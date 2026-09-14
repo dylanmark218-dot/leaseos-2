@@ -14,9 +14,9 @@ here can be added rather than read.
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
 | Permissions | **328** | the `Permission` union |
-| Sensitive (fail-closed) permissions | **112** | `SENSITIVE_PERMISSIONS` |
+| Sensitive (fail-closed) permissions | **119** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **8** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **161 / 2653** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **161 / 2654** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
