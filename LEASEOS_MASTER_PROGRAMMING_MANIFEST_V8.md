@@ -1,3 +1,5 @@
+> **HISTORICAL — DO NOT USE AS CURRENT IMPLEMENTATION STATE.** This document describes an earlier plan. The implemented state is in `LEASEOS_CURRENT_STATE.md` (generated) and the per-release checkpoints.
+
 # LeaseOS / FieldRoute — Master Programming Manifest V8
 
 **Purpose:** One source of truth for completing LeaseOS from the current `leaseos-fieldroute-v6.zip`, the Trip Operations plan, the Billing/Records Chain, Taxonomy/Routing work, the Integrated Operations checkpoint, and LeaseOS features added across the project.

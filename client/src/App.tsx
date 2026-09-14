@@ -2,19 +2,24 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ReactNode } from "react";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Redirect, Route, Switch } from "wouter";
+import { PortalShell } from "./portal/PortalShell";
+import { CustomerPortal } from "./portal/external/CustomerPortal";
+import { ShowcaseFrame } from "./showcase/ShowcaseFrame";
+import { MapSurface, EvidenceSurface, JobsSurface, SafetySurface } from "./pages/authoritative/Surfaces";
+import { VendorFacilityPortal } from "./portal/external/VendorFacilityPortal";
 import ErrorBoundary from "./components/ErrorBoundary";
 import DashboardLayout from "./components/DashboardLayout";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
-import FleetWorkspace from "./pages/FleetWorkspace";
-import LocationWorkspace from "./pages/LocationWorkspace";
-import ComplianceEngine from "./pages/ComplianceEngine";
-import OfflineVault from "./pages/OfflineVault";
-import BillingSafetyWorkspace from "./pages/BillingSafetyWorkspace";
-import RouteSafetyWorkspace from "./pages/RouteSafetyWorkspace";
+import Home from "./showcase/Home";
+import FleetWorkspace from "./showcase/FleetWorkspace";
+import LocationWorkspace from "./showcase/LocationWorkspace";
+import ComplianceEngine from "./showcase/ComplianceEngine";
+import OfflineVault from "./showcase/OfflineVault";
+import BillingSafetyWorkspace from "./showcase/BillingSafetyWorkspace";
+import RouteSafetyWorkspace from "./showcase/RouteSafetyWorkspace";
 import DisposalDirectory from "./pages/DisposalDirectory";
-import TripOperationsWorkspace from "./pages/TripOperationsWorkspace";
+import TripOperationsWorkspace from "./showcase/TripOperationsWorkspace";
 
 function DashboardRoute({ children }: { children: ReactNode }) {
   return <DashboardLayout>{children}</DashboardLayout>;
@@ -23,59 +28,33 @@ function DashboardRoute({ children }: { children: ReactNode }) {
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Home} />
-      <Route path="/map" component={Home} />
-      <Route path="/jobs" component={Home} />
-      <Route path="/evidence" component={Home} />
-      <Route path="/safety" component={Home} />
-      <Route
-        path="/fleet"
-        component={() => (
-          <DashboardRoute>
-            <FleetWorkspace />
-          </DashboardRoute>
-        )}
-      />
-      <Route
-        path="/locations"
-        component={() => (
-          <DashboardRoute>
-            <LocationWorkspace />
-          </DashboardRoute>
-        )}
-      />
-      <Route
-        path="/compliance-engine"
-        component={() => (
-          <DashboardRoute>
-            <ComplianceEngine />
-          </DashboardRoute>
-        )}
-      />
-      <Route
-        path="/offline-vault"
-        component={() => (
-          <DashboardRoute>
-            <OfflineVault />
-          </DashboardRoute>
-        )}
-      />
-      <Route
-        path="/billing-safety"
-        component={() => (
-          <DashboardRoute>
-            <BillingSafetyWorkspace />
-          </DashboardRoute>
-        )}
-      />
-      <Route
-        path="/route-safety"
-        component={() => (
-          <DashboardRoute>
-            <RouteSafetyWorkspace />
-          </DashboardRoute>
-        )}
-      />
+      <Route path="/" component={() => <PortalShell />} />
+      {/* v21.7 — the role-composed portal, on the five surfaces. */}
+      <Route path="/portal" component={() => <PortalShell />} />
+      <Route path="/portal/:portal/*?" component={() => <PortalShell />} />
+      {/* v21.13 — the customer's portal, on external procedures only. */}
+      <Route path="/customer" component={() => <CustomerPortal />} />
+      <Route path="/vendor" component={() => <VendorFacilityPortal />} />
+      <Route path="/facility" component={() => <VendorFacilityPortal />} />
+      <Route path="/map" component={() => <MapSurface />} />
+      <Route path="/jobs" component={() => <JobsSurface />} />
+      <Route path="/evidence" component={() => <EvidenceSurface />} />
+      <Route path="/safety" component={() => <SafetySurface />} />
+      {/* v22.5.1 — showcase surfaces: demonstration data, mutations refused by the client */}
+      <Route path="/showcase" component={() => <ShowcaseFrame title="Home"><Home /></ShowcaseFrame>} />
+      <Route path="/showcase/route-safety" component={() => <ShowcaseFrame title="Route safety"><RouteSafetyWorkspace /></ShowcaseFrame>} />
+      <Route path="/showcase/locations" component={() => <ShowcaseFrame title="Locations"><LocationWorkspace /></ShowcaseFrame>} />
+      <Route path="/showcase/trips" component={() => <ShowcaseFrame title="Trip operations"><TripOperationsWorkspace /></ShowcaseFrame>} />
+      <Route path="/showcase/fleet" component={() => <ShowcaseFrame title="Fleet"><FleetWorkspace /></ShowcaseFrame>} />
+      <Route path="/showcase/billing-safety" component={() => <ShowcaseFrame title="Billing and safety"><BillingSafetyWorkspace /></ShowcaseFrame>} />
+      <Route path="/showcase/compliance-engine" component={() => <ShowcaseFrame title="Compliance engine"><ComplianceEngine /></ShowcaseFrame>} />
+      <Route path="/showcase/offline-vault" component={() => <ShowcaseFrame title="Offline vault"><OfflineVault /></ShowcaseFrame>} />
+      <Route path="/fleet" component={() => <Redirect to="/showcase/fleet" />} />
+      <Route path="/locations" component={() => <Redirect to="/showcase/locations" />} />
+      <Route path="/compliance-engine" component={() => <Redirect to="/showcase/compliance-engine" />} />
+      <Route path="/offline-vault" component={() => <Redirect to="/showcase/offline-vault" />} />
+      <Route path="/billing-safety" component={() => <Redirect to="/showcase/billing-safety" />} />
+      <Route path="/route-safety" component={() => <Redirect to="/showcase/route-safety" />} />
       <Route
         path="/disposal-directory"
         component={() => (
@@ -84,14 +63,7 @@ function Router() {
           </DashboardRoute>
         )}
       />
-      <Route
-        path="/trip-operations"
-        component={() => (
-          <DashboardRoute>
-            <TripOperationsWorkspace />
-          </DashboardRoute>
-        )}
-      />
+      <Route path="/trip-operations" component={() => <Redirect to="/showcase/trips" />} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

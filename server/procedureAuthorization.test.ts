@@ -1,0 +1,292 @@
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { EXTERNAL_PROCEDURE_PERMISSIONS, OPERATIONAL_PROCEDURE_PERMISSIONS, RECORDS_PROCEDURE_PERMISSIONS } from "./_core/recordsAuthorization";
+import {
+  UNVERIFIED_DATA_SOURCES,
+  VERIFIED_DATA_SOURCES,
+} from "./_core/externalSourceSeeds";
+
+/**
+ * Drift guard.
+ *
+ * B20.3 gated the records surface and left 85 pre-existing procedures on
+ * authenticated-only. That debt is acceptable only while it is visible and
+ * shrinking. This test makes both true: the counts are asserted, so adding a
+ * bare `protectedProcedure` fails the build and forces a deliberate
+ * classification in PROCEDURE_AUTHORIZATION_INVENTORY.md.
+ *
+ * The number is expected to go DOWN. If it goes up, someone added an ungated
+ * operational procedure and this is the thing that noticed.
+ */
+
+const routers = readFileSync("server/routers.ts", "utf8");
+const recordsRouter = readFileSync("server/recordsRouter.ts", "utf8");
+const payrollRouter = readFileSync("server/payrollRouter.ts", "utf8");
+const portalFundingRouter = readFileSync("server/portalFundingRouter.ts", "utf8");
+const purchasingRouter = readFileSync("server/purchasingRouter.ts", "utf8");
+const deviceRouter = readFileSync("server/deviceRouter.ts", "utf8");
+const complianceRouter = readFileSync("server/complianceRouter.ts", "utf8");
+const requirementRouter = readFileSync("server/requirementRouter.ts", "utf8");
+const surfacesRouter = readFileSync("server/surfacesRouter.ts", "utf8");
+const dispatchRouter = readFileSync("server/dispatchRouter.ts", "utf8");
+const iftaRouter = readFileSync("server/iftaRouter.ts", "utf8");
+const fuelOpsRouter = readFileSync("server/fuelOpsRouter.ts", "utf8");
+const periodRouter = readFileSync("server/periodRouter.ts", "utf8");
+const gstRouter = readFileSync("server/gstRouter.ts", "utf8");
+const cashRouter = readFileSync("server/cashRouter.ts", "utf8");
+const commercialRouter = readFileSync("server/commercialRouter.ts", "utf8");
+const portalRouter = readFileSync("server/portalRouter.ts", "utf8");
+const shopRouter = readFileSync("server/shopRouter.ts", "utf8");
+const assetRouter = readFileSync("server/assetRouter.ts", "utf8");
+const projectRouter = readFileSync("server/projectRouter.ts", "utf8");
+const integrationRouter = readFileSync("server/integrationRouter.ts", "utf8");
+const telematicsRouter = readFileSync("server/telematicsRouter.ts", "utf8");
+const workforceRouter = readFileSync("server/workforceRouter.ts", "utf8");
+const auditRouter = readFileSync("server/auditRouter.ts", "utf8");
+const spatialRouter = readFileSync("server/spatialRouter.ts", "utf8");
+const commercialSetupRouter = readFileSync("server/commercialSetupRouter.ts", "utf8");
+const invoicingRouter = readFileSync("server/invoicingRouter.ts", "utf8");
+const geoRouter = readFileSync("server/geoRouter.ts", "utf8");
+const closeoutRouter = readFileSync("server/closeoutRouter.ts", "utf8");
+const insuranceRouter = readFileSync("server/insuranceRouter.ts", "utf8");
+const inventory = readFileSync("PROCEDURE_AUTHORIZATION_INVENTORY.md", "utf8");
+const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
+
+/**
+ * The operational permission map spans more than one file now — routers.ts and
+ * payrollRouter.ts both draw from it. Checking only one would let a declared
+ * permission go unwired without anyone noticing.
+ */
+const OPERATIONAL_SOURCES = [routers, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + invoicingRouter + geoRouter].join("\n");
+
+const countBuilders = (src: string, builder: string) =>
+  (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
+
+/** Baseline recorded at B20.3. Lowering it is the goal; raising it is a bug. */
+/**
+ * Zero. B20.6 finished the migration — every operational procedure in
+ * routers.ts now goes through roleProcedure with a declared permission.
+ *
+ * This baseline must never rise. A bare `protectedProcedure` added tomorrow is
+ * an ungated operational endpoint, and this is the thing that notices.
+ */
+const UNREVIEWED_BASELINE = 0;
+const PUBLIC_BASELINE = 2;
+
+describe("records surface is fully role-authorized", () => {
+  it("uses roleProcedure for every records procedure", () => {
+    const roleCount = (recordsRouter.match(/roleProcedure\(/g) ?? []).length;
+    expect(roleCount).toBe(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length);
+    expect(roleCount).toBe(17);
+  });
+
+  it("has no protectedProcedure fallback in the records router", () => {
+    // The only occurrence permitted is the doc comment explaining its absence.
+    const uses = countBuilders(recordsRouter, "protectedProcedure");
+    expect(uses).toBe(0);
+  });
+
+  it("maps every roleProcedure name to a declared permission", () => {
+    const names = Array.from(
+      recordsRouter.matchAll(/roleProcedure\("([^"]+)"\)/g)
+    ).map(m => m[1]);
+    expect(names.length).toBe(17);
+    for (const n of names) {
+      expect(
+        Object.prototype.hasOwnProperty.call(RECORDS_PROCEDURE_PERMISSIONS, n),
+        `${n} is not in RECORDS_PROCEDURE_PERMISSIONS`
+      ).toBe(true);
+    }
+  });
+
+  it("has no orphan mapping — every declared permission is actually wired", () => {
+    const names = new Set(
+      Array.from(recordsRouter.matchAll(/roleProcedure\("([^"]+)"\)/g)).map(m => m[1])
+    );
+    for (const declared of Object.keys(RECORDS_PROCEDURE_PERMISSIONS)) {
+      expect(names.has(declared), `${declared} is declared but not wired`).toBe(true);
+    }
+  });
+});
+
+describe("migrated operational procedures", () => {
+  it("gates every declared operational procedure in routers.ts", () => {
+    const wired = new Set(
+      Array.from(OPERATIONAL_SOURCES.matchAll(/roleProcedure\("([^"]+)"\)/g)).map(m => m[1])
+    );
+    for (const declared of Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS)) {
+      expect(wired.has(declared), `${declared} declared but not wired`).toBe(true);
+    }
+    expect(wired.size).toBe(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length);
+  });
+
+  it("has no roleProcedure in routers.ts without a declared permission", () => {
+    const wired = Array.from(
+      OPERATIONAL_SOURCES.matchAll(/roleProcedure\("([^"]+)"\)/g)
+    ).map(m => m[1]);
+    for (const name of wired) {
+      expect(
+        Object.prototype.hasOwnProperty.call(OPERATIONAL_PROCEDURE_PERMISSIONS, name),
+        `${name} is wired but undeclared`
+      ).toBe(true);
+    }
+  });
+
+  it("has migrated the entire operational surface", () => {
+    // 85 unreviewed at B20.3, 57 after B20.4, 0 after B20.6. B20.7 added the
+    // 40-procedure payroll/finance surface, all gated from the start.
+    // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(378);   // v22.7: +13 commercial setup; v22.8: +2 (ticket pricing, vendor rate variances); v22.9: +3 invoicing; v22.10: +2 (render, send); v22.11: +2 (void, disputeResolve); v22.13: +5 geo; v22.14: +6 (legal land, entrances, corridor); v22.15: +4 (structures, route approvals); v22.16: +2 (graph build, route compute)
+    expect(UNREVIEWED_BASELINE).toBe(0);
+  });
+
+  it("wires exactly as many roleProcedures as it declares permissions for", () => {
+    const wired = (OPERATIONAL_SOURCES.match(/roleProcedure\(/g) ?? []).length;
+    expect(wired).toBe(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length);
+  });
+
+  it("has no bare protectedProcedure in the payroll or finance surface", () => {
+    expect(countBuilders(payrollRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in the portal or funding surface", () => {
+    expect(countBuilders(portalFundingRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in the purchasing or AP surface", () => {
+    expect(countBuilders(purchasingRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in the device or sync surface", () => {
+    expect(countBuilders(deviceRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in the compliance surface", () => {
+    expect(countBuilders(complianceRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in the requirement or calibration surface", () => {
+    expect(countBuilders(requirementRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in the universal surfaces", () => {
+    expect(countBuilders(surfacesRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in the dispatch gate", () => {
+    expect(countBuilders(dispatchRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in IFTA", () => {
+    expect(countBuilders(iftaRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in fuel operations", () => {
+    expect(countBuilders(fuelOpsRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in period close", () => {
+    expect(countBuilders(periodRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in GST/HST", () => {
+    expect(countBuilders(gstRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in bank and receivables", () => {
+    expect(countBuilders(cashRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in the shop or the asset register", () => {
+    expect(countBuilders(shopRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(assetRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(projectRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(integrationRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(telematicsRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(workforceRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(auditRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(spatialRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(commercialSetupRouter + invoicingRouter + geoRouter, "protectedProcedure")).toBe(0);
+    // the inbound router mounts only the machine gate
+    const inbound = integrationRouter.slice(integrationRouter.indexOf("export const inboundRouter"));
+    expect(countBuilders(inbound, "roleProcedure")).toBe(0);
+    expect(countBuilders(inbound, "externalProcedure")).toBe(0);
+    expect(countBuilders(inbound, "integrationProcedure")).toBe(2);
+  });
+
+  it("has no bare protectedProcedure in the commercial core or the portal", () => {
+    expect(countBuilders(commercialRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(portalRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in the site sign-off chain", () => {
+    expect(countBuilders(closeoutRouter, "protectedProcedure")).toBe(0);
+  });
+
+  it("v21.10 — the portal uses only externalProcedure, every call site is mapped, and nothing internal is reachable from outside", () => {
+    // The portal router must never mount a role procedure: an external identity is not a domain-role user.
+    expect(countBuilders(portalRouter, "roleProcedure")).toBe(0);
+    const external = [...portalRouter.matchAll(/externalProcedure\("([^"]+)"\)/g)].map(m => m[1]);
+    expect(external.length).toBe(36);   // v22.10: + invoices, invoiceView, invoiceAccept // v21.17: + quotes, quote acceptance, change-order authorization, RFI answers
+    for (const name of external) expect(EXTERNAL_PROCEDURE_PERMISSIONS, name).toHaveProperty(name);
+    expect(Object.keys(EXTERNAL_PROCEDURE_PERMISSIONS).sort()).toEqual([...external].sort());
+    // And no internal router mounts an external procedure.
+    expect(countBuilders(OPERATIONAL_SOURCES, "externalProcedure")).toBe(0);
+  });
+
+  it("has no bare protectedProcedure in the insurance surface", () => {
+    expect(countBuilders(insuranceRouter, "protectedProcedure")).toBe(0);
+  });
+});
+
+describe("the data source document matches the seeded registry", () => {
+  it("states the corrected count of eight verified and three not", () => {
+    // The research summary said nine; three of eleven were unresolved, so it is
+    // eight. The document and the seed must agree or a future reader trusts the
+    // wrong number.
+    expect(dataSources).toContain("Eight verified, three not");
+    expect(VERIFIED_DATA_SOURCES).toHaveLength(8);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(3);
+  });
+
+  it("lists exactly the three blocked sources as blocked", () => {
+    for (const key of UNVERIFIED_DATA_SOURCES.map(s => s.sourceKey)) {
+      expect(dataSources, key).toContain(`\`${key}\``);
+    }
+    expect(dataSources).toContain("blocked for everything but inspection");
+  });
+
+  it("still says plainly that no dataset has been imported", () => {
+    expect(dataSources).toContain("No dataset has been imported");
+  });
+});
+
+describe("the untouched API is counted, not forgotten", () => {
+  it("holds the authenticated-only count at or below the recorded baseline", () => {
+    const unreviewed = countBuilders(routers, "protectedProcedure");
+    expect(
+      unreviewed,
+      unreviewed > UNREVIEWED_BASELINE
+        ? "A new bare protectedProcedure was added. Gate it with roleProcedure, or classify it in PROCEDURE_AUTHORIZATION_INVENTORY.md and lower this baseline deliberately."
+        : "Baseline is stale — lower UNREVIEWED_BASELINE to lock in the progress."
+    ).toBe(UNREVIEWED_BASELINE);
+  });
+
+  it("holds the public procedure count exactly", () => {
+    expect(countBuilders(routers, "publicProcedure")).toBe(PUBLIC_BASELINE);
+  });
+
+  it("has no stale narrative claiming completed work is still pending", () => {
+    // The directive flagged this: an earlier revision described the 57-procedure
+    // tranche as "next" beside a table showing it done. A future agent could
+    // have repeated it.
+    expect(inventory).not.toMatch(/AUTHENTICATED_ONLY_UNREVIEWED\s*\|\s*\*\*[1-9]/);
+    expect(inventory).not.toContain("still to move");
+    expect(inventory).not.toContain("— next");
+  });
+
+  it("keeps the inventory document in step with the code", () => {
+    expect(inventory).toContain("ROLE_AUTHORIZED");
+    expect(inventory).toContain("356");
+  });
+});

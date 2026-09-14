@@ -1,3 +1,5 @@
+> **HISTORICAL — DO NOT USE AS CURRENT IMPLEMENTATION STATE.** This document describes an earlier plan. The implemented state is in `LEASEOS_CURRENT_STATE.md` (generated) and the per-release checkpoints.
+
 # LeaseOS — Feature & Backend Specification
 
 **Companion to:** `leaseos-prototype.html` (clickable UI) and `LEASEOS_BUILD_PLAN.md` (audit + phasing).

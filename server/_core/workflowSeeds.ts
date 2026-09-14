@@ -214,6 +214,266 @@ export const RULE_SEEDS: WorkflowRule[] = [
       },
     ],
   },
+
+  /* ── E. B20 records, safety & release ───────────────────────────────── */
+
+  /* A sealed incident. The rule holds the unit and notifies; it does not
+     diagnose the truck and it does not decide the severity — safety already
+     did, and this reports that decision. */
+  {
+    ruleKey: "safety.incident.sealed",
+    version: 1,
+    name: "Incident sealed in the field",
+    eventType: "safety.incident_sealed",
+    enabled: true,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+    tenantId: null,
+    branchId: null,
+    conditions: [
+      { path: "payload.severity", op: "in", value: ["moderate", "serious", "critical"] },
+    ],
+    dedupeOn: ["payload.incidentNumber"],
+    actions: [
+      {
+        kind: "create_task",
+        taskType: "review_sealed_incident",
+        title: "Review sealed incident report",
+        description:
+          "Operator sealed an incident in the field. The original statement is " +
+          "attached verbatim and must not be edited during review.",
+        assignedRole: "safety",
+        priority: "high",
+        isRoot: true,
+      },
+      {
+        kind: "notify",
+        role: "management",
+        message: "Incident sealed — management review required",
+        deepLink: "/safety/incidents",
+      },
+    ],
+  },
+
+  /* A held unit is a dispatch fact before it is anything else. Split from the
+     rule above so a hold raises the dispatch consequence even when severity
+     alone would not have escalated. */
+  {
+    ruleKey: "safety.incident.unit_held",
+    version: 1,
+    name: "Incident held a unit — recalculate dispatch",
+    eventType: "safety.incident_sealed",
+    enabled: true,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+    tenantId: null,
+    branchId: null,
+    conditions: [{ path: "payload.holdUnit", op: "eq", value: true }],
+    dedupeOn: ["payload.incidentNumber"],
+    actions: [
+      {
+        kind: "create_task",
+        taskType: "inspect_unit_after_incident",
+        title: "Inspect unit held after an incident",
+        description:
+          "Held pending inspection. The workflow cannot return it to service — " +
+          "only a mechanic release can.",
+        assignedRole: "mechanic",
+        priority: "critical",
+        isRoot: true,
+      },
+      {
+        kind: "create_task",
+        taskType: "review_affected_assignments",
+        title: "Review assignments affected by a held unit",
+        assignedRole: "dispatcher",
+        priority: "high",
+        dueInMinutes: 60,
+      },
+      { kind: "invalidate_eligibility", scope: "unit" },
+      { kind: "mark_at_risk", scope: "assignment" },
+    ],
+  },
+
+  /* A near miss that reported an injury converts. Safety reviews the converted
+     incident; the original near-miss statement travels with it. */
+  {
+    ruleKey: "safety.near_miss.escalated",
+    version: 1,
+    name: "Near miss escalated to an incident",
+    eventType: "safety.near_miss_escalated",
+    enabled: true,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+    tenantId: null,
+    branchId: null,
+    conditions: [],
+    dedupeOn: ["payload.nearMissNumber"],
+    actions: [
+      {
+        kind: "create_task",
+        taskType: "review_escalated_near_miss",
+        title: "Review near miss escalated to incident",
+        assignedRole: "safety",
+        priority: "high",
+        isRoot: true,
+      },
+      {
+        kind: "notify",
+        role: "management",
+        message: "Near miss escalated — injury reported",
+        deepLink: "/safety/incidents",
+      },
+    ],
+  },
+
+  /* Integrity failure on receipt. The task is to get the record re-sent; the
+     device copy is deliberately retained, so this is not a driver chase. */
+  {
+    ruleKey: "records.evidence.integrity_failed",
+    version: 1,
+    name: "Sealed record failed integrity verification",
+    eventType: "records.evidence_integrity_failed",
+    enabled: true,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+    tenantId: null,
+    branchId: null,
+    conditions: [],
+    dedupeOn: ["payload.trackingNumber"],
+    actions: [
+      {
+        kind: "create_task",
+        taskType: "resolve_evidence_integrity_failure",
+        title: "Sealed record did not verify — re-transmission required",
+        description:
+          "Server could not reproduce the sealed hash. The operator's local " +
+          "copy is retained and must not be deleted until this resolves.",
+        assignedRole: "office",
+        priority: "high",
+        isRoot: true,
+      },
+      {
+        kind: "notify",
+        role: "office",
+        message: "Evidence integrity error — local copy retained",
+        deepLink: "/records/exceptions",
+      },
+    ],
+  },
+
+  /* Legal hold. Tracked as an obligation with a review task rather than a flag
+     nobody revisits. */
+  {
+    ruleKey: "records.legal_hold.placed",
+    version: 1,
+    name: "Legal hold placed on records",
+    eventType: "records.legal_hold_placed",
+    enabled: true,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+    tenantId: null,
+    branchId: null,
+    conditions: [],
+    dedupeOn: ["payload.holdNumber"],
+    actions: [
+      {
+        kind: "create_task",
+        taskType: "confirm_legal_hold_scope",
+        title: "Confirm legal hold scope covers all related records",
+        assignedRole: "management",
+        priority: "high",
+        isRoot: true,
+      },
+    ],
+  },
+
+  /* Management reviewed a driver defect and sent it to the shop. */
+  {
+    ruleKey: "fleet.defect.sent_to_shop",
+    version: 1,
+    name: "Defect sent to the shop",
+    eventType: "fleet.defect_sent_to_shop",
+    enabled: true,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+    tenantId: null,
+    branchId: null,
+    conditions: [],
+    dedupeOn: ["payload.workOrderRef"],
+    actions: [
+      {
+        kind: "create_task",
+        taskType: "perform_work_order",
+        title: "Work order raised from a driver defect report",
+        description:
+          "The driver's original observation is attached verbatim. Closing this " +
+          "work order does not return the unit to service.",
+        assignedRole: "mechanic",
+        priority: "high",
+        isRoot: true,
+      },
+      {
+        kind: "notify",
+        role: "mechanic",
+        message: "Defect sent to shop — work order raised",
+        deepLink: "/shop/work-orders",
+      },
+    ],
+  },
+
+  /* A restricted release is still a release. Dispatch is told the restriction
+     rather than simply being told the unit is clear. */
+  {
+    ruleKey: "fleet.mechanic_release.restricted",
+    version: 1,
+    name: "Unit released under restriction",
+    eventType: "unit.mechanic_released",
+    enabled: true,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+    tenantId: null,
+    branchId: null,
+    conditions: [
+      { path: "payload.releaseVerified", op: "eq", value: true },
+      { path: "payload.restricted", op: "eq", value: true },
+    ],
+    dedupeOn: ["payload.unitId"],
+    actions: [
+      {
+        kind: "create_task",
+        taskType: "apply_release_restriction",
+        title: "Unit released under a stated restriction",
+        description:
+          "The restriction travels with the unit. Assignments must be checked " +
+          "against it before dispatch.",
+        assignedRole: "dispatcher",
+        priority: "high",
+        isRoot: true,
+      },
+      { kind: "invalidate_eligibility", scope: "unit" },
+    ],
+  },
+
+  /* A revoked release takes the unit back out of service. */
+  {
+    ruleKey: "fleet.mechanic_release.revoked",
+    version: 1,
+    name: "Mechanic release revoked — unit held again",
+    eventType: "unit.mechanic_released",
+    enabled: true,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+    tenantId: null,
+    branchId: null,
+    conditions: [{ path: "payload.releaseType", op: "eq", value: "revoked" }],
+    dedupeOn: ["payload.unitId"],
+    actions: [
+      {
+        kind: "create_task",
+        taskType: "resolve_revoked_release",
+        title: "Release revoked — unit held from dispatch",
+        assignedRole: "mechanic",
+        priority: "critical",
+        isRoot: true,
+      },
+      { kind: "invalidate_eligibility", scope: "unit" },
+      { kind: "mark_at_risk", scope: "assignment" },
+    ],
+  },
+
 ];
 
 /* ===================== responsibility routing ===================== */

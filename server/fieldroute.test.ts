@@ -1,6 +1,48 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
+import { grantUserRole, listActiveUserRoleNames } from "./db";
+
+/**
+ * B20.4 put personnel, billing, compliance, safety and maintenance behind
+ * domain roles. This suite exercises those procedures, so its caller now needs
+ * the roles a real user performing this work would hold.
+ *
+ * The grant is the fix rather than loosening the gate — these tests failing
+ * against a role-less caller was the gate proving it works.
+ */
+const TEST_USER_ID = 1;
+
+beforeAll(async () => {
+  if (!process.env.DATABASE_URL) return;
+  const held = new Set(await listActiveUserRoleNames(TEST_USER_ID));
+  // Deliberately not `mechanic`: the shop is explicitly denied personnel.write,
+  // and deny beats grant, so adding it here would block operator creation. That
+  // combination is not a realistic person either — the roles this caller holds
+  // are the ones an office/safety/management user actually has.
+  // B20.6 gated the whole operational surface, so this suite's caller now needs
+  // the roles a real office/safety/management user performing this work holds.
+  // Still deliberately not `mechanic` — the shop is denied personnel.write and
+  // deny beats grant.
+  // Deliberately NOT dispatcher or mechanic: both are explicitly denied
+  // personnel.write, and deny beats grant — adding either here would block
+  // operator creation. Piling roles onto one caller fights the model rather
+  // than exercising it.
+  for (const role of ["office", "safety", "management"] as const) {
+    if (held.has(role)) continue;
+    try {
+      await grantUserRole({
+        userId: TEST_USER_ID,
+        role,
+        scopeType: "global",
+        grantedByUserId: TEST_USER_ID,
+        grantedAt: new Date(),
+      });
+    } catch {
+      // Already granted by a concurrent run — the unique index is doing its job.
+    }
+  }
+});
 
 function createContext(): TrpcContext {
   return {
@@ -105,7 +147,6 @@ describe("fieldRoute evidence and safety", () => {
       title: "Soft shoulder reported",
       detail: "County 214 km 18.",
       occurredAt: new Date(),
-      status: "open",
     });
     expect(id).toBeDefined();
   });
@@ -119,8 +160,6 @@ describe("fieldRoute route context", () => {
       source: "Provincial transportation authority",
       effectiveAt: new Date("2026-07-01T00:00:00Z"),
       expiresAt: new Date("2026-10-01T00:00:00Z"),
-      verifiedAt: new Date(),
-      confidence: "high",
       restrictions: "Bridge 08: 42t gross limit.",
       snapshotKey: "route-context-tests/north-ridge.json",
       snapshotUrl: "/manus-storage/route-context-tests/north-ridge.json",
@@ -146,8 +185,6 @@ describe("fieldRoute identity and compliance", () => {
       caller.fieldRoute.identity.units.create({
         unitNumber,
         vehicleType: "Hydrovac",
-        inspectionStatus: "current",
-        maintenanceStatus: "clear",
         qrTag: `qr:${unitNumber}`,
       })
     ).resolves.toBeDefined();
@@ -158,7 +195,6 @@ describe("fieldRoute identity and compliance", () => {
         docType: "license",
         title: "Test licence scan",
         capturedAt: new Date(),
-        verificationStatus: "needs_review",
         source: "OCR proposal",
         confidence: "low",
       })
@@ -168,7 +204,6 @@ describe("fieldRoute identity and compliance", () => {
         jobId: 1,
         material: "Used drilling fluid",
         isWaste: true,
-        classificationStatus: "needs_verification",
         confidence: "low",
         source: "Operator statement; SDS pending",
       })
@@ -186,7 +221,6 @@ describe("fieldRoute identity and compliance", () => {
         unitId: 1,
         title: "Test hydraulic inspection",
         severity: "inspection_required",
-        status: "open",
         reportedAt: new Date(),
       })
     ).resolves.toBeDefined();
@@ -202,9 +236,7 @@ describe("fieldRoute identity and compliance", () => {
       caller.fieldRoute.compliance.sign({
         jobId: 1,
         signerName: "Test Operator",
-        authMethod: "device biometric authentication",
         signedAt: new Date(),
-        status: "authenticated",
       })
     ).resolves.toBeDefined();
   });
@@ -260,7 +292,6 @@ describe("fieldRoute location identity and scans", () => {
       material: "Used drilling fluid",
       unitId: 1,
       driver: "Test Driver",
-      status: "draft",
     });
     expect(manifestId).toBeDefined();
     await expect(
@@ -268,7 +299,6 @@ describe("fieldRoute location identity and scans", () => {
         scanType: "qr",
         subjectType: "location",
         subjectId: typeof locationId === "number" ? locationId : 1,
-        accessRole: "dispatcher",
         scannedAt: new Date(),
         latitude: 53.557,
         longitude: -113.286,
@@ -371,7 +401,6 @@ describe("trip operations", () => {
         latitude: 53.557,
         longitude: -113.286,
         radiusMetres: 90,
-        verifiedAt: new Date(),
         source: "field survey",
       })
     ).resolves.toBeDefined();
@@ -383,7 +412,6 @@ describe("trip operations", () => {
       caller.fieldRoute.workOrders.create({
         workOrderNumber: `WO-TEST-${Date.now()}`,
         unitId: 1,
-        status: "open",
         priority: "urgent",
         openedAt: new Date(),
         odometerKm: 183500,
