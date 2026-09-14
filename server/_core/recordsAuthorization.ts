@@ -1611,6 +1611,16 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  // Carried forward from the v22.16 audit: these actions already existed in
+  // the Permission union and production routers but were never placed in the
+  // fail-closed set. Each creates or changes operational/commercial truth.
+  "invoicing.void",
+  "invoicing.dispute.resolve",
+  "geo.import",
+  "geo.locationVerifyFromGrid",
+  "geo.access.decide",
+  "spatial.structure.verify",
+  "spatial.route.approve",
   "geo.graph.build",
   // v22.17 — each of these establishes a fact a driver will act on: that a channel
   // record matches the regulator, that the company may transmit, that a road carries

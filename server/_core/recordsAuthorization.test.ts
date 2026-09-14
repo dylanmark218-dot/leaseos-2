@@ -402,6 +402,16 @@ describe("sensitive permissions are declared, not guessed", () => {
     }
   });
 
+  it("keeps invoicing and spatial truth-changing actions fail-closed", () => {
+    for (const p of [
+      "invoicing.void", "invoicing.dispute.resolve",
+      "geo.import", "geo.locationVerifyFromGrid", "geo.access.decide",
+      "spatial.structure.verify", "spatial.route.approve",
+    ] as Permission[]) {
+      expect(isSensitivePermission(p), p).toBe(true);
+    }
+  });
+
   it("does not mark ordinary reads sensitive", () => {
     for (const p of ["evidence.read_own", "incident.read_summary", "roadside.open"] as Permission[]) {
       expect(isSensitivePermission(p), p).toBe(false);
