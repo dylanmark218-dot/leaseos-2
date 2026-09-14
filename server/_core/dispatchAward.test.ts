@@ -30,6 +30,7 @@ const FACTS: EligibilityFacts = {
   destinationAcceptanceVersion: "v3",
   routeProfileId: "RP-1a2b3c4d",
   routeDecisionVersion: "v1",
+  communicationPlanVersion: "none",
 };
 
 const eligible = (

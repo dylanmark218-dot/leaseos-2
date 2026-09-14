@@ -9,7 +9,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, between, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
-import { accessRoadSegments, atsLegalSubdivisions, externalDataSources, geoImportRuns, locationIdentities, roadGraphBuilds, roadGraphEdges, roadGraphNodes, siteAccessConfirmations, siteAccessPoints } from "../drizzle/schema";
+import { accessRoadSegments, atsLegalSubdivisions, communicationCoverage, companyRadioAuthorizations, externalDataSources, geoImportRuns, locationIdentities, radioChannels, roadGraphBuilds, roadGraphEdges, roadGraphNodes, roadRadioAssignments, siteAccessConfirmations, siteAccessPoints, unitRadioCapabilities } from "../drizzle/schema";
+import { planCommunications, type CoverageObservation, type GeoCondition, type PathSegment } from "./_core/commRoute";
+import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
 import { getDb, seedExternalDataSources } from "./db";
 import { roleProcedure, router } from "./_core/trpc";
 import { ACCESS_ROADS_ENDPOINT, ACCESS_ROADS_LAYER, ATS_LSD_ENDPOINT, ATS_LSD_LAYER, boundingBox, locateAccess, parseLsdFeature, parseRoadFeature, type FeatureCollection, type LngLat } from "./_core/geoImport";
@@ -43,7 +45,97 @@ async function sourceGate(d: Awaited<ReturnType<typeof db>>, sourceKey: string) 
   return s;
 }
 
+/**
+ * The communication plan over a computed path. Read-only and additive: the
+ * routing answer is unchanged whether or not this runs, because a path and a
+ * communication plan are separate facts about the same road.
+ */
+async function communicationsFor(d: Awaited<ReturnType<typeof db>>, path: PathSegment[], unitId: number | null, at: Date, buildRef: string | null) {
+  const segmentIds = path.map(s => s.segmentId);
+  // One resolver, consumed by every production path. The engine had a
+  // geographic input from v22.17 and no caller supplied it, so every route-level
+  // plan evaluated geography as unknown. This is the supply.
+  const geo = buildRef ? await resolveRouteCommunicationGeography(d, { buildRef, segmentIds }) : null;
+  const [assignRows, coverRows, channelRows, authRows] = await Promise.all([
+    d.select().from(roadRadioAssignments).where(inArray(roadRadioAssignments.segmentId, segmentIds)),
+    d.select().from(communicationCoverage).where(inArray(communicationCoverage.segmentId, segmentIds)),
+    d.select().from(radioChannels),
+    d.select().from(companyRadioAuthorizations).where(eq(companyRadioAuthorizations.authorized, true)),
+  ]);
+  const cap = unitId ? (await d.select().from(unitRadioCapabilities).where(eq(unitRadioCapabilities.unitId, unitId)).limit(1))[0] : undefined;
+  const coverage: CoverageObservation[] = coverRows.map(r => ({ segmentId: r.segmentId, medium: r.medium, state: r.state, sourceKey: r.sourceKey, authorityTier: r.authorityTier, observedAt: r.observedAt, verificationStatus: r.verificationStatus }));
+  const plan = planCommunications({
+    path,
+    assignments: assignRows.map(r => ({ assignmentRef: r.assignmentRef, segmentId: r.segmentId, channelKey: r.channelKey, authorityTier: r.authorityTier, effectiveFrom: r.effectiveFrom, effectiveTo: r.effectiveTo, callDirectionLoaded: r.callDirectionLoaded, callIntervalKm: r.callIntervalKm, mustCallKm: r.mustCallKmJson ? (JSON.parse(r.mustCallKmJson) as number[]) : null, roadName: r.roadName, observedAt: r.observedAt, verificationStatus: r.verificationStatus, supersedesAssignmentRef: r.supersedesAssignmentRef })),
+    channels: channelRows.map(r => ({ channelKey: r.channelKey, alias: r.alias, serviceClass: r.serviceClass, systemType: r.systemType, rxMHz: r.rxMHz, txMHz: r.txMHz, toneRxHz: r.toneRxHz, toneTxHz: r.toneTxHz, bandwidthKHz: r.bandwidthKHz, maxPowerW: r.maxPowerW, licenceRequired: r.licenceRequired, conditions: JSON.parse(r.conditionsJson) as GeoCondition[], sourceKey: r.sourceKey, sourceCitation: r.sourceCitation, sourceVersion: r.sourceVersion, verificationStatus: r.verificationStatus })),
+    coverage,
+    companyAuthorizations: authRows.map(a => ({ channelKey: a.channelKey, authorized: a.authorized, licenceRef: a.licenceRef, licenceExpiresAt: a.licenceExpiresAt, provinces: a.provincesJson ? (JSON.parse(a.provincesJson) as string[]) : null, approvedUnitIds: a.approvedUnitIdsJson ? (JSON.parse(a.approvedUnitIdsJson) as number[]) : null, verificationStatus: a.verificationStatus })),
+    geographyBySegment: geo?.geographyBySegment,
+    unit: cap ? { unitId: cap.unitId, vhf: cap.vhf, uhf: cap.uhf, cb: cap.cb, satellite: cap.satellite, cellular: cap.cellular, programmingProfileRef: cap.programmingProfileRef, programmedChannelKeys: cap.programmedChannelKeysJson ? (JSON.parse(cap.programmedChannelKeysJson) as string[]) : null, verificationStatus: cap.verificationStatus } : null,
+    at,
+  });
+  return { ...plan, geographyHash: geo?.geographyHash ?? null, missingGeometry: geo?.missing ?? [] };
+}
+
 export const geoRouter = router({
+  /**
+   * Clear a government data source for operational use — or record that it
+   * cannot be.
+   *
+   * This is the act that was missing. Ten sources sat unverified with no way to
+   * review one except raw SQL, so a licence decision left no trace of who made
+   * it or what they read. Research about a licence is not a licence review: a
+   * person opens the publisher's terms, records the attribution those terms
+   * require, and says what they permit.
+   *
+   * The attribution barrier is enforced here rather than assumed: a source with
+   * no recorded attribution text cannot be cleared, however permissive its
+   * licence is said to be.
+   */
+  sourceReview: roleProcedure("geo.sourceReview")
+    .input(z.object({
+      sourceKey: z.string().min(1).max(60),
+      decision: z.enum(["clear", "refuse"]),
+      licenceName: z.string().max(200).optional(),
+      licenceUrl: z.string().max(600).optional(),
+      /** What the publisher requires shown. Required to clear — this is the barrier. */
+      attributionText: z.string().max(600).optional(),
+      commercialUsePermitted: z.enum(["yes", "no", "unknown"]).optional(),
+      redistributionPermitted: z.enum(["yes", "no", "unknown"]).optional(),
+      reviewNote: z.string().min(10).max(1000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const d = await db();
+      const src = (await d.select().from(externalDataSources).where(eq(externalDataSources.sourceKey, input.sourceKey)).limit(1))[0];
+      if (!src) throw new TRPCError({ code: "NOT_FOUND", message: `No source ${input.sourceKey} in the registry` });
+
+      if (input.decision === "refuse") {
+        await d.update(externalDataSources).set({ status: "unverified", reviewedByUserId: ctx.user.id, reviewedAt: new Date(), reviewNote: input.reviewNote }).where(eq(externalDataSources.id, src.id));
+        return { sourceKey: src.sourceKey, status: "unverified" as const, note: "Recorded as reviewed and not cleared. Nothing imports from it." };
+      }
+
+      const attribution = input.attributionText ?? src.attributionText;
+      if (src.attributionRequired && !attribution) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${src.sourceKey} requires attribution and none is recorded — record what the publisher requires shown before clearing it` });
+      }
+      const licenceName = input.licenceName ?? src.licenceName;
+      if (!licenceName) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Clearing a source names the licence it was cleared under" });
+
+      await d.update(externalDataSources).set({
+        status: "verified", licenceName, licenceUrl: input.licenceUrl ?? src.licenceUrl,
+        attributionText: attribution,
+        commercialUsePermitted: input.commercialUsePermitted ?? src.commercialUsePermitted,
+        redistributionPermitted: input.redistributionPermitted ?? src.redistributionPermitted,
+        verifiedAt: new Date(), reviewedByUserId: ctx.user.id, reviewedAt: new Date(), reviewNote: input.reviewNote,
+      }).where(eq(externalDataSources.id, src.id));
+
+      return {
+        sourceKey: src.sourceKey, status: "verified" as const, licenceName,
+        commercialUsePermitted: input.commercialUsePermitted ?? src.commercialUsePermitted,
+        note: "Cleared. Imports from this source are now permitted by the registry gate — which is a licence decision, not a statement that the data is correct.",
+      };
+    }),
+
   /** Import ATS legal subdivisions for one township. Alberta serves 1,000 features per page; the run records what came back. */
   atsImportTownship: roleProcedure("geo.atsImportTownship")
     .input(z.object({ meridian: z.number().int().min(1).max(6), rangeNumber: z.number().int().min(1).max(30), township: z.number().int().min(1).max(126), sections: z.array(z.number().int().min(1).max(36)).max(36).optional() }))
@@ -283,6 +375,7 @@ export const geoRouter = router({
       unitId: z.number().int().positive().optional(),
       vehicle: z.object({ grossWeightKg: z.number().int().positive(), maxAxleGroupKg: z.number().int().positive(), heightM: z.number().positive(), widthM: z.number().positive(), lengthM: z.number().positive(), dangerousGoods: z.boolean().default(false), requiresEscort: z.boolean().default(false) }).optional(),
       requiredChecks: z.array(z.string().min(2).max(60)).max(20).default([]),
+      includeCommunications: z.boolean().default(false),
       at: z.coerce.date().default(() => new Date()),
     }))
     .query(async ({ input }) => {
@@ -313,10 +406,16 @@ export const geoRouter = router({
       if (result.outcome !== "path") return { outcome: result.outcome, reasons: result.reasons, buildRef: build.buildRef, path: null, verdict: null };
       const reasons = [...result.reasons, `Snapped ${origin.snap.metresFromPosition} m to the road at the origin and ${destination.snap.metresFromPosition} m at the destination — the last stretch to the site is not part of the road network`];
       const path = { buildRef: build.buildRef, metres: result.path.metres, kilometres: Math.round(result.path.metres / 100) / 10, surfaces: result.path.surfaces, segments: result.path.edges.map(e => ({ segmentId: e.segmentId, label: e.label, surfaceKind: e.surfaceKind, featureTypeLabel: e.featureTypeLabel ?? null, kilometres: Math.round(e.lengthMetres / 100) / 10 })) };
-      if (!input.vehicle || !input.requiredChecks.length) return { outcome: "path_only" as const, reasons: [...reasons, "No vehicle or checks supplied — this is the road connection only, and it is not a permission to drive it"], buildRef: build.buildRef, path, verdict: null };
+
+      // v22.17 — what the driver talks on while driving this path, and where that
+      // stops being true. Computed beside the verdict, never inside it: a radio
+      // plan is not an argument that a truck may cross a bridge.
+      const communications = input.includeCommunications ? await communicationsFor(d, result.path.edges.map(e => ({ segmentId: e.segmentId, label: e.label, lengthKm: e.lengthMetres / 1000 })), input.unitId ?? null, input.at, build.buildRef) : null;
+
+      if (!input.vehicle || !input.requiredChecks.length) return { outcome: "path_only" as const, reasons: [...reasons, "No vehicle or checks supplied — this is the road connection only, and it is not a permission to drive it"], buildRef: build.buildRef, path, verdict: null, communications };
       const segments: RoadSegmentInput[] = result.path.edges.map(e => { const prepared = roadAsSegment({ objectId: e.accessRoadObjectId, name: e.label, highwayNumber: null, roadClass: null, featureTypeLabel: e.featureTypeLabel ?? null, surfaceKind: e.surfaceKind, lanes: null, lengthMetres: e.lengthMetres, path: e.path, sourceKey: "ats_road_allowance", sourceLayer: "Access and Facility Roads", retrievedAt: build.builtAt, geometrySource: null }); return { segmentId: prepared.segmentId, label: prepared.label, lengthKm: prepared.lengthKm, attributes: prepared.attributes }; });
       const verdict = evaluateRoute(input.requiredChecks as RequiredCheck[], segments, input.vehicle);
-      return { outcome: "evaluated" as const, reasons: [...reasons, "The path is the road connection; the verdict is the evaluator's, and every limit the province does not state reads UNKNOWN"], buildRef: build.buildRef, path, verdict };
+      return { outcome: "evaluated" as const, reasons: [...reasons, "The path is the road connection; the verdict is the evaluator's, and every limit the province does not state reads UNKNOWN"], buildRef: build.buildRef, path, verdict, communications };
     }),
 
   /** Coverage: which townships hold imported grid, and how many roads. A count, never a claim of completeness. */

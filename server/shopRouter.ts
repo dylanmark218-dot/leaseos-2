@@ -5,8 +5,10 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
+import { evaluateMechanicRelease } from "./_core/mechanicRelease";
+import { appendWorkOrderRelease } from "./recordsService";
 import { getDb } from "./db";
-import { partMovements, parts, recallNotices, recallUnitStatus, serializedTools, tireInstallations, tireMeasurements, tires, toolCheckouts, vendorBillLines, warrantyClaims, warrantyPolicies, workOrders } from "../drizzle/schema";
+import { partMovements, parts, recallNotices, recallUnitStatus, serializedTools, tireInstallations, tireMeasurements, tires, toolCheckouts, vendorBillLines, warrantyClaims, warrantyPolicies, workOrders, maintenanceDefects } from "../drizzle/schema";
 import { claimDecision, claimEligibility, countAdjustment, installDecision, issueDecision, reorderFindings, signedQty, stockPositions, tireRun, treadStatus, workOrderCost, type Movement } from "./_core/fleetShop";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -247,6 +249,119 @@ export const shopRouter = router({
     for (const u of input.unitIds) await db.insert(recallUnitStatus).values({ recallId: id, unitId: u, status: "unknown" });
     return { recallRef, duplicate: false as const, verificationStatus: "unverified" as const, unitsMarkedUnknown: input.unitIds.length };
   }),
+
+  /**
+   * Move a work order forward.
+   *
+   * Also missing: the shop bridge opens work orders and nothing could advance
+   * one, so a release was refused for an open work order that had no way to stop
+   * being open. Forward only — a closed work order is not reopened by editing a
+   * status, and "the repair went backwards" is a new work order, not an undo.
+   */
+  workOrderAdvance: roleProcedure("shop.workOrderAdvance")
+    .input(z.object({
+      workOrderId: z.number().int().positive(),
+      to: z.enum(["in_progress", "waiting_parts", "ready_for_service", "closed"]),
+      note: z.string().max(400).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const wo = (await db.select().from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1))[0];
+      if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: "No such work order" });
+      const order = ["draft", "open", "in_progress", "waiting_parts", "ready_for_service", "closed"];
+      const from = order.indexOf(wo.status);
+      const to = order.indexOf(input.to);
+      // waiting_parts sits beside in_progress rather than after it, so moving
+      // back to in_progress from waiting_parts is forward in the real sense.
+      const sideways = wo.status === "waiting_parts" && input.to === "in_progress";
+      if (wo.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A closed work order is not reopened by changing a status — raise a new one" });
+      if (to <= from && !sideways) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `A work order does not move from ${wo.status} back to ${input.to}` });
+      await db.update(workOrders).set({ status: input.to }).where(eq(workOrders.id, input.workOrderId));
+      return { workOrderId: input.workOrderId, from: wo.status, to: input.to };
+    }),
+
+  /**
+   * Record a mechanic's release of a work order.
+   *
+   * This did not exist. `appendWorkOrderRelease` was a service function no
+   * endpoint called, so the shop's completion step had no API surface and the
+   * end-to-end enforcement test had to invoke it directly — the one step of the
+   * chain that did not run through the product.
+   *
+   * The technician is the request context, never the request body. "Who signed
+   * this release" is exactly the fact a client must not be able to assert: a
+   * release attributed to somebody who did not give it is worse than no release
+   * at all, because it looks like accountability.
+   *
+   * The decision itself is `evaluateMechanicRelease`, which already scales its
+   * evidence requirements with defect severity. Nothing is re-decided here.
+   */
+  workOrderRelease: roleProcedure("shop.workOrderRelease")
+    .input(z.object({
+      workOrderId: z.number().int().positive(),
+      releaseType: z.enum(["full", "restricted", "revoked"]),
+      repairSummary: z.string().min(5).max(2000),
+      testProcedure: z.string().max(2000).optional(),
+      testResult: z.enum(["pass", "fail", "not_required"]).optional(),
+      roadTestPerformed: z.boolean().default(false),
+      roadTestNotes: z.string().max(2000).optional(),
+      restrictionDetail: z.string().max(2000).optional(),
+      technicianCertificationRef: z.string().max(120).optional(),
+      resolvedDefectIds: z.array(z.number().int().positive()).max(50).default([]),
+      releasedAt: z.coerce.date().default(() => new Date()),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const wo = (await db.select().from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1))[0];
+      if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: "No such work order" });
+
+      // The severity the release is judged against comes from the defect the
+      // work order is for, not from the person releasing it.
+      const defect = wo.defectId
+        ? (await db.select().from(maintenanceDefects).where(eq(maintenanceDefects.id, wo.defectId)).limit(1))[0]
+        : null;
+      const defectSeverity = (defect?.severity ?? "advisory") as "advisory" | "inspection_required" | "critical";
+
+      const decision = evaluateMechanicRelease({
+        workOrderStatus: wo.status,
+        defectSeverity,
+        releaseType: input.releaseType,
+        repairSummary: input.repairSummary,
+        testProcedure: input.testProcedure ?? null,
+        testResult: input.testResult ?? null,
+        roadTestPerformed: input.roadTestPerformed,
+        technicianUserId: ctx.user.id,
+        technicianIdentifier: `TECH-${ctx.user.id}`,
+        restrictionDetail: input.restrictionDetail ?? null,
+      });
+      if (!decision.valid) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: decision.blockers.map(b => b.label).join(" · ") });
+      }
+
+      const releaseId = await appendWorkOrderRelease({
+        workOrderId: input.workOrderId, unitId: wo.unitId, releaseType: input.releaseType,
+        restrictionDetail: input.restrictionDetail ?? null,
+        repairSummary: input.repairSummary, testProcedure: input.testProcedure ?? null,
+        testResult: input.testResult ?? null, roadTestPerformed: input.roadTestPerformed,
+        roadTestNotes: input.roadTestNotes ?? null,
+        technicianUserId: ctx.user.id, technicianIdentifier: `TECH-${ctx.user.id}`,
+        technicianCertificationRef: input.technicianCertificationRef ?? null,
+        releasedAt: input.releasedAt, resolvedDefectIds: JSON.stringify(input.resolvedDefectIds),
+      });
+
+      return {
+        releaseId: releaseId ?? null, workOrderId: input.workOrderId, unitId: wo.unitId,
+        releaseType: input.releaseType, defectSeverity,
+        mechanicReleaseGiven: decision.mechanicReleaseGiven,
+        unitDispatchable: decision.unitDispatchable,
+        restricted: decision.restricted,
+        technicianUserId: ctx.user.id,
+        note: "Recorded as given by the authenticated technician. A mechanic release says the unit is mechanically sound; it does not lift a government out-of-service order.",
+      };
+    }),
+
   recallVerify: roleProcedure("shop.recallVerify").input(z.object({ recallRef: z.string().min(1).max(64) })).mutation(async ({ ctx, input }) => {
     const db = await dbOrThrow();
     const r = (await db.select().from(recallNotices).where(eq(recallNotices.recallRef, input.recallRef)).limit(1))[0];

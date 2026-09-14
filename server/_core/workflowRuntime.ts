@@ -319,6 +319,13 @@ export async function applyEventConsequences(
  * a failure rolls back the task writes AND the claim together, so the event
  * returns to the queue rather than being marked done with nothing created.
  */
+/**
+ * How long a claim is honoured before another worker may take the event. Long
+ * enough that ordinary processing finishes; short enough that a crash is not a
+ * permanent loss.
+ */
+export const CLAIM_LEASE_SECONDS = 120;
+
 export function createWorkerPorts(
   pool: PoolLike,
   now: () => Date = () => new Date()
@@ -333,7 +340,10 @@ export function createWorkerPorts(
                   payloadJson, attemptCount, occurredAt, jobId, tripId, unitId,
                   correlationId, causationId, actorSource
            FROM domainEventOutbox
-           WHERE processedAt IS NULL AND claimedAt IS NULL
+           WHERE processedAt IS NULL
+             AND deadLetteredAt IS NULL
+             AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW())
+             AND (claimedAt IS NULL OR claimedAt < DATE_SUB(NOW(), INTERVAL ${CLAIM_LEASE_SECONDS} SECOND))
            ORDER BY id LIMIT ${Math.max(1, Math.floor(limit))} FOR UPDATE SKIP LOCKED`
         );
         const claimed = rows as Row[];
@@ -397,13 +407,27 @@ export function createWorkerPorts(
     },
 
     async markFailed(id, outcome) {
-      // Release the claim so a retry can pick it up; a dead letter keeps the
-      // claim so it stops circulating and surfaces to an administrator.
+      if (outcome.status === "dead_letter") {
+        // Its own state, not a stuck claim. A claim that never clears is
+        // indistinguishable from a crashed worker, and becomes reclaimable the
+        // moment the lease exists.
+        await pool.execute(
+          `UPDATE domainEventOutbox
+           SET lastError = ?, deadLetteredAt = NOW(), deadLetterReason = ?, claimedAt = NULL, claimedBy = NULL
+           WHERE id = ?`,
+          [outcome.reason, outcome.reason, id]
+        );
+        return;
+      }
+      // The backoff classifyFailure computed is persisted rather than discarded,
+      // so a failing event waits instead of spinning at poll speed.
+      const delayMs = Math.max(0, outcome.retryAfterMs ?? 0);
       await pool.execute(
         `UPDATE domainEventOutbox
-         SET lastError = ?, claimedAt = ${outcome.status === "dead_letter" ? "claimedAt" : "NULL"}
+         SET lastError = ?, claimedAt = NULL, claimedBy = NULL,
+             retryAvailableAt = DATE_ADD(NOW(), INTERVAL ? MICROSECOND)
          WHERE id = ?`,
-        [outcome.reason, id]
+        [outcome.reason, delayMs * 1000, id]
       );
     },
   };

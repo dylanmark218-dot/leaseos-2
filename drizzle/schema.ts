@@ -7,6 +7,7 @@ import {
   text,
   timestamp,
   varchar,
+  decimal,
 } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
@@ -1830,6 +1831,9 @@ export const dispatchEligibilityChecks = mysqlTable(
     // it is both recent AND still describes the world — freshness alone is
     // worthless if a defect was raised four minutes after the check ran.
     fingerprint: varchar("fingerprint", { length: 32 }).notNull(),
+    // v22.18 — the route this check asked about, so the award-time recompute
+    // asks the same question rather than a smaller one.
+    routeApprovalRef: varchar("routeApprovalRef", { length: 64 }),
     evaluatedAt: timestamp("evaluatedAt").notNull(),
     evaluatedByUserId: int("evaluatedByUserId"),
     usedForAward: boolean("usedForAward").default(false).notNull(),
@@ -2111,6 +2115,10 @@ export const domainEventOutbox = mysqlTable("domainEventOutbox", {
   occurredAt: timestamp("occurredAt").notNull(),
   // Claimed by exactly one worker via SELECT ... FOR UPDATE SKIP LOCKED.
   claimedAt: timestamp("claimedAt"),
+  /** The lease. Old enough and another worker may take the event. */
+  retryAvailableAt: timestamp("retryAvailableAt"),
+  deadLetteredAt: timestamp("deadLetteredAt"),
+  deadLetterReason: varchar("deadLetterReason", { length: 1000 }),
   claimedBy: varchar("claimedBy", { length: 64 }),
   processedAt: timestamp("processedAt"),
   attemptCount: int("attemptCount").default(0).notNull(),
@@ -2655,6 +2663,9 @@ export const syncPackageItems = mysqlTable("syncPackageItems", {
   evidenceRecordId: int("evidenceRecordId").notNull(),
   declaredContentHash: varchar("declaredContentHash", { length: 64 }).notNull(),
   declaredManifestHash: varchar("declaredManifestHash", { length: 64 }).notNull(),
+  // 0079 — historical capture context, never inferred from later sync success.
+  captureAuthorizationClaim: mysqlEnum("captureAuthorizationClaim", ["authorized", "unauthorized", "unknown"]).default("unknown").notNull(),
+  captureAuthorizationReason: varchar("captureAuthorizationReason", { length: 300 }),
   state: mysqlEnum("state", ["pending", "received", "verified", "mismatch"])
     .default("pending").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -3279,7 +3290,7 @@ export const externalDataSources = mysqlTable("externalDataSources", {
   authority: varchar("authority", { length: 220 }).notNull(),
   sourceUrl: varchar("sourceUrl", { length: 600 }),
   jurisdiction: varchar("jurisdiction", { length: 80 }),
-  category: mysqlEnum("category", ["base_map", "road_network", "land_grid", "oilfield_assets", "road_conditions", "weather", "wildfire", "routing_engine", "geocoder", "tiles", "other"]).notNull(),
+  category: mysqlEnum("category", ["base_map", "road_network", "land_grid", "oilfield_assets", "road_conditions", "weather", "wildfire", "routing_engine", "geocoder", "tiles", "spectrum", "coverage", "other"]).notNull(),
   licenceName: varchar("licenceName", { length: 180 }),
   licenceUrl: varchar("licenceUrl", { length: 600 }),
   attributionRequired: boolean("attributionRequired").default(true).notNull(),
@@ -3293,6 +3304,10 @@ export const externalDataSources = mysqlTable("externalDataSources", {
   updateIntervalHours: int("updateIntervalHours"),
   retrievedAt: timestamp("retrievedAt"),
   verifiedAt: timestamp("verifiedAt"),
+  // v22.20 — who cleared this licence, when, and what they read.
+  reviewedByUserId: int("reviewedByUserId"),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewNote: varchar("reviewNote", { length: 1000 }),
   verifiedByUserId: int("verifiedByUserId"),
   status: mysqlEnum("status", ["unverified", "verified", "superseded", "withdrawn"]).default("unverified").notNull(),
   notes: text("notes"),
@@ -5953,6 +5968,10 @@ export const routeApprovals = mysqlTable("routeApprovals", {
   unitId: int("unitId").notNull(),
   originRef: varchar("originRef", { length: 120 }).notNull(),
   destinationRef: varchar("destinationRef", { length: 120 }).notNull(),
+  // v22.20 — the graph build the route was computed on. NULL on historical
+  // approvals means exactly "not recorded"; it is never backfilled with today's
+  // build, because inventing provenance is worse than admitting its absence.
+  buildRef: varchar("buildRef", { length: 64 }),
   dispatchStatus: varchar("dispatchStatus", { length: 40 }).notNull(),
   segmentIdsJson: text("segmentIdsJson").notNull(),
   fingerprintJson: text("fingerprintJson").notNull(),
@@ -6024,3 +6043,945 @@ export const roadGraphEdges = mysqlTable("roadGraphEdges", {
 });
 export type RoadGraphEdgeRow = typeof roadGraphEdges.$inferSelect;
 export type InsertRoadGraphEdge = typeof roadGraphEdges.$inferInsert;
+
+/* ---- v22.17: communications on the route ---- */
+
+export const radioChannels = mysqlTable("radioChannels", {
+  id: int("id").autoincrement().primaryKey(),
+  channelKey: varchar("channelKey", { length: 40 }).notNull().unique(),
+  alias: varchar("alias", { length: 120 }).notNull(),
+  serviceClass: mysqlEnum("serviceClass", ["bc_resource_road", "bc_loading", "land_mobile_b1", "company_private", "operator_private", "cb_grs", "frs_gmrs", "public_safety", "amateur"]).notNull(),
+  systemType: mysqlEnum("systemType", ["simplex", "repeater", "trunked", "cb"]).default("simplex").notNull(),
+  rxMHz: double("rxMHz"),
+  txMHz: double("txMHz"),
+  toneRxHz: double("toneRxHz"),
+  toneTxHz: double("toneTxHz"),
+  bandwidthKHz: double("bandwidthKHz"),
+  maxPowerW: double("maxPowerW"),
+  licenceRequired: boolean("licenceRequired").default(true).notNull(),
+  conditionsJson: text("conditionsJson").notNull(),
+  sourceKey: varchar("sourceKey", { length: 60 }).notNull(),
+  sourceCitation: varchar("sourceCitation", { length: 400 }).notNull(),
+  sourceUrl: varchar("sourceUrl", { length: 600 }),
+  sourceVersion: varchar("sourceVersion", { length: 80 }),
+  retrievedAt: timestamp("retrievedAt"),
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "superseded"]).default("unverified").notNull(),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  recordedByUserId: int("recordedByUserId"),
+  // v22.18 — Weatheradio was shut down with its frequencies still published.
+  // A retired service authorizes nothing, whatever else is on file.
+  serviceStatus: mysqlEnum("serviceStatus", ["active", "retired"]).default("active").notNull(),
+  retiredNote: varchar("retiredNote", { length: 400 }),
+  retiredAt: timestamp("retiredAt"),
+  retiredByUserId: int("retiredByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type RadioChannelRow = typeof radioChannels.$inferSelect;
+export type InsertRadioChannel = typeof radioChannels.$inferInsert;
+
+export const companyRadioAuthorizations = mysqlTable("companyRadioAuthorizations", {
+  id: int("id").autoincrement().primaryKey(),
+  authorizationRef: varchar("authorizationRef", { length: 64 }).notNull().unique(),
+  channelKey: varchar("channelKey", { length: 40 }).notNull(),
+  authorized: boolean("authorized").default(false).notNull(),
+  licenceRef: varchar("licenceRef", { length: 120 }),
+  licenceExpiresAt: timestamp("licenceExpiresAt"),
+  provincesJson: text("provincesJson"),
+  approvedUnitIdsJson: text("approvedUnitIdsJson"),
+  evidenceRecordId: int("evidenceRecordId"),
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "superseded"]).default("unverified").notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CompanyRadioAuthorizationRow = typeof companyRadioAuthorizations.$inferSelect;
+export type InsertCompanyRadioAuthorization = typeof companyRadioAuthorizations.$inferInsert;
+
+export const unitRadioCapabilities = mysqlTable("unitRadioCapabilities", {
+  id: int("id").autoincrement().primaryKey(),
+  unitId: int("unitId").notNull().unique(),
+  vhf: boolean("vhf").default(false).notNull(),
+  uhf: boolean("uhf").default(false).notNull(),
+  cb: boolean("cb").default(false).notNull(),
+  satellite: boolean("satellite").default(false).notNull(),
+  cellular: boolean("cellular").default(false).notNull(),
+  programmingProfileRef: varchar("programmingProfileRef", { length: 80 }),
+  programmingProfileVersion: varchar("programmingProfileVersion", { length: 40 }),
+  programmedChannelKeysJson: text("programmedChannelKeysJson"),
+  programmedAt: timestamp("programmedAt"),
+  programmedBy: varchar("programmedBy", { length: 200 }),
+  configurationHash: varchar("configurationHash", { length: 64 }),
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "superseded"]).default("unverified").notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type UnitRadioCapabilityRow = typeof unitRadioCapabilities.$inferSelect;
+export type InsertUnitRadioCapability = typeof unitRadioCapabilities.$inferInsert;
+
+export const roadRadioAssignments = mysqlTable("roadRadioAssignments", {
+  id: int("id").autoincrement().primaryKey(),
+  assignmentRef: varchar("assignmentRef", { length: 64 }).notNull().unique(),
+  segmentId: varchar("segmentId", { length: 80 }).notNull(),
+  channelKey: varchar("channelKey", { length: 40 }).notNull(),
+  roadName: varchar("roadName", { length: 220 }),
+  authorityTier: mysqlEnum("authorityTier", ["posted_sign", "operator_instruction", "regulatory_authority", "planning_map", "company_entry", "driver_observation", "community_reference", "unverified_submission"]).notNull(),
+  callDirectionLoaded: mysqlEnum("callDirectionLoaded", ["increasing_km", "decreasing_km"]),
+  callIntervalKm: double("callIntervalKm"),
+  mustCallKmJson: text("mustCallKmJson"),
+  effectiveFrom: timestamp("effectiveFrom"),
+  effectiveTo: timestamp("effectiveTo"),
+  permanent: boolean("permanent").default(true).notNull(),
+  supersedesAssignmentRef: varchar("supersedesAssignmentRef", { length: 64 }),
+  sourceKey: varchar("sourceKey", { length: 60 }).notNull(),
+  sourceCitation: varchar("sourceCitation", { length: 400 }),
+  observedAt: timestamp("observedAt"),
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "superseded"]).default("unverified").notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type RoadRadioAssignmentRow = typeof roadRadioAssignments.$inferSelect;
+export type InsertRoadRadioAssignment = typeof roadRadioAssignments.$inferInsert;
+
+export const radioSignObservations = mysqlTable("radioSignObservations", {
+  id: int("id").autoincrement().primaryKey(),
+  observationRef: varchar("observationRef", { length: 64 }).notNull().unique(),
+  segmentId: varchar("segmentId", { length: 80 }),
+  roadName: varchar("roadName", { length: 220 }),
+  observedChannelText: varchar("observedChannelText", { length: 120 }).notNull(),
+  resolvedChannelKey: varchar("resolvedChannelKey", { length: 40 }),
+  latitude: double("latitude").notNull(),
+  longitude: double("longitude").notNull(),
+  evidenceRecordId: int("evidenceRecordId"),
+  photoHash: varchar("photoHash", { length: 64 }),
+  tripId: int("tripId"),
+  note: varchar("note", { length: 400 }),
+  status: mysqlEnum("status", ["pending", "confirmed", "rejected"]).default("pending").notNull(),
+  decisionNote: varchar("decisionNote", { length: 400 }),
+  observedByUserId: int("observedByUserId").notNull(),
+  decidedByUserId: int("decidedByUserId"),
+  decidedAt: timestamp("decidedAt"),
+  createdAssignmentRef: varchar("createdAssignmentRef", { length: 64 }),
+  observedAt: timestamp("observedAt").defaultNow().notNull(),
+});
+export type RadioSignObservationRow = typeof radioSignObservations.$inferSelect;
+export type InsertRadioSignObservation = typeof radioSignObservations.$inferInsert;
+
+export const communicationCoverage = mysqlTable("communicationCoverage", {
+  id: int("id").autoincrement().primaryKey(),
+  coverageRef: varchar("coverageRef", { length: 64 }).notNull().unique(),
+  segmentId: varchar("segmentId", { length: 80 }).notNull(),
+  medium: mysqlEnum("medium", ["cellular", "satellite", "radio"]).notNull(),
+  state: mysqlEnum("state", ["available", "intermittent", "unavailable"]).notNull(),
+  carrier: varchar("carrier", { length: 120 }),
+  authorityTier: mysqlEnum("authorityTier", ["posted_sign", "operator_instruction", "regulatory_authority", "planning_map", "company_entry", "driver_observation", "community_reference", "unverified_submission"]).notNull(),
+  sourceKey: varchar("sourceKey", { length: 60 }).notNull(),
+  sourceCitation: varchar("sourceCitation", { length: 400 }),
+  observedAt: timestamp("observedAt"),
+  tripId: int("tripId"),
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "superseded"]).default("unverified").notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CommunicationCoverageRow = typeof communicationCoverage.$inferSelect;
+export type InsertCommunicationCoverage = typeof communicationCoverage.$inferInsert;
+
+export const communicationPlans = mysqlTable("communicationPlans", {
+  id: int("id").autoincrement().primaryKey(),
+  planRef: varchar("planRef", { length: 64 }).notNull().unique(),
+  unitId: int("unitId"),
+  tripId: int("tripId"),
+  jobId: int("jobId"),
+  buildRef: varchar("buildRef", { length: 64 }),
+  segmentIdsJson: text("segmentIdsJson").notNull(),
+  totalKm: double("totalKm").default(0).notNull(),
+  verdict: mysqlEnum("verdict", ["covered", "gaps", "unknown"]).notNull(),
+  unknownChannelKm: double("unknownChannelKm").default(0).notNull(),
+  noCommunicationKm: double("noCommunicationKm").default(0).notNull(),
+  zonesJson: text("zonesJson").notNull(),
+  coverageJson: text("coverageJson").notNull(),
+  ladderJson: text("ladderJson").notNull(),
+  mustCallJson: text("mustCallJson").notNull(),
+  fingerprintHash: varchar("fingerprintHash", { length: 64 }).notNull(),
+  explanation: varchar("explanation", { length: 2000 }).notNull(),
+  computedByUserId: int("computedByUserId").notNull(),
+  computedAt: timestamp("computedAt").defaultNow().notNull(),
+});
+export type CommunicationPlanRow = typeof communicationPlans.$inferSelect;
+export type InsertCommunicationPlan = typeof communicationPlans.$inferInsert;
+
+/* ---- v22.18: the company's own communication policy ---- */
+
+export const communicationPolicies = mysqlTable("communicationPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  policyRef: varchar("policyRef", { length: 64 }).notNull().unique(),
+  label: varchar("label", { length: 220 }).notNull(),
+  scopeType: mysqlEnum("scopeType", ["company", "branch"]).default("company").notNull(),
+  scopeRef: varchar("scopeRef", { length: 64 }),
+  unknownPlanBlocks: boolean("unknownPlanBlocks").default(false).notNull(),
+  requireTransmitAuthorization: boolean("requireTransmitAuthorization").default(false).notNull(),
+  toleratedNoCommunicationKm: double("toleratedNoCommunicationKm").default(0).notNull(),
+  loneWorkerRequiresSatellite: boolean("loneWorkerRequiresSatellite").default(false).notNull(),
+  rationale: varchar("rationale", { length: 1000 }),
+  effectiveFrom: timestamp("effectiveFrom"),
+  effectiveTo: timestamp("effectiveTo"),
+  status: mysqlEnum("status", ["proposed", "approved", "superseded", "rejected"]).default("proposed").notNull(),
+  supersedesPolicyRef: varchar("supersedesPolicyRef", { length: 64 }),
+  proposedByUserId: int("proposedByUserId").notNull(),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  decisionNote: varchar("decisionNote", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CommunicationPolicyRow = typeof communicationPolicies.$inferSelect;
+export type InsertCommunicationPolicy = typeof communicationPolicies.$inferInsert;
+
+/* ---- v22.19: the offline communication package ---- */
+
+export const communicationPackages = mysqlTable("communicationPackages", {
+  id: int("id").autoincrement().primaryKey(),
+  packageRef: varchar("packageRef", { length: 64 }).notNull().unique(),
+  label: varchar("label", { length: 220 }).notNull(),
+  version: int("version").default(1).notNull(),
+  planRef: varchar("planRef", { length: 64 }),
+  routeApprovalRef: varchar("routeApprovalRef", { length: 64 }),
+  tripId: int("tripId"),
+  jobId: int("jobId"),
+  unitId: int("unitId"),
+  buildRef: varchar("buildRef", { length: 64 }),
+  segmentIdsJson: text("segmentIdsJson").notNull(),
+  // The database column is LONGTEXT: a sealed package for a long route can
+  // exceed the 64 KB a TEXT column holds, and a truncated package is a lie.
+  contentJson: text("contentJson").notNull(),
+  manifestHash: varchar("manifestHash", { length: 64 }).notNull(),
+  dependencyJson: text("dependencyJson").notNull(),
+  dependencyHash: varchar("dependencyHash", { length: 64 }).notNull(),
+  verdict: mysqlEnum("verdict", ["covered", "gaps", "unknown"]).notNull(),
+  totalKm: double("totalKm").default(0).notNull(),
+  zoneCount: int("zoneCount").default(0).notNull(),
+  channelCount: int("channelCount").default(0).notNull(),
+  unverifiedChannelCount: int("unverifiedChannelCount").default(0).notNull(),
+  retiredExcludedCount: int("retiredExcludedCount").default(0).notNull(),
+  mustCallCount: int("mustCallCount").default(0).notNull(),
+  zonesWithoutChannel: int("zonesWithoutChannel").default(0).notNull(),
+  status: mysqlEnum("status", ["current", "superseded", "stale"]).default("current").notNull(),
+  staleReasonsJson: text("staleReasonsJson"),
+  stalenessDetectedAt: timestamp("stalenessDetectedAt"),
+  supersedesPackageRef: varchar("supersedesPackageRef", { length: 64 }),
+  builtByUserId: int("builtByUserId").notNull(),
+  builtAt: timestamp("builtAt").defaultNow().notNull(),
+});
+export type CommunicationPackageRow = typeof communicationPackages.$inferSelect;
+export type InsertCommunicationPackage = typeof communicationPackages.$inferInsert;
+
+export const communicationPackageDownloads = mysqlTable("communicationPackageDownloads", {
+  id: int("id").autoincrement().primaryKey(),
+  downloadRef: varchar("downloadRef", { length: 64 }).notNull().unique(),
+  packageRef: varchar("packageRef", { length: 64 }).notNull(),
+  manifestHash: varchar("manifestHash", { length: 64 }).notNull(),
+  deviceRef: varchar("deviceRef", { length: 80 }),
+  userId: int("userId").notNull(),
+  tripId: int("tripId"),
+  downloadedAt: timestamp("downloadedAt").defaultNow().notNull(),
+  acknowledgedAt: timestamp("acknowledgedAt"),
+});
+export type CommunicationPackageDownloadRow = typeof communicationPackageDownloads.$inferSelect;
+export type InsertCommunicationPackageDownload = typeof communicationPackageDownloads.$inferInsert;
+
+/* ---- v22.20: hours of service as versioned rules, not code ---- */
+
+export const hosRuleProfiles = mysqlTable("hosRuleProfiles", {
+  id: int("id").autoincrement().primaryKey(),
+  profileKey: varchar("profileKey", { length: 60 }).notNull().unique(),
+  label: varchar("label", { length: 220 }).notNull(),
+  authorityLevel: mysqlEnum("authorityLevel", ["federal", "provincial", "territorial"]).notNull(),
+  jurisdiction: varchar("jurisdiction", { length: 8 }),
+  latitudeRule: mysqlEnum("latitudeRule", ["north_of_60", "south_of_60"]),
+  minimumWeightKg: int("minimumWeightKg"),
+  operationClass: varchar("operationClass", { length: 40 }),
+  sourceAuthority: varchar("sourceAuthority", { length: 220 }).notNull(),
+  sourceCitation: varchar("sourceCitation", { length: 400 }).notNull(),
+  sourceUrl: varchar("sourceUrl", { length: 600 }),
+  sourceSection: varchar("sourceSection", { length: 120 }),
+  effectiveFrom: timestamp("effectiveFrom"),
+  effectiveTo: timestamp("effectiveTo"),
+  retrievedAt: timestamp("retrievedAt"),
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "superseded"]).default("unverified").notNull(),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  supersedesProfileKey: varchar("supersedesProfileKey", { length: 60 }),
+  recordedByUserId: int("recordedByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type HosRuleProfileRow = typeof hosRuleProfiles.$inferSelect;
+export type InsertHosRuleProfile = typeof hosRuleProfiles.$inferInsert;
+
+export const hosRuleLimits = mysqlTable("hosRuleLimits", {
+  id: int("id").autoincrement().primaryKey(),
+  profileKey: varchar("profileKey", { length: 60 }).notNull(),
+  limitKey: varchar("limitKey", { length: 60 }).notNull(),
+  value: double("value").notNull(),
+  sourceSection: varchar("sourceSection", { length: 120 }),
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "superseded"]).default("unverified").notNull(),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type HosRuleLimitRow = typeof hosRuleLimits.$inferSelect;
+export type InsertHosRuleLimit = typeof hosRuleLimits.$inferInsert;
+
+/* ---- v22.20 (0081): feed provenance, and the publisher's own statement ---- */
+
+export const externalFeedRuns = mysqlTable("externalFeedRuns", {
+  id: int("id").autoincrement().primaryKey(),
+  runRef: varchar("runRef", { length: 64 }).notNull().unique(),
+  sourceKey: varchar("sourceKey", { length: 60 }).notNull(),
+  startedAt: timestamp("startedAt").notNull(),
+  finishedAt: timestamp("finishedAt"),
+  outcome: mysqlEnum("outcome", ["succeeded", "failed", "refused", "not_modified"]).notNull(),
+  refusedBecause: mysqlEnum("refusedBecause", ["not_cleared", "no_credential", "not_due", "quota_exhausted", "withdrawn"]),
+  httpStatus: int("httpStatus"),
+  recordsSeen: int("recordsSeen").default(0).notNull(),
+  recordsAccepted: int("recordsAccepted").default(0).notNull(),
+  recordsRejected: int("recordsRejected").default(0).notNull(),
+  rejectionsJson: text("rejectionsJson"),
+  quotaUsedInWindow: int("quotaUsedInWindow"),
+  quotaLimit: int("quotaLimit"),
+  responseHash: varchar("responseHash", { length: 64 }),
+  sourceVersion: varchar("sourceVersion", { length: 120 }),
+  entityTag: varchar("entityTag", { length: 200 }),
+  errorText: varchar("errorText", { length: 1000 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ExternalFeedRunRow = typeof externalFeedRuns.$inferSelect;
+export type InsertExternalFeedRun = typeof externalFeedRuns.$inferInsert;
+
+export const roadAdvisories = mysqlTable("roadAdvisories", {
+  id: int("id").autoincrement().primaryKey(),
+  advisoryRef: varchar("advisoryRef", { length: 64 }).notNull().unique(),
+  sourceKey: varchar("sourceKey", { length: 60 }).notNull(),
+  externalRef: varchar("externalRef", { length: 200 }).notNull(),
+  runRef: varchar("runRef", { length: 64 }).notNull(),
+  advisoryType: mysqlEnum("advisoryType", ["closure", "incident", "construction", "road_condition", "weather", "restriction", "other"]).notNull(),
+  severity: mysqlEnum("severity", ["info", "minor", "major", "closure", "unknown"]).default("unknown").notNull(),
+  headline: varchar("headline", { length: 400 }).notNull(),
+  detail: varchar("detail", { length: 2000 }),
+  roadName: varchar("roadName", { length: 220 }),
+  direction: varchar("direction", { length: 60 }),
+  latitude: double("latitude"),
+  longitude: double("longitude"),
+  radiusMetres: double("radiusMetres"),
+  geometryJson: text("geometryJson"),
+  effectiveFrom: timestamp("effectiveFrom"),
+  effectiveTo: timestamp("effectiveTo"),
+  sourceUpdatedAt: timestamp("sourceUpdatedAt"),
+  retrievedAt: timestamp("retrievedAt").notNull(),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  /** Never false. No writer sets it, and a test holds it that way. */
+  advisoryOnly: boolean("advisoryOnly").default(true).notNull(),
+  status: mysqlEnum("status", ["active", "superseded", "withdrawn"]).default("active").notNull(),
+  supersededByAdvisoryRef: varchar("supersededByAdvisoryRef", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type RoadAdvisoryRow = typeof roadAdvisories.$inferSelect;
+export type InsertRoadAdvisory = typeof roadAdvisories.$inferInsert;
+
+/* ---- v22.20 (0082): enforcement as records ---- */
+
+export const enforcementDocumentExtractions = mysqlTable("enforcementDocumentExtractions", {
+  id: int("id").autoincrement().primaryKey(),
+  extractionRef: varchar("extractionRef", { length: 64 }).notNull().unique(),
+  documentKind: varchar("documentKind", { length: 60 }).notNull(),
+  evidenceRecordId: int("evidenceRecordId"),
+  capturedByUserId: int("capturedByUserId").notNull(),
+  capturedAt: timestamp("capturedAt").notNull(),
+  latitude: double("latitude"),
+  longitude: double("longitude"),
+  fieldsJson: text("fieldsJson").notNull(),
+  extractedCount: int("extractedCount").default(0).notNull(),
+  highlightedJson: text("highlightedJson"),
+  missingRequiredJson: text("missingRequiredJson"),
+  /** Always true. No writer sets it false. */
+  requiresConfirmation: boolean("requiresConfirmation").default(true).notNull(),
+  status: mysqlEnum("status", ["proposed", "confirmed", "discarded"]).default("proposed").notNull(),
+  confirmedEventRef: varchar("confirmedEventRef", { length: 64 }),
+  discardedReason: varchar("discardedReason", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type EnforcementExtractionRow = typeof enforcementDocumentExtractions.$inferSelect;
+
+export const enforcementEvents = mysqlTable("enforcementEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  eventType: varchar("eventType", { length: 60 }).notNull(),
+  jurisdiction: varchar("jurisdiction", { length: 40 }).notNull(),
+  /** Snapshotted when the stop is confirmed. Reassigning the asset later must not move the policy. */
+  tenantId: varchar("tenantId", { length: 40 }),
+  branchId: varchar("branchId", { length: 40 }),
+  terminalId: varchar("terminalId", { length: 40 }),
+  agency: varchar("agency", { length: 200 }).notNull(),
+  occurredAt: timestamp("occurredAt").notNull(),
+  locationText: varchar("locationText", { length: 300 }),
+  latitude: double("latitude"),
+  longitude: double("longitude"),
+  inspectionReportNumber: varchar("inspectionReportNumber", { length: 120 }),
+  inspectionLevel: varchar("inspectionLevel", { length: 20 }),
+  inspectionResult: mysqlEnum("inspectionResult", ["pass", "requires_attention", "out_of_service", "unknown"]).default("unknown").notNull(),
+  operatorId: int("operatorId"),
+  unitId: int("unitId"),
+  trailerId: int("trailerId"),
+  jobId: int("jobId"),
+  tripId: int("tripId"),
+  extractionRef: varchar("extractionRef", { length: 64 }),
+  evidenceRecordId: int("evidenceRecordId"),
+  status: mysqlEnum("status", ["confirmed", "under_review", "resolved", "rescinded"]).default("confirmed").notNull(),
+  confirmedByUserId: int("confirmedByUserId").notNull(),
+  confirmedAt: timestamp("confirmedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type EnforcementEventRow = typeof enforcementEvents.$inferSelect;
+
+export const enforcementViolations = mysqlTable("enforcementViolations", {
+  id: int("id").autoincrement().primaryKey(),
+  violationRef: varchar("violationRef", { length: 64 }).notNull().unique(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull(),
+  system: varchar("system", { length: 60 }).notNull(),
+  ownCode: varchar("ownCode", { length: 120 }).notNull(),
+  sourceReference: varchar("sourceReference", { length: 400 }),
+  description: varchar("description", { length: 1000 }),
+  citationIssued: boolean("citationIssued").default(false).notNull(),
+  outOfService: boolean("outOfService").default(false).notNull(),
+  oosScope: mysqlEnum("oosScope", ["driver", "vehicle", "trailer", "cargo", "carrier"]),
+  defectRequired: boolean("defectRequired").default(false).notNull(),
+  repairRequired: boolean("repairRequired").default(false).notNull(),
+  courtAction: boolean("courtAction").default(false).notNull(),
+  defectId: int("defectId"),
+  workOrderId: int("workOrderId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type EnforcementViolationRow = typeof enforcementViolations.$inferSelect;
+
+export const enforcementCitations = mysqlTable("enforcementCitations", {
+  id: int("id").autoincrement().primaryKey(),
+  citationRef: varchar("citationRef", { length: 64 }).notNull().unique(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull(),
+  violationRef: varchar("violationRef", { length: 64 }),
+  citationNumber: varchar("citationNumber", { length: 120 }),
+  offenceDescription: varchar("offenceDescription", { length: 600 }),
+  fineAmountCents: int("fineAmountCents"),
+  responseDueAt: timestamp("responseDueAt"),
+  courtAt: timestamp("courtAt"),
+  status: mysqlEnum("status", ["scanned", "open", "review_required", "payable", "disputed", "court_pending", "paid", "withdrawn", "dismissed", "convicted", "reduced", "appealed", "closed"]).default("scanned").notNull(),
+  disposition: varchar("disposition", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type EnforcementCitationRow = typeof enforcementCitations.$inferSelect;
+
+export const outOfServiceOrders = mysqlTable("outOfServiceOrders", {
+  id: int("id").autoincrement().primaryKey(),
+  orderRef: varchar("orderRef", { length: 64 }).notNull().unique(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull(),
+  violationRef: varchar("violationRef", { length: 64 }),
+  scope: mysqlEnum("scope", ["driver", "vehicle", "trailer", "cargo", "carrier"]).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  /** Snapshotted when the stop is confirmed. Reassigning the asset later must not move the policy. */
+  tenantId: varchar("tenantId", { length: 40 }),
+  branchId: varchar("branchId", { length: 40 }),
+  terminalId: varchar("terminalId", { length: 40 }),
+  issuedAt: timestamp("issuedAt").notNull(),
+  issuingAgency: varchar("issuingAgency", { length: 200 }),
+  releaseCondition: varchar("releaseCondition", { length: 600 }).notNull(),
+  /**
+   * The typed act the order demands. NULL means nobody has established which,
+   * and is never inferred from the prose in `releaseCondition`.
+   */
+  requiredFindingType: mysqlEnum("requiredFindingType", ["repair_verification", "reinspection", "inspector_release", "document_confirmation", "waiting_period_complete", "other"]),
+  status: mysqlEnum("status", ["active", "released", "rescinded"]).default("active").notNull(),
+  releasedAt: timestamp("releasedAt"),
+  releasedByUserId: int("releasedByUserId"),
+  releaseEvidenceRef: varchar("releaseEvidenceRef", { length: 64 }),
+  /** The policy that released it, bound at the moment of release — never reconstructed later. */
+  releasePolicyRef: varchar("releasePolicyRef", { length: 64 }),
+  releasePolicyVersion: int("releasePolicyVersion"),
+  rescindedAt: timestamp("rescindedAt"),
+  rescindedByUserId: int("rescindedByUserId"),
+  rescissionReason: varchar("rescissionReason", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type OutOfServiceOrderRow = typeof outOfServiceOrders.$inferSelect;
+
+export const oosReleaseFindings = mysqlTable("oosReleaseFindings", {
+  id: int("id").autoincrement().primaryKey(),
+  findingRef: varchar("findingRef", { length: 64 }).notNull().unique(),
+  orderRef: varchar("orderRef", { length: 64 }).notNull(),
+  finding: mysqlEnum("finding", ["satisfied", "not_satisfied", "unknown"]).notNull(),
+  findingType: mysqlEnum("findingType", ["repair_verification", "reinspection", "inspector_release", "document_confirmation", "waiting_period_complete", "other"]).notNull(),
+  evidenceRef: varchar("evidenceRef", { length: 64 }),
+  notes: varchar("notes", { length: 1000 }),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  recordedByRole: varchar("recordedByRole", { length: 60 }).notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+});
+export type OosReleaseFindingRow = typeof oosReleaseFindings.$inferSelect;
+
+/* ---- v22.20 (0084): the release policy, with proposer and approver recorded ---- */
+
+export const oosReleasePolicies = mysqlTable("oosReleasePolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  policyRef: varchar("policyRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  version: int("version").default(1).notNull(),
+  label: varchar("label", { length: 220 }).notNull(),
+  scopeType: mysqlEnum("scopeType", ["company", "branch", "terminal"]).default("company").notNull(),
+  scopeRef: varchar("scopeRef", { length: 64 }),
+  repairerMayRecordRepairVerification: boolean("repairerMayRecordRepairVerification").default(false).notNull(),
+  releaserMustDifferFromRepairer: boolean("releaserMustDifferFromRepairer").default(true).notNull(),
+  releaserMustDifferFromFindingAuthor: boolean("releaserMustDifferFromFindingAuthor").default(false).notNull(),
+  allowedFindingRolesJson: text("allowedFindingRolesJson").notNull(),
+  rationale: varchar("rationale", { length: 1000 }),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  status: mysqlEnum("status", ["proposed", "approved", "superseded", "rejected"]).default("proposed").notNull(),
+  supersedesPolicyRef: varchar("supersedesPolicyRef", { length: 64 }),
+  proposedByUserId: int("proposedByUserId").notNull(),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  decisionNote: varchar("decisionNote", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type OosReleasePolicyRow = typeof oosReleasePolicies.$inferSelect;
+
+/* ---- v22.20 (0086): organizations and memberships ---- */
+
+export const organizations = mysqlTable("organizations", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull().unique(),
+  name: varchar("name", { length: 220 }).notNull(),
+  status: mysqlEnum("status", ["active", "suspended", "closed"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type OrganizationRow = typeof organizations.$inferSelect;
+
+export const organizationMemberships = mysqlTable("organizationMemberships", {
+  id: int("id").autoincrement().primaryKey(),
+  membershipRef: varchar("membershipRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull(),
+  userId: int("userId").notNull(),
+  membershipType: mysqlEnum("membershipType", ["employee", "contractor", "client", "system"]).default("employee").notNull(),
+  status: mysqlEnum("status", ["active", "suspended", "ended"]).default("active").notNull(),
+  defaultWorkspace: varchar("defaultWorkspace", { length: 60 }),
+  branchId: varchar("branchId", { length: 40 }),
+  contractorOrgRef: varchar("contractorOrgRef", { length: 40 }),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
+
+/* ---- v22.20 (0087): what a device reports it is holding ---- */
+
+export const deviceSafetyLatches = mysqlTable("deviceSafetyLatches", {
+  id: int("id").autoincrement().primaryKey(),
+  latchRef: varchar("latchRef", { length: 64 }).notNull().unique(),
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  reportedByUserId: int("reportedByUserId").notNull(),
+  captureLocalId: varchar("captureLocalId", { length: 120 }).notNull(),
+  subjectType: mysqlEnum("subjectType", ["driver", "vehicle", "trailer", "cargo", "carrier"]).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  capturedAt: timestamp("capturedAt").notNull(),
+  latitude: double("latitude"),
+  longitude: double("longitude"),
+  note: varchar("note", { length: 400 }),
+  serverEventRef: varchar("serverEventRef", { length: 64 }),
+  serverOrderRef: varchar("serverOrderRef", { length: 64 }),
+  state: mysqlEnum("state", ["blocking", "lifted"]).default("blocking").notNull(),
+  /** Never set from a device report. Only an authoritative order state sets it. */
+  liftAuthority: mysqlEnum("liftAuthority", ["released", "rescinded"]),
+  liftedAt: timestamp("liftedAt"),
+  reportedAt: timestamp("reportedAt").defaultNow().notNull(),
+});
+export type DeviceSafetyLatchRow = typeof deviceSafetyLatches.$inferSelect;
+
+/* ---- v22.20 (0088): the grant behind a roadside panel ---- */
+
+export const roadsidePanelGrants = mysqlTable("roadsidePanelGrants", {
+  id: int("id").autoincrement().primaryKey(),
+  grantRef: varchar("grantRef", { length: 64 }).notNull().unique(),
+  unitRef: varchar("unitRef", { length: 120 }).notNull(),
+  unitId: int("unitId"),
+  issuedByUserId: int("issuedByUserId").notNull(),
+  issuedFor: varchar("issuedFor", { length: 220 }).notNull(),
+  issuedAt: timestamp("issuedAt").defaultNow().notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokedByUserId: int("revokedByUserId"),
+  revocationReason: varchar("revocationReason", { length: 400 }),
+  viewCount: int("viewCount").default(0).notNull(),
+  lastViewedAt: timestamp("lastViewedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type RoadsidePanelGrantRow = typeof roadsidePanelGrants.$inferSelect;
+
+/* ---- v22.20 (0090): time off ---- */
+
+export const leaveRequests = mysqlTable("leaveRequests", {
+  id: int("id").autoincrement().primaryKey(),
+  requestRef: varchar("requestRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  userId: int("userId").notNull(),
+  category: mysqlEnum("category", ["vacation", "sick", "medical_appointment", "personal", "family_responsibility", "bereavement", "unpaid", "statutory_holiday", "training", "certification_renewal", "court_obligation", "company_authorized", "other"]).notNull(),
+  urgency: mysqlEnum("urgency", ["planned", "same_day"]).default("planned").notNull(),
+  fromDate: timestamp("fromDate").notNull(),
+  toDate: timestamp("toDate").notNull(),
+  partialFromTime: varchar("partialFromTime", { length: 5 }),
+  partialToTime: varchar("partialToTime", { length: 5 }),
+  /** Its own column so the scheduling read can simply not select it. */
+  privateNote: varchar("privateNote", { length: 2000 }),
+  requestedAt: timestamp("requestedAt").notNull(),
+  status: mysqlEnum("status", ["requested", "approved", "declined", "cancelled", "recorded"]).default("requested").notNull(),
+  decidedByUserId: int("decidedByUserId"),
+  decidedAt: timestamp("decidedAt"),
+  decisionNote: varchar("decisionNote", { length: 600 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type LeaveRequestRow = typeof leaveRequests.$inferSelect;
+
+/* ---- v22.20 (0091): open shifts ---- */
+
+export const shiftPosts = mysqlTable("shiftPosts", {
+  id: int("id").autoincrement().primaryKey(),
+  postRef: varchar("postRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  title: varchar("title", { length: 220 }).notNull(),
+  kind: mysqlEnum("kind", ["open", "assigned"]).default("open").notNull(),
+  startsAt: timestamp("startsAt").notNull(),
+  endsAt: timestamp("endsAt").notNull(),
+  location: varchar("location", { length: 220 }),
+  requiredRole: varchar("requiredRole", { length: 60 }).notNull(),
+  requiredQualificationsJson: text("requiredQualificationsJson").notNull(),
+  seats: int("seats").default(1).notNull(),
+  status: mysqlEnum("status", ["open", "filled", "cancelled", "expired"]).default("open").notNull(),
+  postedByUserId: int("postedByUserId").notNull(),
+  postedAt: timestamp("postedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ShiftPostRow = typeof shiftPosts.$inferSelect;
+
+export const shiftInterests = mysqlTable("shiftInterests", {
+  id: int("id").autoincrement().primaryKey(),
+  postRef: varchar("postRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  expressedAt: timestamp("expressedAt").notNull(),
+  withdrawnAt: timestamp("withdrawnAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ShiftInterestRow = typeof shiftInterests.$inferSelect;
+
+/* ---- v22.20 (0092): qualifications ---- */
+
+export const qualificationTypes = mysqlTable("qualificationTypes", {
+  id: int("id").autoincrement().primaryKey(),
+  code: varchar("code", { length: 60 }).notNull().unique(),
+  label: varchar("label", { length: 220 }).notNull(),
+  issuingBody: varchar("issuingBody", { length: 220 }),
+  requiresDocument: boolean("requiresDocument").default(true).notNull(),
+  renewalMonths: int("renewalMonths"),
+  /** What an expiry actually stops, so it blocks the dependency and not the person. */
+  blocksCapabilitiesJson: text("blocksCapabilitiesJson").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type QualificationTypeRow = typeof qualificationTypes.$inferSelect;
+
+export const workerQualifications = mysqlTable("workerQualifications", {
+  id: int("id").autoincrement().primaryKey(),
+  holdingRef: varchar("holdingRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  userId: int("userId").notNull(),
+  code: varchar("code", { length: 60 }).notNull(),
+  certificateNumber: varchar("certificateNumber", { length: 120 }),
+  issuedAt: timestamp("issuedAt"),
+  expiresAt: timestamp("expiresAt"),
+  verificationState: mysqlEnum("verificationState", ["unverified", "extracted", "verified", "rejected", "superseded"]).default("unverified").notNull(),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  documentRef: varchar("documentRef", { length: 64 }),
+  supersededByHoldingRef: varchar("supersededByHoldingRef", { length: 64 }),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  recordedAt: timestamp("recordedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type WorkerQualificationRow = typeof workerQualifications.$inferSelect;
+
+
+/* ---- v22.20 (0093): crews ---- */
+
+export const crews = mysqlTable("crews", {
+  id: int("id").autoincrement().primaryKey(),
+  crewRef: varchar("crewRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  name: varchar("name", { length: 220 }).notNull(),
+  type: mysqlEnum("type", ["permanent", "job", "shift", "site", "unit", "project", "emergency"]).default("permanent").notNull(),
+  supervisorUserId: int("supervisorUserId"),
+  jobRef: varchar("jobRef", { length: 64 }),
+  branchId: varchar("branchId", { length: 40 }),
+  state: mysqlEnum("state", ["active", "read_only", "archived"]).default("active").notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CrewRow = typeof crews.$inferSelect;
+
+export const crewMembers = mysqlTable("crewMembers", {
+  id: int("id").autoincrement().primaryKey(),
+  crewRef: varchar("crewRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  crewRole: mysqlEnum("crewRole", ["supervisor", "driver", "operator", "labourer", "mechanic", "safety", "dispatch", "other"]).default("driver").notNull(),
+  source: mysqlEnum("source", ["manual", "dispatch", "job_assignment", "shift_assignment"]).default("manual").notNull(),
+  /** Null means no pattern, which is not the same as never working. */
+  rotationOnDays: int("rotationOnDays"),
+  rotationOffDays: int("rotationOffDays"),
+  rotationAnchor: timestamp("rotationAnchor"),
+  joinedAt: timestamp("joinedAt").notNull(),
+  leftAt: timestamp("leftAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CrewMemberRow = typeof crewMembers.$inferSelect;
+
+/* ---- v22.20 (0096): message board ---- */
+
+export const messageChannels = mysqlTable("messageChannels", {
+  id: int("id").autoincrement().primaryKey(),
+  channelRef: varchar("channelRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  type: mysqlEnum("type", ["announcement", "dispatch", "safety", "maintenance", "field_operations", "road_conditions", "training", "general", "job", "client", "private", "emergency"]).notNull(),
+  name: varchar("name", { length: 220 }).notNull(),
+  jobRef: varchar("jobRef", { length: 64 }),
+  /** What makes a channel external. Access is decided here, not per message. */
+  clientRef: varchar("clientRef", { length: 64 }),
+  crewRef: varchar("crewRef", { length: 64 }),
+  archived: boolean("archived").default(false).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type MessageChannelRow = typeof messageChannels.$inferSelect;
+
+export const boardMessages = mysqlTable("boardMessages", {
+  id: int("id").autoincrement().primaryKey(),
+  messageRef: varchar("messageRef", { length: 64 }).notNull().unique(),
+  channelRef: varchar("channelRef", { length: 64 }).notNull(),
+  authorUserId: int("authorUserId").notNull(),
+  authorRole: varchar("authorRole", { length: 40 }).notNull(),
+  priority: mysqlEnum("priority", ["normal", "important", "urgent", "emergency"]).default("normal").notNull(),
+  body: varchar("body", { length: 4000 }).notNull(),
+  latitude: decimal("latitude", { precision: 9, scale: 6 }),
+  longitude: decimal("longitude", { precision: 9, scale: 6 }),
+  /** When the device recorded it. Never overwritten by the server's clock. */
+  deviceCreatedAt: timestamp("deviceCreatedAt").notNull(),
+  serverReceivedAt: timestamp("serverReceivedAt"),
+  deviceId: varchar("deviceId", { length: 64 }),
+  requiresAcknowledgement: boolean("requiresAcknowledgement").default(false).notNull(),
+  withdrawnAt: timestamp("withdrawnAt"),
+  withdrawnByUserId: int("withdrawnByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type BoardMessageRow = typeof boardMessages.$inferSelect;
+
+export const messageReceipts = mysqlTable("messageReceipts", {
+  id: int("id").autoincrement().primaryKey(),
+  messageRef: varchar("messageRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  state: mysqlEnum("state", ["queued_offline", "uploaded", "accepted", "delivered", "opened", "acknowledged", "actioned", "resolved"]).default("accepted").notNull(),
+  deliveredAt: timestamp("deliveredAt"),
+  openedAt: timestamp("openedAt"),
+  acknowledgedAt: timestamp("acknowledgedAt"),
+  /** The server witnesses acceptance, so it may record it. */
+  acceptedAt: timestamp("acceptedAt"),
+  actionedAt: timestamp("actionedAt"),
+  resolvedAt: timestamp("resolvedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type MessageReceiptRow = typeof messageReceipts.$inferSelect;
+
+/** Revisions 2+. Revision 1 is the original body on `boardMessages`. */
+export const messageRevisions = mysqlTable("messageRevisions", {
+  id: int("id").autoincrement().primaryKey(),
+  messageRef: varchar("messageRef", { length: 64 }).notNull(),
+  revision: int("revision").notNull(),
+  body: varchar("body", { length: 4000 }).notNull(),
+  editedByUserId: int("editedByUserId").notNull(),
+  editedAt: timestamp("editedAt").notNull(),
+  reason: varchar("reason", { length: 600 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type MessageRevisionRow = typeof messageRevisions.$inferSelect;
+
+/* ---- v22.20 (0099): message attachments ---- */
+
+export const messageAttachments = mysqlTable("messageAttachments", {
+  id: int("id").autoincrement().primaryKey(),
+  attachmentRef: varchar("attachmentRef", { length: 64 }).notNull().unique(),
+  messageRef: varchar("messageRef", { length: 64 }).notNull(),
+  /** A pointer. Never the referenced record's contents. */
+  kind: varchar("kind", { length: 40 }).notNull(),
+  objectRef: varchar("objectRef", { length: 120 }).notNull(),
+  attachedByUserId: int("attachedByUserId").notNull(),
+  attachedAt: timestamp("attachedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type MessageAttachmentRow = typeof messageAttachments.$inferSelect;
+
+/* ---- v22.20 (0100): agent runs ---- */
+
+export const agentRuns = mysqlTable("agentRuns", {
+  id: int("id").autoincrement().primaryKey(),
+  runRef: varchar("runRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  agentKey: varchar("agentKey", { length: 60 }).notNull(),
+  goal: varchar("goal", { length: 600 }).notNull(),
+  /** LeaseOS owns this. The model does not invent a status. */
+  status: mysqlEnum("status", ["created", "planning", "ready", "executing", "waiting_for_input", "waiting_for_event", "waiting_for_approval", "retry_scheduled", "blocked", "paused", "completed", "failed", "cancelled"]).default("created").notNull(),
+  initiatedByUserId: int("initiatedByUserId").notNull(),
+  awaitingEvent: varchar("awaitingEvent", { length: 120 }),
+  awaitingFilterJson: text("awaitingFilterJson"),
+  blockedReason: varchar("blockedReason", { length: 600 }),
+  stepsUsed: int("stepsUsed").default(0).notNull(),
+  maxSteps: int("maxSteps").default(40).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type AgentRunRow = typeof agentRuns.$inferSelect;
+
+export const agentSteps = mysqlTable("agentSteps", {
+  id: int("id").autoincrement().primaryKey(),
+  runRef: varchar("runRef", { length: 64 }).notNull(),
+  stepNumber: int("stepNumber").notNull(),
+  capability: varchar("capability", { length: 80 }).notNull(),
+  status: mysqlEnum("status", ["planned", "running", "completed", "blocked", "skipped", "failed"]).default("planned").notNull(),
+  reason: varchar("reason", { length: 600 }),
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type AgentStepRow = typeof agentSteps.$inferSelect;
+
+export const agentActions = mysqlTable("agentActions", {
+  id: int("id").autoincrement().primaryKey(),
+  actionRef: varchar("actionRef", { length: 64 }).notNull().unique(),
+  runRef: varchar("runRef", { length: 64 }).notNull(),
+  stepNumber: int("stepNumber"),
+  capability: varchar("capability", { length: 80 }).notNull(),
+  actorType: mysqlEnum("actorType", ["user", "agent", "system"]).notNull(),
+  actorId: varchar("actorId", { length: 64 }).notNull(),
+  /** Both identities survive: the agent acted, the person asked for it. */
+  delegatedByUserId: int("delegatedByUserId"),
+  targetEntityType: varchar("targetEntityType", { length: 60 }).notNull(),
+  targetEntityId: varchar("targetEntityId", { length: 120 }).notNull(),
+  payloadHash: varchar("payloadHash", { length: 128 }).notNull(),
+  origin: mysqlEnum("origin", ["system", "leaseos_policy", "company_policy", "authorized_user", "workflow_data", "external_content"]).notNull(),
+  decision: mysqlEnum("decision", ["allow", "deny", "require_approval", "compliance_block", "stale"]).notNull(),
+  decisionReasons: text("decisionReasons").notNull(),
+  outcome: mysqlEnum("outcome", ["requested", "accepted", "executed", "verified", "failed"]),
+  idempotencyKey: varchar("idempotencyKey", { length: 220 }).notNull(),
+  requestedAt: timestamp("requestedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type AgentActionRow = typeof agentActions.$inferSelect;
+
+export const agentApprovals = mysqlTable("agentApprovals", {
+  id: int("id").autoincrement().primaryKey(),
+  approvalRef: varchar("approvalRef", { length: 64 }).notNull().unique(),
+  runRef: varchar("runRef", { length: 64 }).notNull(),
+  capability: varchar("capability", { length: 80 }).notNull(),
+  targetEntityId: varchar("targetEntityId", { length: 120 }).notNull(),
+  payloadHash: varchar("payloadHash", { length: 128 }).notNull(),
+  requestedAt: timestamp("requestedAt").notNull(),
+  decidedByUserId: int("decidedByUserId"),
+  decidedAt: timestamp("decidedAt"),
+  decision: mysqlEnum("decision", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  note: varchar("note", { length: 600 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type AgentApprovalRow = typeof agentApprovals.$inferSelect;
+
+/* ---- v22.20 (0101): knowledge passages and assistant queries ---- */
+
+export const knowledgePassages = mysqlTable("knowledgePassages", {
+  id: int("id").autoincrement().primaryKey(),
+  passageRef: varchar("passageRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  documentRef: varchar("documentRef", { length: 64 }).notNull(),
+  documentTitle: varchar("documentTitle", { length: 300 }).notNull(),
+  section: varchar("section", { length: 120 }),
+  page: int("page"),
+  body: text("body").notNull(),
+  revision: varchar("revision", { length: 40 }).notNull(),
+  effectiveFrom: timestamp("effectiveFrom"),
+  supersededAt: timestamp("supersededAt"),
+  /** Null means the document states none, which is not "all of them". */
+  jurisdiction: varchar("jurisdiction", { length: 20 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type KnowledgePassageRow = typeof knowledgePassages.$inferSelect;
+
+export const assistantQueries = mysqlTable("assistantQueries", {
+  id: int("id").autoincrement().primaryKey(),
+  queryRef: varchar("queryRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  askedByUserId: int("askedByUserId").notNull(),
+  question: varchar("question", { length: 1000 }).notNull(),
+  jurisdiction: varchar("jurisdiction", { length: 20 }),
+  verdict: mysqlEnum("verdict", ["verified", "partially_supported", "insufficient_evidence", "conflicting"]).notNull(),
+  passagesRetrieved: int("passagesRetrieved").default(0).notNull(),
+  passagesSupporting: int("passagesSupporting").default(0).notNull(),
+  citedPassageRefsJson: text("citedPassageRefsJson").notNull(),
+  askedAt: timestamp("askedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type AssistantQueryRow = typeof assistantQueries.$inferSelect;
+
+/* ---- v22.20 (0102): retrieval probes ---- */
+
+export const retrievalProbes = mysqlTable("retrievalProbes", {
+  id: int("id").autoincrement().primaryKey(),
+  probeRef: varchar("probeRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  question: varchar("question", { length: 1000 }).notNull(),
+  expectedPassageRefsJson: text("expectedPassageRefsJson").notNull(),
+  /** A probe is a claim; it carries the name of whoever made it. */
+  authoredByUserId: int("authoredByUserId").notNull(),
+  /** A question written from the passage inherits its vocabulary. */
+  origin: mysqlEnum("origin", ["authored_from_document", "real_question"]).default("authored_from_document").notNull(),
+  /** The recorded ask a real question was copied from. Null when authored. */
+  originQueryRef: varchar("originQueryRef", { length: 64 }),
+  retiredAt: timestamp("retiredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type RetrievalProbeRow = typeof retrievalProbes.$inferSelect;
+
+export const retrievalMeasurements = mysqlTable("retrievalMeasurements", {
+  id: int("id").autoincrement().primaryKey(),
+  measurementRef: varchar("measurementRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }),
+  k: int("k").notNull(),
+  grade: mysqlEnum("grade", ["unmeasured", "insufficient_sample", "poor", "adequate", "good"]).notNull(),
+  probeCount: int("probeCount").notNull(),
+  realQuestionCount: int("realQuestionCount").default(0).notNull(),
+  meanRecallBasisPoints: int("meanRecallBasisPoints"),
+  /** A measurement describes the corpus it ran against. */
+  corpusPassageCount: int("corpusPassageCount").notNull(),
+  /** Identity, where the count and the newest date were only description. */
+  corpusHash: varchar("corpusHash", { length: 64 }).default("").notNull(),
+  /** Which retriever produced it. A corpus can hold still while this moves. */
+  retrieverKey: varchar("retrieverKey", { length: 60 }).default("unknown").notNull(),
+  retrieverVersion: varchar("retrieverVersion", { length: 30 }).default("unknown").notNull(),
+  corpusNewestPassageAt: timestamp("corpusNewestPassageAt"),
+  measuredByUserId: int("measuredByUserId").notNull(),
+  measuredAt: timestamp("measuredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type RetrievalMeasurementRow = typeof retrievalMeasurements.$inferSelect;

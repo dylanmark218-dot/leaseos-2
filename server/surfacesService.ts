@@ -8,6 +8,7 @@
  */
 
 import { and, desc, eq, gte, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
+import { resolveActingScope } from "./_core/actingScope";
 import { getDb } from "./db";
 import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
@@ -111,13 +112,35 @@ export type InboxItem = {
   ref: string; title: string; detail: string | null; dueAt: Date | null; since: Date; deepLink: { portal: string; route: string };
 };
 
+/**
+ * v22.20 — the inbox, scoped to the caller's organization.
+ *
+ * Tasks and notifications are addressed to a person OR to a role. The
+ * person-addressed half was always safe; the role-addressed half was not, and
+ * became actively unsafe once enforcement started writing role-addressed alerts:
+ * an out-of-service notification for "dispatcher" reached every dispatcher in
+ * every organization, because the read matched on the role string alone.
+ *
+ * A row with no organization on it is still shown. Legacy rows predate the
+ * column and hiding them would empty real people's inboxes to fix a leak that
+ * only exists between organizations.
+ */
 export async function loadInbox(args: { userId: number; roles: readonly string[]; canApprovePurchases: boolean; canResolveConflicts: boolean; canReviewAssistant: boolean }): Promise<InboxItem[]> {
   const db = await getDb();
   if (!db) return [];
   const roles = args.roles.length ? args.roles : ["__none__"];
+  const acting = await resolveActingScope(db, args.userId);
   const [tasks, notes, myProposals, myQuestions, myRequests] = await Promise.all([
-    db.select().from(operationalTasks).where(and(inArray(operationalTasks.status, ["open", "acknowledged", "in_progress"] as never), or(eq(operationalTasks.assignedUserId, args.userId), inArray(operationalTasks.assignedRole, roles)))).limit(200),
-    db.select().from(workflowNotifications).where(and(or(eq(workflowNotifications.recipientUserId, args.userId), inArray(workflowNotifications.recipientRole, roles)), isNull(workflowNotifications.acknowledgedAt))).orderBy(desc(workflowNotifications.queuedAt)).limit(100),
+    db.select().from(operationalTasks).where(and(
+      inArray(operationalTasks.status, ["open", "acknowledged", "in_progress"] as never),
+      or(eq(operationalTasks.assignedUserId, args.userId), inArray(operationalTasks.assignedRole, roles)),
+      or(eq(operationalTasks.tenantId, acting.tenantId), isNull(operationalTasks.tenantId)),
+    )).limit(200),
+    db.select().from(workflowNotifications).where(and(
+      or(eq(workflowNotifications.recipientUserId, args.userId), inArray(workflowNotifications.recipientRole, roles)),
+      isNull(workflowNotifications.acknowledgedAt),
+      or(eq(workflowNotifications.tenantId, acting.tenantId), isNull(workflowNotifications.tenantId)),
+    )).orderBy(desc(workflowNotifications.queuedAt)).limit(100),
     db.select({ proposalId: assistantProposals.proposalId, title: assistantProposals.title, formKey: assistantProposals.formKey, createdAt: assistantProposals.createdAt }).from(assistantProposals).where(and(eq(assistantProposals.createdByUserId, args.userId), eq(assistantProposals.commitState, "awaiting_readback"))).limit(50),
     db.select({ questionRef: assistantQuestions.questionRef, question: assistantQuestions.question, createdAt: assistantQuestions.createdAt }).from(assistantQuestions).where(and(eq(assistantQuestions.askedToUserId, args.userId), eq(assistantQuestions.status, "pending"))).limit(50),
     db.select({ authorizationRef: purchaseAuthorizations.authorizationRef, status: purchaseAuthorizations.status, estimatedAmount: purchaseAuthorizations.estimatedAmount, requestedAt: purchaseAuthorizations.requestedAt }).from(purchaseAuthorizations).where(and(eq(purchaseAuthorizations.requestedByUserId, args.userId), eq(purchaseAuthorizations.status, "requested"))).limit(50),

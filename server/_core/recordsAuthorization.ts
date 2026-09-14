@@ -215,6 +215,44 @@ export type Permission =
   | "geo.import" | "geo.read" | "geo.locationVerifyFromGrid" | "geo.access.propose" | "geo.access.decide" | "geo.access.passage" | "geo.graph.build"
   // v22.15 — structures on a road, and an approved route that knows when it has gone stale.
   | "spatial.structure.record" | "spatial.structure.verify" | "spatial.route.approve"
+  // v22.17 — communications on the route. A frequency is not a permission to transmit,
+  // so knowing a channel and being authorized on it are separate grants.
+  | "comms.read" | "comms.channel.manage" | "comms.channel.verify"
+  | "comms.authorization.manage" | "comms.authorization.verify"
+  | "comms.unit.capability" | "comms.assignment.record" | "comms.assignment.verify"
+  | "comms.observation.record" | "comms.observation.decide" | "comms.plan.compute"
+  // v22.18 — the company's own answer to whether communications stop a truck.
+  | "comms.policy.manage" | "comms.policy.approve"
+  // v22.20 — the out-of-service release policy, which decides who may release a truck.
+  | "oos.policy.manage" | "oos.policy.approve"
+  // v22.20 — the enforcement surface. Recording a stop and releasing a truck
+  // from a government prohibition are different acts with different authority.
+  | "enforcement.read" | "enforcement.capture" | "enforcement.confirm"
+  | "enforcement.finding.record" | "enforcement.release" | "enforcement.latch"
+  | "enforcement.panel.issue" | "enforcement.panel.view"
+  // v22.20 — time off. Reading a schedule and reading a reason are different acts.
+  | "timeOff.request" | "timeOff.decide" | "timeOff.schedulingRead"
+  // v22.20 — open shifts. Posting work and wanting it are different acts.
+  | "shifts.post" | "shifts.read" | "shifts.interest"
+  // v22.20 — crews. Reading a forecast and changing who is on a crew differ.
+  | "crews.read" | "crews.manage"
+  // v22.20 — calendar. Your own is not the same act as somebody else's.
+  | "calendar.own" | "calendar.scheduling"
+  // v22.20 — readiness. Reading your own is not reading somebody else's.
+  | "readiness.read"
+  // v22.20 — the read-only assistant. Asking and loading differ.
+  | "assistant.ask" | "assistant.curate"
+  // v22.20 — the board. Creating a channel is not the same as posting in one.
+  | "board.read" | "board.post" | "board.manage"
+  // v22.20 — the agent. Asking it to work, acting, and approving differ.
+  | "agent.use" | "agent.act" | "agent.approve" | "agent.read"
+  // v22.20 — clearing a government data source for operational use.
+  | "geo.source.review"
+  // v22.19 — the package a truck carries when nothing can be fetched.
+  | "comms.package.build" | "comms.package.fetch"
+  // v22.20 — hours of service as versioned rules. A verified figure is what a
+  // driver's legal driving time is computed from, so verifying is its own act.
+  | "hos.read" | "hos.rule.manage" | "hos.rule.verify"
   | "portal.identity.manage" | "portal.submission.review"
   // v21.12 — render a frozen revision; propose payroll from a client bonus; record what a person saw.
   | "closeout.document.render" | "closeout.adjustment.payroll_propose" | "observation.record"
@@ -222,6 +260,8 @@ export type Permission =
   // recall verification are the shop lead's; a warranty claim is decided above the shop.
   | "shop.read" | "shop.parts.manage" | "shop.parts.move" | "shop.parts.count" | "shop.tires.manage"
   | "shop.tools.manage" | "shop.warranty.raise" | "shop.warranty.decide" | "shop.recall.record" | "shop.recall.verify"
+  // v22.20 — the mechanic's release, which had no procedure until now.
+  | "shop.release" | "shop.workorder.advance"
   // v21.16 — capital assets. Registering is bookkeeping; the capital review, the CCA class verification and the
   // schedule review are decisions above it.
   | "asset.read" | "asset.register" | "asset.capital.review" | "asset.cca.classify" | "asset.cca.verify" | "cca.prepare" | "cca.review"
@@ -267,6 +307,24 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    "assistant.ask",
+    "board.read",
+    "board.post",
+    "readiness.read",
+    "calendar.own",
+    "crews.read",
+    "shifts.read",
+    "shifts.interest",
+    "timeOff.request",
+    "enforcement.panel.issue",
+    "enforcement.panel.view",
+    "enforcement.latch",
+    "enforcement.read",
+    "enforcement.capture",
+    "comms.package.fetch",
+    /* v22.17 — communications */
+    "comms.read",
+    "comms.observation.record",
     "evidence.seal",
     "evidence.send",
     "evidence.read_own",
@@ -329,6 +387,32 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "assistant.ask",
+    "agent.use",
+    "agent.act",
+    "agent.read",
+    "board.read",
+    "board.post",
+    "board.manage",
+    "readiness.read",
+    "calendar.own",
+    "calendar.scheduling",
+    "crews.read",
+    "crews.manage",
+    "shifts.read",
+    "shifts.post",
+    "timeOff.request",
+    "timeOff.schedulingRead",
+    "enforcement.panel.issue",
+    "enforcement.panel.view",
+    "enforcement.latch",
+    "enforcement.read",
+    "hos.read",
+    "comms.package.build",
+    "comms.package.fetch",
+    /* v22.17 — communications */
+    "comms.read",
+    "comms.plan.compute",
     "evidence.read_job_operational",
     "incident.create",
     // Summary only. A dispatcher must know a unit is unavailable; they do not
@@ -405,6 +489,22 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
+    "assistant.ask",
+    "board.read",
+    "board.post",
+    "readiness.read",
+    "calendar.own",
+    "crews.read",
+    "shifts.read",
+    "shifts.interest",
+    "timeOff.request",
+    "shop.workorder.advance",
+    "shop.release",
+    "enforcement.latch",
+    "enforcement.read",
+    "enforcement.finding.record",
+    /* v22.17 — communications */
+    "comms.read",
     // The shop reaches maintenance history and the operational context of the
     // job the unit was on. It is not granted commercial or personnel reads at
     // all, so nothing has to be subtracted later.
@@ -455,6 +555,28 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
+    "assistant.ask",
+    "agent.read",
+    "board.read",
+    "board.post",
+    "readiness.read",
+    "calendar.own",
+    "calendar.scheduling",
+    "crews.read",
+    "crews.manage",
+    "shifts.read",
+    "shifts.post",
+    "timeOff.request",
+    "timeOff.decide",
+    "timeOff.schedulingRead",
+    "shop.workorder.advance",
+    "shop.release",
+    "enforcement.latch",
+    "enforcement.read",
+    "enforcement.finding.record",
+    /* v22.17 — communications */
+    "comms.read",
+    "comms.unit.capability",
     "evidence.read_maintenance",
     "evidence.read_job_operational",
     "maintenance.read_defect",
@@ -518,6 +640,38 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "assistant.ask",
+    "assistant.curate",
+    "agent.read",
+    "agent.approve",
+    "board.read",
+    "board.post",
+    "board.manage",
+    "readiness.read",
+    "calendar.own",
+    "calendar.scheduling",
+    "crews.read",
+    "shifts.read",
+    "timeOff.request",
+    "timeOff.schedulingRead",
+    "enforcement.panel.issue",
+    "enforcement.panel.view",
+    "enforcement.latch",
+    "enforcement.read",
+    "enforcement.capture",
+    "enforcement.confirm",
+    "enforcement.finding.record",
+    "enforcement.release",
+    "oos.policy.manage",
+    "hos.read",
+    "comms.package.build",
+    "comms.policy.manage",
+    /* v22.17 — communications */
+    "comms.read",
+    "comms.assignment.record",
+    "comms.assignment.verify",
+    "comms.observation.decide",
+    "comms.plan.compute",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
     "evidence.read_maintenance",
@@ -589,6 +743,27 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
   ],
   office: [
+    "assistant.ask",
+    "agent.use",
+    "agent.act",
+    "agent.read",
+    "board.read",
+    "board.post",
+    "readiness.read",
+    "calendar.own",
+    "calendar.scheduling",
+    "crews.read",
+    "shifts.read",
+    "timeOff.request",
+    "timeOff.schedulingRead",
+    "enforcement.latch",
+    "enforcement.read",
+    "hos.read",
+    "comms.package.build",
+    /* v22.17 — communications */
+    "comms.read",
+    "comms.plan.compute",
+    "comms.assignment.record",
     "evidence.read_job_operational",
     "evidence.read_commercial",
     "evidence.read_safety_summary",
@@ -721,6 +896,58 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "assistant.ask",
+    "assistant.curate",
+    "agent.use",
+    "agent.act",
+    "agent.read",
+    "agent.approve",
+    "board.read",
+    "board.post",
+    "board.manage",
+    "readiness.read",
+    "calendar.own",
+    "calendar.scheduling",
+    "crews.read",
+    "crews.manage",
+    "shifts.read",
+    "shifts.post",
+    "shifts.interest",
+    "timeOff.request",
+    "timeOff.decide",
+    "timeOff.schedulingRead",
+    "enforcement.panel.issue",
+    "enforcement.panel.view",
+    "shop.workorder.advance",
+    "shop.release",
+    "enforcement.latch",
+    "enforcement.read",
+    "enforcement.capture",
+    "enforcement.confirm",
+    "enforcement.finding.record",
+    "enforcement.release",
+    "oos.policy.manage",
+    "oos.policy.approve",
+    "geo.source.review",
+    "hos.read",
+    "hos.rule.manage",
+    "hos.rule.verify",
+    "comms.package.build",
+    "comms.package.fetch",
+    "comms.policy.manage",
+    "comms.policy.approve",
+    /* v22.17 — communications */
+    "comms.read",
+    "comms.channel.manage",
+    "comms.channel.verify",
+    "comms.authorization.manage",
+    "comms.authorization.verify",
+    "comms.unit.capability",
+    "comms.assignment.record",
+    "comms.assignment.verify",
+    "comms.observation.record",
+    "comms.observation.decide",
+    "comms.plan.compute",
     "evidence.read_job_operational",
     "evidence.read_commercial",
     "evidence.read_safety_summary",
@@ -1124,6 +1351,21 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    "enforcement.read",
+    "oos.policy.manage",
+    "oos.policy.approve",
+    "geo.source.review",
+    "hos.read",
+    "hos.rule.manage",
+    "hos.rule.verify",
+    "comms.policy.manage",
+    "comms.policy.approve",
+    /* v22.17 — communications */
+    "comms.read",
+    "comms.channel.manage",
+    "comms.channel.verify",
+    "comms.authorization.manage",
+    "comms.authorization.verify",
     "tax.read_business",
     "tax.expense.review",
     "tax.asset.read",
@@ -1370,6 +1612,40 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "geo.graph.build",
+  // v22.17 — each of these establishes a fact a driver will act on: that a channel
+  // record matches the regulator, that the company may transmit, that a road carries
+  // a channel, or that a photographed sign now governs over every dataset.
+  "comms.channel.verify",
+  "comms.authorization.verify",
+  "comms.assignment.verify",
+  "comms.observation.decide",
+  // v22.18 — approving the policy decides whether a driver leaves the yard.
+  "comms.policy.approve",
+  // Approving this decides who may lift a government prohibition.
+  "oos.policy.approve",
+  // Confirming a stop creates prohibitions; releasing one lifts a government
+  // order. Both establish facts a driver acts on.
+  "enforcement.confirm",
+  "enforcement.release",
+  // Approving leave changes who is available to work.
+  "timeOff.decide",
+  // Posting work commits the company to needing somebody there.
+  "shifts.post",
+  // Who is on a crew decides who is sent to work.
+  "crews.manage",
+  // A channel decides who may read a conversation.
+  "board.manage",
+  // What is loaded decides what every later answer can cite.
+  "assistant.curate",
+  // Approving an agent action is authorising a machine to affect the company.
+  "agent.approve",
+  // Signing a mechanic release is an accountability act attributed to a person.
+  "shop.release",
+  // Clearing a source decides whether the company may commercially use a
+  // government dataset. That is a determination, not an edit.
+  "geo.source.review",
+  // v22.20 — a verified HOS figure becomes a legal determination about a person.
+  "hos.rule.verify",
   // v22.1 — approved terms decide what a customer is billed.
   "closeout.terms.approve",
   // v22.0 — a verified coordinate, profile or restriction is a fact a route will be judged by.
@@ -2091,6 +2367,94 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "geo.corridorEvaluate": "geo.read",
   "geo.graphBuild": "geo.graph.build",
   "geo.routeCompute": "geo.read",
+  "geo.sourceReview": "geo.source.review",
+
+  /* ---- v22.17: communications on the route ---- */
+  "comms.channelSeed": "comms.channel.manage",
+  "comms.channelList": "comms.read",
+  "comms.channelVerify": "comms.channel.verify",
+  "comms.authorizationRecord": "comms.authorization.manage",
+  "comms.authorizationVerify": "comms.authorization.verify",
+  "comms.unitCapabilitySet": "comms.unit.capability",
+  "comms.assignmentRecord": "comms.assignment.record",
+  "comms.assignmentVerify": "comms.assignment.verify",
+  "comms.assignmentsForSegments": "comms.read",
+  "comms.signObserve": "comms.observation.record",
+  "comms.signDecide": "comms.observation.decide",
+  "comms.signQueue": "comms.read",
+  "comms.coverageRecord": "comms.assignment.record",
+  "comms.transmitCheck": "comms.read",
+  "comms.planForPath": "comms.plan.compute",
+  "comms.planGet": "comms.read",
+  "comms.policyPropose": "comms.policy.manage",
+  "comms.policyApprove": "comms.policy.approve",
+  "comms.policyCurrent": "comms.read",
+  "comms.oosPolicyPropose": "oos.policy.manage",
+  "comms.oosPolicyApprove": "oos.policy.approve",
+  "enforcement.extractionRecord": "enforcement.capture",
+  "enforcement.eventConfirm": "enforcement.confirm",
+  "enforcement.findingRecord": "enforcement.finding.record",
+  "enforcement.orderRelease": "enforcement.release",
+  "enforcement.activeOrders": "enforcement.read",
+  "enforcement.eventGet": "enforcement.read",
+  "enforcement.latchReport": "enforcement.latch",
+  "enforcement.latchStates": "enforcement.latch",
+  "enforcement.panelGrantIssue": "enforcement.panel.issue",
+  "enforcement.panelGrantRevoke": "enforcement.panel.issue",
+  "enforcement.panelView": "enforcement.panel.view",
+  "timeOff.request": "timeOff.request",
+  "timeOff.callOff": "timeOff.request",
+  "timeOff.mine": "timeOff.request",
+  "timeOff.decide": "timeOff.decide",
+  "timeOff.schedulingRead": "timeOff.schedulingRead",
+  "shifts.post": "shifts.post",
+  "shifts.list": "shifts.read",
+  "shifts.eligibility": "shifts.read",
+  "shifts.expressInterest": "shifts.interest",
+  "shifts.interests": "shifts.read",
+  "crews.create": "crews.manage",
+  "crews.addMember": "crews.manage",
+  "crews.removeMember": "crews.manage",
+  "crews.forecast": "crews.read",
+  "calendar.mine": "calendar.own",
+  "calendar.forScheduling": "calendar.scheduling",
+  "calendar.exceptions": "calendar.scheduling",
+  "readiness.forShift": "readiness.read",
+  "readiness.forTime": "readiness.read",
+  "assistant.ask": "assistant.ask",
+  "assistant.askHistory": "assistant.ask",
+  "assistant.addPassage": "assistant.curate",
+  "assistant.supersedePassage": "assistant.curate",
+  "assistant.addProbe": "assistant.curate",
+  "assistant.addProbeFromAsk": "assistant.curate",
+  "assistant.passageList": "assistant.curate",
+  "assistant.measureRetrieval": "assistant.ask",
+  "board.createChannel": "board.manage",
+  "board.post": "board.post",
+  "board.read": "board.read",
+  "board.open": "board.read",
+  "board.acknowledge": "board.read",
+  "board.acknowledgements": "board.read",
+  "agent.start": "agent.use",
+  "agent.requestAction": "agent.act",
+  "agent.decideApproval": "agent.approve",
+  "agent.awaitEvent": "agent.act",
+  "agent.get": "agent.read",
+  "board.history": "board.read",
+  "board.edit": "board.post",
+  "board.withdraw": "board.post",
+  "hos.profileSeed": "hos.rule.manage",
+  "hos.profileList": "hos.read",
+  "hos.limitVerify": "hos.rule.verify",
+  "hos.profileVerify": "hos.rule.verify",
+  "hos.profileFor": "hos.read",
+  "hos.status": "hos.read",
+  "hos.tripFeasibility": "hos.read",
+  "comms.channelRetire": "comms.channel.verify",
+  "comms.packageBuild": "comms.package.build",
+  "comms.packageFetch": "comms.package.fetch",
+  "comms.packageAcknowledge": "comms.package.fetch",
+  "comms.packageStatus": "comms.read",
   "portalAdmin.identityInvite": "portal.identity.manage",
   "portalAdmin.submissionReview": "portal.submission.review",
 
@@ -2136,6 +2500,8 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "shop.toolCheckout": "shop.tools.manage",
   "shop.toolReturn": "shop.tools.manage",
   "shop.recallRecord": "shop.recall.record",
+  "shop.workOrderAdvance": "shop.workorder.advance",
+  "shop.workOrderRelease": "shop.release",
   "shop.recallVerify": "shop.recall.verify",
   "shop.recallUnitDecide": "shop.recall.record",
   "shop.workOrderCost": "shop.read",
@@ -2230,6 +2596,20 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
 } as const satisfies Record<string, Permission>;
+
+/**
+ * Every procedure name the two maps declare, as a type.
+ *
+ * `roleProcedure` took a bare string, so `roleProcedure("comms.read")` — a
+ * permission where a procedure name belongs — compiled fine and failed at
+ * wiring time. That mistake has now been made twice in four checkpoints, in
+ * both directions, because the two vocabularies look alike and live in the same
+ * file. A union closes the category: a permission is not a ProcedureName, and
+ * TypeScript says so at the call site instead of the server saying so at boot.
+ */
+export type ProcedureName =
+  | keyof typeof RECORDS_PROCEDURE_PERMISSIONS
+  | keyof typeof OPERATIONAL_PROCEDURE_PERMISSIONS;
 
 export function permissionForProcedure(name: string): Permission | null {
   return (

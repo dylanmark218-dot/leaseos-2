@@ -19,6 +19,12 @@ import OfflineVault from "./showcase/OfflineVault";
 import BillingSafetyWorkspace from "./showcase/BillingSafetyWorkspace";
 import RouteSafetyWorkspace from "./showcase/RouteSafetyWorkspace";
 import DisposalDirectory from "./pages/DisposalDirectory";
+import CommunicationsPackage from "./pages/CommunicationsPackage";
+import TransmitCheck from "./pages/TransmitCheck";
+import CommunicationsPackageStatus from "./pages/CommunicationsPackageStatus";
+import RoutePreview from "./pages/RoutePreview";
+import AssistantAsk from "./pages/AssistantAsk";
+import AssistantCalibration from "./pages/AssistantCalibration";
 import TripOperationsWorkspace from "./showcase/TripOperationsWorkspace";
 
 function DashboardRoute({ children }: { children: ReactNode }) {
@@ -40,6 +46,15 @@ function Router() {
       <Route path="/jobs" component={() => <JobsSurface />} />
       <Route path="/evidence" component={() => <EvidenceSurface />} />
       <Route path="/safety" component={() => <SafetySurface />} />
+      {/* v22.20 — communications, on real procedures. Not showcase routes:
+          these read sealed packages and the transmit engine, so demonstration
+          data here would be indistinguishable from an operational answer. */}
+      <Route path="/comms/package" component={() => <CommunicationsPackage />} />
+      <Route path="/comms/transmit" component={() => <TransmitCheck />} />
+      <Route path="/comms/status" component={() => <CommunicationsPackageStatus />} />
+      <Route path="/route/preview" component={() => <RoutePreview />} />
+      <Route path="/documents/ask" component={() => <AssistantAsk />} />
+      <Route path="/documents/calibration" component={() => <AssistantCalibration />} />
       {/* v22.5.1 — showcase surfaces: demonstration data, mutations refused by the client */}
       <Route path="/showcase" component={() => <ShowcaseFrame title="Home"><Home /></ShowcaseFrame>} />
       <Route path="/showcase/route-safety" component={() => <ShowcaseFrame title="Route safety"><RouteSafetyWorkspace /></ShowcaseFrame>} />
