@@ -1,0 +1,154 @@
+/**
+ * v22.20 — Hours of service: the API.
+ *
+ * Loading a profile is a controller's act. Verifying one — or a single limit
+ * inside it — is a second person's, because a verified figure is what a
+ * driver's legal driving time will be computed from. Until then every
+ * determination reads UNKNOWN and the clocks are shown without a compliance
+ * answer.
+ */
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
+import { and, eq, gte, inArray } from "drizzle-orm";
+import { roleProcedure, router } from "./_core/trpc";
+import { getDb } from "./db";
+import { dutyRecords, hosRuleLimits, hosRuleProfiles } from "../drizzle/schema";
+import { ALL_HOS_PROFILE_SEEDS, HOS_SEED_CAVEAT, HOS_SEED_RETRIEVAL_DATE } from "./_core/hosRuleSeeds";
+import {
+  computeClocks, determine, selectProfile, tripFeasibility,
+  type DutyEntry, type HosRuleProfile, type LimitKey,
+} from "./_core/hos";
+
+async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
+
+/** Rows read back as the engine's types. The limits travel with their profile, never apart from it. */
+async function loadProfiles(d: Awaited<ReturnType<typeof db>>): Promise<HosRuleProfile[]> {
+  const profiles = await d.select().from(hosRuleProfiles);
+  const limits = profiles.length ? await d.select().from(hosRuleLimits).where(inArray(hosRuleLimits.profileKey, profiles.map(p => p.profileKey))) : [];
+  return profiles.map(p => ({
+    profileKey: p.profileKey, label: p.label,
+    applicability: { authorityLevel: p.authorityLevel, jurisdiction: p.jurisdiction, latitudeRule: p.latitudeRule, minimumWeightKg: p.minimumWeightKg, operationClass: p.operationClass },
+    limits: limits.filter(l => l.profileKey === p.profileKey && l.verificationStatus !== "superseded").map(l => ({ limitKey: l.limitKey as LimitKey, value: l.value, sourceSection: l.sourceSection, verificationStatus: l.verificationStatus })),
+    sourceAuthority: p.sourceAuthority, sourceCitation: p.sourceCitation, sourceUrl: p.sourceUrl,
+    effectiveFrom: p.effectiveFrom, effectiveTo: p.effectiveTo,
+    verificationStatus: p.verificationStatus, supersedesProfileKey: p.supersedesProfileKey,
+  }));
+}
+
+const CONTEXT = z.object({
+  carrierAuthority: z.enum(["federal", "provincial", "territorial"]).nullish(),
+  jurisdiction: z.string().max(8).nullish(),
+  crossedBoundary: z.boolean().nullish(),
+  registeredWeightKg: z.number().int().positive().max(200_000).nullish(),
+  operationClass: z.string().max(40).nullish(),
+  latitude: z.number().min(-90).max(90).nullish(),
+  at: z.coerce.date().default(() => new Date()),
+});
+
+export const hosRouter = router({
+  /** Load the candidate profiles. Additive and idempotent: a profile already present is left exactly as it is. */
+  profileSeed: roleProcedure("hos.profileSeed").mutation(async ({ ctx }) => {
+    const d = await db();
+    const present = new Set((await d.select({ profileKey: hosRuleProfiles.profileKey }).from(hosRuleProfiles)).map(r => r.profileKey));
+    const inserted: string[] = [];
+    for (const p of ALL_HOS_PROFILE_SEEDS) {
+      if (present.has(p.profileKey)) continue;
+      await d.insert(hosRuleProfiles).values({
+        profileKey: p.profileKey, label: p.label, authorityLevel: p.applicability.authorityLevel,
+        jurisdiction: p.applicability.jurisdiction, latitudeRule: p.applicability.latitudeRule,
+        minimumWeightKg: p.applicability.minimumWeightKg, operationClass: p.applicability.operationClass,
+        sourceAuthority: p.sourceAuthority, sourceCitation: p.sourceCitation,
+        retrievedAt: HOS_SEED_RETRIEVAL_DATE, verificationStatus: "unverified", recordedByUserId: ctx.user.id,
+      });
+      for (const l of p.limits) await d.insert(hosRuleLimits).values({ profileKey: p.profileKey, limitKey: l.limitKey, value: l.value, sourceSection: l.sourceSection, verificationStatus: "unverified" });
+      inserted.push(p.profileKey);
+    }
+    return { inserted: inserted.length, existing: present.size, profiles: inserted, caveat: HOS_SEED_CAVEAT };
+  }),
+
+  profileList: roleProcedure("hos.profileList").query(async () => {
+    const d = await db();
+    const profiles = await loadProfiles(d);
+    return {
+      profiles: profiles.map(p => ({
+        profileKey: p.profileKey, label: p.label, applicability: p.applicability,
+        verificationStatus: p.verificationStatus, sourceCitation: p.sourceCitation,
+        limitCount: p.limits.length, verifiedLimits: p.limits.filter(l => l.verificationStatus === "verified").length,
+        note: p.limits.length ? null : "No figures are loaded for this profile — every determination under it is UNKNOWN",
+      })),
+      verified: profiles.filter(p => p.verificationStatus === "verified").length,
+      unverified: profiles.filter(p => p.verificationStatus === "unverified").length,
+      caveat: HOS_SEED_CAVEAT,
+    };
+  }),
+
+  /** Verify one figure against its clause. A profile is verified only when every limit it carries is. */
+  limitVerify: roleProcedure("hos.limitVerify")
+    .input(z.object({ profileKey: z.string().min(1).max(60), limitKey: z.string().min(1).max(60), sourceSection: z.string().min(1).max(120), confirmedValue: z.number().nonnegative() }))
+    .mutation(async ({ ctx, input }) => {
+      const d = await db();
+      const l = (await d.select().from(hosRuleLimits).where(and(eq(hosRuleLimits.profileKey, input.profileKey), eq(hosRuleLimits.limitKey, input.limitKey))).limit(1))[0];
+      if (!l) throw new TRPCError({ code: "NOT_FOUND", message: `${input.profileKey} carries no ${input.limitKey}` });
+      if (l.verificationStatus !== "unverified") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `That limit is ${l.verificationStatus}` });
+      // The verifier states the figure they read. A mismatch is a correction, not a rubber stamp.
+      const corrected = input.confirmedValue !== l.value;
+      await d.update(hosRuleLimits).set({ value: input.confirmedValue, sourceSection: input.sourceSection, verificationStatus: "verified", verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(eq(hosRuleLimits.id, l.id));
+      return { profileKey: l.profileKey, limitKey: l.limitKey, verificationStatus: "verified" as const, corrected, previousValue: corrected ? l.value : null, value: input.confirmedValue };
+    }),
+
+  /** Verify the profile itself, once every figure under it has been verified. */
+  profileVerify: roleProcedure("hos.profileVerify")
+    .input(z.object({ profileKey: z.string().min(1).max(60), sourceUrl: z.string().max(600).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const d = await db();
+      const p = (await d.select().from(hosRuleProfiles).where(eq(hosRuleProfiles.profileKey, input.profileKey)).limit(1))[0];
+      if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "No such profile" });
+      if (p.verificationStatus !== "unverified") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Profile is ${p.verificationStatus}` });
+      if (p.recordedByUserId != null && p.recordedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The person who recorded a profile does not verify it — a second person does" });
+      const limits = await d.select().from(hosRuleLimits).where(eq(hosRuleLimits.profileKey, p.profileKey));
+      const outstanding = limits.filter(l => l.verificationStatus !== "verified");
+      if (outstanding.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${outstanding.length} figure(s) in this profile are unverified — verify each against its clause first: ${outstanding.map(l => l.limitKey).join(", ")}` });
+      if (!limits.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This profile carries no figures — there is nothing to have verified" });
+      await d.update(hosRuleProfiles).set({ verificationStatus: "verified", verifiedByUserId: ctx.user.id, verifiedAt: new Date(), sourceUrl: input.sourceUrl ?? p.sourceUrl }).where(eq(hosRuleProfiles.id, p.id));
+      return { profileKey: p.profileKey, verificationStatus: "verified" as const, limitsVerified: limits.length };
+    }),
+
+  /** Which schedule applies? The ladder, walked, with the rung that stopped it named. */
+  profileFor: roleProcedure("hos.profileFor").input(CONTEXT).query(async ({ input }) => {
+    const d = await db();
+    return selectProfile({ ...input, at: input.at }, await loadProfiles(d));
+  }),
+
+  /** The clocks, and what the applicable schedule makes of them. */
+  status: roleProcedure("hos.status")
+    .input(CONTEXT.extend({ operatorId: z.number().int().positive(), lookbackDays: z.number().int().min(1).max(30).default(16) }))
+    .query(async ({ input }) => {
+      const d = await db();
+      const since = new Date(input.at.getTime() - input.lookbackDays * 24 * 60 * 60_000);
+      const rows = await d.select().from(dutyRecords).where(and(eq(dutyRecords.operatorId, input.operatorId), gte(dutyRecords.startedAt, since)));
+      const entries: DutyEntry[] = rows.map(r => ({ dutyStatus: r.dutyStatus, startedAt: r.startedAt, endedAt: r.endedAt }));
+      const selection = selectProfile({ ...input, at: input.at }, await loadProfiles(d));
+      const profile = selection.outcome === "selected" ? selection.profile : null;
+      const core = profile?.limits.find(l => l.limitKey === "core_rest_minutes" && l.verificationStatus === "verified")?.value;
+      const clocks = computeClocks(entries, input.at, { shiftResetMinutes: core });
+      return {
+        operatorId: input.operatorId, dutyRecordsRead: rows.length,
+        selection, clocks, determination: determine(clocks, profile),
+        shiftBasis: core ? `work shift taken to begin after a verified ${core} min core rest` : "work shift taken to begin after 8 h of rest — a default, because no verified core-rest figure applies",
+      };
+    }),
+
+  /** Can this trip be finished legally? UNKNOWN whenever the driving limit is unverified. */
+  tripFeasibility: roleProcedure("hos.tripFeasibility")
+    .input(CONTEXT.extend({ operatorId: z.number().int().positive(), estimatedDriveMinutes: z.number().positive().max(10_000) }))
+    .query(async ({ input }) => {
+      const d = await db();
+      const since = new Date(input.at.getTime() - 16 * 24 * 60 * 60_000);
+      const rows = await d.select().from(dutyRecords).where(and(eq(dutyRecords.operatorId, input.operatorId), gte(dutyRecords.startedAt, since)));
+      const selection = selectProfile({ ...input, at: input.at }, await loadProfiles(d));
+      const profile = selection.outcome === "selected" ? selection.profile : null;
+      const clocks = computeClocks(rows.map(r => ({ dutyStatus: r.dutyStatus, startedAt: r.startedAt, endedAt: r.endedAt })), input.at);
+      const determination = determine(clocks, profile);
+      return { operatorId: input.operatorId, selection, determination, feasibility: tripFeasibility(determination, input.estimatedDriveMinutes) };
+    }),
+});

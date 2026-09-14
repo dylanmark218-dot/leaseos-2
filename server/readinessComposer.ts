@@ -25,6 +25,8 @@ import {
   jobs, maintenanceDefects, measurementDeviceAssignments, measurementDevices, calibrationEvents, operators, roadsideServiceEvents,
   units, workOrderReleases,
   faultCodes,
+  communicationCoverage, communicationPolicies, companyRadioAuthorizations, radioChannels,
+  roadGraphEdges, roadRadioAssignments, routeApprovals, unitRadioCapabilities,
 } from "../drizzle/schema";
 import {
   evaluateDispatchReadiness, type CredentialState, type DispatchBlocker, type DispatchEligibility, type EligibilityVerdict, type ReadinessInput,
@@ -33,8 +35,55 @@ import { computeEligibilityFingerprint, type EligibilityFacts } from "./_core/di
 import { assessCoverage, type PolicyRecord } from "./_core/insuranceRisk";
 import { calibrationEffectOnUse, calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import { medicalFitnessForDispatch } from "./_core/compliancePassport";
+import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
+import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
+import {
+  ADVISORY_POLICY, communicationBlockers, planCommunications,
+  type CommunicationPolicy, type CoverageObservation, type GeoCondition, type PathSegment,
+} from "./_core/commRoute";
 
-export type ReadinessSubject = { operatorId: number; unitId: number | null; trailerId: number | null; jobId: number | null; postingId?: number | null };
+export type ReadinessSubject = {
+  operatorId: number; unitId: number | null; trailerId: number | null; jobId: number | null; postingId?: number | null;
+  /**
+   * v22.18 — the route this readiness is about. Optional, so every existing
+   * caller keeps its exact behaviour: without it the route axis answers what it
+   * has always answered, which is that nothing was evaluated.
+   */
+  routeApprovalRef?: string | null;
+  /** Working alone, for the policy rule that only applies then. */
+  loneWorker?: boolean;
+  /**
+   * v22.20 — active out-of-service orders and unresolved inspections covering
+   * this operator, unit or trailer.
+   *
+   * Before this, a mechanic release could report a unit available while a
+   * government order prohibited it from moving: the composer had no idea
+   * enforcement existed. A mechanic can establish that a truck is mechanically
+   * sound. Nobody in this company can establish that an inspector's order has
+   * been lifted.
+   */
+  enforcement?: {
+    orders: readonly OosOrder[];
+    unresolvedInspections?: readonly { inspectionRef: string; coversSubjectRefs: readonly string[] }[];
+    subjects: readonly { subjectRef: string; scope: OosScope }[];
+  } | null;
+};
+
+/** The approved communication policy in force, or the advisory default. */
+export async function currentCommunicationPolicy(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, now: Date): Promise<{ policy: CommunicationPolicy; policyRef: string | null }> {
+  const rows = await db.select().from(communicationPolicies).where(eq(communicationPolicies.status, "approved")).orderBy(desc(communicationPolicies.id));
+  const live = rows.find(r => (!r.effectiveFrom || r.effectiveFrom.getTime() <= now.getTime()) && (!r.effectiveTo || r.effectiveTo.getTime() > now.getTime()));
+  if (!live) return { policy: ADVISORY_POLICY, policyRef: null };
+  return {
+    policyRef: live.policyRef,
+    policy: {
+      unknownPlanBlocks: live.unknownPlanBlocks,
+      requireTransmitAuthorization: live.requireTransmitAuthorization,
+      toleratedNoCommunicationKm: live.toleratedNoCommunicationKm,
+      loneWorkerRequiresSatellite: live.loneWorkerRequiresSatellite,
+    },
+  };
+}
 
 export type ComposedReadiness = {
   eligibility: DispatchEligibility;
@@ -228,9 +277,99 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   };
   if (!job) contributions.push({ engine: "dispatch", finding: "No job supplied — job requirements not evaluated" });
 
-  /* ---- route: no spatial branch, so nothing is known. B12 makes that `unknown`, overridable by a manager. ---- */
+  /* ---- enforcement: an order from outside this company ---- */
+  if (subject.enforcement?.subjects.length) {
+    const enf = enforcementReadiness({
+      subjects: subject.enforcement.subjects,
+      orders: subject.enforcement.orders,
+      unresolvedInspections: subject.enforcement.unresolvedInspections,
+      at: now,
+    });
+    for (const b of enf.blockers) {
+      // Not overridable by anyone here. A manager may override a company rule;
+      // an inspector's order is not a company rule.
+      extra.push({ code: b.code, label: b.label, severity: "blocking", subject: b.scope === "driver" ? "operator" : b.scope === "trailer" ? "trailer" : "truck", overridable: false });
+    }
+    for (const s of enf.subjects.filter(x => x.state === "unknown")) {
+      extra.push({ code: "enforcement_result_unknown", label: s.reasons[0], severity: "unknown", subject: s.scope === "driver" ? "operator" : "truck", overridable: true, overrideAuthority: "manager" });
+    }
+    if (enf.replaceableSubjects.includes("driver")) {
+      contributions.push({ engine: "enforcement", finding: "The driver is prohibited and the unit is not — dispatch may assign an eligible replacement driver" });
+    }
+    contributions.push({ engine: "enforcement", finding: `Enforcement: ${enf.verdict}${enf.blockers.length ? ` — ${enf.blockers.length} active order(s)` : ""}` });
+  }
+
+  /* ---- route and communications ---- */
   const route: ReadinessInput["route"] = { dispatchStatus: null, dataTrustworthy: null };
-  contributions.push({ engine: "routing", finding: "Route not evaluated — no routing data source is loaded (P0/P5)" });
+  let routeProfileId: string | null = null;
+  let routeDecisionVersion = "not_evaluated";
+  let communicationPlanVersion = "none";
+
+  if (!subject.routeApprovalRef) {
+    // Unchanged, and still true: without a named route there is nothing to read.
+    contributions.push({ engine: "routing", finding: "No route named for this readiness — the route axis is not evaluated" });
+  } else {
+    const approval = (await db.select().from(routeApprovals).where(eq(routeApprovals.approvalRef, subject.routeApprovalRef)).limit(1))[0];
+    if (!approval) {
+      extra.push({ code: "route_approval_missing", label: `Route ${subject.routeApprovalRef} is not on record`, severity: "unknown", subject: "route", overridable: true, overrideAuthority: "manager" });
+      contributions.push({ engine: "routing", finding: `Route approval ${subject.routeApprovalRef} not found` });
+    } else {
+      routeProfileId = approval.approvalRef;
+      routeDecisionVersion = approval.fingerprintHash.slice(0, 16);
+      const status = approval.dispatchStatus as ReadinessInput["route"]["dispatchStatus"];
+      route.dispatchStatus = status === "clear" || status === "warning" || status === "review" || status === "blocked" ? status : null;
+      // The approval records a verdict, not the confidence behind it, so this
+      // stays unknown rather than being invented from the verdict.
+      route.dataTrustworthy = null;
+      if (approval.status === "stale" || approval.status === "revoked" || approval.status === "superseded") {
+        extra.push({ code: `route_approval_${approval.status}`, label: `The approved route is ${approval.status} — re-evaluate it before dispatching`, severity: "blocking", subject: "route", overridable: true, overrideAuthority: "manager" });
+      }
+      contributions.push({ engine: "routing", finding: `Route ${approval.approvalRef}: ${approval.dispatchStatus}, ${approval.status}` });
+
+      /* The communication plan over that route's segments, under the company's own policy. */
+      const segmentIds = JSON.parse(approval.segmentIdsJson) as string[];
+      const { policy, policyRef } = await currentCommunicationPolicy(db, now);
+      const [edgeRows, assignRows, coverRows, channelRows, authRows] = await Promise.all([
+        segmentIds.length ? db.select({ segmentId: roadGraphEdges.segmentId, lengthMetres: roadGraphEdges.lengthMetres }).from(roadGraphEdges).where(inArray(roadGraphEdges.segmentId, segmentIds)) : Promise.resolve([]),
+        segmentIds.length ? db.select().from(roadRadioAssignments).where(inArray(roadRadioAssignments.segmentId, segmentIds)) : Promise.resolve([]),
+        segmentIds.length ? db.select().from(communicationCoverage).where(inArray(communicationCoverage.segmentId, segmentIds)) : Promise.resolve([]),
+        db.select().from(radioChannels),
+        db.select().from(companyRadioAuthorizations).where(eq(companyRadioAuthorizations.authorized, true)),
+      ]);
+      const lengthBySegment = new Map<string, number>();
+      for (const e of edgeRows) lengthBySegment.set(e.segmentId, e.lengthMetres / 1000);
+      const unmeasured = segmentIds.filter(id => !lengthBySegment.has(id));
+      const path: PathSegment[] = segmentIds.map(segmentId => ({ segmentId, label: segmentId, lengthKm: lengthBySegment.get(segmentId) ?? 0 }));
+      const cap = subject.unitId ? (await db.select().from(unitRadioCapabilities).where(eq(unitRadioCapabilities.unitId, subject.unitId)).limit(1))[0] : undefined;
+      const coverage: CoverageObservation[] = coverRows.map(r => ({ segmentId: r.segmentId, medium: r.medium, state: r.state, sourceKey: r.sourceKey, authorityTier: r.authorityTier, observedAt: r.observedAt, verificationStatus: r.verificationStatus }));
+      // The same resolver the route path uses. An approval with no recorded
+      // buildRef resolves no geography, and every condition reads UNKNOWN —
+      // which is the honest answer for a route whose graph build was never
+      // recorded, and is never a guess.
+      const geo = approval.buildRef ? await resolveRouteCommunicationGeography(db, { buildRef: approval.buildRef, segmentIds }) : null;
+      const plan = planCommunications({
+        geographyBySegment: geo?.geographyBySegment,
+        path,
+        assignments: assignRows.map(r => ({ assignmentRef: r.assignmentRef, segmentId: r.segmentId, channelKey: r.channelKey, authorityTier: r.authorityTier, effectiveFrom: r.effectiveFrom, effectiveTo: r.effectiveTo, callDirectionLoaded: r.callDirectionLoaded, callIntervalKm: r.callIntervalKm, mustCallKm: r.mustCallKmJson ? (JSON.parse(r.mustCallKmJson) as number[]) : null, roadName: r.roadName, observedAt: r.observedAt, verificationStatus: r.verificationStatus, supersedesAssignmentRef: r.supersedesAssignmentRef })),
+        channels: channelRows.map(r => ({ channelKey: r.channelKey, alias: r.alias, serviceClass: r.serviceClass, systemType: r.systemType, rxMHz: r.rxMHz, txMHz: r.txMHz, toneRxHz: r.toneRxHz, toneTxHz: r.toneTxHz, bandwidthKHz: r.bandwidthKHz, maxPowerW: r.maxPowerW, licenceRequired: r.licenceRequired, conditions: JSON.parse(r.conditionsJson) as GeoCondition[], sourceKey: r.sourceKey, sourceCitation: r.sourceCitation, sourceVersion: r.sourceVersion, verificationStatus: r.verificationStatus, serviceStatus: r.serviceStatus, retiredNote: r.retiredNote })),
+        coverage,
+        companyAuthorizations: authRows.map(a => ({ channelKey: a.channelKey, authorized: a.authorized, licenceRef: a.licenceRef, licenceExpiresAt: a.licenceExpiresAt, provinces: a.provincesJson ? (JSON.parse(a.provincesJson) as string[]) : null, approvedUnitIds: a.approvedUnitIdsJson ? (JSON.parse(a.approvedUnitIdsJson) as number[]) : null, verificationStatus: a.verificationStatus })),
+        unit: cap ? { unitId: cap.unitId, vhf: cap.vhf, uhf: cap.uhf, cb: cap.cb, satellite: cap.satellite, cellular: cap.cellular, programmingProfileRef: cap.programmingProfileRef, programmedChannelKeys: cap.programmedChannelKeysJson ? (JSON.parse(cap.programmedChannelKeysJson) as string[]) : null, verificationStatus: cap.verificationStatus } : null,
+        at: now,
+      });
+      for (const b of communicationBlockers(plan, policy, { loneWorker: subject.loneWorker === true, dangerousGoods, unitHasSatellite: cap ? cap.satellite : null })) extra.push(b);
+      if (unmeasured.length) {
+        // A segment with no measured length contributes nothing to the plan's
+        // kilometres, which would quietly understate a gap. Say so instead.
+        extra.push({ code: "communication_plan_unmeasured_segments", label: `${unmeasured.length} route segment(s) have no measured length — the communication plan's kilometres understate the route`, severity: "unknown", subject: "route", overridable: true, overrideAuthority: "dispatcher" });
+      }
+      if (geo?.missing.length) {
+        extra.push({ code: "communication_geometry_missing", label: `${geo.missing.length} route segment(s) have no usable road geometry — radio authorization there is UNKNOWN, not permitted`, severity: "unknown", subject: "route", overridable: true, overrideAuthority: "dispatcher" });
+      }
+      communicationPlanVersion = `${plan.verdict}:${geo?.geographyHash?.slice(0, 8) ?? "nogeo"}:${versionOf(plan.zones.map(z => `${z.segmentIds.join(",")}=${z.channelKey ?? "∅"}@${z.authorityTier ?? "∅"}/${z.transmit}`))}`;
+      contributions.push({ engine: "communications", finding: `${plan.explanation}${policyRef ? ` (policy ${policyRef})` : " (no approved policy — advisory)"}` });
+    }
+  }
 
   const input: ReadinessInput = {
     evaluatedAt: now,
@@ -250,7 +389,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     materialClassificationVersion: "none",
     permitVersion: "none",
     destinationAcceptanceVersion: "none",
-    routeProfileId: null, routeDecisionVersion: "not_evaluated",
+    routeProfileId, routeDecisionVersion, communicationPlanVersion,
   };
   return { eligibility, facts, fingerprint: computeEligibilityFingerprint(facts), contributions };
 }

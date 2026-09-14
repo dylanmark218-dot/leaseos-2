@@ -29,7 +29,12 @@ const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 
 let pool: mysql.Pool;
-let nextId = 500000 + Math.floor(Math.random() * 400000);
+// A 400k-wide window starting at 500,000 overlapped bulkFuel.test.ts, which
+// begins at 880,000 — so this file could allocate a user another file had
+// already granted a role to, and the role assertions here would see one extra.
+// Every other file in this suite uses a narrow window at a widely spaced base;
+// this now follows that convention instead of spanning half of them.
+let nextId = 12_000_000 + Math.floor(Math.random() * 60_000);
 const newUserId = () => nextId++;
 
 beforeAll(async () => {

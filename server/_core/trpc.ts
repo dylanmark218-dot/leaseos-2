@@ -53,8 +53,7 @@ import {
   isSensitivePermission,
   permissionForProcedure,
   type Permission,
-  type RoleGrant,
-} from "./recordsAuthorization";
+  type RoleGrant, type ProcedureName } from "./recordsAuthorization";
 import { listActiveUserRoles, recordAuthorizationDecision } from "../db";
 
 /**
@@ -69,7 +68,7 @@ import { listActiveUserRoles, recordAuthorizationDecision } from "../db";
  * incident investigation is exactly what an audit wants to see, and exactly
  * what a permissive system never captures.
  */
-export function roleProcedure(procedureName: string) {
+export function roleProcedure(procedureName: ProcedureName) {
   const permission: Permission | null = permissionForProcedure(procedureName);
 
   if (!permission) {

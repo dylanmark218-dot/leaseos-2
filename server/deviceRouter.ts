@@ -118,6 +118,8 @@ const ITEM = z.object({
   declaredManifestHash: FINGERPRINT,
   computedContentHash: FINGERPRINT,
   computedManifestHash: FINGERPRINT,
+  captureAuthorizationClaim: z.enum(["authorized", "unauthorized", "unknown"]).default("unknown"),
+  captureAuthorizationReason: z.string().max(300).nullable().optional(),
 });
 
 export const syncRouter = router({
@@ -201,7 +203,8 @@ export const syncRouter = router({
 
       for (const it of input.items) {
         const v = verification.verdicts.find(x => x.evidenceRecordId === it.evidenceRecordId)!;
-        await db.insert(syncPackageItems).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, declaredContentHash: it.declaredContentHash, declaredManifestHash: it.declaredManifestHash, state: v.outcome === "verified" ? "verified" : "mismatch" });
+        await db.insert(syncPackageItems).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, declaredContentHash: it.declaredContentHash, declaredManifestHash: it.declaredManifestHash,
+          captureAuthorizationClaim: it.captureAuthorizationClaim, captureAuthorizationReason: it.captureAuthorizationReason ?? null, state: v.outcome === "verified" ? "verified" : "mismatch" });
         await db.insert(syncReceipts).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, computedContentHash: it.computedContentHash, computedManifestHash: it.computedManifestHash, matched: v.outcome === "verified", receivedAt: now, failureDetail: v.outcome === "verified" ? null : v.reason });
       }
       await db.update(syncPackages).set({

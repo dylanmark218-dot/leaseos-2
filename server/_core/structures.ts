@@ -105,9 +105,18 @@ export type RouteDependencies = {
   structureSet: string;        // the structures on those segments, as applied
   roadFabric: string;          // which imported roads, at which import run
   requiredChecks: string;      // what was asked of the route
+  /**
+   * v22.17 — the channel that governs each segment, and who says so. A road
+   * operator moving a haul road to a different channel for one week is a real
+   * change to the trip a driver was briefed on, so an approval that stood on
+   * the old channel goes stale by arithmetic rather than by somebody
+   * remembering to look. Optional, so approvals recorded before v22.17 are
+   * compared on the dependencies they actually carried.
+   */
+  communicationsPlan?: string;
 };
 export const DEPENDENCY_LABELS: Record<keyof RouteDependencies, string> = {
-  vehicleProfile: "the unit's profile", loadProfile: "the load", permitSet: "the permits", restrictionSet: "the restrictions in force", structureSet: "the structures on the route", roadFabric: "the imported road data", requiredChecks: "the checks required",
+  vehicleProfile: "the unit's profile", loadProfile: "the load", permitSet: "the permits", restrictionSet: "the restrictions in force", structureSet: "the structures on the route", roadFabric: "the imported road data", requiredChecks: "the checks required", communicationsPlan: "the radio channels on the route",
 };
 
 export function hashPart(value: unknown): string {
