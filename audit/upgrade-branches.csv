@@ -1,0 +1,75 @@
+branch,checkpoint_file,checkpoint_version,title
+upgrade/b12-routing-evidence,LEASEOS_B12_ROUTING_EVIDENCE.md,,LeaseOS — B12: Routing Constraint Compiler + Evidence Ledger
+upgrade/b13-data-governance,LEASEOS_B13_DATA_GOVERNANCE.md,,LeaseOS — B13: Data Governance & Road Graph
+upgrade/b14-dispatch,LEASEOS_B14_DISPATCH.md,,LeaseOS — B14: Dispatch Operations Centre
+upgrade/b15-transactional-dispatch,LEASEOS_B15_TRANSACTIONAL_DISPATCH.md,,LeaseOS — B15: Transactional Dispatch Backend
+upgrade/b16-ci-database,LEASEOS_B16_CI_DATABASE.md,,"LeaseOS — B16: Disposable database, and what it revealed"
+upgrade/b17-1-production-wiring,LEASEOS_B17_1_PRODUCTION_WIRING.md,,LeaseOS — B17.1: Production Workflow Wiring
+upgrade/b17-workflow-core,LEASEOS_B17_WORKFLOW_CORE.md,,LeaseOS — B17: Workflow Orchestration Core
+upgrade/b18-billing-adjustments,LEASEOS_B18_BILLING_ADJUSTMENTS.md,,"LeaseOS — B18: Billing Adjustments, Disputes & Third-Party Work"
+upgrade/b19-end-to-end,LEASEOS_B19_END_TO_END.md,,"LeaseOS — B19: The Chain, Joined"
+upgrade/b20-10-verified-source-registry,LEASEOS_B20_10_VERIFIED_SOURCE_REGISTRY.md,v20.12.2,LeaseOS — v20.12.2 Checkpoint: Verified Source Registry
+upgrade/b20-11-p3-typed-commit,LEASEOS_B20_11_P3_TYPED_COMMIT.md,v20.13-dev1,LeaseOS — v20.13-dev1 Checkpoint: P3 Typed Assistant Commit Boundary
+upgrade/b20-12-v20-13-promotion,LEASEOS_B20_12_V20_13_PROMOTION.md,v20.13,LeaseOS — v20.13 Checkpoint: P3 Typed Commit Boundary (candidate promoted)
+upgrade/b20-13-portals-funding,LEASEOS_B20_13_PORTALS_FUNDING.md,v20.14,LeaseOS — v20.14 Checkpoint: Portal Composition + Funding Knowledge Panel
+upgrade/b20-14-v20-15-extraction-queue,LEASEOS_B20_14_V20_15_EXTRACTION_QUEUE.md,v20.15,LeaseOS — v20.15 Checkpoint: Document Extraction + Question Queue + Funding Persistence
+upgrade/b20-15-v20-16-fingerprint-disposal,LEASEOS_B20_15_V20_16_FINGERPRINT_DISPOSAL.md,v20.16,LeaseOS — v20.16 Checkpoint: Fingerprinting + Disposal Tickets + Merchant Memory
+upgrade/b20-16-v20-17-integrity-closure,LEASEOS_B20_16_V20_17_INTEGRITY_CLOSURE.md,v20.17,LeaseOS — v20.17 Checkpoint: P3 Integrity Closure
+upgrade/b20-17-v20-18-fuel-ledger,LEASEOS_B20_17_V20_18_FUEL_LEDGER.md,v20.18,LeaseOS — v20.18 Checkpoint: Fuel & Energy Ledger
+upgrade/b20-18-v20-19-roadside-ap,LEASEOS_B20_18_V20_19_ROADSIDE_AP.md,v20.19,LeaseOS — v20.19 Checkpoint: Roadside Events + Purchasing + Accounts Payable Spine
+upgrade/b20-19-v20-20-secure-field-runtime,LEASEOS_B20_19_V20_20_SECURE_FIELD_RUNTIME.md,v20.20,LeaseOS — v20.20 Checkpoint: P4 Secure Field Runtime (server half)
+upgrade/b20-1-workflow-wiring,LEASEOS_B20_1_WORKFLOW_WIRING.md,,LeaseOS — B20.1 Checkpoint: Records & Safety Wired Into the Workflow Engine
+upgrade/b20-20-v20-21-compliance-registry,LEASEOS_B20_20_V20_21_COMPLIANCE_REGISTRY.md,v20.21,LeaseOS — v20.21 Checkpoint: Compliance Master Registry
+upgrade/b20-21-v20-22-requirement-engine,LEASEOS_B20_21_V20_22_REQUIREMENT_ENGINE.md,v20.22,LeaseOS — v20.22 Checkpoint: Generalized Requirement Engine + Packs + Calibration
+upgrade/b20-22-v20-23-insurance-risk,LEASEOS_B20_22_V20_23_INSURANCE_RISK.md,v20.23,LeaseOS — v20.23 Checkpoint: Insurance & Risk
+upgrade/b20-2-authorization,LEASEOS_B20_2_AUTHORIZATION.md,,LeaseOS — B20.2 Checkpoint: Server-Enforced Domain Authorization
+upgrade/b20-3-authorization-enforcement,LEASEOS_B20_3_AUTHORIZATION_ENFORCEMENT.md,,LeaseOS — B20.3 Checkpoint: Authorization Enforcement + Records API
+upgrade/b20-4-api-migration,LEASEOS_B20_4_API_MIGRATION.md,,LeaseOS — B20.4 Checkpoint: Operational API Migration (Tranche 1)
+upgrade/b20-5-payroll-finance-tax,LEASEOS_B20_5_PAYROLL_FINANCE_TAX.md,,"LeaseOS — B20.5 Checkpoint: Payroll, Finance & Tax Foundation"
+upgrade/b20-6-authorization-complete,LEASEOS_B20_6_AUTHORIZATION_COMPLETE.md,,LeaseOS — B20.6 Checkpoint: Authorization Migration Complete (P1)
+upgrade/b20-7-payroll-finance-api,LEASEOS_B20_7_PAYROLL_FINANCE_API.md,,"LeaseOS — B20.7 Checkpoint: Payroll, Finance & Tax API (P2)"
+upgrade/b20-8-external-data-routing,LEASEOS_B20_8_EXTERNAL_DATA_ROUTING.md,,LeaseOS — B20.8 Checkpoint: External Data Foundation + Routing Adapter
+upgrade/b20-9-universal-permissions,LEASEOS_B20_9_UNIVERSAL_PERMISSIONS.md,v20.12.1,LeaseOS — v20.12.1 Checkpoint: Universal Permissions
+upgrade/b20-measurement-ladder,LEASEOS_B20_MEASUREMENT_LADDER.md,,LeaseOS — B20 Checkpoint: Verified Baseline + Measurement Quality Ladder
+upgrade/b20-records-vault,LEASEOS_B20_RECORDS_VAULT.md,,"LeaseOS — B20 Checkpoint: Records, Evidence & Compliance Vault"
+upgrade/b21-0-universal-surfaces,LEASEOS_B21_0_UNIVERSAL_SURFACES.md,v21.0,"LeaseOS — v21.0 Checkpoint: Universal Surfaces (Exception Centre, Inbox, My Day, Search, Timeline)"
+upgrade/b21-10-commercial-portals,LEASEOS_B21_10_COMMERCIAL_PORTALS.md,v21.10,"LeaseOS — v21.10 Checkpoint: Commercial Core + External Portals (vendor, customer, facility)"
+upgrade/b21-11-site-signoff-chain,LEASEOS_B21_11_SITE_SIGNOFF_CHAIN.md,v21.11,LeaseOS — v21.11 Checkpoint: Site Sign-Off & Post-Site Billing Chain (promotion of an unauthored arrival)
+upgrade/b21-12-portal-hardening,LEASEOS_B21_12_PORTAL_HARDENING.md,v21.12,LeaseOS — v21.12 Checkpoint: Portal Identity Hardening + Billing Closeout Completion
+upgrade/b21-13-customer-live-view,LEASEOS_B21_13_CUSTOMER_LIVE_VIEW.md,v21.13,LeaseOS — v21.13 Checkpoint: Customer Live View + Portal Client Shell
+upgrade/b21-14-customer-transaction,LEASEOS_B21_14_CUSTOMER_TRANSACTION.md,v21.14,LeaseOS — v21.14 Checkpoint: Customer Transaction & Field Closeout Completion (with v21.13.1 Documentation Truth Guards)
+upgrade/b21-15-fleet-shop,LEASEOS_B21_15_FLEET_SHOP.md,v21.15,LeaseOS — v21.15 Checkpoint: Fleet Shop OS
+upgrade/b21-16-capital-assets,LEASEOS_B21_16_CAPITAL_ASSETS.md,v21.16,LeaseOS — v21.16 Checkpoint: Capital Assets + CCA + Asset Twin
+upgrade/b21-17-commercial-projects,LEASEOS_B21_17_COMMERCIAL_PROJECTS.md,v21.17,LeaseOS — v21.17 Checkpoint: Commercial Project Management
+upgrade/b21-18-integration-gateway,LEASEOS_B21_18_INTEGRATION_GATEWAY.md,v21.18,LeaseOS — v21.18 Checkpoint: Integration Gateway
+upgrade/b21-19-telematics,LEASEOS_B21_19_TELEMATICS.md,v21.19,LeaseOS — v21.19 Checkpoint: Telematics & Video Safety
+upgrade/b21-1-dispatch-gate,LEASEOS_B21_1_DISPATCH_GATE.md,v21.1,"LeaseOS — v21.1 Checkpoint: The Dispatch Gate, Reachable"
+upgrade/b21-20-workforce,LEASEOS_B21_20_WORKFORCE.md,v21.20,LeaseOS — v21.20 Checkpoint: Workforce Lifecycle
+upgrade/b21-21-audit-packages,LEASEOS_B21_21_AUDIT_PACKAGES.md,v21.21,LeaseOS — v21.21 Checkpoint: Audit Package Builder
+upgrade/b21-2-dispatch-enforcement,LEASEOS_B21_2_DISPATCH_ENFORCEMENT.md,v21.2,LeaseOS — v21.2 Checkpoint: Dispatch Enforcement on the Legacy Path
+upgrade/b21-3-ifta,LEASEOS_B21_3_IFTA.md,v21.3,LeaseOS — v21.3 Checkpoint: IFTA on the Fuel Ledger
+upgrade/b21-4-bulk-fuel-statements,LEASEOS_B21_4_BULK_FUEL_STATEMENTS.md,v21.4,"LeaseOS — v21.4 Checkpoint: Bulk Fuel, Statement Import, Anomalies"
+upgrade/b21-5-period-close,LEASEOS_B21_5_PERIOD_CLOSE.md,v21.5,LeaseOS — v21.5 Checkpoint: Period Close + Fuel-Line Exceptions
+upgrade/b21-6-field-runtime,LEASEOS_B21_6_FIELD_RUNTIME.md,v21.6,LeaseOS — v21.6 Checkpoint: Secure Field Runtime — the client half that can be proven here
+upgrade/b21-7-portal-experience,LEASEOS_B21_7_PORTAL_EXPERIENCE.md,v21.7,LeaseOS — v21.7 Checkpoint: Portal Experience
+upgrade/b21-8-gst-hst,LEASEOS_B21_8_GST_HST.md,v21.8,LeaseOS — v21.8 Checkpoint: GST/HST Return Assembly + Close Expansion
+upgrade/b21-9-1-integrity-hotfix,LEASEOS_B21_9_1_INTEGRITY_HOTFIX.md,v21.9.1,LeaseOS — v21.9.1 Checkpoint: Authorization & Financial Integrity Hotfix
+upgrade/b21-9-bank-and-ar,LEASEOS_B21_9_BANK_AND_AR.md,v21.9,LeaseOS — v21.9 Checkpoint: Bank Reconciliation + Accounts Receivable
+upgrade/b22-0-spatial-foundation,LEASEOS_B22_0_SPATIAL_FOUNDATION.md,v22.0,LeaseOS — v22.0 Checkpoint: Spatial Foundation (routing source not loaded)
+upgrade/b22-10-invoice-to-customer,LEASEOS_B22_10_INVOICE_TO_CUSTOMER.md,v22.10,LeaseOS — v22.10 Checkpoint: An Approved Invoice Reaches the Customer
+upgrade/b22-11-credits-voids,LEASEOS_B22_11_CREDITS_VOIDS.md,v22.11,"LeaseOS — v22.11 Checkpoint: Credits, Voids and Supplemental Drafts"
+upgrade/b22-12-setup-wizard,LEASEOS_B22_12_SETUP_WIZARD.md,v22.12,LeaseOS — v22.12 Checkpoint: The First-Run Setup Wizard
+upgrade/b22-13-mapping-foundation,LEASEOS_B22_13_MAPPING_FOUNDATION.md,v22.13,"LeaseOS — v22.13 Checkpoint: The Mapping Foundation, From Open Data"
+upgrade/b22-14-legal-land,LEASEOS_B22_14_LEGAL_LAND.md,v22.14,"LeaseOS — v22.14 Checkpoint: Legal Land Both Ways, Entrances as Records"
+upgrade/b22-15-structures-staleness,LEASEOS_B22_15_STRUCTURES_STALENESS.md,v22.15,"LeaseOS — v22.15 Checkpoint: Structures, Effective Dates, and Route Staleness"
+upgrade/b22-16-routing-graph,LEASEOS_B22_16_ROUTING_GRAPH.md,v22.16,LeaseOS — v22.16 Checkpoint: The First Routing Graph
+upgrade/b22-1-contract-terms,LEASEOS_B22_1_CONTRACT_TERMS.md,v22.1,LeaseOS — v22.1 Checkpoint: Contract Terms Decide; the Worker Delivers
+upgrade/b22-2-terms-complete,LEASEOS_B22_2_TERMS_COMPLETE.md,v22.2,LeaseOS — v22.2 Checkpoint: Terms Complete the Closeout; COR and Insurance Packages
+upgrade/b22-3-money-precision,LEASEOS_B22_3_MONEY_PRECISION.md,v22.3,LeaseOS — v22.3 Checkpoint: Money Precision
+upgrade/b22-4-shadows-everywhere,LEASEOS_B22_4_SHADOWS_EVERYWHERE.md,v22.4,LeaseOS — v22.4 Checkpoint: Integer Shadows Everywhere
+upgrade/b22-5-1-operational-truth,LEASEOS_B22_5_1_OPERATIONAL_TRUTH.md,v22.5.1,LeaseOS — v22.5.1 Checkpoint: Operational Truth Boundary + Legacy Surface Closure
+upgrade/b22-5-first-ledger-retired,LEASEOS_B22_5_FIRST_LEDGER_RETIRED.md,v22.5,LeaseOS — v22.5 Checkpoint: The First Ledger Retires Its Doubles
+upgrade/b22-6-fuel-retired,LEASEOS_B22_6_FUEL_RETIRED.md,v22.6,LeaseOS — v22.6 Checkpoint: The Fuel Ledger Retires Its Doubles
+upgrade/b22-7-commercial-setup,LEASEOS_B22_7_COMMERCIAL_SETUP.md,v22.7,LeaseOS — v22.7 Checkpoint: Commercial Setup & Rate Resolution
+upgrade/b22-8-lines-priced,LEASEOS_B22_8_LINES_PRICED.md,v22.8,LeaseOS — v22.8 Checkpoint: The Paths That Bill Write the Decision
+upgrade/b22-9-invoice-path,LEASEOS_B22_9_INVOICE_PATH.md,v22.9,LeaseOS — v22.9 Checkpoint: The Invoice Path

@@ -1,0 +1,80 @@
+# Upgrade branch index
+
+Each branch below is generated from a supplied checkpoint document. These are traceability/merge-planning branches; only v20.2 and v22.16 can be reconstructed as exact source snapshots from the supplied archive.
+
+| Branch | Checkpoint | Version |
+|---|---|---|
+| `upgrade/b12-routing-evidence` | `LEASEOS_B12_ROUTING_EVIDENCE.md` | checkpoint label only |
+| `upgrade/b13-data-governance` | `LEASEOS_B13_DATA_GOVERNANCE.md` | checkpoint label only |
+| `upgrade/b14-dispatch` | `LEASEOS_B14_DISPATCH.md` | checkpoint label only |
+| `upgrade/b15-transactional-dispatch` | `LEASEOS_B15_TRANSACTIONAL_DISPATCH.md` | checkpoint label only |
+| `upgrade/b16-ci-database` | `LEASEOS_B16_CI_DATABASE.md` | checkpoint label only |
+| `upgrade/b17-1-production-wiring` | `LEASEOS_B17_1_PRODUCTION_WIRING.md` | checkpoint label only |
+| `upgrade/b17-workflow-core` | `LEASEOS_B17_WORKFLOW_CORE.md` | checkpoint label only |
+| `upgrade/b18-billing-adjustments` | `LEASEOS_B18_BILLING_ADJUSTMENTS.md` | checkpoint label only |
+| `upgrade/b19-end-to-end` | `LEASEOS_B19_END_TO_END.md` | checkpoint label only |
+| `upgrade/b20-10-verified-source-registry` | `LEASEOS_B20_10_VERIFIED_SOURCE_REGISTRY.md` | v20.12.2 |
+| `upgrade/b20-11-p3-typed-commit` | `LEASEOS_B20_11_P3_TYPED_COMMIT.md` | v20.13-dev1 |
+| `upgrade/b20-12-v20-13-promotion` | `LEASEOS_B20_12_V20_13_PROMOTION.md` | v20.13 |
+| `upgrade/b20-13-portals-funding` | `LEASEOS_B20_13_PORTALS_FUNDING.md` | v20.14 |
+| `upgrade/b20-14-v20-15-extraction-queue` | `LEASEOS_B20_14_V20_15_EXTRACTION_QUEUE.md` | v20.15 |
+| `upgrade/b20-15-v20-16-fingerprint-disposal` | `LEASEOS_B20_15_V20_16_FINGERPRINT_DISPOSAL.md` | v20.16 |
+| `upgrade/b20-16-v20-17-integrity-closure` | `LEASEOS_B20_16_V20_17_INTEGRITY_CLOSURE.md` | v20.17 |
+| `upgrade/b20-17-v20-18-fuel-ledger` | `LEASEOS_B20_17_V20_18_FUEL_LEDGER.md` | v20.18 |
+| `upgrade/b20-18-v20-19-roadside-ap` | `LEASEOS_B20_18_V20_19_ROADSIDE_AP.md` | v20.19 |
+| `upgrade/b20-19-v20-20-secure-field-runtime` | `LEASEOS_B20_19_V20_20_SECURE_FIELD_RUNTIME.md` | v20.20 |
+| `upgrade/b20-1-workflow-wiring` | `LEASEOS_B20_1_WORKFLOW_WIRING.md` | checkpoint label only |
+| `upgrade/b20-20-v20-21-compliance-registry` | `LEASEOS_B20_20_V20_21_COMPLIANCE_REGISTRY.md` | v20.21 |
+| `upgrade/b20-21-v20-22-requirement-engine` | `LEASEOS_B20_21_V20_22_REQUIREMENT_ENGINE.md` | v20.22 |
+| `upgrade/b20-22-v20-23-insurance-risk` | `LEASEOS_B20_22_V20_23_INSURANCE_RISK.md` | v20.23 |
+| `upgrade/b20-2-authorization` | `LEASEOS_B20_2_AUTHORIZATION.md` | checkpoint label only |
+| `upgrade/b20-3-authorization-enforcement` | `LEASEOS_B20_3_AUTHORIZATION_ENFORCEMENT.md` | checkpoint label only |
+| `upgrade/b20-4-api-migration` | `LEASEOS_B20_4_API_MIGRATION.md` | checkpoint label only |
+| `upgrade/b20-5-payroll-finance-tax` | `LEASEOS_B20_5_PAYROLL_FINANCE_TAX.md` | checkpoint label only |
+| `upgrade/b20-6-authorization-complete` | `LEASEOS_B20_6_AUTHORIZATION_COMPLETE.md` | checkpoint label only |
+| `upgrade/b20-7-payroll-finance-api` | `LEASEOS_B20_7_PAYROLL_FINANCE_API.md` | checkpoint label only |
+| `upgrade/b20-8-external-data-routing` | `LEASEOS_B20_8_EXTERNAL_DATA_ROUTING.md` | checkpoint label only |
+| `upgrade/b20-9-universal-permissions` | `LEASEOS_B20_9_UNIVERSAL_PERMISSIONS.md` | v20.12.1 |
+| `upgrade/b20-measurement-ladder` | `LEASEOS_B20_MEASUREMENT_LADDER.md` | checkpoint label only |
+| `upgrade/b20-records-vault` | `LEASEOS_B20_RECORDS_VAULT.md` | checkpoint label only |
+| `upgrade/b21-0-universal-surfaces` | `LEASEOS_B21_0_UNIVERSAL_SURFACES.md` | v21.0 |
+| `upgrade/b21-10-commercial-portals` | `LEASEOS_B21_10_COMMERCIAL_PORTALS.md` | v21.10 |
+| `upgrade/b21-11-site-signoff-chain` | `LEASEOS_B21_11_SITE_SIGNOFF_CHAIN.md` | v21.11 |
+| `upgrade/b21-12-portal-hardening` | `LEASEOS_B21_12_PORTAL_HARDENING.md` | v21.12 |
+| `upgrade/b21-13-customer-live-view` | `LEASEOS_B21_13_CUSTOMER_LIVE_VIEW.md` | v21.13 |
+| `upgrade/b21-14-customer-transaction` | `LEASEOS_B21_14_CUSTOMER_TRANSACTION.md` | v21.14 |
+| `upgrade/b21-15-fleet-shop` | `LEASEOS_B21_15_FLEET_SHOP.md` | v21.15 |
+| `upgrade/b21-16-capital-assets` | `LEASEOS_B21_16_CAPITAL_ASSETS.md` | v21.16 |
+| `upgrade/b21-17-commercial-projects` | `LEASEOS_B21_17_COMMERCIAL_PROJECTS.md` | v21.17 |
+| `upgrade/b21-18-integration-gateway` | `LEASEOS_B21_18_INTEGRATION_GATEWAY.md` | v21.18 |
+| `upgrade/b21-19-telematics` | `LEASEOS_B21_19_TELEMATICS.md` | v21.19 |
+| `upgrade/b21-1-dispatch-gate` | `LEASEOS_B21_1_DISPATCH_GATE.md` | v21.1 |
+| `upgrade/b21-20-workforce` | `LEASEOS_B21_20_WORKFORCE.md` | v21.20 |
+| `upgrade/b21-21-audit-packages` | `LEASEOS_B21_21_AUDIT_PACKAGES.md` | v21.21 |
+| `upgrade/b21-2-dispatch-enforcement` | `LEASEOS_B21_2_DISPATCH_ENFORCEMENT.md` | v21.2 |
+| `upgrade/b21-3-ifta` | `LEASEOS_B21_3_IFTA.md` | v21.3 |
+| `upgrade/b21-4-bulk-fuel-statements` | `LEASEOS_B21_4_BULK_FUEL_STATEMENTS.md` | v21.4 |
+| `upgrade/b21-5-period-close` | `LEASEOS_B21_5_PERIOD_CLOSE.md` | v21.5 |
+| `upgrade/b21-6-field-runtime` | `LEASEOS_B21_6_FIELD_RUNTIME.md` | v21.6 |
+| `upgrade/b21-7-portal-experience` | `LEASEOS_B21_7_PORTAL_EXPERIENCE.md` | v21.7 |
+| `upgrade/b21-8-gst-hst` | `LEASEOS_B21_8_GST_HST.md` | v21.8 |
+| `upgrade/b21-9-1-integrity-hotfix` | `LEASEOS_B21_9_1_INTEGRITY_HOTFIX.md` | v21.9.1 |
+| `upgrade/b21-9-bank-and-ar` | `LEASEOS_B21_9_BANK_AND_AR.md` | v21.9 |
+| `upgrade/b22-0-spatial-foundation` | `LEASEOS_B22_0_SPATIAL_FOUNDATION.md` | v22.0 |
+| `upgrade/b22-10-invoice-to-customer` | `LEASEOS_B22_10_INVOICE_TO_CUSTOMER.md` | v22.10 |
+| `upgrade/b22-11-credits-voids` | `LEASEOS_B22_11_CREDITS_VOIDS.md` | v22.11 |
+| `upgrade/b22-12-setup-wizard` | `LEASEOS_B22_12_SETUP_WIZARD.md` | v22.12 |
+| `upgrade/b22-13-mapping-foundation` | `LEASEOS_B22_13_MAPPING_FOUNDATION.md` | v22.13 |
+| `upgrade/b22-14-legal-land` | `LEASEOS_B22_14_LEGAL_LAND.md` | v22.14 |
+| `upgrade/b22-15-structures-staleness` | `LEASEOS_B22_15_STRUCTURES_STALENESS.md` | v22.15 |
+| `upgrade/b22-16-routing-graph` | `LEASEOS_B22_16_ROUTING_GRAPH.md` | v22.16 |
+| `upgrade/b22-1-contract-terms` | `LEASEOS_B22_1_CONTRACT_TERMS.md` | v22.1 |
+| `upgrade/b22-2-terms-complete` | `LEASEOS_B22_2_TERMS_COMPLETE.md` | v22.2 |
+| `upgrade/b22-3-money-precision` | `LEASEOS_B22_3_MONEY_PRECISION.md` | v22.3 |
+| `upgrade/b22-4-shadows-everywhere` | `LEASEOS_B22_4_SHADOWS_EVERYWHERE.md` | v22.4 |
+| `upgrade/b22-5-1-operational-truth` | `LEASEOS_B22_5_1_OPERATIONAL_TRUTH.md` | v22.5.1 |
+| `upgrade/b22-5-first-ledger-retired` | `LEASEOS_B22_5_FIRST_LEDGER_RETIRED.md` | v22.5 |
+| `upgrade/b22-6-fuel-retired` | `LEASEOS_B22_6_FUEL_RETIRED.md` | v22.6 |
+| `upgrade/b22-7-commercial-setup` | `LEASEOS_B22_7_COMMERCIAL_SETUP.md` | v22.7 |
+| `upgrade/b22-8-lines-priced` | `LEASEOS_B22_8_LINES_PRICED.md` | v22.8 |
+| `upgrade/b22-9-invoice-path` | `LEASEOS_B22_9_INVOICE_PATH.md` | v22.9 |
