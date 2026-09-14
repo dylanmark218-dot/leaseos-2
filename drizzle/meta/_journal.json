@@ -1,0 +1,125 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1787883684540,
+      "tag": "0000_productive_thundra",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1787884013132,
+      "tag": "0001_parallel_bastion",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787884414017,
+      "tag": "0002_orange_rockslide",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787885046123,
+      "tag": "0003_rich_multiple_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1787886067273,
+      "tag": "0004_lazy_colonel_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1787886606918,
+      "tag": "0005_closed_madripoor",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787887773268,
+      "tag": "0006_clean_namor",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1787888197606,
+      "tag": "0007_brainy_black_tarantula",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787971875783,
+      "tag": "0008_trip_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788058275783,
+      "tag": "0009_gps_zone_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788060000000,
+      "tag": "0010_billing_records_chain",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788070000000,
+      "tag": "0011_taxonomy_billing_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788110000000,
+      "tag": "0012_road_graph_ingestion",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788190000000,
+      "tag": "0013_dispatch_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788280000000,
+      "tag": "0014_assistant_proposals",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1788400000000,
+      "tag": "0015_workflow_orchestration",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788600000000,
+      "tag": "0018_billing_adjustments",
+      "breakpoints": true
+    }
+  ]
+}
