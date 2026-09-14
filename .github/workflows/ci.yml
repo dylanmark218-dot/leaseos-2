@@ -1,0 +1,47 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Disposable database. Everything below now runs — including the 15 DB
+    # tests and the award concurrency suite, neither of which could execute
+    # before this existed.
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: leaseos
+          MYSQL_USER: leaseos
+          MYSQL_PASSWORD: leaseos
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    env:
+      DATABASE_URL: mysql://leaseos:leaseos@127.0.0.1:3306/leaseos
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+
+      - run: pnpm install --frozen-lockfile
+
+      # Applying migrations IS a test. A migration that has never executed is
+      # an assumption, not a schema.
+      - name: Apply migrations
+        run: bash scripts/apply-migrations.sh
+
+      - name: Verify schema/migration parity
+        run: bash scripts/verify-parity.sh
+
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm exec vitest run
+      - run: pnpm build

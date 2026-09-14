@@ -1,0 +1,84 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  color: #172033;
+  background: #f6f8fb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --background: 214 33% 97%;
+  --foreground: 220 31% 16%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 31% 16%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 31% 16%;
+  --primary: 14 100% 62%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 213 35% 94%;
+  --secondary-foreground: 217 27% 30%;
+  --muted: 213 28% 94%;
+  --muted-foreground: 216 15% 51%;
+  --accent: 213 35% 94%;
+  --accent-foreground: 220 31% 16%;
+  --destructive: 0 68% 54%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 26% 89%;
+  --input: 214 26% 89%;
+  --ring: 14 100% 62%;
+  --radius: 0.8rem;
+  --sidebar-background: 213 60% 16%;
+  --sidebar-foreground: 214 30% 85%;
+  --sidebar-primary: 14 100% 62%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 213 42% 25%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 213 42% 25%;
+  --sidebar-ring: 14 100% 62%;
+}
+
+.dark {
+  --background: 213 53% 8%;
+  --foreground: 214 30% 92%;
+  --card: 213 48% 12%;
+  --card-foreground: 214 30% 92%;
+  --popover: 213 48% 12%;
+  --popover-foreground: 214 30% 92%;
+  --primary: 14 100% 62%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 213 35% 20%;
+  --secondary-foreground: 214 30% 92%;
+  --muted: 213 35% 20%;
+  --muted-foreground: 214 18% 65%;
+  --accent: 213 35% 20%;
+  --accent-foreground: 214 30% 92%;
+  --destructive: 0 65% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 213 35% 22%;
+  --input: 213 35% 22%;
+  --ring: 14 100% 62%;
+  --sidebar-background: 213 63% 7%;
+  --sidebar-foreground: 214 30% 86%;
+  --sidebar-primary: 14 100% 62%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 213 42% 17%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 213 42% 17%;
+  --sidebar-ring: 14 100% 62%;
+}
+
+* { border-color: hsl(var(--border)); }
+html { min-width: 320px; background: #f6f8fb; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: #f6f8fb; }
+button, a, input { -webkit-tap-highlight-color: transparent; }
+button { transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+button:active { transform: scale(0.97); }
+::selection { background: rgba(255, 107, 66, 0.22); color: #172033; }
+
+.font-mono { font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}

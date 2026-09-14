@@ -1,0 +1,1194 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeaseOS — Industrial Precision design system</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN TOKENS — the single source of truth.
+   Every component below reads from these. Nothing hard-codes a colour.
+   ═══════════════════════════════════════════════════════════════ */
+:root{
+  /* Light / Professional — office, dispatch, client */
+  --bg:#F6F8FA; --surface:#FFFFFF; --surface-2:#F0F3F6;
+  --text:#17212B; --text-2:#667481; --border:#D9E0E7;
+
+  /* Brand */
+  --navy:#17324D; --action:#2F6FEB;
+
+  /* Operational states — the only semantic colours in the system */
+  --ready:#2F8F6B; --review:#D99026; --blocked:#C94E42;
+  --unknown:#718096; --info:#3976B8;
+
+  /* Tinted state fills, derived so they track the mode */
+  --ready-bg:#2F8F6B14; --review-bg:#D9902614; --blocked-bg:#C94E4214;
+  --unknown-bg:#71809614; --action-bg:#2F6FEB12;
+
+  /* Spacing — 4/8/12/16/24/32/48 */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s6:24px; --s8:32px; --s12:48px;
+
+  /* Radii */
+  --r-card:9px; --r-btn:7px; --r-input:7px; --r-pill:999px;
+
+  /* Elevation — borders and spacing do the work, shadows stay near-invisible */
+  --shadow:0 1px 2px rgba(23,33,43,.04);
+  --shadow-lift:0 4px 16px rgba(23,33,43,.08);
+
+  --nav-w:248px; --bar-h:64px;
+  --font:'Manrope',system-ui,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+[data-theme="dark"]{
+  --bg:#0D151D; --surface:#151F29; --surface-2:#1C2834;
+  --text:#EDF2F6; --text-2:#96A6B5; --border:#2A3947;
+  --navy:#DCE6F0; --action:#5B92F5;
+  --ready:#4FB286; --review:#E5A648; --blocked:#E0685B;
+  --unknown:#8C9BAA; --info:#5B9BD5;
+  --ready-bg:#4FB2861F; --review-bg:#E5A6481F; --blocked-bg:#E0685B1F;
+  --unknown-bg:#8C9BAA1F; --action-bg:#5B92F51A;
+  --shadow:0 1px 2px rgba(0,0,0,.3);
+  --shadow-lift:0 4px 20px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:var(--font);font-size:15px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  transition:background .18s ease,color .18s ease;
+}
+.mono{font-family:var(--mono);font-size:.88em;letter-spacing:-.01em}
+
+/* ── typographic scale ──────────────────────────────────────── */
+h1{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.2}
+h2{font-size:20px;font-weight:600;letter-spacing:-.015em;line-height:1.3}
+h3{font-size:15px;font-weight:600;letter-spacing:-.005em}
+.lede{font-size:16px;color:var(--text-2);max-width:66ch}
+.small{font-size:13px;color:var(--text-2)}
+.tiny{font-size:12px;color:var(--text-2)}
+
+/* ═══ COMPONENT: AppShell ═══ */
+.shell{display:grid;grid-template-columns:var(--nav-w) 1fr;min-height:100vh}
+.shell.wide{grid-template-columns:1fr}
+@media(max-width:900px){.shell{grid-template-columns:1fr}}
+
+.cmdbar{
+  grid-column:1/-1;height:var(--bar-h);display:flex;align-items:center;gap:var(--s4);
+  padding:0 var(--s6);background:var(--surface);border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:60;
+}
+.logo{font-weight:700;font-size:17px;letter-spacing:-.03em;color:var(--text);white-space:nowrap}
+.logo em{font-style:normal;color:var(--text-2);font-weight:500}
+
+/* ═══ COMPONENT: GlobalSearch ═══ */
+.search{
+  flex:1;max-width:520px;display:flex;align-items:center;gap:var(--s2);
+  background:var(--bg);border:1px solid var(--border);border-radius:var(--r-input);padding:0 var(--s3);height:38px;color:var(--text-2);font-size:14px;
+}
+.search input{
+  flex:1;background:none;border:0;outline:none;font-family:inherit;font-size:14px;color:var(--text);
+}
+.search input::placeholder{color:var(--text-2)}
+.search:focus-within{border-color:var(--action);box-shadow:0 0 0 3px var(--action-bg)}
+@media(max-width:720px){.search{display:none}}
+
+.bar-right{margin-left:auto;display:flex;align-items:center;gap:var(--s3)}
+
+/* ═══ COMPONENT: Navigation ═══ */
+nav.side{
+  background:var(--surface);border-right:1px solid var(--border);
+  padding:var(--s4) 0;overflow-y:auto;
+}
+nav.side a{
+  display:flex;align-items:center;gap:var(--s3);margin:1px var(--s3);
+  padding:9px var(--s3);border-radius:var(--r-btn);
+  color:var(--text-2);text-decoration:none;font-size:14.5px;font-weight:500;cursor:pointer;
+}
+nav.side a:hover{background:var(--surface-2);color:var(--text)}
+nav.side a.on{background:var(--action-bg);color:var(--action);font-weight:600}
+nav.side a:focus-visible{outline:2px solid var(--action);outline-offset:1px}
+nav.side .count{
+  margin-left:auto;font-size:12px;font-weight:600;
+  background:var(--review-bg);color:var(--review);padding:1px 7px;border-radius:var(--r-pill);
+}
+nav.side .divider{height:1px;background:var(--border);margin:var(--s3) var(--s4)}
+@media(max-width:900px){nav.side{display:none}}
+
+main{padding:var(--s6);max-width:1560px;width:100%}
+@media(max-width:640px){main{padding:var(--s4)}}
+
+/* ═══ COMPONENT: PageHeader ═══ */
+.pagehead{margin-bottom:var(--s6);display:flex;justify-content:space-between;
+  align-items:flex-start;gap:var(--s4);flex-wrap:wrap}
+.pagehead .who{color:var(--text-2);font-size:14px;margin-top:2px}
+
+/* ═══ COMPONENT: StatusBadge ═══
+   Icon + word, always. Colour never carries meaning alone. ═══ */
+.st{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:13px;font-weight:600;padding:3px 10px;border-radius:var(--r-pill);
+  white-space:nowrap;line-height:1.4;
+}
+.st i{font-style:normal;font-size:12px;line-height:1}
+.st.ready{background:var(--ready-bg);color:var(--ready)}
+.st.review{background:var(--review-bg);color:var(--review)}
+.st.blocked{background:var(--blocked-bg);color:var(--blocked)}
+.st.unknown{background:var(--unknown-bg);color:var(--unknown)}
+.st.pending{background:var(--unknown-bg);color:var(--text-2)}
+.st.syncing{background:var(--action-bg);color:var(--action)}
+.st.lg{font-size:14.5px;padding:5px 13px}
+
+/* ═══ COMPONENT: Card ═══ */
+.card{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r-card);padding:var(--s4);box-shadow:var(--shadow)}
+.card + .card{margin-top:var(--s3)}
+.card h3{margin-bottom:var(--s3)}
+.card.quiet{background:transparent;border-style:dashed;box-shadow:none}
+
+.grid{display:grid;gap:var(--s3)}
+.g2{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+
+/* ═══ COMPONENT: MetricCard — restrained, not a colour block ═══ */
+.metric{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r-card);padding:var(--s3) var(--s4);cursor:pointer}
+.metric:hover{border-color:var(--action)}
+.metric .n{font-size:27px;font-weight:700;letter-spacing:-.03em;line-height:1.1}
+.metric .l{font-size:13px;color:var(--text-2);margin-top:2px}
+.metric.alert .n{color:var(--review)}
+.metric.critical .n{color:var(--blocked)}
+
+/* ═══ COMPONENT: Button ═══ */
+.btn{
+  font-family:inherit;font-size:14.5px;font-weight:600;
+  background:var(--surface);color:var(--text);border:1px solid var(--border);
+  padding:9px 15px;border-radius:var(--r-btn);cursor:pointer;
+  display:inline-flex;align-items:center;gap:var(--s2);text-decoration:none;
+}
+.btn:hover{border-color:var(--text-2)}
+.btn:focus-visible{outline:2px solid var(--action);outline-offset:2px}
+.btn.primary{background:var(--action);border-color:var(--action);color:#fff}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.sm{padding:5px 11px;font-size:13px}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--action)}
+.btnrow{display:flex;gap:var(--s2);flex-wrap:wrap}
+
+/* ═══ COMPONENT: ExceptionBanner ═══ */
+.banner{
+  display:flex;gap:var(--s3);padding:var(--s3) var(--s4);border-radius:var(--r-card);
+  border:1px solid;align-items:flex-start;
+}
+.banner.review{background:var(--review-bg);border-color:#D9902640;color:var(--text)}
+.banner.blocked{background:var(--blocked-bg);border-color:#C94E4240;color:var(--text)}
+.banner.info{background:var(--action-bg);border-color:#2F6FEB30;color:var(--text)}
+.banner b{display:block;font-size:14.5px;margin-bottom:2px}
+.banner p{font-size:13.5px;color:var(--text-2)}
+
+/* ═══ COMPONENT: Timeline / Stepper ═══ */
+.steps{list-style:none}
+.steps li{display:flex;gap:var(--s3);padding:7px 0;align-items:baseline;font-size:14.5px}
+.steps .dot{width:16px;flex:0 0 16px;text-align:center;font-size:12px}
+.steps .done{color:var(--text-2)}
+.steps .done .dot{color:var(--ready)}
+.steps .now{font-weight:600}
+.steps .now .dot{color:var(--action)}
+.steps .todo{color:var(--text-2);opacity:.65}
+.steps time{margin-left:auto;font-family:var(--mono);font-size:12.5px;color:var(--text-2)}
+
+/* ═══ COMPONENT: EvidenceDrawer — progressive disclosure ═══ */
+details.evidence{border-top:1px solid var(--border);margin-top:var(--s3);padding-top:var(--s3)}
+details.evidence summary{
+  cursor:pointer;font-size:13.5px;color:var(--action);font-weight:600;list-style:none;
+}
+details.evidence summary::-webkit-details-marker{display:none}
+details.evidence summary::before{content:"▸ ";font-size:11px}
+details.evidence[open] summary::before{content:"▾ "}
+details.evidence .body{margin-top:var(--s3);font-size:13.5px}
+dl.kv{display:grid;grid-template-columns:minmax(130px,32%) 1fr;gap:var(--s2) var(--s4)}
+dl.kv dt{color:var(--text-2);font-size:13px}
+dl.kv dd{font-size:13.5px}
+
+/* ═══ COMPONENT: DataTable ═══ */
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:12.5px;font-weight:600;color:var(--text-2);
+  padding:0 var(--s3) var(--s2) 0;border-bottom:1px solid var(--border)}
+td{padding:11px var(--s3) 11px 0;border-bottom:1px solid var(--border)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--surface-2)}
+.wrap{overflow-x:auto}
+
+/* ═══ COMPONENT: DocumentRow ═══ */
+.docrow{display:flex;align-items:center;gap:var(--s3);padding:10px 0;
+  border-bottom:1px solid var(--border);font-size:14.5px}
+.docrow:last-child{border-bottom:0}
+.docrow .name{flex:1}
+
+/* ═══ FIELD MODE — driver, large targets ═══ */
+.field{max-width:460px;margin:0 auto;padding:var(--s4) var(--s4) 96px}
+.field .jobcard{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r-card);padding:var(--s4);margin-bottom:var(--s3)}
+.next{
+  width:100%;min-height:60px;font-family:inherit;font-size:18px;font-weight:700;
+  letter-spacing:-.01em;background:var(--action);color:#fff;border:0;
+  border-radius:var(--r-btn);cursor:pointer;padding:var(--s4);
+}
+.next:focus-visible{outline:3px solid var(--action);outline-offset:3px}
+.next .hint{display:block;font-size:13px;font-weight:500;opacity:.85;margin-top:3px}
+.secondaries{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s2);margin-top:var(--s2)}
+.secondaries .btn{justify-content:center;min-height:46px;font-size:14px}
+.tabbar{
+  position:fixed;bottom:0;left:0;right:0;height:62px;background:var(--surface);
+  border-top:1px solid var(--border);display:flex;z-index:70;
+}
+.tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;color:var(--text-2);text-decoration:none;font-size:11.5px;font-weight:600;cursor:pointer}
+.tabbar a.on{color:var(--action)}
+.tabbar .ico{font-size:17px}
+.mic{
+  position:fixed;right:18px;bottom:78px;z-index:71;width:56px;height:56px;border-radius:50%;
+  background:var(--navy);color:var(--surface);border:0;cursor:pointer;font-size:21px;
+  box-shadow:var(--shadow-lift);
+}
+[data-theme="dark"] .mic{background:var(--action);color:#fff}
+
+/* ═══ COMMAND CENTRE — three columns ═══ */
+.centre{display:grid;grid-template-columns:340px 1fr 300px;gap:var(--s4);align-items:start}
+@media(max-width:1280px){.centre{grid-template-columns:320px 1fr}}
+@media(max-width:940px){.centre{grid-template-columns:1fr}}
+.col h3{margin-bottom:var(--s3);display:flex;align-items:center;gap:var(--s2)}
+.actioncard{background:var(--surface);border:1px solid var(--border);border-left-width:3px;
+  border-radius:var(--r-card);padding:var(--s3) var(--s4);margin-bottom:var(--s2);cursor:pointer}
+.actioncard:hover{box-shadow:var(--shadow-lift)}
+.actioncard.blocked{border-left-color:var(--blocked)}
+.actioncard.review{border-left-color:var(--review)}
+.actioncard.unknown{border-left-color:var(--unknown)}
+.actioncard .top{display:flex;justify-content:space-between;gap:var(--s2);align-items:baseline}
+.actioncard .id{font-family:var(--mono);font-size:13px;font-weight:500}
+.actioncard .why{font-size:13.5px;color:var(--text-2);margin:3px 0 var(--s2)}
+
+.sched{list-style:none}
+.sched li{display:grid;grid-template-columns:58px 1fr auto;gap:var(--s3);
+  padding:var(--s3) 0;border-bottom:1px solid var(--border);align-items:center}
+.sched li:last-child{border-bottom:0}
+.sched .t{font-family:var(--mono);font-size:13.5px;color:var(--text-2)}
+.sched .who{font-size:13.5px;color:var(--text-2)}
+
+/* ═══ JOB WORKSPACE tabs ═══ */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:var(--s4);
+  overflow-x:auto}
+.tabs a{padding:10px var(--s3);font-size:14.5px;font-weight:600;color:var(--text-2);
+  text-decoration:none;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.tabs a.on{color:var(--action);border-bottom-color:var(--action)}
+.tabs a:hover{color:var(--text)}
+
+/* ═══ CLIENT PORTAL — most generous spacing in the system ═══ */
+.portal{max-width:900px;margin:0 auto;padding:var(--s12) var(--s6) var(--s12)}
+.portal h1{font-size:30px;margin-bottom:var(--s2)}
+.portal .jobrow{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r-card);padding:var(--s6);margin-bottom:var(--s3)}
+.proof{display:flex;flex-wrap:wrap;gap:var(--s3) var(--s6);margin:var(--s4) 0}
+.proof span{font-size:14px;display:flex;align-items:center;gap:6px;color:var(--text-2)}
+.proof i{font-style:normal;color:var(--ready)}
+.amount{font-size:34px;font-weight:700;letter-spacing:-.03em;font-family:var(--mono)}
+
+/* ═══ token reference page ═══ */
+.swatch{border:1px solid var(--border);border-radius:var(--r-btn);overflow:hidden}
+.swatch .chip{height:56px}
+.swatch .meta{padding:var(--s2) var(--s3);font-size:12.5px;background:var(--surface)}
+.swatch .meta b{display:block;font-size:13px;font-weight:600}
+.spec{display:flex;gap:var(--s4);align-items:baseline;padding:var(--s3) 0;
+  border-bottom:1px solid var(--border);flex-wrap:wrap}
+.spec .label{width:150px;flex:0 0 150px;font-size:12.5px;color:var(--text-2)}
+
+/* ═══ AGENT WORKSPACE — the assistant as a working surface, not a chat ═══ */
+.agent{display:grid;grid-template-columns:1fr 380px;gap:var(--s4);align-items:start}
+@media(max-width:1100px){.agent{grid-template-columns:1fr}}
+
+.task{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-card);
+  overflow:hidden}
+.task .head{padding:var(--s3) var(--s4);border-bottom:1px solid var(--border);
+  display:flex;justify-content:space-between;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.task .head .ctx{font-family:var(--mono);font-size:12.5px;color:var(--text-2)}
+
+/* the plan: what the assistant is doing, visible while it does it */
+.plan{list-style:none;padding:var(--s3) var(--s4)}
+.plan li{display:flex;gap:var(--s3);align-items:flex-start;padding:6px 0;font-size:14px}
+.plan .m{width:16px;flex:0 0 16px;text-align:center;font-size:12px;line-height:1.5}
+.plan .done .m{color:var(--ready)}
+.plan .done{color:var(--text-2)}
+.plan .active{font-weight:600}
+.plan .active .m{color:var(--action)}
+.plan .queued{color:var(--text-2);opacity:.6}
+.plan .detail{display:block;font-weight:400;font-size:13px;color:var(--text-2);margin-top:1px}
+
+/* said: what the driver actually said, kept verbatim */
+.utterance{background:var(--surface-2);border-left:3px solid var(--border);
+  padding:var(--s3) var(--s4);margin:0 var(--s4) var(--s3);border-radius:0 var(--r-btn) var(--r-btn) 0;
+  font-size:15px;line-height:1.55}
+.utterance .src{font-size:12px;color:var(--text-2);margin-bottom:4px}
+
+/* the artifact: a typed proposal, inspectable field by field */
+.artifact{border:1px solid var(--border);border-radius:var(--r-card);margin:0 var(--s4) var(--s4)}
+.artifact .cap{padding:var(--s3) var(--s4);border-bottom:1px solid var(--border);
+  display:flex;justify-content:space-between;align-items:center;gap:var(--s3)}
+.artifact .cap b{font-size:14.5px}
+.artifact .cap .to{font-family:var(--mono);font-size:12px;color:var(--text-2)}
+.slot{display:grid;grid-template-columns:150px 1fr auto;gap:var(--s3);align-items:center;
+  padding:10px var(--s4);border-bottom:1px solid var(--border);font-size:14px}
+.slot:last-of-type{border-bottom:0}
+.slot .k{color:var(--text-2);font-size:13px}
+.slot .v{font-weight:600}
+.slot .v .approx{font-weight:400;color:var(--review);font-size:12.5px;margin-left:6px}
+.slot .said{display:block;font-weight:400;font-size:12px;color:var(--text-2);margin-top:1px}
+.slot.needs{background:var(--review-bg)}
+.slot .acts{display:flex;gap:4px}
+.slot .acts button{font-family:inherit;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface);
+  color:var(--text-2);cursor:pointer}
+.slot .acts button:hover{border-color:var(--action);color:var(--action)}
+@media(max-width:560px){.slot{grid-template-columns:1fr;gap:4px}}
+
+.gate{padding:var(--s3) var(--s4);border-top:1px solid var(--border);background:var(--surface-2)}
+.gate ul{list-style:none;margin:var(--s2) 0 0}
+.gate li{font-size:13.5px;color:var(--text-2);padding:2px 0}
+.gate li::before{content:"× ";color:var(--blocked);font-weight:700}
+
+.composer{display:flex;gap:var(--s2);padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
+.composer input{flex:1;background:var(--bg);border:1px solid var(--border);
+  border-radius:var(--r-input);padding:10px var(--s3);font-family:inherit;font-size:14.5px;
+  color:var(--text);outline:none}
+.composer input:focus{border-color:var(--action);box-shadow:0 0 0 3px var(--action-bg)}
+.composer button{min-width:44px;justify-content:center}
+
+/* ═══ view switcher (prototype chrome only — not part of the product) ═══ */
+.switcher{
+  position:fixed;bottom:0;left:0;right:0;z-index:90;background:var(--surface);
+  border-top:2px solid var(--action);padding:var(--s2) var(--s4);
+  display:flex;gap:var(--s2);align-items:center;overflow-x:auto;
+}
+.switcher b{font-size:11.5px;color:var(--text-2);white-space:nowrap;margin-right:var(--s2);
+  font-weight:600}
+.switcher button{
+  font-family:inherit;font-size:13px;font-weight:600;padding:6px 12px;cursor:pointer;
+  background:transparent;border:1px solid var(--border);border-radius:var(--r-pill);
+  color:var(--text-2);white-space:nowrap;
+}
+.switcher button[aria-pressed=true]{background:var(--action);border-color:var(--action);color:#fff}
+body{padding-bottom:56px}
+.field{padding-bottom:150px}
+
+.hide{display:none}
+@media(prefers-reduced-motion:no-preference){
+  main>*,.field>*{animation:rise .2s ease-out both}
+  @keyframes rise{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="switcher" role="group" aria-label="Reference template">
+  <b>Reference templates</b>
+  <button data-v="tokens" aria-pressed="true">Design system</button>
+  <button data-v="driver" aria-pressed="false">Driver</button>
+  <button data-v="dispatch" aria-pressed="false">Dispatch</button>
+  <button data-v="job" aria-pressed="false">Job workspace</button>
+  <button data-v="office" aria-pressed="false">Office</button>
+  <button data-v="client" aria-pressed="false">Client</button>
+  <button data-v="assistant" aria-pressed="false">Assistant</button>
+  <button id="theme" style="margin-left:auto">Dark</button>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   STATUS SYSTEM — the one vocabulary every screen shares.
+   Internal enums are translated here and nowhere else, so a state
+   can never read one way on Dispatch and another on Documents.
+   ═══════════════════════════════════════════════════════════════ */
+const STATUS = {
+  ready:   {icon:"✓", word:"Ready"},
+  review:  {icon:"!", word:"Review"},
+  blocked: {icon:"×", word:"Blocked"},
+  unknown: {icon:"?", word:"Unknown"},
+  pending: {icon:"○", word:"Pending"},
+  syncing: {icon:"↻", word:"Syncing"},
+};
+
+/** Internal enum → the words a person reads. Technical name stays in evidence. */
+const HUMAN = {
+  eligible:            ["ready",   "Ready"],
+  eligible_review:     ["review",  "Needs review"],
+  blocked:             ["blocked", "Blocked"],
+  unknown:             ["unknown", "Not established"],
+  partially_staffed:   ["review",  "Crew incomplete"],
+  staffed:             ["ready",   "Crew complete"],
+  dependency_change:   ["review",  "Something changed since the last safety check"],
+  at_risk:             ["review",  "At risk"],
+  released:            ["ready",   "Cleared to depart"],
+};
+
+const st = (kind, label, size) => {
+  const s = STATUS[kind];
+  return `<span class="st ${kind}${size ? " " + size : ""}"><i>${s.icon}</i>${label ?? s.word}</span>`;
+};
+const human = (enumKey) => { const [k,l] = HUMAN[enumKey] ?? ["unknown", enumKey]; return st(k,l); };
+
+/* ── navigation: nine domains, role-filtered ── */
+const NAV = {
+  dispatch: [["Home","⌂"],["Jobs","▤"],["Dispatch","◈",4],["Fleet","▣"],["People","◉"],
+             ["Documents","▢"],["Billing","▦"],["Map","◎"],["More","⋯"]],
+  office:   [["Home","⌂"],["Jobs","▤"],["Documents","▢",6],["Billing","▦",14],["People","◉"],
+             ["Fleet","▣"],["Map","◎"],["More","⋯"]],
+};
+
+const sideNav = (items, active) => `
+  <nav class="side">
+    ${items.map(([label,ico,count],i)=>`
+      <a class="${label===active?'on':''}"><span aria-hidden="true">${ico}</span>${label}
+        ${count?`<span class="count">${count}</span>`:''}</a>
+      ${i===items.length-2?'<div class="divider"></div>':''}`).join("")}
+  </nav>`;
+
+const cmdbar = (context) => `
+  <header class="cmdbar">
+    <div class="logo">LeaseOS <em>${context}</em></div>
+    <label class="search">
+      <span aria-hidden="true">⌕</span>
+      <input placeholder="Search jobs, units, drivers, tickets, LSD, invoices…" aria-label="Search">
+    </label>
+    <div class="bar-right">
+      <span class="st ready"><i>✓</i>Synced</span>
+      <button class="btn sm">Grande Prairie</button>
+    </div>
+  </header>`;
+
+/* ═══════════════════════════════════════════════════════════════
+   1 — DESIGN SYSTEM REFERENCE
+   ═══════════════════════════════════════════════════════════════ */
+const V = {};
+
+V.tokens = () => `
+<div class="shell wide">
+  ${cmdbar("Design system")}
+  <main>
+    <div class="pagehead"><div>
+      <h1>Industrial Precision</h1>
+      <p class="lede">One token system and one component library. Every screen in LeaseOS inherits
+        from this, so the same state never appears two different ways.</p>
+    </div></div>
+
+    <div class="card"><h3>Operational states</h3>
+      <p class="small" style="margin-bottom:var(--s4)">Icon and word carry the meaning. Colour
+        reinforces it and never carries it alone — these read correctly in greyscale, at a glance,
+        and to someone who can't distinguish red from green.</p>
+      <div class="btnrow">
+        ${st("ready")} ${st("review")} ${st("blocked")}
+        ${st("unknown")} ${st("pending")} ${st("syncing")}
+      </div>
+      <div class="banner review" style="margin-top:var(--s4)">
+        <span aria-hidden="true">!</span>
+        <div><b>Red is reserved</b>
+        <p>Blocked is the only state that uses red, and only for a genuine safety or legal stop.
+          If half the screen is amber, nothing reads as urgent.</p></div>
+      </div>
+    </div>
+
+    <div class="card"><h3>Plain language over internal enums</h3>
+      <p class="small" style="margin-bottom:var(--s3)">The engines keep their names. People never
+        see them unless they open the evidence drawer.</p>
+      <div class="wrap"><table>
+        <thead><tr><th>Engine value</th><th>What a person reads</th></tr></thead>
+        <tbody>
+        ${["eligible_review","partially_staffed","dependency_change","unknown","at_risk"]
+          .map(k=>`<tr><td class="mono">${k}</td><td>${human(k)}</td></tr>`).join("")}
+        </tbody></table></div>
+      <details class="evidence"><summary>Why keep both</summary>
+        <div class="body">An auditor and an administrator need the exact identifier. A driver at
+          06:00 needs to know the truck can't leave. Same record, two audiences, one translation
+          layer.</div></details>
+    </div>
+
+    <div class="card"><h3>Colour</h3>
+      <div class="grid g4">
+        ${[["--bg","Background"],["--surface","Surface"],["--surface-2","Secondary surface"],
+           ["--border","Border"],["--text","Primary text"],["--text-2","Secondary text"],
+           ["--navy","Deep navy"],["--action","Action blue"],["--ready","Ready"],
+           ["--review","Review"],["--blocked","Blocked"],["--unknown","Unknown"]]
+          .map(([v,n])=>`<div class="swatch">
+            <div class="chip" style="background:var(${v})"></div>
+            <div class="meta"><b>${n}</b><span class="mono">var(${v})</span></div></div>`).join("")}
+      </div>
+      <p class="small" style="margin-top:var(--s3)">Both modes are the same tokens. Switching theme
+        never changes which component is used, only what the token resolves to.</p>
+    </div>
+
+    <div class="grid g2">
+      <div class="card"><h3>Type</h3>
+        <div class="spec"><span class="label">Display</span><h1 style="font-size:26px">Manrope 700</h1></div>
+        <div class="spec"><span class="label">Section</span><h2>Manrope 600</h2></div>
+        <div class="spec"><span class="label">Body</span><span>Manrope 400 · 15px / 1.5</span></div>
+        <div class="spec"><span class="label">Secondary</span><span class="small">13px, secondary text</span></div>
+        <div class="spec"><span class="label">Identifiers</span>
+          <span class="mono">JOB-2026-008841 · 04-12-084-06W5 · 34.2 m³</span></div>
+        <p class="small" style="margin-top:var(--s3)">Monospace is for tracking numbers, land
+          descriptions and measurements — things that need to align and be read character by
+          character. Never for prose.</p>
+      </div>
+      <div class="card"><h3>Spacing, radius, elevation</h3>
+        <div class="spec"><span class="label">Scale</span><span class="mono">4 · 8 · 12 · 16 · 24 · 32 · 48</span></div>
+        <div class="spec"><span class="label">Card radius</span><span class="mono">9px</span></div>
+        <div class="spec"><span class="label">Button radius</span><span class="mono">7px</span></div>
+        <div class="spec"><span class="label">Pill radius</span><span class="mono">999px</span></div>
+        <div class="spec"><span class="label">Elevation</span><span class="small">Near-invisible.
+          Borders and whitespace do the work.</span></div>
+      </div>
+    </div>
+
+    <div class="card"><h3>Progressive disclosure</h3>
+      <p class="small" style="margin-bottom:var(--s3)">Summary first. Explanation on request. Raw
+        evidence underneath. Nothing is removed — it's sequenced.</p>
+      <div class="docrow"><span class="name">TDG certification</span>${st("ready","Current")}</div>
+      <details class="evidence"><summary>View details</summary>
+        <div class="body"><dl class="kv">
+          <dt>Expires</dt><dd class="mono">2027-03-14</dd>
+          <dt>Verified by</dt><dd>S. Bell · 2026-08-01</dd>
+          <dt>Source</dt><dd>Certificate scan, reviewed</dd>
+          <dt>Confidence</dt><dd>Authority confirmed</dd>
+          <dt>Fingerprint</dt><dd class="mono">EF-7c1f9a2e</dd>
+        </dl></div></details>
+    </div>
+
+    <div class="card"><h3>Density changes by role, components do not</h3>
+      <div class="wrap"><table>
+        <thead><tr><th>Experience</th><th>Default mode</th><th>Density</th><th>Primary actions</th></tr></thead>
+        <tbody>
+          <tr><td>Field — driver, mechanic</td><td>Dark</td><td>One thing at a time</td><td>1</td></tr>
+          <tr><td>Operations — dispatch, office</td><td>Light</td><td>Exception-first, then dense</td><td>2–4</td></tr>
+          <tr><td>Client</td><td>Light</td><td>Spacious, outcomes only</td><td>1–2</td></tr>
+        </tbody></table></div>
+    </div>
+  </main>
+</div>`;
+
+/* ═══════════════════════════════════════════════════════════════
+   2 — DRIVER HOME
+   ═══════════════════════════════════════════════════════════════ */
+V.driver = () => `
+<div class="field">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--s4)">
+    <div><div class="logo">LeaseOS</div>
+      <p class="small">D. Reid · VAC-27</p></div>
+    ${st("ready","Unit ready")}
+  </div>
+
+  <div class="jobcard">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span class="mono small">JOB-2026-008841</span>
+      ${st("syncing","2 items")}
+    </div>
+    <h2 style="margin:var(--s2) 0 var(--s1)">Clearwater Disposal #3</h2>
+    <p class="small">Northridge Energy · vacuum haul</p>
+    <p class="small mono" style="margin-top:2px">04-12-084-06W5 → Clearwater #3</p>
+  </div>
+
+  <button class="next">Confirm departure
+    <span class="hint">GPS says 10:42 — tap to confirm</span></button>
+  <div class="secondaries">
+    <button class="btn">Photo</button>
+    <button class="btn">Voice</button>
+    <button class="btn">Problem</button>
+  </div>
+
+  <div class="jobcard" style="margin-top:var(--s4)">
+    <h3>This stop</h3>
+    <ul class="steps">
+      <li class="done"><span class="dot">✓</span>Arrived<time>10:03</time></li>
+      <li class="done"><span class="dot">✓</span>Setup<time>10:11</time></li>
+      <li class="done"><span class="dot">✓</span>Unloading started<time>10:14</time></li>
+      <li class="done"><span class="dot">✓</span>Empty<time>10:37</time></li>
+      <li class="now"><span class="dot">●</span>Depart<time>now</time></li>
+      <li class="todo"><span class="dot">○</span>Post-trip<time></time></li>
+    </ul>
+  </div>
+
+  <div class="jobcard">
+    <h3>Still needed — 2</h3>
+    <div class="docrow"><span class="name">Disposal ticket photo</span>${st("review","Needed")}</div>
+    <div class="docrow"><span class="name">Closing odometer</span>${st("pending")}</div>
+  </div>
+
+  <div class="banner info" style="margin-top:var(--s3)">
+    <span aria-hidden="true">✓</span>
+    <div><b>Saved on this device</b>
+    <p>Two items are waiting for signal. Nothing is lost — they'll send when you're back in range.</p></div>
+  </div>
+</div>
+
+<button class="mic" aria-label="Tell LeaseOS">🎙</button>
+<nav class="tabbar">
+  <a class="on"><span class="ico" aria-hidden="true">⌂</span>Home</a>
+  <a><span class="ico" aria-hidden="true">▤</span>Jobs</a>
+  <a><span class="ico" aria-hidden="true">◎</span>Map</a>
+  <a><span class="ico" aria-hidden="true">▢</span>Docs</a>
+  <a><span class="ico" aria-hidden="true">⋯</span>More</a>
+</nav>`;
+
+/* ═══════════════════════════════════════════════════════════════
+   3 — DISPATCH COMMAND CENTRE
+   ═══════════════════════════════════════════════════════════════ */
+V.dispatch = () => `
+<div class="shell">
+  ${cmdbar("Dispatch")}
+  ${sideNav(NAV.dispatch, "Dispatch")}
+  <main>
+    <div class="pagehead"><div>
+      <h1>Today</h1><p class="who">Grande Prairie · Sunday 31 August</p>
+    </div>
+    <div class="btnrow"><button class="btn">New job</button>
+      <button class="btn primary">Post for bid</button></div></div>
+
+    <div class="grid g4" style="margin-bottom:var(--s6)">
+      <div class="metric"><div class="n">12</div><div class="l">Jobs today</div></div>
+      <div class="metric alert"><div class="n">4</div><div class="l">Unassigned</div></div>
+      <div class="metric"><div class="n">7</div><div class="l">Open bids</div></div>
+      <div class="metric critical"><div class="n">2</div><div class="l">At risk</div></div>
+      <div class="metric"><div class="n">9</div><div class="l">Operators free</div></div>
+      <div class="metric"><div class="n">11</div><div class="l">Units free</div></div>
+    </div>
+
+    <div class="centre">
+      <div class="col">
+        <h3>Needs someone now</h3>
+
+        <div class="actioncard blocked">
+          <div class="top"><span class="id">JOB-8851</span>${st("blocked")}</div>
+          <p class="why">Unit inspection expired after this was assigned.</p>
+          <div class="btnrow"><button class="btn sm primary">Choose another unit</button>
+            <button class="btn sm">Open</button></div>
+        </div>
+
+        <div class="actioncard review">
+          <div class="top"><span class="id">JOB-8849</span>${st("review","No crew")}</div>
+          <p class="why">Hotshot, starts 09:30. Nobody assigned.</p>
+          <div class="btnrow"><button class="btn sm primary">Find operator</button></div>
+        </div>
+
+        <div class="actioncard review">
+          <div class="top"><span class="id">JOB-8852</span>${st("review")}</div>
+          <p class="why">Destination hasn't confirmed it accepts this material.</p>
+          <div class="btnrow"><button class="btn sm">Review</button></div>
+        </div>
+
+        <div class="actioncard unknown">
+          <div class="top"><span class="id">JOB-8853</span>${st("unknown","Hours")}</div>
+          <p class="why">J. Whitecalf hasn't reported hours of service.</p>
+          <div class="btnrow"><button class="btn sm">Ask</button></div>
+        </div>
+      </div>
+
+      <div class="col">
+        <h3>Schedule</h3>
+        <div class="card">
+          <ul class="sched">
+            <li><span class="t">06:30</span>
+              <div><b>JOB-8841</b><div class="who">D. Reid · VAC-27 · Clearwater #3</div></div>
+              ${st("ready")}</li>
+            <li><span class="t">07:00</span>
+              <div><b>JOB-8842</b><div class="who">M. Okonkwo · WTR-08 · water delivery</div></div>
+              ${st("ready")}</li>
+            <li><span class="t">08:00</span>
+              <div><b>JOB-8851</b><div class="who">T. Lavallee · VAC-12</div></div>
+              ${st("blocked")}</li>
+            <li><span class="t">09:30</span>
+              <div><b>JOB-8849</b><div class="who">Unassigned · hotshot</div></div>
+              ${st("review","No crew")}</li>
+            <li><span class="t">10:00</span>
+              <div><b>JOB-8850</b><div class="who">T. Lavallee · VAC-19</div></div>
+              ${st("review","Check due")}</li>
+            <li><span class="t">13:00</span>
+              <div><b>JOB-8854</b><div class="who">S. Cardinal · VAC-31 · rig support</div></div>
+              ${st("ready")}</li>
+          </ul>
+        </div>
+
+        <div class="card" style="margin-top:var(--s3)">
+          <h3>JOB-8850 — pre-departure check due</h3>
+          <div class="banner review"><span aria-hidden="true">!</span>
+            <div><b>Scheduled, not yet cleared to depart</b>
+            <p>Assigned Thursday. Conditions are rechecked before departure, and the last check was
+              4 hours ago.</p></div></div>
+          <details class="evidence"><summary>What is being rechecked</summary>
+            <div class="body"><dl class="kv">
+              <dt>Operator</dt><dd>${st("ready","Licence and tickets current")}</dd>
+              <dt>Unit</dt><dd>${st("ready","No open defects")}</dd>
+              <dt>Hours</dt><dd>${st("review","540 min available, job needs 520")}</dd>
+              <dt>Route</dt><dd>${st("ready","Cleared")}</dd>
+              <dt>Engine state</dt><dd class="mono">eligible_review · checked 04:12</dd>
+            </dl></div></details>
+          <div class="btnrow" style="margin-top:var(--s3)">
+            <button class="btn primary">Run check now</button>
+            <button class="btn">Reassign</button></div>
+        </div>
+      </div>
+
+      <div class="col">
+        <h3>Available</h3>
+        <div class="card">
+          <div class="docrow"><span class="name">T. Lavallee<br><span class="tiny">31 km · vacuum</span></span>${st("ready")}</div>
+          <div class="docrow"><span class="name">S. Cardinal<br><span class="tiny">On call · environmental</span></span>${st("ready")}</div>
+          <div class="docrow"><span class="name">J. Whitecalf<br><span class="tiny">Hours not reported</span></span>${st("unknown")}</div>
+        </div>
+        <div class="card" style="margin-top:var(--s3)">
+          <h3>Units</h3>
+          <div class="docrow"><span class="name mono">VAC-19</span>${st("ready")}</div>
+          <div class="docrow"><span class="name mono">VAC-31</span>${st("ready")}</div>
+          <div class="docrow"><span class="name mono">VAC-12</span>${st("blocked","Inspection")}</div>
+          <div class="docrow"><span class="name mono">TRK-31</span>${st("blocked","In shop")}</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>`;
+
+/* ═══════════════════════════════════════════════════════════════
+   4 — JOB WORKSPACE
+   ═══════════════════════════════════════════════════════════════ */
+V.job = () => `
+<div class="shell">
+  ${cmdbar("Jobs")}
+  ${sideNav(NAV.dispatch, "Jobs")}
+  <main>
+    <div class="pagehead"><div>
+      <p class="mono small">JOB-2026-008841</p>
+      <h1>Vacuum haul — produced water</h1>
+      <p class="who">Northridge Energy · 04-12-084-06W5 → Clearwater Disposal #3</p>
+    </div>
+    <div style="text-align:right">
+      ${st("review","At risk","lg")}
+      <div class="small" style="margin-top:var(--s2)">Scheduled 31 Aug · 06:30</div>
+    </div></div>
+
+    <div class="banner review" style="margin-bottom:var(--s4)">
+      <span aria-hidden="true">!</span>
+      <div><b>Unit inspection expires before this job departs</b>
+        <p>VAC-27's annual inspection lapses at midnight. The job is still scheduled — it just
+          can't be released to depart until this is resolved.</p>
+        <div class="btnrow" style="margin-top:var(--s3)">
+          <button class="btn sm primary">Book inspection</button>
+          <button class="btn sm">Use a different unit</button></div>
+      </div></div>
+
+    <div class="tabs">
+      <a class="on">Overview</a><a>Dispatch</a><a>Trips</a><a>Loads</a>
+      <a>Safety</a><a>Documents</a><a>Billing</a><a>History</a>
+    </div>
+
+    <div class="centre" style="grid-template-columns:1fr 320px">
+      <div class="col">
+        <div class="card"><h3>Progress</h3>
+          <ul class="steps">
+            <li class="done"><span class="dot">✓</span>Dispatched<time>07:12</time></li>
+            <li class="done"><span class="dot">✓</span>Arrived North Pad<time>07:34</time></li>
+            <li class="done"><span class="dot">✓</span>Loaded — 8,000 L<time>08:16</time></li>
+            <li class="done"><span class="dot">✓</span>Arrived Clearwater<time>10:03</time></li>
+            <li class="now"><span class="dot">●</span>Unloading complete<time>10:37</time></li>
+            <li class="todo"><span class="dot">○</span>Departure<time></time></li>
+            <li class="todo"><span class="dot">○</span>Post-trip<time></time></li>
+          </ul>
+        </div>
+
+        <div class="card"><h3>Needs attention</h3>
+          <div class="docrow"><span class="name">Disposal ticket — load 4</span>${st("review","Awaiting photo")}</div>
+          <div class="docrow"><span class="name">Departure time from Clearwater</span>${st("pending","Unconfirmed")}</div>
+          <details class="evidence"><summary>Why the departure time is unconfirmed</summary>
+            <div class="body">GPS recorded the truck leaving the unload zone at 10:42 with ±11 m
+              accuracy. That's a proposal, not a record — the driver confirms it before it becomes
+              part of the trip and the billable time.
+              <dl class="kv" style="margin-top:var(--s3)">
+                <dt>Detected</dt><dd class="mono">10:42:07</dd>
+                <dt>Distance</dt><dd class="mono">96 m from zone edge</dd>
+                <dt>Confidence</dt><dd>High</dd>
+              </dl></div></details>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="card"><h3>Job health</h3>
+          <div class="docrow"><span class="name">Crew</span>${st("ready")}</div>
+          <div class="docrow"><span class="name">Unit</span>${st("review","Inspection")}</div>
+          <div class="docrow"><span class="name">Route</span>${st("ready")}</div>
+          <div class="docrow"><span class="name">Documents</span>${st("review","7 of 8")}</div>
+          <div class="docrow"><span class="name">Field ticket</span>${st("ready","Signed")}</div>
+          <div class="docrow"><span class="name">Billing</span>${st("pending","Held")}</div>
+        </div>
+        <div class="card" style="margin-top:var(--s3)"><h3>Assignment</h3>
+          <dl class="kv">
+            <dt>Operator</dt><dd>D. Reid</dd>
+            <dt>Unit</dt><dd class="mono">VAC-27</dd>
+            <dt>Material</dt><dd>Produced water</dd>
+            <dt>Loads</dt><dd class="mono">4 · 34.2 m³</dd>
+            <dt>AFE</dt><dd class="mono">AFE-8841-22</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>`;
+
+/* ═══════════════════════════════════════════════════════════════
+   5 — OFFICE HOME
+   ═══════════════════════════════════════════════════════════════ */
+V.office = () => `
+<div class="shell">
+  ${cmdbar("Operations")}
+  ${sideNav(NAV.office, "Home")}
+  <main>
+    <div class="pagehead"><div>
+      <h1>Needs you today</h1>
+      <p class="who">22 items. Everything else is running normally.</p>
+    </div></div>
+
+    <div class="grid g4" style="margin-bottom:var(--s6)">
+      <div class="metric critical"><div class="n">3</div><div class="l">Blocking dispatch</div></div>
+      <div class="metric alert"><div class="n">6</div><div class="l">Missing documents</div></div>
+      <div class="metric"><div class="n">14</div><div class="l">Ready to invoice</div></div>
+      <div class="metric alert"><div class="n">3</div><div class="l">Awaiting client</div></div>
+    </div>
+
+    <div class="centre" style="grid-template-columns:1fr 340px">
+      <div class="col">
+        <h3>Priority queue</h3>
+
+        <div class="actioncard blocked">
+          <div class="top"><span class="id">VAC-12</span>${st("blocked","Dispatch stopped")}</div>
+          <p class="why">Annual inspection expired 3 days ago. The unit can't be assigned until
+            it's done — no role can override this.</p>
+          <div class="btnrow"><button class="btn sm primary">Book shop</button></div>
+        </div>
+
+        <div class="actioncard review">
+          <div class="top"><span class="id">JOB-8841</span>${st("review","Billing held")}</div>
+          <p class="why">Disposal ticket missing for load 4. Only the disposal charge is held —
+            the other four lines can invoice now.</p>
+          <div class="btnrow"><button class="btn sm primary">Ask driver</button>
+            <button class="btn sm">Invoice the rest</button></div>
+        </div>
+
+        <div class="actioncard review">
+          <div class="top"><span class="id">D. Reid</span>${st("review","17 days")}</div>
+          <p class="why">Class 3 licence expires 16 September.</p>
+          <div class="btnrow"><button class="btn sm">Request renewal</button></div>
+        </div>
+
+        <div class="actioncard unknown">
+          <div class="top"><span class="id">INV-2026-000388</span>${st("unknown","Disputed 26 days")}</div>
+          <p class="why">Cold Lake disputes 1.5 h standby. GPS supports it; nobody signed for it
+            at the lease.</p>
+          <div class="btnrow"><button class="btn sm">Send evidence</button>
+            <button class="btn sm">Credit the line</button></div>
+        </div>
+      </div>
+
+      <div class="col">
+        <h3>Ready to invoice</h3>
+        <div class="card">
+          <div class="docrow"><span class="name mono">JOB-8812</span><span class="mono">$3,840</span></div>
+          <div class="docrow"><span class="name mono">JOB-8814</span><span class="mono">$1,920</span></div>
+          <div class="docrow"><span class="name mono">JOB-8816</span><span class="mono">$6,214</span></div>
+          <div class="btnrow" style="margin-top:var(--s3)">
+            <button class="btn sm primary">Review all 14</button></div>
+        </div>
+
+        <div class="card" style="margin-top:var(--s3)"><h3>Recent corrections</h3>
+          <p class="small" style="margin-bottom:var(--s3)">Every change keeps the original value.</p>
+          <div class="docrow"><span class="name">Unload quantity
+            <br><span class="tiny mono">8.2 → 8.7 m³ · scale ticket DSP-99183</span></span></div>
+          <div class="docrow"><span class="name">Disposal ticket attached
+            <br><span class="tiny">D. Reid · 11:04</span></span></div>
+          <div class="docrow"><span class="name">Invoice approved
+            <br><span class="tiny">Northridge · INV-391</span></span></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>`;
+
+/* ═══════════════════════════════════════════════════════════════
+   6 — CLIENT PORTAL
+   ═══════════════════════════════════════════════════════════════ */
+V.client = () => `
+<div class="shell wide">
+  <header class="cmdbar">
+    <div class="logo">Northridge Energy</div>
+    <div class="bar-right">
+      <button class="btn ghost">Jobs</button><button class="btn ghost">Documents</button>
+      <button class="btn ghost">Invoices</button>
+      <span class="tiny">via LeaseOS</span>
+    </div>
+  </header>
+  <main style="padding:0">
+    <div class="portal">
+      <h1>Good morning</h1>
+      <p class="lede">Two invoices are waiting for your approval. Everything else is complete.</p>
+
+      <div class="grid g4" style="margin:var(--s8) 0">
+        <div class="metric"><div class="n">4</div><div class="l">Active jobs</div></div>
+        <div class="metric"><div class="n">17</div><div class="l">Completed this week</div></div>
+        <div class="metric alert"><div class="n">2</div><div class="l">Awaiting your approval</div></div>
+        <div class="metric"><div class="n">100%</div><div class="l">Documentation complete</div></div>
+      </div>
+
+      <div class="jobrow">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--s4);flex-wrap:wrap">
+          <div>
+            <p class="mono small">JOB-2026-008841</p>
+            <h2 style="margin:var(--s1) 0">Vacuum haul — North Pad</h2>
+            <p class="small">31 August · 06:30 to 16:24 · D. Reid</p>
+          </div>
+          ${st("ready","Complete","lg")}
+        </div>
+
+        <div class="proof">
+          <span><i>✓</i>Work complete</span>
+          <span><i>✓</i>Field ticket signed</span>
+          <span><i>✓</i>Disposal verified</span>
+          <span><i>✓</i>Documents complete</span>
+        </div>
+
+        <div class="grid g3" style="margin:var(--s6) 0">
+          <div><div class="amount">4</div><div class="small">loads</div></div>
+          <div><div class="amount">34.2</div><div class="small">cubic metres</div></div>
+          <div><div class="amount">96</div><div class="small">kilometres</div></div>
+        </div>
+
+        <div class="btnrow"><button class="btn">Job summary</button>
+          <button class="btn">Field ticket</button><button class="btn">Manifest</button>
+          <button class="btn">Disposal tickets</button><button class="btn">Photos</button>
+          <button class="btn ghost">Download everything</button></div>
+      </div>
+
+      <div class="jobrow">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--s4);flex-wrap:wrap">
+          <div>
+            <p class="mono small">INV-2026-000391</p>
+            <h2 style="margin:var(--s1) 0">Invoice for JOB-8841</h2>
+            <p class="small">Net 30 · due 30 September</p>
+          </div>
+          <div class="amount">$1,951.03</div>
+        </div>
+
+        <div class="proof"><span><i>✓</i>Every line supported by signed evidence</span></div>
+
+        <div class="wrap" style="margin:var(--s4) 0"><table>
+          <thead><tr><th>Line</th><th>Quantity</th><th>Amount</th></tr></thead>
+          <tbody>
+            <tr><td>Vacuum truck</td><td class="mono">4.6 h</td><td class="mono">$851.00</td></tr>
+            <tr><td>Disposal — liquid</td><td class="mono">8.7 m³</td><td class="mono">$365.40</td></tr>
+            <tr><td>Standby</td><td class="mono">0.75 h</td><td class="mono">$93.75</td></tr>
+            <tr><td>Mileage</td><td class="mono">96 km</td><td class="mono">$297.60</td></tr>
+          </tbody></table></div>
+
+        <details class="evidence"><summary>Where these numbers come from</summary>
+          <div class="body"><dl class="kv">
+            <dt>Truck hours</dt><dd>Arrival to departure, GPS confirmed by the operator</dd>
+            <dt>Disposal</dt><dd>Clearwater #3 scale ticket DSP-99183</dd>
+            <dt>Standby</dt><dd>Authorised on site by R. Hollis, signed on the field ticket</dd>
+            <dt>Mileage</dt><dd>Odometer, start and close</dd>
+          </dl></div></details>
+
+        <div class="btnrow" style="margin-top:var(--s6)">
+          <button class="btn primary">Approve invoice</button>
+          <button class="btn">Question a line</button></div>
+      </div>
+    </div>
+  </main>
+</div>`;
+
+
+/* ═══════════════════════════════════════════════════════════════
+   7 — ASSISTANT: agent workspace, not a chat
+   The assistant shows its plan, its steps and its output as a typed
+   artifact you act on in place. Nothing commits until the gate clears.
+   ═══════════════════════════════════════════════════════════════ */
+V.assistant = () => `
+<div class="shell">
+  ${cmdbar("Assistant")}
+  ${sideNav(NAV.dispatch, "Jobs")}
+  <main>
+    <div class="pagehead"><div>
+      <h1>Log this stop</h1>
+      <p class="who">Working on TRIP-2026-004821 · unload stop · Clearwater #3</p>
+    </div>
+    <div class="btnrow">${st("review","2 need you")}</div></div>
+
+    <div class="agent">
+      <div class="col">
+        <div class="task">
+          <div class="head">
+            <b>Reading what you said</b>
+            <span class="ctx">JOB-8841 · TRIP-004821 · VAC-27</span>
+          </div>
+
+          <ol class="plan">
+            <li class="done"><span class="m">✓</span><span>Transcribed 41 seconds of audio</span></li>
+            <li class="done"><span class="m">✓</span><span>Matched to the unload stop form
+              <span class="detail">8 fields, 4 required</span></span></li>
+            <li class="done"><span class="m">✓</span><span>Filled 5 fields
+              <span class="detail">3 marked approximate — you hedged, so it did too</span></span></li>
+            <li class="active"><span class="m">●</span><span>Waiting on you for 2 things
+              <span class="detail">Quantity, and whether 10:40 was exact</span></span></li>
+            <li class="queued"><span class="m">○</span><span>Read back and save</span></li>
+          </ol>
+
+          <div class="utterance">
+            <div class="src">You said, 10:52</div>
+            "Got to the pit around ten, waited about eight minutes because the scale was backed up,
+            started unloading quarter after, finished about twenty to eleven."
+          </div>
+
+          <div class="artifact">
+            <div class="cap">
+              <b>Unload stop</b>
+              <span class="to">would update TRIP-2026-004821</span>
+            </div>
+
+            <div class="slot">
+              <span class="k">Arrived</span>
+              <span class="v">10:00 <span class="approx">approximate</span>
+                <span class="said">from "around ten"</span></span>
+              <span class="acts"><button>Change</button></span>
+            </div>
+
+            <div class="slot">
+              <span class="k">Wait</span>
+              <span class="v">8 min<span class="said">from "about eight minutes"</span></span>
+              <span class="acts"><button>Change</button></span>
+            </div>
+
+            <div class="slot">
+              <span class="k">Delay reason</span>
+              <span class="v">Scale delay<span class="said">inferred from "the scale was backed up"</span></span>
+              <span class="acts"><button>Change</button><button>Drop</button></span>
+            </div>
+
+            <div class="slot">
+              <span class="k">Unloading started</span>
+              <span class="v">10:15<span class="said">from "quarter after"</span></span>
+              <span class="acts"><button>Change</button></span>
+            </div>
+
+            <div class="slot needs">
+              <span class="k">Unloading complete</span>
+              <span class="v">10:40 <span class="approx">approximate</span>
+                <span class="said">Was that exact, or about twenty to?</span></span>
+              <span class="acts"><button>Exact</button><button>About</button></span>
+            </div>
+
+            <div class="slot needs">
+              <span class="k">Quantity</span>
+              <span class="v" style="color:var(--text-2);font-weight:400">Not mentioned
+                <span class="said">Required — how much, and metered or estimated?</span></span>
+              <span class="acts"><button>Add</button></span>
+            </div>
+
+            <div class="gate">
+              <b style="font-size:13.5px">Can't save yet</b>
+              <ul>
+                <li>Quantity is required and has no value</li>
+                <li>Unloading complete is still marked approximate — confirm whether it is exact</li>
+                <li>Read-back has not been generated</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="composer">
+            <input placeholder="Answer, or say something else…" aria-label="Reply to the assistant">
+            <button class="btn" aria-label="Voice">🎙</button>
+            <button class="btn" aria-label="Photo">📷</button>
+            <button class="btn primary">Send</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:var(--s3)">
+          <h3>What it won't do</h3>
+          <p class="small">The assistant recorded a grinding noise you mentioned on VAC-27 and
+            opened a defect with your words in it. It did not decide what's wrong with the pump —
+            a mechanic does that.</p>
+          <details class="evidence"><summary>See the defect it opened</summary>
+            <div class="body"><dl class="kv">
+              <dt>Unit</dt><dd class="mono">VAC-27</dd>
+              <dt>System</dt><dd>Pump / PTO</dd>
+              <dt>What you noticed</dt><dd>"Grinding when I first started it"</dd>
+              <dt>New since last trip</dt><dd>No — same as yesterday</dd>
+              <dt>Diagnosis</dt><dd>${st("unknown","Not the assistant's call")}</dd>
+            </dl></div></details>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="card"><h3>Review queue</h3>
+          <p class="small" style="margin-bottom:var(--s3)">Everything waiting on a person, from
+            every source — not just this conversation.</p>
+          <div class="docrow"><span class="name">Unload quantity
+            <br><span class="tiny">Voice · this stop</span></span>${st("review")}</div>
+          <div class="docrow"><span class="name">Departure 10:42
+            <br><span class="tiny">GPS · ±11 m</span></span>${st("review")}</div>
+          <div class="docrow"><span class="name">Disposal ticket DSP-99183
+            <br><span class="tiny">Photo · read from image</span></span>${st("review")}</div>
+          <div class="docrow"><span class="name">Load 3 quantity
+            <br><span class="tiny">Confirmed 09:12</span></span>${st("ready")}</div>
+        </div>
+
+        <div class="card" style="margin-top:var(--s3)"><h3>How this works</h3>
+          <ul class="steps" style="font-size:13.5px">
+            <li class="done"><span class="dot">1</span>You talk, type or photograph</li>
+            <li class="done"><span class="dot">2</span>It fills only the fields this form has</li>
+            <li class="done"><span class="dot">3</span>Hedges stay hedges</li>
+            <li class="done"><span class="dot">4</span>It asks the fewest questions it can</li>
+            <li class="done"><span class="dot">5</span>It reads the whole thing back</li>
+            <li class="done"><span class="dot">6</span>You save it — not the assistant</li>
+          </ul>
+        </div>
+
+        <div class="banner info" style="margin-top:var(--s3)">
+          <span aria-hidden="true">✓</span>
+          <div><b>Saved on this device</b>
+          <p>You're offline. This draft is safe here and will finish when you're back in range.</p></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>`;
+
+/* ── boot ── */
+let view = "tokens";
+const render = () => { document.getElementById("app").innerHTML = V[view](); window.scrollTo(0,0); };
+
+document.querySelectorAll(".switcher button[data-v]").forEach(b=>{
+  b.onclick = () => {
+    view = b.dataset.v;
+    document.querySelectorAll(".switcher button[data-v]")
+      .forEach(x=>x.setAttribute("aria-pressed", String(x===b)));
+    // Field defaults to dark, everything else to light — the modes are a
+    // working choice, not decoration.
+    document.documentElement.dataset.theme = view === "driver" ? "dark" : "light";
+    document.getElementById("theme").textContent =
+      document.documentElement.dataset.theme === "dark" ? "Light" : "Dark";
+    render();
+  };
+});
+document.getElementById("theme").onclick = (e) => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  e.target.textContent = next === "dark" ? "Light" : "Dark";
+};
+render();
+</script>
+</body>
+</html>
