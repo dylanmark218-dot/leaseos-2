@@ -12,6 +12,8 @@
  * declares whether it applies before it declares whether it passed.
  */
 
+import { classifyMeasurementMethod } from "./measurementQuality";
+
 export type CheckStatus = "pass" | "missing" | "not_required" | "unverified";
 
 export type DisposalCheck = {
@@ -103,18 +105,16 @@ export function reconcileDisposal(
   present("quantity", "Quantity recorded", input.quantity);
 
   // A quantity without a method is not billable — an estimate and a weighed
-  // figure are not the same evidence.
+  // figure are not the same evidence. Classified against the single ladder in
+  // measurementQuality, which fails closed: a method from a vocabulary this
+  // trunk does not know is `unknown` and holds the charge. It is not waved
+  // through for the sole reason that it isn't the literal string "unknown".
+  const measurement = classifyMeasurementMethod(input.measurementMethod);
   checks.push({
     key: "measurement_method",
     label: "Measurement method",
-    status:
-      !input.measurementMethod || input.measurementMethod === "unknown"
-        ? "missing"
-        : "pass",
-    detail:
-      input.measurementMethod === "estimate"
-        ? "Estimated, not weighed — confirm before billing"
-        : undefined,
+    status: measurement.adequateForCharge ? "pass" : "missing",
+    detail: measurement.detail,
   });
 
   present("arrival", "Arrival time", input.arrivedAt);

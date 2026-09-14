@@ -81,6 +81,14 @@ export async function emitMechanicReleased(
     workOrderRef: string;
     releasedBy: string;
     releaseVerified: boolean;
+    /**
+     * Added in B20. Optional so existing callers are unaffected. A restricted
+     * release returns the unit to service under stated limits — dispatch needs
+     * the limit, not just the fact that something was signed.
+     */
+    releaseType?: "full" | "restricted" | "revoked";
+    restricted?: boolean;
+    restrictionDetail?: string | null;
   }
 ): Promise<OutboxRow | null> {
   return emitGuarded(tx, ctx, {
@@ -289,6 +297,162 @@ export async function emitSubcontractorShortPayProposed(
     subject: { entityType: "subcontractor", entityId: payload.subcontractorId },
     tenantId: ctx.tenantId,
     branchId: ctx.branchId,
+    correlationId: ctx.correlationId,
+    causationId: ctx.causationId,
+    payload,
+  });
+}
+
+/* ===================== E. B20 records, safety & release ===================== */
+
+/**
+ * An incident the operator has sealed in the field.
+ *
+ * Emitted after sealing, never at capture: an unsealed draft is something the
+ * operator is still writing, and raising a management task off a half-typed
+ * statement trains people to stop typing. `severity` and `holdUnit` are already
+ * decided by the safety domain — this reports them and does not re-derive them.
+ */
+export type IncidentSealed = {
+  incidentNumber: string;
+  incidentType: string;
+  severity: "none" | "minor" | "moderate" | "serious" | "critical";
+  unitId?: string | null;
+  jobId?: string | null;
+  employeeNumber?: string | null;
+  injuryReported: boolean;
+  environmentalRelease: boolean;
+  dangerousGoodsInvolved: boolean;
+  holdUnit: boolean;
+  legalHoldRecommended: boolean;
+  /** The operator's own words, carried so the task can quote them verbatim. */
+  reportedStatement: string;
+};
+
+export async function emitIncidentSealed(
+  tx: TxLike,
+  ctx: EmitContext,
+  payload: IncidentSealed
+): Promise<OutboxRow | null> {
+  return emitGuarded(tx, ctx, {
+    type: "safety.incident_sealed",
+    actor: ctx.actor,
+    subject: { entityType: "incident", entityId: payload.incidentNumber },
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
+    unitId: payload.unitId ?? undefined,
+    correlationId: ctx.correlationId,
+    causationId: ctx.causationId,
+    payload,
+  });
+}
+
+/**
+ * A near miss that reported an injury and therefore is not a near miss.
+ * The original statement travels with it; the operator retypes nothing.
+ */
+export async function emitNearMissEscalated(
+  tx: TxLike,
+  ctx: EmitContext,
+  payload: {
+    nearMissNumber: string;
+    incidentNumber: string;
+    reportedStatement: string;
+    unitId?: string | null;
+  }
+): Promise<OutboxRow | null> {
+  return emitGuarded(tx, ctx, {
+    type: "safety.near_miss_escalated",
+    actor: ctx.actor,
+    subject: { entityType: "nearMiss", entityId: payload.nearMissNumber },
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
+    unitId: payload.unitId ?? undefined,
+    correlationId: ctx.correlationId,
+    causationId: ctx.causationId,
+    payload,
+  });
+}
+
+/**
+ * A sealed record arrived and the server could not reproduce its hash.
+ *
+ * This is the one sync state that is a real exception. The device copy stays
+ * put, so the task exists to get the record re-sent — not to chase the driver.
+ */
+export async function emitEvidenceIntegrityFailed(
+  tx: TxLike,
+  ctx: EmitContext,
+  payload: {
+    trackingNumber: string;
+    packageRef: string;
+    deviceId: string;
+    failureMode: "hash_mismatch" | "manifest_mismatch";
+    employeeNumber?: string | null;
+  }
+): Promise<OutboxRow | null> {
+  return emitGuarded(tx, ctx, {
+    type: "records.evidence_integrity_failed",
+    actor: ctx.actor,
+    subject: { entityType: "evidenceRecord", entityId: payload.trackingNumber },
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
+    correlationId: ctx.correlationId,
+    causationId: ctx.causationId,
+    payload,
+  });
+}
+
+/**
+ * A legal hold was placed. Emitted so retention suspension becomes a tracked
+ * obligation with a review task rather than a flag nobody revisits.
+ */
+export async function emitLegalHoldPlaced(
+  tx: TxLike,
+  ctx: EmitContext,
+  payload: {
+    holdNumber: string;
+    reason: string;
+    incidentNumber?: string | null;
+    recordCount: number;
+  }
+): Promise<OutboxRow | null> {
+  return emitGuarded(tx, ctx, {
+    type: "records.legal_hold_placed",
+    actor: ctx.actor,
+    subject: { entityType: "legalHold", entityId: payload.holdNumber },
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
+    correlationId: ctx.correlationId,
+    causationId: ctx.causationId,
+    payload,
+  });
+}
+
+/**
+ * A driver defect report that management has reviewed and sent to the shop.
+ * The driver's original observation is carried verbatim — the shop reads what
+ * the operator actually said, not a paraphrase of it.
+ */
+export async function emitDefectSentToShop(
+  tx: TxLike,
+  ctx: EmitContext,
+  payload: {
+    unitId: string;
+    defectId: string;
+    workOrderRef: string;
+    severity: "advisory" | "inspection_required" | "critical";
+    reportedObservation: string;
+    reviewedByUserId: number;
+  }
+): Promise<OutboxRow | null> {
+  return emitGuarded(tx, ctx, {
+    type: "fleet.defect_sent_to_shop",
+    actor: ctx.actor,
+    subject: { entityType: "unit", entityId: payload.unitId },
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
+    unitId: payload.unitId,
     correlationId: ctx.correlationId,
     causationId: ctx.causationId,
     payload,

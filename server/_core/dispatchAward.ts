@@ -229,22 +229,26 @@ export function decideAward(context: AwardContext): AwardDecision {
       .map(b => `BLOCKED — ${b.label}`);
     refusals.push(...named);
   }
-  if (verdict === "unknown") {
-    const named = context.eligibility.blockers
-      .filter(b => b.severity === "unknown")
-      .map(b => `UNKNOWN — ${b.label}`);
-    refusals.push(...named);
-  }
-  if (verdict === "eligible_review") {
+  // v21.1 — an unknown blocker that the readiness engine marked overridable
+  // (route_not_evaluated, by a manager) IS resolved by a granted override:
+  // that is a recorded human decision with a reason, not a rounding-up. An
+  // unknown blocker nobody may override refuses regardless. Before this,
+  // every unknown verdict refused unconditionally and the override the
+  // engine offered was dead — found when the gate was first wired.
+  // Review blockers are checked whenever the verdict is review OR unknown;
+  // previously an unknown verdict skipped them.
+  if (verdict === "unknown" || verdict === "eligible_review") {
     for (const b of context.eligibility.blockers.filter(
-      x => x.severity === "review"
+      x => x.severity === "unknown" || x.severity === "review"
     )) {
-      const covered = context.grantedOverrides.some(
-        o => o.blockerCode === b.code
-      );
+      const covered =
+        b.overridable &&
+        context.grantedOverrides.some(o => o.blockerCode === b.code);
       if (!covered)
         refusals.push(
-          `REVIEW — ${b.label} (unresolved, no authorised override)`
+          b.severity === "unknown"
+            ? `UNKNOWN — ${b.label}${b.overridable ? " (no authorised override)" : ""}`
+            : `REVIEW — ${b.label} (unresolved, no authorised override)`
         );
     }
   }

@@ -37,7 +37,11 @@ export type FieldType =
   | "quantity"
   | "text"
   | "enum"
-  | "boolean";
+  | "boolean"
+  // v20.15 — document extraction. A total is money, not a quantity, and a
+  // receipt date is a calendar date, not a clock time.
+  | "number"
+  | "date";
 
 export type FormFieldDef = {
   key: string;
@@ -124,6 +128,9 @@ export const FORMS: Record<string, FormDefinition> = {
         type: "duration",
         required: false,
         unit: "min",
+        // Wait time can feed customer billing and the target tripStops table has
+        // no approximation channel. Voice hedges therefore require confirmation.
+        precisionSensitive: true,
       },
       {
         key: "delayReason",
@@ -218,6 +225,130 @@ export const FORMS: Record<string, FormDefinition> = {
       },
     ],
   },
+
+  /**
+   * A photographed receipt. Every field is proposed by OCR; the money fields
+   * are precision-sensitive so a human confirms them, and there is no
+   * treatment field at all — a receipt is not a deduction (B20.5).
+   */
+  expense_receipt: {
+    key: "expense_receipt",
+    version: 1,
+    title: "Expense receipt",
+    fields: [
+      { key: "vendorName", label: "Vendor", type: "text", required: true },
+      {
+        key: "transactionDate",
+        label: "Date",
+        type: "date",
+        required: true,
+        precisionSensitive: true,
+      },
+      {
+        key: "total",
+        label: "Total",
+        type: "number",
+        required: true,
+        precisionSensitive: true,
+      },
+      { key: "subtotal", required: false, label: "Subtotal", type: "number", precisionSensitive: true },
+      { key: "salesTaxAmount", required: false, label: "Sales tax", type: "number", precisionSensitive: true },
+      { key: "currency", required: false, label: "Currency", type: "text" },
+      { key: "paymentMethod", required: false, label: "Paid with", type: "text" },
+      { key: "cardLastFour", required: false, label: "Card last four", type: "text" },
+      {
+        key: "categoryKey",
+        required: false,
+        label: "Category",
+        type: "enum",
+        options: [
+          "fuel", "def", "repairs_parts", "tools_shop_supplies", "safety_ppe",
+          "lodging", "meals_travel", "permits_fees", "cellular", "office", "other",
+        ],
+      },
+      { key: "jobRef", required: false, label: "Job", type: "text" },
+      { key: "unitRef", required: false, label: "Unit", type: "text" },
+      {
+        key: "businessUsePercent",
+        required: false,
+        label: "Business use %",
+        type: "number",
+        precisionSensitive: true,
+      },
+    ],
+  },
+
+  /**
+   * A photographed disposal or scale ticket. One form serves both: a scale
+   * ticket is the weights, a facility ticket is the weights plus the
+   * facility's own reference. Every field is proposed by OCR and every weight
+   * is precision-sensitive, because net kilograms drive both the disposal gate
+   * and the invoice. The record lands as `needs_review` and is invisible to
+   * billing until a person verifies it.
+   */
+  disposal_ticket: {
+    key: "disposal_ticket",
+    version: 1,
+    title: "Disposal / scale ticket",
+    fields: [
+      { key: "facilityName", required: true, label: "Facility", type: "text" },
+      {
+        key: "facilityTicketNumber",
+        required: true,
+        label: "Facility ticket number",
+        type: "text",
+        precisionSensitive: true,
+      },
+      { key: "loadRef", required: true, label: "Load", type: "text" },
+      {
+        key: "ticketDate",
+        required: true,
+        label: "Ticket date",
+        type: "date",
+        precisionSensitive: true,
+      },
+      { key: "scaleInTime", required: false, label: "Scale-in time", type: "time" },
+      { key: "grossWeightKg", required: false, label: "Gross (kg)", type: "number", precisionSensitive: true },
+      { key: "tareWeightKg", required: false, label: "Tare (kg)", type: "number", precisionSensitive: true },
+      { key: "netWeightKg", required: false, label: "Net (kg)", type: "number", precisionSensitive: true },
+      { key: "volumeM3", required: false, label: "Volume (m³)", type: "number", precisionSensitive: true },
+      { key: "material", required: false, label: "Material", type: "text" },
+    ],
+  },
+
+  /**
+   * A fuel receipt. Its own form, not a generic expense: a fueling event
+   * answers four separate questions and none of the answers come from the
+   * slip. `unitNumber` and `cardLastFour` as printed are HINTS for the
+   * reviewer — the unit and the card that bind the transaction are resolved
+   * by the server from the assignment and the card token.
+   */
+  fuel_receipt: {
+    key: "fuel_receipt",
+    version: 1,
+    title: "Fuel receipt",
+    fields: [
+      { key: "vendorName", required: true, label: "Vendor", type: "text" },
+      { key: "transactionDate", required: true, label: "Date", type: "date", precisionSensitive: true },
+      { key: "transactionTime", required: false, label: "Time", type: "time" },
+      {
+        key: "fuelType", required: true, label: "Fuel type", type: "enum",
+        options: ["diesel", "gasoline", "def", "propane", "cng", "lng", "electric_charge", "other"],
+      },
+      { key: "quantity", required: true, label: "Quantity", type: "number", precisionSensitive: true },
+      { key: "quantityUnit", required: false, label: "Unit of measure", type: "enum", options: ["L", "gal", "kg", "kWh"] },
+      { key: "unitPrice", required: false, label: "Price per unit", type: "number", precisionSensitive: true },
+      { key: "subtotal", required: false, label: "Subtotal", type: "number", precisionSensitive: true },
+      { key: "salesTaxAmount", required: false, label: "Tax", type: "number", precisionSensitive: true },
+      { key: "total", required: true, label: "Total", type: "number", precisionSensitive: true },
+      { key: "cardLastFour", required: false, label: "Card last four (as printed)", type: "text" },
+      { key: "unitNumber", required: false, label: "Unit (as printed)", type: "text" },
+      { key: "odometerKm", required: false, label: "Odometer (km)", type: "number", precisionSensitive: true },
+      { key: "authorizationCode", required: false, label: "Authorization code", type: "text" },
+      // v21.3 — where the litres were bought, as printed. The receipt is the source; IFTA reads it.
+      { key: "jurisdiction", required: false, label: "Province/state (as printed)", type: "enum", options: ["CA-AB", "CA-BC", "CA-SK", "CA-MB", "CA-ON", "CA-NT", "US-MT", "US-ND", "US-WA", "US-ID"] },
+    ],
+  },
 };
 
 /* ========================= building a proposal ========================= */
@@ -248,7 +379,8 @@ function stableId(seed: string): string {
 export function buildProposal(
   form: FormDefinition,
   targetRef: string,
-  extracted: ExtractedValue[]
+  extracted: ExtractedValue[],
+  proposalId?: string
 ): Proposal {
   const declared = new Set(form.fields.map(f => f.key));
   const kept = extracted.filter(e => declared.has(e.key));
@@ -271,9 +403,17 @@ export function buildProposal(
 
   const gaps = detectGaps(form, fields);
   return {
-    proposalId: stableId(
-      `${form.key}:${targetRef}:${kept.map(k => k.key).join(",")}`
-    ),
+    // Server request paths supply a unique capture id. The deterministic fallback
+    // keeps the pure engine convenient for tests/non-persistent callers only.
+    proposalId:
+      proposalId ??
+      stableId(
+        `${form.key}:${targetRef}:${JSON.stringify(
+          kept
+            .map(k => ({ key: k.key, value: k.value, sourceUtterance: k.sourceUtterance ?? null }))
+            .sort((a, b) => a.key.localeCompare(b.key))
+        )}`
+      ),
     formKey: form.key,
     formVersion: form.version,
     title: form.title,

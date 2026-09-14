@@ -1,6 +1,11 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
+  userRoleAssignments,
+  roleBootstrapEvents,
+  authorizationDecisions,
+  externalDataSources,
+  type InsertUserRoleAssignment,
   InsertEvidenceRecord,
   InsertJob,
   InsertSafetyEvent,
@@ -70,6 +75,8 @@ import {
   routeContexts,
   safetyEvents,
   users,
+  externalIdentities,
+  integrationClients,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -174,6 +181,13 @@ export async function listEvidenceRecords() {
     .from(evidenceRecords)
     .orderBy(desc(evidenceRecords.capturedAt))
     .limit(100);
+}
+
+export async function findEvidenceByClientCaptureRef(clientCaptureRef: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select({ id: evidenceRecords.id, storageKey: evidenceRecords.storageKey, storageUrl: evidenceRecords.storageUrl }).from(evidenceRecords).where(eq(evidenceRecords.clientCaptureRef, clientCaptureRef)).limit(1);
+  return rows[0];
 }
 
 export async function createEvidenceRecord(input: InsertEvidenceRecord) {
@@ -859,4 +873,290 @@ export async function listProposalFields(proposalId: string) {
     .select()
     .from(proposalFields)
     .where(eq(proposalFields.proposalId, proposalId));
+}
+
+/* ==================================================================
+ * B20.2 — role resolution & authorization audit
+ * ================================================================== */
+
+/**
+ * Active domain roles for a user. Revoked grants are excluded here rather than
+ * deleted at revoke time, so "what could this person do in March" stays an
+ * answerable question.
+ */
+export async function listActiveUserRoles(
+  userId: number
+): Promise<{ role: string; scopeRef: string | null }[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      role: userRoleAssignments.role,
+      scopeRef: userRoleAssignments.scopeRef,
+    })
+    .from(userRoleAssignments)
+    .where(
+      and(
+        eq(userRoleAssignments.userId, userId),
+        isNull(userRoleAssignments.revokedAt)
+      )
+    );
+  return rows.map(r => ({ role: r.role as string, scopeRef: r.scopeRef ?? null }));
+}
+
+/** Role names only, for callers that do not care about branch confinement. */
+export async function listActiveUserRoleNames(userId: number): Promise<string[]> {
+  return (await listActiveUserRoles(userId)).map(r => r.role);
+}
+
+/**
+ * Count of users currently holding management. Used only by the bootstrap
+ * path, which must refuse to run once anybody holds it.
+ */
+export async function countActiveManagementGrants(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const rows = await db
+    .select({ userId: userRoleAssignments.userId })
+    .from(userRoleAssignments)
+    .where(
+      and(
+        eq(userRoleAssignments.role, "management"),
+        isNull(userRoleAssignments.revokedAt)
+      )
+    );
+  return rows.length;
+}
+
+/**
+ * The one-time transition from an empty role table to a usable system.
+ *
+ * Fail-closed authorization means nobody can grant a role until somebody holds
+ * `roles.grant`, and nobody holds it while the table is empty. This is the only
+ * path across that gap, and it closes behind itself: it refuses once any active
+ * management grant exists, it grants exactly `management` and nothing else, and
+ * it requires a platform admin. Platform admin is not itself a domain role —
+ * an admin is not automatically a mechanic, HR or legal.
+ */
+export async function bootstrapManagementRole(args: {
+  targetUserId: number;
+  performedByUserId: number;
+  reason: string;
+}): Promise<
+  | { ok: true; grantId: number | undefined }
+  | { ok: false; reason: string }
+> {
+  const db = await getDb();
+  if (!db) return { ok: false, reason: "No database" };
+  if (!args.reason.trim()) {
+    return { ok: false, reason: "Bootstrap requires a stated reason" };
+  }
+
+  const existing = await countActiveManagementGrants();
+  if (existing > 0) {
+    return {
+      ok: false,
+      reason: `Bootstrap is closed — ${existing} active management grant(s) already exist`,
+    };
+  }
+
+  const now = new Date();
+  const grantId = await grantUserRole({
+    userId: args.targetUserId,
+    role: "management",
+    scopeType: "global",
+    grantedByUserId: args.performedByUserId,
+    grantedAt: now,
+  });
+
+  await db.insert(roleBootstrapEvents).values({
+    targetUserId: args.targetUserId,
+    performedByUserId: args.performedByUserId,
+    reason: args.reason,
+    activeManagementCountBefore: existing,
+    occurredAt: now,
+  });
+
+  return { ok: true, grantId };
+}
+
+export async function grantUserRole(input: InsertUserRoleAssignment) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.insert(userRoleAssignments).values(input);
+  return result[0]?.insertId;
+}
+
+export async function revokeUserRole(args: {
+  userId: number;
+  role: string;
+  revokedByUserId: number;
+  reason: string;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return db
+    .update(userRoleAssignments)
+    .set({
+      revokedAt: new Date(),
+      revokedByUserId: args.revokedByUserId,
+      revokeReason: args.reason,
+    })
+    .where(
+      and(
+        eq(userRoleAssignments.userId, args.userId),
+        eq(userRoleAssignments.role, args.role as never),
+        isNull(userRoleAssignments.revokedAt)
+      )
+    );
+}
+
+/**
+ * Records the decision. Never throws — an audit write failing must not become
+ * a way to make the gate itself fail open or closed unpredictably.
+ */
+export async function recordAuthorizationDecision(input: {
+  actorUserId: number | null;
+  procedureName: string;
+  permission: string;
+  rolesHeld: string | null;
+  outcome: string;
+  subjectType?: string | null;
+  subjectId?: string | null;
+  detail: string | null;
+  occurredAt: Date;
+}) {
+  try {
+    const db = await getDb();
+    if (!db) return undefined;
+    const result = await db.insert(authorizationDecisions).values({
+      actorUserId: input.actorUserId,
+      procedureName: input.procedureName,
+      permission: input.permission,
+      rolesHeld: input.rolesHeld,
+      outcome: input.outcome as never,
+      subjectType: input.subjectType ?? null,
+      subjectId: input.subjectId ?? null,
+      detail: input.detail,
+      occurredAt: input.occurredAt,
+    });
+    return result[0]?.insertId;
+  } catch {
+    return undefined;
+  }
+}
+
+/* ==================================================================
+ * B20.9 — External data source seeding
+ * ================================================================== */
+
+/**
+ * Seed the verified-source registry.
+ *
+ * Idempotent by `sourceKey`, and deliberately **does not downgrade** an
+ * existing row: if someone has since verified AER's terms and marked the row
+ * verified, re-running the seed must not quietly revert that legal work.
+ * It only inserts what is missing.
+ */
+export async function seedExternalDataSources(): Promise<{
+  inserted: string[];
+  existing: string[];
+}> {
+  const db = await getDb();
+  if (!db) return { inserted: [], existing: [] };
+
+  const { ALL_DATA_SOURCES, SOURCES_REQUIRING_API_KEY, SOURCE_CAVEATS } =
+    await import("./_core/externalSourceSeeds");
+
+  const rows = await db
+    .select({ sourceKey: externalDataSources.sourceKey })
+    .from(externalDataSources);
+  const present = new Set(rows.map(r => r.sourceKey));
+
+  const inserted: string[] = [];
+  const existing: string[] = [];
+
+  for (const s of ALL_DATA_SOURCES) {
+    if (present.has(s.sourceKey)) {
+      existing.push(s.sourceKey);
+      continue;
+    }
+    await db.insert(externalDataSources).values({
+      sourceKey: s.sourceKey,
+      displayName: s.displayName,
+      authority: s.authority,
+      jurisdiction: s.jurisdiction ?? null,
+      category: s.category,
+      licenceName: s.licenceName ?? null,
+      licenceUrl: s.licenceUrl ?? null,
+      attributionRequired: s.attributionRequired,
+      attributionText: s.attributionText ?? null,
+      shareAlikeObligation: s.shareAlikeObligation,
+      commercialUsePermitted: s.commercialUsePermitted,
+      redistributionPermitted: s.redistributionPermitted,
+      rateLimitCalls: s.rateLimitCalls ?? null,
+      rateLimitWindowSeconds: s.rateLimitWindowSeconds ?? null,
+      requiresApiKey: SOURCES_REQUIRING_API_KEY.includes(s.sourceKey),
+      updateIntervalHours: s.updateIntervalHours ?? null,
+      retrievedAt: s.retrievedAt ?? null,
+      verifiedAt: s.verifiedAt ?? null,
+      status: s.status,
+      notes: SOURCE_CAVEATS[s.sourceKey] ?? null,
+    });
+    inserted.push(s.sourceKey);
+  }
+
+  return { inserted, existing };
+}
+
+export async function listExternalDataSources() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(externalDataSources);
+}
+
+/* ---- v21.10: external identities ---- */
+export async function findExternalIdentityByTokenHash(tokenHash: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(externalIdentities).where(eq(externalIdentities.tokenHash, tokenHash)).limit(1);
+  return rows[0];
+}
+export async function touchExternalIdentity(id: number, at: Date) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(externalIdentities).set({ lastSeenAt: at }).where(eq(externalIdentities.id, id));
+}
+
+/* ---- v21.12: identity hardening ---- */
+export async function findExternalIdentityByAnyTokenHash(tokenHash: string, now: Date) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const cur = await db.select().from(externalIdentities).where(eq(externalIdentities.tokenHash, tokenHash)).limit(1);
+  if (cur[0]) return { identity: cur[0], viaPrevious: false as const };
+  const prev = await db.select().from(externalIdentities).where(eq(externalIdentities.previousTokenHash, tokenHash)).limit(1);
+  if (prev[0] && prev[0].previousTokenExpiresAt && now < prev[0].previousTokenExpiresAt) return { identity: prev[0], viaPrevious: true as const };
+  return undefined;
+}
+export async function findExternalIdentityByInvitationHash(hash: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(externalIdentities).where(eq(externalIdentities.invitationTokenHash, hash)).limit(1))[0];
+}
+export async function updateExternalIdentity(id: number, patch: Partial<typeof externalIdentities.$inferInsert>) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(externalIdentities).set(patch).where(eq(externalIdentities.id, id));
+}
+
+/* ---- v21.18: integration clients ---- */
+export async function findIntegrationClientByKeyHash(keyHash: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(integrationClients).where(eq(integrationClients.keyHash, keyHash)).limit(1))[0];
+}
+export async function touchIntegrationClient(id: number, at: Date) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(integrationClients).set({ lastSeenAt: at }).where(eq(integrationClients.id, id));
 }

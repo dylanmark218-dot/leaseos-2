@@ -97,3 +97,14 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const { url } = (await resp.json()) as { url: string };
   return url;
 }
+
+/**
+ * v21.6 — read the stored bytes. The sync gate recomputes an evidence hash
+ * from what is actually in storage, so it needs the bytes, not a URL.
+ */
+export async function storageRead(relKey: string): Promise<Buffer> {
+  const url = await storageGetSignedUrl(relKey);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Storage read failed for ${relKey}: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
