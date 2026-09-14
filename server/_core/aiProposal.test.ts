@@ -63,6 +63,7 @@ const SPOKEN: ExtractedValue[] = [
 const full = () => {
   let p = buildProposal(UNLOAD, TARGET, SPOKEN);
   p = answerField(p, UNLOAD, "arrivedAt", "10:00", "approximate");
+  p = answerField(p, UNLOAD, "waitMinutes", 8, "exact");
   p = answerField(p, UNLOAD, "operationCompletedAt", "10:40", "exact");
   p = answerField(p, UNLOAD, "quantity", 8000, "exact");
   p = answerField(p, UNLOAD, "measurementMethod", "Meter");
@@ -99,9 +100,24 @@ describe("precision is never silently upgraded", () => {
     expect(gap?.question).toContain("about twenty to");
   });
 
-  it("does not raise a precision question for a field that is not precision-sensitive", () => {
+  it("raises a precision question for wait time because it can become billable time", () => {
     const p = buildProposal(UNLOAD, TARGET, SPOKEN);
-    expect(p.gaps.find(g => g.key === "waitMinutes")).toBeUndefined();
+    const gap = p.gaps.find(g => g.key === "waitMinutes");
+    expect(gap?.kind).toBe("precision_unresolved");
+    expect(gap?.question).toContain("about eight minutes");
+  });
+});
+
+describe("proposal identity", () => {
+  it("does not collapse different captured values onto the same fallback id", () => {
+    const a = buildProposal(FORMS.defect_report, "VAC-27", [
+      { key: "observation", value: "noise A", source: "driver_typed", confidence: "high" },
+    ]);
+    const b = buildProposal(FORMS.defect_report, "VAC-27", [
+      { key: "observation", value: "noise B", source: "driver_typed", confidence: "high" },
+    ]);
+    expect(a.proposalId).not.toBe(b.proposalId);
+    expect(buildProposal(UNLOAD, TARGET, [], "P-capture-id").proposalId).toBe("P-capture-id");
   });
 });
 

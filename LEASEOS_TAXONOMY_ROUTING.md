@@ -1,3 +1,5 @@
+> **HISTORICAL — DO NOT USE AS CURRENT IMPLEMENTATION STATE.** This document describes an earlier plan. The implemented state is in `LEASEOS_CURRENT_STATE.md` (generated) and the per-release checkpoints.
+
 # LeaseOS — Taxonomy & Routing Derivation (B12)
 
 **Status:** engine built and tested (19 tests). Schema + migration 0011 written. Prototyped.

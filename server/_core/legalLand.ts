@@ -1,0 +1,150 @@
+/**
+ * v22.14 — Legal land in both directions, entrances as records, and the
+ * imported road fabric as evaluator input.
+ *
+ * Pure: no database, no network. Three things the fabrics of v22.13 can
+ * answer that they could not before —
+ *   • a GPS fix read back as a legal land description,
+ *   • an entrance's confidence as a count of what has actually reached it,
+ *   • an imported road segment expressed as attributes the four-axis
+ *     evaluator already understands, where an absent attribute stays
+ *     absent so the evaluator reads UNKNOWN rather than pass.
+ */
+import type { RequiredCheck } from "./routingCompiler";
+import type { SegmentAttribute } from "./routeEvaluation";
+import { distanceToPathMetres, pointInRing, type LngLat, type SurfaceKind } from "./geoImport";
+
+/* ---- GPS → legal land ---- */
+
+export type ParcelShape = { pid: string; descriptor: string; identity: string; meridian: number; rangeNumber: number; township: number; sectionNumber: number; quarterSection: string | null; legalSubdivision: number | null; roadAllowance: string | null; ring: LngLat[]; centroid: LngLat };
+export type ReverseFix =
+  | { outcome: "located"; parcel: ParcelShape; metresFromCentroid: number; onRoadAllowance: boolean; reasons: string[] }
+  | { outcome: "outside_imported_grid"; candidates: number; reasons: string[] };
+
+/**
+ * Which parcel is this position in? Land wins over a road allowance when the
+ * rings overlap at their shared edge, because a truck on a road allowance is
+ * still *at* the adjoining land — and the answer says which it was.
+ */
+export function reverseLookup(position: LngLat, parcels: readonly ParcelShape[]): ReverseFix {
+  const hits = parcels.filter(p => pointInRing(position, p.ring));
+  if (!hits.length) return { outcome: "outside_imported_grid", candidates: parcels.length, reasons: [parcels.length ? `Position is inside none of the ${parcels.length} imported parcel(s) near it — the grid covering this position is not imported` : "No ATS grid is imported near this position"] };
+  const land = hits.filter(p => !p.roadAllowance || p.roadAllowance.trim() === "");
+  const parcel = land[0] ?? hits[0]!;
+  const onRoadAllowance = !land.length;
+  const metres = Math.round(haversine(position, parcel.centroid));
+  const reasons = [`Position is inside ${parcel.descriptor}`];
+  if (onRoadAllowance) reasons.push(`The position is on a road allowance (${parcel.roadAllowance}), not on the land it adjoins`);
+  if (hits.length > 1) reasons.push(`${hits.length} imported parcels contain this position; the land parcel was taken`);
+  return { outcome: "located", parcel, metresFromCentroid: metres, onRoadAllowance, reasons };
+}
+
+const EARTH_RADIUS_M = 6_371_008.8;
+const rad = (d: number) => (d * Math.PI) / 180;
+function haversine(a: LngLat, b: LngLat): number {
+  const dLat = rad(b[1] - a[1]), dLng = rad(b[0] - a[0]);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[1])) * Math.cos(rad(b[1])) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+/* ---- an entrance's confidence ---- */
+
+export type AccessConfirmation = { outcome: "reached" | "could_not_reach" | "reached_with_difficulty"; configurationFingerprint: string | null; operatorId: number | null; observedAt: Date };
+export type AccessConfidence = { level: "confirmed" | "probable" | "reported" | "proposed" | "disputed"; reached: number; failed: number; difficult: number; distinctOperators: number; lastReachedAt: Date | null; matchingConfiguration: "exact" | "similar" | "none"; reasons: string[] };
+
+/**
+ * What has actually reached this entrance, counted. A confirmation is
+ * evidence, not a verdict: a single passage never becomes "confirmed", and a
+ * failure against successes is a dispute a person settles.
+ */
+export function accessConfidence(args: { status: "proposed" | "confirmed" | "rejected" | "superseded"; confirmations: readonly AccessConfirmation[]; configurationFingerprint?: string | null }): AccessConfidence {
+  const reached = args.confirmations.filter(c => c.outcome === "reached");
+  const difficult = args.confirmations.filter(c => c.outcome === "reached_with_difficulty");
+  const failed = args.confirmations.filter(c => c.outcome === "could_not_reach");
+  const operators = new Set(args.confirmations.map(c => c.operatorId).filter(o => o != null));
+  const lastReached = [...reached, ...difficult].sort((a, b) => b.observedAt.getTime() - a.observedAt.getTime())[0]?.observedAt ?? null;
+  const reasons: string[] = [];
+  let matching: AccessConfidence["matchingConfiguration"] = "none";
+  if (args.configurationFingerprint) {
+    const successes = [...reached, ...difficult];
+    if (successes.some(c => c.configurationFingerprint === args.configurationFingerprint)) { matching = "exact"; reasons.push(`This exact configuration has reached it (${args.configurationFingerprint})`); }
+    else if (successes.some(c => c.configurationFingerprint)) { matching = "similar"; reasons.push("Other configurations have reached it; this one has not — a different truck's passage does not prove this one's"); }
+    else reasons.push("No configuration recorded on any passage");
+  }
+  let level: AccessConfidence["level"];
+  if (failed.length && failed.length >= reached.length) { level = "disputed"; reasons.unshift(`${failed.length} report(s) of not reaching it against ${reached.length} of reaching it — a person settles this`); }
+  else if (args.status === "confirmed" && reached.length >= 3 && operators.size >= 2) { level = "confirmed"; reasons.unshift(`Confirmed by a person and reached ${reached.length} time(s) by ${operators.size} operators`); }
+  else if (args.status === "confirmed") { level = "probable"; reasons.unshift(`Confirmed by a person; reached ${reached.length} time(s) by ${operators.size} operator(s) — more passages would raise it`); }
+  else if (reached.length + difficult.length > 0) { level = "reported"; reasons.unshift(`Reached ${reached.length + difficult.length} time(s) but not yet confirmed by a person`); }
+  else { level = "proposed"; reasons.unshift("Derived from the grid and the road fabric; nothing has reached it yet"); }
+  if (difficult.length) reasons.push(`${difficult.length} passage(s) reported difficulty`);
+  return { level, reached: reached.length, failed: failed.length, difficult: difficult.length, distinctOperators: operators.size, lastReachedAt: lastReached, matchingConfiguration: matching, reasons };
+}
+
+/** A configuration fingerprint: what was driven, not who drove it. */
+export function configurationFingerprint(v: { grossWeightKg: number; heightM: number; widthM: number; lengthM: number; axleGroups: number; trailerKind?: string | null }): string {
+  return [v.trailerKind?.toUpperCase().replace(/[^A-Z0-9]/g, "") || "UNIT", `${v.axleGroups}AX`, `${(v.grossWeightKg / 1000).toFixed(1)}T`, `${v.heightM.toFixed(2)}H`, `${v.widthM.toFixed(2)}W`, `${v.lengthM.toFixed(1)}L`].join("|");
+}
+
+/* ---- imported roads → evaluator attributes ---- */
+
+export type ImportedRoad = { objectId: number; name: string | null; highwayNumber: string | null; roadClass: string | null; featureTypeLabel: string | null; surfaceKind: SurfaceKind; lanes: number | null; lengthMetres: number; path: LngLat[]; sourceKey: string; sourceLayer: string; retrievedAt: Date; geometrySource: string | null };
+
+/** Surfaces a loaded commercial unit may travel, and what each implies operationally. */
+const SURFACE_SUITABILITY: Record<SurfaceKind, { textValue: string; operational: "suitable" | "review" | "unsuitable" }> = {
+  paved: { textValue: "paved", operational: "suitable" },
+  gravel: { textValue: "gravel", operational: "suitable" },
+  dry_weather: { textValue: "dry_weather", operational: "review" },
+  winter: { textValue: "winter_road", operational: "review" },
+  ramp: { textValue: "interchange_ramp", operational: "suitable" },
+  driveway: { textValue: "driveway", operational: "unsuitable" },
+  ferry: { textValue: "ferry_crossing", operational: "unsuitable" },
+  ford: { textValue: "ford", operational: "unsuitable" },
+  other: { textValue: "other", operational: "review" },
+  unknown: { textValue: "unknown", operational: "review" },
+};
+
+/**
+ * One imported road as evaluator input.
+ *
+ * The province's road layer states a surface and a class. It states **no**
+ * weight, axle, clearance, width or length limit — so this emits **no
+ * attribute** for those checks, and the evaluator reads them as UNKNOWN.
+ * A verified restriction row, recorded separately, is what turns any of them
+ * into a pass. The map's silence is never a permission.
+ */
+export function roadAsSegment(road: ImportedRoad): { segmentId: string; label: string; lengthKm: number; attributes: SegmentAttribute[]; silentChecks: RequiredCheck[] } {
+  const s = SURFACE_SUITABILITY[road.surfaceKind];
+  const retrieved = road.retrievedAt.toISOString();
+  const attributes: SegmentAttribute[] = [{
+    check: "surface_condition",
+    textValue: s.textValue,
+    jurisdiction: "CA-AB",
+    source: `${road.sourceKey}: ${road.sourceLayer}`,
+    sourceVersion: road.geometrySource ?? null,
+    // Alberta states the surface; that it is Alberta's own layer makes it authority-sourced, and nothing more than the surface.
+    confidence: "authority_confirmed",
+    verifiedAt: retrieved,
+  }];
+  const silentChecks: RequiredCheck[] = ["road_weight_restriction", "axle_group_limit", "bridge_capacity", "bridge_axle_limit", "overhead_clearance", "bridge_clearance", "width_restriction", "length_restriction", "seasonal_closure", "road_ban_level"];
+  return {
+    segmentId: `AB-ACCESS-${road.objectId}`,
+    label: road.name ?? road.highwayNumber ?? road.featureTypeLabel ?? `Access road ${road.objectId}`,
+    lengthKm: Math.round(road.lengthMetres) / 1000,
+    attributes,
+    silentChecks,
+  };
+}
+
+/** The ordered roads a straight corridor between two points touches, nearest first, within a width. */
+export function corridorSegments(from: LngLat, to: LngLat, roads: readonly ImportedRoad[], widthMetres = 1_500): { road: ImportedRoad; metresFromCorridor: number }[] {
+  const samples: LngLat[] = [];
+  const steps = Math.max(2, Math.min(40, Math.ceil(haversine(from, to) / 2_000)));
+  for (let i = 0; i <= steps; i++) samples.push([from[0] + ((to[0] - from[0]) * i) / steps, from[1] + ((to[1] - from[1]) * i) / steps]);
+  const scored = roads.map(road => {
+    let nearest = Number.POSITIVE_INFINITY;
+    for (const s of samples) { const d = distanceToPathMetres(s, road.path).metres; if (d < nearest) nearest = d; }
+    return { road, metresFromCorridor: Math.round(nearest) };
+  }).filter(x => x.metresFromCorridor <= widthMetres);
+  return scored.sort((a, b) => a.metresFromCorridor - b.metresFromCorridor);
+}

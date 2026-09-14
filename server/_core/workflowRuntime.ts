@@ -23,6 +23,7 @@ import {
   resolveResponsibility,
 } from "./workflowSeeds";
 import type { ClaimedEvent, WorkerPorts } from "./drainWorker";
+import { dispatchWebhooks, sweepWebhookRetries } from "../webhookDispatchService";
 
 /** Narrow surface so this works with a pool, a connection or a drizzle tx. */
 export type SqlRunner = {
@@ -271,6 +272,43 @@ export async function applyEventConsequences(
     }
   }
 
+  // Explicit `notify` actions.
+  //
+  // These were declared in ConsequenceAction and used across eight released
+  // rules, but nothing applied them — notifications only ever appeared as a
+  // side effect of task creation, addressed to the task's own assignee. So a
+  // rule saying "notify management" delivered nothing unless a task happened to
+  // be assigned to management, and a rule author reading the seed file had no
+  // way to tell. Dead configuration that reads as working configuration.
+  //
+  // Delivered here against the same derived-key rule, so a redelivered event
+  // still cannot notify twice.
+  for (const match of matches) {
+    for (const action of match.actions) {
+      if (action.kind !== "notify") continue;
+      const notificationKey = `${event.id}|${action.role}|${action.message}`;
+      try {
+        await tx.execute(
+          `INSERT INTO workflowNotifications
+             (notificationKey, tenantId, recipientRole, title, body, deepLink, queuedAt)
+           VALUES (?,?,?,?,?,?,?)`,
+          [
+            notificationKey,
+            event.tenantId,
+            action.role,
+            action.message,
+            null,
+            action.deepLink ?? null,
+            now,
+          ]
+        );
+        notificationsQueued++;
+      } catch {
+        // Duplicate key — this role has already been told about this event.
+      }
+    }
+  }
+
   return { tasksCreated: plan.create.length, notificationsQueued };
 }
 
@@ -336,6 +374,8 @@ export function createWorkerPorts(
         const rules = await loadRules(conn, event.type);
         const result = await applyEventConsequences(conn, event, rules, now());
         await conn.commit();
+        // v22.1 — the same event goes out to subscribed webhooks; the attempt is its own row and never fails the event.
+        try { await dispatchWebhooks({ eventIds: [event.id], now: now() }); } catch (e) { console.warn("[worker] webhook dispatch failed", e instanceof Error ? e.message : e); }
         return { tasksCreated: result.tasksCreated };
       } catch (e) {
         await conn.rollback();
@@ -345,6 +385,10 @@ export function createWorkerPorts(
       }
     },
 
+    async heartbeat(_workerId, at) {
+      // v22.1 — retry sweep for failed webhook deliveries that are due.
+      try { await sweepWebhookRetries(at); } catch (e) { console.warn("[worker] webhook retry sweep failed", e instanceof Error ? e.message : e); }
+    },
     async markProcessed(id) {
       await pool.execute(
         "UPDATE domainEventOutbox SET processedAt = ? WHERE id = ?",

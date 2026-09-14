@@ -1,12 +1,57 @@
+import { randomUUID } from "node:crypto";
 import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+/**
+ * v22.5.1 — the operational truth boundary. Authorization answers "may this
+ * person perform this kind of action"; these refusals answer "what may the
+ * action establish as fact". A create or capture may carry an observation or
+ * a claim; it may not carry a verified, authenticated, resolved, approved or
+ * authoritative state, a verification time or verifier, or server provenance.
+ * A present value is refused, not silently dropped, so an old client learns.
+ */
+const REFUSED = z.undefined({ message: "Trust-bearing value refused: this state is established by its own review, verification or transition procedure, never by a create or capture." }).optional();
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { recordsRouter } from "./recordsRouter";
+import {
+  contractorRouter,
+  financeRouter,
+  payrollRouter,
+} from "./payrollRouter";
+import { fundingRouter, portalsRouter } from "./portalFundingRouter";
+import { purchasingRouter, recoveryRouter, roadsideRouter, vendorRouter } from "./purchasingRouter";
+import { deviceRouter, syncRouter } from "./deviceRouter";
+import { complianceRouter } from "./complianceRouter";
+import { calibrationRouter, requirementRouter } from "./requirementRouter";
+import { surfacesRouter } from "./surfacesRouter";
+import { dispatchGateRouter } from "./dispatchRouter";
+import { createJobUnitGated } from "./dispatchEnforcementService";
+import { iftaRouter } from "./iftaRouter";
+import { fuelOpsRouter } from "./fuelOpsRouter";
+import { periodRouter } from "./periodRouter";
+import { gstRouter } from "./gstRouter";
+import { arRouter, bankRouter } from "./cashRouter";
+import { commercialRouter, portalAdminRouter } from "./commercialRouter";
+import { commercialSetupRouter } from "./commercialSetupRouter";
+import { invoicingRouter } from "./invoicingRouter";
+import { geoRouter } from "./geoRouter";
+import { portalRouter } from "./portalRouter";
+import { shopRouter } from "./shopRouter";
+import { assetRouter } from "./assetRouter";
+import { projectRouter } from "./projectRouter";
+import { inboundRouter, integrationRouter } from "./integrationRouter";
+import { telematicsRouter } from "./telematicsRouter";
+import { workforceRouter } from "./workforceRouter";
+import { auditRouter } from "./auditRouter";
+import { spatialRouter } from "./spatialRouter";
+import { closeoutRouter } from "./closeoutRouter";
+import { insuranceRouter } from "./insuranceRouter";
+import { publicProcedure, roleProcedure, router } from "./_core/trpc";
 import { storagePut } from "./storage";
 import {
   createEvidenceRecord,
+  findEvidenceByClientCaptureRef,
   createJob,
   createSafetyEvent,
   getJobByCode,
@@ -78,8 +123,32 @@ import {
   listTripBreadcrumbs,
   listZoneEvents,
   updateZoneEvent,
-} from "./db";
+ getDb } from "./db";
 import { ingestBreadcrumb } from "./_core/tripGps";
+import { routingSourceStatus } from "./_core/routingSource";
+import { operators as operatorsTable, trips as tripsTable } from "../drizzle/schema";
+import { and as andOp, eq as eqOp, inArray as inArrayOp } from "drizzle-orm";
+
+/** The session's operator record, or null. Identity is resolved, never named by the request. */
+async function operatorForUser(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select({ id: operatorsTable.id }).from(operatorsTable).where(eqOp(operatorsTable.userId, userId)).limit(1))[0] ?? null;
+}
+/** The operator's one active trip, or null. A breadcrumb binds to this, not to a trip the request names. */
+async function activeTripForOperator(operatorId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select({ id: tripsTable.id, unitId: tripsTable.unitId }).from(tripsTable).where(andOp(eqOp(tripsTable.operatorId, operatorId), inArrayOp(tripsTable.status, ["loading", "in_transit", "unloading"]))).limit(1))[0] ?? null;
+}
+/** A scan's access role is the strongest role the caller holds, in the scan audit's vocabulary. */
+function scanRoleOf(roles: readonly string[]): "inspection" | "driver" | "mechanic" | "dispatcher" | "admin" {
+  if (roles.includes("management") || roles.includes("controller")) return "admin";
+  if (roles.includes("dispatcher")) return "dispatcher";
+  if (roles.includes("mechanic") || roles.includes("shop_lead")) return "mechanic";
+  if (roles.includes("safety") || roles.includes("auditor")) return "inspection";
+  return "driver";
+}
 import {
   createAssistantProposal,
   updateAssistantProposal,
@@ -95,8 +164,6 @@ import {
   setFieldStatus,
   generateReadBack,
   acknowledgeReadBack,
-  checkCommit,
-  commitProposal,
   rejectProposal,
   type Proposal,
   type ProposedField,
@@ -107,6 +174,8 @@ import {
   parseExtraction,
   parseModelJson,
 } from "./_core/assistantExtraction";
+import { rehydrateProposal } from "./_core/assistantPersistence";
+import { executeAssistantCommit } from "./_core/assistantCommitService";
 import { invokeLLM } from "./_core/llm";
 
 /** Rebuild the in-memory proposal from its stored rows. */
@@ -114,37 +183,8 @@ async function loadProposal(proposalId: string): Promise<Proposal | null> {
   const row = await getAssistantProposal(proposalId);
   if (!row) return null;
   const fieldRows = await listProposalFields(proposalId);
-  const fields: ProposedField[] = fieldRows.map(f => ({
-    key: f.fieldKey,
-    label: f.label,
-    value: f.fieldValue === null ? null : safeParse(f.fieldValue),
-    precision: f.precision,
-    source: f.source,
-    confidence: f.confidence,
-    status: f.status,
-    sourceUtterance: f.sourceUtterance,
-    correctedFrom: f.correctedFrom === null ? null : safeParse(f.correctedFrom),
-  }));
-  const form = FORMS[row.formKey];
-  const base = buildProposal(form, row.targetRef, []);
-  return {
-    ...base,
-    proposalId: row.proposalId,
-    fields,
-    gaps: base.gaps,
-    questions: base.questions,
-    readBack: row.readBack,
-    readBackAcknowledged: row.readBackAcknowledged,
-    commitState: row.commitState,
-  };
+  return rehydrateProposal(row, fieldRows);
 }
-const safeParse = (v: string): string | number | boolean | null => {
-  try {
-    return JSON.parse(v);
-  } catch {
-    return v;
-  }
-};
 
 async function persist(p: Proposal) {
   await updateAssistantProposal(p.proposalId, {
@@ -198,6 +238,48 @@ const jobInput = z.object({
 
 export const appRouter = router({
   system: systemRouter,
+  records: recordsRouter,
+  payroll: payrollRouter,
+  contractors: contractorRouter,
+  finance: financeRouter,
+  portals: portalsRouter,
+  funding: fundingRouter,
+  roadside: roadsideRouter,
+  purchasing: purchasingRouter,
+  vendor: vendorRouter,
+  recovery: recoveryRouter,
+  device: deviceRouter,
+  sync: syncRouter,
+  compliance: complianceRouter,
+  requirement: requirementRouter,
+  calibration: calibrationRouter,
+  surfaces: surfacesRouter,
+  dispatch: dispatchGateRouter,
+  ifta: iftaRouter,
+  fuel: fuelOpsRouter,
+  period: periodRouter,
+  gst: gstRouter,
+  bank: bankRouter,
+  ar: arRouter,
+  commercial: commercialRouter,
+  commercialSetup: commercialSetupRouter,
+  invoicing: invoicingRouter,
+  geo: geoRouter,
+  closeout: closeoutRouter,
+  portalAdmin: portalAdminRouter,
+  // v21.10 — external identities only; gated by externalProcedure, never by roles.
+  portal: portalRouter,
+  shop: shopRouter,
+  asset: assetRouter,
+  project: projectRouter,
+  integration: integrationRouter,
+  telematics: telematicsRouter,
+  workforce: workforceRouter,
+  audit: auditRouter,
+  spatial: spatialRouter,
+  // v21.18 — machines only; gated by integrationProcedure, never by roles.
+  inbound: inboundRouter,
+  insurance: insuranceRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -208,17 +290,17 @@ export const appRouter = router({
   }),
   fieldRoute: router({
     jobs: router({
-      list: protectedProcedure.query(() => listJobs()),
-      byCode: protectedProcedure
+      list: roleProcedure("jobs.list").query(() => listJobs()),
+      byCode: roleProcedure("jobs.byCode")
         .input(z.object({ jobCode: z.string().min(1) }))
         .query(({ input }) => getJobByCode(input.jobCode)),
-      create: protectedProcedure
+      create: roleProcedure("jobs.create")
         .input(jobInput)
         .mutation(({ input }) => createJob(input)),
     }),
     evidence: router({
-      list: protectedProcedure.query(() => listEvidenceRecords()),
-      upload: protectedProcedure
+      list: roleProcedure("evidence.list").query(() => listEvidenceRecords()),
+      upload: roleProcedure("evidence.upload")
         .input(
           z.object({
             title: z.string().min(1).max(220),
@@ -229,6 +311,9 @@ export const appRouter = router({
             latitude: z.number().optional(),
             longitude: z.number().optional(),
             notes: z.string().optional(),
+            // v21.6 — offline-first: the device's reference (idempotent) and when it captured.
+            clientCaptureRef: z.string().min(8).max(80).optional(),
+            capturedAt: z.coerce.date().optional(),
           })
         )
         .mutation(async ({ ctx, input }) => {
@@ -238,6 +323,10 @@ export const appRouter = router({
               code: "BAD_REQUEST",
               message: "Evidence files must be 15 MB or smaller.",
             });
+          }
+          if (input.clientCaptureRef) {
+            const existing = await findEvidenceByClientCaptureRef(input.clientCaptureRef);
+            if (existing) return { id: existing.id, key: existing.storageKey ?? "", url: existing.storageUrl ?? "", alreadyUploaded: true as const };
           }
           const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "-");
           const stored = await storagePut(
@@ -251,8 +340,10 @@ export const appRouter = router({
             storageKey: stored.key,
             storageUrl: stored.url,
             mimeType: input.mimeType,
-            capturedAt: new Date(),
+            // The device says when it captured; createdAt is when the server received it.
+            capturedAt: input.capturedAt ?? new Date(),
             capturedBy: ctx.user.id,
+            clientCaptureRef: input.clientCaptureRef ?? null,
             latitude: input.latitude,
             longitude: input.longitude,
             status: "needs_review",
@@ -260,7 +351,7 @@ export const appRouter = router({
           });
           return { id, ...stored };
         }),
-      add: protectedProcedure
+      add: roleProcedure("evidence.add")
         .input(
           z.object({
             jobId: z.number().int().optional(),
@@ -273,20 +364,18 @@ export const appRouter = router({
             capturedBy: z.number().int().optional(),
             latitude: z.number().optional(),
             longitude: z.number().optional(),
-            status: z
-              .enum(["needs_review", "verified", "unverified"])
-              .default("needs_review"),
+            status: REFUSED,
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) => createEvidenceRecord(input)),
-      verify: protectedProcedure
+        .mutation(({ input }) => createEvidenceRecord({ ...input, status: "needs_review" })),   // verification is evidence.verify
+      verify: roleProcedure("evidence.verify")
         .input(z.object({ id: z.number().int().positive() }))
         .mutation(({ input }) => verifyEvidenceRecord(input.id)),
     }),
     trips: router({
-      list: protectedProcedure.query(() => listTrips()),
-      create: protectedProcedure
+      list: roleProcedure("trips.list").query(() => listTrips()),
+      create: roleProcedure("trips.create")
         .input(
           z.object({
             tripNumber: z.string().min(1).max(50),
@@ -328,7 +417,7 @@ export const appRouter = router({
                 : undefined),
           })
         ),
-      update: protectedProcedure
+      update: roleProcedure("trips.update")
         .input(
           z.object({
             id: z.number().int().positive(),
@@ -355,10 +444,10 @@ export const appRouter = router({
         }),
     }),
     tripStops: router({
-      list: protectedProcedure
+      list: roleProcedure("tripStops.list")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
         .query(({ input }) => listTripStops(input?.tripId)),
-      create: protectedProcedure
+      create: roleProcedure("tripStops.create")
         .input(
           z.object({
             tripId: z.number().int(),
@@ -398,7 +487,7 @@ export const appRouter = router({
               minutes(input.arrivedAt, input.departedAt),
           });
         }),
-      update: protectedProcedure
+      update: roleProcedure("tripStops.update")
         .input(
           z.object({
             id: z.number().int().positive(),
@@ -421,8 +510,8 @@ export const appRouter = router({
         }),
     }),
     operatingZones: router({
-      list: protectedProcedure.query(() => listOperatingZones()),
-      create: protectedProcedure
+      list: roleProcedure("operatingZones.list").query(() => listOperatingZones()),
+      create: roleProcedure("operatingZones.create")
         .input(
           z.object({
             name: z.string().min(1).max(180),
@@ -441,7 +530,7 @@ export const appRouter = router({
         .mutation(({ input }) => createOperatingZone(input)),
     }),
     assistant: router({
-      forms: protectedProcedure.query(() =>
+      forms: roleProcedure("assistant.forms").query(() =>
         Object.values(FORMS).map(f => ({
           key: f.key,
           version: f.version,
@@ -454,12 +543,16 @@ export const appRouter = router({
        * outputSchema to the declared slots — it cannot return a field this
        * form does not have.
        */
-      draft: protectedProcedure
+      draft: roleProcedure("assistant.draft")
         .input(
           z.object({
             formKey: z.string(),
             targetRef: z.string().max(180),
             transcript: z.string().min(1).max(8000),
+            // Structured write context. targetRef remains display-only.
+            targetRecordId: z.number().int().positive().optional(),
+            eventDateLocal: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+            utcOffsetMinutes: z.number().int().min(-840).max(840).optional(),
             tripId: z.number().int().optional(),
             jobId: z.number().int().optional(),
             unitId: z.number().int().optional(),
@@ -490,7 +583,8 @@ export const appRouter = router({
           const proposal = buildProposal(
             form,
             input.targetRef,
-            extraction.values
+            extraction.values,
+            `P-${randomUUID()}`
           );
 
           await createAssistantProposal({
@@ -499,6 +593,9 @@ export const appRouter = router({
             formVersion: form.version,
             title: form.title,
             targetRef: input.targetRef,
+            targetRecordId: input.targetRecordId,
+            eventDateLocal: input.eventDateLocal,
+            utcOffsetMinutes: input.utcOffsetMinutes,
             jobId: input.jobId,
             tripId: input.tripId,
             unitId: input.unitId,
@@ -522,15 +619,15 @@ export const appRouter = router({
           };
         }),
 
-      get: protectedProcedure
+      get: roleProcedure("assistant.get")
         .input(z.object({ proposalId: z.string() }))
         .query(({ input }) => loadProposal(input.proposalId)),
 
-      pending: protectedProcedure
+      pending: roleProcedure("assistant.pending")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
         .query(({ input }) => listPendingProposals(input?.tripId)),
 
-      answer: protectedProcedure
+      answer: roleProcedure("assistant.answer")
         .input(
           z.object({
             proposalId: z.string(),
@@ -553,7 +650,7 @@ export const appRouter = router({
           return next;
         }),
 
-      setStatus: protectedProcedure
+      setStatus: roleProcedure("assistant.setStatus")
         .input(
           z.object({
             proposalId: z.string(),
@@ -574,7 +671,7 @@ export const appRouter = router({
           return next;
         }),
 
-      readBack: protectedProcedure
+      readBack: roleProcedure("assistant.readBack")
         .input(z.object({ proposalId: z.string() }))
         .mutation(async ({ input }) => {
           const p = await loadProposal(input.proposalId);
@@ -584,7 +681,7 @@ export const appRouter = router({
           return next;
         }),
 
-      acknowledge: protectedProcedure
+      acknowledge: roleProcedure("assistant.acknowledge")
         .input(z.object({ proposalId: z.string() }))
         .mutation(async ({ input }) => {
           const p = await loadProposal(input.proposalId);
@@ -598,28 +695,16 @@ export const appRouter = router({
        * The only path from proposal to operational record. Refuses with the
        * specific outstanding items rather than a generic failure.
        */
-      commit: protectedProcedure
+      commit: roleProcedure("assistant.commit")
         .input(z.object({ proposalId: z.string() }))
-        .mutation(async ({ input }) => {
-          const p = await loadProposal(input.proposalId);
-          if (!p) throw new Error("Proposal not found");
-          const form = FORMS[p.formKey];
-          const check = checkCommit(p, form);
-          if (!check.canCommit)
-            return { committed: false as const, refusals: check.refusals };
+        .mutation(({ ctx, input }) =>
+          executeAssistantCommit({
+            proposalId: input.proposalId,
+            actorUserId: ctx.user.id,
+          })
+        ),
 
-          const result = commitProposal(p, form, new Date());
-          if (!result.ok)
-            return { committed: false as const, refusals: result.refusals };
-
-          await updateAssistantProposal(p.proposalId, {
-            commitState: "committed",
-            committedAt: new Date(),
-          });
-          return { committed: true as const, fields: result.fields };
-        }),
-
-      reject: protectedProcedure
+      reject: roleProcedure("assistant.reject")
         .input(z.object({ proposalId: z.string() }))
         .mutation(async ({ input }) => {
           const p = await loadProposal(input.proposalId);
@@ -633,11 +718,11 @@ export const appRouter = router({
       // while a trip is active. Runs the point against all active operating
       // zones and proposes any enter/exit it implies as a pending zoneEvent —
       // it never writes to tripStops directly.
-      submitBreadcrumb: protectedProcedure
+      submitBreadcrumb: roleProcedure("gps.submitBreadcrumb")
         .input(
           z.object({
-            tripId: z.number().int(),
-            unitId: z.number().int().optional(),
+            tripId: z.number().int().optional(),
+            unitId: REFUSED,
             latitude: z.number().min(-90).max(90),
             longitude: z.number().min(-180).max(180),
             accuracyMetres: z.number().nonnegative().optional(),
@@ -647,23 +732,29 @@ export const appRouter = router({
             recordedAt: z.coerce.date(),
           })
         )
-        .mutation(({ input }) => ingestBreadcrumb(input)),
-      breadcrumbs: protectedProcedure
+        .mutation(async ({ ctx, input }) => {
+          const own = await operatorForUser(ctx.user.id);
+          const active = own ? await activeTripForOperator(own.id) : null;
+          if (!active) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No active trip is assigned to the signed-in operator; a position is not attached to a trip it was not assigned to" });
+          if (input.tripId != null && input.tripId !== active.id) throw new TRPCError({ code: "FORBIDDEN", message: `The signed-in operator's active trip is ${active.id}; a breadcrumb is not attached to another trip` });
+          return ingestBreadcrumb({ ...input, tripId: active.id, unitId: active.unitId ?? undefined });
+        }),
+      breadcrumbs: roleProcedure("gps.breadcrumbs")
         .input(z.object({ tripId: z.number().int() }))
         .query(({ input }) => listTripBreadcrumbs(input.tripId)),
       // Pending proposals a driver/dispatcher hasn't ruled on yet. Omit tripId
       // to review pending events across all active trips (dispatch view).
-      pendingZoneEvents: protectedProcedure
+      pendingZoneEvents: roleProcedure("gps.pendingZoneEvents")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
         .query(({ input }) => listZoneEvents(input?.tripId, "pending")),
-      zoneEvents: protectedProcedure
+      zoneEvents: roleProcedure("gps.zoneEvents")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
         .query(({ input }) => listZoneEvents(input?.tripId)),
       // The human-in-the-loop step: a confirmed event can optionally be linked
       // to the tripStop it resolves (e.g. sets arrivedAt). Rejecting it leaves
       // the tripStop entirely untouched — the GPS engine never overwrites a
       // record on its own say-so.
-      confirmZoneEvent: protectedProcedure
+      confirmZoneEvent: roleProcedure("gps.confirmZoneEvent")
         .input(
           z.object({
             id: z.number().int().positive(),
@@ -683,13 +774,13 @@ export const appRouter = router({
         }),
     }),
     dutyRecords: router({
-      list: protectedProcedure
+      list: roleProcedure("dutyRecords.list")
         .input(z.object({ operatorId: z.number().int().optional() }).optional())
         .query(({ input }) => listDutyRecords(input?.operatorId)),
-      create: protectedProcedure
+      create: roleProcedure("dutyRecords.create")
         .input(
           z.object({
-            operatorId: z.number().int(),
+            operatorId: z.number().int().optional(),
             tripId: z.number().int().optional(),
             dutyStatus: z.enum([
               "driving",
@@ -708,9 +799,17 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) =>
-          createDutyRecord({
+        .mutation(async ({ ctx, input }) => {
+          const own = await operatorForUser(ctx.user.id);
+          const roles = (ctx as unknown as { roles?: readonly string[] }).roles ?? [];
+          const amending = input.operatorId != null && input.operatorId !== own?.id;
+          if (amending && !roles.some(r => r === "dispatcher" || r === "hr" || r === "management")) throw new TRPCError({ code: "FORBIDDEN", message: "A duty record names the operator of the signed-in driver; recording for another operator is an amendment for dispatch, HR or management" });
+          const operatorId = amending ? input.operatorId! : own?.id;
+          if (operatorId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No operator record for the signed-in user, and no amendment authority to name one" });
+          return createDutyRecord({
             ...input,
+            operatorId,
+            source: amending ? `amendment by user ${ctx.user.id}` : input.source,
             durationMinutes:
               input.durationMinutes ??
               (input.endedAt
@@ -720,14 +819,14 @@ export const appRouter = router({
                       60000
                   )
                 : undefined),
-          })
-        ),
+          });
+        }),
     }),
     workOrders: router({
-      list: protectedProcedure
+      list: roleProcedure("workOrders.list")
         .input(z.object({ unitId: z.number().int().optional() }).optional())
         .query(({ input }) => listWorkOrders(input?.unitId)),
-      create: protectedProcedure
+      create: roleProcedure("workOrders.create")
         .input(
           z.object({
             workOrderNumber: z.string().min(1).max(80),
@@ -760,7 +859,7 @@ export const appRouter = router({
           })
         )
         .mutation(({ input }) => createWorkOrder(input)),
-      update: protectedProcedure
+      update: roleProcedure("workOrders.update")
         .input(
           z.object({
             id: z.number().int().positive(),
@@ -792,26 +891,26 @@ export const appRouter = router({
         }),
     }),
     routeContext: router({
-      list: protectedProcedure.query(() => listRouteContexts()),
-      create: protectedProcedure
+      list: roleProcedure("routeContext.list").query(() => listRouteContexts()),
+      create: roleProcedure("routeContext.create")
         .input(
           z.object({
             name: z.string().min(1).max(180),
             source: z.string().min(1).max(220),
             effectiveAt: z.coerce.date(),
             expiresAt: z.coerce.date().optional(),
-            verifiedAt: z.coerce.date().optional(),
-            confidence: z.enum(["low", "medium", "high"]).default("medium"),
+            verifiedAt: REFUSED,
+            confidence: REFUSED,
             restrictions: z.string().optional(),
             snapshotKey: z.string().max(512).optional(),
             snapshotUrl: z.string().max(1024).optional(),
           })
         )
-        .mutation(({ input }) => createRouteContext(input)),
+        .mutation(({ input }) => createRouteContext({ ...input, verifiedAt: null, confidence: "low", source: `stated: ${input.source}` })),   // a stated source is a claim; verification names its dataset
     }),
     routeDecisions: router({
-      list: protectedProcedure.query(() => listRouteDecisions()),
-      create: protectedProcedure
+      list: roleProcedure("routeDecisions.list").query(() => listRouteDecisions()),
+      create: roleProcedure("routeDecisions.create")
         .input(
           z.object({
             tripId: z.string().min(1).max(40),
@@ -828,17 +927,17 @@ export const appRouter = router({
             riskLevel: z
               .enum(["low", "moderate", "high", "blocked"])
               .default("moderate"),
-            source: z.string().max(180).optional(),
-            confidence: z.string().max(40).optional(),
+            source: REFUSED,
+            confidence: REFUSED,
             driverAcknowledged: z.number().int().default(0),
           })
         )
-        .mutation(({ input }) => createRouteDecision(input)),
+        .mutation(({ input }) => createRouteDecision({ ...input, source: `manual choice (routing source ${routingSourceStatus().status})`, confidence: "manual — not authority data" })),   // a person's choice, labelled as one; never authority
     }),
     billing: router({
       rateCards: router({
-        list: protectedProcedure.query(() => listBillingRateCards()),
-        create: protectedProcedure
+        list: roleProcedure("rateCards.list").query(() => listBillingRateCards()),
+        create: roleProcedure("rateCards.create")
           .input(
             z.object({
               name: z.string().min(1).max(160),
@@ -853,7 +952,7 @@ export const appRouter = router({
             })
           )
           .mutation(({ input }) => createBillingRateCard(input)),
-        update: protectedProcedure
+        update: roleProcedure("rateCards.update")
           .input(
             z.object({
               id: z.number().int().positive(),
@@ -870,10 +969,10 @@ export const appRouter = router({
           }),
       }),
       lines: router({
-        list: protectedProcedure
+        list: roleProcedure("lines.list")
           .input(z.object({ jobId: z.number().int().optional() }).optional())
           .query(({ input }) => listJobChargeLines(input?.jobId)),
-        create: protectedProcedure
+        create: roleProcedure("lines.create")
           .input(
             z.object({
               jobId: z.number().int().optional(),
@@ -892,8 +991,8 @@ export const appRouter = router({
       }),
     }),
     vendors: router({
-      list: protectedProcedure.query(() => listVendors()),
-      update: protectedProcedure
+      list: roleProcedure("vendors.list").query(() => listVendors()),
+      update: roleProcedure("vendors.update")
         .input(
           z.object({
             id: z.number().int().positive(),
@@ -907,7 +1006,7 @@ export const appRouter = router({
           const { id, ...values } = input;
           return updateVendor(id, values);
         }),
-      create: protectedProcedure
+      create: roleProcedure("vendors.create")
         .input(
           z.object({
             name: z.string().min(1).max(180),
@@ -924,8 +1023,8 @@ export const appRouter = router({
         .mutation(({ input }) => createVendor(input)),
     }),
     unitSafety: router({
-      list: protectedProcedure.query(() => listUnitSafetyPlans()),
-      update: protectedProcedure
+      list: roleProcedure("unitSafety.list").query(() => listUnitSafetyPlans()),
+      update: roleProcedure("unitSafety.update")
         .input(
           z.object({
             id: z.number().int().positive(),
@@ -941,7 +1040,7 @@ export const appRouter = router({
           const { id, ...values } = input;
           return updateUnitSafetyPlan(id, values);
         }),
-      create: protectedProcedure
+      create: roleProcedure("unitSafety.create")
         .input(
           z.object({
             unitId: z.number().int().optional(),
@@ -958,8 +1057,8 @@ export const appRouter = router({
     }),
     complianceEngine: router({
       artifacts: router({
-        list: protectedProcedure.query(() => listComplianceArtifacts()),
-        create: protectedProcedure
+        list: roleProcedure("artifacts.list").query(() => listComplianceArtifacts()),
+        create: roleProcedure("artifacts.create")
           .input(
             z.object({
               trackingNumber: z.string().min(1).max(40),
@@ -980,8 +1079,8 @@ export const appRouter = router({
           .mutation(({ input }) => createComplianceArtifact(input)),
       }),
       tailgates: router({
-        list: protectedProcedure.query(() => listTailgateMeetings()),
-        create: protectedProcedure
+        list: roleProcedure("tailgates.list").query(() => listTailgateMeetings()),
+        create: roleProcedure("tailgates.create")
           .input(
             z.object({
               trackingNumber: z.string().min(1).max(40),
@@ -1004,8 +1103,8 @@ export const appRouter = router({
           .mutation(({ input }) => createTailgateMeeting(input)),
       }),
       transfers: router({
-        list: protectedProcedure.query(() => listTransferAcknowledgements()),
-        create: protectedProcedure
+        list: roleProcedure("transfers.list").query(() => listTransferAcknowledgements()),
+        create: roleProcedure("transfers.create")
           .input(
             z.object({
               trackingNumber: z.string().min(1).max(40),
@@ -1021,7 +1120,7 @@ export const appRouter = router({
             })
           )
           .mutation(({ input }) => createTransferAcknowledgement(input)),
-        acknowledge: protectedProcedure
+        acknowledge: roleProcedure("transfers.acknowledge")
           .input(
             z.object({
               id: z.number().int().positive(),
@@ -1034,8 +1133,8 @@ export const appRouter = router({
       }),
     }),
     locations: router({
-      list: protectedProcedure.query(() => listLocationIdentities()),
-      create: protectedProcedure
+      list: roleProcedure("locations.list").query(() => listLocationIdentities()),
+      create: roleProcedure("locations.create")
         .input(
           z.object({
             name: z.string().min(1).max(180),
@@ -1062,8 +1161,8 @@ export const appRouter = router({
         .mutation(({ input }) => createLocationIdentity(input)),
     }),
     manifests: router({
-      list: protectedProcedure.query(() => listManifests()),
-      create: protectedProcedure
+      list: roleProcedure("manifests.list").query(() => listManifests()),
+      create: roleProcedure("manifests.create")
         .input(
           z.object({
             manifestNumber: z.string().min(1).max(80),
@@ -1079,37 +1178,31 @@ export const appRouter = router({
             scaleTickets: z.string().optional(),
             evidenceRefs: z.string().optional(),
             signatureRefs: z.string().optional(),
-            status: z.enum(["draft", "verified", "complete"]).default("draft"),
+            status: REFUSED,
           })
         )
-        .mutation(({ input }) => createManifest(input)),
+        .mutation(({ input }) => createManifest({ ...input, status: "draft" })),
     }),
     scans: router({
-      list: protectedProcedure.query(() => listScanAudits()),
-      create: protectedProcedure
+      list: roleProcedure("scans.list").query(() => listScanAudits()),
+      create: roleProcedure("scans.create")
         .input(
           z.object({
             scanType: z.enum(["qr", "nfc"]),
             subjectType: z.enum(["unit", "location", "manifest"]),
             subjectId: z.number().int(),
-            accessRole: z.enum([
-              "inspection",
-              "driver",
-              "mechanic",
-              "dispatcher",
-              "admin",
-            ]),
+            accessRole: REFUSED,
             scannedAt: z.coerce.date(),
             latitude: z.number().optional(),
             longitude: z.number().optional(),
           })
         )
-        .mutation(({ input }) => createScanAudit(input)),
+        .mutation(({ ctx, input }) => createScanAudit({ ...input, accessRole: scanRoleOf((ctx as unknown as { roles?: readonly string[] }).roles ?? []) })),   // the caller's role, never the caller's claim
     }),
     identity: router({
       operators: router({
-        list: protectedProcedure.query(() => listOperators()),
-        create: protectedProcedure
+        list: roleProcedure("operators.list").query(() => listOperators()),
+        create: roleProcedure("operators.create")
           .input(
             z.object({
               userId: z.number().int().optional(),
@@ -1128,8 +1221,8 @@ export const appRouter = router({
           .mutation(({ input }) => createOperator(input)),
       }),
       units: router({
-        list: protectedProcedure.query(() => listUnits()),
-        create: protectedProcedure
+        list: roleProcedure("units.list").query(() => listUnits()),
+        create: roleProcedure("units.create")
           .input(
             z.object({
               unitNumber: z.string().min(1).max(40),
@@ -1141,20 +1234,16 @@ export const appRouter = router({
               axles: z.number().int().optional(),
               dimensions: z.string().max(160).optional(),
               equipment: z.string().optional(),
-              inspectionStatus: z
-                .enum(["current", "due", "blocked"])
-                .default("current"),
-              maintenanceStatus: z
-                .enum(["clear", "review", "blocked"])
-                .default("clear"),
+              inspectionStatus: REFUSED,
+              maintenanceStatus: REFUSED,
               qrTag: z.string().max(120).optional(),
             })
           )
-          .mutation(({ input }) => createUnit(input)),
+          .mutation(({ input }) => createUnit({ ...input, inspectionStatus: "due", maintenanceStatus: "review" })),   // a new row proves nothing: due and review until the facts exist
       }),
       jobUnits: router({
-        list: protectedProcedure.query(() => listJobUnits()),
-        create: protectedProcedure
+        list: roleProcedure("jobUnits.list").query(() => listJobUnits()),
+        create: roleProcedure("jobUnits.create")
           .input(
             z.object({
               jobId: z.number().int(),
@@ -1166,13 +1255,18 @@ export const appRouter = router({
               hours: z.number().int().optional(),
               mileage: z.number().int().optional(),
               workPerformed: z.string().optional(),
+              // v21.2 — the readiness check this assignment relies on. Required
+              // when enforcement is on; recorded whenever supplied.
+              eligibilityCheckId: z.number().int().positive().nullable().optional(),
             })
           )
-          .mutation(({ input }) => createJobUnit(input)),
+          // v21.2 — under the enforcement setting: off as always, advisory
+          // records findings, enforced refuses without a valid check.
+          .mutation(async ({ input }) => { const r = await createJobUnitGated(input); return r.id; }),
       }),
       inspections: router({
-        list: protectedProcedure.query(() => listInspections()),
-        create: protectedProcedure
+        list: roleProcedure("inspections.list").query(() => listInspections()),
+        create: roleProcedure("inspections.create")
           .input(
             z.object({
               unitId: z.number().int(),
@@ -1189,8 +1283,8 @@ export const appRouter = router({
           .mutation(({ input }) => createInspection(input)),
       }),
       documents: router({
-        list: protectedProcedure.query(() => listComplianceDocuments()),
-        create: protectedProcedure
+        list: roleProcedure("documents.list").query(() => listComplianceDocuments()),
+        create: roleProcedure("documents.create")
           .input(
             z.object({
               ownerType: z.enum(["operator", "unit", "job"]),
@@ -1201,15 +1295,13 @@ export const appRouter = router({
               storageUrl: z.string().max(1024).optional(),
               capturedAt: z.coerce.date(),
               expiresAt: z.coerce.date().optional(),
-              verificationStatus: z
-                .enum(["needs_review", "verified", "rejected"])
-                .default("needs_review"),
+              verificationStatus: REFUSED,
               source: z.string().max(220).optional(),
               confidence: z.enum(["low", "medium", "high"]).default("medium"),
             })
           )
-          .mutation(({ input }) => createComplianceDocument(input)),
-        review: protectedProcedure
+          .mutation(({ input }) => createComplianceDocument({ ...input, verificationStatus: "needs_review" })),   // review is documents.review
+        review: roleProcedure("documents.review")
           .input(
             z.object({
               id: z.number().int().positive(),
@@ -1223,8 +1315,8 @@ export const appRouter = router({
     }),
     compliance: router({
       loads: router({
-        list: protectedProcedure.query(() => listLoadProfiles()),
-        create: protectedProcedure
+        list: roleProcedure("loads.list").query(() => listLoadProfiles()),
+        create: roleProcedure("loads.create")
           .input(
             z.object({
               jobId: z.number().int(),
@@ -1240,19 +1332,17 @@ export const appRouter = router({
               quantity: z.string().max(80).optional(),
               transportMode: z.string().max(80).optional(),
               jurisdiction: z.string().max(120).optional(),
-              classificationStatus: z
-                .enum(["needs_verification", "verified", "blocked"])
-                .default("needs_verification"),
+              classificationStatus: REFUSED,
               source: z.string().max(220).optional(),
               confidence: z.enum(["low", "medium", "high"]).default("low"),
-              verifiedAt: z.coerce.date().optional(),
+              verifiedAt: REFUSED,
             })
           )
-          .mutation(({ input }) => createLoadProfile(input)),
+          .mutation(({ input }) => createLoadProfile({ ...input, classificationStatus: "needs_verification", verifiedAt: null })),   // TDG is never self-certified
       }),
       facilities: router({
-        list: protectedProcedure.query(() => listFacilities()),
-        create: protectedProcedure
+        list: roleProcedure("facilities.list").query(() => listFacilities()),
+        create: roleProcedure("facilities.create")
           .input(
             z.object({
               name: z.string().min(1).max(220),
@@ -1272,8 +1362,8 @@ export const appRouter = router({
           .mutation(({ input }) => createFacility(input)),
       }),
       maintenance: router({
-        list: protectedProcedure.query(() => listMaintenanceDefects()),
-        create: protectedProcedure
+        list: roleProcedure("maintenance.list").query(() => listMaintenanceDefects()),
+        create: roleProcedure("maintenance.create")
           .input(
             z.object({
               unitId: z.number().int(),
@@ -1281,9 +1371,7 @@ export const appRouter = router({
               severity: z
                 .enum(["advisory", "inspection_required", "critical"])
                 .default("advisory"),
-              status: z
-                .enum(["open", "in_progress", "resolved"])
-                .default("open"),
+              status: REFUSED,
               detail: z.string().optional(),
               storageKey: z.string().max(512).optional(),
               storageUrl: z.string().max(1024).optional(),
@@ -1293,11 +1381,11 @@ export const appRouter = router({
               completedAt: z.coerce.date().optional(),
             })
           )
-          .mutation(({ input }) => createMaintenanceDefect(input)),
+          .mutation(({ input }) => createMaintenanceDefect({ ...input, status: "open" })),   // resolution is a later act
       }),
       deliveries: router({
-        list: protectedProcedure.query(() => listDeliveries()),
-        create: protectedProcedure
+        list: roleProcedure("deliveries.list").query(() => listDeliveries()),
+        create: roleProcedure("deliveries.create")
           .input(
             z.object({
               jobId: z.number().int(),
@@ -1311,24 +1399,22 @@ export const appRouter = router({
           )
           .mutation(({ input }) => createDelivery(input)),
       }),
-      sign: protectedProcedure
+      sign: roleProcedure("compliance.sign")
         .input(
           z.object({
             jobId: z.number().int(),
             signerName: z.string().min(1).max(180),
-            authMethod: z.string().min(1).max(120),
+            authMethod: REFUSED,
             signedAt: z.coerce.date(),
-            documentHash: z.string().max(180).optional(),
-            status: z
-              .enum(["pending", "authenticated", "invalidated"])
-              .default("pending"),
+            documentHash: REFUSED,
+            status: REFUSED,
           })
         )
-        .mutation(({ input }) => createSignatureAudit(input)),
+        .mutation(({ input }) => createSignatureAudit({ ...input, authMethod: "legacy observation — not the frozen signature chain (use closeout.siteSign)", documentHash: null, status: "pending" })),
     }),
     safety: router({
-      list: protectedProcedure.query(() => listSafetyEvents()),
-      create: protectedProcedure
+      list: roleProcedure("safety.list").query(() => listSafetyEvents()),
+      create: roleProcedure("safety.create")
         .input(
           z.object({
             jobId: z.number().int().optional(),
@@ -1337,12 +1423,10 @@ export const appRouter = router({
             title: z.string().min(1).max(220),
             detail: z.string().optional(),
             occurredAt: z.coerce.date(),
-            status: z
-              .enum(["open", "acknowledged", "resolved"])
-              .default("open"),
+            status: REFUSED,
           })
         )
-        .mutation(({ input }) => createSafetyEvent(input)),
+        .mutation(({ input }) => createSafetyEvent({ ...input, status: "open" })),
     }),
   }),
 });
