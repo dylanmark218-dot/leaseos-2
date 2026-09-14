@@ -9,7 +9,14 @@ cd "$(dirname "$0")/.."
 # permission count, which is how this script briefly tried to write the
 # document to a file named 112.
 OUT="${2:-LEASEOS_CURRENT_STATE.md}"
-RELEASE="${1:-$(ls LEASEOS_B2*_*.md | sort -V | tail -1 | sed -E 's/.*_V?([0-9]+_[0-9]+(_[0-9]+)?)_.*/\1/; s/_/./g')}"
+if [ -n "${1:-}" ]; then
+  RELEASE="$1"
+elif [ -s LEASEOS_RELEASE ]; then
+  RELEASE="$(tr -d '\r\n' < LEASEOS_RELEASE)"
+else
+  echo "LEASEOS_RELEASE is missing or empty; pass an explicit release as argument 1" >&2
+  exit 1
+fi
 TABLES=$(grep -c 'mysqlTable(' drizzle/schema.ts)
 MIGRATIONS=$(ls drizzle/*.sql | wc -l | tr -d ' ')
 ROUTERS=$(ls server/*Router*.ts server/routers.ts server/recordsRouter.ts 2>/dev/null | sort -u)
@@ -49,7 +56,7 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **@@RELEASE@@** | latest checkpoint filename |
+| Release | **@@RELEASE@@** | `LEASEOS_RELEASE` (or explicit argument 1) |
 | Tables | **@@TABLES@@** | `mysqlTable(` declarations in `drizzle/schema.ts` |
 | Migrations | **@@MIGRATIONS@@** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
 | Role-authorized procedures | **@@PROCS@@** | `roleProcedure(` call sites across all routers |
