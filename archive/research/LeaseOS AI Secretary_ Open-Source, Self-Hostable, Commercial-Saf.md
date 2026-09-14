@@ -1,0 +1,122 @@
+# LeaseOS AI Secretary: Open-Source, Self-Hostable, Commercial-Safe Stack Verification (September 2026)
+
+## TL;DR
+- **The consultant's stack is largely sound and commercial-safe.** Eight of the nine proposed components carry genuinely permissive licenses (Apache 2.0 or MIT) that allow commercial, self-hosted, offline use — the lone trap is exactly the one the consultant flagged: Mistral's **Voxtral TTS weights are CC BY-NC 4.0 (non-commercial)**. Use Voxtral *Realtime* (STT, Apache 2.0) but NOT Voxtral *TTS* weights commercially; pair with Kokoro or Qwen3-TTS for the speech-output layer.
+- **The tightest real constraints are TTS licensing and true full-duplex voice.** For commercial TTS the safe picks are Kokoro-82M, Qwen3-TTS, Chatterbox, Dia, Piper, and VoxCPM (all Apache/MIT). Genuine open-weight full-duplex speech-to-speech (speak while listening, handle interruption) now exists but with caveats — Moshi (CC-BY 4.0) and FLM-Audio (Apache 2.0) are the commercial-safe options; the highest-quality option (NVIDIA PersonaPlex) uses a custom license and Qwen3-Omni is only half-duplex. For a first product, a cascade (STT → LLM → TTS) remains the safest, most flexible path.
+- **Realistic hardware:** a single 24–32GB GPU (e.g., RTX 4090/5090 or the ~$1,799 Radeon AI PRO R9700 32GB) runs gpt-oss-20b OR Qwen3-Coder-30B plus Whisper and Kokoro comfortably; running the reasoning model, coding model, and voice all resident simultaneously wants ~48GB VRAM or two cards, roughly a $3,000–$8,000 workstation. Use RAG as the default for your document knowledge; reserve LoRA fine-tuning for tone/format, not facts.
+
+## Key Findings
+
+### Component-by-component verification
+
+| # | Component | Exists / current? | License | Commercial OK? | Approx. hardware |
+|---|-----------|-------------------|---------|----------------|------------------|
+| 1 | gpt-oss-20b (OpenAI) | Yes | Apache 2.0 | ✅ Yes | ~12–16GB VRAM (MXFP4/Q4) |
+| 2 | Qwen3-Coder-30B-A3B | Yes | Apache 2.0 | ✅ Yes | ~19–22GB VRAM (Q4), 256K context |
+| 3 | Qwen3-Omni-30B-A3B | Yes | Apache 2.0 | ✅ Yes | ~48GB (4-bit AWQ) / 80GB full |
+| 4 | Whisper (incl. turbo) | Yes | MIT | ✅ Yes | ~6GB VRAM (turbo) |
+| 5a | Voxtral Realtime (STT) | Yes | Apache 2.0 | ✅ Yes | ~16GB BF16 / ~2.5GB Q4 |
+| 5b | Voxtral **TTS** | Yes | **CC BY-NC 4.0** | ❌ **No (non-commercial)** | 4.1B model |
+| 6 | Kokoro-82M | Yes | Apache 2.0 | ✅ Yes | ~2–3GB VRAM or CPU |
+| 7 | Docling (IBM) | Yes | MIT | ✅ Yes | CPU-capable; commodity HW |
+| 8 | Qdrant | Yes | Apache 2.0 | ✅ Yes | CPU; RAM scales w/ vectors |
+| 9 | Ollama + llama.cpp | Yes | MIT (both) | ✅ Yes | serving layer |
+
+### 1. gpt-oss-20b — VERIFIED
+OpenAI's open-weight model, released under **Apache 2.0** (confirmed on OpenAI's own site, the GitHub repo, and Ollama). It is a 21B-parameter mixture-of-experts model with only 3.6B active parameters per token. Thanks to native MXFP4 quantization of the MoE weights, it runs within ~16GB of memory; independent hardware guides put the Q4_K_M footprint at ~12GB of weights plus ~2GB KV cache (~14GB total), fitting on a 16GB card like an RTX 4060 Ti. It is trained for tool use and reasoning (configurable low/medium/high effort), supports 128K context, and outputs full chain-of-thought. Caveat: it uses OpenAI's "harmony" response format and must be used with it. The consultant's claims (Apache 2.0, ~16GB) are accurate.
+
+### 2. Qwen3-Coder-30B-A3B — VERIFIED
+A 30.5B-parameter MoE coding model (3.3B active, 128 experts, 8 active) under **Apache 2.0** (confirmed on the Qwen GitHub/Ollama license text and on Fireworks, which states the license "permits unrestricted commercial use"). [Fireworks AI](https://fireworks.ai/models/fireworks/qwen3-coder-30b-a3b-instruct) Native context is **262,144 tokens (256K)**, extendable to 1M with YaRN. [Hugging Face](https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct) At Q4_K_M it needs ~19–22GB VRAM (~18.6GB weights). Released July 31, 2025; still current and widely served. Note: it runs in non-thinking mode only (no `<think>` blocks). The consultant's claims (Apache 2.0, ~19GB, 256K) are accurate.
+
+### 3. Qwen3-Omni-30B-A3B — VERIFIED with an important caveat
+Alibaba's natively end-to-end omni-modal model (text/image/audio/video in, text + speech out), **Apache 2.0** across Instruct, Thinking, and Captioner checkpoints (confirmed on the arXiv paper and HF cards). It supports **119 text languages, 19 speech-input languages, and 10 speech-output languages** [huggingface](https://huggingface.co/cpatonn/Qwen3-Omni-30B-A3B-Instruct-AWQ-4bit) — matching the consultant's "119 text languages" claim. VRAM: community 4-bit AWQ builds fit in roughly 48GB (an RTX 4090D 48GB runs it near-capacity); full precision wants an 80GB datacenter GPU. **Critical caveat the consultant did not flag: Qwen3-Omni is half-duplex / turn-based, not true full-duplex.** It streams and can emit text+speech in parallel, but academic sources explicitly classify it as a "half-duplex speech LLM" [arXiv](https://arxiv.org/html/2608.28630) — it cannot genuinely speak while listening / handle barge-in without additional fine-tuning (e.g., DuplexOmni). It is excellent for voice Q&A, document reading, and multimodal understanding, but do not promise full-duplex conversation from it out of the box.
+
+### 4. Whisper (turbo) — VERIFIED
+OpenAI's Whisper, code and weights, is **MIT-licensed** (confirmed on the openai/whisper GitHub and HF card). `large-v3-turbo` is an 809M-parameter distilled decoder variant, ~8x faster than large-v3, needing ~6GB VRAM (vs ~10GB), 99 languages. Note: Whisper is fundamentally an *offline/batch* transcriber; it is not natively real-time (though faster-whisper/whisper.cpp enable near-real-time). For truly low-latency streaming, Voxtral Realtime or Kyutai STT are better suited. The consultant's claims (MIT, STT) are accurate.
+
+### 5. Voxtral — THE LICENSING SPLIT IS REAL AND CORRECTLY FLAGGED
+Mistral's Voxtral family splits cleanly on licensing, exactly as the consultant warned:
+- **Voxtral Realtime** (`Voxtral-Mini-4B-Realtime-2602`, released Feb 4, 2026) — a 4B streaming STT model, **Apache 2.0 open weights** on Hugging Face, [Simon Willison](https://simonwillison.net/2026/Feb/4/voxtral-2/) sub-200ms configurable latency, 13 languages. ✅ **Commercial-safe.** ~16GB VRAM BF16 on a single GPU; a Q4 build drops to ~2.5GB. [Weesper Neon Flow](https://weesperneonflow.ai/en/blog/2026-03-31-voxtral-whisper-open-source-speech-models-comparison-2026/) At 480ms delay it's competitive with Whisper; at 960ms it beats it. [arXiv](https://arxiv.org/html/2602.11298v2)
+- **Voxtral Mini Transcribe V2** — batch STT, **API-only** (not open weights). [Weesper Neon Flow](https://weesperneonflow.ai/en/blog/2026-03-31-voxtral-whisper-open-source-speech-models-comparison-2026/)
+- **Voxtral TTS** (`Voxtral-4B-TTS-2603`, released March 26, 2026) — a 4.1B-parameter model (9 languages, 90ms time-to-first-audio, 68.4% win rate vs ElevenLabs Flash v2.5) released under **CC BY-NC 4.0 (NON-COMMERCIAL)**, confirmed on Mistral's own site, the HF model card, and the arXiv paper ("We release the model weights under a CC BY-NC license"). [arXiv](https://arxiv.org/abs/2603.25551) The bundled reference voices also inherit CC BY-NC. [Hugging Face](https://huggingface.co/mistralai/Voxtral-4B-TTS-2603) ❌ **NOT commercial-safe for self-hosting.** Commercial use requires Mistral's paid API — confirmed on Mistral's official pricing page (`voxtral-mini-tts-latest`, `/v1/audio/speech`) at **$0.016 per 1,000 characters**.
+
+**Bottom line: Use Voxtral Realtime for STT commercially; do NOT self-host Voxtral TTS weights in LeaseOS. Use Kokoro or Qwen3-TTS for the speech-output layer instead.**
+
+### 6. Kokoro-82M — VERIFIED
+An 82M-parameter TTS model (StyleTTS 2 lineage, ISTFTNet decoder), **Apache 2.0** (confirmed on the hexgrad HF card and multiple reviews). v1.0 (Jan 27, 2025) ships **54 preset voices spanning 9 language/accent groups** (American & British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese, Mandarin), outputs 24kHz audio, weights ~327MB, and ranked #1 on the TTS Spaces Arena leaderboard at launch (as v0.19). It runs faster than real-time even on CPU — a hands-on test clocked ~6x real-time on an Apple M3 Pro CPU (a 22-second narration rendered in ~3.5 seconds) at ~2–3GB GPU memory. **Caveats: no voice cloning (54 fixed presets only), and it requires the `espeak-ng` phonemizer as a dependency.** Excellent for reading documents aloud and for the assistant's voice. The consultant's claims (Apache 2.0, small/fast) are accurate.
+
+### 7. Docling (IBM) — VERIFIED
+IBM Research's document-conversion toolkit, **MIT-licensed** (confirmed on the docling GitHub, the AAAI 2025 paper, and IBM Research). It parses PDF, DOCX, PPTX, XLSX, HTML, EPUB, images/scans, and even audio/video into a unified structured `DoclingDocument` (Markdown/JSON), with layout analysis (DocLayNet/RT-DETR), table structure (TableFormer), and OCR backends (EasyOCR, Tesseract, RapidOCR). It now integrates the **Granite-Docling-258M VLM (Apache 2.0, released January 2026)**. Runs 100% locally/air-gapped [Docling](https://docling.org/) — ideal for poor-connectivity environments. Hosted under the LF AI & Data Foundation. [GitHub](https://github.com/docling-project/docling) Note: the Docling *codebase* is MIT, but individual bundled models carry their own licenses [GitHub](https://github.com/docling-project/docling) (Granite-Docling is Apache 2.0). The consultant's claims (MIT, broad format ingestion + OCR) are accurate.
+
+### 8. Qdrant — VERIFIED
+The Rust-based vector database, **Apache 2.0** (confirmed on the qdrant GitHub LICENSE file). Fully open-source and self-hostable with no feature gates; [Railway](https://railway.com/deploy/qdrant-vector-database) supports dense, sparse, and multivector (ColBERT-style) search, rich payload filtering, and hybrid fusion (RRF/DBSF). REST + gRPC APIs. [GitHub](https://github.com/qdrant/qdrant) Current (v1.19 as of mid-2026). The consultant's claims (Apache 2.0) are accurate. Alternatives: Milvus (Apache 2.0) and pgvector if you're already on Postgres with <1M vectors. [Railway](https://railway.com/deploy/qdrant-vector-database)
+
+### 9. Ollama and llama.cpp — VERIFIED
+Both are **MIT-licensed** (confirmed on multiple sources). llama.cpp is the C/C++ inference engine created by Georgi Gerganov (open-sourced March 2023) that underpins Ollama and LM Studio; it crossed 100,000 GitHub stars in March 2026 (~126,000 as of writing, faster than PyTorch or TensorFlow reached the milestone). Both expose an **OpenAI-compatible API** (Ollama on `localhost:11434/v1`) and support **function/tool calling** via the standard OpenAI `tools` parameter. [Vucense](https://vucense.com/dev-corner/openai-compatible-llm-apis-2026/) Ollama added Anthropic-API compatibility (Jan 2026) and an MLX engine for Apple Silicon (v0.19, March 2026). [Learn AI](https://ai.miraheze.org/wiki/Ollama) For higher-throughput/multi-user serving, consider vLLM (Apache 2.0) or SGLang. The consultant's claims are accurate.
+
+### Current best open-weight models (Sept 2026)
+The field has moved fast in 2026. For **reasoning/general**: gpt-oss (20B/120B, Apache 2.0) remains the cleanest-licensed local pick; DeepSeek V4 checkpoints (MIT), Qwen3.8 (Apache 2.0 for the 27B; conditional "Max" license for the 2.4T sparse model), GLM-5.3 (custom permissive), and Kimi K3 (custom license with commercial conditions) [Wavect](https://wavect.io/blog/open-weight-llm-comparison-2026/) lead the frontier of open weights. For **coding**: Qwen3-Coder (Apache 2.0) is the best clean-licensed local coder; larger/hosted options like DeepSeek V4-Pro (~80.6% SWE-bench Verified, MIT), Kimi K3 (frontend leader), and GLM-5.3 [Morph](https://www.morphllm.com/best-open-source-coding-model-2026) lead raw benchmarks but need multi-node hardware. **For LeaseOS's local, commercial, single-box constraints, the consultant's gpt-oss-20b + Qwen3-Coder-30B pairing remains a very good, license-clean choice.**
+
+### Best commercial-safe TTS (the tightest constraint)
+Confirmed Apache-2.0 / MIT (commercial-safe): **Kokoro-82M** (Apache 2.0, best lightweight/CPU pick), **Qwen3-TTS** (Apache 2.0, released Jan 22, 2026, 10 languages, [Aihub](https://docs.aihub.gg/tts/tts-tools/) voice cloning + voice design, ~4GB VRAM), **Chatterbox** (MIT, Resemble AI). On Chatterbox: the newest **Chatterbox-Turbo** (350M params, released Dec 15, 2025) clones a voice from ~5s of audio at sub-200ms latency; in Resemble AI's own Podonos-run blind study, **63.75%** of listeners preferred Chatterbox over ElevenLabs, and a follow-up reported **65.3% preferred Chatterbox-Turbo vs 24.5% for ElevenLabs** (10.2% neutral) — note these are vendor-run studies. Also commercial-safe: **Dia** (Apache 2.0, dialogue), **Piper** (MIT, Raspberry-Pi-class), **VoxCPM** (Apache 2.0), **Orpheus** (Apache 2.0), **Zonos** (Apache 2.0), **Step Audio EditX** (Apache 2.0). Non-commercial / restricted (AVOID for LeaseOS): **Voxtral TTS** (CC BY-NC), **XTTS v2** (Coqui CPML), **F5-TTS** (CC BY-NC), **Fish Audio S2 Pro** (paid commercial license). [Dograh](https://www.dograh.com/feeds/blog/open-source-ai-voice-generator) **Watch: Higgs Audio V2 shows a license conflict (Apache 2.0 on GitHub vs "other" on Hugging Face) [Dograh](https://www.dograh.com/feeds/blog/open-source-ai-voice-generator) — confirm before use.**
+
+### Best commercial-safe STT
+**Whisper / large-v3-turbo** (MIT) is the battle-tested default; **Voxtral Realtime** (Apache 2.0) is the best for low-latency streaming/voice agents; **NVIDIA Parakeet**, **Canary**, and **Qwen3-ASR** are strong alternatives (verify NVIDIA models use the NVIDIA license, not Apache).
+
+### True full-duplex speech-to-speech (speak while listening, handle interruption)
+This exists in open weights as of Sept 2026, but the commercial-license picture is nuanced:
+- **Kyutai Moshi** — 7B (Temporal Transformer + Mimi codec, 24kHz→12.5Hz, 1.1kbps), weights **CC-BY 4.0** (commercial OK with attribution; code MIT/Apache), ~24GB VRAM (bf16; less with quantization). Per Kyutai's paper (Défossez et al., 2024) it is "the first real-time full-duplex spoken large language model, with a theoretical latency of 160ms, 200ms in practice" (on an L4 GPU). The most established option; Kyutai labels it "experimental." [Scaleway Labs](https://labs.scaleway.com/en/moshi/)
+- **FLM-Audio** — 7B, **Apache 2.0 per its GitHub** [GitHub](https://github.com/cofe-ai/flm-audio) (⚠️ HF card is missing license metadata — verify before commercial deployment), ~20GB VRAM, [GitHub](https://github.com/cofe-ai/flm-audio) true native full-duplex, bilingual EN/ZH. Cleanest standard license for a native full-duplex model.
+- **NVIDIA PersonaPlex-7B** — highest quality / ~70ms speaker-switch, [Rywalker](https://rywalker.com/research/nvidia-personaplex) but weights are under the **NVIDIA Open Model License** [GitHub](https://github.com/NVIDIA/personaplex) (custom; commercial allowed but not Apache/MIT).
+- **Qwen3-Omni-30B-A3B** — Apache 2.0 but **half-duplex only** (see above).
+- **Freeze-Omni** — Apache-labeled but bound by a **Tencent Acceptable Use Policy**, [Hugging Face](https://huggingface.co/VITA-MLLM/Freeze-Omni) and only partial-duplex (barge-in only).
+
+**Recommendation: for LeaseOS's first release, build a cascade (Voxtral Realtime/Whisper → gpt-oss-20b → Kokoro/Qwen3-TTS). It is the most license-flexible, debuggable, and citation-friendly path. Treat full-duplex (Moshi or FLM-Audio) as a v2 experiment.**
+
+### Licensing gotchas in this space
+- **CC BY-NC is the recurring trap** — many of the best-sounding TTS models (Voxtral TTS, XTTS v2, F5-TTS) are non-commercial. Always check the *weights* license, not just the code license.
+- **"Open" ≠ commercial-free.** Meta's Llama license is *not* OSI open-source: it carries an Acceptable Use Policy and a **700-million-monthly-active-user threshold**. Per Meta's Llama 3 License §2 (Additional Commercial Terms), if your product exceeds "greater than 700 million monthly active users in the preceding calendar month, you must request a license from Meta, which Meta may grant to you in its sole discretion," plus naming/attribution obligations. [Promise](https://blog.promise.legal/open-weight-ai-license-trap-startups/) This is why gpt-oss (Apache 2.0) and Qwen (Apache 2.0) are cleaner choices.
+- **Revenue/user thresholds:** certain Mistral models carry a $20M-monthly-revenue threshold; Gemma retains a "remote restriction" right; [Promise](https://blog.promise.legal/open-weight-ai-license-trap-startups/) Kimi/Qwen-Max-tier models have conditional commercial clauses.
+- **Code vs weights vs bundled models:** Docling (MIT code) bundles models with their own licenses; NVIDIA speech models use the NVIDIA Open Model License, not Apache.
+- **License metadata mismatches:** FLM-Audio (GitHub Apache vs missing HF metadata) and Higgs Audio V2 (GitHub Apache vs HF "other") are genuinely ambiguous — get written confirmation before shipping.
+- gpt-oss itself carries only a minimal usage policy ("comply with all applicable law") [Milvus](https://milvus.io/ai-quick-reference/under-what-license-are-gptoss-models-released-and-what-usage-does-that-permit) — no industry restrictions that would affect trucking/oilfield use.
+
+### LoRA/PEFT fine-tuning vs RAG
+The 2026 consensus is clear and directly applicable to LeaseOS: **RAG is the default for knowledge; fine-tuning is for form, not facts.**
+- **Use RAG** (Docling → embeddings → Qdrant → retrieval → LLM) for everything that changes or is company-specific: manuals, procedures, lease terms, regulations. It's faster to build (days), easy to update, [BuilderWorld](https://builderworld.io/en/learn/lora-vs-fine-tuning-vs-rag) and gives you the **source citations** your requirements demand. This should be the backbone of LeaseOS's document Q&A and tutoring.
+- **Use LoRA/QLoRA** only to lock in *behavior*: a consistent response format (strict JSON, citation style), brand/persona voice, domain vocabulary/shorthand, or refusal patterns. LoRA reaches ~95%+ of full-fine-tune quality; [Metacto](https://www.metacto.com/blogs/rag-vs-fine-tuning-vs-other-llm-techniques-choosing-the-right-approach) a 7B–32B LoRA trains on a single 24GB GPU for roughly $50–$1,200 per run, [Sthambh](https://www.sthambh.com/blog/rag-vs-fine-tuning-enterprise-2026/) often needing only 200–500 curated examples for narrow tasks. [Winder](https://winder.ai/rag-vs-fine-tuning-2026-decision-framework/)
+- **The canonical 2026 pattern is "fine-tune AND RAG"**: tune the interface, retrieve the content. [Big Data Boutique](https://bigdataboutique.com/blog/fine-tuning-llms-when-rag-isnt-enough) For LeaseOS, start with RAG only; add a small LoRA later if the assistant's tone/format needs tightening. Do not fine-tune to teach facts — it's expensive, brittle, and un-citable.
+
+## Details
+
+### Practical hardware & cost for self-hosting the full stack
+The models are MoE, so VRAM is set by *total* parameters (all experts must be resident), even though compute is set by active parameters. Rough single-instance footprints at Q4: gpt-oss-20b ~14GB; Qwen3-Coder-30B ~19–22GB; Whisper turbo ~6GB; Kokoro ~2–3GB (or CPU); Qdrant/Docling on CPU + RAM.
+
+- **Minimum viable (one model at a time):** a single 24GB GPU (RTX 4090/3090, or the Radeon AI PRO R9700 32GB at ~$1,799) [Pinggy](https://pinggy.io/blog/best_hardware_for_self_hosted_coding_agents/) runs either the reasoning model OR the coder, plus Whisper + Kokoro. Swap models on demand via Ollama. ~$2,000–$3,000 workstation.
+- **Comfortable (reasoning + coder + voice resident together):** ~48GB VRAM — either a single 48GB card or two 24–32GB cards. ~$4,000–$8,000 workstation. A Mac Studio with large unified memory (e.g., 128–192GB) is a viable low-power alternative for larger models at lower token/sec.
+- **If you add Qwen3-Omni** for multimodal voice: budget an additional ~48GB (4-bit) — this is the single heaviest component and may argue for a dedicated GPU or keeping it optional.
+- **Operating cost:** electricity is minor — an RTX 5090 tower under load ~8h/day costs roughly $30/month at US average rates ($0.1834/kWh, June 2026); a Mac Studio far less. **The dominant cost is engineering labor, not hardware or power.** Budget 1.5–2 FTE for a production self-hosted AI system. [Aipricingmaster](https://www.aipricingmaster.com/blog/self-hosting-ai-models-cost-vs-api)
+- **Break-even vs API:** self-hosting typically makes sense for privacy/offline/data-residency reasons more than pure cost; against cheap hosted open-model APIs the machine may never pay back on economics alone. LeaseOS's offline/poor-connectivity requirement is itself the justification.
+
+## Recommendations
+
+**Stage 1 — Ship the cascade (weeks 1–8).** Adopt the consultant's stack with one substitution: gpt-oss-20b (reasoning/agent brain, Apache 2.0) + Qwen3-Coder-30B (coding, Apache 2.0) served via Ollama/llama.cpp; **Whisper turbo or Voxtral Realtime for STT**; **Kokoro-82M for TTS (NOT Voxtral TTS)**; Docling for ingestion; Qdrant for vectors; RAG with source citations as the knowledge backbone. Target hardware: one 24–32GB GPU to start; 48GB if you want reasoning + coding resident together. *Benchmark that would change this: if your voice UX needs sub-second natural turn-taking with barge-in, jump to Stage 3.*
+
+**Stage 2 — Add capability (months 2–4).** If you need voice cloning or a more expressive brand voice, evaluate **Qwen3-TTS (Apache 2.0)** or **Chatterbox-Turbo (MIT)** against Kokoro. Add **Qwen3-Omni (Apache 2.0)** only if you need multimodal understanding (reading images/video, audio Q&A) and can afford ~48GB more VRAM. Add a small **LoRA** only if response format/tone needs tightening — never for facts. *Threshold: add Qwen3-Omni only when multimodal input is a real product requirement, not speculative.*
+
+**Stage 3 — Full-duplex voice (v2 experiment).** If natural interruptible conversation becomes a differentiator, prototype **FLM-Audio (Apache 2.0, verify HF license)** or **Moshi (CC-BY 4.0)**. Keep the cascade as the fallback. Avoid PersonaPlex unless you accept the NVIDIA custom license. *Threshold: only invest here after the cascade proves the product.*
+
+**Cross-cutting:**
+- **Before shipping, get written confirmation** of the weights license for any ambiguous model (FLM-Audio, Higgs Audio V2). Keep a license register mapping each component → license → commercial status.
+- **Never self-host Voxtral TTS commercially.** If you love its quality, use the Mistral API at $0.016/1k chars — but that breaks your offline requirement, so prefer Kokoro/Qwen3-TTS.
+- **Default to RAG + citations** for the document-tutoring/Q&A features; this directly satisfies your "answer with source citations" requirement.
+- **Budget for people, not just GPUs** — 1.5–2 FTE for production ops.
+
+## Caveats
+- **Rapidly moving field.** Model versions (Qwen3.8, GLM-5.3, DeepSeek V4, Kimi K3) shift monthly; verify the exact checkpoint and its license at deployment time. Some 2026 benchmark numbers cited by vendors (including the Chatterbox vs ElevenLabs studies) are self-reported and not independently reproduced.
+- **Full-duplex is immature.** Even the best open full-duplex models are labeled "experimental," have limited reasoning (7B backbones), and a 2026 security paper (DuplexJail) shows safety-alignment breaks under spoken interruption — a real concern for a commercial agent. The cascade is safer for launch.
+- **Qwen3-Omni is half-duplex**, contrary to any impression of "real-time speech-to-speech = full-duplex." Do not over-promise interruptible conversation from it.
+- **MoE VRAM is deceptive:** the "3B active" figure describes speed, not memory — you must fit all 30B expert weights in VRAM.
+- **Whisper is not natively real-time**; use faster-whisper/whisper.cpp or Voxtral Realtime for streaming.
+- **Licenses can change.** 2026 saw several license shifts and conditional/"Max"-tier licenses appear; a model that's Apache today could ship a differently-licensed successor. Pin versions and re-check on upgrade.
+- Some hardware/VRAM figures are community estimates and vary with quantization, context length, and KV-cache size; benchmark on your actual workload before committing capital.
