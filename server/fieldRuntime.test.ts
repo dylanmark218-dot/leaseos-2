@@ -12,7 +12,7 @@ vi.mock("./storage", () => ({
 import mysql from "mysql2/promise";
 import { FlagConnectivity, MemoryKeystore, MemoryStore, MemoryVault, SettableClock } from "../client/src/runtime/adapters/memory";
 import { Outbox } from "../client/src/runtime/outbox";
-import { SyncEngine, KEY_ROTATION_DAYS } from "../client/src/runtime/syncEngine";
+import { SyncEngine, KEY_ROTATION_DAYS, MAX_ITEMS_PER_PACKAGE, prioritizeQueuedCaptures } from "../client/src/runtime/syncEngine";
 import { canonicalJson, sha256Hex } from "../client/src/runtime/crypto";
 import type { Transport } from "../client/src/runtime/contracts";
 import { NATIVE_ONLY_CAPABILITIES } from "../client/src/runtime/adapters/capacitor";
@@ -70,6 +70,23 @@ describe("a capture is saved first, and the UI can always say where it is", () =
     expect(r).toEqual({ evicted: 1, freedBytes: 1000, refusedBecauseUnsynced: 1 });
     expect(await vault.usageBytes()).toBe(1000);
     expect((await outbox.status()).counts.queued).toBe(1);
+  });
+});
+
+describe("the sync queue gives safety evidence precedence over bulk media", () => {
+  it("puts a newer HOS event ahead of 500 older photos without reordering a tier", () => {
+    const base = (kind: "photo" | "hos_event", localId: string, capturedAt: string) => ({
+      localId, kind, formKey: null, title: localId, category: kind, fields: {}, files: [],
+      capturedAt, gps: null, jobId: 1, unitId: null, captureAuthorizationClaim: "unknown" as const, captureAuthorizationReason: null,
+      syncState: "queued" as const, attempts: 0, lastError: null, serverEvidenceId: null, sealed: false, sealManifestHash: null, packagedIn: null, createdAt: capturedAt, updatedAt: capturedAt,
+    });
+    const photos = Array.from({ length: MAX_ITEMS_PER_PACKAGE }, (_, i) => base("photo", `P-${String(i).padStart(3, "0")}`, `2026-09-10T${String(Math.floor(i / 60) % 24).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}:00.000Z`));
+    const hos = base("hos_event", "HOS-NEW", "2026-09-11T23:59:00.000Z");
+    const selected = prioritizeQueuedCaptures([...photos, hos]).slice(0, MAX_ITEMS_PER_PACKAGE);
+    expect(selected[0].localId).toBe("HOS-NEW");
+    expect(selected.filter(c => c.kind === "hos_event")).toHaveLength(1);
+    expect(selected.filter(c => c.kind === "photo")).toHaveLength(MAX_ITEMS_PER_PACKAGE - 1);
+    expect(selected.filter(c => c.kind === "photo").map(c => c.localId).slice(0, 3)).toEqual(["P-000", "P-001", "P-002"]);
   });
 });
 
@@ -172,7 +189,7 @@ d("a driver starts the day offline", () => {
     // 05:30 pre-trip, 06:10 load photo, 09:40 fuel receipt, 11:15 disposal ticket, 13:00 defect — all offline.
     const pretrip = await outbox.saveDraft({ kind: "pretrip", formKey: null, title: "Pre-trip Unit 142", category: "inspection", fields: { unit: "142", defects: 0, brakes: "ok" }, unitId: 142 });
     clock.set(new Date("2026-09-10T06:10:00Z"));
-    const photo = await outbox.saveDraft({ kind: "photo", formKey: null, title: "Load 1 — tank full", category: "photo", fields: {}, files: [{ bytes: jpeg(4096), fileName: "load1.jpg", mimeType: "image/jpeg" }], gps: { latitude: 53.5, longitude: -113.4, accuracyM: 8, fixedAt: clock.now().toISOString(), source: "device_gps" }, jobId: 1 });
+    const photo = await outbox.saveDraft({ kind: "photo", formKey: null, title: "Load 1 — tank full", category: "photo", fields: {}, files: [{ bytes: jpeg(4096), fileName: "load1.jpg", mimeType: "image/jpeg" }], gps: { latitude: 53.5, longitude: -113.4, accuracyM: 8, fixedAt: clock.now().toISOString(), source: "device_gps" }, jobId: 1, captureAuthorizationClaim: "unauthorized", captureAuthorizationReason: "Authorization context unavailable in the dead zone" });
     clock.set(new Date("2026-09-10T09:40:00Z"));
     const fuel = await outbox.saveDraft({ kind: "fuel_receipt", formKey: "fuel_receipt", title: "Cardlock Nisku", category: "receipt", fields: { total: 412.5, quantity: 275, jurisdiction: "CA-AB" }, files: [{ bytes: jpeg(2048), fileName: "fuel.jpg", mimeType: "image/jpeg" }], unitId: 142 });
     clock.set(new Date("2026-09-10T11:15:00Z"));
@@ -221,6 +238,18 @@ d("a driver starts the day offline", () => {
     expect(pkgs.map(p => p.state)).toEqual(["hash_verified", "hash_verified"]);
     expect(pkgs.map(p => Number(p.itemCount))).toEqual([2, 3]);
     expect(pkgs[0].signedWithFingerprint).toBe(await keystore.fingerprint());
+
+    // Recording and authorization are separate facts. The photo survives and
+    // synchronizes, but successful sync does not rewrite its capture-time claim.
+    const [authClaims] = await pool.execute<mysql.RowDataPacket[]>(
+      "SELECT e.clientCaptureRef, i.captureAuthorizationClaim, i.captureAuthorizationReason FROM syncPackageItems i JOIN evidenceRecords e ON e.id=i.evidenceRecordId WHERE e.clientCaptureRef IN (?, ?)",
+      [`${enrolled.deviceRef}:${photo.localId}`, `${enrolled.deviceRef}:${fuel.localId}`],
+    );
+    const photoClaim = authClaims.find(r => r.clientCaptureRef === `${enrolled.deviceRef}:${photo.localId}`)!;
+    const fuelClaim = authClaims.find(r => r.clientCaptureRef === `${enrolled.deviceRef}:${fuel.localId}`)!;
+    expect(photoClaim.captureAuthorizationClaim).toBe("unauthorized");
+    expect(photoClaim.captureAuthorizationReason).toContain("dead zone");
+    expect(fuelClaim.captureAuthorizationClaim).toBe("unknown");
   });
 
   it("marks the right capture failed when the server's bytes do not match the device's seal", async () => {

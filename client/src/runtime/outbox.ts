@@ -8,7 +8,7 @@
  * the same rule the server's storage plan applies.
  */
 
-import type { CaptureKind, GpsFix, LocalCapture, LocalStore, FileVault, Clock } from "./contracts";
+import type { CaptureAuthorizationClaim, CaptureKind, GpsFix, LocalCapture, LocalStore, FileVault, Clock } from "./contracts";
 
 const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -16,7 +16,7 @@ export class Outbox {
   constructor(private store: LocalStore, private vault: FileVault, private clock: Clock) {}
 
   /** Save a draft locally. It is on the device and nowhere else. */
-  async saveDraft(args: { kind: CaptureKind; formKey: string | null; title: string; category: string; fields: Record<string, unknown>; files?: { bytes: Uint8Array; fileName: string; mimeType: string }[]; gps?: GpsFix | null; jobId?: number | null; unitId?: number | null; capturedAt?: Date }): Promise<LocalCapture> {
+  async saveDraft(args: { kind: CaptureKind; formKey: string | null; title: string; category: string; fields: Record<string, unknown>; files?: { bytes: Uint8Array; fileName: string; mimeType: string }[]; gps?: GpsFix | null; jobId?: number | null; unitId?: number | null; capturedAt?: Date; captureAuthorizationClaim?: CaptureAuthorizationClaim; captureAuthorizationReason?: string | null }): Promise<LocalCapture> {
     const now = this.clock.now().toISOString();
     const files: LocalCapture["files"] = [];
     for (const f of args.files ?? []) {
@@ -26,6 +26,7 @@ export class Outbox {
     const c: LocalCapture = {
       localId: uid(), kind: args.kind, formKey: args.formKey, title: args.title, category: args.category, fields: args.fields, files,
       capturedAt: (args.capturedAt ?? this.clock.now()).toISOString(), gps: args.gps ?? null, jobId: args.jobId ?? null, unitId: args.unitId ?? null,
+      captureAuthorizationClaim: args.captureAuthorizationClaim ?? "unknown", captureAuthorizationReason: args.captureAuthorizationReason ?? null,
       syncState: "saved_locally", attempts: 0, lastError: null, serverEvidenceId: null, sealed: false, sealManifestHash: null, packagedIn: null, createdAt: now, updatedAt: now,
     };
     await this.store.putCapture(c);

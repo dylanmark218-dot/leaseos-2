@@ -40,6 +40,13 @@ export type EligibilityFacts = {
   destinationAcceptanceVersion: string;
   routeProfileId: string | null;
   routeDecisionVersion: string;
+  /**
+   * v22.18 — the channels governing the route's segments, and the plan's
+   * verdict. A road operator moving a haul road to another channel between the
+   * check and the award changes what the driver was briefed on, so the award
+   * recomputes and refuses rather than binding an assignment to a stale brief.
+   */
+  communicationPlanVersion: string;
 };
 
 function stableHash(value: string): string {

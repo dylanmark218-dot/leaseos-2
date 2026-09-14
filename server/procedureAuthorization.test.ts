@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { EXTERNAL_PROCEDURE_PERMISSIONS, OPERATIONAL_PROCEDURE_PERMISSIONS, RECORDS_PROCEDURE_PERMISSIONS } from "./_core/recordsAuthorization";
+import { EXTERNAL_PROCEDURE_PERMISSIONS, OPERATIONAL_PROCEDURE_PERMISSIONS, RECORDS_PROCEDURE_PERMISSIONS, type ProcedureName } from "./_core/recordsAuthorization";
 import {
   UNVERIFIED_DATA_SOURCES,
   VERIFIED_DATA_SOURCES,
@@ -47,8 +47,19 @@ const spatialRouter = readFileSync("server/spatialRouter.ts", "utf8");
 const commercialSetupRouter = readFileSync("server/commercialSetupRouter.ts", "utf8");
 const invoicingRouter = readFileSync("server/invoicingRouter.ts", "utf8");
 const geoRouter = readFileSync("server/geoRouter.ts", "utf8");
+const commsRouter = readFileSync("server/commsRouter.ts", "utf8");
+const enforcementRouter = readFileSync("server/enforcementRouter.ts", "utf8");
+const timeOffRouter = readFileSync("server/timeOffRouter.ts", "utf8");
+const openShiftsRouter = readFileSync("server/openShiftsRouter.ts", "utf8");
+const crewRouter = readFileSync("server/crewRouter.ts", "utf8");
+const calendarRouter = readFileSync("server/calendarRouter.ts", "utf8");
+const readinessRouter = readFileSync("server/readinessRouter.ts", "utf8");
+const messageBoardRouter = readFileSync("server/messageBoardRouter.ts", "utf8");
+const agentRouter = readFileSync("server/agentRouter.ts", "utf8");
+const hosRouter = readFileSync("server/hosRouter.ts", "utf8");
 const closeoutRouter = readFileSync("server/closeoutRouter.ts", "utf8");
 const insuranceRouter = readFileSync("server/insuranceRouter.ts", "utf8");
+const assistantAskRouter = readFileSync("server/assistantAskRouter.ts", "utf8");
 const inventory = readFileSync("PROCEDURE_AUTHORIZATION_INVENTORY.md", "utf8");
 const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
 
@@ -57,7 +68,7 @@ const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
  * payrollRouter.ts both draw from it. Checking only one would let a declared
  * permission go unwired without anyone noticing.
  */
-const OPERATIONAL_SOURCES = [routers, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + invoicingRouter + geoRouter].join("\n");
+const OPERATIONAL_SOURCES = [routers, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + assistantAskRouter].join("\n");
 
 const countBuilders = (src: string, builder: string) =>
   (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
@@ -136,7 +147,7 @@ describe("migrated operational procedures", () => {
     // 85 unreviewed at B20.3, 57 after B20.4, 0 after B20.6. B20.7 added the
     // 40-procedure payroll/finance surface, all gated from the start.
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(378);   // v22.7: +13 commercial setup; v22.8: +2 (ticket pricing, vendor rate variances); v22.9: +3 invoicing; v22.10: +2 (render, send); v22.11: +2 (void, disputeResolve); v22.13: +5 geo; v22.14: +6 (legal land, entrances, corridor); v22.15: +4 (structures, route approvals); v22.16: +2 (graph build, route compute)
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(466);   // v22.20: +5 agent runtime   // v22.20: +1 (source licence review)   // v22.7: +13 commercial setup; v22.8: +2 (ticket pricing, vendor rate variances); v22.9: +3 invoicing; v22.10: +2 (render, send); v22.11: +2 (void, disputeResolve); v22.13: +5 geo; v22.14: +6 (legal land, entrances, corridor); v22.15: +4 (structures, route approvals); v22.16: +2 (graph build, route compute); v22.17: +16 communications; v22.18: +4 (policy propose/approve/current, channel retire); v22.20: +1 (source licence review); v22.19: +4 (package build/fetch/acknowledge/status); v22.20: +7 hours of service
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 
@@ -240,16 +251,17 @@ describe("migrated operational procedures", () => {
 });
 
 describe("the data source document matches the seeded registry", () => {
-  it("states the corrected count of eight verified and three not", () => {
-    // The research summary said nine; three of eleven were unresolved, so it is
-    // eight. The document and the seed must agree or a future reader trusts the
-    // wrong number.
-    expect(dataSources).toContain("Eight verified, three not");
+  it("states the corrected count of eight verified and ten not", () => {
+    // The research summary said nine of eleven were clean; three were unresolved,
+    // so it was eight. v22.17 added six spectrum and coverage sources, none of
+    // them licence-cleared, so nine are now blocked. The document and the seed
+    // must agree or a future reader trusts the wrong number.
+    expect(dataSources).toContain("Eight verified, ten not");
     expect(VERIFIED_DATA_SOURCES).toHaveLength(8);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(3);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(10);
   });
 
-  it("lists exactly the three blocked sources as blocked", () => {
+  it("lists exactly the blocked sources as blocked", () => {
     for (const key of UNVERIFIED_DATA_SOURCES.map(s => s.sourceKey)) {
       expect(dataSources, key).toContain(`\`${key}\``);
     }
@@ -288,5 +300,35 @@ describe("the untouched API is counted, not forgotten", () => {
   it("keeps the inventory document in step with the code", () => {
     expect(inventory).toContain("ROLE_AUTHORIZED");
     expect(inventory).toContain("356");
+  });
+});
+
+describe("a permission is not a procedure name, and the compiler says so", () => {
+  it("accepts a declared procedure name and rejects a permission in its place", () => {
+    // These assertions run at compile time, not at runtime. If `roleProcedure`
+    // ever went back to taking a bare string, the @ts-expect-error lines below
+    // would themselves become errors ("unused expect-error"), so this test fails
+    // by refusing to build — which is the only way to pin a type.
+    const good: ProcedureName = "comms.channelList";
+    expect(good).toBe("comms.channelList");
+
+    // @ts-expect-error — "comms.read" is a Permission, not a ProcedureName.
+    const asPermission: ProcedureName = "comms.read";
+    expect(typeof asPermission).toBe("string");
+
+    // @ts-expect-error — a procedure nobody declared is not a ProcedureName.
+    const undeclared: ProcedureName = "comms.notAProcedure";
+    expect(typeof undeclared).toBe("string");
+  });
+
+  it("covers every procedure both maps declare", () => {
+    const declared = [
+      ...Object.keys(RECORDS_PROCEDURE_PERMISSIONS),
+      ...Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS),
+    ];
+    // Every declared key is assignable to ProcedureName by construction; this
+    // pins that both maps are still in the union rather than only one.
+    expect(declared).toContain("comms.channelList");
+    expect(declared.length).toBeGreaterThan(400);
   });
 });

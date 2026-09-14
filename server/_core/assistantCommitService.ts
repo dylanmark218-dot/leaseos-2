@@ -9,6 +9,7 @@
  */
 
 import { toCents } from "./money";
+import type { Tx } from "./dbTypes";
 import { createHash } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import {
@@ -279,7 +280,10 @@ export async function executeAssistantCommit(args: {
       }
     }
 
-    const target = await applyIntent(tx as any, plan.intent, row, committed.fields);
+    // This call used to launder the handle through an escape cast, which put back
+    // exactly the hole the typing removed. applyIntent already declares `tx: Tx`,
+    // so the cast bought nothing and cost the checking of everything it calls.
+    const target = await applyIntent(tx, plan.intent, row, committed.fields);
     if (!target.ok) return { committed: false as const, refusals: target.refusals };
 
     // Auto-file. The bytes already live once in the vault under the extraction's
@@ -349,7 +353,7 @@ export async function executeAssistantCommit(args: {
 }
 
 async function applyIntent(
-  tx: any,
+  tx: Tx,
   intent: AssistantCommitIntent,
   proposalRow: typeof assistantProposals.$inferSelect,
   committedFields: readonly { key: string; value: unknown }[]
@@ -528,7 +532,14 @@ async function applyIntent(
       fuelType: intent.values.fuelType,
       quantity: intent.values.quantity,
       quantityUnit: intent.values.quantityUnit,
-      unitPrice: intent.values.unitPrice,
+      /**
+       * The column is `unitPriceMillis` — tenths of a cent, because fuel is
+       * priced per litre to three decimals and cents would round every fill.
+       * This wrote `unitPrice`, which is not a column on this table, so the AI
+       * Secretary's fuel commit would have failed at the database. Invisible
+       * until the transaction handle was typed.
+       */
+      unitPriceMillis: intent.values.unitPrice != null ? Math.round(Number(intent.values.unitPrice) * 1000) : null,
       subtotalCents: toCents(intent.values.subtotal),
       taxAmountCents: toCents(intent.values.taxAmount),
       totalCents: toCents(intent.values.total)!,

@@ -5,7 +5,7 @@ publisher and is now seeded into `externalDataSources` by
 `seedExternalDataSources()`. This document describes what the runtime enforces;
 it is not the enforcement itself.
 
-## Eight verified, three not
+## Eight verified, ten not
 
 | | Count |
 |---|---|
@@ -38,8 +38,15 @@ it is not the enforcement itself.
 | `aer_st37` | AER Terms of Use, not an open licence. Commercial use and redistribution **unknown**. |
 | `aer_st102` | Same. |
 | `ab511` | Developer terms via account registration. No open licence stated. Commercial use and redistribution **unknown**. |
+| `ised_b1_western` | ISED's western and northern mobile appendix. Published openly; redistributing it to field tablets as an operational channel bank is a different question and was not confirmed. |
+| `ised_bc_rr` | ISED's BC resource-road channel conditions. Same question, and the publisher states the channels are for use where posted. |
+| `ised_cb_grs` | RSS-236, the General Radio Service allocation. Same. |
+| `ised_sms` | Spectrum Management System licence extracts — licence holders, sites and call signs. Personal and corporate licence data; redistribution terms not confirmed. |
+| `bc_resource_road_maps` | The province states these are planning tools and that the posted road sign takes precedence. |
+| `statcan_boundaries` | The provincial/territorial boundary file. Licence not reviewed here, so nothing imports from it — which is exactly why a coordinate still cannot establish a province. |
+| `crtc_coverage` | Modelled coverage layers published for regulatory purposes, not a guarantee of service at a position. |
 
-All three carry `attributionText: null` deliberately, as a second barrier: a
+All ten carry `attributionText: null` deliberately, as a second barrier: a
 source cannot reach operational use by editing `status` and the permission flags
 alone — somebody has to have actually recorded what the publisher requires shown.
 Test-pinned.

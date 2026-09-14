@@ -31,20 +31,33 @@ const byKey = (k: string) =>
   ALL_DATA_SOURCES.find(s => s.sourceKey === k)!;
 
 describe("the count is eight, not nine", () => {
-  it("has eleven sources, eight verified and three not", () => {
+  it("has eighteen sources, eight verified and ten not", () => {
     // The research summary said "nine of eleven are clean" while separately
     // flagging three as unresolved. Eleven minus three is eight. Seeding nine
     // would have marked a blocked source usable.
-    expect(ALL_DATA_SOURCES).toHaveLength(11);
+    //
+    // v22.17 added six spectrum and coverage sources. Not one of them is
+    // licence-cleared: the ISED appendices are published openly, but
+    // redistributing a channel bank to field tablets as operational data is a
+    // separate permission nobody has confirmed. They seed unverified, which
+    // means inspection only, and the eight stays eight.
+    expect(ALL_DATA_SOURCES).toHaveLength(18);
     expect(VERIFIED_DATA_SOURCES).toHaveLength(8);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(3);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(10);
   });
 
-  it("names exactly the three that could not be verified", () => {
+  it("names exactly the ones that could not be verified", () => {
     expect(UNVERIFIED_DATA_SOURCES.map(s => s.sourceKey).sort()).toEqual([
       "ab511",
       "aer_st102",
       "aer_st37",
+      "bc_resource_road_maps",
+      "crtc_coverage",
+      "ised_b1_western",
+      "ised_bc_rr",
+      "ised_cb_grs",
+      "ised_sms",
+      "statcan_boundaries",
     ]);
   });
 
@@ -226,7 +239,13 @@ describe("attribution is collected, and gaps are named", () => {
 
   it("names the sources missing required attribution", () => {
     const r = collectAttributions(ALL_DATA_SOURCES);
-    expect(r.missing.sort()).toEqual(["ab511", "aer_st102", "aer_st37"]);
+    // Every v22.17 source requires attribution and has none recorded, which is the
+    // second barrier working as designed: a source cannot reach operational use by
+    // flipping `status` alone — somebody has to record what the publisher requires shown.
+    expect(r.missing.sort()).toEqual([
+      "ab511", "aer_st102", "aer_st37", "bc_resource_road_maps", "crtc_coverage",
+      "ised_b1_western", "ised_bc_rr", "ised_cb_grs", "ised_sms", "statcan_boundaries",
+    ]);
   });
 });
 
@@ -317,13 +336,13 @@ beforeAll(async () => {
 });
 
 d("seeding into the database", () => {
-  it("inserts all eleven and is idempotent on a second run", async () => {
+  it("inserts all eighteen and is idempotent on a second run", async () => {
     const first = await seedExternalDataSources();
-    expect(first.inserted.length + first.existing.length).toBe(11);
+    expect(first.inserted.length + first.existing.length).toBe(18);
 
     const second = await seedExternalDataSources();
     expect(second.inserted).toEqual([]);
-    expect(second.existing).toHaveLength(11);
+    expect(second.existing).toHaveLength(18);
   });
 
   it("persists status, rate limit and retrieval date", async () => {

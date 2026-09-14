@@ -10,7 +10,8 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { applicableRestrictions, fingerprintHash, hashPart, inForce, loadFingerprint, stalenessAgainst, structureAttributes, type RouteDependencies } from "./_core/structures";
 import { getDb } from "./db";
-import { accessRoadSegments, routeApprovals, structures, bridges, inboundEvents, integrationClients, locationIdentities, roadRestrictions, routeEvidenceEntries, routeRequests, units, vehicleProfiles } from "../drizzle/schema";
+import { accessRoadSegments, roadGraphBuilds, roadGraphEdges, roadRadioAssignments, routeApprovals, structures, bridges, inboundEvents, integrationClients, locationIdentities, roadRestrictions, routeEvidenceEntries, routeRequests, units, vehicleProfiles } from "../drizzle/schema";
+import { resolveAssignment } from "./_core/commRoute";
 import { parseLsd, parseUwi, theoreticalCentroid } from "./_core/dls";
 import { routeAgainstNetwork, routingSourceStatus } from "./_core/routingSource";
 import { evaluateRoute, type RoadSegmentInput, type SegmentAttribute } from "./_core/routeEvaluation";
@@ -29,6 +30,18 @@ async function routeDependencies(db: NonNullable<Awaited<ReturnType<typeof getDb
   const sts = args.segmentIds.length ? await db.select().from(structures).where(inArray(structures.segmentId, args.segmentIds)) : [];
   const liveStructures = sts.filter(x => x.verificationStatus !== "superseded" && inForce(x, args.at));
   const roads = args.segmentIds.length ? await db.select({ objectId: accessRoadSegments.objectId, importRunRef: accessRoadSegments.importRunRef }).from(accessRoadSegments).where(inArray(accessRoadSegments.objectId, args.segmentIds.map(id => Number(id.replace(/^AB-ACCESS-/, ""))).filter(n => Number.isInteger(n)))) : [];
+  // v22.17 — which channel governs each segment at this moment, resolved by
+  // authority exactly as the driver's screen resolves it. A temporary operator
+  // change, or a driver's photographed sign confirmed by the office, moves this
+  // hash and the approval says so in a dispatcher's words.
+  const radio = args.segmentIds.length ? await db.select().from(roadRadioAssignments).where(inArray(roadRadioAssignments.segmentId, args.segmentIds)) : [];
+  const governing = args.segmentIds.map(segmentId => {
+    const chosen = resolveAssignment(
+      radio.filter(r => r.segmentId === segmentId).map(r => ({ assignmentRef: r.assignmentRef, segmentId: r.segmentId, channelKey: r.channelKey, authorityTier: r.authorityTier, effectiveFrom: r.effectiveFrom, effectiveTo: r.effectiveTo, observedAt: r.observedAt, verificationStatus: r.verificationStatus })),
+      args.at
+    ).chosen;
+    return { segmentId, channel: chosen?.channelKey ?? null, tier: chosen?.authorityTier ?? null };
+  }).sort((a, b) => a.segmentId.localeCompare(b.segmentId));
   return {
     vehicleProfile: hashPart(profile ? { heightM: profile.heightM, widthM: profile.widthM, lengthM: profile.lengthM, emptyWeightKg: profile.emptyWeightKg, axleGroups: profile.axleGroupsJson, verificationStatus: profile.verificationStatus } : { absent: true }),
     loadProfile: typeof args.load === "string" ? args.load : loadFingerprint(args.load),
@@ -37,6 +50,7 @@ async function routeDependencies(db: NonNullable<Awaited<ReturnType<typeof getDb
     structureSet: hashPart(liveStructures.map(x => ({ ref: x.structureRef, posted: x.postedWeightKg, axle: x.postedAxleGroupKg, clearance: x.clearanceM, width: x.widthM, seasonal: x.seasonalVariation, verified: x.verificationStatus })).sort((a, b) => a.ref.localeCompare(b.ref))),
     roadFabric: hashPart(roads.map(r => ({ objectId: r.objectId, run: r.importRunRef })).sort((a, b) => a.objectId - b.objectId)),
     requiredChecks: args.carryOver ? args.carryOver.requiredChecks : hashPart([...args.requiredChecks].sort()),
+    communicationsPlan: hashPart(governing),
   };
 }
 
@@ -215,16 +229,34 @@ export const spatialRouter = router({
       unitId: z.number().int().positive(), originRef: z.string().min(1).max(120), destinationRef: z.string().min(1).max(120), segmentIds: z.array(z.string().min(1).max(80)).min(1).max(200),
       dispatchStatus: z.string().min(3).max(40), explanation: z.string().min(3).max(2000), requiredChecks: z.array(z.string().min(2).max(60)).min(1).max(20),
       load: z.object({ grossWeightKg: z.number().int().positive(), dangerousGoods: z.boolean().default(false), unNumber: z.string().max(12).optional(), heightM: z.number().positive().optional(), widthM: z.number().positive().optional(), lengthM: z.number().positive().optional() }),
-      permitRefs: z.array(z.string().max(64)).max(20).default([]), tripId: z.number().int().positive().optional(), jobId: z.number().int().positive().optional(), at: z.coerce.date().default(() => new Date()),
+      permitRefs: z.array(z.string().max(64)).max(20).default([]), tripId: z.number().int().positive().optional(), jobId: z.number().int().positive().optional(),
+      /**
+       * v22.20 — the graph build this route was computed on, as `routeCompute`
+       * returned it. Optional, and NULL means exactly "not recorded": an
+       * approval that never carried a build is not backfilled with today's.
+       * But a build that IS named is checked, because naming the wrong one
+       * would make the geography look established when it was evaluated
+       * against a different road.
+       */
+      buildRef: z.string().max(64).optional(),
+      at: z.coerce.date().default(() => new Date()),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (input.dispatchStatus === "blocked") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A blocked route is not approved" });
+      if (input.buildRef) {
+        const build = (await db.select({ buildRef: roadGraphBuilds.buildRef, status: roadGraphBuilds.status }).from(roadGraphBuilds).where(eq(roadGraphBuilds.buildRef, input.buildRef)).limit(1))[0];
+        if (!build) throw new TRPCError({ code: "NOT_FOUND", message: `No routing graph build ${input.buildRef}` });
+        const edges = await db.select({ segmentId: roadGraphEdges.segmentId }).from(roadGraphEdges).where(and(eq(roadGraphEdges.buildRef, input.buildRef), inArray(roadGraphEdges.segmentId, input.segmentIds)));
+        const covered = new Set(edges.map(e => e.segmentId));
+        const absent = input.segmentIds.filter(id => !covered.has(id));
+        if (absent.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Graph build ${input.buildRef} does not contain ${absent.length} of this route's segments (${absent.slice(0, 3).join(", ")}) — it is not the build this route was computed on` });
+      }
       const deps = await routeDependencies(db, { unitId: input.unitId, segmentIds: input.segmentIds, load: input.load, permitRefs: input.permitRefs, requiredChecks: input.requiredChecks, at: input.at });
       const approvalRef = `RA-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      await db.insert(routeApprovals).values({ approvalRef, tripId: input.tripId ?? null, jobId: input.jobId ?? null, unitId: input.unitId, originRef: input.originRef, destinationRef: input.destinationRef, dispatchStatus: input.dispatchStatus, segmentIdsJson: JSON.stringify(input.segmentIds), fingerprintJson: JSON.stringify(deps), fingerprintHash: fingerprintHash(deps), explanation: input.explanation, approvedByUserId: ctx.user.id });
-      return { approvalRef, status: "approved" as const, fingerprintHash: fingerprintHash(deps), dependencies: Object.keys(deps) };
+      await db.insert(routeApprovals).values({ approvalRef, tripId: input.tripId ?? null, jobId: input.jobId ?? null, unitId: input.unitId, originRef: input.originRef, destinationRef: input.destinationRef, dispatchStatus: input.dispatchStatus, segmentIdsJson: JSON.stringify(input.segmentIds), buildRef: input.buildRef ?? null, fingerprintJson: JSON.stringify(deps), fingerprintHash: fingerprintHash(deps), explanation: input.explanation, approvedByUserId: ctx.user.id });
+      return { approvalRef, status: "approved" as const, buildRef: input.buildRef ?? null, geographyRecorded: !!input.buildRef, fingerprintHash: fingerprintHash(deps), dependencies: Object.keys(deps) };
     }),
 
   /** Is this approval still the answer? Anything that changed is named in the words a dispatcher would use. */

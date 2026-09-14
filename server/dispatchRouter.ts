@@ -31,7 +31,9 @@ import { requestOverride, type DispatchBlocker, type OverrideRequest } from "./_
 import { awardAssignment } from "./_core/dispatchTransaction";
 import type { GrantedOverride } from "./_core/dispatchAward";
 
-const SUBJECT = z.object({ operatorId: z.number().int().positive(), unitId: z.number().int().positive().nullable(), trailerId: z.number().int().positive().nullable().optional(), jobId: z.number().int().positive().nullable().optional() });
+// v22.18 — a readiness may name the route it is about. Optional, so every
+// caller that does not keeps exactly the behaviour it had.
+const SUBJECT = z.object({ operatorId: z.number().int().positive(), unitId: z.number().int().positive().nullable(), trailerId: z.number().int().positive().nullable().optional(), jobId: z.number().int().positive().nullable().optional(), routeApprovalRef: z.string().max(64).nullable().optional(), loneWorker: z.boolean().optional() });
 
 /** B12's override authority ladder, from the caller's domain roles. */
 async function overrideRoleFor(userId: number): Promise<OverrideRequest["requestedByRole"]> {
@@ -48,7 +50,7 @@ export const dispatchGateRouter = router({
   readiness: roleProcedure("dispatch.readiness")
     .input(SUBJECT)
     .query(async ({ input }) => {
-      const r = await composeReadiness({ operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null, jobId: input.jobId ?? null });
+      const r = await composeReadiness({ operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null, jobId: input.jobId ?? null, routeApprovalRef: input.routeApprovalRef ?? null, loneWorker: input.loneWorker });
       return { verdict: r.eligibility.verdict, explanation: r.eligibility.explanation, blockers: r.eligibility.blockers, contributions: r.contributions };
     }),
 
@@ -63,10 +65,11 @@ export const dispatchGateRouter = router({
       if (input.postingId && !posting) throw new TRPCError({ code: "NOT_FOUND", message: "Posting not found" });
       const now = new Date();
       const jobId = input.jobId ?? posting?.jobId ?? null;
-      const r = await composeReadiness({ operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null, jobId }, now);
+      const r = await composeReadiness({ operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null, jobId, routeApprovalRef: input.routeApprovalRef ?? null, loneWorker: input.loneWorker }, now);
       const ins = await db.insert(dispatchEligibilityChecks).values({
         postingId: input.postingId ?? null, jobId, roleId: input.roleId ?? null, operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null,
         verdict: r.eligibility.verdict, blockersJson: JSON.stringify(r.eligibility.blockers), fingerprint: r.fingerprint, evaluatedAt: now, evaluatedByUserId: ctx.user.id,
+        routeApprovalRef: input.routeApprovalRef ?? null,
       });
       return { checkId: Number(ins[0]?.insertId ?? 0), verdict: r.eligibility.verdict, explanation: r.eligibility.explanation, blockers: r.eligibility.blockers, fingerprint: r.fingerprint, evaluatedAt: now, contributions: r.contributions };
     }),
@@ -120,7 +123,10 @@ export const dispatchGateRouter = router({
       const posting = (await db.select({ jobId: dispatchPostings.jobId }).from(dispatchPostings).where(eq(dispatchPostings.id, check.postingId)).limit(1))[0];
       const now = new Date();
       // The facts are recomputed here, never accepted from the caller.
-      const current = await composeReadiness({ operatorId: check.operatorId, unitId: check.unitId, trailerId: check.trailerId, jobId: posting?.jobId ?? null }, now);
+      // v22.18 — the recompute asks the same question the check asked, route
+      // included. Without the route the facts would be a smaller set than the
+      // ones the fingerprint was taken over, and every award would refuse.
+      const current = await composeReadiness({ operatorId: check.operatorId, unitId: check.unitId, trailerId: check.trailerId, jobId: posting?.jobId ?? null, routeApprovalRef: check.routeApprovalRef }, now);
       const granted = await db.select().from(dispatchOverrides).where(and(eq(dispatchOverrides.eligibilityCheckId, check.id), eq(dispatchOverrides.granted, true)));
       const grantedOverrides: GrantedOverride[] = granted.map(g => ({ blockerCode: g.blockerCode, grantedByUserId: g.requestedByUserId, grantedByRole: g.requestedByRole, reason: g.reason ?? "", grantedAt: g.requestedAt }));
       const roles = await listActiveUserRoleNames(ctx.user.id);

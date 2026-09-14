@@ -12,12 +12,53 @@
  * Key rotation happens here too, before the push, when the key is old.
  */
 
-import type { Clock, Connectivity, FileVault, Keystore, LocalCapture, LocalStore, Transport } from "./contracts";
+import type { CaptureKind, Clock, Connectivity, FileVault, Keystore, LocalCapture, LocalStore, Transport } from "./contracts";
 import { canonicalJson, sha256Hex, sha256HexOfString, toBase64 } from "./crypto";
 import { Outbox } from "./outbox";
 
 export const KEY_ROTATION_DAYS = 30;
 export const MAX_ITEMS_PER_PACKAGE = 500;
+/**
+ * Safety and legal-state evidence outruns bulk media. Age orders records only
+ * inside a tier, so 500 old photos can never starve a newly queued HOS event.
+ */
+export function captureSyncPriority(kind: CaptureKind): number {
+  switch (kind) {
+    // A prohibition binds before the server hears about it, and it must reach
+    // the server first when signal returns. Nothing outranks an out-of-service
+    // order — not photographs, and not an HOS event.
+    case "roadside_enforcement":
+    case "oos_order":
+    case "hos_event":
+    case "incident":
+    case "defect_report":
+      return 0;
+    case "pretrip":
+    case "posttrip":
+    case "tdg_document":
+    case "job_accept":
+    case "tailgate":
+    case "signature":
+      return 10;
+    case "load_ticket":
+    case "disposal_ticket":
+    case "fuel_receipt":
+    case "expense_receipt":
+    case "voice_note":
+      return 20;
+    case "photo":
+      return 40;
+  }
+}
+
+export function prioritizeQueuedCaptures(captures: readonly LocalCapture[]): LocalCapture[] {
+  return [...captures].sort((a, b) =>
+    captureSyncPriority(a.kind) - captureSyncPriority(b.kind)
+    || a.capturedAt.localeCompare(b.capturedAt)
+    || a.localId.localeCompare(b.localId)
+  );
+}
+
 
 export type SyncOutcome = {
   attempted: boolean;
@@ -67,7 +108,7 @@ export class SyncEngine {
     if (!deviceRef) return none("Device not enrolled");
     if ((await this.deps.store.getMeta("deviceStatus")) === "revoked") return none("This device was revoked — recapture on an enrolled device", "revoked");
 
-    const queued = (await this.deps.store.listCaptures({ syncState: "queued" })).sort((a, b) => a.capturedAt.localeCompare(b.capturedAt)).slice(0, MAX_ITEMS_PER_PACKAGE);
+    const queued = prioritizeQueuedCaptures(await this.deps.store.listCaptures({ syncState: "queued" })).slice(0, MAX_ITEMS_PER_PACKAGE);
     if (queued.length === 0) return none("Nothing to sync", "active");
 
     // Rotate an old key before pushing with it.
@@ -116,7 +157,12 @@ export class SyncEngine {
         //    seal's own manifest hash as the server returned it. The server recomputes the content
         //    hash from the bytes it stored; the device's "computed" value is only its declaration.
         const declaredManifestHash = sealManifestHash ?? (await sha256HexOfString(SyncEngine.manifestOf(c)));
-        items.push({ evidenceRecordId: evidenceId, declaredContentHash: contentHash, declaredManifestHash, computedContentHash: contentHash, computedManifestHash: declaredManifestHash });
+        items.push({
+          evidenceRecordId: evidenceId, declaredContentHash: contentHash, declaredManifestHash,
+          computedContentHash: contentHash, computedManifestHash: declaredManifestHash,
+          captureAuthorizationClaim: c.captureAuthorizationClaim,
+          captureAuthorizationReason: c.captureAuthorizationReason,
+        });
         byEvidenceId.set(evidenceId, c);
       } catch (e) {
         failed++;

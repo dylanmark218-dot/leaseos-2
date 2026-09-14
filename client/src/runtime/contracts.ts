@@ -21,9 +21,14 @@
 
 export type SyncState = "saved_locally" | "queued" | "syncing" | "synchronized" | "failed" | "conflict";
 
+/** What the device knew at the moment of capture. This is historical evidence, not server authorization. */
+export type CaptureAuthorizationClaim = "authorized" | "unauthorized" | "unknown";
+
 export type CaptureKind =
   | "pretrip" | "posttrip" | "hos_event" | "job_accept" | "load_ticket" | "disposal_ticket" | "fuel_receipt"
-  | "expense_receipt" | "photo" | "signature" | "incident" | "defect_report" | "tailgate" | "tdg_document" | "voice_note";
+  | "expense_receipt" | "photo" | "signature" | "incident" | "defect_report" | "tailgate" | "tdg_document" | "voice_note"
+  // v22.20 — a roadside enforcement document and the order it carries.
+  | "roadside_enforcement" | "oos_order";
 
 export type GpsFix = { latitude: number; longitude: number; accuracyM: number | null; fixedAt: string; source: "device_gps" | "network" | "manual" };
 
@@ -43,6 +48,13 @@ export type LocalCapture = {
   gps: GpsFix | null;
   jobId: number | null;
   unitId: number | null;
+  /**
+   * The device's historical claim about whether an authorization context was
+   * available at capture time. UNKNOWN is the default. A later successful sync
+   * never upgrades this field: recording and authorization are separate facts.
+   */
+  captureAuthorizationClaim: CaptureAuthorizationClaim;
+  captureAuthorizationReason: string | null;
   syncState: SyncState;
   attempts: number;
   lastError: string | null;
@@ -93,7 +105,7 @@ export interface Transport {
   rotateKey(input: { deviceRef: string; newKeyFingerprint: string; reason?: string }): Promise<{ status: string }>;
   uploadEvidence(input: { title: string; category: string; fileName: string; mimeType: string; dataBase64: string; latitude?: number; longitude?: number; notes?: string; clientCaptureRef: string; capturedAt: Date }): Promise<{ id: number; alreadyUploaded?: boolean }>;
   sealEvidence(input: { evidenceId: number; contentHash: string; recordType: string; relationships: { entityType: string; entityId: number; relation: string }[]; deviceId: string; devicePlatform?: string }): Promise<{ ok: true; alreadySealed: boolean; manifestHash: string | null }>;
-  receivePackage(input: { deviceRef: string; packageRef: string; queuedAt: Date; signedWithFingerprint: string; items: { evidenceRecordId: number; declaredContentHash: string; declaredManifestHash: string; computedContentHash: string; computedManifestHash: string }[]; recordUpdates: { recordType: string; recordRef: string; baseVersion: number; baseValues: Record<string, unknown>; deviceValues: Record<string, unknown> }[] }): Promise<{ packageRef: string; state: string; reason?: string; verified: number; rejected: number; conflicts: number; itemVerdicts?: { evidenceRecordId: number; outcome: "verified" | "rejected"; reason?: string }[] }>;
+  receivePackage(input: { deviceRef: string; packageRef: string; queuedAt: Date; signedWithFingerprint: string; items: { evidenceRecordId: number; declaredContentHash: string; declaredManifestHash: string; computedContentHash: string; computedManifestHash: string; captureAuthorizationClaim: CaptureAuthorizationClaim; captureAuthorizationReason?: string | null }[]; recordUpdates: { recordType: string; recordRef: string; baseVersion: number; baseValues: Record<string, unknown>; deviceValues: Record<string, unknown> }[] }): Promise<{ packageRef: string; state: string; reason?: string; verified: number; rejected: number; conflicts: number; itemVerdicts?: { evidenceRecordId: number; outcome: "verified" | "rejected"; reason?: string }[] }>;
 }
 
 export interface Connectivity { online(): Promise<boolean>; }

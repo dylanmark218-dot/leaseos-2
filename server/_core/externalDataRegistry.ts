@@ -33,6 +33,10 @@ export type SourceCategory =
   | "routing_engine"
   | "geocoder"
   | "tiles"
+  // v22.17 — radio spectrum authorizations and channel banks, and the modelled
+  // mobile coverage layers a route's communication plan reads.
+  | "spectrum"
+  | "coverage"
   | "other";
 
 export type SourceStatus = "unverified" | "verified" | "superseded" | "withdrawn";

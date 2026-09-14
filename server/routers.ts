@@ -36,6 +36,17 @@ import { commercialRouter, portalAdminRouter } from "./commercialRouter";
 import { commercialSetupRouter } from "./commercialSetupRouter";
 import { invoicingRouter } from "./invoicingRouter";
 import { geoRouter } from "./geoRouter";
+import { commsRouter } from "./commsRouter";
+import { enforcementRouter } from "./enforcementRouter";
+import { timeOffRouter } from "./timeOffRouter";
+import { openShiftsRouter } from "./openShiftsRouter";
+import { crewRouter } from "./crewRouter";
+import { calendarRouter } from "./calendarRouter";
+import { readinessRouter } from "./readinessRouter";
+import { messageBoardRouter } from "./messageBoardRouter";
+import { assistantAskRouter } from "./assistantAskRouter";
+import { agentRouter } from "./agentRouter";
+import { hosRouter } from "./hosRouter";
 import { portalRouter } from "./portalRouter";
 import { shopRouter } from "./shopRouter";
 import { assetRouter } from "./assetRouter";
@@ -238,6 +249,17 @@ const jobInput = z.object({
 
 export const appRouter = router({
   system: systemRouter,
+  comms: commsRouter,
+  enforcement: enforcementRouter,
+  timeOff: timeOffRouter,
+  shifts: openShiftsRouter,
+  crews: crewRouter,
+  calendar: calendarRouter,
+  readiness: readinessRouter,
+  board: messageBoardRouter,
+  assistantAsk: assistantAskRouter,
+  agent: agentRouter,
+  hos: hosRouter,
   records: recordsRouter,
   payroll: payrollRouter,
   contractors: contractorRouter,
