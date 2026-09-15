@@ -288,7 +288,11 @@ export type Permission =
   // v21.11 — the site sign-off chain. The field records events and witnesses the
   // consultant's signature; the office resolves lines and prepares the supplement.
   | "closeout.ticket.write" | "closeout.event.record" | "closeout.delay.record" | "closeout.sign.witness"
-  | "closeout.line.decide" | "closeout.supplement.prepare" | "closeout.authority.manage" | "closeout.read";
+  | "closeout.line.decide" | "closeout.supplement.prepare" | "closeout.authority.manage" | "closeout.read"
+  // v22.21 — Training Academy. Learner permissions are universal but self-scoped in the router.
+  | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
+  | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
+  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -387,6 +391,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "academy.direct_supervision.manage",
     "assistant.ask",
     "agent.use",
     "agent.act",
@@ -555,6 +560,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
+    "academy.evaluate",
     "assistant.ask",
     "agent.read",
     "board.read",
@@ -640,6 +646,13 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "academy.assign",
+    "academy.manage",
+    "academy.evaluate",
+    "academy.source.review",
+    "academy.certificate.issue",
+    "academy.requirement.manage",
+    "academy.direct_supervision.manage",
     "assistant.ask",
     "assistant.curate",
     "agent.read",
@@ -896,6 +909,13 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "academy.assign",
+    "academy.manage",
+    "academy.evaluate",
+    "academy.source.review",
+    "academy.certificate.issue",
+    "academy.requirement.manage",
+    "academy.direct_supervision.manage",
     "assistant.ask",
     "assistant.curate",
     "agent.use",
@@ -1120,6 +1140,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.graph.build",
   ],
   hr: [
+    "academy.assign",
+    "academy.manage",
+    "academy.evaluate",
+    "academy.certificate.issue",
     "evidence.read_personnel",
     "incident.read_summary",
     "incident.read_investigation",
@@ -1564,6 +1588,11 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "myday.read_own",
   // v21.1 — "what am I missing?" reads the caller's own operator record.
   "dispatch.readiness_own",
+  "academy.read_own",
+  "academy.progress_own",
+  "academy.assessment_own",
+  "academy.certificate.sign_own",
+  "academy.direct_supervision_attest_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -1611,6 +1640,11 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  "academy.source.review",
+  "academy.certificate.issue",
+  "academy.certificate.sign_own",
+  "academy.requirement.manage",
+  "academy.direct_supervision_attest_own",
   // Carried forward from the v22.16 audit: these actions already existed in
   // the Permission union and production routers but were never placed in the
   // fail-closed set. Each creates or changes operational/commercial truth.
@@ -2250,6 +2284,10 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "compliance.requirementLoad": "compliance.requirement.manage",
   "compliance.programPublish": "compliance.program.publish",
   "compliance.profileReviewRecord": "compliance.profile.review",
+  "compliance.knowledgeCatalog": "compliance.passport.read",
+  "compliance.dangerousGoodsAssist": "compliance.work.evaluate",
+  "compliance.securementAssist": "compliance.work.evaluate",
+  "compliance.driverQualification": "compliance.work.evaluate",
 
   /* ---- v20.22: requirement engine, packs, equipment, calibration ---- */
   "compliance.packActivate": "compliance.pack.manage",
@@ -2557,6 +2595,28 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "telematics.reviewQueue": "telematics.read",
   "telematics.eventReview": "safety.event.review",
   "telematics.videoView": "safety.video.read",
+
+  /* ---- v22.21/v22.22: Training Academy ---- */
+  "academy.catalog": "academy.read_own",
+  "academy.myTraining": "academy.read_own",
+  "academy.assignmentDetail": "academy.read_own",
+  "academy.ticketPortfolio": "academy.read_own",
+  "academy.moduleComplete": "academy.progress_own",
+  "academy.assessmentOpen": "academy.assessment_own",
+  "academy.assessmentSubmit": "academy.assessment_own",
+  "academy.syncCatalog": "academy.manage",
+  "academy.assign": "academy.assign",
+  "academy.practicalSignoff": "academy.evaluate",
+  "academy.sourceReview": "academy.source.review",
+  "academy.certificateIssue": "academy.certificate.issue",
+  "academy.certificateSignOwn": "academy.certificate.sign_own",
+  "academy.statementOfExperienceCreate": "academy.certificate.issue",
+  "academy.foreignTdgRoadRecognize": "compliance.credential.verify",
+  "academy.requirementList": "academy.read_own",
+  "academy.requirementUpsert": "academy.requirement.manage",
+  "academy.directSupervisionCreate": "academy.direct_supervision.manage",
+  "academy.directSupervisionAttest": "academy.direct_supervision_attest_own",
+  "academy.dispatchCheck": "dispatch.evaluate",
 
   /* ---- v21.20: workforce lifecycle ---- */
   "workforce.applicantCreate": "hr.applicant.manage",

@@ -16,4 +16,15 @@ for f in $(ls drizzle/*.sql | sort); do
   sed 's/-->[[:space:]]*statement-breakpoint//' "$f" \
     | mysql -h "$host" -P "$port" -u "$user" ${pass:+-p"$pass"} "$db"
 done
-echo "migrations applied"
+
+# Academy certificate retention is a legal/compliance invariant, not an optional
+# convenience. The recovered 0108 migration installs the guard; a migration
+# run that silently omits the trigger is not complete.
+academy_trigger_count=$(mysql -N -B -h "$host" -P "$port" -u "$user" ${pass:+-p"$pass"} "$db" \
+  -e "SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = 'academyCertificates_retention_guard'")
+if [ "$academy_trigger_count" != "1" ]; then
+  echo "migration verification failed: academyCertificates_retention_guard missing or duplicated (count=$academy_trigger_count)" >&2
+  exit 1
+fi
+
+echo "migrations applied and Academy retention guard verified"

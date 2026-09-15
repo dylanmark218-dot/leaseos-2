@@ -35,22 +35,27 @@ export type MeasurementMethod =
   | "estimate"
   | "customer_stated"
   | "system_timed"
+  | "loadsense_calibrated"
+  | "loadsense_uncalibrated"
   | "unknown";
 
 /**
  * Authority tiers, strongest first. Ranks are spaced so a tier can be
  * inserted without renumbering the ladder.
  *
- * `authority_certified` and `operator_stated` are intentionally reserved and
- * currently unoccupied. They are the slots a certified-scale reading and a
- * driver-entered figure belong in. They are declared, not populated, because
- * no schema value maps to them yet — declaring the shape is forward planning,
- * inventing the values would be fabricating a branch that has not arrived.
+ * `authority_certified` remains intentionally distinct from a generic `scale`
+ * method: a scale reading is not automatically a certified legal-for-trade
+ * reading. The recovered LoadSense line now occupies the calibrated and
+ * uncalibrated instrument tiers. `operator_stated` remains the authority slot
+ * for a driver-entered weight source; the operational schema still refuses to
+ * turn that source into a billable measurement method by name alone.
  */
 export type MeasurementAuthority =
   | "authority_certified"
+  | "instrument_calibrated"
   | "instrument_measured"
   | "system_derived"
+  | "instrument_uncalibrated"
   | "operator_stated"
   | "counterparty_stated"
   | "estimated"
@@ -59,11 +64,13 @@ export type MeasurementAuthority =
 export const MEASUREMENT_AUTHORITY_RANK: Record<MeasurementAuthority, number> =
   {
     authority_certified: 10,
-    instrument_measured: 20,
+    instrument_calibrated: 20,
+    instrument_measured: 25,
     system_derived: 30,
     operator_stated: 40,
-    counterparty_stated: 50,
-    estimated: 60,
+    instrument_uncalibrated: 50,
+    counterparty_stated: 60,
+    estimated: 70,
     unknown: 99,
   };
 
@@ -75,6 +82,16 @@ type LadderEntry = {
 };
 
 const LADDER: Record<MeasurementMethod, LadderEntry> = {
+  loadsense_calibrated: {
+    authority: "instrument_calibrated",
+    label: "Calibrated onboard weight",
+    detail: "Calibrated onboard measurement — contract, stability and current-calibration gates still apply before billing",
+  },
+  loadsense_uncalibrated: {
+    authority: "instrument_uncalibrated",
+    label: "Uncalibrated onboard weight",
+    detail: "Onboard sensor reading without a current accepted calibration — review only, not billable evidence",
+  },
   scale: { authority: "instrument_measured", label: "Weighed on a scale" },
   meter: { authority: "instrument_measured", label: "Metered" },
   gauge: { authority: "instrument_measured", label: "Gauged" },
@@ -136,7 +153,7 @@ export function classifyMeasurementMethod(
       rank: MEASUREMENT_AUTHORITY_RANK[entry.authority],
       label: entry.label,
       detail: entry.detail,
-      adequateForCharge: raw !== "unknown",
+      adequateForCharge: raw !== "unknown" && raw !== "loadsense_uncalibrated" && raw !== "loadsense_calibrated",
     };
   }
 
@@ -182,4 +199,31 @@ export function strongerMeasurementMethod(
   return compareMeasurementQuality(a, b) <= 0
     ? classifyMeasurementMethod(a).method
     : classifyMeasurementMethod(b).method;
+}
+
+
+export type WeightSource = "estimated" | "driver_entered" | "loadsense_uncalibrated" | "loadsense_calibrated" | "certified_scale";
+
+export function authorityForWeightSource(source: WeightSource): MeasurementAuthority {
+  switch (source) {
+    case "certified_scale": return "authority_certified";
+    case "loadsense_calibrated": return "instrument_calibrated";
+    case "driver_entered": return "operator_stated";
+    case "loadsense_uncalibrated": return "instrument_uncalibrated";
+    case "estimated": return "estimated";
+  }
+}
+
+export function measurementAuthorityRank(authority: MeasurementAuthority): number {
+  return MEASUREMENT_AUTHORITY_RANK[authority];
+}
+
+export function methodForWeightSource(source: WeightSource): MeasurementMethod {
+  switch (source) {
+    case "certified_scale": return "scale";
+    case "loadsense_calibrated": return "loadsense_calibrated";
+    case "loadsense_uncalibrated": return "loadsense_uncalibrated";
+    case "estimated": return "estimate";
+    case "driver_entered": return "unknown";
+  }
 }

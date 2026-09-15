@@ -26,6 +26,7 @@ import RoutePreview from "./pages/RoutePreview";
 import AssistantAsk from "./pages/AssistantAsk";
 import AssistantCalibration from "./pages/AssistantCalibration";
 import TripOperationsWorkspace from "./showcase/TripOperationsWorkspace";
+import TrainingAcademy from "./pages/TrainingAcademy";
 
 function DashboardRoute({ children }: { children: ReactNode }) {
   return <DashboardLayout>{children}</DashboardLayout>;
@@ -79,6 +80,7 @@ function Router() {
         )}
       />
       <Route path="/trip-operations" component={() => <Redirect to="/showcase/trips" />} />
+      <Route path="/training-academy" component={() => <DashboardRoute><TrainingAcademy /></DashboardRoute>} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

@@ -15,7 +15,7 @@
  *   employee payroll because they drove a truck.
  */
 
-import { classifyMeasurementMethod } from "./measurementQuality";
+import { classifyMeasurementMethod, MEASUREMENT_AUTHORITY_RANK } from "./measurementQuality";
 
 export type EarningUnit = "hour" | "km" | "load" | "tonne" | "m3" | "percent" | "each";
 
@@ -34,6 +34,7 @@ export type PayRate = {
    */
   minimumMeasurementAuthority?:
     | "authority_certified"
+    | "instrument_calibrated"
     | "instrument_measured"
     | "system_derived"
     | null;
@@ -174,15 +175,7 @@ export function calculateEarning(args: {
   };
 }
 
-const AUTHORITY_RANK: Record<string, number> = {
-  authority_certified: 10,
-  instrument_measured: 20,
-  system_derived: 30,
-  operator_stated: 40,
-  counterparty_stated: 50,
-  estimated: 60,
-  unknown: 99,
-};
+const AUTHORITY_RANK: Record<string, number> = MEASUREMENT_AUTHORITY_RANK;
 
 /* ------------------------------------------------------------------ */
 /* Clock reconciliation                                                 */

@@ -229,7 +229,7 @@ describe("a typed handle is not cast back to any", () => {
   });
 });
 
-describe("the workflow runtime exists and is not started", () => {
+describe("the workflow runtime exists and is started through one production owner", () => {
   /**
    * An earlier version of this block concluded that no workflow runtime
    * existed. That was false, and the way it was false is worth keeping: it
@@ -238,9 +238,10 @@ describe("the workflow runtime exists and is not started", () => {
    * search found nothing and the absence was read as proof.
    *
    * The real state is narrower and more useful: the engine, runtime, seeds and
-   * drain worker all exist and are exercised against the database; nothing in
-   * the production server lifecycle starts the worker. So the tables are
-   * written by a runtime that does not currently run.
+   * drain worker all exist and are exercised against the database. The production
+   * lifecycle now starts one claim owner through `productionWorker.ts`, and that
+   * owner dispatches specialised enforcement handling without starting a second
+   * consumer for the same outbox.
    */
   const runtime = readFileSync("server/_core/workflowRuntime.ts", "utf8");
   const drain = readFileSync("server/_core/drainWorker.ts", "utf8");
@@ -263,19 +264,22 @@ describe("the workflow runtime exists and is not started", () => {
     expect(lifecycle).toContain("onShutdown");
   });
 
-  it("is still not started by any production entry point, which is the remaining gap", () => {
-    const starters: string[] = [];
-    for (const dir of ["server", "server/_core"]) {
-      for (const f of readdirSync(dir)) {
-        if (!f.endsWith(".ts") || f.includes(".test.")) continue;
-        const path = `${dir}/${f}`;
-        if (path.endsWith("drainWorker.ts")) continue;   // its own definition
-        if (/startDrainWorker\s*\(/.test(readFileSync(path, "utf8"))) starters.push(path);
-      }
-    }
-    // Empty means the worker is defined and never launched. When somebody wires
-    // a lifecycle module, this fails and the documentation sentence changes with it.
-    expect(starters).toEqual([]);
+  it("is started by the production entry point through the single-owner lifecycle", () => {
+    const production = readFileSync("server/_core/productionWorker.ts", "utf8");
+    const entry = readFileSync("server/_core/index.ts", "utf8");
+    const standalone = readFileSync("server/_core/worker.ts", "utf8");
+
+    expect(production).toContain("startProductionWorker");
+    expect(production).toContain("startOnce");
+    expect(production).toContain("startDrainWorker");
+    expect(production).toContain("withHandlers");
+    expect(production).toContain("handleClaimedEnforcementEvent");
+    expect(entry).toContain("await startProductionWorker()");
+    expect(standalone).toContain("await startProductionWorker()");
+
+    // The legacy enforcement consumer remains available for direct tests/tools,
+    // but the production owner must not start it alongside the shared claimer.
+    expect(production).not.toContain("consumeEnforcementEvents");
   });
 });
 

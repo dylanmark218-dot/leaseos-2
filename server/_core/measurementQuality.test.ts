@@ -49,6 +49,8 @@ describe("classifyMeasurementMethod — recognition", () => {
       "estimate",
       "customer_stated",
       "system_timed",
+      "loadsense_calibrated",
+      "loadsense_uncalibrated",
       "unknown",
     ]) {
       expect(isRecognizedMeasurementMethod(m)).toBe(true);
@@ -65,28 +67,27 @@ describe("classifyMeasurementMethod — recognition", () => {
     }
   });
 
-  it("fails closed on a method from a vocabulary this trunk does not know", () => {
-    // Exactly the shape of value a second branch's precedence ladder would
-    // introduce. It must not be read as adequate evidence for a charge.
-    for (const foreign of [
-      "certified_scale",
-      "loadsense_calibrated",
-      "loadsense_uncalibrated",
-      "driver_entered",
-      "estimated",
-    ]) {
+  it("recognizes the reconciled LoadSense methods but keeps their billing gate closed here", () => {
+    const calibrated = classifyMeasurementMethod("loadsense_calibrated");
+    expect(calibrated.recognized).toBe(true);
+    expect(calibrated.authority).toBe("instrument_calibrated");
+    expect(calibrated.adequateForCharge).toBe(false);
+    expect(calibrated.detail).toContain("contract");
+
+    const uncalibrated = classifyMeasurementMethod("loadsense_uncalibrated");
+    expect(uncalibrated.recognized).toBe(true);
+    expect(uncalibrated.authority).toBe("instrument_uncalibrated");
+    expect(uncalibrated.adequateForCharge).toBe(false);
+  });
+
+  it("still fails closed on weight-source vocabulary that is not an operational measurement method", () => {
+    for (const foreign of ["certified_scale", "driver_entered", "estimated"]) {
       const c = classifyMeasurementMethod(foreign);
       expect(c.recognized).toBe(false);
       expect(c.method).toBe("unknown");
       expect(c.adequateForCharge).toBe(false);
       expect(c.unrecognizedValue).toBe(foreign);
     }
-  });
-
-  it("preserves the unrecognized string so the vocabulary gap is reportable", () => {
-    const c = classifyMeasurementMethod("loadsense_uncalibrated");
-    expect(c.detail).toContain("loadsense_uncalibrated");
-    expect(c.detail).toContain("held for review");
   });
 
   it("does not confuse a near-miss spelling for the known value", () => {
@@ -122,9 +123,11 @@ describe("classifyMeasurementMethod — ladder ordering", () => {
     expect(MEASUREMENT_AUTHORITY_RANK.authority_certified).toBeLessThan(
       MEASUREMENT_AUTHORITY_RANK.instrument_measured
     );
-    const occupied = ["meter", "scale", "gauge", "estimate", "customer_stated", "system_timed", "unknown"]
+    const occupied = ["meter", "scale", "gauge", "estimate", "customer_stated", "system_timed", "loadsense_calibrated", "loadsense_uncalibrated", "unknown"]
       .map(m => classifyMeasurementMethod(m).authority);
     expect(occupied).not.toContain("authority_certified");
+    expect(occupied).toContain("instrument_calibrated");
+    expect(occupied).toContain("instrument_uncalibrated");
   });
 
   it("returns the stronger method without discarding that a weaker one exists", () => {

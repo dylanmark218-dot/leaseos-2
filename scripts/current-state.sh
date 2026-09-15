@@ -109,7 +109,7 @@ hashed pointer under its own logged permission) · workforce lifecycle
 (evidenced screenings, hires refused while a screening is pending,
 onboarding credentials entering the registry on a second person's
 verification, supervisor-signed competency, two-person probation,
-offboarding that revokes every door) · audit packages (vehicle, driver, job,
+offboarding that revokes every door) · Training Academy (versioned courses, modules and content; learner progression; version-locked assessments; practical competency sign-off; employer/company versus external-track credential boundaries; server-owned TDG expiry; two-party certificate signatures; retention guard; statements of experience; source-tier gate; direct supervision; qualification requirements explicitly bound into central dispatch readiness without inferring cargo or jurisdiction from free text) · LoadSense recovery (calibration math, stability and axle-limit evaluation, gateway replay/de-duplication and sequence-gap detection, certified-scale reconciliation, material-movement evidence and density-derived volume on the canonical measurement authority ladder; modern persistence uses `measurementDevices`/`calibrationEvents` rather than restoring a second device registry) · audit packages (vehicle, driver, job,
 customer, incident, tax, COR, insurance — hashed manifests, listed
 redactions, named gaps, two-person release) · spatial foundation (LSD/UWI
 validation, theoretical grid positions labelled as such, coordinates
@@ -118,7 +118,7 @@ verified-or-not rule rows, four-axis segment evaluation, route requests
 answered UNKNOWN with no routing source) · contract terms (approved by a
 second person, deciding standby, holds, disposal time and return travel
 with a cited clause, grace minutes and a minimum that raises what is billed
-and says so; the drain worker dispatches webhooks and sweeps retries) ·
+and says so; the production lifecycle starts one shared outbox claimer, dispatches stricter enforcement handling through that owner, and sweeps webhook retries; a standalone worker entrypoint is also available) ·
 money precision (vendor bills, their lines and fuel transactions hold money
 only as integers; thirty grandfathered double money columns remain, pinned
 by test,
@@ -216,6 +216,7 @@ read again on every open, and refused rather than shown when they no longer
 match what was stored — proven in Node against the runtime contracts, with the
 native vault still a stub. Internal portal: shell, switcher, My Day, exceptions,
 inbox, timeline, search, sync indicator, quick capture, view-models.
+Training Academy at `/training-academy`: course catalog, My Training, current-version lesson completion, locked/unlocked final assessment, results, certificate/qualification portfolio, and self-signing of pending regulated certificates.
 Customer portal at `/customer`: invitation acceptance, job board,
 pre-clearance, signing screen, chain of custody, adjustments, line disputes,
 approval queue, timeline, alerts and preferences, documents with download,
@@ -228,7 +229,7 @@ readiness — every step the server's answer.
 
 Native shell (Capacitor), encrypted SQLite, hardware keystore, native file
 vault, camera, GPS, biometric signing, local notifications. Browser/mobile
-end-to-end tests. Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). Contracts and MSAs as
+end-to-end tests. LoadSense authenticated gateway ingestion/native BLE service and hardware deployment (the recovered protocol, calibration/stability/material-movement engines and persistence model are present; the production machine-authenticated device edge is not yet wired). Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). Contracts and MSAs as
 records; WBS below cost code; earned-value schedules. AI extraction of rate sheets from
 uploaded documents (a proposal path exists; the document reader that fills
 it does not); formula pricing is recorded, not evaluated. inbound

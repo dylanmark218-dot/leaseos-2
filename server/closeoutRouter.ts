@@ -107,7 +107,7 @@ export const closeoutRouter = router({
     }),
 
   lineAdd: roleProcedure("closeout.lineAdd")
-    .input(z.object({ ticketNumber: z.string().min(1).max(64), lineKind: z.enum(["service", "load", "disposal", "standby", "equipment", "personnel", "mileage", "other"]), serviceCode: z.string().min(1).max(60).optional(), description: z.string().min(1).max(220), quantity: z.number().nullable().optional(), quantityUnit: z.string().max(30).nullable().optional(), measurementMethod: z.enum(["meter", "scale", "gauge", "estimate", "customer_stated", "system_timed", "unknown"]).default("unknown"), sourceTrackingNumber: z.string().max(64).nullable().optional(), operatorStatement: z.string().max(220).nullable().optional() }))
+    .input(z.object({ ticketNumber: z.string().min(1).max(64), lineKind: z.enum(["service", "load", "disposal", "standby", "equipment", "personnel", "mileage", "other"]), serviceCode: z.string().min(1).max(60).optional(), description: z.string().min(1).max(220), quantity: z.number().nullable().optional(), quantityUnit: z.string().max(30).nullable().optional(), measurementMethod: z.enum(["meter", "scale", "loadsense_calibrated", "loadsense_uncalibrated", "gauge", "estimate", "customer_stated", "system_timed", "unknown"]).default("unknown"), sourceTrackingNumber: z.string().max(64).nullable().optional(), operatorStatement: z.string().max(220).nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       const x = await loadTicket(input.ticketNumber);
       if (x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Ticket is signed — a later addition is a supplement, not an edit" });

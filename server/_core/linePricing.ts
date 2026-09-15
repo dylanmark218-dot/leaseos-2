@@ -11,7 +11,7 @@ import { and, eq } from "drizzle-orm";
 import { chargeDefinitions, pricingDecisions } from "../../drizzle/schema";
 import { priceQuantity, resolveRate, type ChargeDefinition, type MeasurementBasis, type PricingOutcome, type RateKind, type ResolutionContext, type Unit } from "./rateResolution";
 
-export const MEASUREMENT_BASIS: Record<string, MeasurementBasis> = { meter: "meter", scale: "certified_scale", gauge: "tank_calibration", estimate: "operator_estimate", customer_stated: "customer_measurement", system_timed: "clock", unknown: "manual_entry" };
+export const MEASUREMENT_BASIS: Record<string, MeasurementBasis> = { meter: "meter", scale: "certified_scale", loadsense_calibrated: "load_sensor", loadsense_uncalibrated: "load_sensor", gauge: "tank_calibration", estimate: "operator_estimate", customer_stated: "customer_measurement", system_timed: "clock", unknown: "manual_entry" };
 const UNIT_ALIASES: Record<string, Unit> = { h: "hour", hr: "hour", hrs: "hour", hour: "hour", hours: "hour", "half-hour": "half_hour", half_hour: "half_hour", day: "day", days: "day", shift: "shift", load: "load", loads: "load", km: "km", kms: "km", kilometre: "km", kilometres: "km", mi: "mile", mile: "mile", miles: "mile", m3: "m3", "m³": "m3", l: "litre", litre: "litre", litres: "litre", liter: "litre", kg: "kg", t: "tonne", tonne: "tonne", tonnes: "tonne", ton: "tonne", acre: "acre", acres: "acre", m: "metre", metre: "metre", metres: "metre", ft: "foot", foot: "foot", feet: "foot", piece: "piece", pieces: "piece", pc: "piece", worker: "worker", crew: "crew", each: "each", ea: "each", none: "none" };
 export function normaliseUnit(raw: string | null | undefined): Unit | null {
   if (!raw) return null;

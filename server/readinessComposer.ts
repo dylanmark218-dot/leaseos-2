@@ -27,6 +27,7 @@ import {
   faultCodes,
   communicationCoverage, communicationPolicies, companyRadioAuthorizations, radioChannels,
   roadGraphEdges, roadRadioAssignments, routeApprovals, unitRadioCapabilities,
+  academyQualifications, academyRequirements, academyRequirementBindings, academyDirectSupervisionRecords,
 } from "../drizzle/schema";
 import {
   evaluateDispatchReadiness, type CredentialState, type DispatchBlocker, type DispatchEligibility, type EligibilityVerdict, type ReadinessInput,
@@ -35,6 +36,8 @@ import { computeEligibilityFingerprint, type EligibilityFacts } from "./_core/di
 import { assessCoverage, type PolicyRecord } from "./_core/insuranceRisk";
 import { calibrationEffectOnUse, calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import { medicalFitnessForDispatch } from "./_core/compliancePassport";
+import { trainingDispatchDecision } from "./_core/trainingAcademy";
+import { listActiveUserRoleNames } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
 import {
@@ -107,6 +110,39 @@ async function credentialsFor(ownerType: "operator" | "unit" | "trailer", ownerI
 
 type CredRow = Awaited<ReturnType<typeof credentialsFor>>[number];
 
+
+type AcademyBindingRow = typeof academyRequirementBindings.$inferSelect;
+
+const academyCode = (value: string) => value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+
+/**
+ * Facts the central composer can establish without guessing from free text.
+ * Jurisdiction and cargo deliberately are not inferred here: those need an
+ * authoritative route/cargo classification, not a substring match.
+ */
+export type AcademyBindingFacts = {
+  role: readonly string[];
+  equipment: readonly string[];
+  job_type: readonly string[];
+  customer: readonly string[];
+  site: readonly string[];
+};
+
+export function academyBindingMatches(binding: Pick<AcademyBindingRow, "subjectType" | "subjectCode">, facts: AcademyBindingFacts): boolean {
+  if (binding.subjectType === "jurisdiction" || binding.subjectType === "cargo") return false;
+  return facts[binding.subjectType].map(academyCode).includes(academyCode(binding.subjectCode));
+}
+
+function bindingHasUnevaluatedConditions(conditionsJson: string | null): boolean {
+  if (!conditionsJson?.trim()) return false;
+  try {
+    const parsed = JSON.parse(conditionsJson) as unknown;
+    return Boolean(parsed && typeof parsed === "object" && Object.keys(parsed as Record<string, unknown>).length > 0);
+  } catch {
+    return true;
+  }
+}
+
 /** Best credential of a type: verified before needs_review; latest expiry; rejected never counts as present. */
 function credentialState(rows: readonly CredRow[], docTypes: readonly string[], label: string): CredentialState {
   const c = rows
@@ -163,6 +199,66 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   const job = subject.jobId ? (await db.select().from(jobs).where(eq(jobs.id, subject.jobId)).limit(1))[0] ?? null : null;
   const dangerousGoods = /tdg|dangerous|hazard/i.test(`${job?.type ?? ""} ${job?.mode ?? ""}`);
   const required: CredentialState[] = [];
+
+  /* ---- Training Academy bindings ----
+   * The Academy is applied only when an explicit binding matches facts the
+   * server can establish. No global "every driver needs every course" rule,
+   * and no province/cargo guesses from free text.
+   */
+  let academyVersion = "none";
+  if (job) {
+    const roles = op.userId ? await listActiveUserRoleNames(op.userId) : [];
+    const unitForBinding = subject.unitId ? (await db.select().from(units).where(eq(units.id, subject.unitId)).limit(1))[0] ?? null : null;
+    const bindingFacts: AcademyBindingFacts = {
+      role: roles,
+      equipment: unitForBinding ? [unitForBinding.vehicleType] : [],
+      job_type: [job.type, job.mode],
+      customer: [job.customer],
+      site: [job.location],
+    };
+    const bindings = await db.select().from(academyRequirementBindings).where(eq(academyRequirementBindings.active, true));
+    const liveBindings = bindings.filter(b => (!b.effectiveAt || b.effectiveAt <= now) && (!b.expiresAt || b.expiresAt > now));
+    const matchedBindings = liveBindings.filter(b => academyBindingMatches(b, bindingFacts));
+    const matchedRequirementIds = Array.from(new Set(matchedBindings.map(b => b.requirementId)));
+    if (matchedRequirementIds.length) {
+      const reqs = (await db.select().from(academyRequirements).where(inArray(academyRequirements.id, matchedRequirementIds))).filter(r => r.active);
+      if (!op.userId) {
+        extra.push({ code: "academy_operator_unlinked", label: "Training requirements apply to this job, but the operator is not linked to a user qualification record", severity: "unknown", subject: "operator", overridable: true, overrideAuthority: "dispatcher" });
+        contributions.push({ engine: "academy", finding: `${reqs.length} bound training requirement(s) apply, but operator ${op.id} has no user link` });
+        academyVersion = versionOf([...matchedBindings.map(b => `${b.id}:${b.requirementId}:${b.createdAt.toISOString()}`), ...reqs.map(r => `${r.id}:${r.updatedAt.toISOString()}`)]);
+      } else {
+        const conditional = matchedBindings.filter(b => bindingHasUnevaluatedConditions(b.conditionsJson));
+        if (conditional.length) {
+          extra.push({ code: "academy_binding_conditions_unknown", label: `${conditional.length} applicable training binding(s) have additional conditions the central dispatch composer cannot yet evaluate`, severity: "unknown", subject: "operator", overridable: true, overrideAuthority: "dispatcher" });
+        }
+        const conditionlessRequirementIds = new Set(matchedBindings.filter(b => !bindingHasUnevaluatedConditions(b.conditionsJson)).map(b => b.requirementId));
+        const applicable = reqs.filter(r => conditionlessRequirementIds.has(r.id));
+        const quals = await db.select().from(academyQualifications).where(eq(academyQualifications.userId, op.userId));
+        const accepted = quals.filter(q => q.status === "current" && (!q.expiresAt || q.expiresAt > now)).map(q => ({ code: q.qualificationCode, status: q.status, expiresAt: q.expiresAt }));
+        const supers = await db.select().from(academyDirectSupervisionRecords).where(and(
+          eq(academyDirectSupervisionRecords.traineeUserId, op.userId),
+          eq(academyDirectSupervisionRecords.jobId, job.id),
+          eq(academyDirectSupervisionRecords.status, "active"),
+          eq(academyDirectSupervisionRecords.physicalPresenceAttested, true),
+        ));
+        for (const sup of supers) {
+          if (sup.startsAt <= now && sup.endsAt > now && !accepted.some(q => q.code === sup.qualificationCode)) {
+            accepted.push({ code: sup.qualificationCode, status: "current" as const, expiresAt: sup.endsAt });
+          }
+        }
+        const decision = trainingDispatchDecision(applicable.map(r => ({ code: r.requirementCode, title: r.title, qualificationCode: r.qualificationCode, enforcement: r.enforcement, recoveryPath: r.recoveryPath })), accepted, now);
+        for (const label of decision.blockers) extra.push({ code: `academy_${academyCode(label).slice(0, 80)}`, label, severity: "blocking", subject: "operator", overridable: false });
+        for (const label of decision.review) extra.push({ code: `academy_review_${academyCode(label).slice(0, 73)}`, label, severity: "review", subject: "operator", overridable: true, overrideAuthority: "safety" });
+        contributions.push({ engine: "academy", finding: `${applicable.length} bound requirement(s): ${decision.status}; ${decision.satisfied.length} satisfied` });
+        academyVersion = versionOf([
+          ...matchedBindings.map(b => `${b.id}:${b.requirementId}:${b.active}:${b.effectiveAt?.toISOString() ?? "∅"}:${b.expiresAt?.toISOString() ?? "∅"}:${b.conditionsJson ?? "∅"}`),
+          ...reqs.map(r => `${r.id}:${r.requirementCode}:${r.qualificationCode}:${r.enforcement}:${r.active}:${r.updatedAt.toISOString()}`),
+          ...quals.map(q => `${q.id}:${q.qualificationCode}:${q.status}:${q.expiresAt?.toISOString() ?? "∅"}:${q.updatedAt.toISOString()}`),
+          ...supers.map(x => `${x.id}:${x.qualificationCode}:${x.status}:${x.physicalPresenceAttested}:${x.startsAt.toISOString()}:${x.endsAt.toISOString()}`),
+        ]);
+      }
+    }
+  }
   if (dangerousGoods) required.push(credentialState(opCreds, ["tdg_certificate"], "TDG certificate"));
   // Medical fitness reaches dispatch as a projection only.
   const medRow = opCreds.filter(c => c.docType === "medical_fitness").sort((a, b) => (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
@@ -381,7 +477,10 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
 
   const facts: EligibilityFacts = {
     operatorId: op.id,
-    operatorCredentialVersion: versionOf(opCreds.map(c => `${c.id}:${c.verificationStatus}:${c.expiresAt?.toISOString() ?? "∅"}`)),
+    operatorCredentialVersion: versionOf([
+      ...opCreds.map(c => `${c.id}:${c.verificationStatus}:${c.expiresAt?.toISOString() ?? "∅"}`),
+      `academy:${academyVersion}`,
+    ]),
     hoursAvailableMinutes: null,
     unitId: subject.unitId, unitStatusVersion: unitVersion, criticalDefectCount: criticalCount, mechanicReleaseVersion: releaseVersion,
     trailerId: subject.trailerId, trailerStatusVersion: trailerVersion,

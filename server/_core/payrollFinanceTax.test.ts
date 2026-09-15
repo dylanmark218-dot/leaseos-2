@@ -510,11 +510,16 @@ describe("a weak measurement does not become a wage", () => {
     expect(c.blockedReason).toContain("requires a instrument_measured");
   });
 
-  it("blocks an unrecognized measurement vocabulary", () => {
-    // Same fail-closed ladder the disposal billing gate uses.
+  it("blocks an uncalibrated LoadSense reading even though its source is now recognized", () => {
     const c = tonnage("loadsense_uncalibrated");
     expect(c.status).toBe("blocked");
-    expect(c.blockedReason).toContain("unrecognized source");
+    expect(c.blockedReason).toContain("instrument_uncalibrated");
+  });
+
+  it("allows calibrated LoadSense where the pay rule requires instrument-measured evidence", () => {
+    const c = tonnage("loadsense_calibrated");
+    expect(c.status).toBe("calculated");
+    expect(c.measurementAuthority).toBe("instrument_calibrated");
   });
 
   it("blocks a missing measurement entirely", () => {

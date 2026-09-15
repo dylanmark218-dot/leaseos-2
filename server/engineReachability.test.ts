@@ -33,17 +33,11 @@ const DECLARED_UNWIRED: Record<string, string> = {
   openShifts: "eligibility engine; openShiftsRouter currently decides inline — a live duplication, not a gap",
   billing: "billing engine predates this audit; reachability not yet established",
   advisoryImpact: "road-advisory placement; feed scheduler is not started",
-  drainWorker: "outbox drain; startOnce is not called from an entry point",
   eventEmitter: "event vocabulary; emitters write via raw SQL",
   externalDataRegistry: "external source registry; no feed is cleared",
   externalSourceSeeds: "no application path reaches this engine",
   feedCollector: "feed quota and clearance gates; scheduler not started",
   feedIngest: "feed ingestion lifecycle; scheduler not started",
-  oauth: "no application path reaches this engine",
-  storageProxy: "no application path reaches this engine",
-  vite: "no application path reaches this engine",
-  workflowEngine: "no application path reaches this engine",
-  workflowSeeds: "no application path reaches this engine",
   billingAdjustment: "adjustment rules; same unestablished reachability as billing",
   dataApi: "shape declarations only",
   dataIngestion: "import path not wired",
@@ -55,15 +49,16 @@ const DECLARED_UNWIRED: Record<string, string> = {
   fieldTicket: "ticket engine; router path predates it",
   heartbeat: "liveness helper; no monitor calls it",
   imageGeneration: "unused capability",
-  index: "barrel file, re-exports only",
   jurisdiction: "profile lookup; callers use their own",
   map: "map geometry helpers; callers use the routing adapter path instead",
+  loadSense: "recovered calibrated onboard-weight engine; production machine/device ingestion is not wired yet",
+  loadSenseProtocol: "recovered gateway frame validation/replay; authenticated machine edge is not wired yet",
+  loadSenseMaterialMovement: "recovered LoadSense manifest/billing projection; persistence is present but no device ingestion path calls it yet",
+  loadSenseEvents: "recovered LoadSense event vocabulary; device ingestion does not emit it yet",
   remoteWorkEvidence: "evidence helper",
   tracking: "tracking-number format; generators inline",
   truckRoutingAdapter: "routing adapter; no live feed",
   voiceTranscription: "transcription edge; no device path",
-  workerLifecycle: "worker lifecycle; startOnce not called from an entry point",
-  workflowRuntime: "runtime writes via raw SQL rather than importing itself",
 };
 
 function coreEngines(): string[] {
@@ -105,8 +100,10 @@ function reachableSet(srcs: Record<string, string>): Set<string> {
 
   const reached = new Set<string>();
   const queue: string[] = [];
+  const coreEntrypoints = new Set(["server/_core/index.ts", "server/_core/worker.ts"]);
   for (const [path, body] of Object.entries(srcs)) {
-    if (path.includes("_core/")) continue;
+    if (path.includes("_core/") && !coreEntrypoints.has(path)) continue;
+    if (coreEntrypoints.has(path)) reached.add(path.split("/").pop()!.replace(/\.ts$/, ""));
     for (const mod of importsOf(body)) queue.push(mod);
   }
   while (queue.length) {
@@ -148,7 +145,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(38);
+    expect(unwired).toHaveLength(33);
     expect(engines.length).toBeGreaterThan(130);
   });
 });

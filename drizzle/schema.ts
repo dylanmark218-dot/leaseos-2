@@ -890,6 +890,8 @@ export const loads = mysqlTable("loads", {
   measurementMethod: mysqlEnum("measurementMethod", [
     "meter",
     "scale",
+    "loadsense_calibrated",
+    "loadsense_uncalibrated",
     "gauge",
     "estimate",
     "customer_stated",
@@ -1066,6 +1068,8 @@ export const fieldTicketLines = mysqlTable("fieldTicketLines", {
   measurementMethod: mysqlEnum("measurementMethod", [
     "meter",
     "scale",
+    "loadsense_calibrated",
+    "loadsense_uncalibrated",
     "gauge",
     "estimate",
     "customer_stated",
@@ -6985,3 +6989,518 @@ export const retrievalMeasurements = mysqlTable("retrievalMeasurements", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type RetrievalMeasurementRow = typeof retrievalMeasurements.$inferSelect;
+
+/* ==================================================================
+ * v22.21 — Training Academy
+ *
+ * Training completion, legal credentials and practical competence are separate
+ * facts. Course versions are immutable once published; attempts snapshot the
+ * exact policy/question order; certificates may be issued only from reviewed
+ * source snapshots and only for employer/company credential boundaries.
+ * ================================================================== */
+
+export const academyCourses = mysqlTable("academyCourses", {
+  id: int("id").autoincrement().primaryKey(),
+  courseCode: varchar("courseCode", { length: 80 }).notNull().unique(),
+  title: varchar("title", { length: 220 }).notNull(),
+  category: mysqlEnum("category", ["whmis", "tdg", "erg", "commercial_driver", "air_brake", "load_securement", "company", "external_track"]).notNull(),
+  credentialBoundary: mysqlEnum("credentialBoundary", ["employer_certificate", "company_certificate", "external_track_only", "knowledge_only"]).notNull(),
+  externalCredentialCode: varchar("externalCredentialCode", { length: 100 }),
+  jurisdiction: varchar("jurisdiction", { length: 80 }).notNull(),
+  regulated: boolean("regulated").default(false).notNull(),
+  requiresPractical: boolean("requiresPractical").default(false).notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const academyCourseVersions = mysqlTable("academyCourseVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  courseId: int("courseId").notNull(),
+  versionRef: varchar("versionRef", { length: 96 }).notNull().unique(),
+  versionNumber: int("versionNumber").notNull(),
+  status: mysqlEnum("status", ["draft", "published", "retired"]).default("draft").notNull(),
+  effectiveAt: timestamp("effectiveAt"),
+  retiredAt: timestamp("retiredAt"),
+  policyJson: text("policyJson").notNull(),
+  courseHash: varchar("courseHash", { length: 64 }).notNull(),
+  sourceSnapshotRef: varchar("sourceSnapshotRef", { length: 96 }),
+  publishedByUserId: int("publishedByUserId"),
+  publishedAt: timestamp("publishedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyModules = mysqlTable("academyModules", {
+  id: int("id").autoincrement().primaryKey(),
+  courseVersionId: int("courseVersionId").notNull(),
+  moduleCode: varchar("moduleCode", { length: 80 }).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  orderIndex: int("orderIndex").notNull(),
+  domainCode: varchar("domainCode", { length: 80 }).notNull(),
+  requiresCompletion: boolean("requiresCompletion").default(true).notNull(),
+  requiresPractical: boolean("requiresPractical").default(false).notNull(),
+  estimatedMinutes: int("estimatedMinutes"),
+  moduleHash: varchar("moduleHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyContentBlocks = mysqlTable("academyContentBlocks", {
+  id: int("id").autoincrement().primaryKey(),
+  moduleId: int("moduleId").notNull(),
+  blockCode: varchar("blockCode", { length: 100 }).notNull(),
+  orderIndex: int("orderIndex").notNull(),
+  kind: mysqlEnum("kind", ["lesson", "callout", "procedure", "scenario", "knowledge_check", "source_note"]).notNull(),
+  title: varchar("title", { length: 240 }).notNull(),
+  bodyJson: text("bodyJson").notNull(),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyAssignments = mysqlTable("academyAssignments", {
+  id: int("id").autoincrement().primaryKey(),
+  assignmentRef: varchar("assignmentRef", { length: 96 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  courseVersionId: int("courseVersionId").notNull(),
+  status: mysqlEnum("status", ["assigned", "in_progress", "assessment_ready", "practical_pending", "completed", "failed", "overdue", "cancelled"]).default("assigned").notNull(),
+  assignedByUserId: int("assignedByUserId").notNull(),
+  assignedAt: timestamp("assignedAt").defaultNow().notNull(),
+  dueAt: timestamp("dueAt"),
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+  completionReason: varchar("completionReason", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const academyModuleCompletions = mysqlTable("academyModuleCompletions", {
+  id: int("id").autoincrement().primaryKey(),
+  assignmentId: int("assignmentId").notNull(),
+  moduleId: int("moduleId").notNull(),
+  courseVersionId: int("courseVersionId").notNull(),
+  status: mysqlEnum("status", ["started", "completed", "invalidated"]).default("started").notNull(),
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+  contentVersionHash: varchar("contentVersionHash", { length: 64 }).notNull(),
+  evidenceJson: text("evidenceJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const academyQuestions = mysqlTable("academyQuestions", {
+  id: int("id").autoincrement().primaryKey(),
+  courseVersionId: int("courseVersionId").notNull(),
+  questionCode: varchar("questionCode", { length: 100 }).notNull(),
+  bankCode: varchar("bankCode", { length: 80 }).notNull(),
+  domainCode: varchar("domainCode", { length: 80 }).notNull(),
+  prompt: text("prompt").notNull(),
+  optionsJson: text("optionsJson").notNull(),
+  correctAnswerJson: text("correctAnswerJson").notNull(),
+  explanation: text("explanation"),
+  critical: boolean("critical").default(false).notNull(),
+  active: boolean("active").default(true).notNull(),
+  questionHash: varchar("questionHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyAssessments = mysqlTable("academyAssessments", {
+  id: int("id").autoincrement().primaryKey(),
+  courseVersionId: int("courseVersionId").notNull(),
+  assessmentCode: varchar("assessmentCode", { length: 100 }).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  questionCount: int("questionCount").notNull(),
+  passingScorePercent: int("passingScorePercent").notNull(),
+  maxAttempts: int("maxAttempts"),
+  policyJson: text("policyJson").notNull(),
+  domainThresholdsJson: text("domainThresholdsJson"),
+  criticalFailurePolicyJson: text("criticalFailurePolicyJson"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyAssessmentAttempts = mysqlTable("academyAssessmentAttempts", {
+  id: int("id").autoincrement().primaryKey(),
+  attemptRef: varchar("attemptRef", { length: 96 }).notNull().unique(),
+  assessmentId: int("assessmentId").notNull(),
+  assignmentId: int("assignmentId").notNull(),
+  userId: int("userId").notNull(),
+  courseVersionId: int("courseVersionId").notNull(),
+  status: mysqlEnum("status", ["open", "submitted", "passed", "failed", "void"]).default("open").notNull(),
+  attemptNumber: int("attemptNumber").notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  submittedAt: timestamp("submittedAt"),
+  scorePercent: int("scorePercent"),
+  domainScoresJson: text("domainScoresJson"),
+  criticalFailuresJson: text("criticalFailuresJson"),
+  policySnapshotJson: text("policySnapshotJson").notNull(),
+  questionSetJson: text("questionSetJson").notNull(),
+  questionSetHash: varchar("questionSetHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyAssessmentItems = mysqlTable("academyAssessmentItems", {
+  id: int("id").autoincrement().primaryKey(),
+  attemptId: int("attemptId").notNull(),
+  questionId: int("questionId").notNull(),
+  sequenceIndex: int("sequenceIndex").notNull(),
+  domainCode: varchar("domainCode", { length: 80 }).notNull(),
+  critical: boolean("critical").default(false).notNull(),
+  presentedPromptHash: varchar("presentedPromptHash", { length: 64 }).notNull(),
+  answerOrderJson: text("answerOrderJson").notNull(),
+  responseJson: text("responseJson"),
+  correct: boolean("correct"),
+  answeredAt: timestamp("answeredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyPracticalEvaluations = mysqlTable("academyPracticalEvaluations", {
+  id: int("id").autoincrement().primaryKey(),
+  evaluationRef: varchar("evaluationRef", { length: 96 }).notNull().unique(),
+  assignmentId: int("assignmentId").notNull(),
+  courseVersionId: int("courseVersionId").notNull(),
+  userId: int("userId").notNull(),
+  competencyCode: varchar("competencyCode", { length: 100 }).notNull(),
+  evaluatorUserId: int("evaluatorUserId").notNull(),
+  status: mysqlEnum("status", ["competent", "needs_practice", "failed", "revoked"]).notNull(),
+  rubricJson: text("rubricJson").notNull(),
+  evidenceRecordId: int("evidenceRecordId"),
+  observedAt: timestamp("observedAt").notNull(),
+  signedAt: timestamp("signedAt").notNull(),
+  expiresAt: timestamp("expiresAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyQualifications = mysqlTable("academyQualifications", {
+  id: int("id").autoincrement().primaryKey(),
+  qualificationRef: varchar("qualificationRef", { length: 96 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  qualificationCode: varchar("qualificationCode", { length: 100 }).notNull(),
+  sourceKind: mysqlEnum("sourceKind", ["academy_certificate", "external_credential", "direct_supervision", "company_signoff"]).notNull(),
+  status: mysqlEnum("status", ["pending", "current", "expired", "revoked", "rejected"]).default("pending").notNull(),
+  courseVersionId: int("courseVersionId"),
+  certificateId: int("certificateId"),
+  complianceDocumentId: int("complianceDocumentId"),
+  validFrom: timestamp("validFrom"),
+  expiresAt: timestamp("expiresAt"),
+  scopeJson: text("scopeJson"),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const academyCertificates = mysqlTable("academyCertificates", {
+  id: int("id").autoincrement().primaryKey(),
+  certificateRef: varchar("certificateRef", { length: 96 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  courseId: int("courseId").notNull(),
+  courseVersionId: int("courseVersionId").notNull(),
+  assignmentId: int("assignmentId").notNull(),
+  qualificationCode: varchar("qualificationCode", { length: 100 }).notNull(),
+  credentialBoundary: mysqlEnum("credentialBoundary", ["employer_certificate", "company_certificate"]).notNull(),
+  status: mysqlEnum("status", ["pending_signature", "active", "revoked"]).default("active").notNull(),
+  issuedByUserId: int("issuedByUserId").notNull(),
+  employeeNameSnapshot: varchar("employeeNameSnapshot", { length: 220 }),
+  employerNameSnapshot: varchar("employerNameSnapshot", { length: 220 }),
+  employerBusinessAddressSnapshot: varchar("employerBusinessAddressSnapshot", { length: 500 }),
+  trainingAspectsJson: text("trainingAspectsJson"),
+  issuedAt: timestamp("issuedAt").notNull(),
+  finalizedAt: timestamp("finalizedAt"),
+  expiresAt: timestamp("expiresAt"),
+  retentionUntil: timestamp("retentionUntil"),
+  sourceSnapshotRef: varchar("sourceSnapshotRef", { length: 96 }).notNull(),
+  regulatoryProfileRef: varchar("regulatoryProfileRef", { length: 96 }),
+  regulatoryProfileHash: varchar("regulatoryProfileHash", { length: 64 }),
+  statementOfExperienceId: int("statementOfExperienceId"),
+  attestationStatement: text("attestationStatement"),
+  attestedAt: timestamp("attestedAt"),
+  policySnapshotHash: varchar("policySnapshotHash", { length: 64 }).notNull(),
+  certificateHash: varchar("certificateHash", { length: 64 }).notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokedByUserId: int("revokedByUserId"),
+  revocationReason: varchar("revocationReason", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academySourceRecords = mysqlTable("academySourceRecords", {
+  id: int("id").autoincrement().primaryKey(),
+  sourceRef: varchar("sourceRef", { length: 96 }).notNull().unique(),
+  authority: varchar("authority", { length: 220 }).notNull(),
+  sourceTier: mysqlEnum("sourceTier", ["authority", "industry_association", "vendor", "unknown"]).default("unknown").notNull(),
+  title: varchar("title", { length: 300 }).notNull(),
+  sourceUrl: varchar("sourceUrl", { length: 1024 }),
+  jurisdiction: varchar("jurisdiction", { length: 80 }).notNull(),
+  edition: varchar("edition", { length: 120 }),
+  effectiveAt: timestamp("effectiveAt"),
+  reviewStatus: mysqlEnum("reviewStatus", ["unreviewed", "reviewed", "superseded", "rejected"]).default("unreviewed").notNull(),
+  reviewedByUserId: int("reviewedByUserId"),
+  reviewedAt: timestamp("reviewedAt"),
+  snapshotHash: varchar("snapshotHash", { length: 64 }).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const academyRegulatoryProfiles = mysqlTable("academyRegulatoryProfiles", {
+  id: int("id").autoincrement().primaryKey(),
+  profileRef: varchar("profileRef", { length: 96 }).notNull().unique(),
+  qualificationCode: varchar("qualificationCode", { length: 100 }).notNull(),
+  mode: mysqlEnum("mode", ["road", "rail", "vessel", "air", "workplace", "company"]).notNull(),
+  profileVersion: int("profileVersion").notNull(),
+  credentialBoundary: mysqlEnum("credentialBoundary", ["employer_certificate", "company_certificate"]).notNull(),
+  validityMonths: int("validityMonths"),
+  retentionMonthsAfterExpiry: int("retentionMonthsAfterExpiry"),
+  requiresEmployeeSignature: boolean("requiresEmployeeSignature").default(false).notNull(),
+  requiresEmployerSignature: boolean("requiresEmployerSignature").default(false).notNull(),
+  requiresReasonableGroundsAttestation: boolean("requiresReasonableGroundsAttestation").default(false).notNull(),
+  sourceSnapshotRef: varchar("sourceSnapshotRef", { length: 96 }).notNull(),
+  effectiveAt: timestamp("effectiveAt").notNull(),
+  supersededAt: timestamp("supersededAt"),
+  profileHash: varchar("profileHash", { length: 64 }).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyCertificateSignatures = mysqlTable("academyCertificateSignatures", {
+  id: int("id").autoincrement().primaryKey(),
+  signatureRef: varchar("signatureRef", { length: 96 }).notNull().unique(),
+  certificateId: int("certificateId").notNull(),
+  signerUserId: int("signerUserId").notNull(),
+  signerParty: mysqlEnum("signerParty", ["employee", "employer_representative", "self_employed"]).notNull(),
+  signerName: varchar("signerName", { length: 220 }).notNull(),
+  signerRole: varchar("signerRole", { length: 160 }).notNull(),
+  signatureMethod: mysqlEnum("signatureMethod", ["drawn", "electronic_ack", "paper_scan"]).notNull(),
+  signatureEvidenceRecordId: int("signatureEvidenceRecordId"),
+  payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
+  signedAt: timestamp("signedAt").notNull(),
+  capturedOffline: boolean("capturedOffline").default(false).notNull(),
+  invalidatedAt: timestamp("invalidatedAt"),
+  invalidationReason: varchar("invalidationReason", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyStatementsOfExperience = mysqlTable("academyStatementsOfExperience", {
+  id: int("id").autoincrement().primaryKey(),
+  statementRef: varchar("statementRef", { length: 96 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  qualificationCode: varchar("qualificationCode", { length: 100 }).notNull(),
+  experienceFrom: timestamp("experienceFrom").notNull(),
+  experienceTo: timestamp("experienceTo").notNull(),
+  dutiesJson: text("dutiesJson").notNull(),
+  dangerousGoodsScopeJson: text("dangerousGoodsScopeJson"),
+  preparedByUserId: int("preparedByUserId").notNull(),
+  employerAttestation: text("employerAttestation").notNull(),
+  sourceCertificateId: int("sourceCertificateId"),
+  payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const complianceKnowledgeItems = mysqlTable("complianceKnowledgeItems", {
+  id: int("id").autoincrement().primaryKey(),
+  code: varchar("code", { length: 100 }).notNull().unique(),
+  category: mysqlEnum("category", ["tdg", "whmis", "erg", "placards", "waste_manifest", "cargo_securement", "company_policy"]).notNull(),
+  title: varchar("title", { length: 240 }).notNull(),
+  jurisdiction: varchar("jurisdiction", { length: 80 }).notNull(),
+  summary: text("summary"),
+  bodyJson: text("bodyJson"),
+  sourceAuthority: varchar("sourceAuthority", { length: 220 }),
+  sourceUrl: varchar("sourceUrl", { length: 1024 }),
+  regulatoryVersion: varchar("regulatoryVersion", { length: 180 }),
+  sourceVerifiedAt: timestamp("sourceVerifiedAt"),
+  companyScope: varchar("companyScope", { length: 180 }),
+  companySpecific: boolean("companySpecific").default(false).notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const academyDirectSupervisionRecords = mysqlTable("academyDirectSupervisionRecords", {
+  id: int("id").autoincrement().primaryKey(),
+  supervisionRef: varchar("supervisionRef", { length: 96 }).notNull().unique(),
+  traineeUserId: int("traineeUserId").notNull(),
+  supervisorUserId: int("supervisorUserId").notNull(),
+  jobId: int("jobId").notNull(),
+  qualificationCode: varchar("qualificationCode", { length: 100 }).notNull(),
+  supervisorQualificationId: int("supervisorQualificationId").notNull(),
+  scopeJson: text("scopeJson").notNull(),
+  startsAt: timestamp("startsAt").notNull(),
+  endsAt: timestamp("endsAt").notNull(),
+  physicalPresenceAttested: boolean("physicalPresenceAttested").default(false).notNull(),
+  attestedByUserId: int("attestedByUserId"),
+  attestedAt: timestamp("attestedAt"),
+  status: mysqlEnum("status", ["planned", "active", "closed", "cancelled"]).default("planned").notNull(),
+  closedAt: timestamp("closedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyRequirements = mysqlTable("academyRequirements", {
+  id: int("id").autoincrement().primaryKey(),
+  requirementCode: varchar("requirementCode", { length: 100 }).notNull().unique(),
+  title: varchar("title", { length: 240 }).notNull(),
+  qualificationCode: varchar("qualificationCode", { length: 100 }).notNull(),
+  enforcement: mysqlEnum("enforcement", ["block", "review", "inform"]).default("block").notNull(),
+  recoveryPath: varchar("recoveryPath", { length: 500 }),
+  conditionsJson: text("conditionsJson"),
+  active: boolean("active").default(true).notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const academyRequirementBindings = mysqlTable("academyRequirementBindings", {
+  id: int("id").autoincrement().primaryKey(),
+  bindingRef: varchar("bindingRef", { length: 96 }).notNull().unique(),
+  requirementId: int("requirementId").notNull(),
+  subjectType: mysqlEnum("subjectType", ["role", "equipment", "job_type", "customer", "site", "jurisdiction", "cargo"]).notNull(),
+  subjectCode: varchar("subjectCode", { length: 160 }).notNull(),
+  conditionsJson: text("conditionsJson"),
+  effectiveAt: timestamp("effectiveAt"),
+  expiresAt: timestamp("expiresAt"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const academyAuditEvents = mysqlTable("academyAuditEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
+  actorUserId: int("actorUserId"),
+  subjectType: varchar("subjectType", { length: 80 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  eventType: varchar("eventType", { length: 120 }).notNull(),
+  eventJson: text("eventJson").notNull(),
+  previousHash: varchar("previousHash", { length: 64 }),
+  eventHash: varchar("eventHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+
+
+/* ==================================================================
+ * Project recovery 0109 — LoadSense on the canonical measurement registry
+ * ================================================================== */
+
+export const loadSenseCalibrationModels = mysqlTable("loadSenseCalibrationModels", {
+  id: int("id").autoincrement().primaryKey(),
+  modelRef: varchar("modelRef", { length: 96 }).notNull().unique(),
+  measurementDeviceId: int("measurementDeviceId").notNull(),
+  calibrationEventId: int("calibrationEventId").notNull(),
+  slope: double("slope").notNull(),
+  offset: double("offset").notNull(),
+  pointCount: int("pointCount").notNull(),
+  rSquared: double("rSquared"),
+  pointsJson: text("pointsJson").notNull(),
+  status: mysqlEnum("status", ["active", "superseded", "invalidated"]).default("active").notNull(),
+  invalidationReason: varchar("invalidationReason", { length: 400 }),
+  effectiveAt: timestamp("effectiveAt").notNull(),
+  invalidatedAt: timestamp("invalidatedAt"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const loadSenseGatewayFrames = mysqlTable("loadSenseGatewayFrames", {
+  id: int("id").autoincrement().primaryKey(),
+  frameKey: varchar("frameKey", { length: 180 }).notNull().unique(),
+  gatewayDeviceRef: varchar("gatewayDeviceRef", { length: 96 }).notNull(),
+  sequence: int("sequence").notNull(),
+  measurementDeviceId: int("measurementDeviceId"),
+  loadId: int("loadId"),
+  calibrationModelId: int("calibrationModelId"),
+  measuredAt: timestamp("measuredAt").notNull(),
+  buffered: boolean("buffered").default(false).notNull(),
+  readingsJson: text("readingsJson").notNull(),
+  vehicleStateJson: text("vehicleStateJson"),
+  receivedAt: timestamp("receivedAt").defaultNow().notNull(),
+});
+
+export const loadSenseWeightSnapshots = mysqlTable("loadSenseWeightSnapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  snapshotRef: varchar("snapshotRef", { length: 96 }).notNull().unique(),
+  loadId: int("loadId").notNull(),
+  unitId: int("unitId").notNull(),
+  trailerId: int("trailerId"),
+  jobId: int("jobId"),
+  tripId: int("tripId"),
+  measurementDeviceId: int("measurementDeviceId"),
+  calibrationModelId: int("calibrationModelId"),
+  measurementSource: mysqlEnum("measurementSource", ["estimated", "driver_entered", "loadsense_uncalibrated", "loadsense_calibrated", "certified_scale"]).notNull(),
+  tareKg: double("tareKg").notNull(),
+  grossKg: double("grossKg").notNull(),
+  payloadKg: double("payloadKg").notNull(),
+  stable: boolean("stable").notNull(),
+  stabilityScore: double("stabilityScore").notNull(),
+  latitude: double("latitude"),
+  longitude: double("longitude"),
+  measuredAt: timestamp("measuredAt").notNull(),
+  payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const loadSenseAxleWeights = mysqlTable("loadSenseAxleWeights", {
+  id: int("id").autoincrement().primaryKey(),
+  snapshotId: int("snapshotId").notNull(),
+  axleGroupKey: varchar("axleGroupKey", { length: 80 }).notNull(),
+  label: varchar("label", { length: 160 }).notNull(),
+  weightKg: double("weightKg").notNull(),
+  configuredLimitKg: double("configuredLimitKg"),
+  limitSource: varchar("limitSource", { length: 300 }),
+  status: mysqlEnum("status", ["within", "near_limit", "over_limit", "unknown_limit"]).notNull(),
+  sourceChannelsJson: text("sourceChannelsJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const loadSenseScaleReconciliations = mysqlTable("loadSenseScaleReconciliations", {
+  id: int("id").autoincrement().primaryKey(),
+  reconciliationRef: varchar("reconciliationRef", { length: 96 }).notNull().unique(),
+  snapshotId: int("snapshotId").notNull(),
+  certifiedScaleEvidenceId: int("certifiedScaleEvidenceId"),
+  certifiedGrossKg: double("certifiedGrossKg").notNull(),
+  varianceKg: double("varianceKg").notNull(),
+  variancePercent: double("variancePercent").notNull(),
+  status: mysqlEnum("status", ["within_tolerance", "review", "recalibration_recommended"]).notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const materialDensityProfiles = mysqlTable("materialDensityProfiles", {
+  id: int("id").autoincrement().primaryKey(),
+  profileRef: varchar("profileRef", { length: 96 }).notNull().unique(),
+  materialCode: varchar("materialCode", { length: 160 }).notNull(),
+  densityKgM3: double("densityKgM3").notNull(),
+  source: varchar("source", { length: 400 }).notNull(),
+  verified: boolean("verified").default(false).notNull(),
+  moistureAdjusted: boolean("moistureAdjusted").default(false).notNull(),
+  effectiveFrom: timestamp("effectiveFrom"),
+  effectiveTo: timestamp("effectiveTo"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type InsertLoadSenseCalibrationModel = typeof loadSenseCalibrationModels.$inferInsert;
+export type InsertLoadSenseGatewayFrame = typeof loadSenseGatewayFrames.$inferInsert;
+export type InsertLoadSenseWeightSnapshot = typeof loadSenseWeightSnapshots.$inferInsert;
+export type InsertLoadSenseAxleWeight = typeof loadSenseAxleWeights.$inferInsert;
+export type InsertLoadSenseScaleReconciliation = typeof loadSenseScaleReconciliations.$inferInsert;
+export type InsertMaterialDensityProfile = typeof materialDensityProfiles.$inferInsert;
+
+export type InsertAcademyCourse = typeof academyCourses.$inferInsert;
+export type InsertAcademyCourseVersion = typeof academyCourseVersions.$inferInsert;
+export type InsertAcademyModule = typeof academyModules.$inferInsert;
+export type InsertAcademyContentBlock = typeof academyContentBlocks.$inferInsert;
+export type InsertAcademyAssignment = typeof academyAssignments.$inferInsert;
+export type InsertAcademyModuleCompletion = typeof academyModuleCompletions.$inferInsert;
+export type InsertAcademyQuestion = typeof academyQuestions.$inferInsert;
+export type InsertAcademyAssessment = typeof academyAssessments.$inferInsert;
+export type InsertAcademyAssessmentAttempt = typeof academyAssessmentAttempts.$inferInsert;
+export type InsertAcademyAssessmentItem = typeof academyAssessmentItems.$inferInsert;
+export type InsertAcademyPracticalEvaluation = typeof academyPracticalEvaluations.$inferInsert;
+export type InsertAcademyQualification = typeof academyQualifications.$inferInsert;
+export type InsertAcademyCertificate = typeof academyCertificates.$inferInsert;
+export type InsertAcademySourceRecord = typeof academySourceRecords.$inferInsert;
+export type InsertAcademyRegulatoryProfile = typeof academyRegulatoryProfiles.$inferInsert;
+export type InsertAcademyCertificateSignature = typeof academyCertificateSignatures.$inferInsert;
+export type InsertAcademyStatementOfExperience = typeof academyStatementsOfExperience.$inferInsert;
+export type ComplianceKnowledgeItem = typeof complianceKnowledgeItems.$inferSelect;
+export type InsertComplianceKnowledgeItem = typeof complianceKnowledgeItems.$inferInsert;
+export type InsertAcademyDirectSupervisionRecord = typeof academyDirectSupervisionRecords.$inferInsert;
+export type InsertAcademyRequirement = typeof academyRequirements.$inferInsert;
+export type InsertAcademyRequirementBinding = typeof academyRequirementBindings.$inferInsert;
+export type InsertAcademyAuditEvent = typeof academyAuditEvents.$inferInsert;

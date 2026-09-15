@@ -19,6 +19,12 @@ import {
   type Credential, type Passport, type Requirement, type Subject,
 } from "./_core/compliancePassport";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
+import {
+  COMPLIANCE_KNOWLEDGE_CATALOG,
+  evaluateDangerousGoodsAssist,
+  evaluateGeneralCargoSecurement,
+} from "./_core/complianceSecretary";
+import { evaluateDriverQualification } from "./_core/driverTraining";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const SUBJECT = z.enum(["operator", "unit", "trailer", "carrier", "job", "user"]);
@@ -233,5 +239,86 @@ export const complianceRouter = router({
         unmatchedExternalEvents: unmatched, riskTrend: input.riskTrend, evidenceRecordId: input.evidenceRecordId ?? null,
       });
       return { reviewRef, unmatchedExternalEvents: unmatched, nextReviewDueAt: next.dueAt, exception: unmatched > 0 ? `${unmatched} external compliance event(s) unmatched — investigate` : null };
-    }),
+    }),  /** v22.22 — source-backed field knowledge restored from the v8 operational engine. */
+  knowledgeCatalog: roleProcedure("compliance.knowledgeCatalog")
+    .input(z.object({ category: z.enum(["tdg", "whmis", "erg", "placards", "waste_manifest", "cargo_securement", "company_policy"]).nullable().optional() }).optional())
+    .query(({ input }) => ({
+      items: COMPLIANCE_KNOWLEDGE_CATALOG.filter(item => !input?.category || item.category === input.category),
+      source: "canonical_source_backed_catalog" as const,
+    })),
+
+  /** Fail-closed AI Secretary: organizes verified DG facts; never invents classification or final placarding. */
+  dangerousGoodsAssist: roleProcedure("compliance.dangerousGoodsAssist")
+    .input(z.object({
+      jurisdiction: z.string().max(80).nullable().optional(),
+      classificationStatus: z.enum(["verified", "needs_verification", "blocked"]),
+      unNumber: z.string().max(40).nullable().optional(),
+      properShippingName: z.string().max(220).nullable().optional(),
+      dgClass: z.string().max(40).nullable().optional(),
+      packingGroup: z.string().max(40).nullable().optional(),
+      quantity: z.string().max(80).nullable().optional(),
+      containerCategory: z.enum(["small", "large", "unknown"]).optional(),
+      tdgShippingDocumentPresent: z.boolean().optional(),
+      tdgExemptionVerified: z.boolean().optional(),
+      marksConfirmed: z.boolean().optional(),
+      driverTdgCertificateStatus: z.enum(["verified", "pending", "missing", "expired", "rejected"]).optional(),
+      tdgDirectSupervision: z.boolean().optional(),
+      supervisorTdgCertificateVerified: z.boolean().optional(),
+      isHazardousWaste: z.boolean().optional(),
+      isHazardousRecyclable: z.boolean().optional(),
+      isDangerousOilfieldWaste: z.boolean().optional(),
+      exportFromAlberta: z.boolean().optional(),
+      hazardousWasteManifestPresent: z.boolean().optional(),
+      recycleDocketPresent: z.boolean().optional(),
+      whmisWorkplaceExposure: z.boolean().optional(),
+      whmisTrainingStatus: z.enum(["current", "due", "missing", "unknown"]).optional(),
+      ergGuideNumber: z.string().max(40).nullable().optional(),
+      ergLookupVerified: z.boolean().optional(),
+    }).strict())
+    .query(({ input }) => evaluateDangerousGoodsAssist(input)),
+
+  /** General NSC10 WLL helper. Commodity-specific rules remain an independent fail-closed gate. */
+  securementAssist: roleProcedure("compliance.securementAssist")
+    .input(z.object({
+      cargoWeightKg: z.number().positive().nullable().optional(),
+      cargoImmobilizedOrContained: z.boolean(),
+      generalRuleApplicable: z.boolean(),
+      commoditySpecificRuleRequired: z.boolean().optional(),
+      commoditySpecificRuleConfirmed: z.boolean().optional(),
+      preTripInspectionComplete: z.boolean().optional(),
+      tiedowns: z.array(z.object({
+        id: z.string().min(1).max(80),
+        workingLoadLimitKg: z.number().positive().nullable().optional(),
+        attachedEndSections: z.union([z.literal(0), z.literal(1), z.literal(2)]).optional(),
+        markedByManufacturer: z.boolean(),
+        damagedOrDefective: z.boolean().optional(),
+      }).strict()).max(100),
+    }).strict())
+    .query(({ input }) => evaluateGeneralCargoSecurement(input)),
+
+  /** Driver-specific licence/Q/S/provincial restriction gate, complementary to Academy requirements. */
+  driverQualification: roleProcedure("compliance.driverQualification")
+    .input(z.object({
+      profile: z.object({
+        operatorId: z.number().int().positive().optional(),
+        licenceClass: z.enum(["1", "2", "3", "4", "5"]).nullable().optional(),
+        licenceVerification: z.enum(["verified", "pending", "rejected", "unknown"]),
+        licenceExpiresAt: z.string().datetime().nullable().optional(),
+        class1ProvincialRestriction: z.boolean().optional(),
+        credentials: z.array(z.object({ code: z.string().min(1).max(100), verification: z.enum(["verified", "pending", "rejected", "unknown"]), expiresAt: z.string().datetime().nullable().optional() }).strict()),
+        completedCompetencies: z.array(z.object({ code: z.string().min(1).max(100), verification: z.enum(["verified", "pending", "rejected", "unknown"]), expiresAt: z.string().datetime().nullable().optional() }).strict()).optional(),
+      }).strict(),
+      requirement: z.object({
+        requiredLicenceClass: z.enum(["1", "2", "3"]),
+        airBrakes: z.boolean(),
+        schoolBus: z.boolean().optional(),
+        dangerousGoods: z.boolean().optional(),
+        tdgDirectSupervision: z.boolean().optional(),
+        tdgSupervisorCertificateVerified: z.boolean().optional(),
+        destinationJurisdiction: z.string().max(80).nullable().optional(),
+        requiredEmployerCompetencies: z.array(z.string().min(1).max(100)).optional(),
+      }).strict(),
+    }).strict())
+    .query(({ input }) => evaluateDriverQualification(input.profile, input.requirement)),
+
 });

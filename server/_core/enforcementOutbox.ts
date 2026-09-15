@@ -66,6 +66,49 @@ export async function enqueueEnforcementEvent(
   return { eventId };
 }
 
+
+/**
+ * Process an enforcement event that has already been claimed by the shared
+ * domain-event drain worker. This is the production path used by the single
+ * claim owner; unlike consumeEnforcementEvents it never claims or marks the
+ * outbox row itself.
+ */
+export async function handleClaimedEnforcementEvent(
+  db: DbOrTx,
+  args: { aggregateId: string; payloadJson: string; tenantId: string; now: Date },
+): Promise<{ notificationsWritten: number; alreadyNotified: number }> {
+  const payload = JSON.parse(args.payloadJson) as EnforcementEventPayload;
+  const policy = DEFAULT_CRITICAL_POLICY;
+  const recipients = payload.severity === "routine" ? [] : [...policy.levels[0].roles];
+  let notificationsWritten = 0, alreadyNotified = 0;
+
+  for (const role of recipients) {
+    const notificationKey = `enf:${args.aggregateId}:${role}`.slice(0, 200);
+    const existing = await db.select({ id: workflowNotifications.id }).from(workflowNotifications)
+      .where(eq(workflowNotifications.notificationKey, notificationKey)).limit(1);
+    if (existing.length) { alreadyNotified++; continue; }
+    try {
+      await db.insert(workflowNotifications).values({
+        notificationKey, taskId: null, workflowNumber: args.aggregateId.slice(0, 40),
+        tenantId: args.tenantId, recipientRole: role, recipientUserId: null,
+        title: payload.orderRefs.length
+          ? `Out of service — ${payload.orderRefs.length} order(s) from ${payload.eventType.replace(/_/g, " ")}`
+          : `Enforcement event recorded (${payload.severity})`,
+        body: payload.orderRefs.length
+          ? `${payload.orderRefs.join(", ")}. The subject cannot move until the order's own release condition is satisfied and somebody releases it.`
+          : `${payload.repairRequired} violation(s) require repair.`,
+        deepLink: `/enforcement/${args.aggregateId}`,
+        channel: "in_app", status: "queued", queuedAt: args.now,
+      });
+      notificationsWritten++;
+    } catch {
+      // notificationKey is unique: a racing/replayed worker already wrote it.
+      alreadyNotified++;
+    }
+  }
+  return { notificationsWritten, alreadyNotified };
+}
+
 export type ConsumeResult = {
   claimed: number;
   notificationsWritten: number;

@@ -531,6 +531,8 @@ describe("payroll and tax authorization boundaries", () => {
       "inbox.read_own", "myday.read_own",
       // v21.1 — your own readiness.
       "dispatch.readiness_own",
+      "academy.read_own", "academy.progress_own", "academy.assessment_own",
+      "academy.certificate.sign_own", "academy.direct_supervision_attest_own",
     ]);
   });
 
