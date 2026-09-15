@@ -7558,3 +7558,47 @@ export type InsertAcademyDirectSupervisionRecord = typeof academyDirectSupervisi
 export type InsertAcademyRequirement = typeof academyRequirements.$inferInsert;
 export type InsertAcademyRequirementBinding = typeof academyRequirementBindings.$inferInsert;
 export type InsertAcademyAuditEvent = typeof academyAuditEvents.$inferInsert;
+
+/* ---- 0115: Contractor & Owner-Operator Operations ---- */
+export const organizationRelationships = mysqlTable("organizationRelationships", {
+  id: int("id").autoincrement().primaryKey(),
+  relationshipRef: varchar("relationshipRef", { length: 64 }).notNull().unique(),
+  parentOrgRef: varchar("parentOrgRef", { length: 40 }).notNull(),
+  childOrgRef: varchar("childOrgRef", { length: 40 }).notNull(),
+  relationshipType: mysqlEnum("relationshipType", ["PRIME_CONTRACTOR","CONTRACTOR","SUBCONTRACTOR","VENDOR","LEASED_OWNER_OPERATOR","INDEPENDENT_CARRIER","EQUIPMENT_PROVIDER"]).notNull(),
+  status: mysqlEnum("status", ["pending","active","suspended","ended"]).default("pending").notNull(),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ pairType: uniqueIndex("organizationRelationships_pair_type_unique").on(t.parentOrgRef,t.childOrgRef,t.relationshipType), parentIdx: index("organizationRelationships_parent_idx").on(t.parentOrgRef,t.status), childIdx: index("organizationRelationships_child_idx").on(t.childOrgRef,t.status) }));
+
+export const contractorBusinessProfiles = mysqlTable("contractorBusinessProfiles", {
+  id: int("id").autoincrement().primaryKey(), orgRef: varchar("orgRef", { length: 40 }).notNull().unique(),
+  operatingMode: mysqlEnum("operatingMode", ["LEASED_OWNER_OPERATOR","INDEPENDENT_CONTRACTOR","INDEPENDENT_CARRIER","CONTRACTOR_COMPANY"]).notNull(),
+  legalName: varchar("legalName", { length: 220 }).notNull(), carrierNumber: varchar("carrierNumber", { length: 80 }),
+  status: mysqlEnum("status", ["active","suspended","closed"]).default("active").notNull(), createdByUserId: int("createdByUserId").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const organizationWorkers = mysqlTable("organizationWorkers", {
+  id: int("id").autoincrement().primaryKey(), workerRef: varchar("workerRef", { length: 64 }).notNull().unique(), orgRef: varchar("orgRef", { length: 40 }).notNull(), userId: int("userId"), operatorId: int("operatorId"),
+  workerType: mysqlEnum("workerType", ["OWNER_DRIVER","EMPLOYEE_DRIVER","CO_DRIVER","SWAMPER","LABORER","EQUIPMENT_OPERATOR","HELPER","SHOP_HAND","MECHANIC","MAINTENANCE_SUPERVISOR","BOOKKEEPER","DISPATCHER","SAFETY_COMPLIANCE","OFFICE_ADMIN"]).notNull(),
+  compensationType: mysqlEnum("compensationType", ["HOURLY","SALARY","DAY_RATE","LOAD_RATE","KM_RATE","PERCENTAGE","PIECE_RATE","CONTRACT_RATE"]),
+  status: mysqlEnum("status", ["active","inactive","ended"]).default("active").notNull(), effectiveFrom: timestamp("effectiveFrom").notNull(), effectiveTo: timestamp("effectiveTo"), createdByUserId: int("createdByUserId").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ orgIdx: index("organizationWorkers_org_idx").on(t.orgRef,t.status) }));
+
+export const commercialJobChains = mysqlTable("commercialJobChains", {
+  id: int("id").autoincrement().primaryKey(), chainRef: varchar("chainRef", { length: 80 }).notNull().unique(), rootJobId: int("rootJobId").notNull(), parentChainRef: varchar("parentChainRef", { length: 80 }),
+  assigningOrgRef: varchar("assigningOrgRef", { length: 40 }).notNull(), performingOrgRef: varchar("performingOrgRef", { length: 40 }).notNull(), customerOrgRef: varchar("customerOrgRef", { length: 40 }), operatingCarrierOrgRef: varchar("operatingCarrierOrgRef", { length: 40 }), equipmentOwnerOrgRef: varchar("equipmentOwnerOrgRef", { length: 40 }),
+  relationshipType: mysqlEnum("relationshipType", ["EMPLOYEE","LEASED_OWNER_OPERATOR","INDEPENDENT_CONTRACTOR","SUBCONTRACTOR","INDEPENDENT_CARRIER"]).notNull(), status: mysqlEnum("status", ["assigned","accepted","active","complete","cancelled"]).default("assigned").notNull(), createdByUserId: int("createdByUserId").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ jobIdx: index("commercialJobChains_job_idx").on(t.rootJobId), performingIdx: index("commercialJobChains_performing_idx").on(t.performingOrgRef,t.status) }));
+
+export const jobCrewAssignments = mysqlTable("jobCrewAssignments", {
+  id: int("id").autoincrement().primaryKey(), assignmentRef: varchar("assignmentRef", { length: 80 }).notNull().unique(), chainRef: varchar("chainRef", { length: 80 }).notNull(), unitId: int("unitId").notNull(), primaryDriverWorkerRef: varchar("primaryDriverWorkerRef", { length: 64 }).notNull(), coDriverWorkerRef: varchar("coDriverWorkerRef", { length: 64 }), additionalCrewJson: text("additionalCrewJson").notNull(),
+  startsAt: timestamp("startsAt").notNull(), endsAt: timestamp("endsAt"), createdByUserId: int("createdByUserId").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ chainIdx: index("jobCrewAssignments_chain_idx").on(t.chainRef), unitIdx: index("jobCrewAssignments_unit_idx").on(t.unitId,t.startsAt) }));
+
+export const privateRateSchedules = mysqlTable("privateRateSchedules", {
+  id: int("id").autoincrement().primaryKey(), rateRef: varchar("rateRef", { length: 80 }).notNull().unique(), ownerOrgRef: varchar("ownerOrgRef", { length: 40 }).notNull(), counterpartyOrgRef: varchar("counterpartyOrgRef", { length: 40 }).notNull(), chainRef: varchar("chainRef", { length: 80 }),
+  compensationType: mysqlEnum("compensationType", ["HOURLY","SALARY","DAY_RATE","LOAD_RATE","KM_RATE","PERCENTAGE","PIECE_RATE","CONTRACT_RATE"]).notNull(), rateCents: int("rateCents").notNull(), currency: varchar("currency", { length: 3 }).default("CAD").notNull(), effectiveFrom: timestamp("effectiveFrom").notNull(), effectiveTo: timestamp("effectiveTo"), createdByUserId: int("createdByUserId").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ ownerIdx: index("privateRateSchedules_owner_idx").on(t.ownerOrgRef,t.counterpartyOrgRef) }));
