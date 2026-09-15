@@ -9,12 +9,13 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { integrationProcedure, roleProcedure, router, type IntegrationContext } from "./_core/trpc";
 import { toCents } from "./_core/money";
 import { getDb } from "./db";
-import { INBOUND_FEEDS, drivingEvents, dutyRecords, faultCodes, fuelTransactions, inboundEvents, integrationClients, operators, telemetrySnapshots, units, webhookDeliveries, webhookSubscriptions, loadSenseGatewayFrames, loads, financialEntities, coreRecordOwnership } from "../drizzle/schema";
+import { INBOUND_FEEDS, drivingEvents, dutyRecords, faultCodes, fuelTransactions, inboundEvents, integrationClients, operators, telemetrySnapshots, units, webhookDeliveries, webhookSubscriptions, loadSenseGatewayFrames, loadSenseGatewayBindings, loadSenseCalibrationModels, loadSenseWeightSnapshots, loadSenseAxleWeights, measurementDevices, calibrationEvents, loads, financialEntities, coreRecordOwnership } from "../drizzle/schema";
 import { intakeDecision, type Feed } from "./_core/integrationGateway";
 import { dispatchWebhooks } from "./webhookDispatchService";
 import { encryptSecret, mfaKey } from "./_core/externalIdentityPolicy";
 import { resolveActingScope } from "./_core/actingScope";
 import { frameKey, validateGatewayFrame } from "./_core/loadSenseProtocol";
+import { applyCalibration, assessWeightStability, buildWeightSnapshot, fitMultiPointCalibration } from "./_core/loadSense";
 import { assignRecordOwner, recordBelongsToOrganization, type OwnedRecordType } from "./_core/coreRecordOwnership";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -57,6 +58,39 @@ export const integrationRouter = router({
         ? await db.select().from(coreRecordOwnership).where(and(eq(coreRecordOwnership.orgRef, orgRef), eq(coreRecordOwnership.recordType, input.recordType)))
         : await db.select().from(coreRecordOwnership).where(eq(coreRecordOwnership.orgRef, orgRef));
       return { ownership: rows.map(r => ({ recordType: r.recordType, recordId: r.recordId, assignedAt: r.assignedAt })) };
+    }),
+
+  loadSenseBindGateway: roleProcedure("integration.clientRegister")
+    .input(z.object({ gatewayDeviceRef: z.string().min(1).max(96), measurementDeviceId: z.number().int().positive(), unitId: z.number().int().positive(), trailerId: z.number().int().positive().optional(), tareKg: z.number().nonnegative(), channelConfig: z.record(z.string(), z.object({ label: z.string().min(1).max(160), configuredLimitKg: z.number().positive().optional(), limitSource: z.string().max(300).optional() })).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const orgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
+      const unitOwned = await recordBelongsToOrganization(db, orgRef, "unit", input.unitId);
+      const device = (await db.select({ id: measurementDevices.id, financialEntityId: measurementDevices.financialEntityId, status: measurementDevices.status, deviceType: measurementDevices.deviceType }).from(measurementDevices).where(eq(measurementDevices.id, input.measurementDeviceId)).limit(1))[0];
+      const deviceOwned = device ? await recordBelongsToOrganization(db, orgRef, "financial_entity", device.financialEntityId) : false;
+      if (!unitOwned || !device || !deviceOwned || device.status !== "active" || !["onboard_load_sensor", "load_cell"].includes(device.deviceType)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Gateway binding requires an owned unit and an active owned LoadSense-capable measurement device" });
+      const existing = (await db.select({ id: loadSenseGatewayBindings.id }).from(loadSenseGatewayBindings).where(and(eq(loadSenseGatewayBindings.orgRef, orgRef), eq(loadSenseGatewayBindings.gatewayDeviceRef, input.gatewayDeviceRef))).limit(1))[0];
+      const values = { measurementDeviceId: input.measurementDeviceId, unitId: input.unitId, trailerId: input.trailerId ?? null, tareKg: input.tareKg, channelConfigJson: input.channelConfig ? JSON.stringify(input.channelConfig) : null, status: "active" as const, boundByUserId: ctx.user.id };
+      if (existing) await db.update(loadSenseGatewayBindings).set(values).where(eq(loadSenseGatewayBindings.id, existing.id));
+      else await db.insert(loadSenseGatewayBindings).values({ orgRef, gatewayDeviceRef: input.gatewayDeviceRef, ...values });
+      return { gatewayDeviceRef: input.gatewayDeviceRef, orgRef, status: "active" as const };
+    }),
+
+  loadSenseCalibrate: roleProcedure("integration.clientRegister")
+    .input(z.object({ measurementDeviceId: z.number().int().positive(), calibrationEventId: z.number().int().positive(), points: z.array(z.object({ rawValue: z.number(), knownWeightKg: z.number().nonnegative() })).min(2).max(50) }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const orgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
+      const device = (await db.select({ financialEntityId: measurementDevices.financialEntityId }).from(measurementDevices).where(eq(measurementDevices.id, input.measurementDeviceId)).limit(1))[0];
+      if (!device || !(await recordBelongsToOrganization(db, orgRef, "financial_entity", device.financialEntityId))) throw new TRPCError({ code: "NOT_FOUND", message: "Measurement device not found in this organization" });
+      const event = (await db.select().from(calibrationEvents).where(and(eq(calibrationEvents.id, input.calibrationEventId), eq(calibrationEvents.measurementDeviceId, input.measurementDeviceId))).limit(1))[0];
+      if (!event || !["calibrated", "verified", "adjusted", "returned_to_service"].includes(event.eventType)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A successful calibration/verification event for this device is required" });
+      const fit = fitMultiPointCalibration(input.points);
+      if (fit.rSquared != null && fit.rSquared < 0.98) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Calibration fit R² ${fit.rSquared.toFixed(4)} is below 0.98` });
+      await db.update(loadSenseCalibrationModels).set({ status: "superseded", invalidatedAt: new Date(), invalidationReason: "Superseded by a newer server-approved calibration model" }).where(and(eq(loadSenseCalibrationModels.measurementDeviceId, input.measurementDeviceId), eq(loadSenseCalibrationModels.status, "active")));
+      const modelRef = ref("LSCAL");
+      await db.insert(loadSenseCalibrationModels).values({ modelRef, measurementDeviceId: input.measurementDeviceId, calibrationEventId: input.calibrationEventId, slope: fit.slope, offset: fit.offset, pointCount: fit.pointCount, rSquared: fit.rSquared ?? null, pointsJson: JSON.stringify(input.points), status: "active", effectiveAt: event.performedAt, createdByUserId: ctx.user.id });
+      return { modelRef, slope: fit.slope, offset: fit.offset, pointCount: fit.pointCount, rSquared: fit.rSquared ?? null, note: "Calibration authorizes LoadSense measurement classification only; it does not grant billing or certified-scale authority." };
     }),
 
   /** Register a machine. The key is shown once and stored only as a hash. Scopes are the feeds it may send. */
@@ -173,12 +207,36 @@ export const inboundRouter = router({
           await db.insert(inboundEvents).values({ orgRef: i.orgRef, inboundRef, clientId: i.clientId, feed: input.feed, idempotencyKey: input.idempotencyKey, payloadJson, payloadHash, status: "rejected", rejectionReason: "Load is not owned by this organization", receivedAt });
           return { inboundRef, status: "rejected" as const, refusals: ["Load is not owned by this organization"] };
         }
+        const measuredAt = new Date(f.measuredAt);
+        const binding = (await db.select().from(loadSenseGatewayBindings).where(and(eq(loadSenseGatewayBindings.orgRef, i.orgRef), eq(loadSenseGatewayBindings.gatewayDeviceRef, f.gatewayDeviceId), eq(loadSenseGatewayBindings.status, "active"))).limit(1))[0];
+        if (binding && !(await recordBelongsToOrganization(db, i.orgRef, "unit", binding.unitId))) {
+          await db.insert(inboundEvents).values({ orgRef: i.orgRef, inboundRef, clientId: i.clientId, feed: input.feed, idempotencyKey: input.idempotencyKey, payloadJson, payloadHash, status: "rejected", rejectionReason: "LoadSense gateway binding no longer points to an owned unit", receivedAt });
+          return { inboundRef, status: "rejected" as const, refusals: ["LoadSense gateway binding no longer points to an owned unit"] };
+        }
+        const model = binding ? (await db.select().from(loadSenseCalibrationModels).where(and(eq(loadSenseCalibrationModels.measurementDeviceId, binding.measurementDeviceId), eq(loadSenseCalibrationModels.status, "active"))).orderBy(desc(loadSenseCalibrationModels.effectiveAt)).limit(1))[0] : undefined;
+        const calibrationEvent = model ? (await db.select().from(calibrationEvents).where(eq(calibrationEvents.id, model.calibrationEventId)).limit(1))[0] : undefined;
+        const calibrationCurrent = !!(model && calibrationEvent && model.effectiveAt.getTime() <= measuredAt.getTime() && (!calibrationEvent.validUntil || calibrationEvent.validUntil.getTime() >= measuredAt.getTime()) && !["failed", "out_of_tolerance_found"].includes(calibrationEvent.eventType));
         const scopedFrameKey = `${i.orgRef}:${frameKey(f)}`;
         const prior = (await db.select({ id: loadSenseGatewayFrames.id }).from(loadSenseGatewayFrames).where(eq(loadSenseGatewayFrames.frameKey, scopedFrameKey)).limit(1))[0];
-        if (!prior) await db.insert(loadSenseGatewayFrames).values({ orgRef: i.orgRef, sourceClientId: i.clientId, frameKey: scopedFrameKey, gatewayDeviceRef: f.gatewayDeviceId, sequence: f.sequence, loadId: f.loadId ?? null, measuredAt: new Date(f.measuredAt), buffered: f.buffered, readingsJson: JSON.stringify(f.readings), vehicleStateJson: f.vehicle ? JSON.stringify(f.vehicle) : null, receivedAt });
-        resultKind = "loadSenseGatewayFrame"; resultRef = scopedFrameKey;
+        if (!prior) await db.insert(loadSenseGatewayFrames).values({ orgRef: i.orgRef, sourceClientId: i.clientId, frameKey: scopedFrameKey, gatewayDeviceRef: f.gatewayDeviceId, sequence: f.sequence, measurementDeviceId: binding?.measurementDeviceId ?? null, loadId: f.loadId ?? null, calibrationModelId: calibrationCurrent ? model!.id : null, measuredAt, buffered: f.buffered, readingsJson: JSON.stringify(f.readings), vehicleStateJson: f.vehicle ? JSON.stringify(f.vehicle) : null, receivedAt });
+
+        let snapshotRef: string | null = null;
+        if (!prior && binding && f.loadId != null && calibrationCurrent && model) {
+          const vehicleComplete = !!f.vehicle && [f.vehicle.speedKph, f.vehicle.pitchDeg, f.vehicle.rollDeg, f.vehicle.accelerationMps2].every(v => typeof v === "number" && Number.isFinite(v));
+          const stability = vehicleComplete ? assessWeightStability(f.vehicle!) : { stable: false, score: 0, reasons: ["Vehicle stability telemetry incomplete"] };
+          let config: Record<string, { label?: string; configuredLimitKg?: number; limitSource?: string }> = {};
+          try { config = binding.channelConfigJson ? JSON.parse(binding.channelConfigJson) : {}; } catch { config = {}; }
+          const axleGroups = Object.entries(f.readings).map(([channel, raw]) => ({ axleGroupKey: channel, label: config[channel]?.label ?? channel, weightKg: applyCalibration(raw, model), configuredLimitKg: config[channel]?.configuredLimitKg ?? null, limitSource: config[channel]?.limitSource ?? null, sourceChannels: [channel] }));
+          const draft = buildWeightSnapshot({ loadId: f.loadId, unitId: binding.unitId, trailerId: binding.trailerId, tareKg: binding.tareKg, axleGroups, measurementSource: "loadsense_calibrated", calibrationId: model.modelRef, stability, measuredAt });
+          snapshotRef = ref("LSW");
+          const ins = await db.insert(loadSenseWeightSnapshots).values({ snapshotRef, loadId: f.loadId, unitId: binding.unitId, trailerId: binding.trailerId, measurementDeviceId: binding.measurementDeviceId, calibrationModelId: model.id, measurementSource: "loadsense_calibrated", tareKg: draft.tareKg, grossKg: draft.grossKg, payloadKg: draft.payloadKg, stable: draft.stable, stabilityScore: draft.stabilityScore, measuredAt, payloadHash: draft.payloadHash });
+          const snapshotId = Number(ins[0]?.insertId ?? 0);
+          if (snapshotId > 0) for (const axle of draft.axleGroups) await db.insert(loadSenseAxleWeights).values({ snapshotId, axleGroupKey: axle.axleGroupKey, label: axle.label, weightKg: axle.weightKg, configuredLimitKg: axle.configuredLimitKg ?? null, limitSource: axle.limitSource ?? null, status: axle.status, sourceChannelsJson: JSON.stringify(axle.sourceChannels ?? []) });
+        }
+        resultKind = snapshotRef ? "loadSenseWeightSnapshot" : "loadSenseGatewayFrame"; resultRef = snapshotRef ?? scopedFrameKey;
         await db.insert(inboundEvents).values({ orgRef: i.orgRef, inboundRef, clientId: i.clientId, feed: input.feed, idempotencyKey: input.idempotencyKey, payloadJson, payloadHash, status: "accepted", resultKind, resultRef, receivedAt });
-        return { inboundRef, status: "accepted" as const, becomes: d.becomes, note: `${d.note} Billing authority: not_granted.`, resultRef };
+        const classification = snapshotRef ? "server-calibrated LoadSense snapshot" : binding ? "raw LoadSense evidence; no current usable calibration/load" : "raw LoadSense evidence; gateway not bound";
+        return { inboundRef, status: "accepted" as const, becomes: d.becomes, note: `${classification}. Billing authority: not_granted. Certified-scale authority: not_granted.`, resultRef };
       }
 
       if (input.feed === "fuel_transaction") {

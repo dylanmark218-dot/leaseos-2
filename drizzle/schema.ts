@@ -7432,6 +7432,22 @@ export const loadSenseCalibrationModels = mysqlTable("loadSenseCalibrationModels
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const loadSenseGatewayBindings = mysqlTable("loadSenseGatewayBindings", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull(),
+  gatewayDeviceRef: varchar("gatewayDeviceRef", { length: 96 }).notNull(),
+  measurementDeviceId: int("measurementDeviceId").notNull(),
+  unitId: int("unitId").notNull(),
+  trailerId: int("trailerId"),
+  tareKg: double("tareKg").notNull(),
+  channelConfigJson: text("channelConfigJson"),
+  status: mysqlEnum("status", ["active", "suspended", "retired"]).default("active").notNull(),
+  boundByUserId: int("boundByUserId").notNull(),
+  boundAt: timestamp("boundAt").defaultNow().notNull(),
+}, (t) => ({
+  gatewayPerOrg: uniqueIndex("loadSenseGatewayBindings_org_gateway_unique").on(t.orgRef, t.gatewayDeviceRef),
+}));
+
 export const loadSenseGatewayFrames = mysqlTable("loadSenseGatewayFrames", {
   id: int("id").autoincrement().primaryKey(),
   orgRef: varchar("orgRef", { length: 40 }).notNull(),

@@ -33,6 +33,7 @@ export function validateGatewayFrame(value: unknown): GatewayFrameValidation {
   if (typeof v.buffered !== "boolean") errors.push("buffered must be boolean");
   if (!v.readings || typeof v.readings !== "object" || Array.isArray(v.readings)) errors.push("readings must be an object");
   else {
+    if (Object.keys(v.readings as Record<string, unknown>).length === 0) errors.push("readings must contain at least one channel");
     for (const [key, reading] of Object.entries(v.readings as Record<string, unknown>)) {
       if (!key.trim() || typeof reading !== "number" || !Number.isFinite(reading)) errors.push(`Invalid reading ${key || "<empty>"}`);
     }
