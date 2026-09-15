@@ -9,6 +9,7 @@ import {
   varchar,
   decimal,
   uniqueIndex,
+  index,
 } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
@@ -5276,6 +5277,20 @@ export const integrationClients = mysqlTable("integrationClients", {
   revokedReason: varchar("revokedReason", { length: 300 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+/** Authoritative organization ownership for legacy core records that predate tenancy.
+ * A record has at most one owner. Absence is not ownership; non-default tenants fail closed. */
+export const coreRecordOwnership = mysqlTable("coreRecordOwnership", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull(),
+  recordType: mysqlEnum("recordType", ["unit", "operator", "load", "financial_entity"]).notNull(),
+  recordId: int("recordId").notNull(),
+  assignedByUserId: int("assignedByUserId").notNull(),
+  assignedAt: timestamp("assignedAt").defaultNow().notNull(),
+}, (t) => ({
+  oneOwnerPerRecord: uniqueIndex("coreRecordOwnership_record_unique").on(t.recordType, t.recordId),
+  orgRecordLookup: index("coreRecordOwnership_org_record_idx").on(t.orgRef, t.recordType, t.recordId),
+}));
 
 export const inboundEvents = mysqlTable("inboundEvents", {
   id: int("id").autoincrement().primaryKey(),
