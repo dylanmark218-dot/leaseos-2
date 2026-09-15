@@ -1,0 +1,21 @@
+topic,status,evidence_summary,remaining_work
+Company message board,IMPLEMENTED,messageBoard core/router/tests + lifecycle/attachment authorization,Keep attachment authorization coverage expanding; no core module gap.
+CVIP / inspections / maintenance,MOSTLY_IMPLEMENTED,"requirement engine, roadside panel, fleet shop/work orders, dispatch readiness",Verify remaining jurisdiction/source rules and deepen preventive-maintenance scheduling.
+Driver training / Academy,RECOVERED_INTEGRATED,"Training Academy, regulatory profiles, assessment/certificates, driver qualification, readiness bindings",Full DB/browser/native release gate still required.
+TDG / WHMIS employer training,RECOVERED_INTEGRATED,TDG versioned certificate lifecycle; WHMIS employer track; compliance Secretary,Carrier governance for who may attest/sign remains a human policy decision.
+AI Secretary / agent,IMPLEMENTED_PARTIAL,"assistantAsk/agent router, typed commits, source-backed knowledge, dangerous-goods assist","Model-provider production config, native voice/device path and action observability remain."
+Backroad radio / communications,PARTIAL_STRONG_SERVER,radio channels/coverage/transmit authorization/offline package + production pages,"Licenced importers, native offline vault and confirmed-transmission interface remain."
+Client/customer live tracking,MOSTLY_IMPLEMENTED,"customer live view, portal transaction/timeline/notices/job state",Run privacy/tenant and real-time incident/offline integration tests.
+Secure authentication,PARTIAL,external portal TOTP/rotation/lockout; server RBAC/audit,Internal passkey/native biometric/device-bound session hardening remains.
+Legal / TOS / privacy / licence,MISSING_DECISION_REQUIRED,No recovered LeaseOS-specific legal suite; SecureGuard terms are separate,Draft LeaseOS legal suite and obtain legal review.
+Company policy portfolio,PARTIAL,multiple domain policy engines exist,"Unify into versioned portfolio, acknowledgement/training and audit export."
+Remote camp / accommodation,MISSING,No corresponding production source found,Design camp/site living assignment/rest/muster/cost/privacy module.
+Knowledge ingestion / operational KB,PARTIAL,"compliance knowledge, Academy sources, assistant knowledge ingestion exist",Expand governed source ingestion/catalog refresh and provenance UI.
+Native/offline field runtime,PARTIAL_MISSING,server protocol/outbox/browser fallback/package abstractions exist,"Capacitor, encrypted SQLite, keystore, camera/GPS, biometrics and local notifications remain."
+LoadSense / material movement,RECOVERED_PARTIAL,historical math/protocol recovered; 0109 modern persistence; authority ladder integrated,Authenticated machine/native hardware ingestion remains.
+Spatial / legal land / routing,RECOVERED_MODERNIZED_PARTIAL,historical v17/v21 recovered; modern road graph/legal land/evidence routing present,"Authoritative jurisdiction boundaries, complete regional data and blocked-source licensing remain."
+HOS / ELD,PARTIAL_BLOCKED,HOS engines/status/readiness exist,"Complete authoritative jurisdiction/short-haul rule profiles, ELD/native capture and regulatory verification."
+Billing / invoices / customer disputes,MOSTLY_IMPLEMENTED,"commercial setup, rate resolution, signed tickets, invoice snapshot/send/portal disputes",Automatic trip/package closure and some contract-depth work remain.
+Workforce / qualifications,MOSTLY_IMPLEMENTED,screening/hire/onboarding/competency/probation/offboarding + Academy,Complete payroll-offboarding and cross-tenant/full release tests.
+Safety / roadside / enforcement,MOSTLY_IMPLEMENTED,"defects, mechanic release, OOS enforcement, roadside panel",Digital safety binder and remaining verified regulatory-source population remain.
+Browser/mobile/native QA,MISSING_PARTIAL,large server test suite/static gates exist,Full authenticated browser/mobile/offline/native E2E remains missing.
