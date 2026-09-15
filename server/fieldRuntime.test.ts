@@ -143,7 +143,7 @@ function transportFor(userId: number, faults: { dropAfterUploads?: number; dropO
   const c = callerFor(userId);
   const t = {
     uploads: 0, seals: 0, packages: 0,
-    async enroll(i: Parameters<Transport["enroll"]>[0]) { const r = await c.device.enroll({ platform: i.platform, keyFingerprint: i.keyFingerprint, keystoreAttestation: i.keystoreAttestation, displayName: i.displayName ?? null }); return { deviceRef: r.deviceRef, status: r.status }; },
+    async enroll(i: Parameters<Transport["enroll"]>[0]) { const r = await c.device.enroll({ platform: i.platform, publicKeySpkiBase64: i.publicKeySpkiBase64, keystoreAttestation: i.keystoreAttestation, displayName: i.displayName ?? null }); return { deviceRef: r.deviceRef, status: r.status }; },
     async activate(i: { deviceRef: string }) { const r = await c.device.activate(i); return { status: r.status }; },
     async rotateKey(i: Parameters<Transport["rotateKey"]>[0]) { const r = await c.device.rotateKey(i); return { status: String((r as { status?: string }).status ?? "rotated") }; },
     async uploadEvidence(i: Parameters<Transport["uploadEvidence"]>[0]) {

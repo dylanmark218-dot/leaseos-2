@@ -81,7 +81,7 @@ export class SyncEngine {
   async enroll(displayName?: string): Promise<{ deviceRef: string; status: string }> {
     const existing = await this.deps.store.getMeta("deviceRef");
     if (existing) return { deviceRef: existing, status: (await this.deps.store.getMeta("deviceStatus")) ?? "enrolled" };
-    const r = await this.deps.transport.enroll({ platform: this.deps.platform, keyFingerprint: await this.deps.keystore.fingerprint(), keystoreAttestation: await this.deps.keystore.attestation(), displayName });
+    const r = await this.deps.transport.enroll({ platform: this.deps.platform, publicKeySpkiBase64: await this.deps.keystore.publicKeySpkiBase64(), keystoreAttestation: await this.deps.keystore.attestation(), displayName });
     await this.deps.store.setMeta("deviceRef", r.deviceRef);
     await this.deps.store.setMeta("deviceStatus", r.status);
     return r;
@@ -116,7 +116,7 @@ export class SyncEngine {
     const keyAge = (this.deps.clock.now().getTime() - new Date(await this.deps.keystore.createdAt()).getTime()) / 86_400_000;
     if (keyAge >= KEY_ROTATION_DAYS) {
       const r = await this.deps.keystore.rotate();
-      await this.deps.transport.rotateKey({ deviceRef, newKeyFingerprint: r.newFingerprint, reason: `Scheduled rotation at ${Math.floor(keyAge)} days` });
+      await this.deps.transport.rotateKey({ deviceRef, newPublicKeySpkiBase64: r.newPublicKeySpkiBase64, reason: `Scheduled rotation at ${Math.floor(keyAge)} days` });
       rotated = true;
     }
 
@@ -172,8 +172,26 @@ export class SyncEngine {
 
     if (items.length === 0) return { attempted: true, reason: "Every item failed before packaging", packageRef, synchronized: 0, failed, conflicts: 0, deviceStatus: "active", rotatedKey: rotated };
 
-    // 4. The signed package.
-    const receipt = await this.deps.transport.receivePackage({ deviceRef, packageRef, queuedAt, signedWithFingerprint: await this.deps.keystore.fingerprint(), items, recordUpdates: [] });
+    // 4. Sign the complete canonical package with the non-exportable device key.
+    // WebCrypto ECDSA emits IEEE-P1363 r||s; the server verifies that exact format.
+    const signedAt = this.deps.clock.now();
+    const nonceBytes = globalThis.crypto.getRandomValues(new Uint8Array(24));
+    const nonce = Array.from(nonceBytes).map(b => b.toString(16).padStart(2, "0")).join("");
+    const recordUpdates: Parameters<Transport["receivePackage"]>[0]["recordUpdates"] = [];
+    const payload = canonicalJson({ deviceRef, packageRef, queuedAt: queuedAt.toISOString(), signedAt: signedAt.toISOString(), nonce, items, recordUpdates });
+    const signatureP1363Base64 = await this.deps.keystore.signP1363(new TextEncoder().encode(payload));
+    let receipt: Awaited<ReturnType<Transport["receivePackage"]>>;
+    try {
+      receipt = await this.deps.transport.receivePackage({ deviceRef, packageRef, queuedAt, signedWithFingerprint: await this.deps.keystore.fingerprint(), signedAt, nonce, signatureP1363Base64, items, recordUpdates });
+    } catch (e) {
+      // Upload/seal may have succeeded before the network failed. Return captures
+      // to queued so idempotent retry can finish instead of stranding `syncing`.
+      for (const c of Array.from(byEvidenceId.values())) {
+        const latest = await this.deps.store.getCapture(c.localId);
+        if (latest?.syncState === "syncing") await this.deps.store.putCapture({ ...latest, syncState: "queued", lastError: e instanceof Error ? e.message : String(e), updatedAt: this.deps.clock.now().toISOString() });
+      }
+      throw e;
+    }
     await this.deps.store.putPackage({ packageRef, captureIds: Array.from(byEvidenceId.values()).map(c => c.localId), queuedAt: queuedAt.toISOString(), state: receipt.state === "rejected" ? "rejected" : receipt.rejected > 0 ? "partial" : "accepted", receipt, attempts: 1 });
 
     if (receipt.state === "rejected") {

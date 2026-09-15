@@ -8,6 +8,7 @@ import {
   timestamp,
   varchar,
   decimal,
+  uniqueIndex,
 } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
@@ -3805,10 +3806,12 @@ export const fieldDevices = mysqlTable("fieldDevices", {
   id: int("id").autoincrement().primaryKey(),
   deviceRef: varchar("deviceRef", { length: 64 }).notNull().unique(),
   userId: int("userId").notNull(),
+  orgRef: varchar("orgRef", { length: 40 }),
   platform: mysqlEnum("platform", ["android", "ios", "windows", "linux", "web", "other"]).notNull(),
   platformDeviceIdHash: varchar("platformDeviceIdHash", { length: 64 }),
   displayName: varchar("displayName", { length: 120 }),
   keyFingerprint: varchar("keyFingerprint", { length: 64 }).notNull(),
+  publicKeySpkiBase64: text("publicKeySpkiBase64"),
   keystoreAttestation: mysqlEnum("keystoreAttestation", ["hardware", "software", "unknown", "failed"]).default("unknown").notNull(),
   encryptedStorageAttested: boolean("encryptedStorageAttested").default(false).notNull(),
   appVersion: varchar("appVersion", { length: 40 }),
@@ -3828,6 +3831,7 @@ export const deviceKeyEvents = mysqlTable("deviceKeyEvents", {
   id: int("id").autoincrement().primaryKey(),
   fieldDeviceId: int("fieldDeviceId").notNull(),
   keyFingerprint: varchar("keyFingerprint", { length: 64 }).notNull(),
+  publicKeySpkiBase64: text("publicKeySpkiBase64"),
   eventType: mysqlEnum("eventType", ["enrolled", "rotated", "retired", "compromised"]).notNull(),
   validFrom: timestamp("validFrom").notNull(),
   validUntil: timestamp("validUntil"),
@@ -3835,6 +3839,19 @@ export const deviceKeyEvents = mysqlTable("deviceKeyEvents", {
   recordedByUserId: int("recordedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+
+export const deviceSyncNonces = mysqlTable("deviceSyncNonces", {
+  id: int("id").autoincrement().primaryKey(),
+  fieldDeviceId: int("fieldDeviceId").notNull(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull(),
+  nonce: varchar("nonce", { length: 120 }).notNull(),
+  signedAt: timestamp("signedAt").notNull(),
+  packageRef: varchar("packageRef", { length: 64 }).notNull(),
+  receivedAt: timestamp("receivedAt").defaultNow().notNull(),
+}, (t) => ({
+  deviceNonceUnique: uniqueIndex("deviceSyncNonces_device_nonce_uq").on(t.fieldDeviceId, t.nonce),
+}));
 
 export const syncConflicts = mysqlTable("syncConflicts", {
   id: int("id").autoincrement().primaryKey(),

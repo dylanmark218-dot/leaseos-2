@@ -13,8 +13,10 @@ import { z } from "zod";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { deviceKeyEvents, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
+import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
 import { createHash } from "node:crypto";
+import { canonicalDevicePackage, fingerprintP256Spki, signatureTimeIsFresh, verifyP256PackageSignature } from "./_core/deviceSignature";
+import { resolveActingScope } from "./_core/actingScope";
 import { storageRead } from "./storage";
 import {
   admitPackage, detectConflict, verifyPackageItems, type FieldDeviceRecord, type KeyEvent,
@@ -36,7 +38,7 @@ export const deviceRouter = router({
       platform: z.enum(["android", "ios", "windows", "linux", "web", "other"]),
       platformDeviceIdHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(),
       displayName: z.string().max(120).nullable().optional(),
-      keyFingerprint: FINGERPRINT,
+      publicKeySpkiBase64: z.string().min(80).max(2048),
       keystoreAttestation: z.enum(["hardware", "software", "unknown", "failed"]).default("unknown"),
       encryptedStorageAttested: z.boolean().default(false),
       appVersion: z.string().max(40).nullable().optional(),
@@ -49,17 +51,21 @@ export const deviceRouter = router({
       if (input.keystoreAttestation === "failed") {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Keystore attestation failed — this device cannot hold LeaseOS keys" });
       }
+      const orgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
+      let keyFingerprint: string;
+      try { keyFingerprint = fingerprintP256Spki(input.publicKeySpkiBase64); }
+      catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Device public key must be a valid P-256 SPKI key" }); }
       const now = new Date();
       const deviceRef = ref("DEV");
       const ins = await db.insert(fieldDevices).values({
-        deviceRef, userId: ctx.user.id, platform: input.platform,
+        deviceRef, userId: ctx.user.id, orgRef, platform: input.platform,
         platformDeviceIdHash: input.platformDeviceIdHash ?? null, displayName: input.displayName ?? null,
-        keyFingerprint: input.keyFingerprint, keystoreAttestation: input.keystoreAttestation,
+        keyFingerprint, publicKeySpkiBase64: input.publicKeySpkiBase64, keystoreAttestation: input.keystoreAttestation,
         encryptedStorageAttested: input.encryptedStorageAttested, appVersion: input.appVersion ?? null,
         status: "enrolled", enrolledAt: now, enrolledByUserId: ctx.user.id,
       });
       const id = Number(ins[0]?.insertId ?? 0);
-      await db.insert(deviceKeyEvents).values({ fieldDeviceId: id, keyFingerprint: input.keyFingerprint, eventType: "enrolled", validFrom: now, recordedByUserId: ctx.user.id });
+      await db.insert(deviceKeyEvents).values({ fieldDeviceId: id, keyFingerprint, publicKeySpkiBase64: input.publicKeySpkiBase64, eventType: "enrolled", validFrom: now, recordedByUserId: ctx.user.id });
       return { deviceRef, status: "enrolled" as const, note: input.encryptedStorageAttested ? undefined : "Encrypted local storage not attested — flagged" };
     }),
 
@@ -70,26 +76,33 @@ export const deviceRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const d = await loadDevice(input.deviceRef);
       if (!d || d.userId !== ctx.user.id) throw new TRPCError({ code: "NOT_FOUND", message: "Device not found for this user" });
+      const actingOrgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
+      if (!d.orgRef || d.orgRef !== actingOrgRef) throw new TRPCError({ code: "FORBIDDEN", message: "Device organization binding does not match the active organization" });
       if (d.status !== "enrolled") throw new TRPCError({ code: "CONFLICT", message: `Device is ${d.status}` });
       await db.update(fieldDevices).set({ status: "active", activatedAt: new Date() }).where(eq(fieldDevices.id, d.id));
       return { deviceRef: d.deviceRef, status: "active" as const };
     }),
 
   rotateKey: roleProcedure("device.rotateKey")
-    .input(z.object({ deviceRef: z.string().min(1).max(64), newKeyFingerprint: FINGERPRINT, reason: z.string().max(300).optional() }))
+    .input(z.object({ deviceRef: z.string().min(1).max(64), newPublicKeySpkiBase64: z.string().min(80).max(2048), reason: z.string().max(300).optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const d = await loadDevice(input.deviceRef);
       if (!d || d.userId !== ctx.user.id) throw new TRPCError({ code: "NOT_FOUND", message: "Device not found for this user" });
+      const actingOrgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
+      if (!d.orgRef || d.orgRef !== actingOrgRef) throw new TRPCError({ code: "FORBIDDEN", message: "Device organization binding does not match the active organization" });
       if (d.status === "revoked") throw new TRPCError({ code: "CONFLICT", message: "A revoked device does not rotate keys; enroll a new device" });
-      if (input.newKeyFingerprint === d.keyFingerprint) throw new TRPCError({ code: "BAD_REQUEST", message: "New key is the current key" });
+      let newKeyFingerprint: string;
+      try { newKeyFingerprint = fingerprintP256Spki(input.newPublicKeySpkiBase64); }
+      catch { throw new TRPCError({ code: "BAD_REQUEST", message: "New device public key must be a valid P-256 SPKI key" }); }
+      if (newKeyFingerprint === d.keyFingerprint) throw new TRPCError({ code: "BAD_REQUEST", message: "New key is the current key" });
       const now = new Date();
       await db.update(deviceKeyEvents).set({ validUntil: now }).where(and(eq(deviceKeyEvents.fieldDeviceId, d.id), eq(deviceKeyEvents.keyFingerprint, d.keyFingerprint), isNull(deviceKeyEvents.validUntil)));
       await db.insert(deviceKeyEvents).values({ fieldDeviceId: d.id, keyFingerprint: d.keyFingerprint, eventType: "retired", validFrom: now, validUntil: now, reason: input.reason ?? "rotated", recordedByUserId: ctx.user.id });
-      await db.insert(deviceKeyEvents).values({ fieldDeviceId: d.id, keyFingerprint: input.newKeyFingerprint, eventType: "rotated", validFrom: now, recordedByUserId: ctx.user.id });
-      await db.update(fieldDevices).set({ keyFingerprint: input.newKeyFingerprint }).where(eq(fieldDevices.id, d.id));
-      return { deviceRef: d.deviceRef, keyFingerprint: input.newKeyFingerprint, retiredFingerprint: d.keyFingerprint };
+      await db.insert(deviceKeyEvents).values({ fieldDeviceId: d.id, keyFingerprint: newKeyFingerprint, publicKeySpkiBase64: input.newPublicKeySpkiBase64, eventType: "rotated", validFrom: now, recordedByUserId: ctx.user.id });
+      await db.update(fieldDevices).set({ keyFingerprint: newKeyFingerprint, publicKeySpkiBase64: input.newPublicKeySpkiBase64 }).where(eq(fieldDevices.id, d.id));
+      return { deviceRef: d.deviceRef, keyFingerprint: newKeyFingerprint, retiredFingerprint: d.keyFingerprint };
     }),
 
   revoke: roleProcedure("device.revoke")
@@ -99,6 +112,8 @@ export const deviceRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const d = await loadDevice(input.deviceRef);
       if (!d) throw new TRPCError({ code: "NOT_FOUND", message: "Device not found" });
+      const actingOrgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
+      if (!d.orgRef || d.orgRef !== actingOrgRef) throw new TRPCError({ code: "FORBIDDEN", message: "Device organization binding does not match the active organization" });
       const now = new Date();
       await db.update(fieldDevices).set({ status: "revoked", revokedAt: now, revokedByUserId: ctx.user.id, revocationReason: input.reason }).where(eq(fieldDevices.id, d.id));
       await db.update(deviceKeyEvents).set({ validUntil: now }).where(and(eq(deviceKeyEvents.fieldDeviceId, d.id), isNull(deviceKeyEvents.validUntil)));
@@ -132,6 +147,9 @@ export const syncRouter = router({
     .input(z.object({
       deviceRef: z.string().min(1).max(64),
       signedWithFingerprint: FINGERPRINT,
+      signedAt: z.coerce.date(),
+      nonce: z.string().min(16).max(120),
+      signatureP1363Base64: z.string().min(80).max(128),
       packageRef: z.string().min(1).max(64),
       queuedAt: z.coerce.date(),
       items: z.array(ITEM).min(1).max(500),
@@ -148,6 +166,23 @@ export const syncRouter = router({
 
       const d = await loadDevice(input.deviceRef);
       const history = d ? await db.select().from(deviceKeyEvents).where(eq(deviceKeyEvents.fieldDeviceId, d.id)) : [];
+      if (!d?.orgRef) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Legacy device has no organization binding and must be re-enrolled" });
+      const orgRef = d.orgRef;
+      const actingOrgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
+      if (d.orgRef !== actingOrgRef) throw new TRPCError({ code: "FORBIDDEN", message: "Device is not bound to the active organization" });
+      if (d && !d.publicKeySpkiBase64) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Legacy fingerprint-only device must be re-enrolled with a public key" });
+      if (!signatureTimeIsFresh(input.signedAt, now)) throw new TRPCError({ code: "UNAUTHORIZED", message: "Device signature timestamp is stale or too far in the future" });
+      const signingKey = d?.keyFingerprint === input.signedWithFingerprint
+        ? d.publicKeySpkiBase64
+        : history.find(h => h.keyFingerprint === input.signedWithFingerprint && h.publicKeySpkiBase64)?.publicKeySpkiBase64;
+      const signedPayload = canonicalDevicePackage({ deviceRef: input.deviceRef, packageRef: input.packageRef, queuedAt: input.queuedAt, signedAt: input.signedAt, nonce: input.nonce, items: input.items, recordUpdates: input.recordUpdates });
+      if (!signingKey || !verifyP256PackageSignature({ publicKeySpkiBase64: signingKey, payload: signedPayload, signatureP1363Base64: input.signatureP1363Base64 }))
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid device package signature" });
+      try {
+        await db.insert(deviceSyncNonces).values({ fieldDeviceId: d!.id, orgRef, nonce: input.nonce, signedAt: input.signedAt, packageRef: input.packageRef, receivedAt: now });
+      } catch {
+        throw new TRPCError({ code: "CONFLICT", message: "Device sync nonce was already used" });
+      }
       const admission = admitPackage({
         device: d ? {
           deviceRef: d.deviceRef, userId: d.userId, status: d.status, keyFingerprint: d.keyFingerprint,
@@ -205,7 +240,7 @@ export const syncRouter = router({
         const v = verification.verdicts.find(x => x.evidenceRecordId === it.evidenceRecordId)!;
         await db.insert(syncPackageItems).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, declaredContentHash: it.declaredContentHash, declaredManifestHash: it.declaredManifestHash,
           captureAuthorizationClaim: it.captureAuthorizationClaim, captureAuthorizationReason: it.captureAuthorizationReason ?? null, state: v.outcome === "verified" ? "verified" : "mismatch" });
-        await db.insert(syncReceipts).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, computedContentHash: it.computedContentHash, computedManifestHash: it.computedManifestHash, matched: v.outcome === "verified", receivedAt: now, failureDetail: v.outcome === "verified" ? null : v.reason });
+        await db.insert(syncReceipts).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, computedContentHash: recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)!.computedContentHash, computedManifestHash: recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)!.computedManifestHash, matched: v.outcome === "verified", receivedAt: now, failureDetail: v.outcome === "verified" ? null : v.reason });
       }
       await db.update(syncPackages).set({
         state: verification.packageOutcome,

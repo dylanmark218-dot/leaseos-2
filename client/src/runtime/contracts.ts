@@ -89,23 +89,25 @@ export interface FileVault {
 }
 
 export interface Keystore {
-  /** The device key never leaves the keystore; only its fingerprint does. */
+  /** The private device key never leaves the keystore. The public SPKI is enrolled server-side. */
   fingerprint(): Promise<string>;
+  publicKeySpkiBase64(): Promise<string>;
+  signP1363(payload: Uint8Array): Promise<string>;
   createdAt(): Promise<string>;
   attestation(): Promise<"hardware" | "software" | "unknown" | "failed">;
   /** Generates a new device key; the old one remains available for the rotation grace window. */
-  rotate(): Promise<{ oldFingerprint: string; newFingerprint: string }>;
+  rotate(): Promise<{ oldFingerprint: string; newFingerprint: string; newPublicKeySpkiBase64: string }>;
   wrapDataKey(raw: Uint8Array): Promise<Uint8Array>;
   unwrapDataKey(wrapped: Uint8Array): Promise<Uint8Array>;
 }
 
 export interface Transport {
-  enroll(input: { platform: "android" | "ios" | "windows" | "linux" | "web" | "other"; keyFingerprint: string; keystoreAttestation: "hardware" | "software" | "unknown" | "failed"; displayName?: string }): Promise<{ deviceRef: string; status: string }>;
+  enroll(input: { platform: "android" | "ios" | "windows" | "linux" | "web" | "other"; publicKeySpkiBase64: string; keystoreAttestation: "hardware" | "software" | "unknown" | "failed"; displayName?: string }): Promise<{ deviceRef: string; status: string }>;
   activate(input: { deviceRef: string }): Promise<{ status: string }>;
-  rotateKey(input: { deviceRef: string; newKeyFingerprint: string; reason?: string }): Promise<{ status: string }>;
+  rotateKey(input: { deviceRef: string; newPublicKeySpkiBase64: string; reason?: string }): Promise<{ status: string }>;
   uploadEvidence(input: { title: string; category: string; fileName: string; mimeType: string; dataBase64: string; latitude?: number; longitude?: number; notes?: string; clientCaptureRef: string; capturedAt: Date }): Promise<{ id: number; alreadyUploaded?: boolean }>;
   sealEvidence(input: { evidenceId: number; contentHash: string; recordType: string; relationships: { entityType: string; entityId: number; relation: string }[]; deviceId: string; devicePlatform?: string }): Promise<{ ok: true; alreadySealed: boolean; manifestHash: string | null }>;
-  receivePackage(input: { deviceRef: string; packageRef: string; queuedAt: Date; signedWithFingerprint: string; items: { evidenceRecordId: number; declaredContentHash: string; declaredManifestHash: string; computedContentHash: string; computedManifestHash: string; captureAuthorizationClaim: CaptureAuthorizationClaim; captureAuthorizationReason?: string | null }[]; recordUpdates: { recordType: string; recordRef: string; baseVersion: number; baseValues: Record<string, unknown>; deviceValues: Record<string, unknown> }[] }): Promise<{ packageRef: string; state: string; reason?: string; verified: number; rejected: number; conflicts: number; itemVerdicts?: { evidenceRecordId: number; outcome: "verified" | "rejected"; reason?: string }[] }>;
+  receivePackage(input: { deviceRef: string; packageRef: string; queuedAt: Date; signedWithFingerprint: string; signedAt: Date; nonce: string; signatureP1363Base64: string; items: { evidenceRecordId: number; declaredContentHash: string; declaredManifestHash: string; computedContentHash: string; computedManifestHash: string; captureAuthorizationClaim: CaptureAuthorizationClaim; captureAuthorizationReason?: string | null }[]; recordUpdates: { recordType: string; recordRef: string; baseVersion: number; baseValues: Record<string, unknown>; deviceValues: Record<string, unknown> }[] }): Promise<{ packageRef: string; state: string; reason?: string; verified: number; rejected: number; conflicts: number; itemVerdicts?: { evidenceRecordId: number; outcome: "verified" | "rejected"; reason?: string }[] }>;
 }
 
 export interface Connectivity { online(): Promise<boolean>; }

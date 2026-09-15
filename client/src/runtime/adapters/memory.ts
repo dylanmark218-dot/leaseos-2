@@ -8,7 +8,7 @@
  */
 
 import type { Clock, Connectivity, FileVault, Keystore, LocalCapture, LocalPackage, LocalStore, SyncState } from "../contracts";
-import { decryptWithRawKey, encryptWithRawKey, generateRawKey, sha256Hex } from "../crypto";
+import { decryptWithRawKey, encryptWithRawKey, generateRawKey, sha256Hex, toBase64 } from "../crypto";
 
 export class MemoryStore implements LocalStore {
   private captures = new Map<string, LocalCapture>();
@@ -27,16 +27,24 @@ export class MemoryStore implements LocalStore {
 }
 
 export class MemoryKeystore implements Keystore {
-  private keys: { raw: Uint8Array; fingerprint: string; createdAt: string }[] = [];
+  private keys: { raw: Uint8Array; privateKey: CryptoKey; publicKey: CryptoKey; spki: string; fingerprint: string; createdAt: string }[] = [];
   constructor(private clock: Clock, private attest: "hardware" | "software" | "unknown" | "failed" = "software") {}
-  private async current() { if (!this.keys.length) { const raw = await generateRawKey(); this.keys.push({ raw, fingerprint: await sha256Hex(raw), createdAt: this.clock.now().toISOString() }); } return this.keys[this.keys.length - 1]!; }
+  private async makeKey() {
+    const pair = await globalThis.crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]) as CryptoKeyPair;
+    const spkiBytes = new Uint8Array(await globalThis.crypto.subtle.exportKey("spki", pair.publicKey));
+    const spki = toBase64(spkiBytes);
+    const raw = await generateRawKey(); // separate AES wrapping key for browser fallback vault
+    return { raw, privateKey: pair.privateKey, publicKey: pair.publicKey, spki, fingerprint: await sha256Hex(spkiBytes), createdAt: this.clock.now().toISOString() };
+  }
+  private async current() { if (!this.keys.length) this.keys.push(await this.makeKey()); return this.keys[this.keys.length - 1]!; }
   async fingerprint() { return (await this.current()).fingerprint; }
+  async publicKeySpkiBase64() { return (await this.current()).spki; }
+  async signP1363(payload: Uint8Array) { return toBase64(new Uint8Array(await globalThis.crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, (await this.current()).privateKey, payload as BufferSource))); }
   async createdAt() { return (await this.current()).createdAt; }
   async attestation() { return this.attest; }
-  async rotate() { const old = await this.current(); const raw = await generateRawKey(); const fp = await sha256Hex(raw); this.keys.push({ raw, fingerprint: fp, createdAt: this.clock.now().toISOString() }); return { oldFingerprint: old.fingerprint, newFingerprint: fp }; }
+  async rotate() { const old = await this.current(); const next = await this.makeKey(); this.keys.push(next); return { oldFingerprint: old.fingerprint, newFingerprint: next.fingerprint, newPublicKeySpkiBase64: next.spki }; }
   async wrapDataKey(raw: Uint8Array) { const k = await this.current(); const e = await encryptWithRawKey(k.raw, raw); const out = new Uint8Array(e.iv.length + e.ciphertext.length); out.set(e.iv, 0); out.set(e.ciphertext, e.iv.length); return out; }
   async unwrapDataKey(wrapped: Uint8Array) {
-    // Try the current key, then older ones still in their grace window.
     for (const k of [...this.keys].reverse()) { try { return await decryptWithRawKey(k.raw, wrapped.slice(0, 12), wrapped.slice(12)); } catch { /* next */ } }
     throw new Error("No key unwraps this data key");
   }
