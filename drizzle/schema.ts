@@ -7588,7 +7588,7 @@ export const organizationWorkers = mysqlTable("organizationWorkers", {
 }, t => ({ orgIdx: index("organizationWorkers_org_idx").on(t.orgRef,t.status) }));
 
 export const commercialJobChains = mysqlTable("commercialJobChains", {
-  id: int("id").autoincrement().primaryKey(), chainRef: varchar("chainRef", { length: 80 }).notNull().unique(), rootJobId: int("rootJobId").notNull(), parentChainRef: varchar("parentChainRef", { length: 80 }),
+  id: int("id").autoincrement().primaryKey(), chainRef: varchar("chainRef", { length: 80 }).notNull().unique(), chainNumber: varchar("chainNumber", { length: 120 }).unique(), rootJobId: int("rootJobId").notNull(), parentChainRef: varchar("parentChainRef", { length: 80 }),
   assigningOrgRef: varchar("assigningOrgRef", { length: 40 }).notNull(), performingOrgRef: varchar("performingOrgRef", { length: 40 }).notNull(), customerOrgRef: varchar("customerOrgRef", { length: 40 }), operatingCarrierOrgRef: varchar("operatingCarrierOrgRef", { length: 40 }), equipmentOwnerOrgRef: varchar("equipmentOwnerOrgRef", { length: 40 }),
   relationshipType: mysqlEnum("relationshipType", ["EMPLOYEE","LEASED_OWNER_OPERATOR","INDEPENDENT_CONTRACTOR","SUBCONTRACTOR","INDEPENDENT_CARRIER"]).notNull(), status: mysqlEnum("status", ["assigned","accepted","active","complete","cancelled"]).default("assigned").notNull(), createdByUserId: int("createdByUserId").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, t => ({ jobIdx: index("commercialJobChains_job_idx").on(t.rootJobId), performingIdx: index("commercialJobChains_performing_idx").on(t.performingOrgRef,t.status) }));
@@ -7602,3 +7602,51 @@ export const privateRateSchedules = mysqlTable("privateRateSchedules", {
   id: int("id").autoincrement().primaryKey(), rateRef: varchar("rateRef", { length: 80 }).notNull().unique(), ownerOrgRef: varchar("ownerOrgRef", { length: 40 }).notNull(), counterpartyOrgRef: varchar("counterpartyOrgRef", { length: 40 }).notNull(), chainRef: varchar("chainRef", { length: 80 }),
   compensationType: mysqlEnum("compensationType", ["HOURLY","SALARY","DAY_RATE","LOAD_RATE","KM_RATE","PERCENTAGE","PIECE_RATE","CONTRACT_RATE"]).notNull(), rateCents: int("rateCents").notNull(), currency: varchar("currency", { length: 3 }).default("CAD").notNull(), effectiveFrom: timestamp("effectiveFrom").notNull(), effectiveTo: timestamp("effectiveTo"), createdByUserId: int("createdByUserId").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, t => ({ ownerIdx: index("privateRateSchedules_owner_idx").on(t.ownerOrgRef,t.counterpartyOrgRef) }));
+
+
+/* ---- 0116: Contractor commercial payables & private settlement chain ---- */
+export const contractorPayables = mysqlTable("contractorPayables", {
+  id: int("id").autoincrement().primaryKey(),
+  payableRef: varchar("payableRef", { length: 80 }).notNull().unique(),
+  chainRef: varchar("chainRef", { length: 80 }).notNull(),
+  payerOrgRef: varchar("payerOrgRef", { length: 40 }).notNull(),
+  payeeOrgRef: varchar("payeeOrgRef", { length: 40 }).notNull(),
+  rateRef: varchar("rateRef", { length: 80 }).notNull(),
+  compensationType: mysqlEnum("compensationType", ["HOURLY","SALARY","DAY_RATE","LOAD_RATE","KM_RATE","PERCENTAGE","PIECE_RATE","CONTRACT_RATE"]).notNull(),
+  quantityMillis: int("quantityMillis").notNull(),
+  quantityUnit: mysqlEnum("quantityUnit", ["HOUR","DAY","LOAD","KM","PERCENT","PIECE","CONTRACT"]).notNull(),
+  rateCentsSnapshot: int("rateCentsSnapshot").notNull(),
+  grossAmountCents: int("grossAmountCents").notNull(),
+  currency: varchar("currency", { length: 3 }).default("CAD").notNull(),
+  evidenceRefsJson: text("evidenceRefsJson").notNull(),
+  preparationSource: mysqlEnum("preparationSource", ["HUMAN","AI_SECRETARY"]).default("HUMAN").notNull(),
+  state: mysqlEnum("state", ["prepared","review","approved","posted","paid","disputed","void"]).default("prepared").notNull(),
+  preparedByUserId: int("preparedByUserId").notNull(),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  postedAt: timestamp("postedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ payerIdx: index("contractorPayables_payer_idx").on(t.payerOrgRef,t.state), payeeIdx: index("contractorPayables_payee_idx").on(t.payeeOrgRef,t.state), chainIdx: index("contractorPayables_chain_idx").on(t.chainRef,t.state) }));
+
+export const contractorPayableEvents = mysqlTable("contractorPayableEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 80 }).notNull().unique(),
+  payableRef: varchar("payableRef", { length: 80 }).notNull(),
+  actorOrgRef: varchar("actorOrgRef", { length: 40 }).notNull(),
+  actorUserId: int("actorUserId").notNull(),
+  eventType: mysqlEnum("eventType", ["PREPARED","SUBMITTED_REVIEW","APPROVED","POSTED","PAID","DISPUTED","VOIDED"]).notNull(),
+  amountCentsSnapshot: int("amountCentsSnapshot").notNull(),
+  note: varchar("note", { length: 500 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ payableIdx: index("contractorPayableEvents_payable_idx").on(t.payableRef,t.createdAt) }));
+
+
+/* ---- 0117: Human-readable inherited commercial job/load numbers ---- */
+export const commercialChainSequences = mysqlTable("commercialChainSequences", {
+  scopeRef: varchar("scopeRef", { length: 120 }).primaryKey(),
+  nextValue: int("nextValue").default(1).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export const commercialLoadChainRefs = mysqlTable("commercialLoadChainRefs", {
+  id: int("id").autoincrement().primaryKey(), loadId: int("loadId").notNull().unique(), chainRef: varchar("chainRef", { length: 80 }).notNull(), loadChainNumber: varchar("loadChainNumber", { length: 140 }).notNull().unique(), createdByUserId: int("createdByUserId").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ chainIdx: index("commercialLoadChainRefs_chain_idx").on(t.chainRef) }));
