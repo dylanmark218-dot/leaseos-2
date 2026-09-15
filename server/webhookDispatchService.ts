@@ -20,13 +20,15 @@ export function setWebhookPoster(p: Poster) { poster = p; }
 
 export type DispatchResult = { attempted: number; results: { subscriptionRef: string; eventId: string; attempt: number; status: string; reason: string }[]; skipped: string | null };
 
-export async function dispatchWebhooks(args: { maxEvents?: number; now?: Date; eventIds?: string[] } = {}): Promise<DispatchResult> {
+export async function dispatchWebhooks(args: { maxEvents?: number; now?: Date; eventIds?: string[]; orgRef?: string } = {}): Promise<DispatchResult> {
   const db = await getDb();
   if (!db) return { attempted: 0, results: [], skipped: "database unavailable" };
   const key = mfaKey();
   if (!key) return { attempted: 0, results: [], skipped: "LEASEOS_PORTAL_MFA_KEY not configured — secrets cannot be read; nothing sent" };
   const now = args.now ?? new Date();
-  const subs = await db.select().from(webhookSubscriptions).where(eq(webhookSubscriptions.status, "active"));
+  const subs = args.orgRef
+    ? await db.select().from(webhookSubscriptions).where(and(eq(webhookSubscriptions.status, "active"), eq(webhookSubscriptions.orgRef, args.orgRef)))
+    : await db.select().from(webhookSubscriptions).where(eq(webhookSubscriptions.status, "active"));
   if (!subs.length) return { attempted: 0, results: [], skipped: null };
   const events = args.eventIds?.length ? await db.select().from(domainEventOutbox).where(inArray(domainEventOutbox.eventId, args.eventIds)) : await db.select().from(domainEventOutbox).orderBy(desc(domainEventOutbox.id)).limit(args.maxEvents ?? 100);
   const results: DispatchResult["results"] = [];
@@ -34,6 +36,8 @@ export async function dispatchWebhooks(args: { maxEvents?: number; now?: Date; e
     const types = JSON.parse(s.eventTypesJson) as string[];
     const secret = decryptSecret(s.secretEnc, key);
     for (const ev of events) {
+      // A subscription may only receive outbox events from its own tenant.
+      if (!s.orgRef || ev.tenantId !== s.orgRef) continue;
       if (!subscribed(types, ev.eventType)) continue;
       const prior = await db.select().from(webhookDeliveries).where(and(eq(webhookDeliveries.subscriptionId, s.id), eq(webhookDeliveries.eventId, ev.eventId))).orderBy(desc(webhookDeliveries.attempt));
       const last = prior[0];
@@ -45,7 +49,7 @@ export async function dispatchWebhooks(args: { maxEvents?: number; now?: Date; e
       const signature = signPayload(secret, timestamp, body);
       const r = await poster(s.url, body, { "content-type": "application/json", "x-leaseos-timestamp": String(timestamp), "x-leaseos-signature": signature, "x-leaseos-event": ev.eventType, "x-leaseos-delivery": `${s.subscriptionRef}:${ev.eventId}:${attempt}` });
       const outcome = deliveryOutcome({ attempt, responseStatus: "status" in r ? r.status : null, error: "error" in r ? r.error : null, at: now });
-      await db.insert(webhookDeliveries).values({ deliveryRef: ref("DLV"), subscriptionId: s.id, eventId: ev.eventId, eventType: ev.eventType, attempt, status: outcome.status, requestHash: sha(body), signature, responseStatus: "status" in r ? r.status : null, error: "error" in r ? r.error.slice(0, 400) : null, nextAttemptAt: outcome.nextAttemptAt, at: now });
+      await db.insert(webhookDeliveries).values({ orgRef: s.orgRef, deliveryRef: ref("DLV"), subscriptionId: s.id, eventId: ev.eventId, eventType: ev.eventType, attempt, status: outcome.status, requestHash: sha(body), signature, responseStatus: "status" in r ? r.status : null, error: "error" in r ? r.error.slice(0, 400) : null, nextAttemptAt: outcome.nextAttemptAt, at: now });
       results.push({ subscriptionRef: s.subscriptionRef, eventId: ev.eventId, attempt, status: outcome.status, reason: outcome.reason });
     }
   }

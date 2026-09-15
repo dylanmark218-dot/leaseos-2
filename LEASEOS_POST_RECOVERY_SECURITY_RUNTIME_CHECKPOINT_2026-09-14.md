@@ -35,3 +35,14 @@ Existing fingerprint-only devices are intentionally not grandfathered. After mig
 2. Tenant-scope integration clients, inbound events and webhook delivery.
 3. Add authenticated `loadsense_weight` machine feed with replay/sequence persistence.
 4. Retain raw LoadSense evidence but refuse projection into legacy global operational tables until authoritative asset ownership is available.
+
+## Continuation — tenant-bound integrations and LoadSense raw edge
+
+- Migration 0111 adds `orgRef` to integration clients, inbound events, webhook subscriptions and webhook deliveries.
+- Machine authentication context now carries the organization stored on the integration client; historical unbound integration keys fail closed and must be re-registered.
+- Integration client management, inbound listing, webhook management and delivery listing are filtered to the server-resolved acting organization.
+- Webhook dispatch compares `domainEventOutbox.tenantId` to the subscription organization before delivery; a subscription cannot receive another tenant's event.
+- Migration 0112 adds the `loadsense_weight` feed and tenant/client provenance on `loadSenseGatewayFrames`.
+- `loadsense_weight` validates the recovered `leaseos.loadsense.v1` frame protocol and persists a tenant-qualified gateway frame key. Duplicate gateway sequence/frame keys do not create a second raw frame.
+- The LoadSense machine edge explicitly returns `Billing authority: not_granted`; raw onboard sensor evidence does not become certified-scale evidence or mutate billable quantity.
+- For non-default tenants, legacy integration feeds retain authenticated inbound evidence but do not project into global legacy unit/operator/load/financial tables until those tables gain authoritative tenant ownership.

@@ -222,7 +222,7 @@ export function externalProcedure(procedureName: string) {
 import { INTEGRATION_SENSITIVE_PERMISSIONS, integrationPermissionForProcedure, type IntegrationPermission } from "./recordsAuthorization";
 import { findIntegrationClientByKeyHash, touchIntegrationClient } from "../db";
 
-export type IntegrationContext = { clientId: number; clientRef: string; kind: string; scopes: string[]; name: string };
+export type IntegrationContext = { clientId: number; clientRef: string; orgRef: string; kind: string; scopes: string[]; name: string };
 
 export function integrationProcedure(procedureName: string) {
   const permission: IntegrationPermission | null = integrationPermissionForProcedure(procedureName);
@@ -239,12 +239,13 @@ export function integrationProcedure(procedureName: string) {
       if (!key) return refuse("denied_unauthenticated", "No integration key", "UNAUTHORIZED");
       const client = await findIntegrationClientByKeyHash(createHash("sha256").update(key).digest("hex"));
       if (!client) return refuse("denied_unauthenticated", "Unknown integration key", "UNAUTHORIZED");
+      if (!client.orgRef) return refuse("denied_scope", "Integration client has no organization binding; re-register it", "FORBIDDEN");
       if (client.status !== "active") return refuse("denied_scope", `Integration client is ${client.status}`, "FORBIDDEN");
       if (client.lockedUntil && now < client.lockedUntil) return refuse("denied_scope", `Integration client is locked until ${client.lockedUntil.toISOString()}`, "FORBIDDEN");
       const auditId = await recordAuthorizationDecision({ actorUserId: null, procedureName, permission, rolesHeld: `integration:${client.kind}`, outcome: "allowed", subjectType: "integrationClient", subjectId: client.clientRef, detail: null, occurredAt: now });
       if (auditId === undefined && INTEGRATION_SENSITIVE_PERMISSIONS.includes(permission)) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Refused: an inbound write is not performed when its audit record cannot be written" });
       await touchIntegrationClient(client.id, now);
-      const integration: IntegrationContext = { clientId: client.id, clientRef: client.clientRef, kind: client.kind, scopes: JSON.parse(client.scopesJson) as string[], name: client.name };
+      const integration: IntegrationContext = { clientId: client.id, clientRef: client.clientRef, orgRef: client.orgRef, kind: client.kind, scopes: JSON.parse(client.scopesJson) as string[], name: client.name };
       return next({ ctx: { ...ctx, integration } });
     })
   );

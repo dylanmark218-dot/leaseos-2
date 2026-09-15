@@ -37,7 +37,7 @@ export function subscribed(eventTypes: readonly string[], eventType: string): bo
 
 /* ---- inbound ---- */
 
-export type Feed = "gps_position" | "fuel_transaction" | "eld_duty_status" | "vehicle_telemetry" | "fault_code" | "safety_event" | "video_clip" | "generic";
+export type Feed = "gps_position" | "fuel_transaction" | "eld_duty_status" | "vehicle_telemetry" | "fault_code" | "safety_event" | "video_clip" | "loadsense_weight" | "generic";
 export type Intake = { accepted: boolean; refusals: string[]; becomes: string; note: string };
 
 export function intakeDecision(args: { feed: Feed; scopes: readonly string[]; payload: Record<string, unknown> }): Intake {
@@ -92,6 +92,15 @@ export function intakeDecision(args: { feed: Feed; scopes: readonly string[]; pa
       if (!str("clipHash") || !/^[a-f0-9]{64}$/i.test(String(p.clipHash))) r.push("clipHash must be the clip's SHA-256");
       if (!str("eventRef") && !(str("unitRef") && iso("recordedAt"))) r.push("either eventRef, or unitRef and recordedAt, is required");
       becomes = "video evidence pointer"; note = "A pointer with a hash, attached to the event it belongs to; viewing it needs its own permission and is logged.";
+      break;
+    case "loadsense_weight":
+      if (p.protocol !== "leaseos.loadsense.v1") r.push("protocol must be leaseos.loadsense.v1");
+      if (!str("gatewayDeviceId")) r.push("gatewayDeviceId is required");
+      if (!Number.isInteger(p.sequence) || Number(p.sequence) < 0) r.push("sequence must be a non-negative integer");
+      if (!iso("measuredAt")) r.push("measuredAt is required (ISO 8601)");
+      if (typeof p.buffered !== "boolean") r.push("buffered must be boolean");
+      if (!p.readings || typeof p.readings !== "object" || Array.isArray(p.readings) || !Object.keys(p.readings as object).length) r.push("readings must be a non-empty object");
+      becomes = "LoadSense gateway evidence"; note = "Authenticated raw gateway evidence only. It does not become billable weight, certified-scale evidence, or an operational load mutation at this boundary.";
       break;
     case "generic":
       becomes = "inbound event only"; note = "Kept with its hash for a person to route; nothing is created from it.";

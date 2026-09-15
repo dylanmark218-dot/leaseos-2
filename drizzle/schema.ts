@@ -5257,10 +5257,11 @@ export type InsertBudgetLines = typeof budgetLines.$inferInsert;
  * v21.18 — Integration gateway
  * ================================================================== */
 
-export const INBOUND_FEEDS = ["gps_position", "fuel_transaction", "eld_duty_status", "vehicle_telemetry", "fault_code", "safety_event", "video_clip", "generic"] as const;
+export const INBOUND_FEEDS = ["gps_position", "fuel_transaction", "eld_duty_status", "vehicle_telemetry", "fault_code", "safety_event", "video_clip", "loadsense_weight", "generic"] as const;
 
 export const integrationClients = mysqlTable("integrationClients", {
   id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 40 }),
   clientRef: varchar("clientRef", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 160 }).notNull(),
   kind: mysqlEnum("kind", ["telematics", "eld", "fuel_card", "accounting", "customer_system", "facility_system", "other"]).notNull(),
@@ -5278,6 +5279,7 @@ export const integrationClients = mysqlTable("integrationClients", {
 
 export const inboundEvents = mysqlTable("inboundEvents", {
   id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 40 }),
   inboundRef: varchar("inboundRef", { length: 64 }).notNull().unique(),
   clientId: int("clientId").notNull(),
   feed: mysqlEnum("feed", [...INBOUND_FEEDS]).notNull(),
@@ -5294,6 +5296,7 @@ export const inboundEvents = mysqlTable("inboundEvents", {
 
 export const webhookSubscriptions = mysqlTable("webhookSubscriptions", {
   id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 40 }),
   subscriptionRef: varchar("subscriptionRef", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 160 }).notNull(),
   url: varchar("url", { length: 500 }).notNull(),
@@ -5306,6 +5309,7 @@ export const webhookSubscriptions = mysqlTable("webhookSubscriptions", {
 
 export const webhookDeliveries = mysqlTable("webhookDeliveries", {
   id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 40 }),
   deliveryRef: varchar("deliveryRef", { length: 64 }).notNull().unique(),
   subscriptionId: int("subscriptionId").notNull(),
   eventId: varchar("eventId", { length: 40 }).notNull(),
@@ -7415,6 +7419,8 @@ export const loadSenseCalibrationModels = mysqlTable("loadSenseCalibrationModels
 
 export const loadSenseGatewayFrames = mysqlTable("loadSenseGatewayFrames", {
   id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull(),
+  sourceClientId: int("sourceClientId").notNull(),
   frameKey: varchar("frameKey", { length: 180 }).notNull().unique(),
   gatewayDeviceRef: varchar("gatewayDeviceRef", { length: 96 }).notNull(),
   sequence: int("sequence").notNull(),
