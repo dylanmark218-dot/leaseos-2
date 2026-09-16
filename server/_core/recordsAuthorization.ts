@@ -1820,6 +1820,11 @@ export function isSensitivePermission(p: Permission): boolean {
   return SENSITIVE_PERMISSIONS.includes(p);
 }
 
+/** B28 — the permissions one domain role carries, for the widget board's role-scoped actor. Universal permissions included. */
+export function permissionsForDomainRole(role: DomainRole): readonly Permission[] {
+  return Array.from(new Set([...(GRANTS[role] ?? []), ...UNIVERSAL_PERMISSIONS]));
+}
+
 export function isDomainRole(value: string): value is DomainRole {
   return Object.prototype.hasOwnProperty.call(GRANTS, value);
 }
@@ -2315,6 +2320,10 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "surfaces.exceptions": "surface.exceptions.read",
   "surfaces.inbox": "inbox.read_own",
   "surfaces.myDay": "myday.read_own",
+  /* ---- v22.23 B28 widget board: a surface over the caller's own board (same permission as My Day) ---- */
+  "widgets.offerable": "myday.read_own",
+  "widgets.boardResolve": "myday.read_own",
+  "widgets.layoutSave": "myday.read_own",
   "surfaces.search": "surface.search",
   "surfaces.timeline": "surface.timeline.read",
 

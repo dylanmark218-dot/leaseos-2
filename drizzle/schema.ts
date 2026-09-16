@@ -7848,6 +7848,36 @@ export type HosRuleLimitHistoryRow = typeof hosRuleLimitHistory.$inferSelect;
  * `requestReceivedAt` are separate because the clock runs from the request and
  * the two dates can differ — see `_core/inspectorRequest.ts`.
  */
+/** 0127/0128 — B28 widget dashboards (renumbered from the engine's 0089/0090). */
+export const widgetLayouts = mysqlTable("widgetLayouts", {
+  id: int("id").autoincrement().primaryKey(),
+  layoutRef: varchar("layoutRef", { length: 64 }).notNull(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  roleKey: varchar("roleKey", { length: 64 }).notNull(),
+  deviceClass: mysqlEnum("deviceClass", ["phone", "tablet", "desktop"]).default("phone").notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  isDefault: boolean("isDefault").default(false).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  revision: int("revision").default(1).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({ owner: index("widgetLayouts_owner").on(t.orgRef, t.userId, t.roleKey, t.deviceClass), ownerRef: uniqueIndex("widgetLayouts_owner_ref").on(t.orgRef, t.userId, t.layoutRef) }));
+export const widgetLayoutItems = mysqlTable("widgetLayoutItems", {
+  id: int("id").autoincrement().primaryKey(),
+  layoutId: int("layoutId").notNull(),
+  instanceRef: varchar("instanceRef", { length: 64 }).notNull(),
+  widgetKey: varchar("widgetKey", { length: 64 }).notNull(),
+  variant: varchar("variant", { length: 32 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }),
+  position: int("position").notNull(),
+  spanColumns: int("spanColumns").default(1).notNull(),
+  spanRows: int("spanRows").default(1).notNull(),
+  options: json("options"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({ layout: index("widgetLayoutItems_layout").on(t.layoutId, t.position), layoutInstance: uniqueIndex("widgetLayoutItems_layout_instance").on(t.layoutId, t.instanceRef) }));
+
 /** 0125 — paper assessment-sheet registry (Chat 5 PENDING-2/3). */
 export const sheetSerialSequences = mysqlTable("sheetSerialSequences", {
   scope: varchar("scope", { length: 120 }).primaryKey(),

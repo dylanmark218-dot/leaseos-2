@@ -1,4 +1,4 @@
--- v22.23 (planned) — 0127: renumbered from B28h sql/0089_widget_dashboards.sql; NOT in drizzle/ until the B28 reconciliation checkpoint applies it.
+-- v22.23 — 0127 (renumbered from B28h 0089): widget dashboards. Applied by the B28 reconciliation checkpoint.
 
 -- B24 — 0089: boards a person arranged.
 --
