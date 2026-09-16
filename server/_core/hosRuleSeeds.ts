@@ -65,7 +65,15 @@ export const FEDERAL_PROFILES: readonly HosRuleProfile[] = [
     profileKey: "CA_FEDERAL_SOUTH60",
     label: "Federal — south of latitude 60°N",
     applicability: { authorityLevel: "federal", jurisdiction: null, latitudeRule: "south_of_60", minimumWeightKg: null, operationClass: null },
-    limits: [...STANDARD_DAY, ...STANDARD_CYCLES],
+    // The daily driving candidate carries the section it came from, so a
+    // verifier opening the console is told where to look instead of having to
+    // find it. Seeded rather than applied by script: a script-applied citation
+    // does not survive a database rebuild, which is how this was found.
+    limits: [
+      lim("daily_drive_minutes", h(13), "12(1)"),
+      ...STANDARD_DAY.filter((l) => l.limitKey !== "daily_drive_minutes"),
+      ...STANDARD_CYCLES,
+    ],
     sourceAuthority: "Transport Canada",
     sourceCitation: FEDERAL_CITATION,
   }),
@@ -73,10 +81,30 @@ export const FEDERAL_PROFILES: readonly HosRuleProfile[] = [
     profileKey: "CA_FEDERAL_NORTH60",
     label: "Federal — north of latitude 60°N",
     applicability: { authorityLevel: "federal", jurisdiction: null, latitudeRule: "north_of_60", minimumWeightKg: null, operationClass: null },
-    // The northern schedule differs at the cycle, not the day: the research
-    // gives 80 in 7 rather than 70, with the interim threshold moving with it.
+    // North of 60 has a distinct daily driving regime. The candidate below is
+    // derived from the northern division's own driving section and still
+    // requires human verification before it determines anything.
+    //
+    // HISTORY — this seed previously reused the southern 13-hour value, with a
+    // comment reading "the northern schedule differs at the cycle, not the
+    // day". That was wrong: the southern figure sits at s. 12(1) inside the
+    // division s. 11 opens, and the northern division opens at s. 37 with its
+    // own driving section at s. 39(1). The adverse-driving provision at s. 76
+    // corroborates the split by referring to the two permitted periods
+    // separately.
+    //
+    // Kept rather than deleted, because "this once said 780" is the part a
+    // reviewer most needs and the part a silent correction destroys.
+    //
+    // STILL CONTESTED — on duty. The same northern section states an on-duty
+    // figure alongside the driving one, so `daily_on_duty_minutes` below is
+    // very likely reused from the south in the same way this was. It has NOT
+    // been changed here: 0093A was scoped to daily driving, and correcting a
+    // second figure on the strength of the same reading, without being asked,
+    // is how one good correction becomes three unexamined ones.
     limits: [
-      ...STANDARD_DAY,
+      lim("daily_drive_minutes", h(15), "39(1)"),
+      ...STANDARD_DAY.filter((l) => l.limitKey !== "daily_drive_minutes"),
       lim("cycle_1_on_duty_minutes", h(80)),
       lim("cycle_1_days", 7),
       lim("cycle_2_on_duty_minutes", h(120)),

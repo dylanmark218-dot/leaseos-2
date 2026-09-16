@@ -53,7 +53,17 @@ describe("the selector refuses to guess", () => {
     expect(under.outcome).toBe("unknown");
   });
 
-  it("crosses the sixtieth parallel into a different schedule, and keeps the day the same", () => {
+  // 0093A. This test previously asserted that the daily driving figure does not
+  // change at the parallel, and it passed because the northern seed reused the
+  // southern value. The assumption, not the code, was the defect: the southern
+  // figure sits in the division opened by s. 11 and the northern division opens
+  // at s. 37 with its own driving section, which s. 76 corroborates by naming
+  // the two permitted periods separately.
+  //
+  // The assertion now tracks the corrected **candidate**. Neither figure is
+  // verified, and this test says nothing about what the law is — only about
+  // what the seed carries and that the two divisions are not the same.
+  it("crosses the sixtieth parallel into a different schedule, and the day changes with it", () => {
     const south = selectProfile(ctx({ latitude: 59.9 }), ALL_HOS_PROFILE_SEEDS);
     const north = selectProfile(ctx({ latitude: 60.0 }), ALL_HOS_PROFILE_SEEDS);
     expect(south.outcome === "selected" && south.profile.profileKey).toBe("CA_FEDERAL_SOUTH60");
@@ -61,7 +71,7 @@ describe("the selector refuses to guess", () => {
     const cycle = (p: HosRuleProfile) => p.limits.find(l => l.limitKey === "cycle_1_on_duty_minutes")!.value;
     const drive = (p: HosRuleProfile) => p.limits.find(l => l.limitKey === "daily_drive_minutes")!.value;
     expect(cycle(seed("CA_FEDERAL_NORTH60"))).toBeGreaterThan(cycle(seed("CA_FEDERAL_SOUTH60")));
-    expect(drive(seed("CA_FEDERAL_NORTH60"))).toBe(drive(seed("CA_FEDERAL_SOUTH60")));   // the day does not change at the parallel
+    expect(drive(seed("CA_FEDERAL_NORTH60"))).toBeGreaterThan(drive(seed("CA_FEDERAL_SOUTH60")));   // the northern division sets its own day
   });
 
   it("lets an operation-specific profile govern, and names the alternative rather than hiding it", () => {
@@ -286,16 +296,32 @@ d("the registry through the database", () => {
     await expect(callerFor(verifier).hos.profileVerify({ profileKey: "YT_NORTH60" })).rejects.toThrow(/carries no figures/i);
   });
 
+  // 0093B. These moved from `hos.limitVerify`, which is closed: it reached
+  // "verified" from a section string and a number, with no citation and no
+  // ledger row. `limitPromote` reports the same correction and leaves a
+  // promotion an audit can follow.
   it("records a correction when the verifier reads a different number than was seeded", async () => {
     const controller = await withRole("controller");
     const verifier = await withRole("management");
     await callerFor(controller).hos.profileSeed();
     await pool.execute("UPDATE hosRuleLimits SET verificationStatus = 'unverified' WHERE profileKey = 'MB_PROVINCIAL' AND limitKey = 'daily_drive_minutes'");
-    const same = await callerFor(verifier).hos.limitVerify({ profileKey: "MB_PROVINCIAL", limitKey: "daily_drive_minutes", sourceSection: "s.12", confirmedValue: 780 });
+    const same = await callerFor(verifier).hos.limitPromote({ profileKey: "MB_PROVINCIAL", limitKey: "daily_drive_minutes", sourceSection: "s.12", value: 780,
+      jurisdiction: "MB", geographicScope: "ALL", authorityType: "law",
+      instrumentTitle: "FIXTURE INSTRUMENT — not a real regulation",
+      issuingAuthority: "FIXTURE — no issuing authority",
+      citationUrl: "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2005-313/",
+      verificationMethod: "OFFICIAL_WEB", unit: "minutes",
+      attestInstrumentOpen: true, attestPersonallyVerified: true, attestBindingAuthority: true } as never) as { corrected: boolean; value: number };
     expect(same).toMatchObject({ corrected: false, value: 780 });
 
     await pool.execute("UPDATE hosRuleLimits SET verificationStatus = 'unverified' WHERE profileKey = 'MB_PROVINCIAL' AND limitKey = 'core_rest_minutes'");
-    const changed = await callerFor(verifier).hos.limitVerify({ profileKey: "MB_PROVINCIAL", limitKey: "core_rest_minutes", sourceSection: "s.14", confirmedValue: 500 });
+    const changed = await callerFor(verifier).hos.limitPromote({ profileKey: "MB_PROVINCIAL", limitKey: "core_rest_minutes", sourceSection: "s.14", value: 500,
+      jurisdiction: "MB", geographicScope: "ALL", authorityType: "law",
+      instrumentTitle: "FIXTURE INSTRUMENT — not a real regulation",
+      issuingAuthority: "FIXTURE — no issuing authority",
+      citationUrl: "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2005-313/",
+      verificationMethod: "OFFICIAL_WEB", unit: "minutes",
+      attestInstrumentOpen: true, attestPersonallyVerified: true, attestBindingAuthority: true } as never) as { corrected: boolean; previousValue: number | null; value: number };
     expect(changed).toMatchObject({ corrected: true, previousValue: 480, value: 500 });
   });
 
@@ -327,6 +353,12 @@ d("the registry through the database", () => {
 
   it("does not let a dispatcher verify a rule", async () => {
     const dispatcher = await withRole("dispatcher");
-    await expect(callerFor(dispatcher).hos.limitVerify({ profileKey: "MB_PROVINCIAL", limitKey: "daily_drive_minutes", sourceSection: "s.12", confirmedValue: 780 })).rejects.toThrow();
+    await expect(callerFor(dispatcher).hos.limitPromote({ profileKey: "MB_PROVINCIAL", limitKey: "daily_drive_minutes", sourceSection: "s.12", value: 780,
+      jurisdiction: "MB", geographicScope: "ALL", authorityType: "law",
+      instrumentTitle: "FIXTURE INSTRUMENT — not a real regulation",
+      issuingAuthority: "FIXTURE — no issuing authority",
+      citationUrl: "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2005-313/",
+      verificationMethod: "OFFICIAL_WEB", unit: "minutes",
+      attestInstrumentOpen: true, attestPersonallyVerified: true, attestBindingAuthority: true } as never)).rejects.toThrow();
   });
 });

@@ -1,16 +1,4 @@
-import {
-  boolean,
-  double,
-  int,
-  mysqlEnum,
-  mysqlTable,
-  text,
-  timestamp,
-  varchar,
-  decimal,
-  uniqueIndex,
-  index,
-} from "drizzle-orm/mysql-core";
+import { boolean, date, decimal, double, index, int, json, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -6370,6 +6358,12 @@ export const hosRuleLimits = mysqlTable("hosRuleLimits", {
   verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "superseded"]).default("unverified").notNull(),
   verifiedByUserId: int("verifiedByUserId"),
   verifiedAt: timestamp("verifiedAt"),
+  /** The knowledge version that established this figure, where one exists (0119, ex-0090). */
+  establishedByVersionRef: varchar("establishedByVersionRef", { length: 64 }),
+  /** Where a reader can go and check it. Null means nobody recorded one. */
+  citationUrl: varchar("citationUrl", { length: 1000 }),
+  /** The promotion that produced the live figure (0120, ex-0091). */
+  currentPromotionRef: varchar("currentPromotionRef", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type HosRuleLimitRow = typeof hosRuleLimits.$inferSelect;
@@ -7650,3 +7644,180 @@ export const commercialChainSequences = mysqlTable("commercialChainSequences", {
 export const commercialLoadChainRefs = mysqlTable("commercialLoadChainRefs", {
   id: int("id").autoincrement().primaryKey(), loadId: int("loadId").notNull().unique(), chainRef: varchar("chainRef", { length: 80 }).notNull(), loadChainNumber: varchar("loadChainNumber", { length: 140 }).notNull().unique(), createdByUserId: int("createdByUserId").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, t => ({ chainIdx: index("commercialLoadChainRefs_chain_idx").on(t.chainRef) }));
+
+
+/* ---- v22.20 (0118, ex-0089): what LeaseOS has been allowed to read ---- */
+
+/**
+ * A source and its licence assessment.
+ *
+ * Four independent permissions, because "can we use this?" is four legal
+ * questions. 511 Alberta is the case that proves it: LeaseOS may link to that
+ * course today and may not store a sentence of it.
+ */
+export const knowledgeSources = mysqlTable("knowledgeSources", {
+  id: int("id").autoincrement().primaryKey(),
+  sourceId: varchar("sourceId", { length: 64 }).notNull().unique(),
+  sourceName: varchar("sourceName", { length: 200 }).notNull(),
+  owner: varchar("owner", { length: 200 }).notNull(),
+  jurisdiction: varchar("jurisdiction", { length: 16 }).notNull(),
+  homeUrl: varchar("homeUrl", { length: 500 }),
+
+  assessmentId: varchar("assessmentId", { length: 64 }),
+  assessedAt: date("assessedAt"),
+  assessedByUserId: int("assessedByUserId"),
+  /** `unassessed` is the default, and it permits nothing. */
+  licenceStatus: mysqlEnum("licenceStatus", [
+    "unassessed", "blocked_pending_written_permission", "authorized_commercial",
+    "authorized_non_commercial_only", "link_and_metadata_only", "prohibited",
+  ]).default("unassessed").notNull(),
+
+  linkingAuthorized: boolean("linkingAuthorized").default(false).notNull(),
+  metadataOnlyAuthorized: boolean("metadataOnlyAuthorized").default(false).notNull(),
+  ragIngestionAuthorized: boolean("ragIngestionAuthorized").default(false).notNull(),
+  modelTrainingAuthorized: boolean("modelTrainingAuthorized").default(false).notNull(),
+  apiProductionAuthorized: boolean("apiProductionAuthorized").default(false).notNull(),
+  /** Meaningless without `permissionDocumentId`; the application enforces the pair. */
+  commercialReuseAuthorized: boolean("commercialReuseAuthorized").default(false).notNull(),
+
+  permissionDocumentId: varchar("permissionDocumentId", { length: 64 }),
+  permissionScope: json("permissionScope"),
+  permissionRecordedByUserId: int("permissionRecordedByUserId"),
+  permissionRecordedAt: timestamp("permissionRecordedAt"),
+
+  reasonsJson: json("reasonsJson"),
+  conditionsToUnblockJson: json("conditionsToUnblockJson"),
+  officialSourcesJson: json("officialSourcesJson"),
+
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type KnowledgeSourceRow = typeof knowledgeSources.$inferSelect;
+
+/** A fetched document. Created quarantined, always. */
+export const knowledgeDocuments = mysqlTable("knowledgeDocuments", {
+  id: int("id").autoincrement().primaryKey(),
+  documentRef: varchar("documentRef", { length: 64 }).notNull().unique(),
+  sourceId: varchar("sourceId", { length: 64 }).notNull(),
+  title: varchar("title", { length: 400 }).notNull(),
+  url: varchar("url", { length: 1000 }),
+  purpose: mysqlEnum("purpose", [
+    "link_only", "metadata_only", "rag_ingestion",
+    "api_production", "api_dev_testing", "model_training", "commercial_redisplay",
+  ]).notNull(),
+  state: mysqlEnum("state", [
+    "QUARANTINED", "LICENCE_CHECKED", "PARSED", "CLASSIFIED", "VERIFIED", "PUBLISHED", "REJECTED",
+  ]).default("QUARANTINED").notNull(),
+  rejectedReason: varchar("rejectedReason", { length: 500 }),
+  gateDecisionCode: varchar("gateDecisionCode", { length: 64 }),
+  authorityLevel: mysqlEnum("authorityLevel", [
+    "law", "official_guidance", "recognized_standard", "manufacturer",
+    "company_policy", "operational", "unverified",
+  ]).default("unverified").notNull(),
+  fetchedAt: timestamp("fetchedAt").notNull(),
+  fetchedByUserId: int("fetchedByUserId"),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type KnowledgeDocumentRow = typeof knowledgeDocuments.$inferSelect;
+
+/** Versions, so a rule can be shown as it stood. Nothing is overwritten. */
+export const knowledgeVersions = mysqlTable("knowledgeVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  versionRef: varchar("versionRef", { length: 64 }).notNull().unique(),
+  documentRef: varchar("documentRef", { length: 64 }).notNull(),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  effectiveFrom: timestamp("effectiveFrom"),
+  effectiveUntil: timestamp("effectiveUntil"),
+  publishedAt: timestamp("publishedAt"),
+  supersedesVersionRef: varchar("supersedesVersionRef", { length: 64 }),
+  supersededByVersionRef: varchar("supersededByVersionRef", { length: 64 }),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type KnowledgeVersionRow = typeof knowledgeVersions.$inferSelect;
+
+/**
+ * Stored text.
+ *
+ * A row here is reproduction, whatever the pipeline calls the step, so one may
+ * exist only where the source permits it. `authorizedByAssessmentId` records
+ * which assessment allowed it, so a later revocation can find its own rows.
+ */
+export const knowledgeChunks = mysqlTable("knowledgeChunks", {
+  id: int("id").autoincrement().primaryKey(),
+  chunkRef: varchar("chunkRef", { length: 64 }).notNull().unique(),
+  documentRef: varchar("documentRef", { length: 64 }).notNull(),
+  versionRef: varchar("versionRef", { length: 64 }),
+  ordinal: int("ordinal").notNull(),
+  text: text("text").notNull(),
+  tokenCount: int("tokenCount"),
+  section: varchar("section", { length: 200 }),
+  page: int("page"),
+  authorizedByAssessmentId: varchar("authorizedByAssessmentId", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type KnowledgeChunkRow = typeof knowledgeChunks.$inferSelect;
+
+
+
+/* ---- v22.20 (0120, ex-0091): every figure LeaseOS has ever relied on ---- */
+
+/**
+ * The promotion ledger.
+ *
+ * One row per promoted figure, written once and never edited. A correction does
+ * not rewrite the row it corrects — it points at it, so the error stays visible.
+ * That is stronger audit evidence than a silent 700 → 780.
+ *
+ * There is deliberately no column for the source text. LeaseOS stores evidence
+ * sufficient to relocate and defend a figure; it does not warehouse the source.
+ */
+export const hosRuleLimitHistory = mysqlTable("hosRuleLimitHistory", {
+  id: int("id").autoincrement().primaryKey(),
+  promotionRef: varchar("promotionRef", { length: 64 }).notNull().unique(),
+
+  profileKey: varchar("profileKey", { length: 60 }).notNull(),
+  limitKey: varchar("limitKey", { length: 60 }).notNull(),
+  value: double("value").notNull(),
+  unit: varchar("unit", { length: 32 }).notNull(),
+
+  jurisdiction: varchar("jurisdiction", { length: 64 }).notNull(),
+  authorityType: mysqlEnum("authorityType", [
+    "law", "official_guidance", "recognized_standard", "manufacturer",
+  ]).notNull(),
+  instrumentTitle: varchar("instrumentTitle", { length: 400 }).notNull(),
+  issuingAuthority: varchar("issuingAuthority", { length: 200 }).notNull(),
+  sourceSection: varchar("sourceSection", { length: 200 }).notNull(),
+  citationUrl: varchar("citationUrl", { length: 1000 }).notNull(),
+  instrumentVersion: varchar("instrumentVersion", { length: 120 }),
+  consolidationDate: date("consolidationDate"),
+  verificationMethod: mysqlEnum("verificationMethod", [
+    "OFFICIAL_WEB", "OFFICIAL_PDF", "OFFICIAL_PRINT", "LEGAL_COUNSEL", "REGULATOR_CONFIRMATION",
+  ]).notNull(),
+  establishedByVersionRef: varchar("establishedByVersionRef", { length: 64 }),
+
+  verifiedByUserId: int("verifiedByUserId").notNull(),
+  /** When a person checked it. */
+  verifiedAt: timestamp("verifiedAt").notNull(),
+  /** When the rule legally began. */
+  effectiveFrom: timestamp("effectiveFrom"),
+  /** When it stopped. */
+  effectiveUntil: timestamp("effectiveUntil"),
+  /** When LeaseOS stored the verification. */
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+
+  status: mysqlEnum("status", ["FUTURE", "CURRENT", "EXPIRED", "REVOKED", "SUPERSEDED"])
+    .default("CURRENT").notNull(),
+  changeReason: mysqlEnum("changeReason", [
+    "INITIAL_VERIFICATION", "VERIFIED_REVISION", "CORRECTED_VERIFICATION",
+    "REVOCATION", "REVERIFICATION",
+  ]).notNull(),
+
+  correctsPromotionRef: varchar("correctsPromotionRef", { length: 64 }),
+  previousPromotionRef: varchar("previousPromotionRef", { length: 64 }),
+});
+export type HosRuleLimitHistoryRow = typeof hosRuleLimitHistory.$inferSelect;
+

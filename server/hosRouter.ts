@@ -14,6 +14,8 @@ import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { dutyRecords, hosRuleLimits, hosRuleProfiles } from "../drizzle/schema";
 import { ALL_HOS_PROFILE_SEEDS, HOS_SEED_CAVEAT, HOS_SEED_RETRIEVAL_DATE } from "./_core/hosRuleSeeds";
+import { divergences, promote as promoteLimit } from "./_core/knowledge/promotionLedger";
+import { checkPromotionScope } from "./_core/knowledge/scopeGuard";
 import {
   computeClocks, determine, selectProfile, tripFeasibility,
   type DutyEntry, type HosRuleProfile, type LimitKey,
@@ -83,17 +85,141 @@ export const hosRouter = router({
   }),
 
   /** Verify one figure against its clause. A profile is verified only when every limit it carries is. */
+  /**
+   * 0093B — closed.
+   *
+   * This reached `verificationStatus: "verified"` from a section string and a
+   * number: no citation anybody could follow, no instrument named, no scope
+   * check against the schedule's applicability, and no ledger entry. The engine
+   * measures drivers against that column, so a figure nobody could produce a
+   * source for was doing real work.
+   *
+   * Two doors to one state, and this one asked for nothing. It now refuses and
+   * names its replacement rather than being deleted, so an existing caller gets
+   * an instruction instead of a missing-procedure error.
+   *
+   * **Breaking change.** Callers move to `hos.limitPromote`, which needs the
+   * instrument, the issuing authority, a citation on a registered publisher's
+   * domain, the geographic scope, a verification method and three attestations
+   * — and reports `corrected` / `previousValue` exactly as this did.
+   *
+   * Figures already verified through this path keep working and keep
+   * determining; they are identifiable by a null `currentPromotionRef` and
+   * reported by `figuresWithoutCitation()`. Re-verifying them through
+   * `limitPromote` is a separate piece of work, and not one to do by script.
+   */
   limitVerify: roleProcedure("hos.limitVerify")
     .input(z.object({ profileKey: z.string().min(1).max(60), limitKey: z.string().min(1).max(60), sourceSection: z.string().min(1).max(120), confirmedValue: z.number().nonnegative() }))
+    .mutation(async ({ input }) => {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `hos.limitVerify is closed: it marked a figure verified without a citation, an instrument or a scope check. Use hos.limitPromote for ${input.profileKey}.${input.limitKey} — it records the same correction and leaves a promotion an audit can follow.`,
+      });
+    }),
+
+  /**
+   * 0093 — the cited path.
+   *
+   * `limitVerify` above takes a section string and a number, and that is all
+   * it has ever taken: no citation anybody can follow, no instrument named, no
+   * scope check, and no ledger entry. It still writes
+   * `verificationStatus: "verified"`, which is what the engine measures
+   * drivers against.
+   *
+   * This procedure is the door the 0090–0092 work built, and until now the
+   * console was wired to the old one. It refuses without a named instrument, a
+   * citation on a registered publisher's domain, a schedule scoped no wider
+   * than the reading, and a plausible figure — then writes the live row and an
+   * immutable promotion together, in one transaction.
+   *
+   * `limitVerify` is deliberately left alone. Changing what an existing
+   * compliance procedure accepts is its own checkpoint; what this does is stop
+   * anything new arriving through it.
+   */
+  limitPromote: roleProcedure("hos.limitPromote")
+    .input(z.object({
+      profileKey: z.string().min(1).max(60),
+      limitKey: z.string().min(1).max(60),
+      value: z.number().finite(),
+      unit: z.enum(["minutes", "hours", "days", "kilograms"]),
+      jurisdiction: z.string().min(2).max(64),
+      geographicScope: z.enum(["SOUTH_OF_60_N", "NORTH_OF_60_N", "ALL"]).optional(),
+      authorityType: z.enum(["law", "official_guidance", "recognized_standard", "manufacturer"]),
+      instrumentTitle: z.string().min(1).max(400),
+      issuingAuthority: z.string().min(1).max(200),
+      sourceSection: z.string().min(1).max(200),
+      citationUrl: z.string().min(1).max(1000),
+      instrumentVersion: z.string().max(120).optional(),
+      verificationMethod: z.enum([
+        "OFFICIAL_WEB", "OFFICIAL_PDF", "OFFICIAL_PRINT", "LEGAL_COUNSEL", "REGULATOR_CONFIRMATION",
+      ]),
+      effectiveFrom: z.coerce.date().optional(),
+      effectiveUntil: z.coerce.date().optional(),
+      correctsPromotionRef: z.string().max(64).optional(),
+      /** All three, separately. The server does not accept one combined flag. */
+      attestInstrumentOpen: z.literal(true),
+      attestPersonallyVerified: z.literal(true),
+      attestBindingAuthority: z.literal(true),
+    }))
     .mutation(async ({ ctx, input }) => {
-      const d = await db();
-      const l = (await d.select().from(hosRuleLimits).where(and(eq(hosRuleLimits.profileKey, input.profileKey), eq(hosRuleLimits.limitKey, input.limitKey))).limit(1))[0];
-      if (!l) throw new TRPCError({ code: "NOT_FOUND", message: `${input.profileKey} carries no ${input.limitKey}` });
-      if (l.verificationStatus !== "unverified") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `That limit is ${l.verificationStatus}` });
-      // The verifier states the figure they read. A mismatch is a correction, not a rubber stamp.
-      const corrected = input.confirmedValue !== l.value;
-      await d.update(hosRuleLimits).set({ value: input.confirmedValue, sourceSection: input.sourceSection, verificationStatus: "verified", verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(eq(hosRuleLimits.id, l.id));
-      return { profileKey: l.profileKey, limitKey: l.limitKey, verificationStatus: "verified" as const, corrected, previousValue: corrected ? l.value : null, value: input.confirmedValue };
+      // A figure may not govern operations wider than the reading it came from.
+      const scope = await checkPromotionScope({
+        profileKey: input.profileKey,
+        jurisdiction: input.jurisdiction,
+        geographicScope: input.geographicScope,
+      });
+      if (!scope.ok) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${scope.reason} — ${scope.remedy}` });
+      }
+
+      // The old door reported when a verifier read a different number than was
+      // seeded. That is the most interesting thing it said and it is kept:
+      // a correction is evidence, and silently accepting a changed figure
+      // would lose it.
+      const before = (await (await db()).select({ value: hosRuleLimits.value, status: hosRuleLimits.verificationStatus })
+        .from(hosRuleLimits)
+        .where(and(eq(hosRuleLimits.profileKey, input.profileKey), eq(hosRuleLimits.limitKey, input.limitKey)))
+        .limit(1))[0];
+
+      const now = new Date();
+      const outcome = await promoteLimit({
+        profileKey: input.profileKey,
+        limitKey: input.limitKey,
+        value: input.value,
+        unit: input.unit,
+        jurisdiction: input.jurisdiction,
+        authorityType: input.authorityType,
+        instrumentTitle: input.instrumentTitle,
+        issuingAuthority: input.issuingAuthority,
+        sourceSection: input.sourceSection,
+        citationUrl: input.citationUrl,
+        instrumentVersion: input.instrumentVersion,
+        verificationMethod: input.verificationMethod,
+        effectiveFrom: input.effectiveFrom,
+        effectiveUntil: input.effectiveUntil,
+        correctsPromotionRef: input.correctsPromotionRef,
+        // The verifier is the authenticated user, never a field in the payload.
+        verifiedByUserId: ctx.user.id,
+        verifiedAt: now,
+      }, now);
+
+      if (!outcome.promoted) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${outcome.code}: ${outcome.reason}` });
+      }
+
+      const divergence = await divergences();
+      const corrected = before != null && before.value !== input.value;
+      return {
+        promotionRef: outcome.promotionRef,
+        status: outcome.status,
+        becameCurrent: outcome.becameCurrent,
+        scope: scope.scope,
+        sourceTextStored: false as const,
+        divergence: divergence.length === 0 ? "NONE" : `${divergence.length} found`,
+        corrected,
+        previousValue: corrected ? before!.value : null,
+        value: input.value,
+      };
     }),
 
   /** Verify the profile itself, once every figure under it has been verified. */

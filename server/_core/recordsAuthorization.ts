@@ -2510,6 +2510,8 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "hos.profileSeed": "hos.rule.manage",
   "hos.profileList": "hos.read",
   "hos.limitVerify": "hos.rule.verify",
+  /** 0093 (recovered): the cited path. Same permission, materially stronger evidence. */
+  "hos.limitPromote": "hos.rule.verify",
   "hos.profileVerify": "hos.rule.verify",
   "hos.profileFor": "hos.read",
   "hos.status": "hos.read",
