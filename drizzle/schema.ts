@@ -6364,6 +6364,8 @@ export const hosRuleLimits = mysqlTable("hosRuleLimits", {
   citationUrl: varchar("citationUrl", { length: 1000 }),
   /** The promotion that produced the live figure (0120, ex-0091). */
   currentPromotionRef: varchar("currentPromotionRef", { length: 64 }),
+  /** Who recorded the candidate (0124). A second person verifies it. */
+  recordedByUserId: int("recordedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type HosRuleLimitRow = typeof hosRuleLimits.$inferSelect;
@@ -7054,6 +7056,15 @@ export const academyCourseVersions = mysqlTable("academyCourseVersions", {
   retiredAt: timestamp("retiredAt"),
   policyJson: text("policyJson").notNull(),
   courseHash: varchar("courseHash", { length: 64 }).notNull(),
+  /** 0123 — s.6.2 topic coverage. Aspects are derived from this, never typed by an issuer. */
+  tdgMode: mysqlEnum("tdgMode", ["road", "rail", "vessel", "air"]),
+  tdgTopicCodesJson: text("tdgTopicCodesJson"),
+  tdgTopicReviewStatus: mysqlEnum("tdgTopicReviewStatus", ["unmapped", "draft", "in_review", "approved"]).default("unmapped").notNull(),
+  tdgTopicCoverageHash: varchar("tdgTopicCoverageHash", { length: 16 }),
+  tdgTopicReviewedHash: varchar("tdgTopicReviewedHash", { length: 16 }),
+  tdgTopicAuthoredByUserId: int("tdgTopicAuthoredByUserId"),
+  tdgTopicReviewedByUserId: int("tdgTopicReviewedByUserId"),
+  tdgTopicReviewedAt: timestamp("tdgTopicReviewedAt"),
   sourceSnapshotRef: varchar("sourceSnapshotRef", { length: 96 }),
   publishedByUserId: int("publishedByUserId"),
   publishedAt: timestamp("publishedAt"),
@@ -7071,6 +7082,8 @@ export const academyModules = mysqlTable("academyModules", {
   requiresPractical: boolean("requiresPractical").default(false).notNull(),
   estimatedMinutes: int("estimatedMinutes"),
   moduleHash: varchar("moduleHash", { length: 64 }).notNull(),
+  /** 0123 — which s.6.2 topics this module teaches; the authored truth the version declaration reconciles against. */
+  tdgTopicCodesJson: text("tdgTopicCodesJson"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

@@ -275,7 +275,9 @@ export async function promote(e: PromotionEvidence, now: Date): Promise<Promotio
     };
 
     if (live[0]) await tx.update(hosRuleLimits).set(row).where(eq(hosRuleLimits.id, live[0].id));
-    else await tx.insert(hosRuleLimits).values({ profileKey: e.profileKey, limitKey: e.limitKey, ...row });
+    // A row that promotion creates was established directly from the instrument
+    // by the verifier, so the verifier is also its recorder (0124).
+    else await tx.insert(hosRuleLimits).values({ profileKey: e.profileKey, limitKey: e.limitKey, recordedByUserId: e.verifiedByUserId, ...row });
   });
 
   return { promoted: true, promotionRef, status, becameCurrent: status === "CURRENT" };

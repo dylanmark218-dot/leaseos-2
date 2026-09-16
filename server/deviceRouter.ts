@@ -15,7 +15,7 @@ import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
 import { createHash } from "node:crypto";
-import { canonicalDevicePackage, fingerprintP256Spki, signatureTimeIsFresh, verifyP256PackageSignature } from "./_core/deviceSignature";
+import { DEVICE_SIGNATURE_MAX_SKEW_MS, canonicalDevicePackage, fingerprintP256Spki, signatureTimeIsFresh, verifyP256PackageSignature } from "./_core/deviceSignature";
 import { resolveActingScope } from "./_core/actingScope";
 import { storageRead } from "./storage";
 import {
@@ -133,7 +133,10 @@ const ITEM = z.object({
   declaredManifestHash: FINGERPRINT,
   computedContentHash: FINGERPRINT,
   computedManifestHash: FINGERPRINT,
-  captureAuthorizationClaim: z.enum(["authorized", "unauthorized", "unknown"]).default("unknown"),
+  // Signed payload: no server-side default. The signature covers the bytes the
+  // device sent, so a field the server would have to fill in cannot be part of
+  // a signed item — the device states the claim, or the schema refuses it.
+  captureAuthorizationClaim: z.enum(["authorized", "unauthorized", "unknown"]),
   captureAuthorizationReason: z.string().max(300).nullable().optional(),
 });
 
@@ -153,11 +156,12 @@ export const syncRouter = router({
       packageRef: z.string().min(1).max(64),
       queuedAt: z.coerce.date(),
       items: z.array(ITEM).min(1).max(500),
+      // Also signed, so also no default: the device always sends it (empty when it has none).
       recordUpdates: z.array(z.object({
         recordType: z.string().min(1).max(60), recordRef: z.string().min(1).max(120),
         baseVersion: z.number().int().nonnegative(),
         baseValues: z.record(z.string(), z.unknown()), deviceValues: z.record(z.string(), z.unknown()),
-      })).default([]),
+      })),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
@@ -171,13 +175,33 @@ export const syncRouter = router({
       const actingOrgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
       if (d.orgRef !== actingOrgRef) throw new TRPCError({ code: "FORBIDDEN", message: "Device is not bound to the active organization" });
       if (d && !d.publicKeySpkiBase64) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Legacy fingerprint-only device must be re-enrolled with a public key" });
-      if (!signatureTimeIsFresh(input.signedAt, now)) throw new TRPCError({ code: "UNAUTHORIZED", message: "Device signature timestamp is stale or too far in the future" });
+      // A refused package is a row, whatever refused it. The pre-0110 rule was
+      // "refusals and rejections are rows"; 0110's signature checks threw
+      // instead, which left the office unable to see that a device with a bad
+      // clock or an unknown key had tried. Recorded against the *claimed* device
+      // ref — the caller is an authenticated user, so this is bounded — and
+      // returned as a rejection so the runtime marks the capture failed rather
+      // than retrying forever.
+      const refuse = async (reason: string) => {
+        await db.insert(syncPackages).values({
+          packageRef: input.packageRef, deviceId: input.deviceRef, fieldDeviceId: d?.id ?? null,
+          signedWithFingerprint: input.signedWithFingerprint, operatorId: null, state: "rejected",
+          itemCount: input.items.length, queuedAt: input.queuedAt, lastAttemptAt: now, attemptCount: 1,
+          serverReceivedAt: null, refusalReason: reason,
+        }).catch(() => undefined);
+        return { packageRef: input.packageRef, state: "rejected" as const, reason, verified: 0, rejected: input.items.length, conflicts: 0 };
+      };
+      if (!signatureTimeIsFresh(input.signedAt, now)) {
+        const skewSeconds = Math.round((input.signedAt.getTime() - now.getTime()) / 1000);
+        // The device can only fix its clock if it is told what the server's is.
+        return refuse(`Device signature timestamp is stale or too far in the future: device signed ${input.signedAt.toISOString()}, server time ${now.toISOString()} (skew ${skewSeconds}s; allowed ±${DEVICE_SIGNATURE_MAX_SKEW_MS / 1000}s)`);
+      }
       const signingKey = d?.keyFingerprint === input.signedWithFingerprint
         ? d.publicKeySpkiBase64
         : history.find(h => h.keyFingerprint === input.signedWithFingerprint && h.publicKeySpkiBase64)?.publicKeySpkiBase64;
       const signedPayload = canonicalDevicePackage({ deviceRef: input.deviceRef, packageRef: input.packageRef, queuedAt: input.queuedAt, signedAt: input.signedAt, nonce: input.nonce, items: input.items, recordUpdates: input.recordUpdates });
       if (!signingKey || !verifyP256PackageSignature({ publicKeySpkiBase64: signingKey, payload: signedPayload, signatureP1363Base64: input.signatureP1363Base64 }))
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid device package signature" });
+        return refuse(signingKey ? "Invalid device package signature" : "Invalid device package signature: the signing key was never enrolled or rotated in for this device");
       try {
         await db.insert(deviceSyncNonces).values({ fieldDeviceId: d!.id, orgRef, nonce: input.nonce, signedAt: input.signedAt, packageRef: input.packageRef, receivedAt: now });
       } catch {

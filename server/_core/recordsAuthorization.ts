@@ -2640,6 +2640,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "academy.directSupervisionCreate": "academy.direct_supervision.manage",
   "academy.directSupervisionAttest": "academy.direct_supervision_attest_own",
   "academy.dispatchCheck": "dispatch.evaluate",
+  /* ---- v22.22 (0122/0123): TDG topic coverage and inspector requests ---- */
+  "academy.tdgCoverageSet": "academy.manage",
+  "academy.tdgCoverageApprove": "academy.source.review",
+  "academy.tdgCoverageStatus": "academy.read_own",
+  "academy.inspectorRequestCreate": "academy.certificate.issue",
+  "academy.inspectorRequestAssemble": "academy.certificate.issue",
+  "academy.inspectorRequestList": "academy.certificate.issue",
 
   /* ---- v21.20: workforce lifecycle ---- */
   "workforce.applicantCreate": "hr.applicant.manage",

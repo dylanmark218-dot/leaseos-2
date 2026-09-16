@@ -11,6 +11,9 @@ import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { certificateContentDecision, deriveTrainingAspects, TDG_6_2_TOPICS, type Tdg62TopicCode, type TdgMode } from "./_core/tdgCertificateContents";
+import { canIssueCertificateFromCoverage, coverageFingerprint, parseTopicCodes, reconcileCoverage, type CoverageRow } from "./_core/tdgTopicCoverage";
+import { assembleInspectorPackage, responseDeadline, inspectorRequestSummary } from "./_core/inspectorRequest";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import {
@@ -35,6 +38,7 @@ import {
   academyRequirements,
   academySourceRecords,
   academyStatementsOfExperience,
+  academyInspectorRequests,
   complianceKnowledgeItems,
   complianceDocuments,
   users,
@@ -87,6 +91,18 @@ async function assignmentForSelf(db: Awaited<ReturnType<typeof dbOrThrow>>, user
   if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Training assignment not found" });
   return row;
 }
+/** 0123 — a course version's coverage as the pure gate reads it: declaration plus the union of its modules. */
+async function coverageRowFor(db: Awaited<ReturnType<typeof dbOrThrow>>, courseVersionId: number): Promise<CoverageRow> {
+  const v = (await db.select().from(academyCourseVersions).where(eq(academyCourseVersions.id, courseVersionId)).limit(1))[0];
+  if (!v) throw new TRPCError({ code: "NOT_FOUND", message: "Course version not found" });
+  const mods = await db.select({ tdgTopicCodesJson: academyModules.tdgTopicCodesJson }).from(academyModules).where(eq(academyModules.courseVersionId, courseVersionId));
+  return {
+    courseVersionRef: v.versionRef, tdgMode: v.tdgMode ?? null,
+    declaredTopicCodesJson: v.tdgTopicCodesJson, reviewStatus: v.tdgTopicReviewStatus, reviewedHash: v.tdgTopicReviewedHash,
+    moduleTopicCodesJson: mods.map(m => m.tdgTopicCodesJson),
+  };
+}
+
 async function assignmentByRef(db: Awaited<ReturnType<typeof dbOrThrow>>, assignmentRef: string) {
   const row = (await db.select().from(academyAssignments).where(eq(academyAssignments.assignmentRef, assignmentRef)).limit(1))[0];
   if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Training assignment not found" });
@@ -408,7 +424,10 @@ export const trainingAcademyRouter = router({
       statementOfExperienceRef: z.string().min(1).max(96).nullable().optional(),
       employerName: z.string().min(2).max(220).nullable().optional(),
       employerBusinessAddress: z.string().min(5).max(500).nullable().optional(),
+      /** Company (non-regulated) certificates only. For a regulated TDG certificate the aspects are DERIVED from approved course coverage and this field is refused. */
       trainingAspects: z.array(z.string().min(2).max(500)).min(1).max(100).nullable().optional(),
+      /** s.6.3(1)(d) — the dangerous-goods scope being certified, e.g. "Class 3, Flammable Liquids". Required for a TDG employer certificate. */
+      dangerousGoodsScope: z.string().min(2).max(300).nullable().optional(),
     }).strict())
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
@@ -425,10 +444,27 @@ export const trainingAcademyRouter = router({
       if (!qualificationCode) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Course has no qualification code" });
       const learner = (await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, a.userId)).limit(1))[0];
       if (!learner?.name?.trim()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Certificate issuance requires the employee name to be present on the authenticated user record" });
+      // 0123 — for a regulated TDG certificate the s.6.3(1)(d) aspects are derived
+      // from the course version's APPROVED s.6.2 topic coverage. There is no path
+      // from client text to the aspects printed on the certificate.
+      let derivedAspects: string[] | null = null;
       if (course.credentialBoundary === "employer_certificate" && qualificationCode === "TDG_ROAD") {
+        if (input.trainingAspects?.length) throw new TRPCError({ code: "BAD_REQUEST", message: "A regulated TDG certificate does not accept typed training aspects; they are derived from the course version's approved s.6.2 topic coverage" });
         if (!input.employerName?.trim()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "TDG certificate requires the employer name" });
         if (!input.employerBusinessAddress?.trim()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "TDG certificate requires the employer place-of-business address" });
-        if (!input.trainingAspects?.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "TDG certificate requires the aspects of dangerous-goods work for which the employee is trained" });
+        if (!input.dangerousGoodsScope?.trim()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "s.6.3(1)(d): TDG certificate requires the dangerous-goods scope being certified" });
+        const coverage = await coverageRowFor(db, version.id);
+        const gate = canIssueCertificateFromCoverage(coverage, "road");
+        if (!gate.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${gate.code}: ${gate.message}` });
+        const derived = deriveTrainingAspects({ courseVersionRef: version.versionRef, coveredTopicCodes: gate.topicCodes, dangerousGoodsScope: input.dangerousGoodsScope, mode: gate.mode });
+        if (!derived.aspects) throw new TRPCError({ code: "PRECONDITION_FAILED", message: derived.blockers.join("; ") });
+        const contents = certificateContentDecision({ regulated: true, credentialBoundary: "employer_certificate", contents: {
+          employerName: input.employerName, employerBusinessAddress: input.employerBusinessAddress, employeeName: learner.name,
+          // Expiry is computed below from the versioned regulatory profile; the content gate needs only to know one will exist.
+          expiresAt: new Date(0), trainingAspects: derived.aspects,
+        } });
+        if (!contents.permitted) throw new TRPCError({ code: "PRECONDITION_FAILED", message: contents.blockers.join("; ") });
+        derivedAspects = [derived.aspects.statement, ...derived.aspects.topicCodes.map((c) => { const t = TDG_6_2_TOPICS.find(x => x.code === c)!; return `${t.ref}: ${t.label}`; })];
       }
       const existing = (await db.select().from(academyCertificates).where(and(eq(academyCertificates.assignmentId, a.id), eq(academyCertificates.courseVersionId, a.courseVersionId))).orderBy(desc(academyCertificates.id)).limit(1))[0];
       if (existing && existing.status !== "revoked" && !existing.revokedAt) return { certificateRef: existing.certificateRef, qualificationCode: existing.qualificationCode, status: existing.status, reused: true };
@@ -464,12 +500,12 @@ export const trainingAcademyRouter = router({
 
       const certificateRef = ref("ACAD-CERT");
       const policySnapshotHash = stableHash(version.policyJson);
-      const provisionalPayload = { certificateRef, userId: a.userId, employeeNameSnapshot: learner.name, employerNameSnapshot: input.employerName ?? null, employerBusinessAddressSnapshot: input.employerBusinessAddress ?? null, trainingAspects: input.trainingAspects ?? null, courseId: course.id, courseVersionId: version.id, assignmentRef: a.assignmentRef, qualificationCode, credentialBoundary: course.credentialBoundary, issuedAt: issuedAt.toISOString(), expiresAt: terms.expiresAt?.toISOString() ?? null, retentionUntil: terms.retentionUntil?.toISOString() ?? null, sourceSnapshotRef: version.sourceSnapshotRef, sourceHash: source?.snapshotHash ?? null, sourceTier: source?.sourceTier ?? null, regulatoryProfileRef: profileRow?.profileRef ?? null, regulatoryProfileHash: profileRow?.profileHash ?? null, statementOfExperienceHash: experienceRow?.payloadHash ?? null, attestationStatement: requiresAttestation ? input.attestationStatement : null, policySnapshotHash };
+      const provisionalPayload = { certificateRef, userId: a.userId, employeeNameSnapshot: learner.name, employerNameSnapshot: input.employerName ?? null, employerBusinessAddressSnapshot: input.employerBusinessAddress ?? null, trainingAspects: derivedAspects ?? input.trainingAspects ?? null, courseId: course.id, courseVersionId: version.id, assignmentRef: a.assignmentRef, qualificationCode, credentialBoundary: course.credentialBoundary, issuedAt: issuedAt.toISOString(), expiresAt: terms.expiresAt?.toISOString() ?? null, retentionUntil: terms.retentionUntil?.toISOString() ?? null, sourceSnapshotRef: version.sourceSnapshotRef, sourceHash: source?.snapshotHash ?? null, sourceTier: source?.sourceTier ?? null, regulatoryProfileRef: profileRow?.profileRef ?? null, regulatoryProfileHash: profileRow?.profileHash ?? null, statementOfExperienceHash: experienceRow?.payloadHash ?? null, attestationStatement: requiresAttestation ? input.attestationStatement : null, policySnapshotHash };
       const provisionalHash = stableHash(provisionalPayload);
       const needsEmployeeSignature = !!profileSeed?.requiresEmployeeSignature;
       const needsEmployerSignature = !!profileSeed?.requiresEmployerSignature;
       const status = needsEmployeeSignature ? "pending_signature" as const : "active" as const;
-      const ins = await db.insert(academyCertificates).values({ certificateRef, userId: a.userId, courseId: course.id, courseVersionId: version.id, assignmentId: a.id, qualificationCode, credentialBoundary: course.credentialBoundary, status, issuedByUserId: ctx.user.id, employeeNameSnapshot: learner.name, employerNameSnapshot: input.employerName ?? null, employerBusinessAddressSnapshot: input.employerBusinessAddress ?? null, trainingAspectsJson: input.trainingAspects ? JSON.stringify(input.trainingAspects) : null, issuedAt, finalizedAt: status === "active" ? issuedAt : null, expiresAt: terms.expiresAt, retentionUntil: terms.retentionUntil, sourceSnapshotRef: version.sourceSnapshotRef!, regulatoryProfileRef: profileRow?.profileRef ?? null, regulatoryProfileHash: profileRow?.profileHash ?? null, statementOfExperienceId: experienceRow?.id ?? null, attestationStatement: requiresAttestation ? input.attestationStatement! : null, attestedAt: requiresAttestation ? issuedAt : null, policySnapshotHash, certificateHash: provisionalHash });
+      const ins = await db.insert(academyCertificates).values({ certificateRef, userId: a.userId, courseId: course.id, courseVersionId: version.id, assignmentId: a.id, qualificationCode, credentialBoundary: course.credentialBoundary, status, issuedByUserId: ctx.user.id, employeeNameSnapshot: learner.name, employerNameSnapshot: input.employerName ?? null, employerBusinessAddressSnapshot: input.employerBusinessAddress ?? null, trainingAspectsJson: derivedAspects ?? input.trainingAspects ? JSON.stringify(input.trainingAspects) : null, issuedAt, finalizedAt: status === "active" ? issuedAt : null, expiresAt: terms.expiresAt, retentionUntil: terms.retentionUntil, sourceSnapshotRef: version.sourceSnapshotRef!, regulatoryProfileRef: profileRow?.profileRef ?? null, regulatoryProfileHash: profileRow?.profileHash ?? null, statementOfExperienceId: experienceRow?.id ?? null, attestationStatement: requiresAttestation ? input.attestationStatement! : null, attestedAt: requiresAttestation ? issuedAt : null, policySnapshotHash, certificateHash: provisionalHash });
       const certificateId = Number(ins[0]?.insertId ?? 0);
 
       let employerSignatureHash: string | null = null;
@@ -602,6 +638,129 @@ export const trainingAcademyRouter = router({
       await db.update(academyDirectSupervisionRecords).set({ physicalPresenceAttested: true, attestedByUserId: ctx.user.id, attestedAt: new Date(), status: "active" }).where(eq(academyDirectSupervisionRecords.id, s.id));
       await audit(db, ctx.user.id, "academy_supervision", s.supervisionRef, "supervision.physical_presence_attested", { traineeUserId: s.traineeUserId, supervisorUserId: s.supervisorUserId, jobId: s.jobId, qualificationCode: s.qualificationCode, startsAt: s.startsAt, endsAt: s.endsAt });
       return { supervisionRef: s.supervisionRef, status: "active" as const };
+    }),
+
+  /* ---- 0123: s.6.2 topic coverage — authored per module, declared per version, approved by a second person ---- */
+
+  /** Author the mapping. Nothing is pre-selected; a human reading the material decides. Any edit returns the version to draft. */
+  tdgCoverageSet: roleProcedure("academy.tdgCoverageSet")
+    .input(z.object({
+      courseVersionRef: z.string().min(1).max(96),
+      tdgMode: z.enum(["road", "rail", "vessel", "air"]),
+      modules: z.array(z.object({ moduleCode: z.string().min(1).max(80), topicCodes: z.array(z.string().min(1).max(40)).max(13) })).min(1).max(60),
+    }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const v = (await db.select().from(academyCourseVersions).where(eq(academyCourseVersions.versionRef, input.courseVersionRef)).limit(1))[0];
+      if (!v) throw new TRPCError({ code: "NOT_FOUND", message: "Course version not found" });
+      const mods = await db.select().from(academyModules).where(eq(academyModules.courseVersionId, v.id));
+      const byCode = new Map(mods.map(m => [m.moduleCode, m]));
+      const union = new Set<Tdg62TopicCode>();
+      for (const m of input.modules) {
+        const row = byCode.get(m.moduleCode);
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: `Module ${m.moduleCode} is not part of ${input.courseVersionRef}` });
+        if (m.topicCodes.length) {
+          const parsed = parseTopicCodes(m.topicCodes);
+          if (!parsed.ok) throw new TRPCError({ code: "BAD_REQUEST", message: `${m.moduleCode}: ${parsed.reason}` });
+          for (const c of parsed.codes) union.add(c);
+        }
+        await db.update(academyModules).set({ tdgTopicCodesJson: m.topicCodes.length ? JSON.stringify(m.topicCodes) : null }).where(eq(academyModules.id, row.id));
+      }
+      const declared = Array.from(union).sort();
+      const coverageHash = declared.length ? coverageFingerprint(input.tdgMode as TdgMode, declared) : null;
+      // Every edit is a new draft. A previous approval does not survive a change of mapping — the fingerprint sees to that.
+      await db.update(academyCourseVersions).set({ tdgMode: input.tdgMode, tdgTopicCodesJson: declared.length ? JSON.stringify(declared) : null, tdgTopicReviewStatus: declared.length ? "draft" : "unmapped", tdgTopicCoverageHash: coverageHash, tdgTopicAuthoredByUserId: ctx.user.id }).where(eq(academyCourseVersions.id, v.id));
+      await audit(db, ctx.user.id, "academy_course_version", v.versionRef, "tdg_coverage.authored", { tdgMode: input.tdgMode, declared, coverageHash });
+      const reconciled = reconcileCoverage(await coverageRowFor(db, v.id));
+      return { courseVersionRef: v.versionRef, declared, coverageHash, reviewStatus: declared.length ? "draft" : "unmapped", reconciled: reconciled.ok, reconciliation: reconciled.ok ? null : `${reconciled.code}: ${reconciled.message}` };
+    }),
+
+  /** Approve the mapping. A second person, binding to the exact fingerprint, after reconciliation passes. */
+  tdgCoverageApprove: roleProcedure("academy.tdgCoverageApprove")
+    .input(z.object({ courseVersionRef: z.string().min(1).max(96), attestReadCourseMaterial: z.literal(true) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const v = (await db.select().from(academyCourseVersions).where(eq(academyCourseVersions.versionRef, input.courseVersionRef)).limit(1))[0];
+      if (!v) throw new TRPCError({ code: "NOT_FOUND", message: "Course version not found" });
+      if (v.tdgTopicAuthoredByUserId != null && v.tdgTopicAuthoredByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The person who authored the coverage mapping does not approve it — a second person does" });
+      const row = await coverageRowFor(db, v.id);
+      const reconciled = reconcileCoverage(row);
+      if (!reconciled.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${reconciled.code}: ${reconciled.message}` });
+      if (!v.tdgMode) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "TDG_MODE_UNSET: set the transport mode before approving coverage" });
+      const fingerprint = coverageFingerprint(v.tdgMode, reconciled.declared);
+      await db.update(academyCourseVersions).set({ tdgTopicReviewStatus: "approved", tdgTopicCoverageHash: fingerprint, tdgTopicReviewedHash: fingerprint, tdgTopicReviewedByUserId: ctx.user.id, tdgTopicReviewedAt: new Date() }).where(eq(academyCourseVersions.id, v.id));
+      await audit(db, ctx.user.id, "academy_course_version", v.versionRef, "tdg_coverage.approved", { fingerprint, declared: reconciled.declared });
+      return { courseVersionRef: v.versionRef, reviewStatus: "approved" as const, fingerprint, topicCodes: reconciled.declared };
+    }),
+
+  /** What a version's coverage currently supports, with the exact refusal code if it cannot issue. */
+  tdgCoverageStatus: roleProcedure("academy.tdgCoverageStatus")
+    .input(z.object({ courseVersionRef: z.string().min(1).max(96) }).strict())
+    .query(async ({ input }) => {
+      const db = await dbOrThrow();
+      const v = (await db.select({ id: academyCourseVersions.id, tdgMode: academyCourseVersions.tdgMode }).from(academyCourseVersions).where(eq(academyCourseVersions.versionRef, input.courseVersionRef)).limit(1))[0];
+      if (!v) throw new TRPCError({ code: "NOT_FOUND", message: "Course version not found" });
+      const row = await coverageRowFor(db, v.id);
+      const gate = canIssueCertificateFromCoverage(row, (v.tdgMode ?? "road") as TdgMode);
+      return { reviewStatus: row.reviewStatus, tdgMode: row.tdgMode, canIssue: gate.ok, refusal: gate.ok ? null : { code: gate.code, message: gate.message }, topics: TDG_6_2_TOPICS.map(t => ({ ref: t.ref, code: t.code, label: t.label })) };
+    }),
+
+  /* ---- 0122: inspector requests — s.6.7, fifteen days ---- */
+
+  inspectorRequestCreate: roleProcedure("academy.inspectorRequestCreate")
+    .input(z.object({
+      certificateRef: z.string().min(1).max(96), issuingAuthority: z.string().min(2).max(220), inspectorName: z.string().max(220).nullable().optional(),
+      authorityFileRef: z.string().max(120).nullable().optional(), requestDatedAt: z.coerce.date(), requestReceivedAt: z.coerce.date().nullable().optional(), notes: z.string().max(2000).nullable().optional(),
+    }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const cert = (await db.select().from(academyCertificates).where(eq(academyCertificates.certificateRef, input.certificateRef)).limit(1))[0];
+      if (!cert) throw new TRPCError({ code: "NOT_FOUND", message: "Certificate not found" });
+      const requestRef = ref("ACAD-INSP");
+      const req = { requestRef, requestDatedAt: input.requestDatedAt, requestReceivedAt: input.requestReceivedAt ?? null, subjectUserId: cert.userId, certificateRef: cert.certificateRef };
+      const deadline = responseDeadline(req, new Date());
+      await db.insert(academyInspectorRequests).values({ requestRef, inspectorName: input.inspectorName ?? null, issuingAuthority: input.issuingAuthority, authorityFileRef: input.authorityFileRef ?? null, requestDatedAt: input.requestDatedAt, requestReceivedAt: input.requestReceivedAt ?? null, dueAt: deadline.dueAt, subjectUserId: cert.userId, certificateId: cert.id, notes: input.notes ?? null });
+      await audit(db, ctx.user.id, "academy_inspector_request", requestRef, "inspector_request.received", { certificateRef: cert.certificateRef, dueAt: deadline.dueAt.toISOString(), anchoredOn: deadline.anchoredOn });
+      return { requestRef, dueAt: deadline.dueAt, daysRemaining: deadline.daysRemaining, anchoredOn: deadline.anchoredOn, urgent: deadline.urgent };
+    }),
+
+  /** Assemble the s.6.7 package from the evidence the retention chain kept. A partial package never reports complete. */
+  inspectorRequestAssemble: roleProcedure("academy.inspectorRequestAssemble")
+    .input(z.object({ requestRef: z.string().min(1).max(96) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const r = (await db.select().from(academyInspectorRequests).where(eq(academyInspectorRequests.requestRef, input.requestRef)).limit(1))[0];
+      if (!r) throw new TRPCError({ code: "NOT_FOUND", message: "Inspector request not found" });
+      if (r.state === "withdrawn") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Request was withdrawn" });
+      const cert = (await db.select().from(academyCertificates).where(eq(academyCertificates.id, r.certificateId)).limit(1))[0] ?? null;
+      const attempts = cert ? await db.select({ id: academyAssessmentAttempts.id }).from(academyAssessmentAttempts).where(eq(academyAssessmentAttempts.assignmentId, cert.assignmentId)) : [];
+      const version = cert ? (await db.select({ id: academyCourseVersions.id }).from(academyCourseVersions).where(eq(academyCourseVersions.id, cert.courseVersionId)).limit(1))[0] : null;
+      const mods = version ? await db.select({ id: academyModules.id }).from(academyModules).where(eq(academyModules.courseVersionId, version.id)) : [];
+      const blocks = mods.length ? await db.select({ id: academyContentBlocks.id }).from(academyContentBlocks).where(inArray(academyContentBlocks.moduleId, mods.map(m => m.id))) : [];
+      // 0121 installed the chain guards; a certificate issued before that date may already have lost its material.
+      const guardsInstalledAt = new Date("2026-09-16T00:00:00Z");
+      const pkg = assembleInspectorPackage({
+        certificatePresent: !!cert, recordOfTrainingPresent: attempts.length > 0, statementOfExperiencePresent: !!cert?.statementOfExperienceId,
+        contentBlockCount: blocks.length, courseVersionPresent: !!version, predatesRetentionGuards: !!cert && cert.issuedAt < guardsInstalledAt,
+      });
+      const producedAt = new Date();
+      const packageHash = stableHash({ requestRef: r.requestRef, certificateRef: cert?.certificateRef ?? null, parts: pkg.parts, attemptIds: attempts.map(a => a.id), blockIds: blocks.map(b => b.id), producedAt: producedAt.toISOString() });
+      await db.update(academyInspectorRequests).set({ state: pkg.complete ? "produced" : "incomplete", producedAt: pkg.complete ? producedAt : null, producedByUserId: pkg.complete ? ctx.user.id : null, packageHash: pkg.complete ? packageHash : null, packagePartsJson: JSON.stringify(pkg.parts), missingPartsJson: JSON.stringify(pkg.missing), irrecoverable: pkg.irrecoverable }).where(eq(academyInspectorRequests.id, r.id));
+      await audit(db, ctx.user.id, "academy_inspector_request", r.requestRef, pkg.complete ? "inspector_request.produced" : "inspector_request.incomplete", { parts: pkg.parts, missing: pkg.missing.map(m => m.code), irrecoverable: pkg.irrecoverable });
+      const summary = inspectorRequestSummary({ requestRef: r.requestRef, requestDatedAt: r.requestDatedAt, requestReceivedAt: r.requestReceivedAt, subjectUserId: r.subjectUserId, certificateRef: cert?.certificateRef ?? "" }, { certificatePresent: !!cert, recordOfTrainingPresent: attempts.length > 0, statementOfExperiencePresent: !!cert?.statementOfExperienceId, contentBlockCount: blocks.length, courseVersionPresent: !!version, predatesRetentionGuards: !!cert && cert.issuedAt < guardsInstalledAt }, new Date());
+      return { requestRef: r.requestRef, complete: pkg.complete, parts: pkg.parts, missing: pkg.missing, irrecoverable: pkg.irrecoverable, packageHash: pkg.complete ? packageHash : null, summary };
+    }),
+
+  /** Open requests with their deadlines — the exception-centre feed. */
+  inspectorRequestList: roleProcedure("academy.inspectorRequestList")
+    .query(async () => {
+      const db = await dbOrThrow();
+      const rows = await db.select().from(academyInspectorRequests).orderBy(academyInspectorRequests.dueAt);
+      const now = new Date();
+      return rows.map(r => {
+        const d = responseDeadline({ requestRef: r.requestRef, requestDatedAt: r.requestDatedAt, requestReceivedAt: r.requestReceivedAt, subjectUserId: r.subjectUserId, certificateRef: String(r.certificateId) }, now);
+        return { requestRef: r.requestRef, state: r.state, issuingAuthority: r.issuingAuthority, dueAt: r.dueAt, daysRemaining: d.daysRemaining, overdue: d.overdue, urgent: d.urgent, irrecoverable: r.irrecoverable, missingParts: r.missingPartsJson ? JSON.parse(r.missingPartsJson) : [] };
+      });
     }),
 
   dispatchCheck: roleProcedure("academy.dispatchCheck")

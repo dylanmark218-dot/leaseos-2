@@ -320,13 +320,13 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
     const graced = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
     expect(graced.state).toBe("hash_verified");
     expect(graced.note).toContain("grace window");
-    // 0110 changed this refusal: a package signed by a key the device never held
-    // used to land as a rejected *row*; it is now refused before anything is
-    // written, because a package whose signature cannot be attributed to the
-    // device cannot be recorded against it. (Design note: the pre-0110 rule
-    // "refusals are rows" no longer covers unverifiable signatures.)
-    await expect(callerFor(driver).sync.receivePackage(signedPackage(STRANGER, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] })))
-      .rejects.toThrow(/Invalid device package signature/);
+    // A package signed by a key the device never held is refused — and, as with
+    // every other refusal, the refusal is a row the office can see.
+    const stranger = await callerFor(driver).sync.receivePackage(signedPackage(STRANGER, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
+    expect(stranger.state).toBe("rejected");
+    expect(stranger.reason).toContain("never enrolled");
+    const [strangerRow] = await pool.execute<mysql.RowDataPacket[]>("SELECT state, refusalReason FROM syncPackages WHERE packageRef = ?", [stranger.packageRef]);
+    expect(strangerRow[0]?.state).toBe("rejected");
 
     // Revoke. The driver cannot; safety can. After that, nothing from it is received.
     await expect(callerFor(driver).device.revoke({ deviceRef: en.deviceRef, reason: "lost" })).rejects.toBeTruthy();

@@ -62,7 +62,7 @@ export const hosRouter = router({
         sourceAuthority: p.sourceAuthority, sourceCitation: p.sourceCitation,
         retrievedAt: HOS_SEED_RETRIEVAL_DATE, verificationStatus: "unverified", recordedByUserId: ctx.user.id,
       });
-      for (const l of p.limits) await d.insert(hosRuleLimits).values({ profileKey: p.profileKey, limitKey: l.limitKey, value: l.value, sourceSection: l.sourceSection, verificationStatus: "unverified" });
+      for (const l of p.limits) await d.insert(hosRuleLimits).values({ profileKey: p.profileKey, limitKey: l.limitKey, value: l.value, recordedByUserId: ctx.user.id, sourceSection: l.sourceSection, verificationStatus: "unverified" });
       inserted.push(p.profileKey);
     }
     return { inserted: inserted.length, existing: present.size, profiles: inserted, caveat: HOS_SEED_CAVEAT };
@@ -176,10 +176,19 @@ export const hosRouter = router({
       // seeded. That is the most interesting thing it said and it is kept:
       // a correction is evidence, and silently accepting a changed figure
       // would lose it.
-      const before = (await (await db()).select({ value: hosRuleLimits.value, status: hosRuleLimits.verificationStatus })
+      const before = (await (await db()).select({ value: hosRuleLimits.value, status: hosRuleLimits.verificationStatus, recordedByUserId: hosRuleLimits.recordedByUserId })
         .from(hosRuleLimits)
         .where(and(eq(hosRuleLimits.profileKey, input.profileKey), eq(hosRuleLimits.limitKey, input.limitKey)))
         .limit(1))[0];
+
+      // 0124 — the same rule profileVerify carries: the person who recorded a
+      // candidate does not verify it. A second person does. It bites on an
+      // unverified candidate only: a figure that is already verified may be
+      // re-verified or amended by the person who established it, because that is
+      // a re-reading of the instrument, not an approval of one's own seed.
+      if (before && before.status !== "verified" && before.recordedByUserId != null && before.recordedByUserId === ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "The person who recorded this candidate figure does not verify it — a second person does" });
+      }
 
       const now = new Date();
       const outcome = await promoteLimit({
