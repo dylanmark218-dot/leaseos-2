@@ -142,7 +142,7 @@ export function gradeAssessment(args: {
   });
   const scorePercent = args.presented.length ? Math.round((correct / args.presented.length) * 100) : 0;
   const domainScores: Record<string, number> = {};
-  for (const [k, v] of domain) domainScores[k] = Math.round((v.correct / v.total) * 100);
+  for (const [k, v] of Array.from(domain.entries())) domainScores[k] = Math.round((v.correct / v.total) * 100);
   const domainFailures = Object.entries(args.policy.domainMinimumPercent ?? {}).filter(([k, min]) => (domainScores[k] ?? 0) < min).map(([k]) => k);
   const passed = scorePercent >= args.policy.passingScorePercent && domainFailures.length === 0 && !(args.policy.failOnCriticalMiss && criticalFailures.length);
   return { passed, scorePercent, domainScores, domainFailures, criticalFailures, itemResults };

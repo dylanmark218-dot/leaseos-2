@@ -2329,6 +2329,22 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "dispatch.enforcementSet": "dispatch.enforcement.manage",
   "dispatch.enforcementGet": "dispatch.read",
 
+  /* ---- post-recovery: contractor / owner-operator operations (procedure names, not permission names) ---- */
+  "contractorOperations.profileUpsert": "contractor.write",
+  "contractorOperations.relationshipCreate": "contractor.write",
+  "contractorOperations.relationships": "contractor.read",
+  "contractorOperations.relationshipAccept": "contractor.approve",
+  "contractorOperations.workerAdd": "contractor.write",
+  "contractorOperations.crewAssign": "dispatch.assign",
+  "contractorOperations.jobChainCreate": "contractor.write",
+  "contractorOperations.rateSet": "contractor.approve",
+  "contractorOperations.ratesMine": "contractor.read",
+  "contractorOperations.loadLink": "contractor.write",
+  "contractorOperations.payablePrepare": "contractor.write",
+  "contractorOperations.payablesMine": "contractor.read",
+  "contractorOperations.payableSubmitReview": "contractor.write",
+  "contractorOperations.payableApprove": "contractor.approve",
+
   /* ---- v21.3: IFTA ---- */
   "ifta.distanceRecord": "ifta.distance.record",
   "ifta.tripSplit": "ifta.distance.record",

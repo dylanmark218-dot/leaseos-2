@@ -248,7 +248,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
         }
         const decision = trainingDispatchDecision(applicable.map(r => ({ code: r.requirementCode, title: r.title, qualificationCode: r.qualificationCode, enforcement: r.enforcement, recoveryPath: r.recoveryPath })), accepted, now);
         for (const label of decision.blockers) extra.push({ code: `academy_${academyCode(label).slice(0, 80)}`, label, severity: "blocking", subject: "operator", overridable: false });
-        for (const label of decision.review) extra.push({ code: `academy_review_${academyCode(label).slice(0, 73)}`, label, severity: "review", subject: "operator", overridable: true, overrideAuthority: "safety" });
+        for (const label of decision.review) extra.push({ code: `academy_review_${academyCode(label).slice(0, 73)}`, label, severity: "review", subject: "operator", overridable: true, overrideAuthority: "manager" });
         contributions.push({ engine: "academy", finding: `${applicable.length} bound requirement(s): ${decision.status}; ${decision.satisfied.length} satisfied` });
         academyVersion = versionOf([
           ...matchedBindings.map(b => `${b.id}:${b.requirementId}:${b.active}:${b.effectiveAt?.toISOString() ?? "∅"}:${b.expiresAt?.toISOString() ?? "∅"}:${b.conditionsJson ?? "∅"}`),

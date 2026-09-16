@@ -59,7 +59,7 @@ export function mergeGatewayFrames(existing: LoadSenseGatewayFrame[], incoming: 
     // Prefer the non-buffered/live copy when the gateway sent the same frame twice.
     if (!prior || (prior.buffered && !checked.frame.buffered)) byKey.set(key, checked.frame);
   }
-  return [...byKey.values()].sort((a, b) => {
+  return Array.from(byKey.values()).sort((a, b) => {
     const time = Date.parse(a.measuredAt) - Date.parse(b.measuredAt);
     return time || a.sequence - b.sequence;
   });
@@ -72,8 +72,8 @@ export function detectSequenceGaps(frames: LoadSenseGatewayFrame[]) {
     list.push(frame.sequence); byGateway.set(frame.gatewayDeviceId, list);
   }
   const gaps: Array<{ gatewayDeviceId: string; from: number; to: number }> = [];
-  for (const [gatewayDeviceId, seqs] of byGateway) {
-    const sorted = [...new Set(seqs)].sort((a, b) => a - b);
+  for (const [gatewayDeviceId, seqs] of Array.from(byGateway.entries())) {
+    const sorted = Array.from(new Set(seqs)).sort((a, b) => a - b);
     for (let i = 1; i < sorted.length; i++) if (sorted[i] > sorted[i - 1] + 1) gaps.push({ gatewayDeviceId, from: sorted[i - 1] + 1, to: sorted[i] - 1 });
   }
   return gaps;

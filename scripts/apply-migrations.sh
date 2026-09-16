@@ -11,10 +11,24 @@ user="${creds%%:*}"; pass="${creds#*:}"; [ "$pass" = "$creds" ] && pass=""
 hostport="${hostpart%%/*}"; db="${hostport#*/}"; db="${hostpart#*/}"
 host="${hostport%%:*}"; port="${hostport#*:}"; [ "$port" = "$host" ] && port=3306
 
+mysqlc() { mysql -h "$host" -P "$port" -u "$user" ${pass:+-p"$pass"} "$db"; }
+
+# COMPOUND STATEMENTS NEED A DELIMITER (recovered from the Chat 5 Academy
+# runner). A trigger with a `BEGIN … END` body contains internal semicolons;
+# the mysql client splits on `;` lexically and knows nothing about BEGIN/END,
+# so without a DELIMITER directive it sends a truncated statement. The test is
+# `^BEGIN$`, NOT `CREATE TRIGGER`: the single-statement triggers in 0061/0062
+# apply correctly under the default `;` and break if wrapped in DELIMITER.
 for f in $(ls drizzle/*.sql | sort); do
   echo "  applying $(basename "$f")"
-  sed 's/-->[[:space:]]*statement-breakpoint//' "$f" \
-    | mysql -h "$host" -P "$port" -u "$user" ${pass:+-p"$pass"} "$db"
+  if grep -qE '^BEGIN$' "$f"; then
+    { printf 'DELIMITER $$\n'
+      sed -e 's/-->[[:space:]]*statement-breakpoint//' -e 's/^END;$/END$$/' "$f"
+      printf '\nDELIMITER ;\n'
+    } | mysqlc
+  else
+    sed 's/-->[[:space:]]*statement-breakpoint//' "$f" | mysqlc
+  fi
 done
 
 # Academy certificate retention is a legal/compliance invariant, not an optional
