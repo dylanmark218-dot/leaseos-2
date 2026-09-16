@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "./db";
+import type { Tx } from "./_core/dbTypes";
 import { roleProcedure, router } from "./_core/trpc";
 import { resolveActingScope } from "./_core/actingScope";
 import { recordBelongsToOrganization } from "./_core/coreRecordOwnership";
@@ -14,7 +15,7 @@ const workerType = z.enum(["OWNER_DRIVER","EMPLOYEE_DRIVER","CO_DRIVER","SWAMPER
 const compensationType = z.enum(["HOURLY","SALARY","DAY_RATE","LOAD_RATE","KM_RATE","PERCENTAGE","PIECE_RATE","CONTRACT_RATE"]);
 const quantityUnit = z.enum(["HOUR","DAY","LOAD","KM","PERCENT","PIECE","CONTRACT"]);
 const autoUnitFor: Record<string,string> = { HOURLY:"HOUR", DAY_RATE:"DAY", LOAD_RATE:"LOAD", KM_RATE:"KM", PIECE_RATE:"PIECE", CONTRACT_RATE:"CONTRACT" };
-const nextSequence = async (tx:any, scopeRef:string) => {
+const nextSequence = async (tx: Tx, scopeRef: string) => {
   await tx.insert(commercialChainSequences).values({scopeRef,nextValue:1}).onDuplicateKeyUpdate({set:{scopeRef}});
   const [row]=await tx.select().from(commercialChainSequences).where(eq(commercialChainSequences.scopeRef,scopeRef)).for("update").limit(1);
   if(!row) throw new TRPCError({code:"INTERNAL_SERVER_ERROR",message:"Sequence allocation failed."});

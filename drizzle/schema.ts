@@ -7414,7 +7414,8 @@ export const loadSenseCalibrationModels = mysqlTable("loadSenseCalibrationModels
   measurementDeviceId: int("measurementDeviceId").notNull(),
   calibrationEventId: int("calibrationEventId").notNull(),
   slope: double("slope").notNull(),
-  offset: double("offset").notNull(),
+  /** Linear intercept. Column renamed from `offset`, a MariaDB reserved word, before first release. */
+  interceptOffset: double("interceptOffset").notNull(),
   pointCount: int("pointCount").notNull(),
   rSquared: double("rSquared"),
   pointsJson: text("pointsJson").notNull(),

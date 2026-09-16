@@ -7,5 +7,7 @@ describe("contractor and owner-operator architecture boundary",()=>{
   it("keeps co-drivers distinct and declares individual HOS policy",()=>{ expect(schema).toContain('coDriverWorkerRef'); expect(src).toContain('INDIVIDUAL_PER_DRIVER'); expect(src).toContain('Primary driver and co-driver must be different workers'); });
   it("keeps rate schedules private to owner/counterparty organizations",()=>{ expect(schema).toContain('privateRateSchedules'); expect(src).toContain('ownerOrgRef'); expect(src).toContain('counterpartyOrgRef'); });
   it("requires the performing organization to create a nested subcontract",()=>{ expect(src).toContain('p.performingOrgRef!==assigningOrgRef'); });
-  it("uses roleProcedure rather than generic authenticated procedures",()=>{ expect(src).not.toContain('protectedProcedure'); expect(src).toContain('roleProcedure("contractor.approve")'); });
+  it("uses roleProcedure rather than generic authenticated procedures",()=>{ expect(src).not.toContain('protectedProcedure'); // Wired by PROCEDURE name (the census requires it); the permission is resolved through the map.
+    expect(src).toContain('roleProcedure("contractorOperations.payableApprove")');
+    expect(src).not.toContain('roleProcedure("contractor.approve")'); });
 });

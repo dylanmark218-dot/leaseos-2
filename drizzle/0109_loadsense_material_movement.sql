@@ -19,7 +19,7 @@ CREATE TABLE `loadSenseCalibrationModels` (
   `measurementDeviceId` int NOT NULL,
   `calibrationEventId` int NOT NULL,
   `slope` double NOT NULL,
-  `offset` double NOT NULL,
+  `interceptOffset` double NOT NULL,   -- renamed from `offset` (MariaDB reserved word) before first release
   `pointCount` int NOT NULL,
   `rSquared` double,
   `pointsJson` text NOT NULL,

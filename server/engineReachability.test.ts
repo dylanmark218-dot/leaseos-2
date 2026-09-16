@@ -51,7 +51,6 @@ const DECLARED_UNWIRED: Record<string, string> = {
   imageGeneration: "unused capability",
   jurisdiction: "profile lookup; callers use their own",
   map: "map geometry helpers; callers use the routing adapter path instead",
-  loadSense: "recovered calibrated onboard-weight engine; authenticated raw gateway ingestion is wired, but calibrated snapshot projection remains deliberately unwired",
   loadSenseMaterialMovement: "recovered LoadSense manifest/billing projection; persistence is present but no device ingestion path calls it yet",
   loadSenseEvents: "recovered LoadSense event vocabulary; device ingestion does not emit it yet",
   remoteWorkEvidence: "evidence helper",
@@ -144,7 +143,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(33);
+    expect(unwired).toHaveLength(31);   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });
