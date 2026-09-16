@@ -7822,3 +7822,40 @@ export const hosRuleLimitHistory = mysqlTable("hosRuleLimitHistory", {
 });
 export type HosRuleLimitHistoryRow = typeof hosRuleLimitHistory.$inferSelect;
 
+
+/* ---- v22.21 (0122, recovered from Chat 5 PENDING-6): inspector requests for training records — TDG s.6.7 ---- */
+
+/**
+ * A written request from an inspector for a person's training records.
+ *
+ * The retention chain guards (0121) keep the evidence alive; this is the
+ * obligation that consumes it: within 15 days the employer must provide the
+ * certificate, the record of training or statement of experience, and a
+ * description of the training material used. `requestDatedAt` and
+ * `requestReceivedAt` are separate because the clock runs from the request and
+ * the two dates can differ — see `_core/inspectorRequest.ts`.
+ */
+export const academyInspectorRequests = mysqlTable("academyInspectorRequests", {
+  id: int("id").autoincrement().primaryKey(),
+  requestRef: varchar("requestRef", { length: 64 }).notNull().unique(),
+  inspectorName: varchar("inspectorName", { length: 220 }),
+  issuingAuthority: varchar("issuingAuthority", { length: 220 }).notNull(),
+  authorityFileRef: varchar("authorityFileRef", { length: 120 }),
+  requestDatedAt: timestamp("requestDatedAt").notNull(),
+  requestReceivedAt: timestamp("requestReceivedAt"),
+  /** Computed at intake and stored, so the deadline is auditable. */
+  dueAt: timestamp("dueAt").notNull(),
+  subjectUserId: int("subjectUserId").notNull(),
+  certificateId: int("certificateId").notNull(),
+  state: mysqlEnum("state", ["received", "assembling", "produced", "incomplete", "withdrawn"]).default("received").notNull(),
+  producedAt: timestamp("producedAt"),
+  producedByUserId: int("producedByUserId"),
+  /** What was handed over, so it can be shown again unchanged. */
+  packageHash: varchar("packageHash", { length: 64 }),
+  packagePartsJson: text("packagePartsJson"),
+  missingPartsJson: text("missingPartsJson"),
+  irrecoverable: boolean("irrecoverable").default(false).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type AcademyInspectorRequestRow = typeof academyInspectorRequests.$inferSelect;
