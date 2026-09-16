@@ -27,7 +27,7 @@ export { setWebhookPoster, type Poster } from "./webhookDispatchService";
 
 export const integrationRouter = router({
   /** Bind a legacy core record to this organization. Ownership cannot be moved here. */
-  ownershipAssign: roleProcedure("integration.clientRegister")
+  ownershipAssign: roleProcedure("integration.ownershipAssign")
     .input(z.object({ recordType: z.enum(["unit", "operator", "load", "financial_entity"]), recordId: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
@@ -49,7 +49,7 @@ export const integrationRouter = router({
       }
     }),
 
-  ownershipList: roleProcedure("integration.inboundList")
+  ownershipList: roleProcedure("integration.ownershipList")
     .input(z.object({ recordType: z.enum(["unit", "operator", "load", "financial_entity"]).optional() }))
     .query(async ({ ctx, input }) => {
       const db = await dbOrThrow();
@@ -60,7 +60,7 @@ export const integrationRouter = router({
       return { ownership: rows.map(r => ({ recordType: r.recordType, recordId: r.recordId, assignedAt: r.assignedAt })) };
     }),
 
-  loadSenseBindGateway: roleProcedure("integration.clientRegister")
+  loadSenseBindGateway: roleProcedure("integration.loadSenseBindGateway")
     .input(z.object({ gatewayDeviceRef: z.string().min(1).max(96), measurementDeviceId: z.number().int().positive(), unitId: z.number().int().positive(), trailerId: z.number().int().positive().optional(), tareKg: z.number().nonnegative(), channelConfig: z.record(z.string(), z.object({ label: z.string().min(1).max(160), configuredLimitKg: z.number().positive().optional(), limitSource: z.string().max(300).optional() })).optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
@@ -76,7 +76,7 @@ export const integrationRouter = router({
       return { gatewayDeviceRef: input.gatewayDeviceRef, orgRef, status: "active" as const };
     }),
 
-  loadSenseCalibrate: roleProcedure("integration.clientRegister")
+  loadSenseCalibrate: roleProcedure("integration.loadSenseCalibrate")
     .input(z.object({ measurementDeviceId: z.number().int().positive(), calibrationEventId: z.number().int().positive(), points: z.array(z.object({ rawValue: z.number(), knownWeightKg: z.number().nonnegative() })).min(2).max(50) }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();

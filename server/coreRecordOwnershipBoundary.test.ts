@@ -20,7 +20,9 @@ describe("legacy core ownership boundary", () => {
   });
 
   it("keeps ownership assignment on a human role-gated surface", () => {
-    expect(gateway).toContain('ownershipAssign: roleProcedure("integration.clientRegister")');
+    // Wired by its own procedure name (mapped to integration.client.manage), not by
+    // borrowing clientRegister's — the census requires one declared name per site.
+    expect(gateway).toContain('ownershipAssign: roleProcedure("integration.ownershipAssign")');
     expect(gateway).not.toContain('ownershipAssign: integrationProcedure');
   });
 });

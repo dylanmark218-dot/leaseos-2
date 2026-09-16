@@ -120,7 +120,10 @@ d("the ledger", () => {
     const first = await promote(evidence({ profileKey, value: 777 }), NOW);
     expect(first.promoted).toBe(true);
 
-    const believed = await believedOn(profileKey, "daily_drive_minutes", new Date(NOW.getTime() + 86_400_000));
+    // recordedAt is the database's now(), not the fixture NOW — so "a day from now"
+    // has to mean the real clock, or the assertion starts failing the day the
+    // calendar passes the fixture date (which is how this was found).
+    const believed = await believedOn(profileKey, "daily_drive_minutes", new Date(Date.now() + 86_400_000));
     expect(believed?.value).toBe(777);
     if (first.promoted) expect(believed?.promotionRef).toBe(first.promotionRef);
   });

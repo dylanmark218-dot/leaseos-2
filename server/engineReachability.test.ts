@@ -26,6 +26,12 @@ import { join } from "path";
  * directions.
  */
 const DECLARED_UNWIRED: Record<string, string> = {
+  // Recovered from Chat 5 (Academy 0089 tranche): pure, tested, DB-free modules whose
+  // router wiring was never written — the certificate-issuance and inspector-request
+  // procedures that consume them are the next Academy checkpoint, not this one.
+  tdgCertificateContents: "s.6.2 topic list and s.6.3(1) certificate-content gate; trainingAcademyRouter's issuance path does not call it yet",
+  tdgTopicCoverage: "s.6.2 coverage vocabulary, reconciliation and approval fingerprint; no router reads academyCourseVersions coverage through it yet",
+  inspectorRequest: "s.6.7 15-day deadline and evidence-package assembly; no router serves academyInspectorRequests (0122) yet",
   offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
   dashboardWidget: "widget contract; no dashboard surface consumes it yet",
@@ -143,7 +149,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(31);   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(34);   // v22.21: +3 Chat 5 Academy modules, declared above   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });

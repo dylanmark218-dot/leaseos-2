@@ -2598,6 +2598,11 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
 
   /* ---- v21.18: integration gateway ---- */
   "integration.clientRegister": "integration.client.manage",
+  /* post-recovery (ChatGPT tip) procedures, previously wired under clientRegister's / inboundList's names — same permissions, own names */
+  "integration.ownershipAssign": "integration.client.manage",
+  "integration.ownershipList": "integration.read",
+  "integration.loadSenseBindGateway": "integration.client.manage",
+  "integration.loadSenseCalibrate": "integration.client.manage",
   "integration.clientRevoke": "integration.client.manage",
   "integration.inboundList": "integration.read",
   "integration.webhookSubscribe": "integration.webhook.manage",
