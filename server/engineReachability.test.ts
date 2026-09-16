@@ -26,6 +26,10 @@ import { join } from "path";
  * directions.
  */
 const DECLARED_UNWIRED: Record<string, string> = {
+  // 0125 — Chat 5 sheet-serial registry, ported from fix/chat5-module-paths-and-vitest.
+  // The print-run and scan-filing procedures that call these are register item P0.7.
+  sheetSerial: "paper assessment-sheet serials, checksums and scan resolution; no print/scan procedure calls it yet (P0.7)",
+  sheetSerialAllocator: "row-locked serial block allocation; no print-run procedure calls it yet (P0.7)",
   offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
   dashboardWidget: "widget contract; no dashboard surface consumes it yet",
@@ -143,7 +147,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(31);   // v22.22: the three Chat 5 Academy modules are wired through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(33);   // v22.22: +2 sheet-serial modules (0125), declared above; the three Chat 5 Academy modules are wired through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });

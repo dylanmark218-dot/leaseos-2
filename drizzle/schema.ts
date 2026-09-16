@@ -1,4 +1,4 @@
-import { boolean, date, decimal, double, index, int, json, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { bigint, boolean, date, decimal, double, index, int, json, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -7848,6 +7848,40 @@ export type HosRuleLimitHistoryRow = typeof hosRuleLimitHistory.$inferSelect;
  * `requestReceivedAt` are separate because the clock runs from the request and
  * the two dates can differ — see `_core/inspectorRequest.ts`.
  */
+/** 0125 — paper assessment-sheet registry (Chat 5 PENDING-2/3). */
+export const sheetSerialSequences = mysqlTable("sheetSerialSequences", {
+  scope: varchar("scope", { length: 120 }).primaryKey(),
+  nextValue: bigint("nextValue", { mode: "number" }).default(1).notNull(),
+});
+export const sheetSerialAllocations = mysqlTable("sheetSerialAllocations", {
+  id: int("id").autoincrement().primaryKey(),
+  allocationRef: varchar("allocationRef", { length: 26 }).notNull(),
+  scope: varchar("scope", { length: 120 }).notNull(),
+  firstSequence: bigint("firstSequence", { mode: "number" }).notNull(),
+  lastSequence: bigint("lastSequence", { mode: "number" }).notNull(),
+  count: int("count").notNull(),
+  printBatchRef: varchar("printBatchRef", { length: 64 }),
+  allocatedByUserId: int("allocatedByUserId").notNull(),
+  state: mysqlEnum("state", ["reserved", "printed", "voided"]).default("reserved").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export const academyAssessmentSheets = mysqlTable("academyAssessmentSheets", {
+  id: int("id").autoincrement().primaryKey(),
+  serial: varchar("serial", { length: 40 }).notNull(),
+  ticketCode: varchar("ticketCode", { length: 24 }).notNull(),
+  courseVersionRef: varchar("courseVersionRef", { length: 96 }).notNull(),
+  itemSetRef: varchar("itemSetRef", { length: 96 }).notNull(),
+  itemSetReviewStatus: mysqlEnum("itemSetReviewStatus", ["draft", "in_review", "approved", "retired"]).default("draft").notNull(),
+  allocationRef: varchar("allocationRef", { length: 26 }).notNull(),
+  state: mysqlEnum("state", ["issued", "printed", "returned", "transcribed", "void"]).default("issued").notNull(),
+  voidedReason: varchar("voidedReason", { length: 300 }),
+  courseVersionSupersededAt: timestamp("courseVersionSupersededAt"),
+  transcribedAt: timestamp("transcribedAt"),
+  transcribedByUserId: int("transcribedByUserId"),
+  transcriptionRef: varchar("transcriptionRef", { length: 96 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const academyInspectorRequests = mysqlTable("academyInspectorRequests", {
   id: int("id").autoincrement().primaryKey(),
   requestRef: varchar("requestRef", { length: 64 }).notNull().unique(),
