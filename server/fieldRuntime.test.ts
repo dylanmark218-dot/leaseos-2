@@ -20,7 +20,14 @@ import { appRouter } from "./routers";
 import { grantUserRole } from "./db";
 import type { DomainRole } from "./_core/recordsAuthorization";
 
-const T0 = new Date("2026-09-10T05:30:00Z");
+// The device's day, anchored eight hours behind the real clock. 0110 refuses a
+// package whose signedAt is more than ten minutes from the server's now, so a
+// virtual day fixed on 2026-09-10 could never push once the calendar moved on;
+// captures still carry the device's own (earlier) time, and the clock is set to
+// real time at the moment of each push, which is what a real tablet does.
+const REAL = new Date(Math.floor(Date.now() / 1000) * 1000);   // whole second: MySQL timestamps round-trip at second resolution
+const T0 = new Date(REAL.getTime() - 8 * 3_600_000);
+const dayAt = (hh: number, mm: number) => new Date(T0.getTime() + ((hh * 60 + mm) - (5 * 60 + 30)) * 60_000);
 const bytes = (s: string) => new TextEncoder().encode(s);
 const jpeg = (n: number) => { const b = new Uint8Array(n); for (let i = 0; i < n; i++) b[i] = (i * 31 + 7) & 0xff; return b; };
 
@@ -188,17 +195,18 @@ d("a driver starts the day offline", () => {
 
     // 05:30 pre-trip, 06:10 load photo, 09:40 fuel receipt, 11:15 disposal ticket, 13:00 defect — all offline.
     const pretrip = await outbox.saveDraft({ kind: "pretrip", formKey: null, title: "Pre-trip Unit 142", category: "inspection", fields: { unit: "142", defects: 0, brakes: "ok" }, unitId: 142 });
-    clock.set(new Date("2026-09-10T06:10:00Z"));
+    clock.set(dayAt(6, 10));
     const photo = await outbox.saveDraft({ kind: "photo", formKey: null, title: "Load 1 — tank full", category: "photo", fields: {}, files: [{ bytes: jpeg(4096), fileName: "load1.jpg", mimeType: "image/jpeg" }], gps: { latitude: 53.5, longitude: -113.4, accuracyM: 8, fixedAt: clock.now().toISOString(), source: "device_gps" }, jobId: 1, captureAuthorizationClaim: "unauthorized", captureAuthorizationReason: "Authorization context unavailable in the dead zone" });
-    clock.set(new Date("2026-09-10T09:40:00Z"));
+    clock.set(dayAt(9, 40));
     const fuel = await outbox.saveDraft({ kind: "fuel_receipt", formKey: "fuel_receipt", title: "Cardlock Nisku", category: "receipt", fields: { total: 412.5, quantity: 275, jurisdiction: "CA-AB" }, files: [{ bytes: jpeg(2048), fileName: "fuel.jpg", mimeType: "image/jpeg" }], unitId: 142 });
-    clock.set(new Date("2026-09-10T11:15:00Z"));
+    clock.set(dayAt(11, 15));
     const ticket = await outbox.saveDraft({ kind: "disposal_ticket", formKey: "disposal_ticket", title: "Facility ticket 88192", category: "ticket", fields: { grossKg: 41200, tareKg: 18900, netKg: 22300 }, files: [{ bytes: jpeg(3000), fileName: "ticket.jpg", mimeType: "image/jpeg" }], jobId: 1 });
-    clock.set(new Date("2026-09-10T13:00:00Z"));
+    clock.set(dayAt(13, 0));
     const defect = await outbox.saveDraft({ kind: "defect_report", formKey: "defect_report", title: "Hydraulic hose weeping at PTO", category: "defect", fields: { severity: "minor" }, unitId: 142 });
     for (const c of [pretrip, photo, fuel, ticket, defect]) await outbox.queue(c.localId);
 
     // Offline: sync does nothing, says why, and everything stays queued.
+    clock.set(new Date());
     const off = await engine.syncOnce();
     expect(off.attempted).toBe(false);
     expect(off.reason).toContain("Offline");
@@ -209,6 +217,7 @@ d("a driver starts the day offline", () => {
     net.isOnline = true;
     const flaky = transportFor(driver, { dropAfterUploads: 2 });
     const engine2 = new SyncEngine({ store, vault, keystore, transport: flaky, connectivity: net, clock, platform: "android" });
+    clock.set(new Date());
     const first = await engine2.syncOnce();
     expect(first.attempted).toBe(true);
     expect(first.synchronized).toBe(2);
@@ -221,6 +230,7 @@ d("a driver starts the day offline", () => {
     // The worker re-queues the failed ones (or the app does on reconnect). The retry re-sends the same
     // capture references: the server returns the same ids, and no duplicate evidence appears.
     for (const c of await store.listCaptures({ syncState: "failed" })) await outbox.queue(c.localId);
+    clock.set(new Date());
     const second = await engine.syncOnce();
     expect(second.synchronized).toBe(3);
     expect(second.failed).toBe(0);
@@ -230,7 +240,7 @@ d("a driver starts the day offline", () => {
     expect(rows).toHaveLength(5);                                          // exactly once each
     expect(rows.every(r => r.sealState === "sealed")).toBe(true);
     const fuelRow = rows.find(r => r.clientCaptureRef === `${enrolled.deviceRef}:${fuel.localId}`)!;
-    expect(new Date(fuelRow.capturedAt).toISOString()).toBe("2026-09-10T09:40:00.000Z"); // the device's time
+    expect(new Date(fuelRow.capturedAt).toISOString()).toBe(dayAt(9, 40).toISOString()); // the device's time
     expect(new Date(fuelRow.createdAt).getTime()).toBeGreaterThan(new Date(fuelRow.capturedAt).getTime()); // the server's
 
     // The packages are on the server, admitted under the device's fingerprint, every item verified.
@@ -263,6 +273,7 @@ d("a driver starts the day offline", () => {
     // A good capture, synced cleanly.
     const good = await outbox.saveDraft({ kind: "photo", formKey: null, title: "ok", category: "photo", fields: {}, files: [{ bytes: jpeg(500), fileName: "ok.jpg", mimeType: "image/jpeg" }], unitId: 142 });
     await outbox.queue(good.localId);
+    clock.set(new Date());
     const r1 = await engine.syncOnce();
     expect(r1.synchronized, (await store.getCapture(good.localId))!.lastError ?? "").toBe(1);
 
@@ -272,6 +283,7 @@ d("a driver starts the day offline", () => {
     const engineBad = new SyncEngine({ store, vault, keystore, transport: corrupt, connectivity: net, clock, platform: "ios" });
     const bad = await outbox.saveDraft({ kind: "photo", formKey: null, title: "tampered", category: "photo", fields: {}, files: [{ bytes: jpeg(600), fileName: "bad.jpg", mimeType: "image/jpeg" }], unitId: 142 });
     await outbox.queue(bad.localId);
+    clock.set(new Date());
     const r2 = await engineBad.syncOnce();
     expect(r2.synchronized).toBe(0);
     expect(r2.failed).toBe(1);
@@ -288,13 +300,18 @@ d("a driver starts the day offline", () => {
     const net = new FlagConnectivity(true);
     const transport = transportFor(driver);
     const engine = new SyncEngine({ store, vault, keystore, transport, connectivity: net, clock, platform: "android" });
+    // Enrol with the device clock 45 days in the past, so the key *is* 45 days
+    // old when the day comes — rather than moving the clock 45 days ahead, which
+    // the server would refuse as a signature too far in the future.
+    clock.set(new Date(REAL.getTime() - (KEY_ROTATION_DAYS + 15) * 86_400_000));
     const e = await engine.enroll(); await engine.activate();
 
     // Key is 45 days old: the engine rotates before it pushes, and the push is admitted under the new key.
-    clock.advanceDays(KEY_ROTATION_DAYS + 15);
+    clock.set(new Date());
     const c1 = await outbox.saveDraft({ kind: "tailgate", formKey: null, title: "Tailgate", category: "safety", fields: { hazards: ["overhead lines"] }, jobId: 1 });
     await outbox.queue(c1.localId);
     const oldFp = await keystore.fingerprint();
+    clock.set(new Date());
     const r1 = await engine.syncOnce();
     expect(r1.rotatedKey).toBe(true);
     expect(r1.synchronized, `${r1.reason} | ${(await store.getCapture(c1.localId))!.lastError ?? ""}`).toBe(1);
@@ -304,12 +321,14 @@ d("a driver starts the day offline", () => {
     await callerFor(safety).device.revoke({ deviceRef: e.deviceRef, reason: "Tablet reported lost" });
     const c2 = await outbox.saveDraft({ kind: "incident", formKey: null, title: "Near miss", category: "incident", fields: { statement: "Backing, spotter lost sight" }, unitId: 142 });
     await outbox.queue(c2.localId);
+    clock.set(new Date());
     const r2 = await engine.syncOnce();
     expect(r2.deviceStatus).toBe("revoked");
     expect(r2.synchronized).toBe(0);
     const kept = (await store.getCapture(c2.localId))!;
     expect(kept.syncState).toBe("failed");
     expect(kept.lastError).toMatch(/revoked/i);
+    clock.set(new Date());
     const r3 = await engine.syncOnce();
     expect(r3.attempted).toBe(false);
     expect(r3.reason).toContain("recapture on an enrolled device");

@@ -240,6 +240,28 @@ let userSeq = 480000 + Math.floor(Math.random() * 50000);
 const nextUser = () => userSeq++;
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
 
+/* ---- 0110 device cryptographic binding: a real P-256 signer for the tests ----
+ * The security-runtime commit changed enrol/rotate/receive to require an SPKI
+ * public key and a P1363 signature over the canonical package, and left these
+ * tests on the old fingerprint-only protocol. Signed here with real keys. */
+import { createPrivateKey, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
+import { canonicalDevicePackage, fingerprintP256Spki } from "./_core/deviceSignature";
+type DeviceKey = { spki: string; fingerprint: string; pem: string };
+function deviceKey(): DeviceKey {
+  const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const spki = publicKey.export({ format: "der", type: "spki" }).toString("base64");
+  return { spki, fingerprint: fingerprintP256Spki(spki), pem: privateKey.export({ format: "pem", type: "pkcs8" }).toString() };
+}
+/** A fully signed receivePackage input, signed with `k` and claiming `k`'s fingerprint. */
+function signedPackage(k: DeviceKey, i: { deviceRef: string; packageRef: string; queuedAt: Date; items: unknown[]; recordUpdates?: unknown[]; claimFingerprint?: string }) {
+  const signedAt = new Date();
+  const nonce = key("n").padEnd(24, "0");
+  const recordUpdates = i.recordUpdates ?? [];
+  const payload = canonicalDevicePackage({ deviceRef: i.deviceRef, packageRef: i.packageRef, queuedAt: i.queuedAt, signedAt, nonce, items: i.items, recordUpdates });
+  const signatureP1363Base64 = cryptoSign("sha256", payload, { key: createPrivateKey(k.pem), dsaEncoding: "ieee-p1363" }).toString("base64");
+  return { deviceRef: i.deviceRef, packageRef: i.packageRef, queuedAt: i.queuedAt, signedWithFingerprint: i.claimFingerprint ?? k.fingerprint, signedAt, nonce, signatureP1363Base64, items: i.items, recordUpdates };
+}
+
 beforeAll(async () => {
   if (!URL) return;
   pool = mysql.createPool({ uri: URL, connectionLimit: 6 });
@@ -251,7 +273,8 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
   it("walks a device through its life and refuses at every wrong turn", async () => {
     const driver = await withRole("driver");
     const safety = await withRole("safety");
-    const kA = sha(key("k")), kB = sha(key("k"));
+    const A = deviceKey(), B = deviceKey(), STRANGER = deviceKey();
+    const kA = A.fingerprint, kB = B.fingerprint;
     const bytesText = key("bytes");
     const c = sha(bytesText), m = sha(key("manifest"));
     // Four real uploads whose stored bytes hash to `c`, and one whose stored bytes do not.
@@ -259,12 +282,12 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
     const ev1 = await up(bytesText), ev2 = await up("tampered on the way in"), ev3 = await up(bytesText), ev4 = await up(bytesText);
 
     // Enrol. A failed attestation is refused outright.
-    await expect(callerFor(driver).device.enroll({ platform: "android", keyFingerprint: kA, keystoreAttestation: "failed" })).rejects.toThrow(/cannot hold LeaseOS keys/);
-    const en = await callerFor(driver).device.enroll({ platform: "android", keyFingerprint: kA, keystoreAttestation: "hardware", encryptedStorageAttested: true });
+    await expect(callerFor(driver).device.enroll({ platform: "android", publicKeySpkiBase64: A.spki, keystoreAttestation: "failed" })).rejects.toThrow(/cannot hold LeaseOS keys/);
+    const en = await callerFor(driver).device.enroll({ platform: "android", publicKeySpkiBase64: A.spki, keystoreAttestation: "hardware", encryptedStorageAttested: true });
     expect(en.status).toBe("enrolled");
 
     // Pushing before activation is refused — and the refusal is a row.
-    const early = await callerFor(driver).sync.receivePackage({ deviceRef: en.deviceRef, signedWithFingerprint: kA, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: 1, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m }] });
+    const early = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: 1, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
     expect(early.state).toBe("rejected");
     expect(early.reason).toContain("not yet activated");
     const [rej] = await pool.execute<mysql.RowDataPacket[]>("SELECT state, refusalReason FROM syncPackages WHERE packageRef = ?", [early.packageRef]);
@@ -277,12 +300,12 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
     await callerFor(driver).device.activate({ deviceRef: en.deviceRef });
 
     // A clean push verifies.
-    const ok = await callerFor(driver).sync.receivePackage({ deviceRef: en.deviceRef, signedWithFingerprint: kA, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev1, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m }] });
+    const ok = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev1, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
     expect(ok.state).toBe("hash_verified");
     expect(ok.verified).toBe(1);
 
     // A tampered push is received — the device is fine — but the item is rejected.
-    const bad = await callerFor(driver).sync.receivePackage({ deviceRef: en.deviceRef, signedWithFingerprint: kA, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev2, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m }] }); // the device claims c; the server finds otherwise in storage
+    const bad = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev2, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] })); // the device claims c; the server finds otherwise in storage
     expect(bad.state).toBe("failed");
     expect(bad.rejected).toBe(1);
     const [receipt] = await pool.execute<mysql.RowDataPacket[]>("SELECT matched, failureDetail FROM syncReceipts WHERE evidenceRecordId = ? AND syncPackageId = (SELECT id FROM syncPackages WHERE packageRef = ?)", [ev2, bad.packageRef]);
@@ -292,38 +315,43 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
     expect(receipt[0].failureDetail).toMatch(/altered|differs/);
 
     // Rotate. The old key works inside the grace window; a stranger's key never does.
-    const rot = await callerFor(driver).device.rotateKey({ deviceRef: en.deviceRef, newKeyFingerprint: kB });
+    const rot = await callerFor(driver).device.rotateKey({ deviceRef: en.deviceRef, newPublicKeySpkiBase64: B.spki });
     expect(rot.retiredFingerprint).toBe(kA);
-    const graced = await callerFor(driver).sync.receivePackage({ deviceRef: en.deviceRef, signedWithFingerprint: kA, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m }] });
+    const graced = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
     expect(graced.state).toBe("hash_verified");
     expect(graced.note).toContain("grace window");
-    const stranger = await callerFor(driver).sync.receivePackage({ deviceRef: en.deviceRef, signedWithFingerprint: sha("stranger"), packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m }] });
-    expect(stranger.state).toBe("rejected");
+    // 0110 changed this refusal: a package signed by a key the device never held
+    // used to land as a rejected *row*; it is now refused before anything is
+    // written, because a package whose signature cannot be attributed to the
+    // device cannot be recorded against it. (Design note: the pre-0110 rule
+    // "refusals are rows" no longer covers unverifiable signatures.)
+    await expect(callerFor(driver).sync.receivePackage(signedPackage(STRANGER, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] })))
+      .rejects.toThrow(/Invalid device package signature/);
 
     // Revoke. The driver cannot; safety can. After that, nothing from it is received.
     await expect(callerFor(driver).device.revoke({ deviceRef: en.deviceRef, reason: "lost" })).rejects.toBeTruthy();
     const rv = await callerFor(safety).device.revoke({ deviceRef: en.deviceRef, reason: "Tablet reported lost", keyCompromised: true });
     expect(rv.status).toBe("revoked");
-    const after = await callerFor(driver).sync.receivePackage({ deviceRef: en.deviceRef, signedWithFingerprint: kB, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev4, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m }] });
+    const after = await callerFor(driver).sync.receivePackage(signedPackage(B, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev4, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
     expect(after.state).toBe("rejected");
     expect(after.reason).toContain("revoked");
-    await expect(callerFor(driver).device.rotateKey({ deviceRef: en.deviceRef, newKeyFingerprint: sha("new") })).rejects.toThrow(/revoked device/);
+    await expect(callerFor(driver).device.rotateKey({ deviceRef: en.deviceRef, newPublicKeySpkiBase64: deviceKey().spki })).rejects.toThrow(/revoked device/);
   });
 
   it("records a material conflict with both versions and lets office resolve it without deleting either", async () => {
     const driver = await withRole("driver");
     const office = await withRole("office");
-    const k = sha(key("k")), c = sha(key("b")), m = sha(key("m"));
-    const en = await callerFor(driver).device.enroll({ platform: "android", keyFingerprint: k, keystoreAttestation: "hardware", encryptedStorageAttested: true });
+    const K = deviceKey(), c = sha(key("b")), m = sha(key("m"));
+    const en = await callerFor(driver).device.enroll({ platform: "android", publicKeySpkiBase64: K.spki, keystoreAttestation: "hardware", encryptedStorageAttested: true });
     await callerFor(driver).device.activate({ deviceRef: en.deviceRef });
 
     const recordRef = key("DSP");
     __seedServerVersion("disposal_ticket", recordRef, { version: 4, values: { netKg: 22790, facilityTicketNumber: "A-1" } });
-    const r = await callerFor(driver).sync.receivePackage({
-      deviceRef: en.deviceRef, signedWithFingerprint: k, packageRef: key("PKG"), queuedAt: new Date(),
-      items: [{ evidenceRecordId: 9, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m }],
+    const r = await callerFor(driver).sync.receivePackage(signedPackage(K, {
+      deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(),
+      items: [{ evidenceRecordId: 9, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }],
       recordUpdates: [{ recordType: "disposal_ticket", recordRef, baseVersion: 3, baseValues: { netKg: 22800, facilityTicketNumber: "A-1" }, deviceValues: { netKg: 22700, facilityTicketNumber: "A-1" } }],
-    });
+    }));
     expect(r.conflicts).toBe(1);
     const [rows] = await pool.execute<mysql.RowDataPacket[]>("SELECT conflictRef, material, status, deviceValuesJson, serverValuesJson FROM syncConflicts WHERE recordRef = ?", [recordRef]);
     expect(Number(rows[0].material)).toBe(1);
