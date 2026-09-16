@@ -1,4 +1,4 @@
--- v22.23 (planned) — 0127: renumbered from B28h sql/0090_widget_layout_revision.sql; NOT in drizzle/ until the B28 reconciliation checkpoint applies it.
+-- v22.23 (planned) — 0128: renumbered from B28h sql/0090_widget_layout_revision.sql; NOT in drizzle/ until the B28 reconciliation checkpoint applies it.
 
 -- B26 — 0090: a layout has a revision.
 --
