@@ -10,10 +10,10 @@
  * the seed runs here, as leads, never as verified facilities.
  */
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import seed from "../data/western-canada-facilities.json";
-import { facilities, facilityAliases, facilityCapabilities, facilityEvidence, facilitySourceLicences, loadFacilityAssessments, loads, wasteStreamVocabulary } from "../drizzle/schema";
+import { facilities, facilityAliases, facilityCallAheads, facilityCapabilities, facilityEvidence, facilityOperatingHours, facilitySourceLicences, facilityWaitReports, loadFacilityAssessments, loads, wasteStreamVocabulary } from "../drizzle/schema";
 import { acceptanceStatusSchema, coordinatePrecisionSchema, wasteCodeSchema, type FacilityMapFeature } from "../shared/facilities";
 import { assessFacilityCompatibility } from "./_core/facilityCompatibility";
 import { toCsv, toGeoJson } from "./_core/facilityExport";
@@ -173,16 +173,23 @@ export const facilityDirectoryRouter = router({
       const cap = input.loadWasteCode ? (await db.select().from(facilityCapabilities).where(and(eq(facilityCapabilities.facilityId, f.id), eq(facilityCapabilities.wasteCode, input.loadWasteCode))).limit(1))[0] : undefined;
       const evidence = await db.select().from(facilityEvidence).where(eq(facilityEvidence.facilityId, f.id));
       const reviewed = evidence.filter(e => e.reviewState === "reviewed" && (cap?.evidenceId === e.id));
+      // A valid call-ahead acceptance for this load (or this waste stream) is the facility's own confirmation.
+      const now = new Date();
+      const callAhead = (await db.select().from(facilityCallAheads).where(and(eq(facilityCallAheads.facilityId, f.id), inArray(facilityCallAheads.outcome, ["accepted", "accepted_with_conditions"]), gte(facilityCallAheads.validUntil, now))).orderBy(desc(facilityCallAheads.calledAt)).limit(5))
+        .find(c => (c.loadId !== null && c.loadId === input.loadId) || (c.loadId === null && c.wasteCode === input.loadWasteCode));
+      const confirmedByCall = !!callAhead && cap?.acceptanceStatus === "confirmation_required";
+      const callMeta = callAhead ? { callAheadRef: callAhead.callAheadRef, outcome: callAhead.outcome, validUntil: callAhead.validUntil?.toISOString() } : null;
       const snapshot = {
-        loadWasteCode: input.loadWasteCode, capabilityWasteCode: cap?.wasteCode as never, acceptanceStatus: (cap?.acceptanceStatus ?? "unknown") as never,
-        coordinatePrecision: f.coordinatePrecision, coordinateSourceUrl: f.coordinateSourceUrl ?? undefined, evidenceIds: reviewed.map(e => e.id), evidenceVerifiedAt: cap?.verifiedAt ?? undefined,
+        loadWasteCode: input.loadWasteCode, capabilityWasteCode: cap?.wasteCode as never, acceptanceStatus: (confirmedByCall ? "verified" : (cap?.acceptanceStatus ?? "unknown")) as never,
+        coordinatePrecision: f.coordinatePrecision, coordinateSourceUrl: f.coordinateSourceUrl ?? undefined, evidenceIds: reviewed.map(e => e.id), evidenceVerifiedAt: confirmedByCall ? callAhead!.calledAt : (cap?.verifiedAt ?? undefined),
         assessedAt: new Date(), accountRequired: input.accountRequired, accountApproved: input.accountApproved, facilityOpen: f.status === "open", routeReviewPassed: input.routeReviewPassed,
         conflictingEvidence: evidence.some(e => e.reviewState === "conflicting"),
       };
       const result = assessFacilityCompatibility(snapshot);
+      if (callMeta?.outcome === "accepted_with_conditions" && result.outcome === "compatible_verified") result.reasonCodes.push("call_ahead_conditions");
       const assessmentRef = ref("FASSESS");
-      await db.insert(loadFacilityAssessments).values({ assessmentRef, loadId: input.loadId, facilityId: f.id, outcome: result.outcome, blocking: result.blocking, reasonCodes: result.reasonCodes, evidenceIds: result.evidenceIds, inputSnapshot: { ...snapshot, assessedAt: snapshot.assessedAt.toISOString(), evidenceVerifiedAt: snapshot.evidenceVerifiedAt?.toISOString() }, engineVersion: result.engineVersion, assessedByUserId: ctx.user.id });
-      return { assessmentRef, ...result, facilityKey: f.facilityKey, dispatchable: !result.blocking };
+      await db.insert(loadFacilityAssessments).values({ assessmentRef, loadId: input.loadId, facilityId: f.id, outcome: result.outcome, blocking: result.blocking, reasonCodes: result.reasonCodes, evidenceIds: result.evidenceIds, inputSnapshot: { ...snapshot, assessedAt: snapshot.assessedAt.toISOString(), evidenceVerifiedAt: snapshot.evidenceVerifiedAt?.toISOString(), callAhead: callMeta }, engineVersion: result.engineVersion, assessedByUserId: ctx.user.id });
+      return { assessmentRef, ...result, facilityKey: f.facilityKey, dispatchable: !result.blocking, callAhead: callMeta };
     }),
   assessments: roleProcedure("facilityDirectory.assessments")
     .input(z.object({ loadId: z.number().int().positive() }))
@@ -190,6 +197,100 @@ export const facilityDirectoryRouter = router({
       const db = await dbOrThrow();
       const rows = await db.select().from(loadFacilityAssessments).where(eq(loadFacilityAssessments.loadId, input.loadId)).orderBy(loadFacilityAssessments.assessedAt);
       return rows.map(r => ({ ...r, reasonCodes: jsonArray<string>(r.reasonCodes), evidenceIds: jsonArray<number>(r.evidenceIds) }));
+    }),
+
+  /**
+   * The driver-facing half. Everything here is a fact somebody witnessed, with who and when;
+   * the current wait is the freshest report or UNKNOWN; hours say who stated them and when.
+   */
+  hours: router({
+    set: roleProcedure("facilityDirectory.hoursSet")
+      .input(z.object({ facilityKey: z.string().min(1).max(100), source: z.enum(["facility_stated", "website", "regulator", "driver_reported"]), statedAt: z.coerce.date(), evidenceId: z.number().int().positive().optional(), days: z.array(z.object({ dayOfWeek: z.number().int().min(0).max(6), opensAt: z.string().regex(/^\d{2}:\d{2}$/).optional(), closesAt: z.string().regex(/^\d{2}:\d{2}$/).optional(), closed: z.boolean().default(false), note: z.string().max(300).optional() })).min(1).max(7) }))
+      .mutation(async ({ ctx, input }) => {
+        const db = await dbOrThrow();
+        const f = await facilityByKey(db, input.facilityKey);
+        for (const d of input.days) {
+          if (!d.closed && (!d.opensAt || !d.closesAt)) throw new TRPCError({ code: "BAD_REQUEST", message: `Day ${d.dayOfWeek}: an open day needs opensAt and closesAt` });
+          const existing = (await db.select({ id: facilityOperatingHours.id }).from(facilityOperatingHours).where(and(eq(facilityOperatingHours.facilityId, f.id), eq(facilityOperatingHours.dayOfWeek, d.dayOfWeek))).limit(1))[0];
+          const values = { facilityId: f.id, dayOfWeek: d.dayOfWeek, opensAt: d.closed ? null : d.opensAt!, closesAt: d.closed ? null : d.closesAt!, closed: d.closed, note: d.note ?? null, source: input.source, evidenceId: input.evidenceId ?? null, statedAt: input.statedAt, setByUserId: ctx.user.id };
+          if (existing) await db.update(facilityOperatingHours).set(values).where(eq(facilityOperatingHours.id, existing.id)); else await db.insert(facilityOperatingHours).values(values);
+        }
+        return { facilityKey: f.facilityKey, daysSet: input.days.length, source: input.source };
+      }),
+  }),
+  callAhead: router({
+    record: roleProcedure("facilityDirectory.callAheadRecord")
+      .input(z.object({ facilityKey: z.string().min(1).max(100), loadId: z.number().int().positive().optional(), wasteCode: wasteCodeSchema.optional(), calledAt: z.coerce.date().optional(), phoneUsed: z.string().max(60).optional(), spokeTo: z.string().max(160).optional(), outcome: z.enum(["accepted", "accepted_with_conditions", "refused", "no_answer", "call_back"]), conditions: z.string().max(500).optional(), quotedWaitMinutes: z.number().int().min(0).max(1440).optional(), validForHours: z.number().min(0.5).max(72).default(12), note: z.string().max(500).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const db = await dbOrThrow();
+        const f = await facilityByKey(db, input.facilityKey);
+        const accepted = input.outcome === "accepted" || input.outcome === "accepted_with_conditions";
+        if (accepted && !input.loadId && !input.wasteCode) throw new TRPCError({ code: "BAD_REQUEST", message: "An acceptance needs the load or the waste stream it was for" });
+        if (input.outcome === "accepted_with_conditions" && !input.conditions) throw new TRPCError({ code: "BAD_REQUEST", message: "State the conditions the facility gave" });
+        if (accepted && !input.spokeTo) throw new TRPCError({ code: "BAD_REQUEST", message: "Record who at the facility accepted the load" });
+        const calledAt = input.calledAt ?? new Date();
+        const validUntil = accepted ? new Date(calledAt.getTime() + input.validForHours * 3_600_000) : null;
+        const callAheadRef = ref("CALL");
+        await db.insert(facilityCallAheads).values({ callAheadRef, facilityId: f.id, loadId: input.loadId ?? null, wasteCode: input.wasteCode ?? null, calledByUserId: ctx.user.id, calledAt, phoneUsed: input.phoneUsed ?? f.phone ?? null, spokeTo: input.spokeTo ?? null, outcome: input.outcome, conditions: input.conditions ?? null, quotedWaitMinutes: input.quotedWaitMinutes ?? null, validUntil, note: input.note ?? null });
+        if (input.quotedWaitMinutes !== undefined) await db.insert(facilityWaitReports).values({ facilityId: f.id, reportedByUserId: ctx.user.id, reportedAt: calledAt, waitMinutes: input.quotedWaitMinutes, source: "facility_stated", note: `quoted on call ${callAheadRef}` });
+        return { callAheadRef, outcome: input.outcome, validUntil };
+      }),
+  }),
+  wait: router({
+    report: roleProcedure("facilityDirectory.waitReport")
+      .input(z.object({ facilityKey: z.string().min(1).max(100), waitMinutes: z.number().int().min(0).max(1440), trucksInQueue: z.number().int().min(0).max(500).optional(), source: z.enum(["driver_observed", "facility_stated", "dispatcher_relayed"]).default("driver_observed"), note: z.string().max(300).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const db = await dbOrThrow();
+        const f = await facilityByKey(db, input.facilityKey);
+        await db.insert(facilityWaitReports).values({ facilityId: f.id, reportedByUserId: ctx.user.id, reportedAt: new Date(), waitMinutes: input.waitMinutes, trucksInQueue: input.trucksInQueue ?? null, source: input.source, note: input.note ?? null });
+        return { facilityKey: f.facilityKey, waitMinutes: input.waitMinutes };
+      }),
+  }),
+
+  /** Sites near a point by great-circle distance, with what is known about each — never a route (the spatial engine's job). */
+  nearby: roleProcedure("facilityDirectory.nearby")
+    .input(z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180), radiusKm: z.number().min(1).max(1500).default(250), wasteCode: wasteCodeSchema.optional(), limit: z.number().int().min(1).max(50).default(15) }))
+    .query(async ({ input }) => {
+      const db = await dbOrThrow();
+      const rows = await db.select().from(facilities).where(and(isNotNull(facilities.facilityKey), isNotNull(facilities.latitude), isNotNull(facilities.longitude)));
+      const R = 6371, rad = (x: number) => (x * Math.PI) / 180;
+      const dist = (lat: number, lon: number) => { const dLat = rad(lat - input.latitude), dLon = rad(lon - input.longitude); const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(input.latitude)) * Math.cos(rad(lat)) * Math.sin(dLon / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(a)); };
+      const ids = rows.map(r => r.id);
+      const caps = ids.length && input.wasteCode ? await db.select().from(facilityCapabilities).where(and(inArray(facilityCapabilities.facilityId, ids), eq(facilityCapabilities.wasteCode, input.wasteCode))) : [];
+      const out = rows.map(f => ({ facilityKey: f.facilityKey!, name: f.name, municipality: f.municipality, province: f.province, facilityType: f.facilityType, distanceKm: Math.round(dist(f.latitude!, f.longitude!) * 10) / 10, coordinatePrecision: f.coordinatePrecision, routable: routableOf(f), phone: f.phone, websiteUrl: f.websiteUrl,
+        acceptance: input.wasteCode ? (caps.find(c => c.facilityId === f.id)?.acceptanceStatus ?? "unknown") : undefined,
+        distanceNote: f.coordinatePrecision === "community_only" ? "distance to the community, not the gate" : undefined }))
+        .filter(x => x.distanceKm <= input.radiusKm).sort((a, b) => a.distanceKm - b.distanceKm).slice(0, input.limit);
+      return { origin: { latitude: input.latitude, longitude: input.longitude }, radiusKm: input.radiusKm, wasteCode: input.wasteCode ?? null, facilities: out, note: "Distances are straight-line. Routes come from the spatial engine with commercial-vehicle constraints; call ahead before travelling." };
+    }),
+
+  /** One screen for a driver: contact, hours as stated, the freshest wait or UNKNOWN, the last valid call-ahead, precision, links. */
+  driverView: roleProcedure("facilityDirectory.driverView")
+    .input(z.object({ facilityKey: z.string().min(1).max(100), loadId: z.number().int().positive().optional() }))
+    .query(async ({ input }) => {
+      const db = await dbOrThrow();
+      const f = await facilityByKey(db, input.facilityKey);
+      const now = new Date();
+      const [hours, waits, calls, caps] = await Promise.all([
+        db.select().from(facilityOperatingHours).where(eq(facilityOperatingHours.facilityId, f.id)),
+        db.select().from(facilityWaitReports).where(and(eq(facilityWaitReports.facilityId, f.id), gte(facilityWaitReports.reportedAt, new Date(now.getTime() - 6 * 3_600_000)))).orderBy(desc(facilityWaitReports.reportedAt)).limit(5),
+        db.select().from(facilityCallAheads).where(eq(facilityCallAheads.facilityId, f.id)).orderBy(desc(facilityCallAheads.calledAt)).limit(5),
+        db.select().from(facilityCapabilities).where(eq(facilityCapabilities.facilityId, f.id)),
+      ]);
+      const today = hours.find(h => h.dayOfWeek === now.getUTCDay());
+      const freshest = waits[0];
+      const lastValid = calls.find(c => (c.outcome === "accepted" || c.outcome === "accepted_with_conditions") && c.validUntil && c.validUntil > now && (!input.loadId || c.loadId === null || c.loadId === input.loadId));
+      return {
+        facility: { facilityKey: f.facilityKey, name: f.name, operatorNameFromSource: f.operatorNameFromSource, municipality: f.municipality, province: f.province, facilityType: f.facilityType, status: f.status, coordinatePrecision: f.coordinatePrecision, routable: routableOf(f), regulatorRef: f.regulatorRef },
+        contact: { phone: f.phone, emergencyPhone: f.emergencyPhone, websiteUrl: f.websiteUrl, accountRegistrationUrl: f.accountRegistrationUrl, gateInstructions: f.gateInstructions, requiredDocuments: f.requiredDocuments },
+        links: buildFacilityLinks({ precision: f.coordinatePrecision, site: f.latitude !== null && f.longitude !== null ? { lat: f.latitude, lon: f.longitude } : undefined, phone: f.phone ?? undefined, websiteUrl: f.websiteUrl ?? undefined, accountRegistrationUrl: f.accountRegistrationUrl ?? undefined }),
+        hoursToday: today ? { ...today, state: "as_stated" as const } : { state: "unknown" as const, note: "No hours on file — call ahead" },
+        hoursWeek: hours,
+        currentWait: freshest ? { waitMinutes: freshest.waitMinutes, trucksInQueue: freshest.trucksInQueue, reportedAt: freshest.reportedAt, ageMinutes: Math.round((now.getTime() - freshest.reportedAt.getTime()) / 60_000), source: freshest.source, state: "reported" as const } : { state: "unknown" as const, note: "No wait report in the last 6 hours — call ahead" },
+        callAhead: lastValid ? { callAheadRef: lastValid.callAheadRef, outcome: lastValid.outcome, spokeTo: lastValid.spokeTo, conditions: lastValid.conditions, quotedWaitMinutes: lastValid.quotedWaitMinutes, validUntil: lastValid.validUntil, calledAt: lastValid.calledAt } : { state: "none_valid" as const, note: "No valid call-ahead acceptance — call before travelling" },
+        accepts: caps.map(c => ({ wasteCode: c.wasteCode, acceptanceStatus: c.acceptanceStatus, conditions: c.conditions, expiresAt: c.expiresAt })),
+        recentCalls: calls.map(c => ({ callAheadRef: c.callAheadRef, calledAt: c.calledAt, outcome: c.outcome, spokeTo: c.spokeTo })),
+      };
     }),
 
   exportCsv: roleProcedure("facilityDirectory.exportCsv").query(async () => toCsv(await exportRows())),

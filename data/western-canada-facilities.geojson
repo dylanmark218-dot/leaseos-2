@@ -1,0 +1,613 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": "secure-fox-creek-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.802,
+     54.395
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-fox-creek-lead",
+    "name": "SECURE Fox Creek facility lead",
+    "facilityType": "industrial_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-edson-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-edson-lead",
+    "name": "SECURE Edson facility lead",
+    "facilityType": "industrial_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-whitecourt-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.685,
+     54.142
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-whitecourt-lead",
+    "name": "SECURE Whitecourt facility lead",
+    "facilityType": "industrial_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-grande-prairie-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.795,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-grande-prairie-lead",
+    "name": "SECURE Grande Prairie facility lead",
+    "facilityType": "industrial_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-fort-st-john-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -120.847,
+     56.246
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-fort-st-john-lead",
+    "name": "SECURE Fort St. John facility lead",
+    "facilityType": "industrial_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-rycroft-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.711,
+     55.759
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-rycroft-lead",
+    "name": "SECURE Rycroft facility lead",
+    "facilityType": "industrial_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-willingdon-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.119,
+     53.828
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-willingdon-lead",
+    "name": "SECURE Willingdon facility lead",
+    "facilityType": "industrial_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-kindersley-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.157,
+     51.467
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-kindersley-lead",
+    "name": "SECURE Kindersley facility lead",
+    "facilityType": "industrial_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-atmore-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.54,
+     54.8
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-atmore-lead",
+    "name": "R360 Atmore cavern/SWD lead",
+    "facilityType": "cavern_swd",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-brazeau-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.13,
+     53.22
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-brazeau-lead",
+    "name": "R360 Brazeau TRD lead",
+    "facilityType": "trd",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-buck-creek-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.59,
+     53.23
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-buck-creek-lead",
+    "name": "R360 Buck Creek TRD lead",
+    "facilityType": "trd",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-west-edson-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-west-edson-lead",
+    "name": "R360 West Edson TRD lead",
+    "facilityType": "trd",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-elk-point-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.9,
+     53.9
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-elk-point-lead",
+    "name": "R360 Elk Point landfill lead",
+    "facilityType": "landfill",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-willesden-green-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.47,
+     52.34
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-willesden-green-lead",
+    "name": "R360 Willesden Green landfill lead",
+    "facilityType": "landfill",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-unity-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.168,
+     52.445
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-unity-lead",
+    "name": "R360 Unity cavern lead",
+    "facilityType": "salt_cavern",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-ryley-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.428,
+     53.288
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-ryley-lead",
+    "name": "Clean Harbors Ryley Technical Services lead",
+    "facilityType": "class_i_landfill",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "aquatera-gp-septage-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.795,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "aquatera-gp-septage-lead",
+    "name": "Aquatera Grande Prairie septage receiving lead",
+    "facilityType": "septage_receiving",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "edson-septage-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "edson-septage-lead",
+    "name": "Edson wastewater/septage receiving lead",
+    "facilityType": "septage_receiving",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "west-yellowhead-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.5857,
+     53.4001
+    ]
+   },
+   "properties": {
+    "facilityKey": "west-yellowhead-landfill-lead",
+    "name": "West Yellowhead Regional Landfill lead",
+    "facilityType": "class_ii_landfill",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "peers-transfer-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.005,
+     53.658
+    ]
+   },
+   "properties": {
+    "facilityKey": "peers-transfer-lead",
+    "name": "Peers Transfer Station lead",
+    "facilityType": "transfer_station",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clairmont-crwm-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.793,
+     55.261
+    ]
+   },
+   "properties": {
+    "facilityKey": "clairmont-crwm-lead",
+    "name": "Clairmont Centre for Recycling and Waste Management lead",
+    "facilityType": "class_ii_landfill",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-edson-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-edson-service",
+    "name": "GFL Edson service location",
+    "facilityType": "service_location",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "unknown"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "prairie-disposal-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.795,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "prairie-disposal-service",
+    "name": "Prairie Disposal service location lead",
+    "facilityType": "service_location",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "unknown"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-nisku-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.55,
+     53.33
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-nisku-lead",
+    "name": "GFL Environmental Nisku industrial hub lead",
+    "facilityType": "hazardous_liquid_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-calgary-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.07,
+     51.05
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-calgary-lead",
+    "name": "GFL Environmental Calgary industrial hub lead",
+    "facilityType": "hazardous_liquid_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-nisku-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.55,
+     53.33
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-nisku-lead",
+    "name": "Clean Harbors Nisku lead",
+    "facilityType": "hazardous_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-fort-mcmurray-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.38,
+     56.73
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-fort-mcmurray-lead",
+    "name": "Clean Harbors Fort McMurray lead",
+    "facilityType": "hazardous_waste",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "wm-thorhild-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.12,
+     54.16
+    ]
+   },
+   "properties": {
+    "facilityKey": "wm-thorhild-landfill-lead",
+    "name": "WM Thorhild Landfill lead",
+    "facilityType": "class_ii_landfill",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "wm-pembina-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.98,
+     53.22
+    ]
+   },
+   "properties": {
+    "facilityKey": "wm-pembina-landfill-lead",
+    "name": "WM Pembina Landfill lead",
+    "facilityType": "class_ii_landfill",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "aquatera-grande-prairie-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.8,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "aquatera-grande-prairie-landfill-lead",
+    "name": "Aquatera Utilities landfill lead",
+    "facilityType": "class_ii_landfill",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "review_required"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "heartland-disposal-edson-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.44,
+     53.58
+    ]
+   },
+   "properties": {
+    "facilityKey": "heartland-disposal-edson-service",
+    "name": "Heartland Disposal & Recycling (service — Edson & Central AB)",
+    "facilityType": "service",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "unknown"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "elite-vac-steam-grande-prairie-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.8,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "elite-vac-steam-grande-prairie-service",
+    "name": "Elite Vac & Steam (hauler — Grande Prairie & Peace Region)",
+    "facilityType": "hauler",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "verificationState": "unknown"
+   }
+  }
+ ]
+}

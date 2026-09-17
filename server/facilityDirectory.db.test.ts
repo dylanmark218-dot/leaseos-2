@@ -18,15 +18,17 @@ const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never,
 async function withRole(role: string) { const userId = seq++; await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())", [userId, role]); return userId; }
 
 d("facility directory — seed and licences", () => {
-  it("imports the 23 v7 leads as leads: community-level coordinates, nothing routable, each with lead evidence under the operator's site; a second run is idempotent", async () => {
+  it("imports the 36 leads (23 from v7, 13 more from the operator brief) as leads: community-level or unknown coordinates, nothing routable, each with lead evidence under the operator's site; a second run is idempotent", async () => {
     const safety = await withRole("safety");
     const first = await callerFor(safety).facilityDirectory.seedLeads();
     const again = await callerFor(safety).facilityDirectory.seedLeads();
-    expect(first.inserted + first.existing).toBe(23);
-    expect(again).toMatchObject({ inserted: 0, existing: 23, routable: 0 });
+    expect(first.inserted + first.existing).toBe(36);
+    expect(again).toMatchObject({ inserted: 0, existing: 36, routable: 0 });
     const features = await callerFor(safety).facilityDirectory.features({ province: "AB" });
     expect(features.length).toBeGreaterThanOrEqual(20);
-    expect(features.every(f => !f.routable && f.coordinatePrecision === "community_only")).toBe(true);
+    const seeded = features.filter(f => /-(lead|ambiguous|service)$/.test(f.facilityKey));
+    expect(seeded.length).toBeGreaterThanOrEqual(20);
+    expect(seeded.every(f => !f.routable && f.coordinatePrecision === "community_only")).toBe(true);
     const [ev] = await pool.query<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM facilityEvidence e JOIN facilities f ON f.id = e.facilityId WHERE f.operatorNameFromSource IS NOT NULL AND e.licenceKey = 'company_website' AND e.reviewState = 'lead' AND e.cachedContent = 0 AND e.title LIKE 'Facility lead%'");
     expect(Number(ev[0]!.n)).toBeGreaterThanOrEqual(23);
     const one = await callerFor(safety).facilityDirectory.get({ facilityKey: "secure-fox-creek-lead" });
@@ -89,5 +91,57 @@ d("facility directory — verification and assessment", () => {
     const history = await callerFor(office).facilityDirectory.assessments({ loadId });
     expect(history.map(h => h.outcome)).toEqual(["insufficient_information", "facility_confirmation_required", "compatible_verified", "insufficient_information"]);
     expect(history[0]!.reasonCodes).toContain("coordinate_not_verified");   // the first row still says what it said
+  }, 60_000);
+});
+
+d("facility directory — the driver's half", () => {
+  it("finds sites near Edson by straight-line distance with the precision caveat; a call-ahead acceptance is the facility confirmation the engine asks for, and it expires; wait reports age into UNKNOWN; hours carry who stated them", async () => {
+    const safety = await withRole("safety"), safety2 = await withRole("safety"), driver = await withRole("driver"), dispatcher = await withRole("dispatcher");
+    await callerFor(safety).facilityDirectory.seedLeads();
+    // 1. Nearby: from Edson, the Edson leads are closest and every lead says the distance is to the community.
+    const near = await callerFor(driver).facilityDirectory.nearby({ latitude: 53.58, longitude: -116.44, radiusKm: 150, wasteCode: "hydrovac_slurry" });
+    expect(near.facilities.length).toBeGreaterThan(3);
+    expect(near.facilities[0]!.distanceKm).toBeLessThan(5);
+    const leads = near.facilities.filter(f => f.coordinatePrecision === "community_only");
+    expect(leads.length).toBeGreaterThan(3);
+    expect(leads.every(f => f.acceptance === "unknown" && f.distanceNote === "distance to the community, not the gate")).toBe(true);
+    // 2. A facility with verified coordinates and a capability that needs the facility's confirmation.
+    const facilityKey = `fac-${rnd()}`;
+    await pool.execute("INSERT INTO facilities (facilityKey, name, status, province, facilityType, phone, latitude, longitude, coordinatePrecision, coordinateSourceUrl, disposition) VALUES (?,?,'open','AB','trd','780-555-0100',53.60,-116.40,'verified_site','https://example.org/verified','verified_facility')", [facilityKey, `Edson TRD ${rnd()}`]);
+    const ev = await callerFor(safety).facilityDirectory.evidenceRecord({ facilityKey, publisher: "Facility", title: "Accepts slurry subject to daily confirmation", sourceUrl: "https://example.org/acceptance", licenceKey: "company_website", claimType: "accepts_waste_stream", retrievedAt: new Date(), confidence: "medium" });
+    await callerFor(safety2).facilityDirectory.evidenceReview({ evidenceId: ev.evidenceId, reviewState: "reviewed", note: "confirmed with the facility manager" });
+    await callerFor(safety).facilityDirectory.capabilitySet({ facilityKey, wasteCode: "hydrovac_slurry", acceptanceStatus: "confirmation_required", evidenceId: ev.evidenceId, conditions: "call the day of" });
+    const [l] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO loads (loadNumber, jobId, material) VALUES (?, 1, 'hydrovac slurry')", [`LD-${rnd()}`]);
+    const loadId = l.insertId;
+    const before = await callerFor(dispatcher).facilityDirectory.assessLoad({ loadId, facilityKey, loadWasteCode: "hydrovac_slurry", routeReviewPassed: true });
+    expect(before).toMatchObject({ outcome: "facility_confirmation_required", dispatchable: false, callAhead: null });
+    expect(before.reasonCodes).toContain("facility_confirmation_required");
+    // 3. The driver calls ahead: an acceptance needs who they spoke to; conditions must be stated.
+    await expect(callerFor(driver).facilityDirectory.callAhead.record({ facilityKey, loadId, outcome: "accepted" })).rejects.toThrow(/who at the facility accepted/);
+    await expect(callerFor(driver).facilityDirectory.callAhead.record({ facilityKey, loadId, outcome: "accepted_with_conditions", spokeTo: "Dana at the scale" })).rejects.toThrow(/State the conditions/);
+    const call = await callerFor(driver).facilityDirectory.callAhead.record({ facilityKey, loadId, outcome: "accepted", spokeTo: "Dana at the scale", quotedWaitMinutes: 20, validForHours: 6 });
+    expect(call.validUntil).not.toBeNull();
+    const after = await callerFor(dispatcher).facilityDirectory.assessLoad({ loadId, facilityKey, loadWasteCode: "hydrovac_slurry", routeReviewPassed: true });
+    expect(after).toMatchObject({ outcome: "compatible_verified", dispatchable: true, callAhead: { callAheadRef: call.callAheadRef, outcome: "accepted" } });
+    // 4. The driver view: wait quoted on the call is the freshest report; hours unknown until someone states them.
+    const view = await callerFor(driver).facilityDirectory.driverView({ facilityKey, loadId });
+    expect(view.currentWait).toMatchObject({ state: "reported", waitMinutes: 20, source: "facility_stated" });
+    expect(view.callAhead).toMatchObject({ callAheadRef: call.callAheadRef, spokeTo: "Dana at the scale" });
+    expect(view.hoursToday).toMatchObject({ state: "unknown" });
+    expect(view.links.googleDirections).toContain("53.6");
+    await callerFor(dispatcher).facilityDirectory.hours.set({ facilityKey, source: "facility_stated", statedAt: new Date(), days: [0, 1, 2, 3, 4, 5, 6].map(d => ({ dayOfWeek: d, opensAt: "07:00", closesAt: "17:00" })) });
+    const view2 = await callerFor(driver).facilityDirectory.driverView({ facilityKey, loadId });
+    expect(view2.hoursToday).toMatchObject({ state: "as_stated", opensAt: "07:00", closesAt: "17:00", source: "facility_stated" });
+    // 5. An expired call-ahead is no confirmation; an old wait report is no wait.
+    await pool.execute("UPDATE facilityCallAheads SET validUntil = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE callAheadRef = ?", [call.callAheadRef]);
+    await pool.execute("UPDATE facilityWaitReports SET reportedAt = DATE_SUB(NOW(), INTERVAL 7 HOUR) WHERE facilityId = (SELECT id FROM facilities WHERE facilityKey = ?)", [facilityKey]);
+    const expired = await callerFor(dispatcher).facilityDirectory.assessLoad({ loadId, facilityKey, loadWasteCode: "hydrovac_slurry", routeReviewPassed: true });
+    expect(expired).toMatchObject({ outcome: "facility_confirmation_required", dispatchable: false, callAhead: null });
+    const view3 = await callerFor(driver).facilityDirectory.driverView({ facilityKey, loadId });
+    expect(view3.currentWait).toMatchObject({ state: "unknown" });
+    expect(view3.callAhead).toMatchObject({ state: "none_valid" });
+    // 6. A driver's own observation of the queue.
+    await callerFor(driver).facilityDirectory.wait.report({ facilityKey, waitMinutes: 45, trucksInQueue: 6 });
+    expect((await callerFor(driver).facilityDirectory.driverView({ facilityKey })).currentWait).toMatchObject({ state: "reported", waitMinutes: 45, trucksInQueue: 6, source: "driver_observed" });
   }, 60_000);
 });

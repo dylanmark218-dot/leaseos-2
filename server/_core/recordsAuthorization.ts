@@ -79,6 +79,7 @@ export type Permission =
   | "facility.directory.read"
   | "facility.directory.write"
   | "facility.directory.review"
+  | "facility.directory.report"
   | "payroll.read"
   // Payroll, split by what is actually being read. `payroll.read` stays the
   // legacy coarse grant and remains HR-only.
@@ -319,6 +320,7 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    "facility.directory.report",
     "facility.directory.read",
     "assistant.ask",
     "board.read",
@@ -400,6 +402,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "facility.directory.report",
     "facility.directory.write",
     "facility.directory.read",
     "academy.direct_supervision.manage",
@@ -658,6 +661,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "facility.directory.report",
     "facility.directory.review",
     "facility.directory.write",
     "facility.directory.read",
@@ -771,6 +775,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
   ],
   office: [
+    "facility.directory.report",
     "facility.directory.write",
     "facility.directory.read",
     "commercial.read",
@@ -928,6 +933,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "facility.directory.report",
     "facility.directory.review",
     "facility.directory.write",
     "facility.directory.read",
@@ -2173,6 +2179,11 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "manifestCustody.evidenceProfileApprove": "manifest.write",
   "manifestCustody.chain": "manifest.read",
   /* ---- v22.24 P4.6 (0131): security incidents and privacy breach assessments ---- */
+  "facilityDirectory.hoursSet": "facility.directory.write",
+  "facilityDirectory.callAheadRecord": "facility.directory.report",
+  "facilityDirectory.waitReport": "facility.directory.report",
+  "facilityDirectory.nearby": "facility.directory.read",
+  "facilityDirectory.driverView": "facility.directory.read",
   "facilityDirectory.licencesList": "facility.directory.read",
   "facilityDirectory.vocabularyList": "facility.directory.read",
   "facilityDirectory.vocabularyVerify": "facility.directory.review",

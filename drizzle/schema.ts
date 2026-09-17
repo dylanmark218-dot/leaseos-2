@@ -8394,3 +8394,47 @@ export const wasteStreamVocabulary = mysqlTable("wasteStreamVocabulary", {
   verifiedAt: timestamp("verifiedAt"),
   verificationNote: varchar("verificationNote", { length: 500 }),
 });
+
+// 0140 — the driver-facing half of the facility directory.
+export const facilityOperatingHours = mysqlTable("facilityOperatingHours", {
+  id: int("id").autoincrement().primaryKey(),
+  facilityId: int("facilityId").notNull(),
+  dayOfWeek: tinyint("dayOfWeek").notNull(),
+  opensAt: varchar("opensAt", { length: 5 }),
+  closesAt: varchar("closesAt", { length: 5 }),
+  closed: boolean("closed").default(false).notNull(),
+  note: varchar("note", { length: 300 }),
+  source: mysqlEnum("source", ["facility_stated", "website", "regulator", "driver_reported", "unknown"]).default("unknown").notNull(),
+  evidenceId: int("evidenceId"),
+  statedAt: timestamp("statedAt").notNull(),
+  setByUserId: int("setByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export const facilityCallAheads = mysqlTable("facilityCallAheads", {
+  id: int("id").autoincrement().primaryKey(),
+  callAheadRef: varchar("callAheadRef", { length: 40 }).notNull().unique(),
+  facilityId: int("facilityId").notNull(),
+  loadId: int("loadId"),
+  wasteCode: varchar("wasteCode", { length: 60 }),
+  calledByUserId: int("calledByUserId").notNull(),
+  calledAt: timestamp("calledAt").notNull(),
+  phoneUsed: varchar("phoneUsed", { length: 60 }),
+  spokeTo: varchar("spokeTo", { length: 160 }),
+  outcome: mysqlEnum("outcome", ["accepted", "accepted_with_conditions", "refused", "no_answer", "call_back"]).notNull(),
+  conditions: varchar("conditions", { length: 500 }),
+  quotedWaitMinutes: int("quotedWaitMinutes"),
+  validUntil: timestamp("validUntil"),
+  note: varchar("note", { length: 500 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export const facilityWaitReports = mysqlTable("facilityWaitReports", {
+  id: int("id").autoincrement().primaryKey(),
+  facilityId: int("facilityId").notNull(),
+  reportedByUserId: int("reportedByUserId").notNull(),
+  reportedAt: timestamp("reportedAt").notNull(),
+  waitMinutes: int("waitMinutes").notNull(),
+  trucksInQueue: int("trucksInQueue"),
+  source: mysqlEnum("source", ["driver_observed", "facility_stated", "dispatcher_relayed"]).notNull(),
+  note: varchar("note", { length: 300 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});

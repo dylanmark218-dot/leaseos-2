@@ -1,25 +1,602 @@
 [
-  {"facilityKey":"secure-fox-creek-lead","name":"SECURE Fox Creek facility lead","operatorKey":"secure","facilityType":"industrial_waste","municipality":"Fox Creek","province":"AB","latitude":54.395,"longitude":-116.802,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://secure.ca/facilities-and-landfills","websiteUrl":"https://secure.ca/facilities-and-landfills","phone":"1-877-518-4321","sourceBriefNames":["SECURE Fox Creek"],"disposition":"approximate_facility"},
-  {"facilityKey":"secure-edson-lead","name":"SECURE Edson facility lead","operatorKey":"secure","facilityType":"industrial_waste","municipality":"Edson","province":"AB","latitude":53.5817,"longitude":-116.4356,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://secure.ca/facilities-and-landfills","websiteUrl":"https://secure.ca/facilities-and-landfills","phone":"1-877-518-4321","sourceBriefNames":["SECURE Edson"],"disposition":"approximate_facility"},
-  {"facilityKey":"secure-whitecourt-lead","name":"SECURE Whitecourt facility lead","operatorKey":"secure","facilityType":"industrial_waste","municipality":"Whitecourt","province":"AB","latitude":54.142,"longitude":-115.685,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://secure.ca/facilities-and-landfills","websiteUrl":"https://secure.ca/facilities-and-landfills","phone":"1-877-518-4321","sourceBriefNames":["SECURE Whitecourt"],"disposition":"approximate_facility"},
-  {"facilityKey":"secure-grande-prairie-lead","name":"SECURE Grande Prairie facility lead","operatorKey":"secure","facilityType":"industrial_waste","municipality":"Grande Prairie","province":"AB","latitude":55.17,"longitude":-118.795,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://secure.ca/facilities-and-landfills","websiteUrl":"https://secure.ca/facilities-and-landfills","phone":"1-877-518-4321","sourceBriefNames":["SECURE Grande Prairie"],"disposition":"approximate_facility"},
-  {"facilityKey":"secure-fort-st-john-lead","name":"SECURE Fort St. John facility lead","operatorKey":"secure","facilityType":"industrial_waste","municipality":"Fort St. John","province":"BC","latitude":56.246,"longitude":-120.847,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://secure.ca/facilities-and-landfills","websiteUrl":"https://secure.ca/facilities-and-landfills","phone":"1-877-518-4321","sourceBriefNames":["SECURE Fort St. John"],"disposition":"approximate_facility"},
-  {"facilityKey":"secure-rycroft-lead","name":"SECURE Rycroft facility lead","operatorKey":"secure","facilityType":"industrial_waste","municipality":"Rycroft","province":"AB","latitude":55.759,"longitude":-118.711,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://secure.ca/facilities-and-landfills","websiteUrl":"https://secure.ca/facilities-and-landfills","phone":"1-877-518-4321","sourceBriefNames":["SECURE Rycroft"],"disposition":"approximate_facility"},
-  {"facilityKey":"secure-willingdon-lead","name":"SECURE Willingdon facility lead","operatorKey":"secure","facilityType":"industrial_waste","municipality":"Willingdon","province":"AB","latitude":53.828,"longitude":-112.119,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://secure.ca/facilities-and-landfills","websiteUrl":"https://secure.ca/facilities-and-landfills","phone":"1-877-518-4321","sourceBriefNames":["SECURE Willingdon"],"disposition":"approximate_facility"},
-  {"facilityKey":"secure-kindersley-lead","name":"SECURE Kindersley facility lead","operatorKey":"secure","facilityType":"industrial_waste","municipality":"Kindersley","province":"SK","latitude":51.467,"longitude":-109.157,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://secure.ca/facilities-and-landfills","websiteUrl":"https://secure.ca/facilities-and-landfills","phone":"1-877-518-4321","sourceBriefNames":["SECURE Kindersley"],"disposition":"approximate_facility"},
-  {"facilityKey":"r360-atmore-lead","name":"R360 Atmore cavern/SWD lead","operatorKey":"waste-connections-r360","facilityType":"cavern_swd","municipality":"Atmore","province":"AB","latitude":54.8,"longitude":-112.54,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.wasteconnectionscanada.com/","websiteUrl":"https://www.wasteconnectionscanada.com/","sourceBriefNames":["R360 Atmore Cavern/SWD"],"disposition":"approximate_facility"},
-  {"facilityKey":"r360-brazeau-lead","name":"R360 Brazeau TRD lead","operatorKey":"waste-connections-r360","facilityType":"trd","municipality":"Brazeau County","province":"AB","latitude":53.22,"longitude":-115.13,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.wasteconnectionscanada.com/","websiteUrl":"https://www.wasteconnectionscanada.com/","sourceBriefNames":["R360 Brazeau TRD"],"disposition":"approximate_facility"},
-  {"facilityKey":"r360-buck-creek-lead","name":"R360 Buck Creek TRD lead","operatorKey":"waste-connections-r360","facilityType":"trd","municipality":"Buck Creek","province":"AB","latitude":53.23,"longitude":-115.59,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.wasteconnectionscanada.com/","websiteUrl":"https://www.wasteconnectionscanada.com/","sourceBriefNames":["R360 Buck Creek TRD"],"disposition":"approximate_facility"},
-  {"facilityKey":"r360-west-edson-lead","name":"R360 West Edson TRD lead","operatorKey":"waste-connections-r360","facilityType":"trd","municipality":"Edson","province":"AB","latitude":53.5817,"longitude":-116.4356,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.wasteconnectionscanada.com/","websiteUrl":"https://www.wasteconnectionscanada.com/","sourceBriefNames":["R360 West Edson TRD"],"disposition":"approximate_facility"},
-  {"facilityKey":"r360-elk-point-lead","name":"R360 Elk Point landfill lead","operatorKey":"waste-connections-r360","facilityType":"landfill","municipality":"Elk Point","province":"AB","latitude":53.9,"longitude":-110.9,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.wasteconnectionscanada.com/","websiteUrl":"https://www.wasteconnectionscanada.com/","sourceBriefNames":["R360 Elk Point Landfill"],"disposition":"approximate_facility"},
-  {"facilityKey":"r360-willesden-green-lead","name":"R360 Willesden Green landfill lead","operatorKey":"waste-connections-r360","facilityType":"landfill","municipality":"Willesden Green","province":"AB","latitude":52.34,"longitude":-114.47,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.wasteconnectionscanada.com/","websiteUrl":"https://www.wasteconnectionscanada.com/","sourceBriefNames":["R360 Willesden Green Landfill"],"disposition":"approximate_facility"},
-  {"facilityKey":"r360-unity-lead","name":"R360 Unity cavern lead","operatorKey":"waste-connections-r360","facilityType":"salt_cavern","municipality":"Unity","province":"SK","latitude":52.445,"longitude":-109.168,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.wasteconnectionscanada.com/","websiteUrl":"https://www.wasteconnectionscanada.com/","sourceBriefNames":["R360 Unity Cavern"],"disposition":"approximate_facility"},
-  {"facilityKey":"clean-harbors-ryley-lead","name":"Clean Harbors Ryley Technical Services lead","operatorKey":"clean-harbors","facilityType":"class_i_landfill","municipality":"Ryley","province":"AB","latitude":53.288,"longitude":-112.428,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.cleanharbors.com/location/ryley","websiteUrl":"https://www.cleanharbors.com/","sourceBriefNames":["Clean Harbors Ryley"],"disposition":"approximate_facility"},
-  {"facilityKey":"aquatera-gp-septage-lead","name":"Aquatera Grande Prairie septage receiving lead","operatorKey":"aquatera","facilityType":"septage_receiving","municipality":"Grande Prairie","province":"AB","latitude":55.17,"longitude":-118.795,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.aquatera.ca/","websiteUrl":"https://www.aquatera.ca/","sourceBriefNames":["Aquatera Grande Prairie Septage Receiving"],"disposition":"approximate_facility"},
-  {"facilityKey":"edson-septage-lead","name":"Edson wastewater/septage receiving lead","operatorKey":"town-edson","facilityType":"septage_receiving","municipality":"Edson","province":"AB","latitude":53.5817,"longitude":-116.4356,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.edson.ca/","websiteUrl":"https://www.edson.ca/","sourceBriefNames":["Edson Wastewater Receiving"],"disposition":"approximate_facility"},
-  {"facilityKey":"west-yellowhead-landfill-lead","name":"West Yellowhead Regional Landfill lead","operatorKey":"yellowhead-region","facilityType":"class_ii_landfill","municipality":"Hinton","province":"AB","latitude":53.4001,"longitude":-117.5857,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://yhcounty.ca/","websiteUrl":"https://yhcounty.ca/","sourceBriefNames":["West Yellowhead Regional Landfill"],"disposition":"approximate_facility"},
-  {"facilityKey":"peers-transfer-lead","name":"Peers Transfer Station lead","operatorKey":"yellowhead-county","facilityType":"transfer_station","municipality":"Peers","province":"AB","latitude":53.658,"longitude":-116.005,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://yhcounty.ca/","websiteUrl":"https://yhcounty.ca/","sourceBriefNames":["Peers Transfer Station"],"disposition":"approximate_facility"},
-  {"facilityKey":"clairmont-crwm-lead","name":"Clairmont Centre for Recycling and Waste Management lead","operatorKey":"county-grande-prairie","facilityType":"class_ii_landfill","municipality":"Clairmont","province":"AB","latitude":55.261,"longitude":-118.793,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.countygp.ab.ca/","websiteUrl":"https://www.countygp.ab.ca/","sourceBriefNames":["Clairmont Centre for Recycling and Waste Management"],"disposition":"approximate_facility"},
-  {"facilityKey":"gfl-edson-service","name":"GFL Edson service location","operatorKey":"gfl","facilityType":"service_location","municipality":"Edson","province":"AB","latitude":53.5817,"longitude":-116.4356,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://gflenv.com/","websiteUrl":"https://gflenv.com/","sourceBriefNames":["GFL Edson"],"disposition":"service_location"},
-  {"facilityKey":"prairie-disposal-service","name":"Prairie Disposal service location lead","operatorKey":"prairie-disposal","facilityType":"service_location","municipality":"Grande Prairie","province":"AB","latitude":55.17,"longitude":-118.795,"coordinatePrecision":"community_only","coordinateSourceUrl":"https://www.google.com/maps/search/?api=1&query=Prairie+Disposal+Grande+Prairie","sourceBriefNames":["Prairie Disposal Ltd"],"disposition":"service_location"}
+  {
+    "facilityKey": "secure-fox-creek-lead",
+    "name": "SECURE Fox Creek facility lead",
+    "operatorKey": "secure",
+    "facilityType": "industrial_waste",
+    "municipality": "Fox Creek",
+    "province": "AB",
+    "latitude": 54.395,
+    "longitude": -116.802,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://secure.ca/facilities-and-landfills",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills",
+    "phone": "1-877-518-4321",
+    "sourceBriefNames": [
+      "SECURE Fox Creek"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "secure-edson-lead",
+    "name": "SECURE Edson facility lead",
+    "operatorKey": "secure",
+    "facilityType": "industrial_waste",
+    "municipality": "Edson",
+    "province": "AB",
+    "latitude": 53.5817,
+    "longitude": -116.4356,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://secure.ca/facilities-and-landfills",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills",
+    "phone": "1-877-518-4321",
+    "sourceBriefNames": [
+      "SECURE Edson"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "secure-whitecourt-lead",
+    "name": "SECURE Whitecourt facility lead",
+    "operatorKey": "secure",
+    "facilityType": "industrial_waste",
+    "municipality": "Whitecourt",
+    "province": "AB",
+    "latitude": 54.142,
+    "longitude": -115.685,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://secure.ca/facilities-and-landfills",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills",
+    "phone": "1-877-518-4321",
+    "sourceBriefNames": [
+      "SECURE Whitecourt"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "secure-grande-prairie-lead",
+    "name": "SECURE Grande Prairie facility lead",
+    "operatorKey": "secure",
+    "facilityType": "industrial_waste",
+    "municipality": "Grande Prairie",
+    "province": "AB",
+    "latitude": 55.17,
+    "longitude": -118.795,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://secure.ca/facilities-and-landfills",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills",
+    "phone": "1-877-518-4321",
+    "sourceBriefNames": [
+      "SECURE Grande Prairie"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "secure-fort-st-john-lead",
+    "name": "SECURE Fort St. John facility lead",
+    "operatorKey": "secure",
+    "facilityType": "industrial_waste",
+    "municipality": "Fort St. John",
+    "province": "BC",
+    "latitude": 56.246,
+    "longitude": -120.847,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://secure.ca/facilities-and-landfills",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills",
+    "phone": "1-877-518-4321",
+    "sourceBriefNames": [
+      "SECURE Fort St. John"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "secure-rycroft-lead",
+    "name": "SECURE Rycroft facility lead",
+    "operatorKey": "secure",
+    "facilityType": "industrial_waste",
+    "municipality": "Rycroft",
+    "province": "AB",
+    "latitude": 55.759,
+    "longitude": -118.711,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://secure.ca/facilities-and-landfills",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills",
+    "phone": "1-877-518-4321",
+    "sourceBriefNames": [
+      "SECURE Rycroft"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "secure-willingdon-lead",
+    "name": "SECURE Willingdon facility lead",
+    "operatorKey": "secure",
+    "facilityType": "industrial_waste",
+    "municipality": "Willingdon",
+    "province": "AB",
+    "latitude": 53.828,
+    "longitude": -112.119,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://secure.ca/facilities-and-landfills",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills",
+    "phone": "1-877-518-4321",
+    "sourceBriefNames": [
+      "SECURE Willingdon"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "secure-kindersley-lead",
+    "name": "SECURE Kindersley facility lead",
+    "operatorKey": "secure",
+    "facilityType": "industrial_waste",
+    "municipality": "Kindersley",
+    "province": "SK",
+    "latitude": 51.467,
+    "longitude": -109.157,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://secure.ca/facilities-and-landfills",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills",
+    "phone": "1-877-518-4321",
+    "sourceBriefNames": [
+      "SECURE Kindersley"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "r360-atmore-lead",
+    "name": "R360 Atmore cavern/SWD lead",
+    "operatorKey": "waste-connections-r360",
+    "facilityType": "cavern_swd",
+    "municipality": "Atmore",
+    "province": "AB",
+    "latitude": 54.8,
+    "longitude": -112.54,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.wasteconnectionscanada.com/",
+    "websiteUrl": "https://www.wasteconnectionscanada.com/",
+    "sourceBriefNames": [
+      "R360 Atmore Cavern/SWD"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "r360-brazeau-lead",
+    "name": "R360 Brazeau TRD lead",
+    "operatorKey": "waste-connections-r360",
+    "facilityType": "trd",
+    "municipality": "Brazeau County",
+    "province": "AB",
+    "latitude": 53.22,
+    "longitude": -115.13,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.wasteconnectionscanada.com/",
+    "websiteUrl": "https://www.wasteconnectionscanada.com/",
+    "sourceBriefNames": [
+      "R360 Brazeau TRD"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "r360-buck-creek-lead",
+    "name": "R360 Buck Creek TRD lead",
+    "operatorKey": "waste-connections-r360",
+    "facilityType": "trd",
+    "municipality": "Buck Creek",
+    "province": "AB",
+    "latitude": 53.23,
+    "longitude": -115.59,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.wasteconnectionscanada.com/",
+    "websiteUrl": "https://www.wasteconnectionscanada.com/",
+    "sourceBriefNames": [
+      "R360 Buck Creek TRD"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "r360-west-edson-lead",
+    "name": "R360 West Edson TRD lead",
+    "operatorKey": "waste-connections-r360",
+    "facilityType": "trd",
+    "municipality": "Edson",
+    "province": "AB",
+    "latitude": 53.5817,
+    "longitude": -116.4356,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.wasteconnectionscanada.com/",
+    "websiteUrl": "https://www.wasteconnectionscanada.com/",
+    "sourceBriefNames": [
+      "R360 West Edson TRD"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "r360-elk-point-lead",
+    "name": "R360 Elk Point landfill lead",
+    "operatorKey": "waste-connections-r360",
+    "facilityType": "landfill",
+    "municipality": "Elk Point",
+    "province": "AB",
+    "latitude": 53.9,
+    "longitude": -110.9,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.wasteconnectionscanada.com/",
+    "websiteUrl": "https://www.wasteconnectionscanada.com/",
+    "sourceBriefNames": [
+      "R360 Elk Point Landfill"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "r360-willesden-green-lead",
+    "name": "R360 Willesden Green landfill lead",
+    "operatorKey": "waste-connections-r360",
+    "facilityType": "landfill",
+    "municipality": "Willesden Green",
+    "province": "AB",
+    "latitude": 52.34,
+    "longitude": -114.47,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.wasteconnectionscanada.com/",
+    "websiteUrl": "https://www.wasteconnectionscanada.com/",
+    "sourceBriefNames": [
+      "R360 Willesden Green Landfill"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "r360-unity-lead",
+    "name": "R360 Unity cavern lead",
+    "operatorKey": "waste-connections-r360",
+    "facilityType": "salt_cavern",
+    "municipality": "Unity",
+    "province": "SK",
+    "latitude": 52.445,
+    "longitude": -109.168,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.wasteconnectionscanada.com/",
+    "websiteUrl": "https://www.wasteconnectionscanada.com/",
+    "sourceBriefNames": [
+      "R360 Unity Cavern"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "clean-harbors-ryley-lead",
+    "name": "Clean Harbors Ryley Technical Services lead",
+    "operatorKey": "clean-harbors",
+    "facilityType": "class_i_landfill",
+    "municipality": "Ryley",
+    "province": "AB",
+    "latitude": 53.288,
+    "longitude": -112.428,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.cleanharbors.com/location/ryley",
+    "websiteUrl": "https://www.cleanharbors.com/",
+    "sourceBriefNames": [
+      "Clean Harbors Ryley"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "aquatera-gp-septage-lead",
+    "name": "Aquatera Grande Prairie septage receiving lead",
+    "operatorKey": "aquatera",
+    "facilityType": "septage_receiving",
+    "municipality": "Grande Prairie",
+    "province": "AB",
+    "latitude": 55.17,
+    "longitude": -118.795,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.aquatera.ca/",
+    "websiteUrl": "https://www.aquatera.ca/",
+    "sourceBriefNames": [
+      "Aquatera Grande Prairie Septage Receiving"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "edson-septage-lead",
+    "name": "Edson wastewater/septage receiving lead",
+    "operatorKey": "town-edson",
+    "facilityType": "septage_receiving",
+    "municipality": "Edson",
+    "province": "AB",
+    "latitude": 53.5817,
+    "longitude": -116.4356,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.edson.ca/",
+    "websiteUrl": "https://www.edson.ca/",
+    "sourceBriefNames": [
+      "Edson Wastewater Receiving"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "west-yellowhead-landfill-lead",
+    "name": "West Yellowhead Regional Landfill lead",
+    "operatorKey": "yellowhead-region",
+    "facilityType": "class_ii_landfill",
+    "municipality": "Hinton",
+    "province": "AB",
+    "latitude": 53.4001,
+    "longitude": -117.5857,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://yhcounty.ca/",
+    "websiteUrl": "https://yhcounty.ca/",
+    "sourceBriefNames": [
+      "West Yellowhead Regional Landfill"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "peers-transfer-lead",
+    "name": "Peers Transfer Station lead",
+    "operatorKey": "yellowhead-county",
+    "facilityType": "transfer_station",
+    "municipality": "Peers",
+    "province": "AB",
+    "latitude": 53.658,
+    "longitude": -116.005,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://yhcounty.ca/",
+    "websiteUrl": "https://yhcounty.ca/",
+    "sourceBriefNames": [
+      "Peers Transfer Station"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "clairmont-crwm-lead",
+    "name": "Clairmont Centre for Recycling and Waste Management lead",
+    "operatorKey": "county-grande-prairie",
+    "facilityType": "class_ii_landfill",
+    "municipality": "Clairmont",
+    "province": "AB",
+    "latitude": 55.261,
+    "longitude": -118.793,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.countygp.ab.ca/",
+    "websiteUrl": "https://www.countygp.ab.ca/",
+    "sourceBriefNames": [
+      "Clairmont Centre for Recycling and Waste Management"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "gfl-edson-service",
+    "name": "GFL Edson service location",
+    "operatorKey": "gfl",
+    "facilityType": "service_location",
+    "municipality": "Edson",
+    "province": "AB",
+    "latitude": 53.5817,
+    "longitude": -116.4356,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://gflenv.com/",
+    "websiteUrl": "https://gflenv.com/",
+    "sourceBriefNames": [
+      "GFL Edson"
+    ],
+    "disposition": "service_location"
+  },
+  {
+    "facilityKey": "prairie-disposal-service",
+    "name": "Prairie Disposal service location lead",
+    "operatorKey": "prairie-disposal",
+    "facilityType": "service_location",
+    "municipality": "Grande Prairie",
+    "province": "AB",
+    "latitude": 55.17,
+    "longitude": -118.795,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.google.com/maps/search/?api=1&query=Prairie+Disposal+Grande+Prairie",
+    "sourceBriefNames": [
+      "Prairie Disposal Ltd"
+    ],
+    "disposition": "service_location"
+  },
+  {
+    "facilityKey": "gfl-nisku-lead",
+    "name": "GFL Environmental Nisku industrial hub lead",
+    "operatorKey": "gfl",
+    "facilityType": "hazardous_liquid_waste",
+    "municipality": "Nisku",
+    "province": "AB",
+    "latitude": 53.33,
+    "longitude": -113.55,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://gflenv.com/",
+    "websiteUrl": "https://gflenv.com/",
+    "sourceBriefNames": [
+      "GFL Nisku/Edmonton"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "gfl-calgary-lead",
+    "name": "GFL Environmental Calgary industrial hub lead",
+    "operatorKey": "gfl",
+    "facilityType": "hazardous_liquid_waste",
+    "municipality": "Calgary",
+    "province": "AB",
+    "latitude": 51.05,
+    "longitude": -114.07,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://gflenv.com/",
+    "websiteUrl": "https://gflenv.com/",
+    "sourceBriefNames": [
+      "GFL Calgary"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "clean-harbors-nisku-lead",
+    "name": "Clean Harbors Nisku lead",
+    "operatorKey": "clean_harbors",
+    "facilityType": "hazardous_waste",
+    "municipality": "Nisku",
+    "province": "AB",
+    "latitude": 53.33,
+    "longitude": -113.55,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.cleanharbors.com/",
+    "websiteUrl": "https://www.cleanharbors.com/",
+    "sourceBriefNames": [
+      "Clean Harbors Nisku"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "clean-harbors-fort-mcmurray-lead",
+    "name": "Clean Harbors Fort McMurray lead",
+    "operatorKey": "clean_harbors",
+    "facilityType": "hazardous_waste",
+    "municipality": "Fort McMurray",
+    "province": "AB",
+    "latitude": 56.73,
+    "longitude": -111.38,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.cleanharbors.com/",
+    "websiteUrl": "https://www.cleanharbors.com/",
+    "sourceBriefNames": [
+      "Clean Harbors Fort McMurray"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "wm-thorhild-landfill-lead",
+    "name": "WM Thorhild Landfill lead",
+    "operatorKey": "waste_management",
+    "facilityType": "class_ii_landfill",
+    "municipality": "Thorhild",
+    "province": "AB",
+    "latitude": 54.16,
+    "longitude": -113.12,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.wm.com/",
+    "websiteUrl": "https://www.wm.com/",
+    "sourceBriefNames": [
+      "WM Thorhild Landfill"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "wm-pembina-landfill-lead",
+    "name": "WM Pembina Landfill lead",
+    "operatorKey": "waste_management",
+    "facilityType": "class_ii_landfill",
+    "municipality": "Drayton Valley",
+    "province": "AB",
+    "latitude": 53.22,
+    "longitude": -114.98,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.wm.com/",
+    "websiteUrl": "https://www.wm.com/",
+    "sourceBriefNames": [
+      "Pembina Landfill"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "aquatera-grande-prairie-landfill-lead",
+    "name": "Aquatera Utilities landfill lead",
+    "operatorKey": "aquatera",
+    "facilityType": "class_ii_landfill",
+    "municipality": "Grande Prairie",
+    "province": "AB",
+    "latitude": 55.17,
+    "longitude": -118.8,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.aquatera.ca/",
+    "websiteUrl": "https://www.aquatera.ca/",
+    "sourceBriefNames": [
+      "Aquatera Utilities Inc. - Landfill"
+    ],
+    "disposition": "approximate_facility"
+  },
+  {
+    "facilityKey": "county-gp-regional-landfill-ambiguous",
+    "name": "Regional Landfill (County of Grande Prairie No. 1) \u2014 ambiguous",
+    "operatorKey": "county_of_grande_prairie",
+    "facilityType": "class_ii_landfill",
+    "municipality": "Grande Prairie",
+    "province": "AB",
+    "coordinatePrecision": "unknown",
+    "websiteUrl": "https://www.countygp.ab.ca/",
+    "sourceBriefNames": [
+      "Regional Landfill (Grande Prairie County No. 1)"
+    ],
+    "disposition": "ambiguous"
+  },
+  {
+    "facilityKey": "secure-nosehill-ambiguous",
+    "name": "SECURE Nosehill \u2014 ambiguous location",
+    "operatorKey": "secure",
+    "facilityType": "trd",
+    "province": "AB",
+    "coordinatePrecision": "unknown",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills",
+    "sourceBriefNames": [
+      "SECURE Nosehill"
+    ],
+    "disposition": "ambiguous"
+  },
+  {
+    "facilityKey": "recycle-west-service",
+    "name": "Recycle West (service \u2014 bulk liquid industrial waste)",
+    "operatorKey": "recycle_west",
+    "facilityType": "service",
+    "province": "AB",
+    "coordinatePrecision": "unknown",
+    "sourceBriefNames": [
+      "Recycle West"
+    ],
+    "disposition": "service_location"
+  },
+  {
+    "facilityKey": "heartland-disposal-edson-service",
+    "name": "Heartland Disposal & Recycling (service \u2014 Edson & Central AB)",
+    "operatorKey": "heartland_disposal",
+    "facilityType": "service",
+    "municipality": "Edson",
+    "province": "AB",
+    "latitude": 53.58,
+    "longitude": -116.44,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.edson.ca/",
+    "sourceBriefNames": [
+      "Heartland Disposal & Recycling"
+    ],
+    "disposition": "service_location"
+  },
+  {
+    "facilityKey": "elite-vac-steam-grande-prairie-service",
+    "name": "Elite Vac & Steam (hauler \u2014 Grande Prairie & Peace Region)",
+    "operatorKey": "elite_vac_steam",
+    "facilityType": "hauler",
+    "municipality": "Grande Prairie",
+    "province": "AB",
+    "latitude": 55.17,
+    "longitude": -118.8,
+    "coordinatePrecision": "community_only",
+    "coordinateSourceUrl": "https://www.cityofgp.com/",
+    "sourceBriefNames": [
+      "Elite Vac & Steam"
+    ],
+    "disposition": "service_location"
+  },
+  {
+    "facilityKey": "norm-survey-canada-service",
+    "name": "NORM Survey of Canada (service \u2014 NORM disposal)",
+    "operatorKey": "norm_survey",
+    "facilityType": "service",
+    "province": "AB",
+    "coordinatePrecision": "unknown",
+    "sourceBriefNames": [
+      "NORM Survey of Canada"
+    ],
+    "disposition": "service_location"
+  }
 ]
