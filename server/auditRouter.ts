@@ -7,7 +7,7 @@ import { z } from "zod";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { auditPackageAccess, auditPackageItems, auditPackages, ccaSchedules, clientAdjustments, competencySignoffs, complianceDocuments, disposalTickets, drivingEvents, dutyRecords, faultCodes, fieldTicketDocuments, fieldTicketEvents, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, gstReturns, iftaReturns, inspections, insuranceClaims, insurancePolicies, loads, maintenanceDefects, operators, programAcknowledgements, recallUnitStatus, safetyEvents, tailgateMeetings, tireInstallations, trainingRecords, units, workOrderReleases, workOrders, writtenProgramVersions } from "../drizzle/schema";
+import { auditPackageAccess, auditPackageItems, auditPackages, ccaSchedules, clientAdjustments, competencySignoffs, complianceDocuments, disposalTickets, drivingEvents, dutyRecords, faultCodes, fieldTicketDocuments, fieldTicketEvents, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, gstReturns, iftaReturns, inspections, insuranceClaims, insurancePolicies, loads, maintenanceDefects, operators, programAcknowledgements, recallUnitStatus, safetyEvents, tailgateMeetings, tireInstallations, trainingRecords, units, workOrderReleases, workOrders, writtenProgramVersions, vendors, vendorBills, commercialApprovals, commercialApprovalSignatures, contractorPayables, facilityStatements, facilityStatementLines, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries } from "../drizzle/schema";
 import { assemble, releaseDecision, sha256, type PackageKind, type RawItem } from "./_core/auditPackage";
 import { renderPdf } from "./_core/ticketPdf";
 import { storagePut, storageGetSignedUrl } from "./storage";
@@ -18,6 +18,23 @@ const inPeriod = <T extends { [k: string]: unknown }>(rows: T[], key: keyof T, f
 const row = (r: object) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v instanceof Date ? v.toISOString() : v]));
 
 /** What the chain holds for a subject, by kind. Nothing is asserted here; rows are named and hashed as they are. */
+/** P7.7 registry documents linked to any of these records — current versions, with their hashes and delivery log. */
+async function registryDocumentsFor(db: Awaited<ReturnType<typeof dbOrThrow>>, keys: [string, string][]): Promise<RawItem[]> {
+  const out: RawItem[] = [];
+  const seen = new Set<number>();
+  for (const [recordType, recordRef] of keys) {
+    const links = await db.select({ documentId: commercialDocumentLinks.documentId }).from(commercialDocumentLinks).where(and(eq(commercialDocumentLinks.recordType, recordType), eq(commercialDocumentLinks.recordRef, recordRef)));
+    for (const l of links) {
+      if (seen.has(l.documentId)) continue; seen.add(l.documentId);
+      const d = (await db.select().from(commercialDocuments).where(eq(commercialDocuments.id, l.documentId)).limit(1))[0];
+      if (!d) continue;
+      const deliveries = await db.select().from(commercialDocumentDeliveries).where(eq(commercialDocumentDeliveries.documentId, d.id));
+      out.push({ itemKind: "registry_document", sourceTable: "commercialDocuments", sourceId: d.id, sourceRef: d.documentRef, title: `${d.documentType} ${d.documentRef} v${d.version} (${d.status}) sha256 ${d.contentHash.slice(0, 12)}… — ${deliveries.length} deliver${deliveries.length === 1 ? "y" : "ies"}`, row: { ...row(d), deliveries: deliveries.map(x => ({ deliveryRef: x.deliveryRef, channel: x.channel, status: x.status, sentAt: x.sentAt?.toISOString() ?? null, deliveredAt: x.deliveredAt?.toISOString() ?? null, failureReason: x.failureReason })) } });
+    }
+  }
+  return out;
+}
+
 async function gather(kind: PackageKind, subjectRef: string, from: Date | null, to: Date | null): Promise<{ subjectType: string; items: RawItem[] }> {
   const db = await dbOrThrow();
   const items: RawItem[] = [];
@@ -45,10 +62,37 @@ async function gather(kind: PackageKind, subjectRef: string, from: Date | null, 
     for (const d of inPeriod(await db.select().from(dutyRecords).where(eq(dutyRecords.operatorId, op.id)), "startedAt", from, to)) items.push({ itemKind: "duty_record", sourceTable: "dutyRecords", sourceId: d.id, sourceRef: null, title: `Duty ${d.dutyStatus} ${d.startedAt.toISOString()}`, row: row(d) });
     return { subjectType: "operator", items };
   }
+  if (kind === "vendor") {
+    const v = (await db.select().from(vendors).where(eq(vendors.vendorRef, subjectRef)).limit(1))[0];
+    if (!v) throw new TRPCError({ code: "NOT_FOUND", message: `Vendor ${subjectRef} not found` });
+    items.push({ itemKind: "vendor", sourceTable: "vendors", sourceId: v.id, sourceRef: v.vendorRef, title: `Vendor ${v.name}${v.orgRef ? ` (organization ${v.orgRef})` : " (not linked to an organization)"}`, row: row(v) });
+    const bills = inPeriod(await db.select().from(vendorBills).where(eq(vendorBills.vendorId, v.id)), "invoiceDate", from, to);
+    for (const b of bills) {
+      items.push({ itemKind: "vendor_bill", sourceTable: "vendorBills", sourceId: b.id, sourceRef: b.billRef, title: `Vendor bill ${b.billRef} — ${b.vendorInvoiceNumber} (${b.status}, ${b.matchOutcome ?? "unmatched"})`, row: row(b) });
+      // The approval ledger: what the ladder required at the time, and who signed, in order — the identities withheld by policy, the roles kept.
+      for (const subjectType of ["vendor_bill", "vendor_bill_payment"]) {
+        const appr = (await db.select().from(commercialApprovals).where(and(eq(commercialApprovals.subjectType, subjectType), eq(commercialApprovals.subjectRef, b.billRef))).limit(1))[0];
+        if (!appr) continue;
+        const sigs = await db.select().from(commercialApprovalSignatures).where(eq(commercialApprovalSignatures.commercialApprovalId, appr.id)).orderBy(commercialApprovalSignatures.sequence);
+        items.push({ itemKind: "approval_ledger", sourceTable: "commercialApprovals", sourceId: appr.id, sourceRef: appr.approvalRef, title: `Approval ledger ${appr.approvalRef} (${subjectType}, ${appr.status}): ${sigs.map(s => `${s.decision} by ${(typeof s.rolesAtApproval === "string" ? JSON.parse(s.rolesAtApproval) : s.rolesAtApproval as string[]).join("/")} #${s.sequence}`).join("; ") || "no signatures"}`, row: { ...row(appr), signatures: sigs.map(s => ({ sequence: s.sequence, decision: s.decision, roles: typeof s.rolesAtApproval === "string" ? JSON.parse(s.rolesAtApproval) : s.rolesAtApproval, at: s.at.toISOString(), note: s.note })) } });
+      }
+      if (b.status === "ready_to_pay" || b.status === "paid") { if (!(await db.select({ id: commercialApprovals.id }).from(commercialApprovals).where(and(eq(commercialApprovals.subjectType, "vendor_bill"), eq(commercialApprovals.subjectRef, b.billRef))).limit(1))[0]) items.push({ itemKind: "gap_note", sourceTable: "vendorBills", sourceId: b.id, sourceRef: b.billRef, title: `Bill ${b.billRef} is ${b.status} with no approval-ledger record (approved before the ladder existed, or outside it)`, row: {} }); }
+    }
+    if (v.orgRef) {
+      for (const p of inPeriod(await db.select().from(contractorPayables).where(eq(contractorPayables.payeeOrgRef, v.orgRef)), "createdAt", from, to)) items.push({ itemKind: "contractor_payable", sourceTable: "contractorPayables", sourceId: p.id, sourceRef: p.payableRef, title: `Contractor payable ${p.payableRef} (${p.state}) ${p.currency} ${(p.grossAmountCents / 100).toFixed(2)}`, row: row(p) });
+      for (const st of inPeriod(await db.select().from(facilityStatements).where(eq(facilityStatements.facilityOrgRef, v.orgRef)), "importedAt", from, to)) {
+        items.push({ itemKind: "facility_statement", sourceTable: "facilityStatements", sourceId: st.id, sourceRef: st.statementRef, title: `Facility statement ${st.statementRef} ${st.periodStart}–${st.periodEnd}: ${st.matchedCount} matched, ${st.varianceCount} variance, ${st.unmatchedCount} unmatched, ${st.ambiguousCount} ambiguous (${st.status})`, row: row(st) });
+        for (const ln of await db.select().from(facilityStatementLines).where(eq(facilityStatementLines.facilityStatementId, st.id))) items.push({ itemKind: "facility_statement_line", sourceTable: "facilityStatementLines", sourceId: ln.id, sourceRef: `${st.statementRef}#${ln.lineNo}`, title: `Line ${ln.lineNo}: ${ln.matchOutcome}${ln.resolution ? `, resolved ${ln.resolution}` : ""}`, row: row(ln) });
+      }
+    }
+    for (const d of await registryDocumentsFor(db, [["vendor", v.vendorRef ?? String(v.id)], ...(v.orgRef ? [["organization", v.orgRef] as [string, string]] : [])])) items.push(d);
+    return { subjectType: "vendor", items };
+  }
   if (kind === "job" || kind === "customer") {
     const t = (await db.select().from(fieldTickets).where(eq(fieldTickets.ticketNumber, subjectRef)).limit(1))[0];
     if (!t) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${subjectRef} not found` });
     items.push({ itemKind: "field_ticket", sourceTable: "fieldTickets", sourceId: t.id, sourceRef: t.ticketNumber, title: `Field ticket ${t.ticketNumber}`, row: row(t) });
+    for (const d of await registryDocumentsFor(db, [["field_ticket", t.ticketNumber]])) items.push(d);
     for (const e of await db.select().from(fieldTicketEvents).where(eq(fieldTicketEvents.fieldTicketId, t.id))) items.push({ itemKind: e.customerBillable === "no" ? "company_activity" : "ticket_event", sourceTable: "fieldTicketEvents", sourceId: e.id, sourceRef: null, title: `${e.eventType} ${e.occurredAt.toISOString()}`, row: row(e) });
     for (const r of await db.select().from(fieldTicketRevisions).where(eq(fieldTicketRevisions.fieldTicketId, t.id))) items.push({ itemKind: "ticket_revision", sourceTable: "fieldTicketRevisions", sourceId: r.id, sourceRef: r.documentRef, title: `R${r.revision} ${r.kind}`, row: row(r), storedHash: r.snapshotHash });
     for (const s of await db.select().from(fieldTicketSignatures).where(eq(fieldTicketSignatures.fieldTicketId, t.id))) items.push({ itemKind: "signature", sourceTable: "fieldTicketSignatures", sourceId: s.id, sourceRef: null, title: `Signature ${s.signerName ?? ""} (${s.signatureMethod})`, row: row(s), storedHash: s.payloadHash });
@@ -104,7 +148,7 @@ async function gather(kind: PackageKind, subjectRef: string, from: Date | null, 
 
 export const auditRouter = router({
   packagePrepare: roleProcedure("audit.packagePrepare")
-    .input(z.object({ kind: z.enum(["vehicle", "driver", "job", "customer", "incident", "tax", "cor", "insurance"]), subjectRef: z.string().min(1).max(80), periodFrom: z.coerce.date().nullable().optional(), periodTo: z.coerce.date().nullable().optional(), recipient: z.string().min(2).max(200), purpose: z.string().min(5).max(400) }))
+    .input(z.object({ kind: z.enum(["vehicle", "driver", "job", "customer", "incident", "tax", "cor", "insurance", "vendor"]), subjectRef: z.string().min(1).max(80), periodFrom: z.coerce.date().nullable().optional(), periodTo: z.coerce.date().nullable().optional(), recipient: z.string().min(2).max(200), purpose: z.string().min(5).max(400) }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const g = await gather(input.kind, input.subjectRef, input.periodFrom ?? null, input.periodTo ?? null);

@@ -5686,7 +5686,7 @@ export type InsertOffboardings = typeof offboardings.$inferInsert;
 export const auditPackages = mysqlTable("auditPackages", {
   id: int("id").autoincrement().primaryKey(),
   packageRef: varchar("packageRef", { length: 64 }).notNull().unique(),
-  kind: mysqlEnum("kind", ["vehicle", "driver", "job", "customer", "incident", "tax", "cor", "insurance"]).notNull(),
+  kind: mysqlEnum("kind", ["vehicle", "driver", "job", "customer", "incident", "tax", "cor", "insurance", "vendor"]).notNull(),
   subjectType: varchar("subjectType", { length: 40 }).notNull(),
   subjectRef: varchar("subjectRef", { length: 80 }).notNull(),
   periodFrom: timestamp("periodFrom"),

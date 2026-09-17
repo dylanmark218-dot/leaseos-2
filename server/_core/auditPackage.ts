@@ -11,7 +11,7 @@
  */
 import { createHash } from "node:crypto";
 
-export type PackageKind = "vehicle" | "driver" | "job" | "customer" | "incident" | "tax" | "cor" | "insurance";
+export type PackageKind = "vehicle" | "driver" | "job" | "customer" | "incident" | "tax" | "cor" | "insurance" | "vendor";
 
 export type RawItem = { itemKind: string; sourceTable: string; sourceId: number; sourceRef: string | null; title: string; row: Record<string, unknown>; storageKey?: string | null; storedHash?: string | null };
 export type ManifestItem = { seq: number; itemKind: string; sourceTable: string; sourceId: number; sourceRef: string | null; title: string; contentHash: string; storageKey: string | null; redactions: string[] };
@@ -26,6 +26,8 @@ export const REDACTION_POLICIES: Readonly<Record<PackageKind, { policy: string; 
   tax: { policy: "tax_v1", fields: /^(preparedByUserId|reviewedByUserId|finalizedByUserId)$/, itemKinds: null, reason: "preparer identities withheld; roles appear" },
   cor: { policy: "cor_v1", fields: /^(userId|approvedByUserId|acknowledgedBy|voiceTranscript|contactJson|privateDetail)$/, itemKinds: /^(medical|hr_)/, reason: "worker identities appear by employee number where the audit requires; voice transcripts and medical detail withheld" },
   insurance: { policy: "insurance_v1", fields: /^(openedByUserId|coverageVerifiedByUserId|annualPremium|contactJson)$/, itemKinds: /^(medical|hr_|customer_rate)/, reason: "premium, identities and medical detail withheld" },
+  // P7.8 — a vendor package shows what was billed, matched, approved and paid, and by which role; internal user ids and rate cards are withheld.
+  vendor: { policy: "vendor_v1", fields: /^(recordedByUserId|codedByUserId|approvedByUserId|paymentReleasedByUserId|preparedByUserId|resolvedByUserId|importedByUserId|userId|startedByUserId|registeredByUserId|linkedByUserId)$/, itemKinds: /^(internal_|customer_rate|payroll)/, reason: "internal user ids withheld; approvals appear by role and sequence" },
 };
 
 /** What each kind should contain. A required kind with no items is a named gap. */
@@ -38,6 +40,7 @@ export const COMPLETENESS: Readonly<Record<PackageKind, { itemKind: string; labe
   tax: [{ itemKind: "gst_return", label: "GST/HST return (finalized or filed)" }, { itemKind: "ifta_return", label: "IFTA return (finalized or filed)" }],
   cor: [{ itemKind: "written_program", label: "Approved written program versions" }, { itemKind: "program_acknowledgement", label: "Program acknowledgements" }, { itemKind: "tailgate", label: "Tailgate meetings in period" }, { itemKind: "inspection", label: "Inspections in period" }, { itemKind: "training", label: "Verified training in period" }, { itemKind: "incident", label: "Incidents in period (or a statement that there were none)" }],
   insurance: [{ itemKind: "policy", label: "Policies in force with coverage verification" }, { itemKind: "claim", label: "Claims in period" }, { itemKind: "incident", label: "Incidents in period" }],
+  vendor: [{ itemKind: "vendor", label: "Vendor record" }, { itemKind: "vendor_bill", label: "Vendor bills in period" }, { itemKind: "approval_ledger", label: "Approval ledger for every approved bill" }],
 };
 
 export function canonicalJson(v: unknown): string {

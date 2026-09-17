@@ -1,9 +1,18 @@
 /**
  * P7.1 — Commercial Office configuration (0133), through the router.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
+
+// P7.8 packages write a cover sheet through the storage layer; kept in memory here, as auditPackage.test does.
+const objects = new Map<string, Buffer>();
+vi.mock("./storage", () => ({
+  storagePut: async (relKey: string, data: Buffer | Uint8Array | string) => { objects.set(relKey, Buffer.from(data as never)); return { key: relKey, url: `mem://${relKey}` }; },
+  storageGet: async (relKey: string) => ({ key: relKey, url: `mem://${relKey}` }),
+  storageGetSignedUrl: async (relKey: string) => `mem://${relKey}`,
+  storageRead: async (relKey: string) => { const b = objects.get(relKey); if (!b) throw new Error(`no object ${relKey}`); return b; },
+}));
 
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
@@ -380,5 +389,45 @@ d("P7.7 — the commercial document registry over the vault", () => {
     const wd = await callerFor(mgr).commercialOffice.documents.withdraw({ documentRef: v2.documentRef, reason: "issued to the wrong counterparty; reissued" });
     expect(wd.note).toContain("not a deletion");
     expect((await c.commercialOffice.documents.get({ documentRef: v2.documentRef })).document).toMatchObject({ status: "withdrawn", contentHash: sha("corrected pdf") });
+  }, 60_000);
+});
+
+d("P7.8 — the vendor audit package, from the ledger, the statements and the registry", () => {
+  const sha = (s: string) => require("node:crypto").createHash("sha256").update(s).digest("hex") as string;
+  it("bundles the vendor's bills with their approval-ledger signatures by role (user ids withheld), the registry documents linked to it, names a bill approved outside the ladder as a gap, is byte-reproducible, and is released only by a second person after a controller prepared it", async () => {
+    const book = await org(), vendorOrg = await org();
+    const bookkeeper = await member(book, ["bookkeeper"]), controller = await member(book, ["controller"]), mgr1 = await member(book, ["management"]), mgr2 = await member(book, ["management"]);
+    const entityId = 1_700_000 + Math.floor(Math.random() * 90_000);
+    const vendorRef = `VEN-${rnd()}`;
+    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [vendorRef, `Big Iron ${rnd()}`]);
+    await callerFor(bookkeeper).commercialOffice.roles.assign({ orgRef: vendorOrg, roleKey: "vendor" });
+    await callerFor(bookkeeper).commercialOffice.links.set({ recordType: "vendor", recordId: v.insertId, orgRef: vendorOrg });
+    const billRef = `BILL-${rnd()}`;
+    await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, recordedByUserId, vendorInvoiceNumber, invoiceDate, receivedAt, dueAt, currency, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?,?,?,?,?, '2026-08-01', '2026-08-02 00:00:00', '2026-08-31 00:00:00', 'CAD', 4000000, 0, 4000000, 'match', 'needs_approval')", [billRef, entityId, v.insertId, bookkeeper, `VI-${rnd()}`]);
+    await callerFor(mgr1).vendor.billApprove({ billRef, codingCategory: "fleet_capital" });
+    await callerFor(mgr2).vendor.billApprove({ billRef, codingCategory: "fleet_capital" });
+    // A bill that was paid before the ladder existed: no ledger record — the package must say so.
+    const legacyRef = `BILL-${rnd()}`;
+    await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, recordedByUserId, vendorInvoiceNumber, invoiceDate, receivedAt, dueAt, currency, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?,?,?,?,?, '2026-08-10', '2026-08-11 00:00:00', '2026-09-10 00:00:00', 'CAD', 50000, 0, 50000, 'match', 'paid')", [legacyRef, entityId, v.insertId, bookkeeper, `VI-${rnd()}`]);
+    // A registry document linked to the vendor, with a delivery.
+    const doc = await callerFor(bookkeeper).commercialOffice.documents.register({ documentType: "remittance", title: "Remittance advice August", contentHash: sha("remittance"), storageKey: "documents/rem-aug.pdf", counterpartyOrgRef: vendorOrg, links: [{ recordType: "vendor", recordRef: vendorRef }] });
+    await callerFor(bookkeeper).commercialOffice.documents.deliveryRecord({ documentRef: doc.documentRef, channel: "email", recipientOrgRef: vendorOrg, status: "delivered", deliveryEvidence: "read receipt" });
+    const pkg = await callerFor(controller).audit.packagePrepare({ kind: "vendor", subjectRef: vendorRef, periodFrom: new Date("2026-08-01T00:00:00Z"), periodTo: new Date("2026-08-31T23:59:59Z"), recipient: "External accountant — year-end", purpose: "AP substantiation" });
+    const got = await callerFor(controller).audit.packageGet({ packageRef: pkg.packageRef });
+    const kinds = got.items.map(i => i.itemKind);
+    expect(kinds).toEqual(expect.arrayContaining(["vendor", "vendor_bill", "approval_ledger", "registry_document", "gap_note"]));
+    const ledger = got.items.find(i => i.itemKind === "approval_ledger")!;
+    expect(ledger.title).toMatch(/approved by management #1; approved by management #2/);
+    expect(JSON.stringify(ledger)).not.toContain(String(mgr1));   // identities withheld, roles kept
+    expect(got.items.find(i => i.itemKind === "gap_note")!.title).toContain(`${legacyRef} is paid with no approval-ledger record`);
+    expect(got.items.find(i => i.itemKind === "registry_document")!.title).toContain("1 delivery");
+    expect(got.missing).toEqual([]);   // vendor, bills and a ledger are all present
+    // Reproducible: preparing the same package again yields the same manifest hash.
+    const again = await callerFor(controller).audit.packagePrepare({ kind: "vendor", subjectRef: vendorRef, periodFrom: new Date("2026-08-01T00:00:00Z"), periodTo: new Date("2026-08-31T23:59:59Z"), recipient: "External accountant — year-end", purpose: "AP substantiation" });
+    expect((await callerFor(controller).audit.packageGet({ packageRef: again.packageRef })).manifestHash).toBe(got.manifestHash);
+    // Release needs a second person.
+    await expect(callerFor(controller).audit.packageRelease({ packageRef: pkg.packageRef, note: "releasing to the accountant" })).rejects.toThrow(/preparer may not release/);
+    const rel = await callerFor(mgr1).audit.packageRelease({ packageRef: pkg.packageRef, note: "Released to the external accountant for AP substantiation" });
+    expect(rel.status).toBe("released");
   }, 60_000);
 });
