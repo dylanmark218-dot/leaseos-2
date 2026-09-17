@@ -79,7 +79,7 @@ import {
   users,
   externalIdentities,
   integrationClients,
-  coreRecordOwnership, organizationMemberships } from "../drizzle/schema";
+  coreRecordOwnership, organizationMemberships, fieldTickets } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -802,6 +802,26 @@ export async function userInScope(userId: number, scope: TenantScope): Promise<b
   if (!db) return false;
   const active = await db.select({ orgRef: organizationMemberships.orgRef }).from(organizationMemberships).where(and(eq(organizationMemberships.userId, userId), eq(organizationMemberships.status, "active")));
   return scope.tenantId === SINGLE_TENANT_ID ? active.length === 0 : active.some(m => m.orgRef === scope.tenantId);
+}
+
+/** A job the scope may see (jobs.orgRef, 0132), or null. */
+export async function jobInScope(jobId: number, scope: TenantScope): Promise<{ id: number; jobCode: string } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select({ id: jobs.id, jobCode: jobs.jobCode }).from(jobs).where(and(eq(jobs.id, jobId), orgScopeWhere(jobs, scope))).limit(1))[0] ?? null;
+}
+/**
+ * A field ticket the scope may see, or null: through its job when it has one, else through its unit's
+ * owner, else only for the historical single tenant (nothing owns it). Not found otherwise.
+ */
+export async function fieldTicketInScope(ticketNumber: string, scope: TenantScope): Promise<{ id: number; jobId: number | null; unitId: number | null } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const t = (await db.select({ id: fieldTickets.id, jobId: fieldTickets.jobId, unitId: fieldTickets.unitId }).from(fieldTickets).where(eq(fieldTickets.ticketNumber, ticketNumber)).limit(1))[0];
+  if (!t) return null;
+  if (t.jobId != null) return (await jobInScope(t.jobId, scope)) ? t : null;
+  if (t.unitId != null) return (await unitInScope(t.unitId, scope)) ? t : null;
+  return scope.tenantId === SINGLE_TENANT_ID ? t : null;
 }
 
 export async function listOperators(scope: TenantScope) {

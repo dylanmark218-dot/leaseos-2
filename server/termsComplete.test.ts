@@ -76,7 +76,8 @@ d("terms complete the closeout", () => {
     const terms = await callerFor(office).closeout.termsRecord({ customerAccountRef: acctRef, title: "MSA 2026", standbyBillable: "yes", standbyFreeMinutes: 0, customerHoldBillable: "yes", weatherHoldBillable: "no", travelToDisposalBillable: "yes", disposalQueueBillable: "yes", disposalBillable: "yes", returnTravelBillable: "yes", minimumHours: 4, clauses: { minimum: "§3.1", return_travel: "§6.1" }, effectiveFrom: new Date("2026-01-01T00:00:00Z"), sourceDocumentEvidenceId: 1 });
     await callerFor(controller).closeout.termsApprove({ termsRef: terms.termsRef });
     const c = callerFor(driver).closeout;
-    const t = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: 142, operatorId: 7, serviceDescription: "Short call-out", postSiteRequired: true });
+    const [fixtureUnit] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
+    const t = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: fixtureUnit.insertId, operatorId: 7, serviceDescription: "Short call-out", postSiteRequired: true });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("07:00"), endedAt: at("09:30"), source: "pto", confidence: "high" });
     const prep = await c.sitePrepare({ ticketNumber: t.ticketNumber, siteWorkCompleteAt: at("09:30") });
     expect(prep.snapshot).toMatchObject({ siteBillableHours: 4, minimumApplied: { minimumHours: 4, billableHoursBefore: 2.5, ruleRef: `${terms.termsRef} v1 §3.1` } });

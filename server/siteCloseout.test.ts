@@ -156,7 +156,8 @@ d("a day on the lease, signed before the truck leaves", () => {
     await callerFor(office).closeout.authoritySet({ customerAccountRef: acctRef, signatoryName: "M. Johnson", signatoryRole: "Site Consultant", externalIdentityRef: inv.identityRef, mayApproveStandby: true, extraWorkLimitCents: 500_000 });
 
     // The day: arrival, work, a customer hold the contract pays for, work, complete at 17:06.
-    const t = await callerFor(driver).closeout.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: 142, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: true });
+    const [fixtureUnit] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
+    const t = await callerFor(driver).closeout.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: fixtureUnit.insertId, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: true });
     const c = callerFor(driver).closeout;
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("07:31"), endedAt: at("12:00"), source: "pto", confidence: "high" });
     const hold = await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "customer_hold", occurredAt: at("12:00"), endedAt: at("13:15"), detail: "Waiting on wireline" });
