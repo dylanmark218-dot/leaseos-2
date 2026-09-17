@@ -1,4 +1,4 @@
--- v22.35 — 0142: regulator-layer importers. The 2026-09-17 endpoint research confirmed two
+-- v22.35 — 0143 (renumbered from 0142: a parallel session committed 0142_sync_package_verification_mode.sql at 08:17 UTC): regulator-layer importers. The 2026-09-17 endpoint research confirmed two
 -- licences and one endpoint: Saskatchewan's Petroleum facilities layer names its licence in the
 -- item metadata ("This product contains information licensed under the Government of
 -- Saskatchewan Standard Unrestricted Use Data License (Version 2.0)"), and the BC Energy

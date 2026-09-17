@@ -8462,7 +8462,7 @@ export const facilityWaitReports = mysqlTable("facilityWaitReports", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-// 0142 — regulator-layer import runs: the layer, the licence, the mapping a person chose, the counts.
+// 0143 — regulator-layer import runs: the layer, the licence, the mapping a person chose, the counts.
 export const facilityImportRuns = mysqlTable("facilityImportRuns", {
   id: int("id").autoincrement().primaryKey(),
   importRef: varchar("importRef", { length: 40 }).notNull().unique(),
