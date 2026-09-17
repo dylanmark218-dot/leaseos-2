@@ -251,7 +251,7 @@ export const V2_DESCRIPTORS = {
     contractVersion: 2, key: "activeTrip", title: "Active Trip", category: "Trips",
     authorization: { kind: "unresolved", question: "no trips.* procedure appears in the 0088 evidence." },
     source: {
-      kind: "server", procedure: "trips.active",
+      kind: "server", procedure: "trips.list",
       subjectRequirements: ["trip"], refreshSeconds: 30, cacheable: true,
     },
     engine: { engine: "trips (server record)", confidence: "NO_EVIDENCE" },

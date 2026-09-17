@@ -6,6 +6,7 @@ import { Redirect, Route, Switch } from "wouter";
 import { PortalShell } from "./portal/PortalShell";
 import { CustomerPortal } from "./portal/external/CustomerPortal";
 import HosVerificationConsole from "./pages/HosVerificationConsole";
+import WidgetBoardPage from "./pages/WidgetBoardPage";
 import { ShowcaseFrame } from "./showcase/ShowcaseFrame";
 import { MapSurface, EvidenceSurface, JobsSurface, SafetySurface } from "./pages/authoritative/Surfaces";
 import { VendorFacilityPortal } from "./portal/external/VendorFacilityPortal";
@@ -43,6 +44,7 @@ function Router() {
       {/* v21.13 — the customer's portal, on external procedures only. */}
       <Route path="/customer" component={() => <CustomerPortal />} />
       <Route path="/hos-verification" component={() => <HosVerificationConsole />} />
+      <Route path="/widgets" component={() => <WidgetBoardPage />} />
       <Route path="/vendor" component={() => <VendorFacilityPortal />} />
       <Route path="/facility" component={() => <VendorFacilityPortal />} />
       <Route path="/map" component={() => <MapSurface />} />

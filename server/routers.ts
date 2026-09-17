@@ -25,6 +25,13 @@ import { deviceRouter, syncRouter } from "./deviceRouter";
 import { complianceRouter } from "./complianceRouter";
 import { calibrationRouter, requirementRouter } from "./requirementRouter";
 import { surfacesRouter } from "./surfacesRouter";
+import { widgetsRouter, type WidgetDeps } from "./widgetsRouter";
+import type { WidgetLayoutStore } from "./_core/widgetService";
+import { drizzleWidgetLayoutStore } from "./widgetLayouts";
+import { widgetReaderFor } from "./widgetSources";
+import { branchRolesFor } from "./_core/widgetRoleKeys";
+import { isDomainRole, permissionsForDomainRole } from "./_core/recordsAuthorization";
+import { listActiveUserRoles } from "./db";
 import { dispatchGateRouter } from "./dispatchRouter";
 import { createJobUnitGated } from "./dispatchEnforcementService";
 import { iftaRouter } from "./iftaRouter";
@@ -249,7 +256,35 @@ const jobInput = z.object({
   longitude: z.number().optional(),
 });
 
+/* ---- B28 widget board: real dependencies for the engine's router ---- */
+/** The store's methods are all async, so the database handle can be resolved on first use rather than at module load. */
+function lazyWidgetStore(tenantId: string): WidgetLayoutStore {
+  const real = getDb().then(d => {
+    if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    return drizzleWidgetLayoutStore(d, tenantId);
+  });
+  return {
+    findLayout: async (q) => (await real).findLayout(q),
+    createLayout: async (layout, items, unset) => (await real).createLayout(layout, items, unset),
+    updateOwnedLayout: async (layout, items, unset, tid, rev) => (await real).updateOwnedLayout(layout, items, unset, tid, rev),
+  };
+}
+const widgetDeps: WidgetDeps = {
+  storeFor: lazyWidgetStore,
+  grants: {
+    // Permissions of one role the user actually holds — or null, which actorForRole refuses.
+    async permissionsForRole(userId, roleKey) {
+      const held = new Set((await listActiveUserRoles(userId)).map(g => g.role));
+      const branchRole = branchRolesFor(roleKey).find(b => held.has(b));
+      return branchRole && isDomainRole(branchRole) ? permissionsForDomainRole(branchRole) : null;
+    },
+  },
+  readerFor: (actor) => widgetReaderFor(actor, (userId) =>
+    appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId } as never }) as never),
+};
+
 export const appRouter = router({
+  widgets: widgetsRouter(widgetDeps),
   system: systemRouter,
   comms: commsRouter,
   enforcement: enforcementRouter,

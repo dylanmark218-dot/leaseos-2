@@ -24,7 +24,9 @@ import type { DeviceClass, NormalizedItem } from "./_core/widgetLayoutWrite";
 
 // The repo's own Db type comes from its drizzle client factory.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Db = any;
+import type { MySql2Database } from "drizzle-orm/mysql2";
+/** The branch's typed handle — the engine shipped `any` here to stay branchless; typed on arrival (tenantIsolation census). */
+type Db = MySql2Database<Record<string, unknown>>;
 
 /**
  * Server-assigned reference.

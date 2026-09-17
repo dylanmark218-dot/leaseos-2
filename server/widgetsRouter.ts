@@ -24,6 +24,7 @@ import { getDb } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
 import { listActiveUserRoles } from "./db";
 import { isDomainRole } from "./_core/recordsAuthorization";
+import { engineRoleKey } from "./_core/widgetRoleKeys";
 
 /**
  * The one adaptation from the engine's scratch context to the branch's real one.
@@ -37,12 +38,12 @@ async function boardCtx(ctx: { user: { id: number } }, requestedRole?: string | 
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   const scope = await resolveActingScope(db, ctx.user.id);
-  const held = (await listActiveUserRoles(ctx.user.id)).map(g => g.role).filter(isDomainRole);
+  const held = (await listActiveUserRoles(ctx.user.id)).map(g => g.role).filter(isDomainRole).map(engineRoleKey);
   const roleKey = requestedRole ?? held[0];
   if (!roleKey) throw new TRPCError({ code: "FORBIDDEN", message: "No active domain role; a board belongs to a role" });
   return { userId: ctx.user.id, tenantId: scope.tenantId, roleKey };
 }
-import { actorForRole, type RoleGrantSource } from "./_core/roleActor";
+import { actorForRole, type RoleActor, type RoleGrantSource } from "./_core/roleActor";
 import { listOfferable, openBoard, saveBoard, type BoardAudit, type TileReader, type WidgetLayoutStore } from "./_core/widgetService";
 
 /**
@@ -55,7 +56,8 @@ import { listOfferable, openBoard, saveBoard, type BoardAudit, type TileReader, 
 export type WidgetDeps = {
   storeFor(tenantId: string): WidgetLayoutStore;
   grants: RoleGrantSource;
-  read: TileReader;
+  /** A reader bound to the acting user: each tile is read as that person, through its own procedure. */
+  readerFor(actor: RoleActor): TileReader;
   audit?: BoardAudit;
 };
 
@@ -127,7 +129,7 @@ export function widgetsRouter(deps: WidgetDeps) {
         return openBoard(
           {
             store: deps.storeFor(actor.tenantId),
-            read: deps.read,
+            read: deps.readerFor(actor),
             ...(deps.audit ? { audit: deps.audit } : {}),
           },
           actor,

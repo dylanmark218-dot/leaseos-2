@@ -203,7 +203,7 @@ export const WIDGET_DEFINITIONS = {
     optionsSchema: { clock: { kind: "enum", values: ["driving", "onDuty", "cycle"], default: "driving" } },
   },
   documentExpiry: {
-    key: "documentExpiry", title: "Expiring Documents", procedure: "records.documentExpiry", scope: "self",
+    key: "documentExpiry", title: "Expiring Documents", procedure: "documents.list", scope: "self",
     variants: ["list", "kpi", "detail"], defaultVariant: "list", refreshSeconds: 300,
     offline: { kind: "pre_departure", maxStaleMinutes: 1440 },
     category: "Documents",
@@ -211,7 +211,7 @@ export const WIDGET_DEFINITIONS = {
     optionsSchema: { warnDays: { kind: "int", min: 1, max: 180, default: 30 }, limit: { kind: "int", min: 3, max: 30, default: 8 } },
   },
   unitReadiness: {
-    key: "unitReadiness", title: "Unit Readiness", procedure: "shop.unitReadiness", scope: "unit",
+    key: "unitReadiness", title: "Unit Readiness", procedure: "readiness.forShift", scope: "unit",
     variants: ["status", "checklist", "detail"], defaultVariant: "status", refreshSeconds: 120,
     offline: { kind: "pre_departure", maxStaleMinutes: 720 },
     category: "Fleet",
@@ -219,7 +219,7 @@ export const WIDGET_DEFINITIONS = {
     optionsSchema: { includeTrailer: { kind: "bool", default: true } },
   },
   activeJob: {
-    key: "activeJob", title: "Active Job", procedure: "jobs.active", scope: "job",
+    key: "activeJob", title: "Active Job", procedure: "jobs.list", scope: "job",
     variants: ["status", "detail", "timeline"], defaultVariant: "status", refreshSeconds: 60,
     offline: { kind: "pre_departure", maxStaleMinutes: 480 },
     category: "My Work",
@@ -227,7 +227,7 @@ export const WIDGET_DEFINITIONS = {
     optionsSchema: {},
   },
   activeTrip: {
-    key: "activeTrip", title: "Active Trip", procedure: "trips.active", scope: "trip",
+    key: "activeTrip", title: "Active Trip", procedure: "trips.list", scope: "trip",
     variants: ["status", "timeline", "map", "detail"], defaultVariant: "timeline", refreshSeconds: 30,
     // B25: was `device_local`, which the device cannot honour. A trip is a
     // server record a dispatcher can reassign; the device knows only what it
@@ -239,7 +239,7 @@ export const WIDGET_DEFINITIONS = {
     optionsSchema: { layer: { kind: "enum", values: ["route", "breadcrumb", "none"], default: "route" } },
   },
   syncStatus: {
-    key: "syncStatus", title: "Sync Status", procedure: "sync.status", scope: "self",
+    key: "syncStatus", title: "Sync Status", procedure: "sync.receivePackage", scope: "self",
     variants: ["status", "kpi", "queue"], defaultVariant: "status", refreshSeconds: 15,
     // Reporting on the queue is the queue's own job; it cannot need the network.
     offline: { kind: "device_local" },

@@ -420,7 +420,7 @@ export function previewDefaultBoard(
  * Replace the board with the registry default.
  *
  * Goes through `saveBoard`, so it meets the same validation, the same ownership
- * check and the same compare-and-swap as any other save. A restore that wrote
+ * check and the same compare-and-swap as every other save. A restore that wrote
  * directly to the store would be a second write path, and the second one is
  * always the one missing a check.
  */

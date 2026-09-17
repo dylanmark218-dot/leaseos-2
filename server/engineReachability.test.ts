@@ -26,6 +26,17 @@ import { join } from "path";
  * directions.
  */
 const DECLARED_UNWIRED: Record<string, string> = {
+  // B28 widget engine (v22.23): the v1 service (widgetService/widgetDashboard/widgetLayoutWrite/
+  // widgetRegistry/widgetPayload/roleActor) is reached through widgetsRouter. The layer below is
+  // the promotion gate and the client's rendering semantics — read by tests and by
+  // client/src/widgets, not by any server procedure. Wiring it server-side is B28 step 6+.
+  boardSemantics: "board-level semantics (tone, ordering); consumed by the client and the promotion-gate tests",
+  deviceManifest: "device-class manifest for the client; no server procedure reads it",
+  hosClockPresentation: "HOS clock presentation for the hosRemaining tile; hosRemaining is not promoted yet (P0.5 step 6)",
+  widgetProjection: "per-widget value projection for the client renderer; not read server-side",
+  widgetRegistryV2: "the promotion-gate registry (source tiers); promotionGate.test is not yet ported",
+  widgetSemantics: "per-widget semantics (variants, subjects); consumed by the client and tests",
+  widgetSourceContract: "the twelve-source contract; enforced by widgetSourceContract.test, not by a procedure",
   // 0125 — Chat 5 sheet-serial registry, ported from fix/chat5-module-paths-and-vitest.
   // The print-run and scan-filing procedures that call these are register item P0.7.
   sheetSerial: "paper assessment-sheet serials, checksums and scan resolution; no print/scan procedure calls it yet (P0.7)",
@@ -147,7 +158,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(33);   // v22.22: +2 sheet-serial modules (0125), declared above; the three Chat 5 Academy modules are wired through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(40);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; v22.22: +2 sheet-serial modules (0125) through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });
