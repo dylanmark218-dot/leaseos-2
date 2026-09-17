@@ -12,6 +12,7 @@ import { MEASUREMENT_BASIS, normaliseUnit, priceLineAndRecord } from "./_core/li
 import { approvalDecision, decideBillable, termsInEffect, type Terms } from "./_core/contractTerms";
 import { storagePut } from "./storage";
 import { getDb } from "./db";
+import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { clientAdjustments, customerAccounts, customerContractTerms, delayEvents, disposalTickets, fieldTicketDocuments, fieldTicketEvents, fieldTicketLines, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, jobs, loads, payrollAdjustments, roadHazardObservations, signatoryAuthorities, tripStops, weatherObservations } from "../drizzle/schema";
 import { EVENT_CLOCK, canonicalJson, classifyDelay, closeoutState, composeSiteSnapshot, lineDecision, postSiteSupplement, sha256, signatureDecision, whyTheseHours, type Authority, type DelayRules, type EventType, type PostSiteAuthorization, type SiteSnapshot, type Supplement, type TicketEvent, type TicketLine } from "./_core/siteCloseout";
 
@@ -99,7 +100,8 @@ export const closeoutRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const acct = input.customerAccountRef ? (await db.select({ id: customerAccounts.id }).from(customerAccounts).where(eq(customerAccounts.accountRef, input.customerAccountRef)).limit(1))[0] : undefined;
       if (input.customerAccountRef && !acct) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
-      const ticketNumber = ref("FT");
+      // Configured, transactional sequence (rule §18): FT-<year>-<000001>, format from trackingSequences.
+      const ticketNumber = (await nextTrackingNumber(db, { sequenceType: "FT" })).trackingNumber;
       const job = (await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, input.jobId)).limit(1))[0];
       if (!job) throw new TRPCError({ code: "NOT_FOUND", message: "Job not found — a field ticket always belongs to a job" });
       await db.insert(fieldTickets).values({ ticketNumber, scope: input.scope, jobId: input.jobId, tripId: input.tripId ?? null, customerAccountId: acct?.id ?? null, unitId: input.unitId ?? null, operatorId: input.operatorId ?? null, serviceDescription: input.serviceDescription ?? null, afeNumber: input.afeNumber ?? null, postSiteRequired: input.postSiteRequired, status: "draft", signatureStatus: "unsigned", updatedAt: new Date() });

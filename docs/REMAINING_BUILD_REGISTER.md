@@ -52,13 +52,13 @@ gate is green before a checkpoint is called complete.
 
 | # | Checkpoint | Definition of done |
 |---|---|---|
-| P3.1 | Manifest = chain of custody | every manifest row references job, trip, load, generator, operator, unit, trailer, LSD/UWI, material, quantity + method, TDG, SDS, tickets, route, permits, GPS, signatures, amendments — by reference, not copy |
-| P3.2 | Field ticket acceptance per line | accepted / disputed per line; disputed statements preserved on both sides; accepted lines flow to billing when customer config permits |
-| P3.3 | Billing readiness names blockers | `billing.readiness` returns exact blockers ("disposal ticket missing for Load 4"); pending OCR/GPS/AI values never become invoice lines |
-| P3.4 | Signatures + integrity | payload hash of what was signed; amended-after-signature flagged and routed to review |
-| P3.5 | Exception Centre completeness | every exception class in §25 of the project rules deep-links to its corrective action; the inspector fifteen-day clock (0122) surfaces here from five days out |
-| P3.6 | Tracking numbers | every artifact category has a configured format, transactional sequence, concurrency test, master-search walk of the evidence chain |
-| P3.7 | Mechanic release | defect → work order → repair → test → authenticated release → dispatch recalculation; completing a work order never implies release |
+| P3.1 | Manifest = chain of custody | **PARTIAL**: the `manifests` table (0010 era) references job and unit by id but carries trailer, driver, route, facility as text and scale tickets / evidence / signatures as JSON refs; no trip, load, LSD/UWI, SDS, permit or disposal-ticket foreign keys; no amendment history. Done when every column in the project rule §19 list is a reference to a record, and amendments are rows |
+| P3.2 | Field ticket acceptance per line | **DONE**: `closeout.lineDecide` (accepted / disputed, customer quantity and statement kept beside the crew's); `invoicing.draftFromTicket` excludes disputed lines and names them |
+| P3.3 | Billing readiness names blockers | **DONE**: `invoicing.draftFromTicket` returns `{ drafted: false, blockers[] }` with named blockers (`invoiceDraft.ts`), including `amended_after_signature`; `closeout.whyTheseHours` explains the hours |
+| P3.4 | Signatures + integrity | **DONE**: `fieldTicketSignatures.payloadHash`; supplements carry `siteRevisionHash`; `amended_after_signature` blocks invoicing (`billing.ts`, `invoiceDraft.ts`) |
+| P3.5 | Exception Centre completeness | **PARTIAL**: `exceptionCentre.ts` derives exceptions with `deepLink` + `requiredPermission`; the inspector fifteen-day clock (0122) is **not yet** a source (`academy.inspectorRequestList` computes urgency; `deriveExceptions` does not read it) |
+| P3.6 | Tracking numbers | **PARTIAL → engine DONE**: `trackingNumbers.ts` over `trackingSequences` (format is configuration; row-locked counter; 150 numbers across 6 concurrent callers tested). Wired: **FT** and **INV**. Still `ref()`: DLY, SIG, CR, BB, DSP, MF, and every other prefix — one call each; master search is `surfaces.search` |
+| P3.7 | Mechanic release | **DONE**: `shop.workOrderRelease` (full / restricted / revoked) is a separate door from `shop.workOrderAdvance`; `evaluateMechanicRelease` gates it; `readinessComposer` consumes the release and refuses to report a unit available on release alone |
 
 ## P4 — tenancy, security, governance
 
@@ -68,7 +68,7 @@ gate is green before a checkpoint is called complete.
 | P4.2 | LoadSense hardware ingestion | gateway frames authenticated (0112/0114 exist); calibration evidence projected; **no weight becomes a legal axle determination without a verified calibration and a stable reading** |
 | P4.3 | Contractor / owner-operator payables | the 0115–0117 chain gets its own router tests through the real procedures (it has boundary tests only) |
 | P4.4 | AI Secretary corpus | ingestion runs **only** through `repository.ts` behind the source-licence gate; every chunk records its authorizing assessment |
-| P4.5 | Legal / licensing | `LICENSE` file matching `package.json` (MIT declared, no file); DPA, GPS-monitoring notice, AI policy, retention schedule, SLA, pilot agreement, contractor IP/NDA, open-source register — the drafts in project knowledge become tracked documents with an owner and a date |
+| P4.5 | Legal / licensing | **STARTED**: `LICENSE` (MIT, matching `package.json`; **copyright holder line needs the legal entity's name**); `docs/legal/LEGAL_DOCUMENT_REGISTER.md` lists the twenty instruments drafted in project knowledge with status, owner and the milestone each is needed before — all DRAFT-PK until counsel signs off |
 | P4.6 | Privacy & AI governance | 0014/0016/0017 tables get their procedures and UI: device permissions, breach register, agent approvals, regulatory sources + rule versions |
 
 ## P5 — showcase, UI, and demos

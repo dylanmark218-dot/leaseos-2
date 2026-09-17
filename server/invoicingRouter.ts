@@ -13,6 +13,7 @@ import { renderPdf, sha256Hex } from "./_core/ticketPdf";
 import { storagePut } from "./storage";
 import { queueCustomerAlert } from "./customerAlertService";
 import { getDb } from "./db";
+import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { roleProcedure, router } from "./_core/trpc";
 import { disputeResolution, draftFromTicket, finalizeCheck, snapshotHash, voidCheck, type TicketLineForInvoice } from "./_core/invoiceDraft";
 import { determine } from "./_core/taxRuleEngine";
@@ -153,7 +154,8 @@ export const invoicingRouter = router({
         const ins = await d.insert(billingBooks).values({ bookNumber: ref("BB"), jobId: x.t.jobId, customer: x.account.name, afeNumber: input.afeNumber ?? null, purchaseOrder: input.purchaseOrder ?? null, billingState: "billing_review", openedAt: new Date() });
         book = (await d.select().from(billingBooks).where(eq(billingBooks.id, Number(ins[0]?.insertId ?? 0))).limit(1))[0]!;
       }
-      const invoiceNumber = ref("INV");
+      // Configured, transactional sequence (rule §18): INV-<year>-<000001>, format from trackingSequences.
+      const invoiceNumber = (await nextTrackingNumber(d, { sequenceType: "INV" })).trackingNumber;
       const ins = await d.insert(invoices).values({ invoiceNumber, financialEntityId: x.account.financialEntityId, billingBookId: book.id, jobId: x.t.jobId, customer: x.account.name, customerAccountId: x.account.id, afeNumber: input.afeNumber ?? null, purchaseOrder: input.purchaseOrder ?? null, subtotalCents: draft.subtotalCents, taxCents: 0, gstTreatment: "unknown", gstTreatmentSource: null, totalCents: draft.subtotalCents, currency: "CAD", status: "draft" });
       const invoiceId = Number(ins[0]?.insertId ?? 0);
       await d.insert(invoiceLines).values(draft.lines.map(l => ({ invoiceId, lineNo: l.lineNo, fieldTicketLineId: l.fieldTicketLineId, pricingDecisionRef: l.pricingDecisionRef, serviceCode: l.serviceCode, description: l.description, quantityMillis: l.quantityMillis, billableQuantityMillis: l.billableQuantityMillis, unit: l.unit, rateMillis: l.rateMillis, amountCents: l.amountCents, basis: l.basis })));
