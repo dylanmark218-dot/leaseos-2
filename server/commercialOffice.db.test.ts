@@ -136,3 +136,49 @@ d("P7.2 — linking records to organizations is a person's act", () => {
     expect(linked[0]).toMatchObject({ customerOrgRef: clientOrg, customer: clientName });
   }, 30_000);
 });
+
+d("P7.3 — a facility statement is matched, never used to edit a ticket", () => {
+  it("imports, matches by facility ticket number, carries a variance, leaves the ticket untouched, refuses to close until a person resolves, and refuses a duplicate import", async () => {
+    const book = await org(); const office = await member(book, ["office"]);
+    const [f] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO facilities (name, status) VALUES (?, 'open')", [`Class II ${rnd()}`]);
+    const facilityId = f.insertId;
+    const tno = (n: number) => `DSP-${rnd()}-${n}`;
+    await pool.execute("INSERT INTO disposalTickets (ticketNumber, facilityId, facilityTicketNumber, scaleInAt, quantity, quantityUnit, verificationStatus, source) VALUES (?,?,?,?,?,?,'verified','scale_ticket')", [tno(1), facilityId, "FAC-9001", "2026-09-05 14:00:00", 30, "m3"]);
+    await pool.execute("INSERT INTO disposalTickets (ticketNumber, facilityId, facilityTicketNumber, scaleInAt, quantity, quantityUnit, verificationStatus, source) VALUES (?,?,?,?,?,?,'verified','scale_ticket')", [tno(2), facilityId, "FAC-9002", "2026-09-06 09:00:00", 12.5, "m3"]);
+    const lines = [
+      { facilityTicketNumber: "FAC-9001", receivedAt: new Date("2026-09-05T14:10:00Z"), material: null, quantity: 30, quantityUnit: "m3", amountCents: 45000, unitHint: null, manifestHint: null },
+      { facilityTicketNumber: "FAC-9002", receivedAt: new Date("2026-09-06T09:05:00Z"), material: null, quantity: 13.4, quantityUnit: "m3", amountCents: 20100, unitHint: null, manifestHint: null },   // 7.2% more than the ticket
+      { facilityTicketNumber: "FAC-9999", receivedAt: new Date("2026-09-07T11:00:00Z"), material: null, quantity: 8, quantityUnit: "m3", amountCents: 12000, unitHint: null, manifestHint: null },       // nothing carries it
+    ];
+    const imp = await callerFor(office).commercialOffice.disposal.statementImport({ facilityId, facilityStatementNumber: "SEP-2026", periodStart: new Date("2026-09-01"), periodEnd: new Date("2026-09-30"), lines });
+    expect(imp).toMatchObject({ match: 1, match_with_variance: 1, unmatched: 0 + 1, ambiguous: 0, facilityLinked: false });
+    const [t2] = await pool.query<mysql.RowDataPacket[]>("SELECT quantity FROM disposalTickets WHERE facilityTicketNumber = 'FAC-9002' AND facilityId = ?", [facilityId]);
+    expect(Number(t2[0]!.quantity)).toBe(12.5);   // the variance lives on the statement line, not on the ticket
+    await expect(callerFor(office).commercialOffice.disposal.statementClose({ statementRef: imp.statementRef })).rejects.toThrow(/2 line\(s\) still need a person's resolution: #2 \(match_with_variance\), #3 \(unmatched\)/);
+    await expect(callerFor(office).commercialOffice.disposal.lineResolve({ statementRef: imp.statementRef, lineNo: 2, resolution: "ticket_needs_correction", note: "short" })).rejects.toThrow();
+    const r2 = await callerFor(office).commercialOffice.disposal.lineResolve({ statementRef: imp.statementRef, lineNo: 2, resolution: "ticket_needs_correction", note: "scale slip shows 13.4; driver entered 12.5 from memory" });
+    expect(r2).toMatchObject({ ticketChanged: false, note: expect.stringContaining("nothing was changed here") });
+    const [t2b] = await pool.query<mysql.RowDataPacket[]>("SELECT quantity FROM disposalTickets WHERE facilityTicketNumber = 'FAC-9002' AND facilityId = ?", [facilityId]);
+    expect(Number(t2b[0]!.quantity)).toBe(12.5);
+    await callerFor(office).commercialOffice.disposal.lineResolve({ statementRef: imp.statementRef, lineNo: 3, resolution: "disputed", note: "no LeaseOS ticket for FAC-9999; asking the facility for the manifest" });
+    await expect(callerFor(office).commercialOffice.disposal.lineResolve({ statementRef: imp.statementRef, lineNo: 3, resolution: "accepted", note: "changed my mind about this one" })).rejects.toThrow(/already resolved/);
+    expect(await callerFor(office).commercialOffice.disposal.statementClose({ statementRef: imp.statementRef })).toMatchObject({ status: "closed" });
+    await expect(callerFor(office).commercialOffice.disposal.statementImport({ facilityId, periodStart: new Date("2026-09-01"), periodEnd: new Date("2026-09-30"), lines })).rejects.toThrow(/already imported/);
+  }, 40_000);
+
+  it("accepts an ambiguous line only by choosing one of its candidates", async () => {
+    const book = await org(); const office = await member(book, ["office"]);
+    const [f] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO facilities (name, status) VALUES (?, 'open')", [`Class II ${rnd()}`]);
+    const facilityId = f.insertId;
+    const [a] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO disposalTickets (ticketNumber, facilityId, scaleInAt, quantity, quantityUnit, verificationStatus, source) VALUES (?,?,?,?,?,'verified','scale_ticket')", [`DSP-${rnd()}`, facilityId, "2026-09-10 14:00:00", 30, "m3"]);
+    const [b] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO disposalTickets (ticketNumber, facilityId, scaleInAt, quantity, quantityUnit, verificationStatus, source) VALUES (?,?,?,?,?,'verified','scale_ticket')", [`DSP-${rnd()}`, facilityId, "2026-09-10 16:00:00", 30, "m3"]);
+    const imp = await callerFor(office).commercialOffice.disposal.statementImport({ facilityId, periodStart: new Date("2026-09-01"), periodEnd: new Date("2026-09-30"), lines: [{ facilityTicketNumber: null, receivedAt: new Date("2026-09-10T15:00:00Z"), material: null, quantity: 30, quantityUnit: "m3", amountCents: null, unitHint: null, manifestHint: null }] });
+    expect(imp.ambiguous).toBe(1);
+    const { lines } = await callerFor(office).commercialOffice.disposal.statementLines({ statementRef: imp.statementRef });
+    expect(lines[0]!.candidateTicketIds?.sort()).toEqual([a.insertId, b.insertId].sort());
+    await expect(callerFor(office).commercialOffice.disposal.lineResolve({ statementRef: imp.statementRef, lineNo: 1, resolution: "accepted", note: "it is the afternoon load" })).rejects.toThrow(/choosing one of its candidates/);
+    await expect(callerFor(office).commercialOffice.disposal.lineResolve({ statementRef: imp.statementRef, lineNo: 1, resolution: "accepted", note: "it is the afternoon load", chosenDisposalTicketId: 999_999_999 })).rejects.toThrow(/choosing one of its candidates/);
+    const ok = await callerFor(office).commercialOffice.disposal.lineResolve({ statementRef: imp.statementRef, lineNo: 1, resolution: "accepted", note: "it is the afternoon load per the driver's day log", chosenDisposalTicketId: b.insertId });
+    expect(ok.matchedDisposalTicketId).toBe(b.insertId);
+  }, 30_000);
+});

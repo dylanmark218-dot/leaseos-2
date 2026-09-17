@@ -2151,6 +2151,10 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "manifestCustody.evidenceProfileApprove": "manifest.write",
   "manifestCustody.chain": "manifest.read",
   /* ---- v22.24 P4.6 (0131): security incidents and privacy breach assessments ---- */
+  "commercialOffice.facilityStatementImport": "commercial.write",
+  "commercialOffice.facilityStatementLines": "commercial.read",
+  "commercialOffice.facilityStatementLineResolve": "commercial.write",
+  "commercialOffice.facilityStatementClose": "commercial.write",
   "commercialOffice.linkSet": "commercial.write",
   "commercialOffice.linkEnd": "commercial.write",
   "commercialOffice.linksList": "commercial.read",

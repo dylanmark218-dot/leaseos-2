@@ -8,13 +8,14 @@
  * a sequence with no numbering policy mints no number.
  */
 import { TRPCError } from "@trpc/server";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors } from "../drizzle/schema";
+import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
+import { matchFacilityStatementLine, type DisposalTicketLite } from "./_core/facilityStatements";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 
@@ -27,6 +28,8 @@ async function bookFor(userId: number) {
 const bookWhere = <T extends { bookOrgRef: any }>(t: T, bookOrgRef: string | null) => bookOrgRef ? or(isNull(t.bookOrgRef), eq(t.bookOrgRef, bookOrgRef)) : isNull(t.bookOrgRef);
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const hash8 = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 8);
+/** MariaDB returns JSON columns as text; read them as the arrays they are. */
+const jsonArray = <T,>(v: unknown): T[] => (typeof v === "string" ? (JSON.parse(v) as T[]) : Array.isArray(v) ? (v as T[]) : []);
 
 export const commercialOfficeRouter = router({
   /** What an organization can be: the built-in roles plus this business's own. */
@@ -270,6 +273,94 @@ export const commercialOfficeRouter = router({
           evidence: "exact_name_match" as const, confidence: "candidate" as const, applied: false as const,
         })));
         return { unlinked: unlinked.length, candidates, note: "Candidates are proposed by exact name only and are never applied here; a person links each one with links.set." };
+      }),
+  }),
+
+  /**
+   * P7.3 — disposal reconciliation. The facility's statement is evidence; each line is
+   * matched to a disposal ticket, outcomes are match / match_with_variance / unmatched /
+   * ambiguous, and a person resolves the rest. Nothing here edits a disposal ticket.
+   */
+  disposal: router({
+    statementImport: roleProcedure("commercialOffice.facilityStatementImport")
+      .input(z.object({
+        facilityId: z.number().int().positive(), facilityStatementNumber: z.string().max(80).optional(),
+        periodStart: z.coerce.date(), periodEnd: z.coerce.date(), quantityTolerance: z.number().min(0).max(0.5).optional(),
+        lines: z.array(z.object({ facilityTicketNumber: z.string().max(80).nullable().default(null), receivedAt: z.coerce.date(), material: z.string().max(120).nullable().default(null), quantity: z.number().nonnegative(), quantityUnit: z.string().min(1).max(16), amountCents: z.number().int().nullable().default(null), unitHint: z.string().max(40).nullable().default(null), manifestHint: z.string().max(60).nullable().default(null) })).min(1).max(2000),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        if (input.periodEnd < input.periodStart) throw new TRPCError({ code: "BAD_REQUEST", message: "periodEnd is before periodStart" });
+        const facility = (await db.select({ id: facilities.id, orgRef: facilities.orgRef }).from(facilities).where(eq(facilities.id, input.facilityId)).limit(1))[0];
+        if (!facility) throw new TRPCError({ code: "NOT_FOUND", message: `Facility ${input.facilityId} does not exist` });
+        const contentHash = createHash("sha256").update(JSON.stringify(input.lines.map(l => [l.facilityTicketNumber, l.receivedAt.toISOString(), l.material, l.quantity, l.quantityUnit, l.amountCents, l.unitHint, l.manifestHint]))).digest("hex");
+        const dup = (await db.select({ statementRef: facilityStatements.statementRef }).from(facilityStatements).where(and(eq(facilityStatements.facilityId, input.facilityId), eq(facilityStatements.contentHash, contentHash))).limit(1))[0];
+        if (dup) throw new TRPCError({ code: "CONFLICT", message: `This statement was already imported as ${dup.statementRef}` });
+        // Tickets at this facility around the period (a day either side), with the unit number for the hint comparison.
+        const lo = new Date(input.periodStart.getTime() - 86_400_000), hi = new Date(input.periodEnd.getTime() + 2 * 86_400_000);
+        const rows = await db.select({ id: disposalTickets.id, facilityTicketNumber: disposalTickets.facilityTicketNumber, scaleInAt: disposalTickets.scaleInAt, material: sql<string | null>`NULL`, quantity: disposalTickets.quantity, quantityUnit: disposalTickets.quantityUnit, unitNumber: units.unitNumber })
+          .from(disposalTickets).leftJoin(units, eq(units.id, disposalTickets.unitId))
+          .where(and(eq(disposalTickets.facilityId, input.facilityId), or(isNull(disposalTickets.scaleInAt), and(gte(disposalTickets.scaleInAt, lo), lte(disposalTickets.scaleInAt, hi)))));
+        const tickets: DisposalTicketLite[] = rows.map(r => ({ ...r, quantity: r.quantity === null ? null : Number(r.quantity) }));
+        const statementRef = ref("FSTMT");
+        const counts = { match: 0, match_with_variance: 0, unmatched: 0, ambiguous: 0 };
+        const lineValues = input.lines.map((l, i) => {
+          const m = matchFacilityStatementLine({ tickets, line: l, quantityTolerance: input.quantityTolerance });
+          counts[m.outcome]++;
+          return { lineNo: i + 1, facilityTicketNumber: l.facilityTicketNumber, receivedAt: l.receivedAt, material: l.material, quantity: l.quantity, quantityUnit: l.quantityUnit, amountCents: l.amountCents, unitHint: l.unitHint, manifestHint: l.manifestHint,
+            matchedDisposalTicketId: "ticketId" in m ? m.ticketId : null, matchOutcome: m.outcome, matchReason: m.reason, variances: "variances" in m && m.variances.length ? m.variances : null, candidateTicketIds: m.outcome === "ambiguous" ? m.candidateTicketIds : null };
+        });
+        await db.transaction(async tx => {
+          const ins = await tx.insert(facilityStatements).values({ statementRef, bookOrgRef, facilityId: input.facilityId, facilityOrgRef: facility.orgRef ?? null, facilityStatementNumber: input.facilityStatementNumber ?? null, periodStart: input.periodStart.toISOString().slice(0, 10), periodEnd: input.periodEnd.toISOString().slice(0, 10), lineCount: lineValues.length, matchedCount: counts.match, varianceCount: counts.match_with_variance, unmatchedCount: counts.unmatched, ambiguousCount: counts.ambiguous, contentHash, importedByUserId: ctx.user.id });
+          const facilityStatementId = ins[0].insertId;
+          await tx.insert(facilityStatementLines).values(lineValues.map(v => ({ ...v, facilityStatementId })));
+        });
+        return { statementRef, ...counts, lineCount: lineValues.length, facilityLinked: facility.orgRef !== null, note: counts.unmatched + counts.ambiguous + counts.match_with_variance ? "Lines other than clean matches wait for a person's resolution." : "Every line matched cleanly." };
+      }),
+    statementLines: roleProcedure("commercialOffice.facilityStatementLines")
+      .input(z.object({ statementRef: z.string().min(1), outcome: z.enum(["match", "match_with_variance", "unmatched", "ambiguous"]).optional(), unresolvedOnly: z.boolean().default(false) }))
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const st = (await db.select().from(facilityStatements).where(eq(facilityStatements.statementRef, input.statementRef)).limit(1))[0];
+        if (!st || (bookOrgRef ? st.bookOrgRef !== bookOrgRef : st.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Statement not found in this business's book" });
+        const conds = [eq(facilityStatementLines.facilityStatementId, st.id)];
+        if (input.outcome) conds.push(eq(facilityStatementLines.matchOutcome, input.outcome));
+        if (input.unresolvedOnly) conds.push(isNull(facilityStatementLines.resolution));
+        const lines = await db.select().from(facilityStatementLines).where(and(...conds)).orderBy(facilityStatementLines.lineNo);
+        return { statement: st, lines: lines.map(l => ({ ...l, variances: l.variances === null ? null : jsonArray<string>(l.variances), candidateTicketIds: l.candidateTicketIds === null ? null : jsonArray<number>(l.candidateTicketIds) })) };
+      }),
+    lineResolve: roleProcedure("commercialOffice.facilityStatementLineResolve")
+      .input(z.object({ statementRef: z.string().min(1), lineNo: z.number().int().positive(), resolution: z.enum(["accepted", "ticket_needs_correction", "facility_error", "disputed"]), note: z.string().min(10).max(500), chosenDisposalTicketId: z.number().int().positive().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const st = (await db.select().from(facilityStatements).where(eq(facilityStatements.statementRef, input.statementRef)).limit(1))[0];
+        if (!st || (bookOrgRef ? st.bookOrgRef !== bookOrgRef : st.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Statement not found in this business's book" });
+        if (st.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Statement is closed" });
+        const line = (await db.select().from(facilityStatementLines).where(and(eq(facilityStatementLines.facilityStatementId, st.id), eq(facilityStatementLines.lineNo, input.lineNo))).limit(1))[0];
+        if (!line) throw new TRPCError({ code: "NOT_FOUND", message: `Line ${input.lineNo} not on ${input.statementRef}` });
+        if (line.resolution) throw new TRPCError({ code: "CONFLICT", message: `Line ${input.lineNo} was already resolved as ${line.resolution}` });
+        let matched = line.matchedDisposalTicketId;
+        if (line.matchOutcome === "ambiguous") {
+          if (input.resolution === "accepted") {
+            const candidates = jsonArray<number>(line.candidateTicketIds);
+            if (!input.chosenDisposalTicketId || !candidates.includes(input.chosenDisposalTicketId)) throw new TRPCError({ code: "BAD_REQUEST", message: `BLOCKED — an ambiguous line is accepted only by choosing one of its candidates: ${candidates.join(", ")}` });
+            matched = input.chosenDisposalTicketId;
+          }
+        } else if (input.chosenDisposalTicketId && input.chosenDisposalTicketId !== matched) throw new TRPCError({ code: "BAD_REQUEST", message: "Only an ambiguous line takes a chosen ticket" });
+        await db.update(facilityStatementLines).set({ resolution: input.resolution, resolutionNote: input.note, resolvedByUserId: ctx.user.id, resolvedAt: new Date(), matchedDisposalTicketId: matched }).where(eq(facilityStatementLines.id, line.id));
+        return { statementRef: input.statementRef, lineNo: input.lineNo, resolution: input.resolution, matchedDisposalTicketId: matched, ticketChanged: false as const, note: input.resolution === "ticket_needs_correction" ? "Recorded. The ticket itself is corrected through the disposal correction path with this statement as evidence; nothing was changed here." : undefined };
+      }),
+    statementClose: roleProcedure("commercialOffice.facilityStatementClose")
+      .input(z.object({ statementRef: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const st = (await db.select().from(facilityStatements).where(eq(facilityStatements.statementRef, input.statementRef)).limit(1))[0];
+        if (!st || (bookOrgRef ? st.bookOrgRef !== bookOrgRef : st.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Statement not found in this business's book" });
+        const open = await db.select({ lineNo: facilityStatementLines.lineNo, outcome: facilityStatementLines.matchOutcome }).from(facilityStatementLines)
+          .where(and(eq(facilityStatementLines.facilityStatementId, st.id), isNull(facilityStatementLines.resolution), inArray(facilityStatementLines.matchOutcome, ["match_with_variance", "unmatched", "ambiguous"])));
+        if (open.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${open.length} line(s) still need a person's resolution: ${open.map(o => `#${o.lineNo} (${o.outcome})`).join(", ")}` });
+        await db.update(facilityStatements).set({ status: "closed", closedByUserId: ctx.user.id, closedAt: new Date() }).where(eq(facilityStatements.id, st.id));
+        return { statementRef: input.statementRef, status: "closed" as const };
       }),
   }),
 });
