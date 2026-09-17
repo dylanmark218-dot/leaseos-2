@@ -27,6 +27,8 @@ beforeAll(async () => {
     FIXTURE_JOB_ID = (await db.insert(jobs).values({ jobCode: `JOB-FR-${tag}`, type: "Hydrovac", customer: "Fixture Energy", location: "Somewhere", status: "dispatched" } as never))[0].insertId;
     FIXTURE_UNIT_ID = (await db.insert(units).values({ unitNumber: `U-FR-${tag}`, vehicleType: "hydrovac" } as never))[0].insertId;
   }
+  // Dispatch enforcement is a global setting another suite may leave at "enforced"; this suite is about creating the
+  // records, not about readiness, and its fixture unit (now real) carries no credentials. Establish "off" explicitly.
   const held = new Set(await listActiveUserRoleNames(TEST_USER_ID));
   // Deliberately not `mechanic`: the shop is explicitly denied personnel.write,
   // and deny beats grant, so adding it here would block operator creation. That
@@ -54,6 +56,7 @@ beforeAll(async () => {
       // Already granted by a concurrent run — the unique index is doing its job.
     }
   }
+  await appRouter.createCaller(createContext()).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
 });
 
 function createContext(): TrpcContext {

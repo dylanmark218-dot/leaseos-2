@@ -192,8 +192,10 @@ d("jobUnits.create under off, advisory and enforced", () => {
     const aw = callerFor(dispatcher).dispatch.award({ checkId: c.checkId, startsAt: new Date(), endsAt: new Date(Date.now() + 3_600_000) });
     await expect(aw).rejects.toThrow(/direct job assignment/);
 
-    // A check for a different job or unit is refused before the mode is even consulted.
-    await expect(identity(dispatcher).create({ jobId: jobId + 1, unitId, operatorId, role: "operator", joinedAt: new Date(), eligibilityCheckId: c.checkId })).rejects.toThrow(/for job/);
+    // A check for a different job or unit is refused before the mode is even consulted. The other job is a real one
+    // (P4.1: a job the caller cannot see is "not found" before anything else is looked at, so `jobId + 1` no longer works).
+    const [otherJob] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Acme', 'LSD 12-01-050-08W5', 'dispatched', 0)", [key("JOB").slice(0, 40)]);
+    await expect(identity(dispatcher).create({ jobId: Number(otherJob.insertId), unitId, operatorId, role: "operator", joinedAt: new Date(), eligibilityCheckId: c.checkId })).rejects.toThrow(/for job/);
 
     // The history is all there, in order, with reasons.
     const [hist] = await pool.execute<mysql.RowDataPacket[]>("SELECT mode, reason, setByUserId FROM dispatchEnforcementSettings WHERE financialEntityId IS NULL AND setByUserId = ? ORDER BY setAt, id", [manager]);
