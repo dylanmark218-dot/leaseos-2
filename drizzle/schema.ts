@@ -1,4 +1,4 @@
-import { bigint, boolean, date, decimal, double, index, int, json, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { bigint, boolean, date, decimal, double, index, int, json, mysqlEnum, mysqlTable, text, timestamp, tinyint, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -8090,3 +8090,85 @@ export const academyInspectorRequests = mysqlTable("academyInspectorRequests", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type AcademyInspectorRequestRow = typeof academyInspectorRequests.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// 0133 — P7.1 Commercial Office configuration. bookOrgRef NULL = the platform
+// default (the owner's 2026-09-17 decisions); a value = one business's own
+// answer, which wins for that business. Every row carries its source.
+// ---------------------------------------------------------------------------
+export const commercialRoleTypes = mysqlTable("commercialRoleTypes", {
+  id: int("id").autoincrement().primaryKey(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  roleKey: varchar("roleKey", { length: 40 }).notNull(),
+  label: varchar("label", { length: 120 }).notNull(),
+  builtIn: boolean("builtIn").default(false).notNull(),
+  status: mysqlEnum("status", ["active", "retired"]).default("active").notNull(),
+  source: varchar("source", { length: 160 }).notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export const organizationCommercialRoles = mysqlTable("organizationCommercialRoles", {
+  id: int("id").autoincrement().primaryKey(),
+  roleRef: varchar("roleRef", { length: 40 }).notNull().unique(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  roleKey: varchar("roleKey", { length: 40 }).notNull(),
+  commercialNumber: varchar("commercialNumber", { length: 40 }),
+  status: mysqlEnum("status", ["active", "suspended", "ended"]).default("active").notNull(),
+  effectiveFrom: date("effectiveFrom", { mode: "string" }).notNull(),
+  effectiveTo: date("effectiveTo", { mode: "string" }),
+  note: varchar("note", { length: 500 }),
+  assignedByUserId: int("assignedByUserId").notNull(),
+  assignedAt: timestamp("assignedAt").defaultNow().notNull(),
+  endedByUserId: int("endedByUserId"),
+  endedAt: timestamp("endedAt"),
+});
+export const commercialNumberingPolicies = mysqlTable("commercialNumberingPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  sequenceType: varchar("sequenceType", { length: 24 }).notNull(),
+  prefix: varchar("prefix", { length: 12 }).notNull(),
+  separator: varchar("separator", { length: 3 }).default("-").notNull(),
+  yearDigits: tinyint("yearDigits").default(4).notNull(),
+  includeMonth: boolean("includeMonth").default(false).notNull(),
+  sequenceDigits: tinyint("sequenceDigits").default(6).notNull(),
+  resetPeriod: mysqlEnum("resetPeriod", ["never", "yearly", "monthly"]).default("yearly").notNull(),
+  source: varchar("source", { length: 160 }).notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export const commercialSettings = mysqlTable("commercialSettings", {
+  id: int("id").autoincrement().primaryKey(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  accountingTarget: mysqlEnum("accountingTarget", ["none", "quickbooks_online", "sage", "xero", "custom"]).default("quickbooks_online").notNull(),
+  accountingTargetLabel: varchar("accountingTargetLabel", { length: 120 }),
+  source: varchar("source", { length: 160 }).notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export const commercialApprovalPolicies = mysqlTable("commercialApprovalPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  category: varchar("category", { length: 40 }).notNull(),
+  maxAmountCents: bigint("maxAmountCents", { mode: "number" }),
+  approverRole: varchar("approverRole", { length: 40 }).notNull(),
+  secondPersonRequired: boolean("secondPersonRequired").default(false).notNull(),
+  separationOfDuties: boolean("separationOfDuties").default(true).notNull(),
+  status: mysqlEnum("status", ["active", "retired"]).default("active").notNull(),
+  source: varchar("source", { length: 200 }).notNull(),
+  effectiveFrom: date("effectiveFrom", { mode: "string" }).notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export const commercialCategoryTypes = mysqlTable("commercialCategoryTypes", {
+  id: int("id").autoincrement().primaryKey(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  kind: mysqlEnum("kind", ["document_type", "load_category", "profitability_dimension"]).notNull(),
+  categoryKey: varchar("categoryKey", { length: 40 }).notNull(),
+  label: varchar("label", { length: 120 }).notNull(),
+  builtIn: boolean("builtIn").default(false).notNull(),
+  status: mysqlEnum("status", ["active", "retired"]).default("active").notNull(),
+  source: varchar("source", { length: 160 }).notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});

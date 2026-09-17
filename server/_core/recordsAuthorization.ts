@@ -71,6 +71,10 @@ export type Permission =
   // Commercial / personnel
   | "billing.read"
   | "billing.write"
+  // P7.1 — Commercial Office configuration: read, maintain counterparties, and set policy (types, ladders, numbering, accounting target).
+  | "commercial.read"
+  | "commercial.write"
+  | "commercial.policy"
   | "payroll.read"
   // Payroll, split by what is actually being read. `payroll.read` stays the
   // legacy coarse grant and remains HR-only.
@@ -756,6 +760,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
   ],
   office: [
+    "commercial.read",
+    "commercial.write",
     "assistant.ask",
     "agent.use",
     "agent.act",
@@ -909,6 +915,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "commercial.read",
+    "commercial.write",
+    "commercial.policy",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1256,6 +1265,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   /* ---- B20.5 finance and payroll functions ---- */
 
   bookkeeper: [
+    "commercial.read",
+    "commercial.write",
     "tax.read_business",
     "tax.expense.create",
     "tax.expense.review",
@@ -2140,6 +2151,21 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "manifestCustody.evidenceProfileApprove": "manifest.write",
   "manifestCustody.chain": "manifest.read",
   /* ---- v22.24 P4.6 (0131): security incidents and privacy breach assessments ---- */
+  "commercialOffice.roleTypesList": "commercial.read",
+  "commercialOffice.roleTypeCreate": "commercial.policy",
+  "commercialOffice.roleAssign": "commercial.write",
+  "commercialOffice.roleEnd": "commercial.write",
+  "commercialOffice.rolesList": "commercial.read",
+  "commercialOffice.settingsGet": "commercial.read",
+  "commercialOffice.settingsSet": "commercial.policy",
+  "commercialOffice.numberingList": "commercial.read",
+  "commercialOffice.numberingSet": "commercial.policy",
+  "commercialOffice.approvalPoliciesList": "commercial.read",
+  "commercialOffice.approvalPolicySet": "commercial.policy",
+  "commercialOffice.approvalPolicyRetire": "commercial.policy",
+  "commercialOffice.approvalRequirement": "commercial.read",
+  "commercialOffice.categoriesList": "commercial.read",
+  "commercialOffice.categoryCreate": "commercial.write",
   "securityIncidents.open": "incident.create",
   "securityIncidents.timelineAppend": "incident.create",
   "securityIncidents.organizationAffect": "incident.review",

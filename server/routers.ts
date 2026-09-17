@@ -36,6 +36,7 @@ async function scopeFor(userId: number) {
   return { tenantId: (await resolveActingScope(db, userId)).tenantId };
 }
 import { securityIncidentsRouter } from "./securityIncidentsRouter";
+import { commercialOfficeRouter } from "./commercialOfficeRouter";
 import type { WidgetLayoutStore } from "./_core/widgetService";
 import { drizzleWidgetLayoutStore } from "./widgetLayouts";
 import { widgetReaderFor } from "./widgetSources";
@@ -299,6 +300,7 @@ export const appRouter = router({
   widgets: widgetsRouter(widgetDeps),
   manifestCustody: manifestCustodyRouter,
   securityIncidents: securityIncidentsRouter,
+  commercialOffice: commercialOfficeRouter,
   system: systemRouter,
   comms: commsRouter,
   enforcement: enforcementRouter,

@@ -87,7 +87,7 @@ Depends on P3.1 (done). Gated on the business decisions in the owner's answer se
 
 | # | Checkpoint | Definition of done |
 |---|---|---|
-| P7.1 | Organization master | one canonical organization with CLIENT / VENDOR / FACILITY / SUBCONTRACTOR / SUPPLIER roles, contacts, addresses, tax identities, duplicate detection |
+| P7.1 | Organization master + Commercial Office configuration | **DONE** (`0133`; `server/commercialOfficeRouter.ts` at `commercialOffice.*`; `server/_core/commercialPolicy.ts`). The owner's five decisions of 2026-09-17 are **seeded defaults a business may override** (`bookOrgRef` NULL = default, a value = that business's own answer, which wins): (1) five built-in role types, one organization holds any combination, custom role types per business; (2) numbering per sequence per business (`CLI-000123`, `VEN-000087`, `PO-2026-001245`, `MF-2026-004812`, `INV-2026-003117` seeded; a business's own prefix/digits/reset win, minted through the tracking engine on a namespaced sequence); (3) accounting-neutral core, QuickBooks Online seeded as first target, `sage`/`xero`/`none`/`custom`+label per business; (4) approval ladder per category per business — an amount no tier covers is **UNKNOWN → review**, the defaults never fill a business's gap, separation of duties refuses the preparer by name, second person named above the top tier; (5) profitability dimensions seeded (client, job, load, unit, driver, branch, contractor); load categories and document types start **empty** until the business adds its own. Permissions `commercial.read/write` (office, bookkeeper, management) and `commercial.policy` (management). Tests: 5 pure + 4 DB. **Human items:** the ladder's supervisor/manager/administrator were mapped to office/management/management+second person and say so in each row's `source` — confirm or change (P6.6); no existing `vendors`/`facilities` rows were linked to organizations by name — linking is a person's act (P7.2) |
 | P7.2 | Commercial relationships | client accounts, vendor approvals, contracts, POs, rate sheets, billing rules, payment terms — building on the 0115–0117 contractor chain, not beside it |
 | P7.3 | Disposal + load reconciliation | manifest ↔ facility ↔ disposal ticket ↔ scale ticket ↔ accepted quantity, over P3.1's evidence links |
 | P7.4 | AR source chain | job / load / ticket / time / rate → invoice line → invoice → credit / payment, referencing evidence not copying it |
@@ -105,6 +105,7 @@ Depends on P3.1 (done). Gated on the business decisions in the owner's answer se
 | P6.2 | Author and approve the first real s.6.2 coverage mapping for the TDG road course | a course author, then a second person |
 | P6.3 | Store written permission (or decline) for 511 Alberta commercial use | Alberta Transportation, then whoever records `permissionDocumentId` |
 | P6.4 | Confirm the s.6.7 clock anchor (dated vs received) against the regulation text | counsel or a regulator confirmation, recorded on the regulatory profile |
+| P6.6 | Confirm the approval-ladder role mapping seeded in 0133 (supervisor→office, manager→management, administrator/owner→management with a second person) or set the business's own tiers through `commercialOffice.approvals.policySet` | human |
 | P6.5 | Read the northern division's own on-duty section (STILL CONTESTED) | a verifier with s. 39 open |
 
 ---
