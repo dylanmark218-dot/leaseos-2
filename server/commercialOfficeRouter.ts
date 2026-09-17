@@ -11,12 +11,13 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, gte, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills } from "../drizzle/schema";
+import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { matchFacilityStatementLine, type DisposalTicketLite } from "./_core/facilityStatements";
 import { aging, type ArInvoice } from "./_core/accountsReceivable";
+import { derivability, empty, finish, type Dimension, type Figures } from "./_core/profitability";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 
@@ -437,6 +438,103 @@ export const commercialOfficeRouter = router({
         }
         const out = Array.from(groups.values()).sort((x, y) => y.totalCents - x.totalCents);
         return { asOf, organizations: out.filter(o => o.linked), unlinked: out.filter(o => !o.linked), note: out.some(o => !o.linked) ? "Unlinked vendors are shown by their captured name; link them to an organization with commercialOffice.links.set (recordType vendor)." : undefined };
+      }),
+  }),
+
+  /**
+   * P7.6 — the general-ledger mapping the accounting-neutral export needs. A business loads
+   * its own chart and maps its own keys; nothing is seeded. Readiness names what is unmapped.
+   */
+  gl: router({
+    accountSet: roleProcedure("commercialOffice.glAccountSet")
+      .input(z.object({ code: z.string().regex(/^[A-Za-z0-9.\-]{1,32}$/), name: z.string().min(1).max(120), kind: z.enum(["revenue", "cost_of_sales", "expense", "asset", "liability", "equity", "tax"]), status: z.enum(["active", "retired"]).default("active") }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const existing = (await db.select({ id: commercialGlAccounts.id }).from(commercialGlAccounts).where(and(eq(commercialGlAccounts.code, input.code), bookOrgRef ? eq(commercialGlAccounts.bookOrgRef, bookOrgRef) : isNull(commercialGlAccounts.bookOrgRef))).limit(1))[0];
+        const values = { ...input, bookOrgRef, source: `business_defined by user ${ctx.user.id}`, createdByUserId: ctx.user.id };
+        if (existing) await db.update(commercialGlAccounts).set({ name: input.name, kind: input.kind, status: input.status }).where(eq(commercialGlAccounts.id, existing.id)); else await db.insert(commercialGlAccounts).values(values);
+        return { code: input.code, bookOrgRef };
+      }),
+    mappingSet: roleProcedure("commercialOffice.glMappingSet")
+      .input(z.object({ mappingKind: z.enum(["service_code", "coding_category", "gst_output", "gst_input"]), mappingKey: z.string().min(1).max(80), glAccountCode: z.string().min(1).max(32) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const acct = (await db.select({ id: commercialGlAccounts.id, status: commercialGlAccounts.status }).from(commercialGlAccounts).where(and(eq(commercialGlAccounts.code, input.glAccountCode), bookWhere(commercialGlAccounts, bookOrgRef))).limit(1))[0];
+        if (!acct) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — GL account ${input.glAccountCode} is not in this business's chart; add it first` });
+        if (acct.status === "retired") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — GL account ${input.glAccountCode} is retired` });
+        const existing = (await db.select({ id: commercialGlMappings.id }).from(commercialGlMappings).where(and(eq(commercialGlMappings.mappingKind, input.mappingKind), eq(commercialGlMappings.mappingKey, input.mappingKey), bookOrgRef ? eq(commercialGlMappings.bookOrgRef, bookOrgRef) : isNull(commercialGlMappings.bookOrgRef))).limit(1))[0];
+        const values = { ...input, bookOrgRef, source: `business_defined by user ${ctx.user.id}`, updatedByUserId: ctx.user.id };
+        if (existing) await db.update(commercialGlMappings).set(values).where(eq(commercialGlMappings.id, existing.id)); else await db.insert(commercialGlMappings).values(values);
+        return { ...input, bookOrgRef };
+      }),
+    list: roleProcedure("commercialOffice.glList").query(async ({ ctx }) => {
+      const { db, bookOrgRef } = await bookFor(ctx.user.id);
+      const [accounts, mappings] = await Promise.all([db.select().from(commercialGlAccounts).where(bookWhere(commercialGlAccounts, bookOrgRef)), db.select().from(commercialGlMappings).where(bookWhere(commercialGlMappings, bookOrgRef))]);
+      return { accounts, mappings };
+    }),
+    /** What an export of this period could not post: every unmapped key, by name and count. Nothing is exported here. */
+    exportReadiness: roleProcedure("commercialOffice.glExportReadiness")
+      .input(z.object({ financialEntityId: z.number().int().positive(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const mappings = await db.select().from(commercialGlMappings).where(bookWhere(commercialGlMappings, bookOrgRef));
+        const mapped = (kind: string, key: string) => mappings.find(m => m.mappingKind === kind && m.mappingKey === key && m.bookOrgRef === bookOrgRef) ?? mappings.find(m => m.mappingKind === kind && m.mappingKey === key && m.bookOrgRef === null) ?? null;
+        const inv = await db.select({ serviceCode: invoiceLines.serviceCode, gst: invoices.gstTreatment, n: sql<number>`COUNT(*)` }).from(invoiceLines).innerJoin(invoices, eq(invoices.id, invoiceLines.invoiceId))
+          .where(and(eq(invoices.financialEntityId, input.financialEntityId), gte(invoices.issuedAt, input.from), lte(invoices.issuedAt, input.to), notInArray(invoices.status, ["draft", "void"]))).groupBy(invoiceLines.serviceCode, invoices.gstTreatment);
+        const bills = await db.select({ codingCategory: vendorBills.codingCategory, gst: vendorBills.gstTreatment, n: sql<number>`COUNT(*)` }).from(vendorBills)
+          .where(and(eq(vendorBills.financialEntityId, input.financialEntityId), gte(vendorBills.invoiceDate, input.from), lte(vendorBills.invoiceDate, input.to), notInArray(vendorBills.status, ["cancelled"]))).groupBy(vendorBills.codingCategory, vendorBills.gstTreatment);
+        const blockers: { kind: string; key: string; count: number; reason: string }[] = [];
+        const tally = (kind: "service_code" | "coding_category" | "gst_output" | "gst_input", key: string | null, n: number, what: string) => {
+          if (key === null || key === "") { blockers.push({ kind, key: "(none)", count: Number(n), reason: `${what} with no ${kind.replace("_", " ")} cannot be posted` }); return; }
+          if (!mapped(kind, key)) blockers.push({ kind, key, count: Number(n), reason: `${what} ${kind.replace("_", " ")} "${key}" is not mapped to a GL account in this book` });
+        };
+        for (const r of inv) { tally("service_code", r.serviceCode, r.n, "invoice lines"); if (r.gst === "unknown") blockers.push({ kind: "gst_output", key: "unknown", count: Number(r.n), reason: "invoice lines whose GST treatment is unknown cannot be posted" }); else tally("gst_output", r.gst, r.n, "invoice lines"); }
+        for (const r of bills) { tally("coding_category", r.codingCategory, r.n, "vendor bills"); if (r.gst === "unknown") blockers.push({ kind: "gst_input", key: "unknown", count: Number(r.n), reason: "vendor bills whose GST treatment is unknown cannot be posted" }); else tally("gst_input", r.gst, r.n, "vendor bills"); }
+        const chartLoaded = (await db.select({ n: sql<number>`COUNT(*)` }).from(commercialGlAccounts).where(bookWhere(commercialGlAccounts, bookOrgRef)))[0]?.n ?? 0;
+        if (!Number(chartLoaded)) blockers.unshift({ kind: "chart", key: "(none)", count: 0, reason: "no chart of accounts loaded for this book" });
+        return { state: blockers.length ? ("BLOCKED" as const) : ("READY" as const), blockers, exported: false as const };
+      }),
+  }),
+
+  /** P7.6 — profitability by dimension, from evidence links only; a business hides the dimensions it does not use by retiring them. */
+  profitability: router({
+    byDimension: roleProcedure("commercialOffice.profitabilityByDimension")
+      .input(z.object({ financialEntityId: z.number().int().positive(), dimension: z.enum(["client", "job", "load", "unit", "driver", "branch", "contractor"]), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const dims = await db.select().from(commercialCategoryTypes).where(and(eq(commercialCategoryTypes.kind, "profitability_dimension"), bookWhere(commercialCategoryTypes, bookOrgRef)));
+        const active = layerFor(dims.map(d => ({ ...d, category: d.categoryKey })), bookOrgRef, input.dimension).rows[0];
+        if (!active) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — dimension "${input.dimension}" is not active in this business's book` });
+        const d = derivability(input.dimension as Dimension);
+        if (d.derivable === false) return { dimension: input.dimension, derivable: false as const, reason: d.reason, rows: [] as never[] };
+        // Revenue by job (ex-tax subtotal), cost by job from bills and contractor payables.
+        const inv = await db.select({ jobId: invoices.jobId, customer: invoices.customer, customerOrgRef: jobs.customerOrgRef, subtotalCents: invoices.subtotalCents }).from(invoices).leftJoin(jobs, eq(jobs.id, invoices.jobId))
+          .where(and(eq(invoices.financialEntityId, input.financialEntityId), gte(invoices.issuedAt, input.from), lte(invoices.issuedAt, input.to), notInArray(invoices.status, ["draft", "void"])));
+        const bills = await db.select({ jobId: vendorBills.jobId, unitId: vendorBills.unitId, subtotalCents: vendorBills.subtotalCents }).from(vendorBills)
+          .where(and(eq(vendorBills.financialEntityId, input.financialEntityId), gte(vendorBills.invoiceDate, input.from), lte(vendorBills.invoiceDate, input.to), notInArray(vendorBills.status, ["cancelled"])));
+        const pays = await db.select({ jobId: commercialJobChains.rootJobId, payeeOrgRef: contractorPayables.payeeOrgRef, grossAmountCents: contractorPayables.grossAmountCents, state: contractorPayables.state }).from(contractorPayables).innerJoin(commercialJobChains, eq(commercialJobChains.chainRef, contractorPayables.chainRef))
+          .where(and(gte(contractorPayables.createdAt, input.from), lte(contractorPayables.createdAt, input.to), inArray(contractorPayables.state, ["approved", "posted"])));
+        const rows = new Map<string, Figures & { key: string; label: string }>();
+        const bump = (key: string, label: string, f: Partial<Figures>) => { const r = rows.get(key) ?? { ...empty(), key, label }; rows.set(key, { ...r, ...Object.fromEntries(Object.entries(f).map(([k, v]) => [k, (r as never as Record<string, number>)[k] + (v as number)])) } as never); };
+        const jobKey = (jobId: number | null) => jobId === null ? "unattributed" : `job:${jobId}`;
+        const clientKey = (customerOrgRef: string | null, customer: string | null) => customerOrgRef ?? (customer ? `unlinked:${customer}` : "unattributed");
+        if (input.dimension === "job") {
+          for (const i of inv) bump(jobKey(i.jobId), jobKey(i.jobId), { revenueCents: i.subtotalCents ?? 0, invoiceCount: 1 });
+          for (const b of bills) bump(jobKey(b.jobId), jobKey(b.jobId), { costCents: b.subtotalCents ?? 0, billCount: 1 });
+          for (const p of pays) bump(jobKey(p.jobId), jobKey(p.jobId), { costCents: p.grossAmountCents, payableCount: 1 });
+        } else if (input.dimension === "client") {
+          const jobClient = new Map<number, { orgRef: string | null; customer: string | null }>();
+          for (const i of inv) if (i.jobId !== null) jobClient.set(i.jobId, { orgRef: i.customerOrgRef, customer: i.customer });
+          for (const i of inv) bump(clientKey(i.customerOrgRef, i.customer), clientKey(i.customerOrgRef, i.customer), { revenueCents: i.subtotalCents ?? 0, invoiceCount: 1 });
+          for (const b of bills) { const c = b.jobId !== null ? jobClient.get(b.jobId) : undefined; const k = c ? clientKey(c.orgRef, c.customer) : "unattributed"; bump(k, k, { costCents: b.subtotalCents ?? 0, billCount: 1 }); }
+          for (const p of pays) { const c = jobClient.get(p.jobId); const k = c ? clientKey(c.orgRef, c.customer) : "unattributed"; bump(k, k, { costCents: p.grossAmountCents, payableCount: 1 }); }
+        } else if (input.dimension === "contractor") {
+          for (const p of pays) bump(p.payeeOrgRef, p.payeeOrgRef, { costCents: p.grossAmountCents, payableCount: 1 });
+        } else if (input.dimension === "unit") {
+          for (const b of bills) { const k = b.unitId === null ? "unattributed" : `unit:${b.unitId}`; bump(k, k, { costCents: b.subtotalCents ?? 0, billCount: 1 }); }
+        }
+        const out = Array.from(rows.values()).map(r => ({ ...r, ...finish(r) })).sort((a, b) => b.revenueCents - a.revenueCents || b.costCents - a.costCents);
+        return { dimension: input.dimension, derivable: d.derivable, basis: d.basis, note: d.derivable === "cost_only" ? d.reason : undefined, rows: out };
       }),
   }),
 });

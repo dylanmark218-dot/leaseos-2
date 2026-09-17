@@ -280,3 +280,58 @@ d("P7.5 — payables through the same ledger, and by organization", () => {
     expect(a.unlinked.find(u => u.label === "Nobody Linked Me Ltd")).toMatchObject({ linked: false, totalCents: 90000, awaitingApprovalCents: 90000, buckets: expect.objectContaining({ d61_90: 90000 }) });
   }, 40_000);
 });
+
+d("P7.6 — GL mapping is the business's own; profitability comes only from evidence links", () => {
+  async function invoice(entityId: number, customer: string, jobId: number | null, subtotal: number, serviceCode: string, gst: "taxable" | "unknown") {
+    const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO billingBooks (bookNumber, jobId, customer, billingState, openedAt, createdAt, updatedAt) VALUES (?, 1, ?, 'invoiced', NOW(), NOW(), NOW())", [`BB-${rnd()}`, customer]);
+    const [inv] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO invoices (invoiceNumber, financialEntityId, issuedAt, billingBookId, jobId, customer, subtotalCents, taxCents, totalCents, currency, status, gstTreatment, dueAt) VALUES (?, ?, '2026-08-05 00:00:00', ?, ?, ?, ?, 0, ?, 'CAD', 'sent', ?, '2026-09-04 00:00:00')", [`INV-${rnd()}`, entityId, book.insertId, jobId, customer, subtotal, subtotal, gst]);
+    await pool.execute("INSERT INTO invoiceLines (invoiceId, lineNo, serviceCode, description, quantityMillis, billableQuantityMillis, unit, rateMillis, amountCents, basis) VALUES (?, 1, ?, 'x', 1000, 1000, 'hr', ?, ?, 'test')", [inv.insertId, serviceCode, subtotal * 1000, subtotal]);
+  }
+  it("refuses a mapping to an account not in the chart, names every unmapped key for a period, and reports READY once the business has mapped its own keys", async () => {
+    const book = await org(); const mgr = await member(book, ["management"]);
+    const entityId = 1_900_000 + Math.floor(Math.random() * 90_000);
+    await invoice(entityId, "Fixture Energy", null, 100_000, "HYDROVAC_HR", "taxable");
+    await expect(callerFor(mgr).commercialOffice.gl.mappingSet({ mappingKind: "service_code", mappingKey: "HYDROVAC_HR", glAccountCode: "4000" })).rejects.toThrow(/not in this business's chart/);
+    const before = await callerFor(mgr).commercialOffice.gl.exportReadiness({ financialEntityId: entityId, from: new Date("2026-08-01"), to: new Date("2026-08-31") });
+    expect(before.state).toBe("BLOCKED");
+    expect(before.exported).toBe(false);
+    expect(before.blockers.map(b => b.kind)).toEqual(expect.arrayContaining(["chart", "service_code", "gst_output"]));
+    await callerFor(mgr).commercialOffice.gl.accountSet({ code: "4000", name: "Hydrovac revenue", kind: "revenue" });
+    await callerFor(mgr).commercialOffice.gl.accountSet({ code: "2300", name: "GST collected", kind: "tax" });
+    await callerFor(mgr).commercialOffice.gl.mappingSet({ mappingKind: "service_code", mappingKey: "HYDROVAC_HR", glAccountCode: "4000" });
+    await callerFor(mgr).commercialOffice.gl.mappingSet({ mappingKind: "gst_output", mappingKey: "taxable", glAccountCode: "2300" });
+    const after = await callerFor(mgr).commercialOffice.gl.exportReadiness({ financialEntityId: entityId, from: new Date("2026-08-01"), to: new Date("2026-08-31") });
+    expect(after).toMatchObject({ state: "READY", blockers: [] });
+    // Another business sees none of this chart.
+    const other = await org(); const mgr2 = await member(other, ["management"]);
+    expect((await callerFor(mgr2).commercialOffice.gl.list()).accounts.length).toBe(0);
+  }, 30_000);
+
+  it("attributes revenue and cost by job and by linked client from evidence, says unit is cost-only, refuses driver by name, and hides a retired dimension", async () => {
+    const book = await org(), clientOrg = await org();
+    const office = await member(book, ["office"]), mgr = await member(book, ["management"]);
+    await callerFor(office).commercialOffice.roles.assign({ orgRef: clientOrg, roleKey: "client" });
+    const entityId = 1_900_000 + Math.floor(Math.random() * 90_000);
+    const jobCode = `JOB-${rnd()}`;
+    await callerFor(office).fieldRoute.jobs.create({ jobCode, type: "Hydrovac", customer: "Fixture Energy", location: "LSD 04-12-045-08W4" } as never);
+    const [j] = await pool.query<mysql.RowDataPacket[]>("SELECT id FROM jobs WHERE jobCode = ?", [jobCode]);
+    const jobId = Number(j[0]!.id);
+    await callerFor(office).commercialOffice.links.set({ recordType: "job_customer", recordId: jobId, orgRef: clientOrg });
+    await invoice(entityId, "Fixture Energy", jobId, 500_000, "HYDROVAC_HR", "taxable");
+    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [`VEN-${rnd()}`, "Disposal Co"]);
+    await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, vendorInvoiceNumber, invoiceDate, receivedAt, currency, subtotalCents, taxAmountCents, totalCents, matchOutcome, status, jobId, unitId) VALUES (?,?,?,?, '2026-08-10', '2026-08-11 00:00:00', 'CAD', 120000, 6000, 126000, 'match', 'ready_to_pay', ?, 42)", [`BILL-${rnd()}`, entityId, v.insertId, `VI-${rnd()}`, jobId]);
+    const byJob = await callerFor(office).commercialOffice.profitability.byDimension({ financialEntityId: entityId, dimension: "job", from: new Date("2026-08-01"), to: new Date("2026-08-31") });
+    expect(byJob.derivable).toBe(true);
+    expect(byJob.rows.find(r => r.key === `job:${jobId}`)).toMatchObject({ revenueCents: 500_000, costCents: 120_000, marginCents: 380_000, marginPct: 76, invoiceCount: 1, billCount: 1 });
+    const byClient = await callerFor(office).commercialOffice.profitability.byDimension({ financialEntityId: entityId, dimension: "client", from: new Date("2026-08-01"), to: new Date("2026-08-31") });
+    expect(byClient.rows.find(r => r.key === clientOrg)).toMatchObject({ revenueCents: 500_000, costCents: 120_000 });
+    const byUnit = await callerFor(office).commercialOffice.profitability.byDimension({ financialEntityId: entityId, dimension: "unit", from: new Date("2026-08-01"), to: new Date("2026-08-31") });
+    expect(byUnit).toMatchObject({ derivable: "cost_only", note: expect.stringContaining("allocation, not evidence") });
+    expect(byUnit.rows.find(r => r.key === "unit:42")).toMatchObject({ costCents: 120_000, revenueCents: 0 });
+    const byDriver = await callerFor(office).commercialOffice.profitability.byDimension({ financialEntityId: entityId, dimension: "driver", from: new Date("2026-08-01"), to: new Date("2026-08-31") });
+    expect(byDriver).toMatchObject({ derivable: false, reason: expect.stringContaining("operator") });
+    // The business hides branch by retiring it in its own book; the default row stays for everyone else.
+    await pool.execute("INSERT INTO commercialCategoryTypes (bookOrgRef, kind, categoryKey, label, builtIn, status, source) VALUES (?, 'profitability_dimension', 'branch', 'Branch', false, 'retired', 'business_defined test')", [book]);
+    await expect(callerFor(mgr).commercialOffice.profitability.byDimension({ financialEntityId: entityId, dimension: "branch", from: new Date("2026-08-01"), to: new Date("2026-08-31") })).rejects.toThrow(/not active in this business's book/);
+  }, 40_000);
+});

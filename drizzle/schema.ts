@@ -8271,3 +8271,26 @@ export const commercialApprovalSignatures = mysqlTable("commercialApprovalSignat
   note: varchar("note", { length: 500 }),
   at: timestamp("at").defaultNow().notNull(),
 });
+
+// 0138 — P7.6 GL mapping as per-business configuration; nothing seeded.
+export const commercialGlAccounts = mysqlTable("commercialGlAccounts", {
+  id: int("id").autoincrement().primaryKey(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  code: varchar("code", { length: 32 }).notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  kind: mysqlEnum("kind", ["revenue", "cost_of_sales", "expense", "asset", "liability", "equity", "tax"]).notNull(),
+  status: mysqlEnum("status", ["active", "retired"]).default("active").notNull(),
+  source: varchar("source", { length: 160 }).notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export const commercialGlMappings = mysqlTable("commercialGlMappings", {
+  id: int("id").autoincrement().primaryKey(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  mappingKind: mysqlEnum("mappingKind", ["service_code", "coding_category", "gst_output", "gst_input"]).notNull(),
+  mappingKey: varchar("mappingKey", { length: 80 }).notNull(),
+  glAccountCode: varchar("glAccountCode", { length: 32 }).notNull(),
+  source: varchar("source", { length: 160 }).notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});

@@ -27,6 +27,13 @@ describe("approval ladder — the owner's defaults", () => {
     expect(approvalRequirementFor(rows, { bookOrgRef: "ORG-C", category: "purchase_order", amountCents: 9_000_000 })).toMatchObject({ state: "KNOWN", layer: "business", approverRole: "office" });
     expect(layerFor(DEFAULTS.map(t => ({ ...t, category: "credit" })), "ORG-C", "credit").layer).toBe("default");
   });
+  it("lets a business retire a category in its own book: the default does not come back", () => {
+    const rows = [...DEFAULTS, { ...tier({ bookOrgRef: "ORG-R", category: "purchase_order" }), status: "retired" as const }];
+    const l = layerFor(rows, "ORG-R", "purchase_order");
+    expect(l).toEqual({ layer: "business", rows: [] });
+    expect(approvalRequirementFor(rows, { bookOrgRef: "ORG-R", category: "purchase_order", amountCents: 100 })).toMatchObject({ state: "UNKNOWN" });
+    expect(layerFor(rows, "ORG-S", "purchase_order").layer).toBe("default");   // everyone else still has the default
+  });
   it("refuses a negative or non-finite amount as UNKNOWN rather than fitting it to the lowest tier", () => {
     expect(approvalRequirementFor(DEFAULTS, { bookOrgRef: null, category: "purchase_order", amountCents: -1 })).toMatchObject({ state: "UNKNOWN" });
     expect(approvalRequirementFor(DEFAULTS, { bookOrgRef: null, category: "purchase_order", amountCents: Number.NaN })).toMatchObject({ state: "UNKNOWN" });

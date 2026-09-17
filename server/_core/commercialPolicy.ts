@@ -23,10 +23,13 @@ export type ApprovalRequirement =
 
 /** The rows that govern one business: its own rows for a category when it wrote some, else the defaults. */
 export function layerFor<T extends { bookOrgRef: string | null; category?: string; status?: string }>(rows: T[], bookOrgRef: string | null, category?: string): { layer: "business" | "default"; rows: T[] } {
-  const active = rows.filter(r => (r.status ?? "active") === "active" && (category === undefined || r.category === category));
-  const own = bookOrgRef ? active.filter(r => r.bookOrgRef === bookOrgRef) : [];
-  if (own.length) return { layer: "business", rows: own };
-  return { layer: "default", rows: active.filter(r => r.bookOrgRef === null) };
+  const inCategory = rows.filter(r => category === undefined || r.category === category);
+  // The business layer governs as soon as the business has written anything for the category —
+  // including a retired row: retiring in your own book hides the default, it does not restore it.
+  const own = bookOrgRef ? inCategory.filter(r => r.bookOrgRef === bookOrgRef) : [];
+  const isActive = (r: T) => (r.status ?? "active") === "active";
+  if (own.length) return { layer: "business", rows: own.filter(isActive) };
+  return { layer: "default", rows: inCategory.filter(r => r.bookOrgRef === null && isActive(r)) };
 }
 
 /** Which approval a category and amount require for this business. */
