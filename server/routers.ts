@@ -26,6 +26,7 @@ import { complianceRouter } from "./complianceRouter";
 import { calibrationRouter, requirementRouter } from "./requirementRouter";
 import { surfacesRouter } from "./surfacesRouter";
 import { widgetsRouter, type WidgetDeps } from "./widgetsRouter";
+import { manifestCustodyRouter } from "./manifestCustodyRouter";
 import type { WidgetLayoutStore } from "./_core/widgetService";
 import { drizzleWidgetLayoutStore } from "./widgetLayouts";
 import { widgetReaderFor } from "./widgetSources";
@@ -287,6 +288,7 @@ const widgetDeps: WidgetDeps = {
 
 export const appRouter = router({
   widgets: widgetsRouter(widgetDeps),
+  manifestCustody: manifestCustodyRouter,
   system: systemRouter,
   comms: commsRouter,
   enforcement: enforcementRouter,

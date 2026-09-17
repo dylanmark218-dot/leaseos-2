@@ -2130,6 +2130,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "loads.create": "load.write",
   "manifests.list": "manifest.read",
   "manifests.create": "manifest.write",
+  /* ---- v22.24 P3.1 (0129/0130): the manifest as a chain of custody ---- */
+  "manifestCustody.bind": "manifest.write",
+  "manifestCustody.custodyRecord": "manifest.write",
+  "manifestCustody.evidenceAttach": "manifest.write",
+  "manifestCustody.amend": "manifest.write",
+  "manifestCustody.close": "manifest.write",
+  "manifestCustody.evidenceProfileSet": "manifest.write",
+  "manifestCustody.evidenceProfileApprove": "manifest.write",
+  "manifestCustody.chain": "manifest.read",
   "deliveries.list": "delivery.read",
   "deliveries.create": "delivery.write",
 

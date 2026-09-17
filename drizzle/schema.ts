@@ -403,11 +403,88 @@ export const manifests = mysqlTable("manifests", {
   scaleTickets: text("scaleTickets"),
   evidenceRefs: text("evidenceRefs"),
   signatureRefs: text("signatureRefs"),
-  status: mysqlEnum("status", ["draft", "verified", "complete"])
+  status: mysqlEnum("status", ["draft", "verified", "sealed", "complete"])
     .default("draft")
     .notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+  /** 0129 (P3.1) — canonical references beside the captured text; the text stays as the snapshot. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  tripId: int("tripId"),
+  loadId: int("loadId"),
+  operatorId: int("operatorId"),
+  trailerUnitId: int("trailerUnitId"),
+  originFacilityId: int("originFacilityId"),
+  destinationFacilityId: int("destinationFacilityId"),
+  loadClass: varchar("loadClass", { length: 64 }),
+  sealedAt: timestamp("sealedAt"),
+  closedAt: timestamp("closedAt"),
+  currentHash: varchar("currentHash", { length: 64 }),
+  amendmentCount: int("amendmentCount").default(0).notNull(),
+}, (t) => ({ orgIdx: index("manifests_org_idx").on(t.orgRef, t.status) }));
+
+/** 0129 — what each party was represented as, at the time. */
+export const manifestPartySnapshots = mysqlTable("manifestPartySnapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  manifestId: int("manifestId").notNull(),
+  role: mysqlEnum("role", ["operator", "unit", "trailer", "route", "origin_facility", "destination_facility"]).notNull(),
+  canonicalEntityId: int("canonicalEntityId"),
+  capturedName: varchar("capturedName", { length: 220 }).notNull(),
+  capturedIdentifier: varchar("capturedIdentifier", { length: 120 }),
+  capturedAddress: varchar("capturedAddress", { length: 300 }),
+  source: mysqlEnum("source", ["backfilled_text", "bound_from_record", "amendment"]).notNull(),
+  capturedAt: timestamp("capturedAt").defaultNow().notNull(),
+}, (t) => ({ manifestIdx: index("manifestPartySnapshots_manifest_idx").on(t.manifestId, t.role) }));
+
+/** 0129 — custody as a sequence of events. */
+export const manifestCustodyEvents = mysqlTable("manifestCustodyEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  manifestId: int("manifestId").notNull(),
+  sequence: int("sequence").notNull(),
+  eventType: mysqlEnum("eventType", ["loaded", "departed_origin", "arrived_facility", "accepted_by_facility", "rejected_by_facility", "unloaded", "closed"]).notNull(),
+  actorUserId: int("actorUserId").notNull(),
+  facilityId: int("facilityId"),
+  occurredAt: timestamp("occurredAt").notNull(),
+  evidenceRecordId: int("evidenceRecordId"),
+  notes: varchar("notes", { length: 500 }),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+}, (t) => ({ seq: uniqueIndex("manifestCustodyEvents_seq_unique").on(t.manifestId, t.sequence) }));
+
+/** 0129 — append-only amendments carrying the hash of what they replaced. */
+export const manifestAmendments = mysqlTable("manifestAmendments", {
+  id: int("id").autoincrement().primaryKey(),
+  manifestId: int("manifestId").notNull(),
+  amendmentNo: int("amendmentNo").notNull(),
+  reasonCode: mysqlEnum("reasonCode", ["party_correction", "quantity_correction", "facility_change", "evidence_added", "other"]).notNull(),
+  reasonText: varchar("reasonText", { length: 500 }).notNull(),
+  requestedByUserId: int("requestedByUserId").notNull(),
+  approvedByUserId: int("approvedByUserId").notNull(),
+  previousHash: varchar("previousHash", { length: 64 }).notNull(),
+  replacementHash: varchar("replacementHash", { length: 64 }).notNull(),
+  changesJson: text("changesJson").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ no: uniqueIndex("manifestAmendments_no_unique").on(t.manifestId, t.amendmentNo) }));
+
+/** 0129 — evidence through the registry, with a named relationship. */
+export const manifestEvidenceLinks = mysqlTable("manifestEvidenceLinks", {
+  id: int("id").autoincrement().primaryKey(),
+  manifestId: int("manifestId").notNull(),
+  evidenceRecordId: int("evidenceRecordId").notNull(),
+  relationship: mysqlEnum("relationship", ["origin_ticket", "scale_ticket", "disposal_ticket", "photo", "signature", "client_authorization", "facility_acceptance", "route_evidence"]).notNull(),
+  attachedByUserId: int("attachedByUserId").notNull(),
+  attachedAt: timestamp("attachedAt").defaultNow().notNull(),
+}, (t) => ({ unique: uniqueIndex("manifestEvidenceLinks_unique").on(t.manifestId, t.evidenceRecordId, t.relationship), evidenceIdx: index("manifestEvidenceLinks_evidence_idx").on(t.evidenceRecordId, t.relationship) }));
+
+/** 0129 — what closing requires, per load class, as configuration. None seeded. */
+export const manifestEvidenceProfiles = mysqlTable("manifestEvidenceProfiles", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  loadClass: varchar("loadClass", { length: 64 }).notNull(),
+  requiredRelationshipsJson: text("requiredRelationshipsJson").notNull(),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ unique: uniqueIndex("manifestEvidenceProfiles_unique").on(t.orgRef, t.loadClass) }));
 
 export const scanAudits = mysqlTable("scanAudits", {
   id: int("id").autoincrement().primaryKey(),

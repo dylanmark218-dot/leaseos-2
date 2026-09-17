@@ -52,7 +52,7 @@ gate is green before a checkpoint is called complete.
 
 | # | Checkpoint | Definition of done |
 |---|---|---|
-| P3.1 | Manifest = chain of custody | **PARTIAL**: the `manifests` table (0010 era) references job and unit by id but carries trailer, driver, route, facility as text and scale tickets / evidence / signatures as JSON refs; no trip, load, LSD/UWI, SDS, permit or disposal-ticket foreign keys; no amendment history. Done when every column in the project rule §19 list is a reference to a record, and amendments are rows |
+| P3.1 | Manifest = chain of custody | **DONE** (0129/0130, `manifestCustodyRouter`): canonical references beside the captured text (operator, unit, trailer, facilities, trip, load), party snapshots as rows (backfilled from the legacy text), custody as a sequenced event chain that seals on departure, evidence through the registry with a named relationship, append-only amendments with previous/replacement hashes needing a reason and a second person, closing against a per-load-class evidence profile — none seeded, REVIEW without one, BLOCKED naming what is missing. The 0130 trigger refuses a silent rewrite of a sealed manifest even by raw SQL. Five invariants tested through the real router. **Not yet**: the legacy `manifests.create/list` still accept text parties (draft only; binding replaces them), and route stays a reference to route evidence because there is no routes table |
 | P3.2 | Field ticket acceptance per line | **DONE**: `closeout.lineDecide` (accepted / disputed, customer quantity and statement kept beside the crew's); `invoicing.draftFromTicket` excludes disputed lines and names them |
 | P3.3 | Billing readiness names blockers | **DONE**: `invoicing.draftFromTicket` returns `{ drafted: false, blockers[] }` with named blockers (`invoiceDraft.ts`), including `amended_after_signature`; `closeout.whyTheseHours` explains the hours |
 | P3.4 | Signatures + integrity | **DONE**: `fieldTicketSignatures.payloadHash`; supplements carry `siteRevisionHash`; `amended_after_signature` blocks invoicing (`billing.ts`, `invoiceDraft.ts`) |
@@ -79,6 +79,22 @@ gate is green before a checkpoint is called complete.
 | P5.2 | Portal shells | driver / dispatcher / office / customer / vendor / facility portals mount only their permitted procedures (7b/7c gates already pin the external counts) |
 | P5.3 | Accessibility | the B28h Chromium accessibility suite (48 cases) runs against the real app, three viewports |
 | P5.4 | Demo dataset | a seeded, fixture-labelled organization that exercises the full chain end-to-end without touching a real customer or a real regulatory figure |
+
+## P7 — Commercial Office chain (filed here so it does not overwrite the P3 rows already done)
+
+Depends on P3.1 (done). Gated on the business decisions in the owner's answer set: organization roles, numbering, accounting target, approval ladder, thresholds, document types, waste categories, profitability dimensions.
+
+| # | Checkpoint | Definition of done |
+|---|---|---|
+| P7.1 | Organization master | one canonical organization with CLIENT / VENDOR / FACILITY / SUBCONTRACTOR / SUPPLIER roles, contacts, addresses, tax identities, duplicate detection |
+| P7.2 | Commercial relationships | client accounts, vendor approvals, contracts, POs, rate sheets, billing rules, payment terms — building on the 0115–0117 contractor chain, not beside it |
+| P7.3 | Disposal + load reconciliation | manifest ↔ facility ↔ disposal ticket ↔ scale ticket ↔ accepted quantity, over P3.1's evidence links |
+| P7.4 | AR source chain | job / load / ticket / time / rate → invoice line → invoice → credit / payment, referencing evidence not copying it |
+| P7.5 | AP source chain | PO / manifest / vendor ticket → vendor bill → approval → payment / remittance |
+| P7.6 | Tax / accounting dimensions | tax ledger, cost centres, GL mapping, profitability by client / job / unit / driver / branch — all dimensions built, companies hide what they do not use |
+| P7.7 | Document registry | canonical documents, hashes, versions, retention classes, multi-record linkage (the records vault is the base) |
+| P7.8 | Audit packages | reproducible job / vendor / client / tax bundles; read-only accountant / auditor access (7b external gate already pins the count) |
+| P7.9 | Office administration UI | clients, vendors, AP, AR, manifests, disposal exceptions, document search, month-close dashboard |
 
 ## P6 — the human-only items (no code completes these)
 
