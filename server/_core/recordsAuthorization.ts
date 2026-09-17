@@ -75,6 +75,10 @@ export type Permission =
   | "commercial.read"
   | "commercial.write"
   | "commercial.policy"
+  // 0139 — disposal-facility directory: read pins and evidence, record evidence and assessments, review evidence and verify coordinates.
+  | "facility.directory.read"
+  | "facility.directory.write"
+  | "facility.directory.review"
   | "payroll.read"
   // Payroll, split by what is actually being read. `payroll.read` stays the
   // legacy coarse grant and remains HR-only.
@@ -315,6 +319,7 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    "facility.directory.read",
     "assistant.ask",
     "board.read",
     "board.post",
@@ -395,6 +400,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "facility.directory.write",
+    "facility.directory.read",
     "academy.direct_supervision.manage",
     "assistant.ask",
     "agent.use",
@@ -564,6 +571,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
+    "facility.directory.read",
     "academy.evaluate",
     "assistant.ask",
     "agent.read",
@@ -650,6 +658,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "facility.directory.review",
+    "facility.directory.write",
+    "facility.directory.read",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -760,6 +771,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
   ],
   office: [
+    "facility.directory.write",
+    "facility.directory.read",
     "commercial.read",
     "commercial.write",
     "assistant.ask",
@@ -915,6 +928,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "facility.directory.review",
+    "facility.directory.write",
+    "facility.directory.read",
     // P7.4/P7.5 — the approval ladder names management above the first tier for write-offs and payments too (credits and bills were already here).
     "ar.writeoff.decide",
     "payment.release",
@@ -1215,6 +1231,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.read_safety_summary",
     "evidence.read_maintenance",
@@ -1268,6 +1285,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   /* ---- B20.5 finance and payroll functions ---- */
 
   bookkeeper: [
+    "facility.directory.read",
     "commercial.read",
     "commercial.write",
     "tax.read_business",
@@ -1389,6 +1407,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
     "oos.policy.approve",
@@ -2154,6 +2173,20 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "manifestCustody.evidenceProfileApprove": "manifest.write",
   "manifestCustody.chain": "manifest.read",
   /* ---- v22.24 P4.6 (0131): security incidents and privacy breach assessments ---- */
+  "facilityDirectory.licencesList": "facility.directory.read",
+  "facilityDirectory.vocabularyList": "facility.directory.read",
+  "facilityDirectory.vocabularyVerify": "facility.directory.review",
+  "facilityDirectory.seedLeads": "facility.directory.review",
+  "facilityDirectory.features": "facility.directory.read",
+  "facilityDirectory.get": "facility.directory.read",
+  "facilityDirectory.evidenceRecord": "facility.directory.write",
+  "facilityDirectory.evidenceReview": "facility.directory.review",
+  "facilityDirectory.coordinateVerify": "facility.directory.review",
+  "facilityDirectory.capabilitySet": "facility.directory.review",
+  "facilityDirectory.assessLoad": "facility.directory.write",
+  "facilityDirectory.assessments": "facility.directory.read",
+  "facilityDirectory.exportCsv": "facility.directory.read",
+  "facilityDirectory.exportGeoJson": "facility.directory.read",
   "commercialOffice.glAccountSet": "commercial.policy",
   "commercialOffice.glMappingSet": "commercial.policy",
   "commercialOffice.glList": "commercial.read",
