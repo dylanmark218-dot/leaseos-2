@@ -9,7 +9,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { applicableRestrictions, fingerprintHash, hashPart, inForce, loadFingerprint, stalenessAgainst, structureAttributes, type RouteDependencies } from "./_core/structures";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, jobInScope, unitInScope } from "./db";
 import { accessRoadSegments, roadGraphBuilds, roadGraphEdges, roadRadioAssignments, routeApprovals, structures, bridges, inboundEvents, integrationClients, locationIdentities, roadRestrictions, routeEvidenceEntries, routeRequests, units, vehicleProfiles } from "../drizzle/schema";
 import { resolveAssignment } from "./_core/commRoute";
 import { parseLsd, parseUwi, theoreticalCentroid } from "./_core/dls";
@@ -93,6 +93,8 @@ export const spatialRouter = router({
   vehicleProfileSet: roleProcedure("spatial.vehicleProfileSet")
     .input(z.object({ unitId: z.number().int().positive(), heightM: z.number().positive().max(6), widthM: z.number().positive().max(5), lengthM: z.number().positive().max(40), emptyWeightKg: z.number().int().positive(), axleGroups: z.array(AXLE_GROUP).min(1).max(6), source: z.enum(["shop_measured", "spec_sheet", "operator_stated"]), measuredAt: z.coerce.date().optional() }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit must be in the caller's scope (coreRecordOwnership); otherwise it does not exist here.
+      if (!(await unitInScope(input.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
       const db = await dbOrThrow();
       for (const g of input.axleGroups) if (g.loadedKg < g.emptyKg) throw new TRPCError({ code: "BAD_REQUEST", message: `${g.name}: loaded below empty` });
       const values = { unitId: input.unitId, heightM: input.heightM, widthM: input.widthM, lengthM: input.lengthM, emptyWeightKg: input.emptyWeightKg, axleGroupsJson: JSON.stringify(input.axleGroups), source: input.source, measuredAt: input.measuredAt ?? null, verificationStatus: "unverified" as const, verifiedByUserId: null, recordedByUserId: ctx.user.id };
@@ -102,6 +104,8 @@ export const spatialRouter = router({
     }),
 
   vehicleProfileVerify: roleProcedure("spatial.vehicleProfileVerify").input(z.object({ unitId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      // P4.1: the unit must be in the caller's scope (coreRecordOwnership); otherwise it does not exist here.
+      if (!(await unitInScope(input.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
     const db = await dbOrThrow();
     const p = (await db.select().from(vehicleProfiles).where(eq(vehicleProfiles.unitId, input.unitId)).limit(1))[0];
     if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "No profile" });
@@ -139,7 +143,9 @@ export const spatialRouter = router({
    */
   routeEvaluateSegments: roleProcedure("spatial.routeEvaluateSegments")
     .input(z.object({ unitId: z.number().int().positive(), segments: z.array(z.object({ segmentId: z.string().min(1).max(80), label: z.string().min(1).max(220), lengthKm: z.number().nonnegative() })).min(1).max(200), at: z.coerce.date().default(() => new Date()), requiredChecks: z.array(CHECK).min(1), dangerousGoods: z.boolean().default(false), requiresEscort: z.boolean().default(false), tripId: z.number().int().positive().optional(), jobId: z.number().int().positive().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit must be in the caller's scope (coreRecordOwnership); otherwise it does not exist here.
+      if (!(await unitInScope(input.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
       const db = await dbOrThrow();
       const p = (await db.select().from(vehicleProfiles).where(eq(vehicleProfiles.unitId, input.unitId)).limit(1))[0];
       if (!p) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No vehicle profile for this unit — record its dimensions and axle weights first" });
@@ -242,6 +248,8 @@ export const spatialRouter = router({
       at: z.coerce.date().default(() => new Date()),
     }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit must be in the caller's scope (coreRecordOwnership); otherwise it does not exist here.
+      if (!(await unitInScope(input.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (input.dispatchStatus === "blocked") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A blocked route is not approved" });
@@ -262,7 +270,13 @@ export const spatialRouter = router({
   /** Is this approval still the answer? Anything that changed is named in the words a dispatcher would use. */
   routeApprovalCheck: roleProcedure("spatial.routeApprovalCheck")
     .input(z.object({ approvalRef: z.string().min(1).max(64), at: z.coerce.date().default(() => new Date()) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      // P4.1: the approval's unit must be in the caller's scope; otherwise the approval does not exist here.
+      {
+        const dbs = await getDb();
+        const ap = dbs ? (await dbs.select({ unitId: routeApprovals.unitId }).from(routeApprovals).where(eq(routeApprovals.approvalRef, input.approvalRef)).limit(1))[0] : undefined;
+        if (ap && !(await unitInScope(ap.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Approval ${input.approvalRef} not found` });
+      }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const a = (await db.select().from(routeApprovals).where(eq(routeApprovals.approvalRef, input.approvalRef)).limit(1))[0];
@@ -276,6 +290,12 @@ export const spatialRouter = router({
     }),
 
   routeRequest: roleProcedure("spatial.routeRequest").input(z.object({ unitId: z.number().int().positive(), originRef: z.string().min(1).max(120), destinationRef: z.string().min(1).max(120), tripId: z.number().int().positive().optional(), jobId: z.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+      // P4.1: the unit, and the job when one is named, must be in the caller's scope.
+      {
+        const scope = await actingScopeFor(ctx.user.id);
+        if (!(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+        if (input.jobId != null && !(await jobInScope(input.jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+      }
     const db = await dbOrThrow();
     const status = routingSourceStatus();
     const answer = routeAgainstNetwork({ originRef: input.originRef, destinationRef: input.destinationRef }, status);
@@ -287,7 +307,9 @@ export const spatialRouter = router({
   routingSourceStatus: roleProcedure("spatial.routingSourceStatus").query(async () => routingSourceStatus()),
 
   /** The last position a machine reported for a unit — evidence with its age and source, never a claim the unit is working. */
-  lastPosition: roleProcedure("spatial.lastPosition").input(z.object({ unitId: z.number().int().positive() })).query(async ({ input }) => {
+  lastPosition: roleProcedure("spatial.lastPosition").input(z.object({ unitId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      // P4.1: the unit must be in the caller's scope (coreRecordOwnership); otherwise it does not exist here.
+      if (!(await unitInScope(input.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
     const db = await dbOrThrow();
     const u = (await db.select({ unitNumber: units.unitNumber }).from(units).where(eq(units.id, input.unitId)).limit(1))[0];
     if (!u) throw new TRPCError({ code: "NOT_FOUND", message: "Unit not found" });
