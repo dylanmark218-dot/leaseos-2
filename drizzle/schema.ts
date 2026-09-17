@@ -5546,6 +5546,7 @@ export type InsertVideoAccessLog = typeof videoAccessLog.$inferInsert;
 
 export const applicants = mysqlTable("applicants", {
   id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),   // 0147: NULL = the historical single tenant; the hiring organization otherwise
   applicantRef: varchar("applicantRef", { length: 64 }).notNull().unique(),
   fullName: varchar("fullName", { length: 180 }).notNull(),
   contactJson: text("contactJson"),
