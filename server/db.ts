@@ -79,7 +79,7 @@ import {
   users,
   externalIdentities,
   integrationClients,
-  coreRecordOwnership, organizationMemberships, fieldTickets } from "../drizzle/schema";
+  coreRecordOwnership, organizationMemberships, fieldTickets, incidentReports } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -822,6 +822,37 @@ export async function fieldTicketInScope(ticketNumber: string, scope: TenantScop
   if (t.jobId != null) return (await jobInScope(t.jobId, scope)) ? t : null;
   if (t.unitId != null) return (await unitInScope(t.unitId, scope)) ? t : null;
   return scope.tenantId === SINGLE_TENANT_ID ? t : null;
+}
+
+/** An operator the scope may see (coreRecordOwnership), or null. */
+export async function operatorInScope(operatorId: number, scope: TenantScope): Promise<{ id: number } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select({ id: operators.id }).from(operators).where(and(eq(operators.id, operatorId), ownershipScopeWhere("operator", operators.id, scope))).limit(1))[0] ?? null;
+}
+/**
+ * An evidence record the scope may see, or null: through its job when it has one, else through the
+ * person who captured it, else only for the historical single tenant.
+ */
+export async function evidenceInScope(evidenceId: number, scope: TenantScope): Promise<{ id: number } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const e = (await db.select({ id: evidenceRecords.id, jobId: evidenceRecords.jobId, capturedBy: evidenceRecords.capturedBy }).from(evidenceRecords).where(eq(evidenceRecords.id, evidenceId)).limit(1))[0];
+  if (!e) return null;
+  if (e.jobId != null) return (await jobInScope(e.jobId, scope)) ? { id: e.id } : null;
+  if (e.capturedBy != null) return (await userInScope(e.capturedBy, scope)) ? { id: e.id } : null;
+  return scope.tenantId === SINGLE_TENANT_ID ? { id: e.id } : null;
+}
+/** An incident report the scope may see, or null: through its job, else its unit, else its operator, else the single tenant only. */
+export async function incidentInScope(incidentNumber: string, scope: TenantScope): Promise<{ id: number } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const i = (await db.select({ id: incidentReports.id, jobId: incidentReports.jobId, unitId: incidentReports.unitId, operatorId: incidentReports.operatorId }).from(incidentReports).where(eq(incidentReports.incidentNumber, incidentNumber)).limit(1))[0];
+  if (!i) return null;
+  if (i.jobId != null) return (await jobInScope(i.jobId, scope)) ? { id: i.id } : null;
+  if (i.unitId != null) return (await unitInScope(i.unitId, scope)) ? { id: i.id } : null;
+  if (i.operatorId != null) return (await operatorInScope(i.operatorId, scope)) ? { id: i.id } : null;
+  return scope.tenantId === SINGLE_TENANT_ID ? { id: i.id } : null;
 }
 
 export async function listOperators(scope: TenantScope) {

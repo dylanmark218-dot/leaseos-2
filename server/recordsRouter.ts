@@ -20,6 +20,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { actingScopeFor, evidenceInScope, incidentInScope, unitInScope, userInScope, workOrderInScope } from "./db";
 import { z } from "zod";
 import { adminProcedure, roleProcedure, router } from "./_core/trpc";
 import {
@@ -104,6 +105,8 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+      // P4.1: the evidence must be in the caller's scope (through its job, else its capturer); otherwise it does not exist here.
+      if (!(await evidenceInScope(input.evidenceId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${input.evidenceId} not found` });
         const me = await svc.resolveOperatorForUser(ctx.user.id);
         const subject = await svc.loadEvidenceSubject(input.evidenceId);
         if (!subject) throw new TRPCError({ code: "NOT_FOUND", message: "No such record" });
@@ -209,6 +212,11 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+      // P4.1: every evidence record named must be in the caller's scope.
+      {
+        const scope = await actingScopeFor(ctx.user.id);
+        for (const id of input.evidenceIds ?? []) if (!(await evidenceInScope(id, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${id} not found` });
+      }
         const me = await svc.resolveOperatorForUser(ctx.user.id);
         const grants = await listActiveUserRoles(ctx.user.id);
 
@@ -298,6 +306,8 @@ export const recordsRouter = router({
     requestDeviceDeletion: roleProcedure("records.evidence.requestDeviceDeletion")
       .input(z.object({ evidenceId: z.number().int() }))
       .mutation(async ({ ctx, input }) => {
+      // P4.1: the evidence must be in the caller's scope (through its job, else its capturer); otherwise it does not exist here.
+      if (!(await evidenceInScope(input.evidenceId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${input.evidenceId} not found` });
         const me = await svc.resolveOperatorForUser(ctx.user.id);
         const subject = await svc.loadEvidenceSubject(input.evidenceId);
         if (!subject) throw new TRPCError({ code: "NOT_FOUND", message: "No such record" });
@@ -350,6 +360,8 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+      // P4.1: the evidence must be in the caller's scope (through its job, else its capturer); otherwise it does not exist here.
+      if (!(await evidenceInScope(input.evidenceId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${input.evidenceId} not found` });
         const subject = await svc.loadEvidenceSubject(input.evidenceId);
         if (!subject) throw new TRPCError({ code: "NOT_FOUND", message: "No such record" });
         if (subject.sealState === "draft") {
@@ -430,6 +442,11 @@ export const recordsRouter = router({
     export: roleProcedure("records.evidence.export")
       .input(z.object({ evidenceIds: z.array(z.number().int()).min(1).max(500) }))
       .mutation(async ({ ctx, input }) => {
+      // P4.1: every evidence record named must be in the caller's scope.
+      {
+        const scope = await actingScopeFor(ctx.user.id);
+        for (const id of input.evidenceIds ?? []) if (!(await evidenceInScope(id, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${id} not found` });
+      }
         for (const id of input.evidenceIds) {
           await svc.recordEvidenceAccess({
             evidenceRecordId: id,
@@ -534,6 +551,8 @@ export const recordsRouter = router({
     readInvestigation: roleProcedure("records.incident.readInvestigation")
       .input(z.object({ incidentNumber: z.string().max(64) }))
       .query(async ({ ctx, input }) => {
+      // P4.1: the incident must be in the caller's scope (through its job, unit or operator); otherwise it does not exist here.
+      if (!(await incidentInScope(input.incidentNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "No such incident" });
         const inc = await svc.loadIncident(input.incidentNumber);
         if (!inc) throw new TRPCError({ code: "NOT_FOUND", message: "No such incident" });
 
@@ -563,6 +582,8 @@ export const recordsRouter = router({
     review: roleProcedure("records.incident.review")
       .input(z.object({ incidentNumber: z.string().max(64) }))
       .mutation(async ({ ctx, input }) => {
+      // P4.1: the incident must be in the caller's scope (through its job, unit or operator); otherwise it does not exist here.
+      if (!(await incidentInScope(input.incidentNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "No such incident" });
         await svc.markIncidentReviewed({
           incidentNumber: input.incidentNumber,
           userId: ctx.user.id,
@@ -589,6 +610,8 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+      // P4.1: a near miss on a unit names a unit the caller may see.
+      if (input.unitId != null && !(await unitInScope(input.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
         const me = await svc.resolveOperatorForUser(ctx.user.id);
         const outcome = evaluateNearMiss({
           originalStatement: input.statement,
@@ -675,6 +698,8 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+      // P4.1: the work order's unit must be in the caller's scope.
+      if (!(await workOrderInScope(input.workOrderId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderId} not found` });
         const grants = await listActiveUserRoles(ctx.user.id);
 
         // The signature must be the caller's own.
@@ -740,6 +765,8 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+      // P4.1: the work order's unit must be in the caller's scope.
+      if (!(await workOrderInScope(input.workOrderId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderId} not found` });
         const wo = await svc.loadWorkOrderSubject(input.workOrderId);
         if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: "No such work order" });
 
@@ -770,6 +797,11 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+      // P4.1: every evidence record named must be in the caller's scope.
+      {
+        const scope = await actingScopeFor(ctx.user.id);
+        for (const id of input.evidenceIds ?? []) if (!(await evidenceInScope(id, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${id} not found` });
+      }
         const id = await svc.placeLegalHold({
           holdNumber: input.holdNumber,
           reason: input.reason,
@@ -810,7 +842,9 @@ export const recordsRouter = router({
   retention: router({
     disposition: roleProcedure("records.retention.disposition")
       .input(z.object({ evidenceId: z.number().int() }))
-      .query(async ({ input }) => {
+      .query(async ({ ctx, input }) => {
+      // P4.1: the evidence must be in the caller's scope (through its job, else its capturer); otherwise it does not exist here.
+      if (!(await evidenceInScope(input.evidenceId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${input.evidenceId} not found` });
         const state = await svc.loadRetentionState(input.evidenceId);
         const underHold = await svc.hasActiveLegalHold(input.evidenceId);
         const r = evaluateOfficeDisposition({
@@ -901,6 +935,10 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        // P4.1: a role is granted only to a person in the caller's scope.
+        if (!(await userInScope(input.targetUserId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
+      // P4.1: a role is granted only to a person in the caller's scope.
+      if (!(await userInScope(input.targetUserId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
         const id = await grantUserRole({
           userId: input.targetUserId,
           role: input.role,
