@@ -12,7 +12,7 @@ with real dependencies; `myDay` is promoted; the other eleven widgets answer
 | 5 promote one widget | done — `myDay` via `surfaces.myDay` as the acting user (`server/widgetSources.ts`) |
 | 6 the seven as-is sources | **done**: inbox, exceptions, dispatchReadiness (operator and unit from the job's dispatched trip, composed by the dispatch composer); hosRemaining device-local by the engine's plan; search and trackingLookup are on-demand tiles (no query in their options) and say so |
 | 7 the resolved sources | **done**: activeJob / activeTrip match the subject by code through `fieldRoute.jobs.list` / `fieldRoute.trips.list`; documentExpiry lists the operator's own documents in the vault's states (current / expiring / expired / unverified / rejected); unitReadiness composes this operator with the selected unit; syncStatus device-local |
-| 8 client suites | `.dom.test.tsx` and the Chromium accessibility suite still run under the engine's own toolchain; a `client` Vitest project is its own commit |
+| 8 client suites | **done**: the three `.dom.test.tsx` suites (51 cases) run under jsdom in this branch's Vitest (`environmentMatchGlobs`, automatic JSX runtime, jest-dom matchers loaded only under jsdom); fixture permissions translated. The Chromium accessibility suite (48 cases) still runs under the engine's Playwright toolchain — a separate CI job (P5.3) |
 
 Not ported: `widgetsRouter.test.ts` (scratch context), `promotionGate.test.ts` and
 `registryIntegrity.test.ts` (assert the scratch permission vocabulary), `guardIntegrity.test.ts` (tools).
