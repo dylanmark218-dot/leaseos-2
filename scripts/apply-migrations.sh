@@ -11,7 +11,9 @@ user="${creds%%:*}"; pass="${creds#*:}"; [ "$pass" = "$creds" ] && pass=""
 hostport="${hostpart%%/*}"; db="${hostport#*/}"; db="${hostpart#*/}"
 host="${hostport%%:*}"; port="${hostport#*:}"; [ "$port" = "$host" ] && port=3306
 
-mysqlc() { mysql -h "$host" -P "$port" -u "$user" ${pass:+-p"$pass"} "$db"; }
+# --default-character-set=utf8mb4: the client otherwise negotiates latin1 and any non-ASCII text in a
+# migration (an en dash in a licence attribution, an accented facility name) is stored as mojibake.
+mysqlc() { mysql --default-character-set=utf8mb4 -h "$host" -P "$port" -u "$user" ${pass:+-p"$pass"} "$db"; }
 
 # COMPOUND STATEMENTS NEED A DELIMITER (recovered from the Chat 5 Academy
 # runner). A trigger with a `BEGIN … END` body contains internal semicolons;
