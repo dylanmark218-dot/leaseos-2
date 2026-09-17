@@ -8,10 +8,10 @@
  * a sequence with no numbering policy mints no number.
  */
 import { TRPCError } from "@trpc/server";
-import { and, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures } from "../drizzle/schema";
+import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
@@ -407,6 +407,36 @@ export const commercialOfficeRouter = router({
         if (!row) return null;
         const signatures = await db.select().from(commercialApprovalSignatures).where(eq(commercialApprovalSignatures.commercialApprovalId, row.id)).orderBy(commercialApprovalSignatures.sequence);
         return { ...row, requirement: typeof row.requirement === "string" ? JSON.parse(row.requirement) : row.requirement, signatures: signatures.map(x => ({ ...x, rolesAtApproval: jsonArray<string>(x.rolesAtApproval) })) };
+      }),
+  }),
+
+  /**
+   * P7.5 — payables by organization: open vendor bills aged by due date, grouped by the
+   * organization a person linked the vendor to; unlinked vendors by their captured name.
+   */
+  ap: router({
+    agingByOrganization: roleProcedure("commercialOffice.apAgingByOrganization")
+      .input(z.object({ financialEntityId: z.number().int().positive(), asOf: z.coerce.date().optional() }))
+      .query(async ({ ctx, input }) => {
+        const { db } = await bookFor(ctx.user.id);
+        const asOf = input.asOf ?? new Date();
+        const rows = await db.select({ b: vendorBills, vendorName: vendors.name, vendorOrgRef: vendors.orgRef }).from(vendorBills).innerJoin(vendors, eq(vendors.id, vendorBills.vendorId))
+          .where(and(eq(vendorBills.financialEntityId, input.financialEntityId), notInArray(vendorBills.status, ["paid", "cancelled"])));
+        const bucketOf = (dueAt: Date | null): "not_due" | "d1_30" | "d31_60" | "d61_90" | "d90_plus" => {
+          if (!dueAt) return "not_due";
+          const days = Math.floor((asOf.getTime() - dueAt.getTime()) / 86_400_000);
+          return days <= 0 ? "not_due" : days <= 30 ? "d1_30" : days <= 60 ? "d31_60" : days <= 90 ? "d61_90" : "d90_plus";
+        };
+        const groups = new Map<string, { orgRef: string | null; label: string; linked: boolean; billCount: number; totalCents: number; buckets: Record<"not_due" | "d1_30" | "d31_60" | "d61_90" | "d90_plus", number>; awaitingApprovalCents: number }>();
+        for (const r of rows) {
+          const key = r.vendorOrgRef ?? `unlinked:${r.vendorName}`;
+          const g = groups.get(key) ?? { orgRef: r.vendorOrgRef ?? null, label: r.vendorOrgRef ?? r.vendorName, linked: r.vendorOrgRef !== null, billCount: 0, totalCents: 0, buckets: { not_due: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 }, awaitingApprovalCents: 0 };
+          g.billCount++; g.totalCents += r.b.totalCents; g.buckets[bucketOf(r.b.dueAt)] += r.b.totalCents;
+          if (r.b.status !== "ready_to_pay") g.awaitingApprovalCents += r.b.totalCents;
+          groups.set(key, g);
+        }
+        const out = Array.from(groups.values()).sort((x, y) => y.totalCents - x.totalCents);
+        return { asOf, organizations: out.filter(o => o.linked), unlinked: out.filter(o => !o.linked), note: out.some(o => !o.linked) ? "Unlinked vendors are shown by their captured name; link them to an organization with commercialOffice.links.set (recordType vendor)." : undefined };
       }),
   }),
 });

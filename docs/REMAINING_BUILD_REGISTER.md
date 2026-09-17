@@ -105,6 +105,7 @@ Depends on P3.1 (done). Gated on the business decisions in the owner's answer se
 | P6.2 | Author and approve the first real s.6.2 coverage mapping for the TDG road course | a course author, then a second person |
 | P6.3 | Store written permission (or decline) for 511 Alberta commercial use | Alberta Transportation, then whoever records `permissionDocumentId` |
 | P6.4 | Confirm the s.6.7 clock anchor (dated vs received) against the regulation text | counsel or a regulator confirmation, recorded on the regulatory profile |
+| P6.7 | Purchase orders have two limit sources: the per-entity purchasing limits (`limitsFor`, existing, tested) and the `purchase_order` tiers seeded in 0133. Decide which governs, or that the ladder is the ceiling and the entity limits refine it, before P7.9 exposes both | human |
 | P6.6 | Confirm the approval-ladder role mapping seeded in 0133/0136 (supervisor→**controller**, manager→management, administrator/owner→management with a second person) or set the business's own tiers through `commercialOffice.approvals.policySet` | human |
 | P6.5 | Read the northern division's own on-duty section (STILL CONTESTED) | a verifier with s. 39 open |
 

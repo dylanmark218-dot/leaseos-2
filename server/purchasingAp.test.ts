@@ -220,9 +220,9 @@ describe("three grants because they are three people", () => {
     expect(can("vendor.bill.approve")).toBe(false);
     expect(can("payment.release")).toBe(false);
   });
-  it("reserves payment release to the controller", () => {
+  it("reserves payment release to the controller and, above the first tier, management (P7.5 ladder)", () => {
     const holders = ALL_ROLES.filter(r => authorize({ userId: 1, roles: [r], permission: "payment.release" }).allowed);
-    expect(holders).toEqual(["controller"]);
+    expect(holders.sort()).toEqual(["controller", "management"]);   // P7.5: the payment tiers above $5,000 name management; the ledger enforces tier, second person and separation of duties
   });
 });
 
@@ -302,13 +302,18 @@ d("the flat tire, end to end", () => {
     expect(m.outcome).toBe("match");
     expect(m.status).toBe("needs_approval");
 
-    // Bookkeeper approves coding. This does NOT release the unit.
-    const ap = await callerFor(bookkeeper).vendor.billApprove({ billRef: bill.billRef, codingCategory: "fleet_repair_tires" });
+    // P7.5 — the approval ladder (0133/0136): the bookkeeper recorded this bill, so they may
+    // not approve it (separation of duties, by name); the controller approves within the
+    // first tier. This does NOT release the unit.
+    await expect(callerFor(bookkeeper).vendor.billApprove({ billRef: bill.billRef, codingCategory: "fleet_repair_tires" })).rejects.toThrow(/separation of duties/);
+    const ap = await callerFor(controller).vendor.billApprove({ billRef: bill.billRef, codingCategory: "fleet_repair_tires" });
     expect(ap.unitReleased).toBe(false);
+    expect(ap.status).toBe("ready_to_pay");
 
-    // The bookkeeper who approved cannot release payment; the controller can.
-    await expect(callerFor(bookkeeper).vendor.paymentRelease({ billRef: bill.billRef })).rejects.toBeTruthy();
-    const paid = await callerFor(controller).vendor.paymentRelease({ billRef: bill.billRef });
+    // The controller who approved cannot release payment; a manager can (a different person, within the payment tier).
+    await expect(callerFor(controller).vendor.paymentRelease({ billRef: bill.billRef })).rejects.toThrow(/does not release/);
+    const manager = await withRole("management");
+    const paid = await callerFor(manager).vendor.paymentRelease({ billRef: bill.billRef });
     expect(paid.status).toBe("paid");
 
     // After all of that: the defect is still open. Nothing in AP touched it.

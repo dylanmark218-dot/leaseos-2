@@ -3799,6 +3799,8 @@ export const purchaseAuthorizations = mysqlTable("purchaseAuthorizations", {
 
 export const vendorBills = mysqlTable("vendorBills", {
   id: int("id").autoincrement().primaryKey(),
+  /** 0137 — who entered the bill; the preparer for separation of duties. NULL on bills that predate this. */
+  recordedByUserId: int("recordedByUserId"),
   billRef: varchar("billRef", { length: 64 }).notNull().unique(),
   financialEntityId: int("financialEntityId").notNull(),
   vendorId: int("vendorId").notNull(),

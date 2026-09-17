@@ -7,6 +7,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { decide as ledgerDecide } from "./_core/commercialApprovalService";
 import { z } from "zod";
 import { and, desc, eq, gte, isNull, or } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
@@ -239,7 +240,7 @@ export const vendorRouter = router({
       const accrual = assessAccrual({ serviceDate: input.serviceDate ?? null, invoiceDate: input.invoiceDate });
       const billRef = ref("BILL");
       const ins = await db.insert(vendorBills).values({
-        billRef, financialEntityId: input.financialEntityId, vendorId: input.vendorId,
+        billRef, financialEntityId: input.financialEntityId, vendorId: input.vendorId, recordedByUserId: ctx.user.id,
         vendorInvoiceNumber: input.vendorInvoiceNumber, invoiceDate: input.invoiceDate,
         serviceDate: input.serviceDate ?? null, receivedAt: new Date(),
         currency: "CAD", subtotalCents: toCents(recon.subtotal), taxAmountCents: toCents(recon.tax), totalCents: toCents(recon.total)!,
@@ -311,9 +312,17 @@ export const vendorRouter = router({
       if (bill.matchOutcome === "unmatched") throw new TRPCError({ code: "CONFLICT", message: "Bill has not been matched" });
       // v21.5 — a bill is approved into its own accounting period; a closed period refuses.
       await assertPeriodOpen(bill.financialEntityId, bill.invoiceDate, "Bill approval");
-      await db.update(vendorBills).set({ codingCategory: input.codingCategory, codedByUserId: ctx.user.id, approvedByUserId: ctx.user.id, approvedAt: new Date(), status: "ready_to_pay" }).where(eq(vendorBills.id, bill.id));
+      if (bill.status === "ready_to_pay" || bill.status === "paid") throw new TRPCError({ code: "CONFLICT", message: `Bill is already ${bill.status}` });
+      // P7.5 — the approval ladder (0133/0136): tier by amount, the recorder never approves, a second person above the top tier.
+      const ledger = await ledgerDecide(db, { actorUserId: ctx.user.id, category: "vendor_bill", subjectType: "vendor_bill", subjectRef: bill.billRef, amountCents: bill.totalCents, preparedByUserId: bill.recordedByUserId ?? null, decision: "approved", note: `coded ${input.codingCategory}` });
+      if (ledger.outcome === "blocked") throw new TRPCError({ code: ledger.reason.startsWith("REVIEW") ? "PRECONDITION_FAILED" : "FORBIDDEN", message: ledger.reason });
+      if (ledger.outcome === "awaiting") {
+        await db.update(vendorBills).set({ codingCategory: input.codingCategory, codedByUserId: ctx.user.id, status: "needs_approval" }).where(eq(vendorBills.id, bill.id));
+        return { billRef: bill.billRef, status: "needs_approval" as const, unitReleased: false as const, ledger };
+      }
+      await db.update(vendorBills).set({ codingCategory: input.codingCategory, codedByUserId: bill.codedByUserId ?? ctx.user.id, approvedByUserId: ctx.user.id, approvedAt: new Date(), status: "ready_to_pay" }).where(eq(vendorBills.id, bill.id));
       // Explicit, because someone will one day ask: this does NOT release the unit.
-      return { billRef: bill.billRef, status: "ready_to_pay", unitReleased: false as const };
+      return { billRef: bill.billRef, status: "ready_to_pay" as const, unitReleased: false as const, ledger };
     }),
 
   paymentRelease: roleProcedure("vendor.paymentRelease")
@@ -327,8 +336,12 @@ export const vendorRouter = router({
       if (bill.status !== "ready_to_pay") throw new TRPCError({ code: "CONFLICT", message: `Bill is ${bill.status}, not ready to pay` });
       // The person who approved coding does not release payment.
       if (bill.approvedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The person who approved the bill does not release its payment" });
+      // P7.5 — a payment is its own decision on the ladder (category `payment`); the approver prepared it.
+      const ledger = await ledgerDecide(db, { actorUserId: ctx.user.id, category: "payment", subjectType: "vendor_bill_payment", subjectRef: bill.billRef, amountCents: bill.totalCents, preparedByUserId: bill.approvedByUserId ?? null, decision: "approved" });
+      if (ledger.outcome === "blocked") throw new TRPCError({ code: ledger.reason.startsWith("REVIEW") ? "PRECONDITION_FAILED" : "FORBIDDEN", message: ledger.reason });
+      if (ledger.outcome === "awaiting") return { billRef: bill.billRef, status: "ready_to_pay" as const, ledger };
       await db.update(vendorBills).set({ paymentReleasedByUserId: ctx.user.id, paymentReleasedAt: new Date(), status: "paid" }).where(eq(vendorBills.id, bill.id));
-      return { billRef: bill.billRef, status: "paid" };
+      return { billRef: bill.billRef, status: "paid" as const, ledger };
     }),
 });
 

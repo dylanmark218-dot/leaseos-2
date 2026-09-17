@@ -247,3 +247,36 @@ d("P7.4 — receivables through the approval ladder, and by organization", () =>
     expect(a.note).toContain("customer_account");
   }, 30_000);
 });
+
+d("P7.5 — payables through the same ledger, and by organization", () => {
+  it("a $40,000 bill takes two managers; the recorder is refused by name; the approver does not release; an unlinked vendor ages by its captured name", async () => {
+    const book = await org(), vendorOrg = await org();
+    const bookkeeper = await member(book, ["bookkeeper"]), controller = await member(book, ["controller"]), mgr1 = await member(book, ["management"]), mgr2 = await member(book, ["management"]);
+    const entityId = 1_800_000 + Math.floor(Math.random() * 90_000);
+    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [`VEN-${rnd()}`, `Big Iron ${rnd()}`]);
+    await callerFor(bookkeeper).commercialOffice.roles.assign({ orgRef: vendorOrg, roleKey: "vendor" });
+    await callerFor(bookkeeper).commercialOffice.links.set({ recordType: "vendor", recordId: v.insertId, orgRef: vendorOrg });
+    const billRef = `BILL-${rnd()}`;
+    await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, recordedByUserId, vendorInvoiceNumber, invoiceDate, receivedAt, dueAt, currency, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?,?,?,?,?, '2026-08-01', '2026-08-02 00:00:00', '2026-08-31 00:00:00', 'CAD', 4000000, 0, 4000000, 'match', 'needs_approval')", [billRef, entityId, v.insertId, bookkeeper, `VI-${rnd()}`]);
+    await expect(callerFor(bookkeeper).vendor.billApprove({ billRef, codingCategory: "fleet_capital" })).rejects.toThrow(/separation of duties/);
+    await expect(callerFor(controller).vendor.billApprove({ billRef, codingCategory: "fleet_capital" })).rejects.toThrow(/requires role management/);
+    const first = await callerFor(mgr1).vendor.billApprove({ billRef, codingCategory: "fleet_capital" });
+    expect(first).toMatchObject({ status: "needs_approval", ledger: { outcome: "awaiting", approvals: 1, required: 2 } });
+    const second = await callerFor(mgr2).vendor.billApprove({ billRef, codingCategory: "fleet_capital" });
+    expect(second).toMatchObject({ status: "ready_to_pay", ledger: { outcome: "satisfied" } });
+    // Payment: the bill's approver (mgr2) prepared it and does not release; mgr1 is a different person but the payment tier above $25,000 wants two.
+    await expect(callerFor(mgr2).vendor.paymentRelease({ billRef })).rejects.toThrow(/does not release/);
+    const rel1 = await callerFor(mgr1).vendor.paymentRelease({ billRef });
+    expect(rel1).toMatchObject({ status: "ready_to_pay", ledger: { outcome: "awaiting", required: 2 } });
+    const mgr3 = await member(book, ["management"]);
+    expect(await callerFor(mgr3).vendor.paymentRelease({ billRef })).toMatchObject({ status: "paid", ledger: { outcome: "satisfied", approvals: 2 } });
+    const ledger = await callerFor(mgr1).commercialOffice.ar.approvalLedger({ subjectType: "vendor_bill_payment", subjectRef: billRef });
+    expect(ledger!.signatures.map(s => s.userId)).toEqual([mgr1, mgr3]);
+    // AP aging: a second, unpaid bill from an unlinked vendor.
+    const [v2] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [`VEN-${rnd()}`, "Nobody Linked Me Ltd"]);
+    await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, vendorInvoiceNumber, invoiceDate, receivedAt, dueAt, currency, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?,?,?,?, '2026-06-01', '2026-06-02 00:00:00', '2026-07-01 00:00:00', 'CAD', 90000, 0, 90000, 'match', 'needs_approval')", [`BILL-${rnd()}`, entityId, v2.insertId, `VI-${rnd()}`]);
+    const a = await callerFor(controller).commercialOffice.ap.agingByOrganization({ financialEntityId: entityId, asOf: new Date("2026-09-17T00:00:00Z") });
+    expect(a.organizations.find(o => o.orgRef === vendorOrg)).toBeUndefined();   // the linked vendor's only bill is paid
+    expect(a.unlinked.find(u => u.label === "Nobody Linked Me Ltd")).toMatchObject({ linked: false, totalCents: 90000, awaitingApprovalCents: 90000, buckets: expect.objectContaining({ d61_90: 90000 }) });
+  }, 40_000);
+});
