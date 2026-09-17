@@ -1,29 +1,18 @@
-# B28 port — WIP state (branch `integration/b28-widgets-wip`)
+# B28 port — status (v22.23)
 
-Phase 3 of the locked order is applied here: engine modules copied (14 server, 7
-client), the router's context adapted to the branch (`boardCtx()` in
-`server/widgetsRouter.ts` — userId from the session, tenantId from
-`resolveActingScope`, roleKey requested-or-first-held and refused by
-`actorForRole` if not held), `widgets.offerable/boardResolve/layoutSave`
-registered under `myday.read_own`, `permissionsForDomainRole()` exported for the
-grant source, migrations 0127/0128 in `drizzle/` with schema declared, and the
-three iteration-style fixes this tsconfig needs.
+**Applied on this branch, gate-green.** The engine is mounted at `widgets.*`
+with real dependencies; `myDay` is promoted; the other eleven widgets answer
+`unknown` with their reason on the tile until each is promoted in its own step.
 
-**Typecheck: 6 errors, all one cause** — the v1 registry types every widget's
-`procedure` as `ProcedureName`, and five sources do not exist on the branch:
+| Step (locked order) | State |
+|---|---|
+| 1–2 baseline / inspect | done (`docs/b28/B28_RECONCILIATION_MATRIX.md`) |
+| 3 engine in, context adapted, procedures registered | done — `boardCtx()` in `server/widgetsRouter.ts`; `widgets.offerable/boardResolve/layoutSave` under `myday.read_own` |
+| 4 migrations 0127/0128 + schema, parity green | done |
+| 5 promote one widget | done — `myDay` via `surfaces.myDay` as the acting user (`server/widgetSources.ts`) |
+| 6 the seven as-is sources | **next**: inbox, exceptions, dispatchReadiness, hosRemaining, trackingLookup, search — one reader each, one commit each; `hosRemaining` reads UNKNOWN until a person promotes a figure (P9) |
+| 7 the resolved sources | documentExpiry → `documents.list`, unitReadiness → `readiness.forShift`, activeJob → `jobs.list`, activeTrip → `trips.list`: readers apply the self/unit scope; syncStatus is device-local (runtime, not server) |
+| 8 client suites | `.dom.test.tsx` and the Chromium accessibility suite still run under the engine's own toolchain; a `client` Vitest project is its own commit |
 
-```
-widgetRegistry.ts:206   "records.documentExpiry"  -> add a read over the records vault (recordsRouter), permission records.read
-widgetRegistry.ts:214   "shop.unitReadiness"      -> do not add to shop; mount readiness.unit over readinessComposer
-widgetRegistry.ts:222   "jobs.active"             -> add a self-scoped read beside jobs.list
-widgetRegistry.ts:230   "trips.active"            -> add a self-scoped read beside trips.list
-widgetRegistry.ts:242   "sync.status"             -> device-local; registryV2 already says kind: "device_local"; v1 needs a non-procedure source kind
-widgetRegistryV2.ts:254 "trips.active"            -> same as above
-```
-
-Not yet done on this branch: mount `widgets: widgetsRouter(deps)` in `routers.ts`
-(deps: `drizzleWidgetLayoutStore`, a grant source over `permissionsForDomainRole`,
-the tile-reader dispatcher for the seven as-is sources), the `/widgets` route, the
-pure engine tests, and the one-widget promotion (`myDay`). The branch does not
-build and must not be merged; it exists so the next checkpoint starts from the
-adapted state rather than from the archive.
+Not ported: `widgetsRouter.test.ts` (scratch context), `promotionGate.test.ts` and
+`registryIntegrity.test.ts` (assert the scratch permission vocabulary), `guardIntegrity.test.ts` (tools).
