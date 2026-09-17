@@ -22,7 +22,7 @@ async function member(orgRef: string | null, roles: string[]) {
 }
 
 d("the owner's decisions are the seeded defaults", () => {
-  it("seeds five role types, five numbering formats, QuickBooks Online, an 18-row ladder and seven profitability dimensions — and no load categories or document types", async () => {
+  it("seeds five role types, five numbering formats, QuickBooks Online, an 18-row ladder, seven profitability dimensions and ten canonical document types — and no load categories", async () => {
     const book = await org(); const office = await member(book, ["office"]);
     const c = callerFor(office);
     expect((await c.commercialOffice.roleTypes.list()).filter(t => t.builtIn).map(t => t.roleKey).sort()).toEqual(["client", "disposal_facility", "subcontractor", "supplier", "vendor"]);
@@ -33,7 +33,7 @@ d("the owner's decisions are the seeded defaults", () => {
     expect(ladder.every(p => p.source.startsWith("owner_decision_2026-09-17"))).toBe(true);
     expect((await c.commercialOffice.categories.list({ kind: "profitability_dimension" })).length).toBe(7);
     expect((await c.commercialOffice.categories.list({ kind: "load_category" })).length).toBe(0);
-    expect((await c.commercialOffice.categories.list({ kind: "document_type" })).length).toBe(0);
+    expect((await c.commercialOffice.categories.list({ kind: "document_type" })).filter(t => t.builtIn).length).toBe(10);   // 0144: the canonical document kinds LeaseOS itself produces are built in; a business adds its own
   }, 20_000);
 });
 
@@ -334,4 +334,51 @@ d("P7.6 — GL mapping is the business's own; profitability comes only from evid
     await pool.execute("INSERT INTO commercialCategoryTypes (bookOrgRef, kind, categoryKey, label, builtIn, status, source) VALUES (?, 'profitability_dimension', 'branch', 'Branch', false, 'retired', 'business_defined test')", [book]);
     await expect(callerFor(mgr).commercialOffice.profitability.byDimension({ financialEntityId: entityId, dimension: "branch", from: new Date("2026-08-01"), to: new Date("2026-08-31") })).rejects.toThrow(/not active in this business's book/);
   }, 40_000);
+});
+
+d("P7.7 — the commercial document registry over the vault", () => {
+  const sha = (s: string) => require("node:crypto").createHash("sha256").update(s).digest("hex") as string;
+  it("registers only with a hash and a pointer, refuses a hash that is not the generated document's, supersedes as a new version carrying links, logs deliveries, assigns retention by policy, and refuses withdrawal under legal hold", async () => {
+    const book = await org(), client = await org();
+    const office = await member(book, ["office"]), mgr = await member(book, ["management"]);
+    const c = callerFor(office);
+    // A generated field-ticket document in the vault's neighbour table, with its own hash.
+    const genHash = sha("field ticket pdf bytes");
+    const [ftd] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO fieldTicketDocuments (documentRef, fieldTicketId, kind, storageKey, contentHash, sourceSnapshotHash, byteLength, generatedAt) VALUES (?, 1, 'invoice', 'documents/ft-1.pdf', ?, ?, 12345, NOW())", [`FTD-${rnd()}`, genHash, sha("snapshot")]);
+    await expect(c.commercialOffice.documents.register({ documentType: "invoice", title: "INV-1", contentHash: genHash })).rejects.toThrow(/needs a pointer to its bytes/);
+    await expect(c.commercialOffice.documents.register({ documentType: "not_a_type", title: "x", contentHash: genHash, storageKey: "k" })).rejects.toThrow(/not an active document type/);
+    await expect(c.commercialOffice.documents.register({ documentType: "invoice", title: "INV-1", contentHash: sha("something else"), fieldTicketDocumentId: ftd.insertId })).rejects.toThrow(/is not the generated document's hash/);
+    const invoiceRef = `INV-${rnd()}`, jobCode = `JOB-${rnd()}`;
+    const reg = await c.commercialOffice.documents.register({ documentType: "invoice", title: "Invoice for the Fixture job", contentHash: genHash, sourceSnapshotHash: sha("snapshot"), byteLength: 12345, mimeType: "application/pdf", fieldTicketDocumentId: ftd.insertId, counterpartyOrgRef: client, issuedAt: new Date("2026-09-10"), links: [{ recordType: "invoice", recordRef: invoiceRef }, { recordType: "job", recordRef: jobCode }] });
+    expect(reg.documentRef).toMatch(/^DOC-/);
+    expect(reg.retention).toContain("unknown");
+    const byJob = await c.commercialOffice.documents.list({ recordType: "job", recordRef: jobCode });
+    expect(byJob.map(d => d.documentRef)).toEqual([reg.documentRef]);
+    // Delivery: sent by email, then bounced with a reason; a bounce without a reason is refused.
+    const dlv = await c.commercialOffice.documents.deliveryRecord({ documentRef: reg.documentRef, channel: "email", recipientOrgRef: client, recipientAddress: "ap@fixture.example", status: "sent", deliveryEvidence: "message-id 123" });
+    await expect(c.commercialOffice.documents.deliveryUpdate({ deliveryRef: dlv.deliveryRef, status: "bounced" })).rejects.toThrow(/needs the reason/);
+    await c.commercialOffice.documents.deliveryUpdate({ deliveryRef: dlv.deliveryRef, status: "bounced", failureReason: "mailbox full" });
+    // Retention: a policy a person picks; the registry records the class and the policy's statutory-source status honestly.
+    const [pol] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO retentionPolicies (policyKey, recordType, companyRetentionMonths, deletionRequiresOfficeReceipt, legalHoldOverridesDeletion, active) VALUES (?, 'commercial_document', 84, true, true, true)", [`commercial-7y-${rnd()}`]);
+    await expect(c.commercialOffice.documents.retentionAssign({ documentRef: reg.documentRef, retentionPolicyId: pol.insertId })).rejects.toThrow();   // office holds commercial.write, not commercial.policy
+    const ret = await callerFor(mgr).commercialOffice.documents.retentionAssign({ documentRef: reg.documentRef, retentionPolicyId: pol.insertId });
+    expect(ret.retentionClass).toMatch(/^commercial-7y-/);
+    // Supersede: same hash refused; a corrected invoice becomes v2, the links come along, v1 is superseded and cannot be sent again.
+    await expect(c.commercialOffice.documents.supersede({ documentRef: reg.documentRef, reason: "no change at all here", contentHash: genHash, storageKey: "k2" })).rejects.toThrow(/same content hash/);
+    const v2 = await c.commercialOffice.documents.supersede({ documentRef: reg.documentRef, reason: "standby line corrected after the site log review", contentHash: sha("corrected pdf"), storageKey: "documents/inv-1-v2.pdf" });
+    expect(v2).toMatchObject({ version: 2, supersedes: reg.documentRef, linksCarried: 2 });
+    await expect(c.commercialOffice.documents.deliveryRecord({ documentRef: reg.documentRef, channel: "email", status: "sent" })).rejects.toThrow(/is superseded; send the current version/);
+    const got = await c.commercialOffice.documents.get({ documentRef: v2.documentRef });
+    expect(got.versions.map(v => `${v.version}:${v.status}`)).toEqual([`1:superseded`, `2:current`]);
+    expect(got.links.map(l => l.recordType).sort()).toEqual(["invoice", "job"]);
+    expect(got.retention).toMatch(/^commercial-7y-/);   // retention carried to the new version
+    expect((await c.commercialOffice.documents.list({ recordType: "invoice", recordRef: invoiceRef })).map(d => d.version)).toEqual([2]);
+    // Withdraw: refused while the underlying evidence record is under legal hold; allowed otherwise, keeping the row.
+    const [held] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt, status, legalHold, createdAt) VALUES ('Signed manifest scan', 'contract', NOW(), 'verified', 1, NOW())");
+    const mf = await c.commercialOffice.documents.register({ documentType: "manifest", title: "Manifest scan", contentHash: sha("manifest scan"), evidenceRecordId: held.insertId });
+    await expect(callerFor(mgr).commercialOffice.documents.withdraw({ documentRef: mf.documentRef, reason: "registered against the wrong job" })).rejects.toThrow(/legal hold/);
+    const wd = await callerFor(mgr).commercialOffice.documents.withdraw({ documentRef: v2.documentRef, reason: "issued to the wrong counterparty; reissued" });
+    expect(wd.note).toContain("not a deletion");
+    expect((await c.commercialOffice.documents.get({ documentRef: v2.documentRef })).document).toMatchObject({ status: "withdrawn", contentHash: sha("corrected pdf") });
+  }, 60_000);
 });

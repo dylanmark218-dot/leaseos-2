@@ -11,7 +11,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, gte, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains } from "../drizzle/schema";
+import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries, evidenceRecords, fieldTicketDocuments, retentionPolicies } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
@@ -493,6 +493,150 @@ export const commercialOfficeRouter = router({
         const chartLoaded = (await db.select({ n: sql<number>`COUNT(*)` }).from(commercialGlAccounts).where(bookWhere(commercialGlAccounts, bookOrgRef)))[0]?.n ?? 0;
         if (!Number(chartLoaded)) blockers.unshift({ kind: "chart", key: "(none)", count: 0, reason: "no chart of accounts loaded for this book" });
         return { state: blockers.length ? ("BLOCKED" as const) : ("READY" as const), blockers, exported: false as const };
+      }),
+  }),
+
+  /**
+   * P7.7 — the commercial document registry, over the records vault. A document is registered
+   * once with its content hash and a pointer to its bytes; content is never rewritten — a
+   * change is a new version that supersedes, with a reason; a withdrawal keeps the row and says
+   * why. Links to many records; deliveries logged; retention assigned by a person.
+   */
+  documents: router({
+    register: roleProcedure("commercialOffice.documentRegister")
+      .input(z.object({
+        documentType: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), title: z.string().min(1).max(300), contentHash: z.string().regex(/^[a-f0-9]{64}$/), sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+        byteLength: z.number().int().nonnegative().optional(), mimeType: z.string().max(120).optional(), evidenceRecordId: z.number().int().positive().optional(), fieldTicketDocumentId: z.number().int().positive().optional(), storageKey: z.string().max(512).optional(),
+        counterpartyOrgRef: z.string().max(64).optional(), issuedAt: z.coerce.date().optional(), links: z.array(z.object({ recordType: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), recordRef: z.string().min(1).max(80) })).max(20).default([]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        if (!input.evidenceRecordId && !input.fieldTicketDocumentId && !input.storageKey) throw new TRPCError({ code: "BAD_REQUEST", message: "BLOCKED — a document needs a pointer to its bytes: an evidence record, a generated field-ticket document, or a storage key" });
+        const types = await db.select().from(commercialCategoryTypes).where(and(eq(commercialCategoryTypes.kind, "document_type"), bookWhere(commercialCategoryTypes, bookOrgRef)));
+        if (!layerFor(types.map(t => ({ ...t, category: t.categoryKey })), bookOrgRef, input.documentType).rows[0]) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — "${input.documentType}" is not an active document type for this business` });
+        if (input.evidenceRecordId) {
+          const ev = (await db.select({ id: evidenceRecords.id }).from(evidenceRecords).where(eq(evidenceRecords.id, input.evidenceRecordId)).limit(1))[0];
+          if (!ev) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence record ${input.evidenceRecordId} does not exist` });
+        }
+        if (input.fieldTicketDocumentId) {
+          const ftd = (await db.select({ id: fieldTicketDocuments.id, contentHash: fieldTicketDocuments.contentHash, sourceSnapshotHash: fieldTicketDocuments.sourceSnapshotHash }).from(fieldTicketDocuments).where(eq(fieldTicketDocuments.id, input.fieldTicketDocumentId)).limit(1))[0];
+          if (!ftd) throw new TRPCError({ code: "NOT_FOUND", message: `Field-ticket document ${input.fieldTicketDocumentId} does not exist` });
+          if (ftd.contentHash && ftd.contentHash !== input.contentHash) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — the hash given (${input.contentHash.slice(0, 12)}…) is not the generated document's hash (${ftd.contentHash.slice(0, 12)}…)` });
+        }
+        const documentRef = (await nextTrackingNumber(db, { sequenceType: "DOC" })).trackingNumber;
+        const ins = await db.insert(commercialDocuments).values({ documentRef, bookOrgRef, documentType: input.documentType, title: input.title, contentHash: input.contentHash, sourceSnapshotHash: input.sourceSnapshotHash ?? null, byteLength: input.byteLength ?? null, mimeType: input.mimeType ?? null, evidenceRecordId: input.evidenceRecordId ?? null, fieldTicketDocumentId: input.fieldTicketDocumentId ?? null, storageKey: input.storageKey ?? null, counterpartyOrgRef: input.counterpartyOrgRef ?? null, issuedAt: input.issuedAt ?? null, registeredByUserId: ctx.user.id });
+        for (const l of input.links) await db.insert(commercialDocumentLinks).values({ documentId: ins[0].insertId, recordType: l.recordType, recordRef: l.recordRef, linkedByUserId: ctx.user.id });
+        return { documentRef, version: 1, retention: "unknown — assign a retention class" as const };
+      }),
+    supersede: roleProcedure("commercialOffice.documentSupersede")
+      .input(z.object({ documentRef: z.string().min(1), reason: z.string().min(10).max(500), contentHash: z.string().regex(/^[a-f0-9]{64}$/), sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), byteLength: z.number().int().nonnegative().optional(), evidenceRecordId: z.number().int().positive().optional(), fieldTicketDocumentId: z.number().int().positive().optional(), storageKey: z.string().max(512).optional(), title: z.string().min(1).max(300).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const old = (await db.select().from(commercialDocuments).where(eq(commercialDocuments.documentRef, input.documentRef)).limit(1))[0];
+        if (!old || (bookOrgRef ? old.bookOrgRef !== bookOrgRef : old.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Document not in this business's register" });
+        if (old.status !== "current") throw new TRPCError({ code: "CONFLICT", message: `Document is ${old.status}; only the current version can be superseded` });
+        if (old.contentHash === input.contentHash) throw new TRPCError({ code: "BAD_REQUEST", message: "The new version has the same content hash as the old; nothing changed" });
+        if (!input.evidenceRecordId && !input.fieldTicketDocumentId && !input.storageKey) throw new TRPCError({ code: "BAD_REQUEST", message: "BLOCKED — the new version needs a pointer to its bytes" });
+        const documentRef = (await nextTrackingNumber(db, { sequenceType: "DOC" })).trackingNumber;
+        const links = await db.select().from(commercialDocumentLinks).where(eq(commercialDocumentLinks.documentId, old.id));
+        let newId = 0;
+        await db.transaction(async tx => {
+          const ins = await tx.insert(commercialDocuments).values({ documentRef, bookOrgRef, documentType: old.documentType, title: input.title ?? old.title, version: old.version + 1, supersedesDocumentId: old.id, contentHash: input.contentHash, sourceSnapshotHash: input.sourceSnapshotHash ?? null, byteLength: input.byteLength ?? null, mimeType: old.mimeType, evidenceRecordId: input.evidenceRecordId ?? null, fieldTicketDocumentId: input.fieldTicketDocumentId ?? null, storageKey: input.storageKey ?? null, counterpartyOrgRef: old.counterpartyOrgRef, issuedAt: old.issuedAt, retentionPolicyId: old.retentionPolicyId, retentionClass: old.retentionClass, retentionAssignedByUserId: old.retentionAssignedByUserId, registeredByUserId: ctx.user.id, statusReason: `supersedes ${old.documentRef}: ${input.reason}` });
+          newId = ins[0].insertId;
+          for (const l of links) await tx.insert(commercialDocumentLinks).values({ documentId: newId, recordType: l.recordType, recordRef: l.recordRef, linkedByUserId: ctx.user.id });
+          await tx.update(commercialDocuments).set({ status: "superseded", supersededByDocumentId: newId, statusReason: `superseded by ${documentRef}: ${input.reason}` }).where(eq(commercialDocuments.id, old.id));
+        });
+        return { documentRef, version: old.version + 1, supersedes: old.documentRef, linksCarried: links.length };
+      }),
+    withdraw: roleProcedure("commercialOffice.documentWithdraw")
+      .input(z.object({ documentRef: z.string().min(1), reason: z.string().min(10).max(500) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const doc = (await db.select().from(commercialDocuments).where(eq(commercialDocuments.documentRef, input.documentRef)).limit(1))[0];
+        if (!doc || (bookOrgRef ? doc.bookOrgRef !== bookOrgRef : doc.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Document not in this business's register" });
+        if (doc.status === "withdrawn") throw new TRPCError({ code: "CONFLICT", message: "Already withdrawn" });
+        if (doc.evidenceRecordId) {
+          const ev = (await db.select({ legalHold: evidenceRecords.legalHold }).from(evidenceRecords).where(eq(evidenceRecords.id, doc.evidenceRecordId)).limit(1))[0];
+          if (ev?.legalHold) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "BLOCKED — the underlying evidence record is under legal hold; the document cannot be withdrawn while it stands" });
+        }
+        await db.update(commercialDocuments).set({ status: "withdrawn", statusReason: `withdrawn by user ${ctx.user.id}: ${input.reason}` }).where(eq(commercialDocuments.id, doc.id));
+        return { documentRef: input.documentRef, status: "withdrawn" as const, note: "The row and its hash stay; withdrawn is a state, not a deletion." };
+      }),
+    link: roleProcedure("commercialOffice.documentLink")
+      .input(z.object({ documentRef: z.string().min(1), recordType: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), recordRef: z.string().min(1).max(80) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const doc = (await db.select({ id: commercialDocuments.id, bookOrgRef: commercialDocuments.bookOrgRef }).from(commercialDocuments).where(eq(commercialDocuments.documentRef, input.documentRef)).limit(1))[0];
+        if (!doc || (bookOrgRef ? doc.bookOrgRef !== bookOrgRef : doc.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Document not in this business's register" });
+        const dup = (await db.select({ id: commercialDocumentLinks.id }).from(commercialDocumentLinks).where(and(eq(commercialDocumentLinks.documentId, doc.id), eq(commercialDocumentLinks.recordType, input.recordType), eq(commercialDocumentLinks.recordRef, input.recordRef))).limit(1))[0];
+        if (dup) return { documentRef: input.documentRef, linked: false, note: "already linked" };
+        await db.insert(commercialDocumentLinks).values({ documentId: doc.id, recordType: input.recordType, recordRef: input.recordRef, linkedByUserId: ctx.user.id });
+        return { documentRef: input.documentRef, linked: true };
+      }),
+    retentionAssign: roleProcedure("commercialOffice.documentRetentionAssign")
+      .input(z.object({ documentRef: z.string().min(1), retentionPolicyId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const doc = (await db.select({ id: commercialDocuments.id, bookOrgRef: commercialDocuments.bookOrgRef }).from(commercialDocuments).where(eq(commercialDocuments.documentRef, input.documentRef)).limit(1))[0];
+        if (!doc || (bookOrgRef ? doc.bookOrgRef !== bookOrgRef : doc.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Document not in this business's register" });
+        const policy = (await db.select({ id: retentionPolicies.id, policyKey: retentionPolicies.policyKey, statutorySourceStatus: retentionPolicies.statutorySourceStatus }).from(retentionPolicies).where(eq(retentionPolicies.id, input.retentionPolicyId)).limit(1))[0];
+        if (!policy) throw new TRPCError({ code: "NOT_FOUND", message: `Retention policy ${input.retentionPolicyId} does not exist` });
+        await db.update(commercialDocuments).set({ retentionPolicyId: policy.id, retentionClass: policy.policyKey, retentionAssignedByUserId: ctx.user.id }).where(eq(commercialDocuments.id, doc.id));
+        return { documentRef: input.documentRef, retentionClass: policy.policyKey, statutorySourceStatus: policy.statutorySourceStatus };
+      }),
+    deliveryRecord: roleProcedure("commercialOffice.documentDeliveryRecord")
+      .input(z.object({ documentRef: z.string().min(1), channel: z.enum(["email", "portal", "print", "api", "courier", "other"]), recipientOrgRef: z.string().max(64).optional(), recipientAddress: z.string().max(300).optional(), status: z.enum(["queued", "sent", "delivered", "failed", "bounced", "acknowledged"]).default("sent"), deliveryEvidence: z.string().max(300).optional(), failureReason: z.string().max(500).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const doc = (await db.select({ id: commercialDocuments.id, bookOrgRef: commercialDocuments.bookOrgRef, status: commercialDocuments.status }).from(commercialDocuments).where(eq(commercialDocuments.documentRef, input.documentRef)).limit(1))[0];
+        if (!doc || (bookOrgRef ? doc.bookOrgRef !== bookOrgRef : doc.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Document not in this business's register" });
+        if (doc.status !== "current" && input.status !== "failed" && input.status !== "bounced") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${input.documentRef} is ${doc.status}; send the current version` });
+        if ((input.status === "failed" || input.status === "bounced") && !input.failureReason) throw new TRPCError({ code: "BAD_REQUEST", message: "A failed or bounced delivery needs the reason" });
+        const deliveryRef = ref("DLV");
+        const sent = input.status !== "queued";
+        await db.insert(commercialDocumentDeliveries).values({ deliveryRef, documentId: doc.id, channel: input.channel, recipientOrgRef: input.recipientOrgRef ?? null, recipientAddress: input.recipientAddress ?? null, status: input.status, sentAt: sent ? new Date() : null, sentByUserId: sent ? ctx.user.id : null, deliveredAt: input.status === "delivered" || input.status === "acknowledged" ? new Date() : null, deliveryEvidence: input.deliveryEvidence ?? null, failureReason: input.failureReason ?? null });
+        return { deliveryRef, status: input.status };
+      }),
+    deliveryUpdate: roleProcedure("commercialOffice.documentDeliveryUpdate")
+      .input(z.object({ deliveryRef: z.string().min(1), status: z.enum(["sent", "delivered", "failed", "bounced", "acknowledged"]), deliveryEvidence: z.string().max(300).optional(), failureReason: z.string().max(500).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db } = await bookFor(ctx.user.id);
+        const d = (await db.select().from(commercialDocumentDeliveries).where(eq(commercialDocumentDeliveries.deliveryRef, input.deliveryRef)).limit(1))[0];
+        if (!d) throw new TRPCError({ code: "NOT_FOUND", message: "Delivery not found" });
+        if ((input.status === "failed" || input.status === "bounced") && !input.failureReason) throw new TRPCError({ code: "BAD_REQUEST", message: "A failed or bounced delivery needs the reason" });
+        await db.update(commercialDocumentDeliveries).set({ status: input.status, sentAt: d.sentAt ?? new Date(), sentByUserId: d.sentByUserId ?? ctx.user.id, deliveredAt: input.status === "delivered" || input.status === "acknowledged" ? new Date() : d.deliveredAt, deliveryEvidence: input.deliveryEvidence ?? d.deliveryEvidence, failureReason: input.failureReason ?? d.failureReason }).where(eq(commercialDocumentDeliveries.id, d.id));
+        return { deliveryRef: input.deliveryRef, status: input.status };
+      }),
+    get: roleProcedure("commercialOffice.documentGet")
+      .input(z.object({ documentRef: z.string().min(1) }))
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const doc = (await db.select().from(commercialDocuments).where(eq(commercialDocuments.documentRef, input.documentRef)).limit(1))[0];
+        if (!doc || (bookOrgRef ? doc.bookOrgRef !== bookOrgRef : doc.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Document not in this business's register" });
+        const [links, deliveries] = await Promise.all([db.select().from(commercialDocumentLinks).where(eq(commercialDocumentLinks.documentId, doc.id)), db.select().from(commercialDocumentDeliveries).where(eq(commercialDocumentDeliveries.documentId, doc.id))]);
+        // The version chain, walked both ways.
+        const chain: { documentRef: string; version: number; status: string }[] = [];
+        let cur: typeof doc | undefined = doc;
+        while (cur?.supersedesDocumentId) { cur = (await db.select().from(commercialDocuments).where(eq(commercialDocuments.id, cur.supersedesDocumentId)).limit(1))[0]; if (cur) chain.unshift({ documentRef: cur.documentRef, version: cur.version, status: cur.status }); }
+        chain.push({ documentRef: doc.documentRef, version: doc.version, status: doc.status });
+        cur = doc;
+        while (cur?.supersededByDocumentId) { cur = (await db.select().from(commercialDocuments).where(eq(commercialDocuments.id, cur.supersededByDocumentId)).limit(1))[0]; if (cur) chain.push({ documentRef: cur.documentRef, version: cur.version, status: cur.status }); }
+        return { document: doc, retention: doc.retentionClass ?? "unknown", links, deliveries, versions: chain };
+      }),
+    list: roleProcedure("commercialOffice.documentsList")
+      .input(z.object({ recordType: z.string().max(40).optional(), recordRef: z.string().max(80).optional(), documentType: z.string().max(40).optional(), counterpartyOrgRef: z.string().max(64).optional(), includeSuperseded: z.boolean().default(false) }).optional())
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const conds = [bookOrgRef ? eq(commercialDocuments.bookOrgRef, bookOrgRef) : isNull(commercialDocuments.bookOrgRef)];
+        if (input?.documentType) conds.push(eq(commercialDocuments.documentType, input.documentType));
+        if (input?.counterpartyOrgRef) conds.push(eq(commercialDocuments.counterpartyOrgRef, input.counterpartyOrgRef));
+        if (!input?.includeSuperseded) conds.push(eq(commercialDocuments.status, "current"));
+        if (input?.recordType && input?.recordRef) {
+          const ids = (await db.select({ documentId: commercialDocumentLinks.documentId }).from(commercialDocumentLinks).where(and(eq(commercialDocumentLinks.recordType, input.recordType), eq(commercialDocumentLinks.recordRef, input.recordRef)))).map(x => x.documentId);
+          if (!ids.length) return [];
+          conds.push(inArray(commercialDocuments.id, ids));
+        }
+        return db.select().from(commercialDocuments).where(and(...conds)).limit(500);
       }),
   }),
 

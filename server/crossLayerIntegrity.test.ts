@@ -36,7 +36,7 @@ describe("client ↔ server parity", () => {
     expect(missing, `client references procedures the server does not mount: ${missing.join(", ")}`).toEqual([]);
   });
   it("the router mounts a stable, large surface", () => {
-    expect(serverPaths.size).toBe(657);   // v22.36: +2 facilityDirectory.{hydrovac.import,duplicates};   // v22.35 (0143): +6 facilityDirectory.{arcgis.presets,arcgis.inspect,arcgis.importFeatures,arcgis.importFromLayer,arcgis.runs,lsdFind}; move on purpose
+    expect(serverPaths.size).toBe(666);   // v22.38: +9 commercialOffice.documents.* (P7.7);   // v22.36: +2 facilityDirectory.{hydrovac.import,duplicates};   // v22.35 (0143): +6 facilityDirectory.{arcgis.presets,arcgis.inspect,arcgis.importFeatures,arcgis.importFromLayer,arcgis.runs,lsdFind}; move on purpose
     expect(serverPaths.has("facilityDirectory.driverView")).toBe(true);
     expect(serverPaths.has("commercialOffice.approvals.requirement")).toBe(true);
   });
