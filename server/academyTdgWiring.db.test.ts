@@ -248,3 +248,30 @@ d("paper sheets are minted in blocks and filed exactly once", () => {
     expect(["serial_checksum_invalid", "serial_unknown", "serial_malformed"]).toContain(bad.code);
   }, 20_000);
 });
+
+d("the inspector clock reaches the exception centre", () => {
+  it("surfaces an open request from five days out, critical once overdue, with a deep link", async () => {
+    const office = await person("safety");
+    const f = await fixtureCourse();
+    const learner = await person("driver");
+    const certificateRef = `ACAD-CERT-${rnd()}`;
+    await pool.execute(
+      `INSERT INTO academyCertificates (certificateRef, userId, courseId, courseVersionId, assignmentId, qualificationCode, credentialBoundary, issuedByUserId, issuedAt, sourceSnapshotRef, policySnapshotHash, certificateHash, retentionUntil)
+       VALUES (?,?,?,?,?,?,?,?,NOW(),?,?,?,?)`,
+      [certificateRef, learner, f.courseId, f.versionId, 1, "TDG_ROAD", "employer_certificate", 1, "S1", "p", "c", new Date("2031-01-01")]);
+    // Dated twelve days ago: three days left, so it is inside the five-day window.
+    const soon = await callerFor(office).academy.inspectorRequestCreate({ certificateRef, issuingAuthority: "Transport Canada", requestDatedAt: new Date(Date.now() - 12 * 86_400_000) });
+    // Dated twenty days ago: overdue by five.
+    const late = await callerFor(office).academy.inspectorRequestCreate({ certificateRef, issuingAuthority: "Transport Canada", requestDatedAt: new Date(Date.now() - 20 * 86_400_000) });
+    const { deriveExceptions } = await import("./_core/exceptionCentre");
+    const { loadExceptionSources } = await import("./surfacesService");
+    const all = deriveExceptions(await loadExceptionSources());
+    const a = all.find(x => x.key === `inspector:${soon.requestRef}`);
+    const b = all.find(x => x.key === `inspector:${late.requestRef}`);
+    expect(a?.severity).toBe("high");
+    expect(a?.dueAt).toBeInstanceOf(Date);
+    expect(a?.deepLink.route).toContain(soon.requestRef);
+    expect(b?.severity).toBe("critical");
+    expect(b?.title).toMatch(/overdue/);
+  }, 20_000);
+});

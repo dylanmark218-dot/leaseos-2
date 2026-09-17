@@ -17,8 +17,7 @@
  */
 import { sql } from "drizzle-orm";
 
-/** `separator` is a reserved word in MariaDB (GROUP_CONCAT ... SEPARATOR); it must be quoted. */
-const SEPARATOR = sql.identifier("separator");
+// `separator` is a MariaDB reserved word: written back-quoted inside the SQL text itself, which is what the reserved-word census scans for.
 import type { MySql2Database } from "drizzle-orm/mysql2";
 
 export type ResetPeriod = "never" | "yearly" | "monthly";
@@ -68,7 +67,7 @@ export async function nextTrackingNumber(
   const periodKey = periodKeyFor(seed.resetPeriod, at);
 
   await db.execute(sql`
-    INSERT IGNORE INTO trackingSequences (sequenceType, branch, periodKey, nextNumber, prefix, ${SEPARATOR}, yearDigits, includeMonth, sequenceDigits, resetPeriod)
+    INSERT IGNORE INTO trackingSequences (sequenceType, branch, periodKey, nextNumber, prefix, \`separator\`, yearDigits, includeMonth, sequenceDigits, resetPeriod)
     VALUES (${args.sequenceType}, ${branch}, ${periodKey}, 1, ${seed.prefix}, ${seed.separator}, ${seed.yearDigits}, ${seed.includeMonth}, ${seed.sequenceDigits}, ${seed.resetPeriod})`);
 
   return db.transaction(async (tx) => {
@@ -81,7 +80,7 @@ export async function nextTrackingNumber(
     const sequence = Number((seqRows as unknown as { sequence: unknown }[])[0]?.sequence);
     if (!Number.isInteger(sequence) || sequence < 1) throw new Error("trackingSequences: LAST_INSERT_ID did not carry the counter back");
     const [fmtRows] = await tx.execute(sql`
-      SELECT prefix, ${SEPARATOR}, yearDigits, includeMonth, sequenceDigits, resetPeriod FROM trackingSequences
+      SELECT prefix, \`separator\`, yearDigits, includeMonth, sequenceDigits, resetPeriod FROM trackingSequences
       WHERE sequenceType = ${args.sequenceType} AND branch = ${branch} AND periodKey = ${periodKey}`);
     const row = (fmtRows as unknown as Record<string, unknown>[])[0]!;
     const format: SequenceFormat = {

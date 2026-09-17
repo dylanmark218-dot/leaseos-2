@@ -75,6 +75,8 @@ export type ExceptionSources = {
   /** v21.5 — the fuel line's findings. */
   statementsWithFindings: { statementRef: string; provider: string; unmatched: number; ambiguous: number; importedAt: Date }[];
   tanksOutOfTolerance: { tankRef: string; name: string; variancePct: number; varianceLitres: number; reason: string }[];
+  /** s.6.7 inspector requests still open (0122): the fifteen-day clock, surfaced from five days out. */
+  inspectorRequests: { requestRef: string; issuingAuthority: string; dueAt: Date; state: string; irrecoverable: boolean }[];
   periodsSoftClosed: { financialEntityId: number; period: string; reviewItems: number; since: Date }[];
 };
 
@@ -83,6 +85,8 @@ export type ExceptionSources = {
 /* ------------------------------------------------------------------ */
 
 const daysUntil = (d: Date | null, now: Date) => (d ? Math.floor((d.getTime() - now.getTime()) / 86_400_000) : null);
+
+const DAY = 86_400_000;
 
 export function deriveExceptions(s: ExceptionSources): Exception[] {
   const out: Exception[] = [];
@@ -287,6 +291,20 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
       title: `Tank ${t.name}: ${t.varianceLitres} L (${t.variancePct}%) unexplained`, reason: t.reason, subjectType: "bulkFuelTank", subjectId: t.tankRef,
       action: "Explain the variance and record it — unrecorded fill, leak or theft", deepLink: { portal: "fleet_maintenance", route: `/fuel/tanks/${t.tankRef}` }, requiredPermission: "fuel.review",
       since: null, dueAt: null,
+    });
+  }
+  for (const r of s.inspectorRequests ?? []) {   // older fixtures omit the field
+    const daysLeft = Math.floor((r.dueAt.getTime() - now.getTime()) / DAY);
+    if (daysLeft > 5) continue;                       // five days out and closer; overdue is negative
+    const overdue = daysLeft < 0;
+    out.push({
+      key: `inspector:${r.requestRef}`, category: "compliance", severity: overdue ? "critical" : "high",
+      title: overdue ? `Inspector request ${r.requestRef} is ${-daysLeft} day(s) overdue` : `Inspector request ${r.requestRef} due in ${daysLeft} day(s)`,
+      reason: `${r.issuingAuthority} requested training records under TDG s.6.7; the response is due ${r.dueAt.toISOString().slice(0, 10)}${r.irrecoverable ? " and part of the evidence is irrecoverable" : ""}`,
+      subjectType: "inspector_request", subjectId: r.requestRef,
+      action: r.state === "incomplete" ? "Assemble what can be produced and state what cannot" : "Assemble and produce the package",
+      deepLink: { portal: "training_academy", route: `/academy/inspector-requests/${r.requestRef}` }, requiredPermission: "academy.certificate.issue",
+      since: null, dueAt: r.dueAt,
     });
   }
   for (const p of s.periodsSoftClosed) {

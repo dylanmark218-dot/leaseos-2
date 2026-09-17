@@ -14,8 +14,7 @@ import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
   complianceDocuments, disposalTickets, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
   maintenanceDefects, measurementDevices, operationalTasks, operators, purchaseAuthorizations, roadsideServiceEvents,
-  syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders,
-} from "../drizzle/schema";
+  syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders, academyInspectorRequests } from "../drizzle/schema";
 import { calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import type { ExceptionSources } from "./_core/exceptionCentre";
 import { loadUngatedAssignments } from "./dispatchEnforcementService";
@@ -31,7 +30,7 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   const db = await getDb();
   const empty: ExceptionSources = {
     now, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [],
-    syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [],
+    syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], inspectorRequests: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [],
   };
   if (!db) return empty;
   const horizon = new Date(now.getTime() + 90 * DAY);
@@ -84,8 +83,11 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   const latestReviews = new Map<string, (typeof reviews)[number]>();
   for (const r of reviews) if (!latestReviews.has(r.reviewRef)) latestReviews.set(r.reviewRef, r);
 
+  const inspector = await db.select({ requestRef: academyInspectorRequests.requestRef, issuingAuthority: academyInspectorRequests.issuingAuthority, dueAt: academyInspectorRequests.dueAt, state: academyInspectorRequests.state, irrecoverable: academyInspectorRequests.irrecoverable })
+    .from(academyInspectorRequests).where(inArray(academyInspectorRequests.state, ["received", "assembling", "incomplete"])).limit(200);
   return {
     now,
+    inspectorRequests: inspector.map(r => ({ requestRef: r.requestRef, issuingAuthority: r.issuingAuthority, dueAt: r.dueAt, state: r.state, irrecoverable: !!r.irrecoverable })),
     criticalDefects: defects.map(d => ({ id: d.id, unitId: d.unitId, unitNumber: d.unitNumber ?? null, title: d.title, reportedAt: d.reportedAt, status: d.status })),
     roadsideOpen: roadside.map(r => ({ id: r.id, eventRef: r.eventRef, unitNumber: r.unitNumber ?? null, eventType: r.eventType, occurredAt: r.occurredAt, vendorAssigned: r.assignedVendorId != null })),
     vendorBills: bills.map(b => ({ id: b.id, billRef: b.billRef, vendorName: b.vendorName ?? null, total: b.totalCents / 100, status: b.status, matchOutcome: b.matchOutcome, receivedAt: b.receivedAt, dueAt: b.dueAt })),
