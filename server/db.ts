@@ -460,19 +460,20 @@ export async function createRouteDecision(input: InsertRouteDecision) {
   const result = await db.insert(routeDecisions).values(input);
   return result[0]?.insertId;
 }
-export async function listBillingRateCards() {
+export async function listBillingRateCards(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(billingRateCards)
+    .where(orgScopeWhere(billingRateCards, scope))
     .orderBy(desc(billingRateCards.updatedAt))
     .limit(100);
 }
-export async function createBillingRateCard(input: InsertBillingRateCard) {
+export async function createBillingRateCard(input: InsertBillingRateCard, scope: TenantScope) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.insert(billingRateCards).values(input);
+  const result = await db.insert(billingRateCards).values({ ...input, orgRef: scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId });
   return result[0]?.insertId;
 }
 export async function listJobChargeLines(jobId: number | undefined, scope: TenantScope) {
@@ -545,12 +546,13 @@ export async function updateUnitSafetyPlan(
   return true;
 }
 
-export async function listComplianceArtifacts() {
+export async function listComplianceArtifacts(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(complianceArtifacts)
+    .where(jobKeyedScope(db, complianceArtifacts.jobId, scope))
     .orderBy(desc(complianceArtifacts.createdAt))
     .limit(100);
 }
@@ -562,12 +564,13 @@ export async function createComplianceArtifact(
   const result = await db.insert(complianceArtifacts).values(input);
   return result[0]?.insertId;
 }
-export async function listTailgateMeetings() {
+export async function listTailgateMeetings(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(tailgateMeetings)
+    .where(jobKeyedScope(db, tailgateMeetings.jobId, scope))
     .orderBy(desc(tailgateMeetings.createdAt))
     .limit(100);
 }
@@ -625,20 +628,21 @@ export async function createLocationIdentity(input: InsertLocationIdentity) {
   return result[0]?.insertId;
 }
 
-export async function listManifests() {
+export async function listManifests(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(manifests)
+    .where(orgScopeWhere(manifests, scope))
     .orderBy(desc(manifests.createdAt))
     .limit(100);
 }
 
-export async function createManifest(input: InsertManifest) {
+export async function createManifest(input: InsertManifest, scope: TenantScope) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.insert(manifests).values(input);
+  const result = await db.insert(manifests).values({ ...input, orgRef: scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId });
   return result[0]?.insertId;
 }
 
@@ -893,6 +897,25 @@ function tripRefScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, refCol
   if (scope.tenantId !== SINGLE_TENANT_ID) return inScope;
   const anyNumber = db.select({ n: trips.tripNumber }).from(trips), anyId = db.select({ n: sql<string>`CAST(${trips.id} AS CHAR)` }).from(trips);
   return or(inScope, and(notInArray(refColumn, anyNumber), notInArray(refColumn, anyId)));
+}
+
+/** An assistant proposal the scope may see, or null: through its job, else its trip, else its unit, else the single tenant only. */
+export async function proposalInScope(proposalId: string, scope: TenantScope): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const p = (await db.select({ jobId: assistantProposals.jobId, tripId: assistantProposals.tripId, unitId: assistantProposals.unitId }).from(assistantProposals).where(eq(assistantProposals.proposalId, proposalId)).limit(1))[0];
+  if (!p) return true;   // nothing to hide; the procedure answers its own not-found
+  if (p.jobId != null) return !!(await jobInScope(p.jobId, scope));
+  if (p.tripId != null) return !!(await tripInScope(p.tripId, scope));
+  if (p.unitId != null) return !!(await unitInScope(p.unitId, scope));
+  return scope.tenantId === SINGLE_TENANT_ID;
+}
+
+/** A billing rate card the scope may see, or null. */
+export async function rateCardInScope(id: number, scope: TenantScope): Promise<{ id: number } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select({ id: billingRateCards.id }).from(billingRateCards).where(and(eq(billingRateCards.id, id), orgScopeWhere(billingRateCards, scope))).limit(1))[0] ?? null;
 }
 
 export async function listOperators(scope: TenantScope) {

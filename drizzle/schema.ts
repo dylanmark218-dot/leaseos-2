@@ -775,6 +775,7 @@ export type InsertTransferAcknowledgement =
 
 export const billingRateCards = mysqlTable("billingRateCards", {
   id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),   // 0148: NULL = the historical single tenant; the owning organization otherwise
   name: varchar("name", { length: 160 }).notNull(),
   unitType: varchar("unitType", { length: 100 }).notNull(),
   hourlyRate: int("hourlyRate").default(0).notNull(),

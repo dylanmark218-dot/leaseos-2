@@ -53,6 +53,8 @@ import {
   tripInScope,
   unitInScope,
   workOrderInScope,
+  proposalInScope,
+  rateCardInScope,
 } from "./db";
 import { dispatchGateRouter } from "./dispatchRouter";
 import { createJobUnitGated } from "./dispatchEnforcementService";
@@ -723,11 +725,19 @@ export const appRouter = router({
 
       get: roleProcedure("assistant.get")
         .input(z.object({ proposalId: z.string() }))
-        .query(({ input }) => loadProposal(input.proposalId)),
+        .query(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await proposalInScope(input.proposalId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Proposal ${input.proposalId} not found` });
+        return loadProposal(input.proposalId);
+      }),
 
       pending: roleProcedure("assistant.pending")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
-        .query(({ input }) => listPendingProposals(input?.tripId)),
+        .query(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
+        return listPendingProposals(input?.tripId);
+      }),
 
       answer: roleProcedure("assistant.answer")
         .input(
@@ -738,7 +748,10 @@ export const appRouter = router({
             precision: z.enum(["exact", "approximate"]).default("exact"),
           })
         )
-        .mutation(async ({ input }) => {
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await proposalInScope(input.proposalId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Proposal ${input.proposalId} not found` });
+        
           const p = await loadProposal(input.proposalId);
           if (!p) throw new Error("Proposal not found");
           const next = answerField(
@@ -760,7 +773,10 @@ export const appRouter = router({
             status: z.enum(["proposed", "confirmed", "rejected", "corrected"]),
           })
         )
-        .mutation(async ({ input }) => {
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await proposalInScope(input.proposalId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Proposal ${input.proposalId} not found` });
+        
           const p = await loadProposal(input.proposalId);
           if (!p) throw new Error("Proposal not found");
           const next = setFieldStatus(
@@ -775,7 +791,10 @@ export const appRouter = router({
 
       readBack: roleProcedure("assistant.readBack")
         .input(z.object({ proposalId: z.string() }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await proposalInScope(input.proposalId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Proposal ${input.proposalId} not found` });
+        
           const p = await loadProposal(input.proposalId);
           if (!p) throw new Error("Proposal not found");
           const next = generateReadBack(p);
@@ -785,7 +804,10 @@ export const appRouter = router({
 
       acknowledge: roleProcedure("assistant.acknowledge")
         .input(z.object({ proposalId: z.string() }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await proposalInScope(input.proposalId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Proposal ${input.proposalId} not found` });
+        
           const p = await loadProposal(input.proposalId);
           if (!p) throw new Error("Proposal not found");
           const next = acknowledgeReadBack(p);
@@ -799,16 +821,21 @@ export const appRouter = router({
        */
       commit: roleProcedure("assistant.commit")
         .input(z.object({ proposalId: z.string() }))
-        .mutation(({ ctx, input }) =>
-          executeAssistantCommit({
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await proposalInScope(input.proposalId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Proposal ${input.proposalId} not found` });
+        return executeAssistantCommit({
             proposalId: input.proposalId,
             actorUserId: ctx.user.id,
-          })
-        ),
+          });
+      }),
 
       reject: roleProcedure("assistant.reject")
         .input(z.object({ proposalId: z.string() }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await proposalInScope(input.proposalId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Proposal ${input.proposalId} not found` });
+        
           const p = await loadProposal(input.proposalId);
           if (!p) throw new Error("Proposal not found");
           await persist(rejectProposal(p));
@@ -1071,7 +1098,7 @@ export const appRouter = router({
     }),
     billing: router({
       rateCards: router({
-        list: roleProcedure("rateCards.list").query(() => listBillingRateCards()),
+        list: roleProcedure("rateCards.list").query(async ({ ctx }) => listBillingRateCards(await scopeFor(ctx.user.id))),
         create: roleProcedure("rateCards.create")
           .input(
             z.object({
@@ -1086,7 +1113,7 @@ export const appRouter = router({
               active: z.number().int().default(1),
             })
           )
-          .mutation(({ input }) => createBillingRateCard(input)),
+          .mutation(async ({ ctx, input }) => createBillingRateCard(input, await scopeFor(ctx.user.id))),
         update: roleProcedure("rateCards.update")
           .input(
             z.object({
@@ -1098,7 +1125,10 @@ export const appRouter = router({
               specialtyEquipmentRate: z.number().int().nonnegative().optional(),
             })
           )
-          .mutation(({ input }) => {
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await rateCardInScope(input.id, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Rate card ${input.id} not found` });
+        
             const { id, ...values } = input;
             return updateBillingRateCard(id, values);
           }),
@@ -1198,7 +1228,7 @@ export const appRouter = router({
     }),
     complianceEngine: router({
       artifacts: router({
-        list: roleProcedure("artifacts.list").query(() => listComplianceArtifacts()),
+        list: roleProcedure("artifacts.list").query(async ({ ctx }) => listComplianceArtifacts(await scopeFor(ctx.user.id))),
         create: roleProcedure("artifacts.create")
           .input(
             z.object({
@@ -1217,10 +1247,14 @@ export const appRouter = router({
               metadata: z.string().optional(),
             })
           )
-          .mutation(({ input }) => createComplianceArtifact(input)),
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        return createComplianceArtifact(input);
+      }),
       }),
       tailgates: router({
-        list: roleProcedure("tailgates.list").query(() => listTailgateMeetings()),
+        list: roleProcedure("tailgates.list").query(async ({ ctx }) => listTailgateMeetings(await scopeFor(ctx.user.id))),
         create: roleProcedure("tailgates.create")
           .input(
             z.object({
@@ -1241,7 +1275,11 @@ export const appRouter = router({
               endedAt: z.coerce.date().optional(),
             })
           )
-          .mutation(({ input }) => createTailgateMeeting(input)),
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        return createTailgateMeeting(input);
+      }),
       }),
       transfers: router({
         list: roleProcedure("transfers.list").query(() => listTransferAcknowledgements()),
@@ -1302,7 +1340,7 @@ export const appRouter = router({
         .mutation(({ input }) => createLocationIdentity(input)),
     }),
     manifests: router({
-      list: roleProcedure("manifests.list").query(() => listManifests()),
+      list: roleProcedure("manifests.list").query(async ({ ctx }) => listManifests(await scopeFor(ctx.user.id))),
       create: roleProcedure("manifests.create")
         .input(
           z.object({
@@ -1322,7 +1360,11 @@ export const appRouter = router({
             status: REFUSED,
           })
         )
-        .mutation(({ input }) => createManifest({ ...input, status: "draft" })),
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        { const scope = await scopeFor(ctx.user.id); if (input?.jobId != null && !(await jobInScope(input.jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` }); if (input?.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` }); }
+        return createManifest({ ...input, status: "draft" }, await scopeFor(ctx.user.id));
+      }),
     }),
     scans: router({
       list: roleProcedure("scans.list").query(() => listScanAudits()),
