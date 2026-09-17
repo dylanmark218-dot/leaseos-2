@@ -123,3 +123,39 @@ Depends on P3.1 (done). Gated on the business decisions in the owner's answer se
 - **OPEN** means code exists somewhere in the master bundle and has not been reconciled.
 - P1–P5 are product work. They are ordered by dependency, not by size, and each row is written so that "complete" can be checked rather than claimed.
 - P6 cannot be finished by an AI or a script. Any tool that claims to have done one of these has violated the one invariant the whole architecture exists to hold.
+
+## Work order 2026-09-17 — the 27-item audit, mapped (v22.35)
+
+The audit in project knowledge was written against 515ce64 (118 migrations). Where an item is already a register row, it is cited; the two release blockers are closed here.
+
+| # | Item | State now |
+|---|---|---|
+| 1 | Reconciliation debt | **closed** (P0) |
+| 2 | Native field app | P1 — needs a device |
+| 3 | Mapping / trucking navigation | P2 — routing runtime needs HERE/511 licences (P6.3) |
+| 4 | Back-road radio in the truck | P1/P2 — server strong, device side open |
+| 5 | HOS as a regulatory product | P6.1/6.4/6.5 human verifications first |
+| 6 | Multi-company SaaS | P4.1 — 3 routers scoped, program continues |
+| 7 | Live truck tracking in the portal | P5 — UI + device |
+| 8 | Message board employee screen | P5 |
+| 9 | Showcase → production screens | P5 |
+| 10 | LoadSense at the machine | P4.2 — hardware |
+| 11 | AI Secretary production agent | P4.4 — corpus licence-gated |
+| 12 | Disposal / facility intelligence | **done on the server** (P3.8, 0139–0141: directory, licences, call-ahead, wait, 113 sites) |
+| 13 | Trip-to-money last automation | **open** — deterministic billing proposal, post-trip package, machine bill/ticket ingestion (facility-statement import exists, P7.3) |
+| 14 | Contracts as operational records | **open** |
+| 15 | Fleet / CVIP / maintenance finish | P3 rows |
+| 16 | Digital safety binder | **open** |
+| 17 | Policy portfolio | **open** (Books 02–50 exist as documents) |
+| 18 | Remote camp module | **open** |
+| 19 | Auth at the native boundary | P1 |
+| 20 | Training — do not duplicate | respected (Academy 0125/0126) |
+| 21 | Legal paperwork portfolio | P4.5 partly — drafts exist in project knowledge |
+| 22 | Notification delivery (email/SMS/push) | **open** — alerting exists, providers do not |
+| 23 | Evidence video media side | P1 |
+| 24 | Final-pay / offboarding calculation | **open** |
+| 25 | Measured fluids inventory | **open** |
+| 26 | **Production migration ledger** | **DONE** — `server/_core/migrationLedger.ts`, `scripts/migrate.ts` (`status` / `up [--dry-run]` / `baseline --yes`): applies only unseen files in order, records the checksum of what ran, refuses on DRIFT (an applied file edited, or a ledgered file gone), stops at the first failure and names it; proven on the real 138-file corpus (same 394 tables and 44 triggers as the gate; non-ASCII intact). The CI gate keeps its clean-build shell runner; production advances through the ledger |
+| 27 | **Field-package security blockers** | **DONE** — refusals were already rows; now the signature is verified over the exact bytes the tablet signed (`signedPayloadJson`, `exact_wire`) and the package processed is parsed from those bytes; packages without them are still accepted and marked `reconstructed` so the office can see un-updated devices; the tablet's own clock is taken (`deviceClockAt`): fresh by its clock, skew recorded, >5 min flagged, >24 h refused as a wrong clock |
+
+Cross-layer proof added this round: `server/crossLayerIntegrity.test.ts` — every tRPC path the client references exists on the server (98 references), the flat mounted surface is pinned (649), and over HTTP the real router + context refuses an anonymous role-gated call with UNAUTHORIZED and 404s an unknown path.

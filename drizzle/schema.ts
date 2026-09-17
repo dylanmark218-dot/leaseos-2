@@ -2751,6 +2751,10 @@ export const legalHoldRecords = mysqlTable("legalHoldRecords", {
 
 export const syncPackages = mysqlTable("syncPackages", {
   id: int("id").autoincrement().primaryKey(),
+  /** 0142 — exact_wire: signature verified over the bytes the device signed; reconstructed: over a re-canonicalized parse (pre-0142 devices). */
+  verificationMode: mysqlEnum("verificationMode", ["exact_wire", "reconstructed", "unverified"]).default("unverified").notNull(),
+  deviceClockAt: timestamp("deviceClockAt"),
+  clockSkewMs: int("clockSkewMs"),
   packageRef: varchar("packageRef", { length: 64 }).notNull().unique(),
   deviceId: varchar("deviceId", { length: 120 }).notNull(),
   // v20.20 — an enrolled device, and the key it signed with.

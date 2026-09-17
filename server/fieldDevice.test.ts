@@ -368,3 +368,50 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
     expect(JSON.parse(afterRows[0].deviceValuesJson).netKg).toBe(22700);
   });
 });
+
+d("0142 — exact-wire verification and the tablet's clock", () => {
+  it("verifies the bytes the device signed (an extra key survives the signature and is stripped only at parse), refuses one flipped byte as a row, admits a 15-minute-off tablet with its skew recorded, and refuses a day-off clock", async () => {
+    const driver = await withRole("driver");
+    const A = deviceKey();
+    const bytesText = key("bytes"), c = sha(bytesText), m = sha(key("manifest"));
+    const ev = Number((await callerFor(driver).fieldRoute.evidence.upload({ title: "e", category: "photo", fileName: "e.bin", mimeType: "application/octet-stream", dataBase64: Buffer.from(bytesText).toString("base64") } as never)).id);
+    const en = await callerFor(driver).device.enroll({ platform: "android", publicKeySpkiBase64: A.spki, keystoreAttestation: "hardware", encryptedStorageAttested: true });
+    await callerFor(driver).device.activate({ deviceRef: en.deviceRef });
+    const item = { evidenceRecordId: ev, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "authorized", captureAuthorizationReason: null, tabletOnlyKey: "the schema does not know this key; the tablet signed it anyway" };
+    // The device's own canonical JSON — key order and all — is what it signs and what it sends.
+    const wire = (packageRef: string, signedAt: Date, nonce: string, queuedAt: Date) => JSON.stringify({ deviceRef: en.deviceRef, packageRef, queuedAt: queuedAt.toISOString(), signedAt: signedAt.toISOString(), nonce, items: [item], recordUpdates: [] });
+    const send = (opts: { deviceClockAt?: Date; signedAt?: Date; tamper?: boolean }) => {
+      const signedAt = opts.signedAt ?? new Date(), queuedAt = new Date(Date.now() - 3_600_000), nonce = key("n").padEnd(24, "0"), packageRef = key("PKG");
+      const json = wire(packageRef, signedAt, nonce, queuedAt);
+      const signatureP1363Base64 = cryptoSign("sha256", Buffer.from(json, "utf8"), { key: createPrivateKey(A.pem), dsaEncoding: "ieee-p1363" }).toString("base64");
+      const sent = opts.tamper ? json.replace("recordUpdates", "recordUpdatez") : json;
+      return callerFor(driver).sync.receivePackage({ deviceRef: en.deviceRef, packageRef, queuedAt, signedWithFingerprint: A.fingerprint, signedAt, nonce, signatureP1363Base64, signedPayloadJson: sent, deviceClockAt: opts.deviceClockAt, items: [{ ...item, tabletOnlyKey: undefined }] as never, recordUpdates: [] });
+    };
+    // 1. Exact wire: verified over the tablet's bytes; processed from them; the package row says how.
+    const ok = await send({});
+    expect(ok.state).toBe("hash_verified");
+    const [row] = await pool.execute<mysql.RowDataPacket[]>("SELECT verificationMode, clockSkewMs FROM syncPackages WHERE packageRef = ?", [ok.packageRef]);
+    expect(row[0]).toMatchObject({ verificationMode: "exact_wire", clockSkewMs: null });
+    // 2. One byte changed after signing: refused, and the refusal is a row.
+    const bad = await send({ tamper: true });
+    expect(bad.state).toBe("rejected");
+    const [rej] = await pool.execute<mysql.RowDataPacket[]>("SELECT state, refusalReason FROM syncPackages WHERE packageRef = ?", [bad.packageRef]);
+    expect(rej[0].state).toBe("rejected");
+    expect(String(rej[0].refusalReason)).toMatch(/signature|payload/i);
+    // 3. A tablet whose clock is 15 minutes slow signs "15 minutes ago" by our clock — fresh by its own; admitted, skew recorded.
+    const slow = new Date(Date.now() - 15 * 60_000);
+    const skewed = await send({ deviceClockAt: slow, signedAt: new Date(slow.getTime() - 30_000) });
+    expect(skewed.state).toBe("hash_verified");
+    const [sk] = await pool.execute<mysql.RowDataPacket[]>("SELECT verificationMode, clockSkewMs FROM syncPackages WHERE packageRef = ?", [skewed.packageRef]);
+    expect(sk[0].verificationMode).toBe("exact_wire");
+    expect(Number(sk[0].clockSkewMs)).toBeGreaterThan(14 * 60_000);
+    // 4. The same 15-minute-old signature WITHOUT a device clock is stale under the server-clock rule.
+    const stale = await send({ signedAt: new Date(Date.now() - 15 * 60_000) });
+    expect(stale.state).toBe("rejected");
+    expect(stale.reason).toContain("no device clock reported");
+    // 5. A clock a day off is wrong, not skewed.
+    const wrong = await send({ deviceClockAt: new Date(Date.now() - 26 * 3_600_000), signedAt: new Date(Date.now() - 26 * 3_600_000) });
+    expect(wrong.state).toBe("rejected");
+    expect(wrong.reason).toContain("beyond a day");
+  }, 60_000);
+});

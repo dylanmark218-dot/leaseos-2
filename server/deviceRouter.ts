@@ -15,7 +15,7 @@ import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
 import { createHash } from "node:crypto";
-import { DEVICE_SIGNATURE_MAX_SKEW_MS, canonicalDevicePackage, fingerprintP256Spki, signatureTimeIsFresh, verifyP256PackageSignature } from "./_core/deviceSignature";
+import { DEVICE_SIGNATURE_MAX_SKEW_MS, canonicalDevicePackage, fingerprintP256Spki, signatureFreshness, verifyP256PackageSignature } from "./_core/deviceSignature";
 import { resolveActingScope } from "./_core/actingScope";
 import { storageRead } from "./storage";
 import {
@@ -153,6 +153,10 @@ export const syncRouter = router({
       signedAt: z.coerce.date(),
       nonce: z.string().min(16).max(120),
       signatureP1363Base64: z.string().min(80).max(128),
+      /** 0142 — the exact bytes the device signed (its canonical JSON). When present it is what is verified AND what is processed. */
+      signedPayloadJson: z.string().max(4_000_000).optional(),
+      /** 0142 — the device's own clock at send time, for skew. */
+      deviceClockAt: z.coerce.date().optional(),
       packageRef: z.string().min(1).max(64),
       queuedAt: z.coerce.date(),
       items: z.array(ITEM).min(1).max(500),
@@ -191,15 +195,32 @@ export const syncRouter = router({
         }).catch(() => undefined);
         return { packageRef: input.packageRef, state: "rejected" as const, reason, verified: 0, rejected: input.items.length, conflicts: 0 };
       };
-      if (!signatureTimeIsFresh(input.signedAt, now)) {
-        const skewSeconds = Math.round((input.signedAt.getTime() - now.getTime()) / 1000);
+      const freshness = signatureFreshness({ signedAt: input.signedAt, now, deviceClockAt: input.deviceClockAt ?? null });
+      if (!freshness.fresh) {
         // The device can only fix its clock if it is told what the server's is.
-        return refuse(`Device signature timestamp is stale or too far in the future: device signed ${input.signedAt.toISOString()}, server time ${now.toISOString()} (skew ${skewSeconds}s; allowed ±${DEVICE_SIGNATURE_MAX_SKEW_MS / 1000}s)`);
+        return refuse(`Device signature timestamp refused: ${freshness.reason} (server time ${now.toISOString()}; allowed ±${DEVICE_SIGNATURE_MAX_SKEW_MS / 60_000} min)`);
       }
+      const clockSkewMs = freshness.skewMs;
       const signingKey = d?.keyFingerprint === input.signedWithFingerprint
         ? d.publicKeySpkiBase64
         : history.find(h => h.keyFingerprint === input.signedWithFingerprint && h.publicKeySpkiBase64)?.publicKeySpkiBase64;
-      const signedPayload = canonicalDevicePackage({ deviceRef: input.deviceRef, packageRef: input.packageRef, queuedAt: input.queuedAt, signedAt: input.signedAt, nonce: input.nonce, items: input.items, recordUpdates: input.recordUpdates });
+      // 0142 — exact-wire verification: the signature is checked over the very bytes the device signed,
+      // and the package processed is parsed FROM those bytes, so nothing between the tablet and the
+      // database can drift. A package without them is verified the pre-0142 way and marked so.
+      let verificationMode: "exact_wire" | "reconstructed" = "reconstructed";
+      let items = input.items, recordUpdates = input.recordUpdates;
+      let signedPayload: Buffer;
+      if (input.signedPayloadJson !== undefined) {
+        signedPayload = Buffer.from(input.signedPayloadJson, "utf8");
+        let parsed: unknown;
+        try { parsed = JSON.parse(input.signedPayloadJson); } catch { return refuse("Signed payload is not JSON"); }
+        const wire = z.object({ deviceRef: z.literal(input.deviceRef), packageRef: z.literal(input.packageRef), queuedAt: z.string(), signedAt: z.string(), nonce: z.literal(input.nonce), items: z.array(ITEM).min(1).max(500), recordUpdates: z.array(z.object({ recordType: z.string().min(1).max(60), recordRef: z.string().min(1).max(120), baseVersion: z.number().int().nonnegative(), baseValues: z.record(z.string(), z.unknown()), deviceValues: z.record(z.string(), z.unknown()) })) }).safeParse(parsed);
+        if (!wire.success) return refuse(`Signed payload does not describe this package: ${wire.error.issues.slice(0, 2).map(x => x.message).join("; ")}`);
+        if (new Date(wire.data.signedAt).getTime() !== input.signedAt.getTime() || new Date(wire.data.queuedAt).getTime() !== input.queuedAt.getTime()) return refuse("Signed payload's timestamps differ from the package envelope");
+        items = wire.data.items; recordUpdates = wire.data.recordUpdates; verificationMode = "exact_wire";
+      } else {
+        signedPayload = canonicalDevicePackage({ deviceRef: input.deviceRef, packageRef: input.packageRef, queuedAt: input.queuedAt, signedAt: input.signedAt, nonce: input.nonce, items: items, recordUpdates: recordUpdates });
+      }
       if (!signingKey || !verifyP256PackageSignature({ publicKeySpkiBase64: signingKey, payload: signedPayload, signatureP1363Base64: input.signatureP1363Base64 }))
         return refuse(signingKey ? "Invalid device package signature" : "Invalid device package signature: the signing key was never enrolled or rotated in for this device");
       try {
@@ -223,18 +244,19 @@ export const syncRouter = router({
         packageRef: input.packageRef, deviceId: input.deviceRef, fieldDeviceId: d?.id ?? null,
         signedWithFingerprint: input.signedWithFingerprint, operatorId: null,
         state: admission.admitted ? "server_received" : "rejected",
-        itemCount: input.items.length, queuedAt: input.queuedAt, lastAttemptAt: now, attemptCount: 1,
+        itemCount: items.length, queuedAt: input.queuedAt, lastAttemptAt: now, attemptCount: 1,
         serverReceivedAt: admission.admitted ? now : null,
         refusalReason: admission.admitted ? null : admission.reason,
+        verificationMode, deviceClockAt: input.deviceClockAt ?? null, clockSkewMs,
       });
       const packageId = Number(pkg[0]?.insertId ?? 0);
       if (!admission.admitted) {
-        return { packageRef: input.packageRef, state: "rejected" as const, reason: admission.reason, verified: 0, rejected: input.items.length, conflicts: 0 };
+        return { packageRef: input.packageRef, state: "rejected" as const, reason: admission.reason, verified: 0, rejected: items.length, conflicts: 0 };
       }
       if (d) await db.update(fieldDevices).set({ lastSeenAt: now }).where(eq(fieldDevices.id, d.id));
 
       // Three-way: declared vs received vs sealed.
-      const ids = input.items.map(i => i.evidenceRecordId);
+      const ids = items.map(i => i.evidenceRecordId);
       const sealRows = ids.length ? await db.select().from(evidenceSeals).where(eq(evidenceSeals.evidenceRecordId, ids[0])) : [];
       const seals = new Map<number, { evidenceRecordId: number; contentHash: string; manifestHash: string } | null>();
       for (const id of ids) {
@@ -248,7 +270,7 @@ export const syncRouter = router({
       // DECLARED. Before this, the router verified the seal against a value the
       // device supplied, and a tampered upload would have passed. Where the
       // stored object cannot be read, the item is rejected rather than trusted.
-      const recomputed = await Promise.all(input.items.map(async it => {
+      const recomputed = await Promise.all(items.map(async it => {
         const rec = (await db.select({ storageKey: evidenceRecords.storageKey }).from(evidenceRecords).where(eq(evidenceRecords.id, it.evidenceRecordId)).limit(1))[0];
         if (!rec?.storageKey) return { ...it, computedContentHash: "0".repeat(64), computedManifestHash: it.declaredManifestHash };
         try {
@@ -260,7 +282,7 @@ export const syncRouter = router({
       }));
       const verification = verifyPackageItems({ items: recomputed, seals });
 
-      for (const it of input.items) {
+      for (const it of items) {
         const v = verification.verdicts.find(x => x.evidenceRecordId === it.evidenceRecordId)!;
         await db.insert(syncPackageItems).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, declaredContentHash: it.declaredContentHash, declaredManifestHash: it.declaredManifestHash,
           captureAuthorizationClaim: it.captureAuthorizationClaim, captureAuthorizationReason: it.captureAuthorizationReason ?? null, state: v.outcome === "verified" ? "verified" : "mismatch" });
@@ -278,7 +300,7 @@ export const syncRouter = router({
       // the device's base and current values differ and the update targets a
       // record the server holds a newer version of.
       let conflicts = 0;
-      for (const u of input.recordUpdates) {
+      for (const u of recordUpdates) {
         const serverVersion = await lookupServerVersion(u.recordType, u.recordRef);
         if (serverVersion == null) continue;
         const det = detectConflict({
