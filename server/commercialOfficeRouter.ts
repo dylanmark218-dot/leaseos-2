@@ -8,10 +8,10 @@
  * a sequence with no numbering policy mints no number.
  */
 import { TRPCError } from "@trpc/server";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, organizationCommercialRoles, organizations, userRoleAssignments } from "../drizzle/schema";
+import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
@@ -185,6 +185,91 @@ export const commercialOfficeRouter = router({
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         await db.insert(commercialCategoryTypes).values({ ...input, bookOrgRef, builtIn: false, source: `business_defined by user ${ctx.user.id}`, createdByUserId: ctx.user.id });
         return { ...input, bookOrgRef };
+      }),
+  }),
+
+  /**
+   * P7.2 — linking the office's existing records to organizations is a person's act.
+   * A vendor row, a facility row, or the client named on a job gets an organization
+   * reference only when someone links it, and only to an organization that holds the
+   * matching role in this book. Candidates are proposed by exact name and never applied.
+   */
+  links: router({
+    set: roleProcedure("commercialOffice.linkSet")
+      .input(z.object({ recordType: z.enum(["vendor", "facility", "job_customer"]), recordId: z.number().int().positive(), orgRef: z.string().min(1).max(64), note: z.string().max(500).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const roleKeyRequired = input.recordType === "vendor" ? "vendor" : input.recordType === "facility" ? "disposal_facility" : "client";
+        const role = (await db.select({ id: organizationCommercialRoles.id }).from(organizationCommercialRoles)
+          .where(and(eq(organizationCommercialRoles.orgRef, input.orgRef), eq(organizationCommercialRoles.roleKey, roleKeyRequired), eq(organizationCommercialRoles.status, "active"),
+            bookOrgRef ? eq(organizationCommercialRoles.bookOrgRef, bookOrgRef) : isNull(organizationCommercialRoles.bookOrgRef))).limit(1))[0];
+        if (!role) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${input.orgRef} does not hold the ${roleKeyRequired} role in this book; assign it first` });
+        const table = input.recordType === "vendor" ? vendors : input.recordType === "facility" ? facilities : jobs;
+        const record = (await db.select({ id: table.id }).from(table).where(eq(table.id, input.recordId)).limit(1))[0];
+        if (!record) throw new TRPCError({ code: "NOT_FOUND", message: `${input.recordType} ${input.recordId} does not exist` });
+        const open = (await db.select({ linkRef: organizationRecordLinks.linkRef, orgRef: organizationRecordLinks.orgRef }).from(organizationRecordLinks)
+          .where(and(eq(organizationRecordLinks.recordType, input.recordType), eq(organizationRecordLinks.recordId, input.recordId), eq(organizationRecordLinks.status, "active"))).limit(1))[0];
+        if (open) throw new TRPCError({ code: "CONFLICT", message: `${input.recordType} ${input.recordId} is already linked to ${open.orgRef} (${open.linkRef}); end that link first` });
+        const linkRef = ref("OLINK");
+        await db.transaction(async tx => {
+          await tx.insert(organizationRecordLinks).values({ linkRef, bookOrgRef, orgRef: input.orgRef, recordType: input.recordType, recordId: input.recordId, roleKeyRequired, note: input.note ?? null, linkedByUserId: ctx.user.id });
+          if (input.recordType === "vendor") await tx.update(vendors).set({ orgRef: input.orgRef }).where(eq(vendors.id, input.recordId));
+          else if (input.recordType === "facility") await tx.update(facilities).set({ orgRef: input.orgRef }).where(eq(facilities.id, input.recordId));
+          else await tx.update(jobs).set({ customerOrgRef: input.orgRef }).where(eq(jobs.id, input.recordId));
+        });
+        return { linkRef, recordType: input.recordType, recordId: input.recordId, orgRef: input.orgRef };
+      }),
+    end: roleProcedure("commercialOffice.linkEnd")
+      .input(z.object({ linkRef: z.string().min(1), reason: z.string().min(5).max(500) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const link = (await db.select().from(organizationRecordLinks).where(eq(organizationRecordLinks.linkRef, input.linkRef)).limit(1))[0];
+        if (!link || (bookOrgRef ? link.bookOrgRef !== bookOrgRef : link.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Link not found in this business's book" });
+        if (link.status === "ended") throw new TRPCError({ code: "CONFLICT", message: "Already ended" });
+        await db.transaction(async tx => {
+          await tx.update(organizationRecordLinks).set({ status: "ended", endedByUserId: ctx.user.id, endedAt: new Date(), endReason: input.reason }).where(eq(organizationRecordLinks.id, link.id));
+          // The reference is cleared; the legacy text on the record stays as it was captured.
+          if (link.recordType === "vendor") await tx.update(vendors).set({ orgRef: null }).where(eq(vendors.id, link.recordId));
+          else if (link.recordType === "facility") await tx.update(facilities).set({ orgRef: null }).where(eq(facilities.id, link.recordId));
+          else await tx.update(jobs).set({ customerOrgRef: null }).where(eq(jobs.id, link.recordId));
+        });
+        return { linkRef: input.linkRef, status: "ended" as const };
+      }),
+    list: roleProcedure("commercialOffice.linksList")
+      .input(z.object({ orgRef: z.string().max(64).optional(), recordType: z.enum(["vendor", "facility", "job_customer"]).optional(), includeEnded: z.boolean().default(false) }).optional())
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const conds = [bookOrgRef ? eq(organizationRecordLinks.bookOrgRef, bookOrgRef) : isNull(organizationRecordLinks.bookOrgRef)];
+        if (input?.orgRef) conds.push(eq(organizationRecordLinks.orgRef, input.orgRef));
+        if (input?.recordType) conds.push(eq(organizationRecordLinks.recordType, input.recordType));
+        if (!input?.includeEnded) conds.push(eq(organizationRecordLinks.status, "active"));
+        return db.select().from(organizationRecordLinks).where(and(...conds)).limit(500);
+      }),
+    /**
+     * PROPOSE → SHOW EVIDENCE → HUMAN CONFIRMATION → COMMIT. Unlinked records whose captured
+     * name exactly equals (case-insensitively) the name of an organization holding the matching
+     * role in this book. Each is a candidate with its evidence; none is applied here.
+     */
+    candidates: roleProcedure("commercialOffice.linkCandidates")
+      .input(z.object({ recordType: z.enum(["vendor", "facility", "job_customer"]) }))
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const roleKeyRequired = input.recordType === "vendor" ? "vendor" : input.recordType === "facility" ? "disposal_facility" : "client";
+        const holders = await db.select({ orgRef: organizations.orgRef, name: organizations.name }).from(organizations)
+          .innerJoin(organizationCommercialRoles, and(eq(organizationCommercialRoles.orgRef, organizations.orgRef), eq(organizationCommercialRoles.roleKey, roleKeyRequired), eq(organizationCommercialRoles.status, "active"),
+            bookOrgRef ? eq(organizationCommercialRoles.bookOrgRef, bookOrgRef) : isNull(organizationCommercialRoles.bookOrgRef)));
+        const byName = new Map<string, { orgRef: string; name: string }[]>();
+        for (const h of holders) { const k = h.name.trim().toLowerCase(); byName.set(k, [...(byName.get(k) ?? []), h]); }
+        const unlinked: { recordId: number; capturedName: string }[] = input.recordType === "vendor"
+          ? (await db.select({ recordId: vendors.id, capturedName: vendors.name }).from(vendors).where(isNull(vendors.orgRef)).limit(500))
+          : input.recordType === "facility"
+            ? (await db.select({ recordId: facilities.id, capturedName: facilities.name }).from(facilities).where(isNull(facilities.orgRef)).limit(500))
+            : (await db.select({ recordId: jobs.id, capturedName: jobs.customer }).from(jobs).where(and(isNull(jobs.customerOrgRef), sql`${jobs.customer} <> ''`)).limit(500));
+        const candidates = unlinked.flatMap(r => (byName.get(r.capturedName.trim().toLowerCase()) ?? []).map(h => ({
+          recordType: input.recordType, recordId: r.recordId, capturedName: r.capturedName, orgRef: h.orgRef, organizationName: h.name,
+          evidence: "exact_name_match" as const, confidence: "candidate" as const, applied: false as const,
+        })));
+        return { unlinked: unlinked.length, candidates, note: "Candidates are proposed by exact name only and are never applied here; a person links each one with links.set." };
       }),
   }),
 });

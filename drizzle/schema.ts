@@ -16,6 +16,8 @@ export const jobs = mysqlTable("jobs", {
   id: int("id").autoincrement().primaryKey(),
   /** 0132 — the organization that owns the row; NULL means the historical single tenant. */
   orgRef: varchar("orgRef", { length: 64 }),
+  /** 0134 — the client organization a person linked; `customer` stays as the captured text. */
+  customerOrgRef: varchar("customerOrgRef", { length: 64 }),
   jobCode: varchar("jobCode", { length: 32 }).notNull().unique(),
   type: varchar("type", { length: 120 }).notNull(),
   mode: mysqlEnum("mode", ["general", "hydrovac", "recovery", "transport"])
@@ -239,6 +241,8 @@ export const loadProfiles = mysqlTable("loadProfiles", {
 
 export const facilities = mysqlTable("facilities", {
   id: int("id").autoincrement().primaryKey(),
+  /** 0134 — the organization a person linked this facility to; NULL until someone does. */
+  orgRef: varchar("orgRef", { length: 64 }),
   name: varchar("name", { length: 220 }).notNull(),
   status: mysqlEnum("status", ["unknown", "open", "closed"])
     .default("unknown")
@@ -759,6 +763,8 @@ export const jobChargeLines = mysqlTable("jobChargeLines", {
 });
 export const vendors = mysqlTable("vendors", {
   id: int("id").autoincrement().primaryKey(),
+  /** 0134 — the organization a person linked this vendor to; NULL until someone does. */
+  orgRef: varchar("orgRef", { length: 64 }),
   // v20.19
   vendorRef: varchar("vendorRef", { length: 64 }),
   name: varchar("name", { length: 180 }).notNull(),
@@ -8171,4 +8177,21 @@ export const commercialCategoryTypes = mysqlTable("commercialCategoryTypes", {
   source: varchar("source", { length: 160 }).notNull(),
   createdByUserId: int("createdByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const organizationRecordLinks = mysqlTable("organizationRecordLinks", {
+  id: int("id").autoincrement().primaryKey(),
+  linkRef: varchar("linkRef", { length: 40 }).notNull().unique(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  recordType: mysqlEnum("recordType", ["vendor", "facility", "job_customer"]).notNull(),
+  recordId: int("recordId").notNull(),
+  roleKeyRequired: varchar("roleKeyRequired", { length: 40 }).notNull(),
+  status: mysqlEnum("status", ["active", "ended"]).default("active").notNull(),
+  note: varchar("note", { length: 500 }),
+  linkedByUserId: int("linkedByUserId").notNull(),
+  linkedAt: timestamp("linkedAt").defaultNow().notNull(),
+  endedByUserId: int("endedByUserId"),
+  endedAt: timestamp("endedAt"),
+  endReason: varchar("endReason", { length: 500 }),
 });

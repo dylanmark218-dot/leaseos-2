@@ -94,3 +94,45 @@ d("a business can answer differently", () => {
     await expect(callerFor(mgr).commercialOffice.settings.set({ accountingTarget: "custom" })).rejects.toThrow(/label/);
   }, 30_000);
 });
+
+d("P7.2 — linking records to organizations is a person's act", () => {
+  it("links a vendor only to an organization holding the vendor role, keeps the history, and clears the reference on unlink", async () => {
+    const book = await org(), counterparty = await org();
+    const office = await member(book, ["office"]);
+    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [`VEN-${rnd()}`, "Acme Parts Ltd"]);
+    // No role yet: refused by name.
+    await expect(callerFor(office).commercialOffice.links.set({ recordType: "vendor", recordId: v.insertId, orgRef: counterparty })).rejects.toThrow(/does not hold the vendor role/);
+    await callerFor(office).commercialOffice.roles.assign({ orgRef: counterparty, roleKey: "vendor" });
+    const link = await callerFor(office).commercialOffice.links.set({ recordType: "vendor", recordId: v.insertId, orgRef: counterparty, note: "confirmed against the account statement" });
+    const [row] = await pool.query<mysql.RowDataPacket[]>("SELECT orgRef, name FROM vendors WHERE id = ?", [v.insertId]);
+    expect(row[0]).toMatchObject({ orgRef: counterparty, name: "Acme Parts Ltd" });
+    await expect(callerFor(office).commercialOffice.links.set({ recordType: "vendor", recordId: v.insertId, orgRef: counterparty })).rejects.toThrow(/already linked/);
+    expect((await callerFor(office).commercialOffice.links.list({ orgRef: counterparty })).map(l => l.linkRef)).toContain(link.linkRef);
+    await callerFor(office).commercialOffice.links.end({ linkRef: link.linkRef, reason: "wrong legal entity; the vendor is the numbered company" });
+    const [after] = await pool.query<mysql.RowDataPacket[]>("SELECT orgRef, name FROM vendors WHERE id = ?", [v.insertId]);
+    expect(after[0]).toMatchObject({ orgRef: null, name: "Acme Parts Ltd" });   // the captured text survives the unlink
+    const history = await callerFor(office).commercialOffice.links.list({ orgRef: counterparty, includeEnded: true });
+    expect(history.find(l => l.linkRef === link.linkRef)).toMatchObject({ status: "ended", endReason: expect.stringContaining("numbered company") });
+  }, 30_000);
+
+  it("proposes an exact-name candidate for a job's client and applies nothing until a person links it", async () => {
+    const book = await org();
+    const office = await member(book, ["office"]);
+    const clientName = `Fixture Energy ${rnd()}`;
+    const clientOrg = `ORG-${rnd()}`;
+    await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [clientOrg, clientName]);
+    await callerFor(office).commercialOffice.roles.assign({ orgRef: clientOrg, roleKey: "client" });
+    const jobCode = `JOB-${rnd()}`;
+    await callerFor(office).fieldRoute.jobs.create({ jobCode, type: "Hydrovac", customer: clientName, location: "LSD 04-12-045-08W4" } as never);
+    const [j] = await pool.query<mysql.RowDataPacket[]>("SELECT id, customerOrgRef FROM jobs WHERE jobCode = ?", [jobCode]);
+    expect(j[0]!.customerOrgRef).toBeNull();
+    const c = await callerFor(office).commercialOffice.links.candidates({ recordType: "job_customer" });
+    const mine = c.candidates.find(x => x.recordId === Number(j[0]!.id));
+    expect(mine).toMatchObject({ orgRef: clientOrg, evidence: "exact_name_match", applied: false });
+    const [still] = await pool.query<mysql.RowDataPacket[]>("SELECT customerOrgRef FROM jobs WHERE id = ?", [j[0]!.id]);
+    expect(still[0]!.customerOrgRef).toBeNull();   // proposing is not linking
+    await callerFor(office).commercialOffice.links.set({ recordType: "job_customer", recordId: Number(j[0]!.id), orgRef: clientOrg });
+    const [linked] = await pool.query<mysql.RowDataPacket[]>("SELECT customerOrgRef, customer FROM jobs WHERE id = ?", [j[0]!.id]);
+    expect(linked[0]).toMatchObject({ customerOrgRef: clientOrg, customer: clientName });
+  }, 30_000);
+});
