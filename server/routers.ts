@@ -29,6 +29,7 @@ import { widgetsRouter, type WidgetDeps } from "./widgetsRouter";
 import type { WidgetLayoutStore } from "./_core/widgetService";
 import { drizzleWidgetLayoutStore } from "./widgetLayouts";
 import { widgetReaderFor } from "./widgetSources";
+import { composeReadiness } from "./readinessComposer";
 import { branchRolesFor } from "./_core/widgetRoleKeys";
 import { isDomainRole, permissionsForDomainRole } from "./_core/recordsAuthorization";
 import { listActiveUserRoles } from "./db";
@@ -280,7 +281,8 @@ const widgetDeps: WidgetDeps = {
     },
   },
   readerFor: (actor) => widgetReaderFor(actor, (userId) =>
-    appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId } as never }) as never),
+    appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId } as never }) as never,
+    (subject) => composeReadiness(subject)),
 };
 
 export const appRouter = router({

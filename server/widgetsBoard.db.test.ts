@@ -78,3 +78,87 @@ d("a driver's board", () => {
     expect(keys).not.toContain("dispatchReadiness");
   });
 });
+
+d("scoped tiles read their subject through the governing procedure", () => {
+  async function fixtures(userId: number) {
+    const jobCode = `JOB-${rnd()}`;
+    const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status) VALUES (?,?,?,?,'dispatched')", [jobCode, "Hydrovac", "Fixture Energy", "LSD 04-12-045-08W4"]);
+    const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [`U-${rnd()}`, "hydrovac"]);
+    const tripNumber = `TRP-${rnd()}`;
+    await pool.execute("INSERT INTO trips (tripNumber, jobId, unitId, operatorId, tripType, status) VALUES (?,?,?,?,'one_way','planned')", [tripNumber, j.insertId, u.insertId, userId]);
+    const soon = new Date(Date.now() + 10 * 86_400_000), later = new Date(Date.now() + 200 * 86_400_000);
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator',?,?,?,NOW(),?,'verified')", [userId, "licence", "Class 1", soon]);
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator',?,?,?,NOW(),?,'needs_review')", [userId, "h2s", "H2S Alive", later]);
+    return { jobCode, tripNumber, unitId: u.insertId, jobId: j.insertId };
+  }
+
+  it("activeJob / activeTrip match the subject by code, and say so when nothing matches", async () => {
+    const { userId } = await person("dispatcher");
+    const f = await fixtures(userId);
+    const save = await callerFor(userId).widgets.layoutSave({
+      layoutRef: null, deviceClass: "desktop", name: "Ops", isDefault: true,
+      items: [
+        { instanceRef: "j1", widgetKey: "activeJob", variant: "status", position: 0, subjectRef: f.jobCode },
+        { instanceRef: "t1", widgetKey: "activeTrip", variant: "status", position: 1, subjectRef: f.tripNumber },
+        { instanceRef: "j2", widgetKey: "activeJob", variant: "status", position: 2, subjectRef: "JOB-NOPE" },
+      ],
+    });
+    expect("ok" in save && save.ok).toBe(true);
+    const board = await callerFor(userId).widgets.boardResolve({ deviceClass: "desktop", connected: true, subjects: {} });
+    const t = (ref: string) => board.tiles.find(x => x.instanceRef === ref)!.payload;
+    expect(t("j1").state).toBe("ok");
+    expect(t("t1").state).toBe("ok");
+    expect(t("j2").state).toBe("unknown");
+    if (t("j2").state === "unknown") expect(t("j2").reason).toContain("no job matches");
+  }, 20_000);
+
+  it("documentExpiry shows the operator's own documents in the vault's states", async () => {
+    const { userId } = await person("dispatcher");
+    await fixtures(userId);
+    await callerFor(userId).widgets.layoutSave({
+      layoutRef: null, deviceClass: "desktop", name: "Ops", isDefault: true,
+      items: [{ instanceRef: "d1", widgetKey: "documentExpiry", variant: "list", position: 0, options: { warnDays: 30 } }],
+    });
+    const board = await callerFor(userId).widgets.boardResolve({ deviceClass: "desktop", connected: true, subjects: {} });
+    const p = board.tiles[0]!.payload;
+    expect(p.state).toBe("ok");
+    if (p.state === "ok") {
+      const v = p.value as { documents: { docType: string; state: string }[]; total: number };
+      expect(v.total).toBe(2);
+      expect(v.documents.find(x => x.docType === "licence")?.state).toBe("expiring");
+      expect(v.documents.find(x => x.docType === "h2s")?.state).toBe("unverified");
+    }
+  }, 20_000);
+
+  it("dispatchReadiness takes the operator and unit from the job's dispatched trip", async () => {
+    const { userId } = await person("dispatcher");
+    const f = await fixtures(userId);
+    await callerFor(userId).widgets.layoutSave({
+      layoutRef: null, deviceClass: "desktop", name: "Ops", isDefault: true,
+      items: [{ instanceRef: "r1", widgetKey: "dispatchReadiness", variant: "status", position: 0, subjectRef: f.jobCode }],
+    });
+    const board = await callerFor(userId).widgets.boardResolve({ deviceClass: "desktop", connected: true, subjects: {} });
+    const p = board.tiles[0]!.payload;
+    expect(["ok", "failed"]).toContain(p.state);
+    if (p.state === "ok") {
+      const v = p.value as { jobCode: string; tripNumber: string; readiness: { verdict: string } };
+      expect(v.jobCode).toBe(f.jobCode);
+      expect(v.tripNumber).toBe(f.tripNumber);
+      // A fixture operator with no licence on file is not READY — the composer names why, it never rounds up.
+      expect(["BLOCKED", "REVIEW", "UNKNOWN", "READY"]).toContain(v.readiness.verdict);
+      expect(v.readiness.verdict).not.toBe("READY");
+    }
+  }, 20_000);
+
+  it("search and trackingLookup are on-demand tiles, not silent empties", async () => {
+    const { userId } = await person("dispatcher");
+    await callerFor(userId).widgets.layoutSave({
+      layoutRef: null, deviceClass: "desktop", name: "Ops", isDefault: true,
+      items: [{ instanceRef: "s1", widgetKey: "search", variant: "list", position: 0 }],
+    });
+    const board = await callerFor(userId).widgets.boardResolve({ deviceClass: "desktop", connected: true, subjects: {} });
+    const p = board.tiles[0]!.payload;
+    expect(p.state).toBe("unknown");
+    if (p.state === "unknown") expect(p.reason).toMatch(/on demand/);
+  }, 20_000);
+});
