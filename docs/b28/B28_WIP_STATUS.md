@@ -10,7 +10,7 @@ with real dependencies; `myDay` is promoted; the other eleven widgets answer
 | 3 engine in, context adapted, procedures registered | done — `boardCtx()` in `server/widgetsRouter.ts`; `widgets.offerable/boardResolve/layoutSave` under `myday.read_own` |
 | 4 migrations 0127/0128 + schema, parity green | done |
 | 5 promote one widget | done — `myDay` via `surfaces.myDay` as the acting user (`server/widgetSources.ts`) |
-| 6 the seven as-is sources | **next**: inbox, exceptions, dispatchReadiness, hosRemaining, trackingLookup, search — one reader each, one commit each; `hosRemaining` reads UNKNOWN until a person promotes a figure (P9) |
+| 6 the seven as-is sources | inbox, exceptions **done** (`7b62c48`); hosRemaining reader written but the planner marks a driver's tile device-local (by design); **next**: dispatchReadiness (job → operator/unit lookup), search (query from options), trackingLookup (subjectRef → entityType/entityId) |
 | 7 the resolved sources | documentExpiry → `documents.list`, unitReadiness → `readiness.forShift`, activeJob → `jobs.list`, activeTrip → `trips.list`: readers apply the self/unit scope; syncStatus is device-local (runtime, not server) |
 | 8 client suites | `.dom.test.tsx` and the Chromium accessibility suite still run under the engine's own toolchain; a `client` Vitest project is its own commit |
 
