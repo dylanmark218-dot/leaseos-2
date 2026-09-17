@@ -43,7 +43,8 @@ d("a field-ticket line is priced as it is recorded", () => {
     const rate = await cs.definitionPropose({ financialEntityId: entityId, rateKind: "sell", serviceCode: "hydrovac", pricingMethod: "per_unit", unit: "hour", rateMillis: 320_000, minimumQuantityMillis: 4_000, billingIncrementMillis: 250, scopeLevel: "customer_contract", customerAccountRef: acctRef, effectiveFrom: new Date("2026-01-01T00:00:00Z"), sourceKind: "human", sourceClause: "ABC MSA §4.2" });
     await callerFor(controller).commercialSetup.definitionApprove({ definitionRef: rate.definitionRef });
     const c = callerFor(driver).closeout;
-    const t = await c.ticketOpen({ jobId: Number(job.insertId), customerAccountRef: acctRef, unitId: 142, operatorId: 7, serviceDescription: "Hydrovac daylighting" });
+    const [fixtureUnit260] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
+    const t = await c.ticketOpen({ jobId: Number(job.insertId), customerAccountRef: acctRef, unitId: fixtureUnit260.insertId, operatorId: 7, serviceDescription: "Hydrovac daylighting" });
     const priced = await c.lineAdd({ ticketNumber: t.ticketNumber, lineKind: "service", serviceCode: "hydrovac", description: "Truck time", quantity: 7.133, quantityUnit: "hrs", measurementMethod: "system_timed" });
     expect(priced.pricing).toMatchObject({ outcome: "priced", amountCents: 232_000 });          // 7.133 → 7.25 h × $320
     const [line] = await pool.execute<mysql.RowDataPacket[]>("SELECT quantity, quantityUnit, serviceCode, pricingDecisionRef FROM fieldTicketLines WHERE id = ?", [priced.lineId]);

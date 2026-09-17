@@ -80,7 +80,8 @@ d("the customer's transaction, end to end", () => {
     expect((await portalCaller(token).portal.alertPreferences()).preferences.find(p => p.eventKind === "delay")).toMatchObject({ enabled: false, isDefault: false });
 
     const c = callerFor(driver).closeout;
-    const t = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: 142, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: true });
+    const [fixtureUnit593] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
+    const t = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: fixtureUnit593.insertId, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: true });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("07:31"), endedAt: at("12:00"), source: "pto", confidence: "high" });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "customer_hold", occurredAt: at("12:00"), endedAt: at("13:15"), detail: "Waiting on wireline" });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("13:15"), endedAt: at("17:06"), source: "pto", confidence: "high" });

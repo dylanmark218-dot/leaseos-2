@@ -112,7 +112,8 @@ d("the customer's live view, through the gate", () => {
     const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress, createdAt) VALUES (?, 'hydrovac', 'hydrovac', 'ABC Energy', '10-22-045-06-W5', 'on_site', 0, NOW())", [key("JOB").slice(0, 40)]);
     const jobId = Number(job.insertId);
     const c = callerFor(driver).closeout;
-    const t = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: 142, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: false });
+    const [fixtureUnit251] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
+    const t = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: fixtureUnit251.insertId, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: false });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("07:31"), endedAt: at("12:00"), source: "pto", confidence: "high" });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "customer_hold", occurredAt: at("12:00"), detail: "Waiting on wireline" });
     await pool.execute("INSERT INTO loads (loadNumber, jobId, material, quantity, quantityUnit, chainState, createdAt) VALUES (?, ?, 'produced water', 12.4, 'm3', 'disposal_verified', NOW()), (?, ?, 'slurry', 11.8, 'm3', 'in_transit', NOW())", [key("LD").slice(0, 40), jobId, key("LD").slice(0, 40), jobId]);
@@ -132,10 +133,15 @@ d("the customer's live view, through the gate", () => {
     const board2 = await portalCaller(token).portal.jobBoard();
     expect(board2.tickets.find(x => x.ticketNumber === t.ticketNumber)!.operational).toMatchObject({ state: "CUSTOMER_HOLD" });
 
-    // Pre-clearance for an operator the contractor has no record of: UNKNOWN with the reason, not an error.
+    // Pre-clearance: the operator is one the contractor has no record of, so the worker's items stay UNKNOWN; the unit is
+    // real (P4.1 made the fixture name a real unit) and has no inspection, registration or insurance on file, so the
+    // whole verdict is BLOCKED — a real unit with nothing verified is blocked, not unknown. Categories only, no detail.
     const pcUnknown = await portalCaller(token).portal.preClearance({ ticketNumber: t.ticketNumber });
-    expect(pcUnknown.readiness).toEqual({ verdict: "UNKNOWN", items: [] });
-    expect(pcUnknown.basis).toContain("no readiness record");
+    expect(pcUnknown.readiness.verdict).toBe("BLOCKED");
+    expect(pcUnknown.readiness.items.filter(i => i.subject === "worker").map(i => i.verdict)).toEqual(expect.arrayContaining(["UNKNOWN"]));
+    expect(pcUnknown.readiness.items.filter(i => i.subject === "unit").every(i => i.verdict === "BLOCKED")).toBe(true);
+    expect(pcUnknown.readiness.items.every(i => Object.keys(i).sort().join(",") === "category,subject,verdict")).toBe(true);   // nothing leaks past the category
+    expect(pcUnknown.basis).toContain("projected: verdict and category only");   // the engine ran; the customer sees only the projection
     // A real operator and unit with no credentials on file: the engine's answer, projected — categories only, nothing free-text.
     const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [key("Op").slice(0, 40)]);
     const [un] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, inspectionStatus, maintenanceStatus, createdAt) VALUES (?, 'vac truck', 'current', 'clear', NOW())", [key("U").slice(0, 20)]);

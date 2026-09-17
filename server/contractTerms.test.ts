@@ -78,7 +78,8 @@ d("the closeout, decided by terms", () => {
     const c = callerFor(driver).closeout;
 
     // Before terms: standby is REVIEW.
-    const t1 = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: 142, operatorId: 7, serviceDescription: "Hydrovac", postSiteRequired: true });
+    const [fixtureUnit669] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
+    const t1 = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: fixtureUnit669.insertId, operatorId: 7, serviceDescription: "Hydrovac", postSiteRequired: true });
     await c.eventRecord({ ticketNumber: t1.ticketNumber, eventType: "site_work", occurredAt: at("07:00"), endedAt: at("12:00"), source: "pto", confidence: "high" });
     const sb1 = await c.eventRecord({ ticketNumber: t1.ticketNumber, eventType: "standby", occurredAt: at("12:00"), endedAt: at("13:15"), detail: "Waiting on wireline" });
     expect(sb1).toMatchObject({ customerBillable: "review", billingRuleRef: null });
@@ -101,7 +102,8 @@ d("the closeout, decided by terms", () => {
     expect(prep.findings).toContain(`standby decided by ${terms.termsRef} v1 §4.3`);
 
     // A new ticket after approval: decided at record time; a weather hold is not billable and says why; an open standby is decided when it closes.
-    const t2 = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: 142, operatorId: 7, serviceDescription: "Hydrovac day 2", postSiteRequired: true });
+    const [fixtureUnit430] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
+    const t2 = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: fixtureUnit430.insertId, operatorId: 7, serviceDescription: "Hydrovac day 2", postSiteRequired: true });
     const wx = await c.eventRecord({ ticketNumber: t2.ticketNumber, eventType: "weather_hold", occurredAt: at("09:00", "2026-09-11"), endedAt: at("10:00", "2026-09-11") });
     expect(wx).toMatchObject({ customerBillable: "no", billingRuleRef: `${terms.termsRef} v1 §4.5` });
     const open = await c.eventRecord({ ticketNumber: t2.ticketNumber, eventType: "standby", occurredAt: at("10:00", "2026-09-11") });

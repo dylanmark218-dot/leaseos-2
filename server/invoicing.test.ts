@@ -86,7 +86,8 @@ d("an invoice from the ticket's decisions, end to end", () => {
     const rate = await cs.definitionPropose({ financialEntityId: entityId, rateKind: "sell", serviceCode: "hydrovac", pricingMethod: "per_unit", unit: "hour", rateMillis: 320_000, minimumQuantityMillis: 4_000, scopeLevel: "customer_contract", customerAccountRef: acctRef, effectiveFrom: new Date("2026-01-01T00:00:00Z"), sourceKind: "human", sourceClause: "ABC MSA §4.2" });
     await callerFor(controller).commercialSetup.definitionApprove({ definitionRef: rate.definitionRef });
     const c = callerFor(driver).closeout;
-    const t = await c.ticketOpen({ jobId: Number(job.insertId), customerAccountRef: acctRef, unitId: 142, operatorId: 7, serviceDescription: "Hydrovac" });
+    const [fixtureUnit735] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
+    const t = await c.ticketOpen({ jobId: Number(job.insertId), customerAccountRef: acctRef, unitId: fixtureUnit735.insertId, operatorId: 7, serviceDescription: "Hydrovac" });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("07:00"), endedAt: at("09:30"), source: "pto", confidence: "high" });
     const truck = await c.lineAdd({ ticketNumber: t.ticketNumber, lineKind: "service", serviceCode: "hydrovac", description: "Truck time", quantity: 2.5, quantityUnit: "h", measurementMethod: "system_timed" });
     const hose = await c.lineAdd({ ticketNumber: t.ticketNumber, lineKind: "equipment", serviceCode: "extra_hose", description: "Extra hose", quantity: 1, quantityUnit: "each", measurementMethod: "customer_stated" });
@@ -215,7 +216,8 @@ d("an invoice from the ticket's decisions, end to end", () => {
       await callerFor(controller).commercialSetup.definitionApprove({ definitionRef: r.definitionRef });
     }
     const c = callerFor(driver).closeout;
-    const t = await c.ticketOpen({ jobId: Number(job.insertId), customerAccountRef: acctRef, unitId: 142, operatorId: 7, serviceDescription: "Hydrovac" });
+    const [fixtureUnit23] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
+    const t = await c.ticketOpen({ jobId: Number(job.insertId), customerAccountRef: acctRef, unitId: fixtureUnit23.insertId, operatorId: 7, serviceDescription: "Hydrovac" });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("07:00"), endedAt: at("15:00"), source: "pto", confidence: "high" });
     const truck = await c.lineAdd({ ticketNumber: t.ticketNumber, lineKind: "service", serviceCode: "hydrovac", description: "Truck time", quantity: 8, quantityUnit: "h", measurementMethod: "system_timed" });
     const standby = await c.lineAdd({ ticketNumber: t.ticketNumber, lineKind: "standby", serviceCode: "hydrovac_standby", description: "Standby", quantity: 1, quantityUnit: "h", measurementMethod: "system_timed" });

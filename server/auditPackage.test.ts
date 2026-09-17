@@ -82,7 +82,8 @@ d("packages over the chain", () => {
     const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress, createdAt) VALUES (?, 'hydrovac', 'hydrovac', 'ABC Energy', '10-22-045-06-W5', 'on_site', 0, NOW())", [key("JOB").slice(0, 40)]);
     const jobId = Number(job.insertId);
     const c = callerFor(driver).closeout;
-    const t = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: 142, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: true });
+    const [fixtureUnit925] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
+    const t = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: fixtureUnit925.insertId, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: true });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("07:31"), endedAt: at("17:06"), source: "pto", confidence: "high" });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "restock", occurredAt: at("20:31"), endedAt: at("20:52") });
     await pool.execute("INSERT INTO loads (loadNumber, jobId, unitId, material, quantity, quantityUnit, measurementMethod, chainState, createdAt) VALUES (?, ?, 142, 'slurry', 11.8, 'm3', 'customer_stated', 'in_transit', ?)", [key("LD").slice(0, 40), jobId, at("16:40")]);
