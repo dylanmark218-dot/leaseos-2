@@ -80,12 +80,12 @@ d("a driver's board", () => {
 });
 
 d("scoped tiles read their subject through the governing procedure", () => {
-  async function fixtures(userId: number) {
+  async function fixtures(userId: number, orgRef: string) {
     const jobCode = `JOB-${rnd()}`;
-    const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status) VALUES (?,?,?,?,'dispatched')", [jobCode, "Hydrovac", "Fixture Energy", "LSD 04-12-045-08W4"]);
+    const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, orgRef) VALUES (?,?,?,?,'dispatched',?)", [jobCode, "Hydrovac", "Fixture Energy", "LSD 04-12-045-08W4", orgRef]);
     const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [`U-${rnd()}`, "hydrovac"]);
     const tripNumber = `TRP-${rnd()}`;
-    await pool.execute("INSERT INTO trips (tripNumber, jobId, unitId, operatorId, tripType, status) VALUES (?,?,?,?,'one_way','planned')", [tripNumber, j.insertId, u.insertId, userId]);
+    await pool.execute("INSERT INTO trips (tripNumber, jobId, unitId, operatorId, tripType, status, orgRef) VALUES (?,?,?,?,'one_way','planned',?)", [tripNumber, j.insertId, u.insertId, userId, orgRef]);
     const soon = new Date(Date.now() + 10 * 86_400_000), later = new Date(Date.now() + 200 * 86_400_000);
     await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator',?,?,?,NOW(),?,'verified')", [userId, "licence", "Class 1", soon]);
     await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator',?,?,?,NOW(),?,'needs_review')", [userId, "h2s", "H2S Alive", later]);
@@ -93,8 +93,8 @@ d("scoped tiles read their subject through the governing procedure", () => {
   }
 
   it("activeJob / activeTrip match the subject by code, and say so when nothing matches", async () => {
-    const { userId } = await person("dispatcher");
-    const f = await fixtures(userId);
+    const { userId, orgRef } = await person("dispatcher");
+    const f = await fixtures(userId, orgRef);
     const save = await callerFor(userId).widgets.layoutSave({
       layoutRef: null, deviceClass: "desktop", name: "Ops", isDefault: true,
       items: [
@@ -113,8 +113,8 @@ d("scoped tiles read their subject through the governing procedure", () => {
   }, 20_000);
 
   it("documentExpiry shows the operator's own documents in the vault's states", async () => {
-    const { userId } = await person("dispatcher");
-    await fixtures(userId);
+    const { userId, orgRef } = await person("dispatcher");
+    await fixtures(userId, orgRef);
     await callerFor(userId).widgets.layoutSave({
       layoutRef: null, deviceClass: "desktop", name: "Ops", isDefault: true,
       items: [{ instanceRef: "d1", widgetKey: "documentExpiry", variant: "list", position: 0, options: { warnDays: 30 } }],
@@ -131,8 +131,8 @@ d("scoped tiles read their subject through the governing procedure", () => {
   }, 20_000);
 
   it("dispatchReadiness takes the operator and unit from the job's dispatched trip", async () => {
-    const { userId } = await person("dispatcher");
-    const f = await fixtures(userId);
+    const { userId, orgRef } = await person("dispatcher");
+    const f = await fixtures(userId, orgRef);
     await callerFor(userId).widgets.layoutSave({
       layoutRef: null, deviceClass: "desktop", name: "Ops", isDefault: true,
       items: [{ instanceRef: "r1", widgetKey: "dispatchReadiness", variant: "status", position: 0, subjectRef: f.jobCode }],

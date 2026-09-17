@@ -27,6 +27,14 @@ import { calibrationRouter, requirementRouter } from "./requirementRouter";
 import { surfacesRouter } from "./surfacesRouter";
 import { widgetsRouter, type WidgetDeps } from "./widgetsRouter";
 import { manifestCustodyRouter } from "./manifestCustodyRouter";
+import { resolveActingScope } from "./_core/actingScope";
+
+/** 0132 — the acting tenant for the legacy readers; a user with no membership acts as the historical single tenant. */
+async function scopeFor(userId: number) {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  return { tenantId: (await resolveActingScope(db, userId)).tenantId };
+}
 import { securityIncidentsRouter } from "./securityIncidentsRouter";
 import type { WidgetLayoutStore } from "./_core/widgetService";
 import { drizzleWidgetLayoutStore } from "./widgetLayouts";
@@ -357,13 +365,13 @@ export const appRouter = router({
   }),
   fieldRoute: router({
     jobs: router({
-      list: roleProcedure("jobs.list").query(() => listJobs()),
+      list: roleProcedure("jobs.list").query(async ({ ctx }) => listJobs(await scopeFor(ctx.user.id))),
       byCode: roleProcedure("jobs.byCode")
         .input(z.object({ jobCode: z.string().min(1) }))
-        .query(({ input }) => getJobByCode(input.jobCode)),
+        .query(async ({ ctx, input }) => getJobByCode(input.jobCode, await scopeFor(ctx.user.id))),
       create: roleProcedure("jobs.create")
         .input(jobInput)
-        .mutation(({ input }) => createJob(input)),
+        .mutation(async ({ ctx, input }) => createJob(input, await scopeFor(ctx.user.id))),
     }),
     evidence: router({
       list: roleProcedure("evidence.list").query(() => listEvidenceRecords()),
@@ -441,7 +449,7 @@ export const appRouter = router({
         .mutation(({ input }) => verifyEvidenceRecord(input.id)),
     }),
     trips: router({
-      list: roleProcedure("trips.list").query(() => listTrips()),
+      list: roleProcedure("trips.list").query(async ({ ctx }) => listTrips(await scopeFor(ctx.user.id))),
       create: roleProcedure("trips.create")
         .input(
           z.object({
@@ -473,7 +481,7 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) =>
+        .mutation(async ({ ctx, input }) =>
           createTrip({
             ...input,
             distanceKm:
@@ -482,7 +490,7 @@ export const appRouter = router({
               input.odometerEndKm !== undefined
                 ? Math.max(0, input.odometerEndKm - input.odometerStartKm)
                 : undefined),
-          })
+          }, await scopeFor(ctx.user.id))
         ),
       update: roleProcedure("trips.update")
         .input(

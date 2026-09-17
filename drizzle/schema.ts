@@ -14,6 +14,8 @@ export const users = mysqlTable("users", {
 
 export const jobs = mysqlTable("jobs", {
   id: int("id").autoincrement().primaryKey(),
+  /** 0132 — the organization that owns the row; NULL means the historical single tenant. */
+  orgRef: varchar("orgRef", { length: 64 }),
   jobCode: varchar("jobCode", { length: 32 }).notNull().unique(),
   type: varchar("type", { length: 120 }).notNull(),
   mode: mysqlEnum("mode", ["general", "hydrovac", "recovery", "transport"])
@@ -517,6 +519,8 @@ export type InsertScanAudit = typeof scanAudits.$inferInsert;
 
 export const trips = mysqlTable("trips", {
   id: int("id").autoincrement().primaryKey(),
+  /** 0132 — the organization that owns the row; NULL means the historical single tenant. */
+  orgRef: varchar("orgRef", { length: 64 }),
   tripNumber: varchar("tripNumber", { length: 50 }).notNull().unique(),
   jobId: int("jobId"),
   unitId: int("unitId"),

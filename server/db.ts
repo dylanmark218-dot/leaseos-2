@@ -1,4 +1,6 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import type { MySqlColumn } from "drizzle-orm/mysql-core";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   userRoleAssignments,
@@ -149,27 +151,40 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-export async function listJobs() {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select().from(jobs).orderBy(desc(jobs.updatedAt)).limit(100);
+/**
+ * 0132 — tenant scope for the legacy readers. The `default` scope (a user with
+ * no organization membership) sees rows with no owner, which are the historical
+ * single tenant's; a member sees rows their organization owns, and nothing else.
+ */
+export type TenantScope = { tenantId: string };
+export function orgScopeWhere<T extends { orgRef: MySqlColumn }>(table: T, scope: TenantScope) {
+  return scope.tenantId === SINGLE_TENANT_ID
+    ? or(isNull(table.orgRef), eq(table.orgRef, SINGLE_TENANT_ID))
+    : eq(table.orgRef, scope.tenantId);
 }
 
-export async function getJobByCode(jobCode: string) {
+export async function listJobs(scope: TenantScope) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(jobs).where(orgScopeWhere(jobs, scope)).orderBy(desc(jobs.updatedAt)).limit(100);
+}
+
+export async function getJobByCode(jobCode: string, scope: TenantScope) {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db
     .select()
     .from(jobs)
-    .where(eq(jobs.jobCode, jobCode))
+    .where(and(eq(jobs.jobCode, jobCode), orgScopeWhere(jobs, scope)))
     .limit(1);
   return result[0];
 }
 
-export async function createJob(input: InsertJob) {
+export async function createJob(input: InsertJob, scope: TenantScope) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.insert(jobs).values(input);
+  // A row created under the default scope stays unowned (legacy); a member's row is theirs.
+  const result = await db.insert(jobs).values({ ...input, orgRef: scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId });
   return result[0]?.insertId;
 }
 
@@ -241,15 +256,15 @@ export async function createSafetyEvent(input: InsertSafetyEvent) {
   return result[0]?.insertId;
 }
 
-export async function listTrips() {
+export async function listTrips(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(trips).orderBy(desc(trips.updatedAt)).limit(200);
+  return db.select().from(trips).where(orgScopeWhere(trips, scope)).orderBy(desc(trips.updatedAt)).limit(200);
 }
-export async function createTrip(input: InsertTrip) {
+export async function createTrip(input: InsertTrip, scope: TenantScope) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.insert(trips).values(input);
+  const result = await db.insert(trips).values({ ...input, orgRef: scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId });
   return result[0]?.insertId;
 }
 export async function updateTrip(id: number, input: Partial<InsertTrip>) {

@@ -31,9 +31,9 @@ async function member(orgRef: string, roles: string[]) {
   for (const role of roles) await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())", [userId, role]);
   return userId;
 }
-async function job() {
+async function job(orgRef: string) {
   const jobCode = `JOB-${rnd()}`;
-  const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status) VALUES (?,?,?,?,'dispatched')", [jobCode, "Hydrovac", "Fixture Energy", "LSD 04-12-045-08W4"]);
+  const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, orgRef) VALUES (?,?,?,?,'dispatched',?)", [jobCode, "Hydrovac", "Fixture Energy", "LSD 04-12-045-08W4", orgRef]);
   return { jobId: r.insertId, jobCode };
 }
 
@@ -43,7 +43,7 @@ d("a carrier pays a leased owner-operator for hours worked", () => {
     const officeA = await member(carrier, ["office", "management"]);   // prepares (contractor.write)
     const controllerA = await member(carrier, ["controller"]);          // approves (contractor.approve)
     const opMgr = await member(operator, ["management"]);
-    const { jobId, jobCode } = await job();
+    const { jobId, jobCode } = await job(carrier);
 
     await callerFor(officeA).contractorOperations.profileUpsert({ operatingMode: "CONTRACTOR_COMPANY", legalName: "Fixture Carrier Ltd." });
     await callerFor(opMgr).contractorOperations.profileUpsert({ operatingMode: "LEASED_OWNER_OPERATOR", legalName: "Fixture Owner-Op" });
@@ -93,7 +93,7 @@ d("a carrier pays a leased owner-operator for hours worked", () => {
     const officeA = await member(carrier, ["office", "management"]);
     const controllerA = await member(carrier, ["controller"]);
     const opMgr = await member(operator, ["management"]);
-    const { jobId } = await job();
+    const { jobId } = await job(carrier);
     // No chain without an active relationship — asserted, then satisfied.
     await expect(callerFor(officeA).contractorOperations.jobChainCreate({ rootJobId: jobId, performingOrgRef: operator, relationshipType: "LEASED_OWNER_OPERATOR" }))
       .rejects.toThrow(/No active commercial relationship/);
