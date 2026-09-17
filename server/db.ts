@@ -503,12 +503,13 @@ export async function createVendor(input: InsertVendor) {
   const result = await db.insert(vendors).values(input);
   return result[0]?.insertId;
 }
-export async function listUnitSafetyPlans() {
+export async function listUnitSafetyPlans(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(unitSafetyPlans)
+    .where(unitKeyedScope(unitSafetyPlans.unitId, scope))
     .orderBy(desc(unitSafetyPlans.updatedAt))
     .limit(100);
 }
@@ -676,12 +677,13 @@ export async function createJobUnit(input: InsertJobUnit) {
   return result[0]?.insertId;
 }
 
-export async function listInspections() {
+export async function listInspections(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(inspections)
+    .where(unitKeyedScope(inspections.unitId, scope))
     .orderBy(desc(inspections.observedAt))
     .limit(100);
 }
@@ -918,6 +920,17 @@ export async function rateCardInScope(id: number, scope: TenantScope): Promise<{
   return (await db.select({ id: billingRateCards.id }).from(billingRateCards).where(and(eq(billingRateCards.id, id), orgScopeWhere(billingRateCards, scope))).limit(1))[0] ?? null;
 }
 
+/** Rows keyed to a unit: the unit's owner in scope (coreRecordOwnership). */
+function unitKeyedScope(unitIdColumn: MySqlColumn, scope: TenantScope) {
+  return ownershipScopeWhere("unit", unitIdColumn, scope);
+}
+/** A manifest the scope may see (manifests.orgRef, written since 0148), by number, or null. */
+export async function manifestInScope(manifestNumber: string, scope: TenantScope): Promise<{ id: number } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select({ id: manifests.id }).from(manifests).where(and(eq(manifests.manifestNumber, manifestNumber), orgScopeWhere(manifests, scope))).limit(1))[0] ?? null;
+}
+
 export async function listOperators(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
@@ -984,12 +997,13 @@ export async function createFacility(input: InsertFacility) {
   return result[0]?.insertId;
 }
 
-export async function listMaintenanceDefects() {
+export async function listMaintenanceDefects(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(maintenanceDefects)
+    .where(unitKeyedScope(maintenanceDefects.unitId, scope))
     .orderBy(desc(maintenanceDefects.reportedAt))
     .limit(100);
 }

@@ -1190,7 +1190,7 @@ export const appRouter = router({
         .mutation(({ input }) => createVendor(input)),
     }),
     unitSafety: router({
-      list: roleProcedure("unitSafety.list").query(() => listUnitSafetyPlans()),
+      list: roleProcedure("unitSafety.list").query(async ({ ctx }) => listUnitSafetyPlans(await scopeFor(ctx.user.id))),
       update: roleProcedure("unitSafety.update")
         .input(
           z.object({
@@ -1451,7 +1451,7 @@ export const appRouter = router({
          const r = await createJobUnitGated(input); return r.id; }),
       }),
       inspections: router({
-        list: roleProcedure("inspections.list").query(() => listInspections()),
+        list: roleProcedure("inspections.list").query(async ({ ctx }) => listInspections(await scopeFor(ctx.user.id))),
         create: roleProcedure("inspections.create")
           .input(
             z.object({
@@ -1556,7 +1556,7 @@ export const appRouter = router({
           .mutation(({ input }) => createFacility(input)),
       }),
       maintenance: router({
-        list: roleProcedure("maintenance.list").query(() => listMaintenanceDefects()),
+        list: roleProcedure("maintenance.list").query(async ({ ctx }) => listMaintenanceDefects(await scopeFor(ctx.user.id))),
         create: roleProcedure("maintenance.create")
           .input(
             z.object({

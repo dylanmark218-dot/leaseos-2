@@ -13,7 +13,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq } from "drizzle-orm";
 import { router, roleProcedure } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, manifestInScope } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
 import { recordBelongsToOrganization } from "./_core/coreRecordOwnership";
 import { evidenceRecords, facilities, manifestAmendments, manifestCustodyEvents, manifestEvidenceLinks, manifestEvidenceProfiles, manifestPartySnapshots, manifests, operators, units } from "../drizzle/schema";
@@ -90,6 +90,9 @@ export const manifestCustodyRouter = router({
   bind: roleProcedure("manifestCustody.bind")
     .input(z.object({ manifestNumber: z.string().min(1).max(80) }).merge(PARTY).strict())
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the manifest must be in the caller's scope (manifests.orgRef); otherwise it does not exist here.
+      if (!(await manifestInScope(input.manifestNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Manifest not found" });
+      
       const db = await dbOrThrow();
       const { m, orgRef } = await ownedManifest(db, ctx.user.id, input.manifestNumber);
       if (m.sealedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Manifest is sealed; changes to its parties require an amendment" });
@@ -112,6 +115,9 @@ export const manifestCustodyRouter = router({
       facilityId: z.number().int().positive().nullable().optional(), evidenceRecordId: z.number().int().positive().nullable().optional(), notes: z.string().max(500).nullable().optional(),
     }).strict())
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the manifest must be in the caller's scope (manifests.orgRef); otherwise it does not exist here.
+      if (!(await manifestInScope(input.manifestNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Manifest not found" });
+      
       const db = await dbOrThrow();
       const { m } = await ownedManifest(db, ctx.user.id, input.manifestNumber);
       const chain = await chainOf(db, m.id);
@@ -129,6 +135,9 @@ export const manifestCustodyRouter = router({
   evidenceAttach: roleProcedure("manifestCustody.evidenceAttach")
     .input(z.object({ manifestNumber: z.string().min(1).max(80), evidenceRecordId: z.number().int().positive(), relationship: z.enum(EVIDENCE_RELATIONSHIPS) }).strict())
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the manifest must be in the caller's scope (manifests.orgRef); otherwise it does not exist here.
+      if (!(await manifestInScope(input.manifestNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Manifest not found" });
+      
       const db = await dbOrThrow();
       const { m } = await ownedManifest(db, ctx.user.id, input.manifestNumber);
       if (m.closedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A closed manifest takes no more evidence; amend it through review" });
@@ -156,6 +165,9 @@ export const manifestCustodyRouter = router({
       changes: PARTY.extend({ material: z.string().max(220).nullable().optional(), unNumber: z.string().max(40).nullable().optional() }),
     }).strict())
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the manifest must be in the caller's scope (manifests.orgRef); otherwise it does not exist here.
+      if (!(await manifestInScope(input.manifestNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Manifest not found" });
+      
       const db = await dbOrThrow();
       const { m, orgRef } = await ownedManifest(db, ctx.user.id, input.manifestNumber);
       const changedKeys = Object.entries(input.changes).filter(([k, v]) => v !== undefined && (m as Record<string, unknown>)[k] !== v).map(([k]) => k);
@@ -182,6 +194,9 @@ export const manifestCustodyRouter = router({
   close: roleProcedure("manifestCustody.close")
     .input(z.object({ manifestNumber: z.string().min(1).max(80), occurredAt: z.coerce.date() }).strict())
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the manifest must be in the caller's scope (manifests.orgRef); otherwise it does not exist here.
+      if (!(await manifestInScope(input.manifestNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Manifest not found" });
+      
       const db = await dbOrThrow();
       const { m, orgRef } = await ownedManifest(db, ctx.user.id, input.manifestNumber);
       if (m.closedAt) return { verdict: "PASS" as const, alreadyClosed: true, closedAt: m.closedAt };
@@ -225,6 +240,9 @@ export const manifestCustodyRouter = router({
   chain: roleProcedure("manifestCustody.chain")
     .input(z.object({ manifestNumber: z.string().min(1).max(80) }).strict())
     .query(async ({ ctx, input }) => {
+      // P4.1: the manifest must be in the caller's scope (manifests.orgRef); otherwise it does not exist here.
+      if (!(await manifestInScope(input.manifestNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Manifest not found" });
+      
       const db = await dbOrThrow();
       const { m } = await ownedManifest(db, ctx.user.id, input.manifestNumber);
       const [snapshots, events, links, amendments] = await Promise.all([

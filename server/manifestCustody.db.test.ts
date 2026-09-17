@@ -30,6 +30,11 @@ async function member(orgRef: string, roles: string[]) {
   for (const role of roles) await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())", [userId, role]);
   return userId;
 }
+async function legacyMember(roles: string[]) {
+  const userId = seq++;
+  for (const role of roles) await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())", [userId, role]);
+  return userId;
+}
 async function owned(orgRef: string, recordType: "unit" | "operator" | "load", recordId: number) {
   await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,?,?,1)", [orgRef, recordType, recordId]);
 }
@@ -40,7 +45,8 @@ async function fixtures(orgRef: string) {
   const [f] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO facilities (name) VALUES (?)", [`Fixture Disposal ${rnd()}`]);
   await owned(orgRef, "operator", op.insertId); await owned(orgRef, "unit", u.insertId); await owned(orgRef, "unit", tr.insertId);
   const manifestNumber = `MAN-${rnd()}`;
-  await pool.execute("INSERT INTO manifests (manifestNumber, material, driver, trailer, facility, status) VALUES (?,?,?,?,?,'draft')", [manifestNumber, "produced water", "Text Driver", "Text Trailer", "Text Facility"]);
+  // P4.1: a manifest belongs to a tenant (manifests.orgRef, written since v22.48); the fixture stamps the one it is for.
+  await pool.execute("INSERT INTO manifests (manifestNumber, material, driver, trailer, facility, status, orgRef) VALUES (?,?,?,?,?,'draft',?)", [manifestNumber, "produced water", "Text Driver", "Text Trailer", "Text Facility", orgRef]);
   return { operatorId: op.insertId, unitId: u.insertId, trailerId: tr.insertId, facilityId: f.insertId, manifestNumber };
 }
 async function evidence(title: string) {
@@ -142,7 +148,9 @@ d("evidence and closing", () => {
 
 d("the backfill", () => {
   it("kept every legacy text party as a snapshot row, and the text itself", async () => {
-    const a = await org(); const office = await member(a, ["office"]);
+    // P4.1: a legacy manifest (no orgRef) is the historical single tenant's — read here by an unaffiliated office user,
+    // not by an organization's member, who would not find it.
+    const office = await legacyMember(["office"]);
     // A legacy manifest: text parties, no references. Re-run the backfill statements for it, as the migration did for the rows it found.
     const manifestNumber = `MAN-LEGACY-${rnd()}`;
     await pool.execute("INSERT INTO manifests (manifestNumber, driver, trailer, route, facility, status) VALUES (?,?,?,?,?,'verified')", [manifestNumber, "R. Legacy", "TR-77", "Hwy 63 north", "Old Facility Name Ltd."]);
