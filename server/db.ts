@@ -79,8 +79,7 @@ import {
   users,
   externalIdentities,
   integrationClients,
-  coreRecordOwnership,
-} from "../drizzle/schema";
+  coreRecordOwnership, organizationMemberships } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -792,6 +791,17 @@ export async function workOrderInScope(key: string | number, scope: TenantScope)
   if (!db) return null;
   const byKey = typeof key === "number" ? eq(workOrders.id, key) : eq(workOrders.workOrderNumber, key);
   return (await db.select({ id: workOrders.id, unitId: workOrders.unitId }).from(workOrders).where(and(byKey, ownershipScopeWhere("unit", workOrders.unitId, scope))).limit(1))[0] ?? null;
+}
+
+/**
+ * A person the scope may see: for an organization, a user with an active membership in it; for the
+ * historical single tenant, a user with no active membership anywhere. "Not found" otherwise.
+ */
+export async function userInScope(userId: number, scope: TenantScope): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const active = await db.select({ orgRef: organizationMemberships.orgRef }).from(organizationMemberships).where(and(eq(organizationMemberships.userId, userId), eq(organizationMemberships.status, "active")));
+  return scope.tenantId === SINGLE_TENANT_ID ? active.length === 0 : active.some(m => m.orgRef === scope.tenantId);
 }
 
 export async function listOperators(scope: TenantScope) {

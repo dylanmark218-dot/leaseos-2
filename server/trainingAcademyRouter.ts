@@ -18,7 +18,7 @@ import { allocateSerialBlock } from "./_core/sheetSerialAllocator";
 import { resolveSheetScan, ticketClassOf } from "./_core/sheetSerial";
 import { academyAssessmentSheets } from "../drizzle/schema";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, userInScope } from "./db";
 import {
   academyAssignments,
   academyAssessmentAttempts,
@@ -265,6 +265,13 @@ export const trainingAcademyRouter = router({
   assignmentDetail: roleProcedure("academy.assignmentDetail")
     .input(z.object({ assignmentRef: z.string().min(1).max(96) }))
     .query(async ({ ctx, input }) => {
+      // P4.1: the assignment's learner must be in the caller's scope; otherwise the assignment does not exist here.
+      {
+        const scope = await actingScopeFor(ctx.user.id);
+        const dbs = await getDb();
+        const owner = dbs ? (await dbs.select({ userId: academyAssignments.userId }).from(academyAssignments).where(eq(academyAssignments.assignmentRef, input.assignmentRef)).limit(1))[0] : undefined;
+        if (owner && !(await userInScope(owner.userId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Assignment ${input.assignmentRef} not found` });
+      }
       const db = await dbOrThrow();
       const a = await assignmentForSelf(db, ctx.user.id, input.assignmentRef);
       const { course, version } = await versionBundle(db, a.courseVersionId);
@@ -301,6 +308,13 @@ export const trainingAcademyRouter = router({
   assessmentOpen: roleProcedure("academy.assessmentOpen")
     .input(z.object({ assignmentRef: z.string().min(1).max(96) }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the assignment's learner must be in the caller's scope; otherwise the assignment does not exist here.
+      {
+        const scope = await actingScopeFor(ctx.user.id);
+        const dbs = await getDb();
+        const owner = dbs ? (await dbs.select({ userId: academyAssignments.userId }).from(academyAssignments).where(eq(academyAssignments.assignmentRef, input.assignmentRef)).limit(1))[0] : undefined;
+        if (owner && !(await userInScope(owner.userId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Assignment ${input.assignmentRef} not found` });
+      }
       const db = await dbOrThrow();
       const a = await assignmentForSelf(db, ctx.user.id, input.assignmentRef);
       const readiness = await moduleReadiness(db, a.id, a.courseVersionId);
@@ -370,6 +384,9 @@ export const trainingAcademyRouter = router({
   assign: roleProcedure("academy.assign")
     .input(z.object({ userId: z.number().int().positive(), courseCode: z.string().min(1).max(80), dueAt: z.coerce.date().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the person must be in the caller's scope (an active member of the organization, or unaffiliated for the single tenant); otherwise not found.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await userInScope(input.userId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.userId} not found` });
       const db = await dbOrThrow();
       let course = (await db.select().from(academyCourses).where(eq(academyCourses.courseCode, input.courseCode)).limit(1))[0];
       if (!course) { await synchronizeCatalog(db, ctx.user.id); course = (await db.select().from(academyCourses).where(eq(academyCourses.courseCode, input.courseCode)).limit(1))[0]; }
@@ -561,6 +578,9 @@ export const trainingAcademyRouter = router({
   statementOfExperienceCreate: roleProcedure("academy.statementOfExperienceCreate")
     .input(z.object({ userId: z.number().int().positive(), qualificationCode: z.string().min(2).max(100), experienceFrom: z.coerce.date(), experienceTo: z.coerce.date(), duties: z.array(z.string().min(2).max(500)).min(1).max(100), dangerousGoodsScope: z.record(z.string(), z.unknown()).nullable().optional(), employerAttestation: z.string().min(20).max(2000), sourceCertificateRef: z.string().min(1).max(96).nullable().optional() }).strict())
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the person must be in the caller's scope (an active member of the organization, or unaffiliated for the single tenant); otherwise not found.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await userInScope(input.userId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.userId} not found` });
       const db = await dbOrThrow();
       if (!(input.experienceTo > input.experienceFrom)) throw new TRPCError({ code: "BAD_REQUEST", message: "Statement of experience requires a valid experience start/end period" });
       let sourceCertificateId: number | null = null;
@@ -580,6 +600,9 @@ export const trainingAcademyRouter = router({
   foreignTdgRoadRecognize: roleProcedure("academy.foreignTdgRoadRecognize")
     .input(z.object({ userId: z.number().int().positive(), complianceDocumentId: z.number().int().positive(), issuingJurisdiction: z.literal("US"), vehicleLicenceJurisdiction: z.literal("US"), trainingStandard: z.string().min(10).max(300), documentValidInIssuingJurisdiction: z.boolean(), expiresAt: z.coerce.date(), issuedAt: z.coerce.date().nullable().optional() }).strict())
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the person must be in the caller's scope (an active member of the organization, or unaffiliated for the single tenant); otherwise not found.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await userInScope(input.userId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.userId} not found` });
       const db = await dbOrThrow();
       const document = (await db.select().from(complianceDocuments).where(eq(complianceDocuments.id, input.complianceDocumentId)).limit(1))[0];
       if (!document) throw new TRPCError({ code: "NOT_FOUND", message: "Foreign TDG compliance document not found" });
@@ -616,6 +639,10 @@ export const trainingAcademyRouter = router({
   directSupervisionCreate: roleProcedure("academy.directSupervisionCreate")
     .input(z.object({ traineeUserId: z.number().int().positive(), supervisorUserId: z.number().int().positive(), jobId: z.number().int().positive(), qualificationCode: z.string().min(2).max(100), scope: z.record(z.string(), z.unknown()), startsAt: z.coerce.date(), endsAt: z.coerce.date() }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the person must be in the caller's scope (an active member of the organization, or unaffiliated for the single tenant); otherwise not found.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await userInScope(input.traineeUserId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Trainee ${input.traineeUserId} not found` });
+      if (!(await userInScope(input.supervisorUserId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Supervisor ${input.supervisorUserId} not found` });
       const db = await dbOrThrow();
       const q = (await db.select().from(academyQualifications).where(and(eq(academyQualifications.userId, input.supervisorUserId), eq(academyQualifications.qualificationCode, input.qualificationCode), eq(academyQualifications.status, "current"))).orderBy(desc(academyQualifications.id)).limit(1))[0];
       const pre = directSupervisionDecision({ traineeUserId: input.traineeUserId, supervisorUserId: input.supervisorUserId, supervisorQualificationStatus: q?.status ?? "pending", supervisorQualificationCode: q?.qualificationCode ?? "", requiredQualificationCode: input.qualificationCode, physicalPresenceAttested: false, startsAt: input.startsAt, endsAt: input.endsAt, jobId: input.jobId, scope: JSON.stringify(input.scope) });
@@ -821,7 +848,10 @@ export const trainingAcademyRouter = router({
 
   dispatchCheck: roleProcedure("academy.dispatchCheck")
     .input(z.object({ userId: z.number().int().positive(), requirementCodes: z.array(z.string().min(1).max(100)).min(1).max(50), jobId: z.number().int().positive().optional() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      // P4.1: the person must be in the caller's scope (an active member of the organization, or unaffiliated for the single tenant); otherwise not found.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await userInScope(input.userId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.userId} not found` });
       const db = await dbOrThrow();
       const reqs = await db.select().from(academyRequirements).where(inArray(academyRequirements.requirementCode, input.requirementCodes));
       const quals = await db.select().from(academyQualifications).where(eq(academyQualifications.userId, input.userId));
