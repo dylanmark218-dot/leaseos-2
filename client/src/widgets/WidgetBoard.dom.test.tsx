@@ -28,12 +28,12 @@ const board = (o: Partial<Parameters<typeof WidgetBoard>[0]> = {}) => (
 
 describe("responsive grid", () => {
   const gridOf = (container: HTMLElement) =>
-    [...container.querySelectorAll("div")].find((d) => d.style.gridTemplateColumns) as HTMLElement;
+    Array.from(container.querySelectorAll("div")).find((d) => d.style.gridTemplateColumns) as HTMLElement;
 
   it("renders one column on a phone and collapses every span", () => {
     const { container } = render(board({ deviceClass: "phone" }));
     expect(gridOf(container).style.gridTemplateColumns).toBe("repeat(1, minmax(0, 1fr))");
-    const spans = [...container.querySelectorAll("[style*='grid-column']")]
+    const spans = Array.from(container.querySelectorAll("[style*='grid-column']"))
       .map((el) => (el as HTMLElement).style.gridColumn);
     expect(new Set(spans)).toEqual(new Set(["span 1"]));
   });
@@ -46,7 +46,7 @@ describe("responsive grid", () => {
 
   it("honours declared spans on a desktop", () => {
     const { container } = render(board({ deviceClass: "desktop" }));
-    const spans = [...container.querySelectorAll("[style*='grid-column']")]
+    const spans = Array.from(container.querySelectorAll("[style*='grid-column']"))
       .map((el) => (el as HTMLElement).style.gridColumn);
     expect(spans).toEqual(["span 2", "span 1", "span 1", "span 4", "span 1"]);
     expect(screen.queryByText(/narrowed to fit/i)).toBeNull();

@@ -14,6 +14,9 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { certificateContentDecision, deriveTrainingAspects, TDG_6_2_TOPICS, type Tdg62TopicCode, type TdgMode } from "./_core/tdgCertificateContents";
 import { canIssueCertificateFromCoverage, coverageFingerprint, parseTopicCodes, reconcileCoverage, type CoverageRow } from "./_core/tdgTopicCoverage";
 import { assembleInspectorPackage, responseDeadline, inspectorRequestSummary } from "./_core/inspectorRequest";
+import { allocateSerialBlock } from "./_core/sheetSerialAllocator";
+import { resolveSheetScan, ticketClassOf } from "./_core/sheetSerial";
+import { academyAssessmentSheets } from "../drizzle/schema";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import {
@@ -761,6 +764,59 @@ export const trainingAcademyRouter = router({
         const d = responseDeadline({ requestRef: r.requestRef, requestDatedAt: r.requestDatedAt, requestReceivedAt: r.requestReceivedAt, subjectUserId: r.subjectUserId, certificateRef: String(r.certificateId) }, now);
         return { requestRef: r.requestRef, state: r.state, issuingAuthority: r.issuingAuthority, dueAt: r.dueAt, daysRemaining: d.daysRemaining, overdue: d.overdue, urgent: d.urgent, irrecoverable: r.irrecoverable, missingParts: r.missingPartsJson ? JSON.parse(r.missingPartsJson) : [] };
       });
+    }),
+
+  /* ---- 0125/0126: paper assessment sheets — minted in blocks, filed exactly once ---- */
+
+  /** A print run: allocate serials under the row lock and register each sheet before it is printed. */
+  sheetPrintRun: roleProcedure("academy.sheetPrintRun")
+    .input(z.object({
+      courseVersionRef: z.string().min(1).max(96),
+      /** Ticket code; a code starting with P is a practice sheet and can never support a credential. */
+      ticketCode: z.string().regex(/^[A-Z][A-Z0-9]{1,7}$/),
+      itemSetRef: z.string().min(1).max(96),
+      /** Stated at print time; an assessment sheet prints only from an approved item set. */
+      itemSetReviewStatus: z.enum(["draft", "in_review", "approved", "retired"]),
+      count: z.number().int().min(1).max(500),
+      printBatchRef: z.string().max(64).nullable().optional(),
+    }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const v = (await db.select({ id: academyCourseVersions.id }).from(academyCourseVersions).where(eq(academyCourseVersions.versionRef, input.courseVersionRef)).limit(1))[0];
+      if (!v) throw new TRPCError({ code: "NOT_FOUND", message: "Course version not found" });
+      if (ticketClassOf(input.ticketCode) === "assessment" && input.itemSetReviewStatus !== "approved") {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `ITEM_SET_NOT_APPROVED: an assessment sheet prints only from an approved item set (${input.itemSetRef} is ${input.itemSetReviewStatus})` });
+      }
+      if (input.itemSetReviewStatus === "retired") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "ITEM_SET_RETIRED: a retired item set does not print" });
+      const block = await allocateSerialBlock(db, { ticketCode: input.ticketCode, courseVersionRef: input.courseVersionRef, count: input.count, allocatedByUserId: ctx.user.id, printBatchRef: input.printBatchRef ?? null });
+      await db.insert(academyAssessmentSheets).values(block.serials.map((serial) => ({
+        serial, ticketCode: input.ticketCode.toUpperCase(), courseVersionRef: input.courseVersionRef, itemSetRef: input.itemSetRef,
+        itemSetReviewStatus: input.itemSetReviewStatus, allocationRef: block.allocationRef, state: "issued" as const,
+      })));
+      await audit(db, ctx.user.id, "academy_sheet_allocation", block.allocationRef, "sheets.printed", { courseVersionRef: input.courseVersionRef, ticketCode: input.ticketCode, count: input.count, firstSequence: block.firstSequence, lastSequence: block.lastSequence });
+      return { allocationRef: block.allocationRef, serials: block.serials, ticketClass: ticketClassOf(input.ticketCode) };
+    }),
+
+  /** File a returned sheet by its serial. Refused rather than filed twice; a practice sheet never becomes credential evidence. */
+  sheetScanFile: roleProcedure("academy.sheetScanFile")
+    .input(z.object({ serial: z.string().min(4).max(40), transcriptionRef: z.string().min(1).max(96) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const scanned = input.serial.trim().toUpperCase();
+      const row = (await db.select().from(academyAssessmentSheets).where(eq(academyAssessmentSheets.serial, scanned)).limit(1))[0] ?? null;
+      const outcome = resolveSheetScan({ scanned, row: row ? {
+        serial: row.serial, ticketCode: row.ticketCode, courseVersionRef: row.courseVersionRef, itemSetRef: row.itemSetRef,
+        itemSetReviewStatus: row.itemSetReviewStatus, courseVersionSupersededAt: row.courseVersionSupersededAt, state: row.state,
+        voidedReason: row.voidedReason, transcribedAt: row.transcribedAt, transcribedByUserId: row.transcribedByUserId,
+      } : null, asOf: new Date() });
+      if (outcome.verdict === "reject" || !row) {
+        await audit(db, ctx.user.id, "academy_sheet", scanned, "sheet.scan_refused", { code: outcome.code });
+        return { filed: false as const, ...outcome };
+      }
+      // The transcribe-once trigger (0126) refuses a second filing even around this router.
+      await db.update(academyAssessmentSheets).set({ state: "transcribed", transcribedAt: new Date(), transcribedByUserId: ctx.user.id, transcriptionRef: input.transcriptionRef }).where(eq(academyAssessmentSheets.id, row.id));
+      await audit(db, ctx.user.id, "academy_sheet", scanned, "sheet.filed", { supports: outcome.supports, flags: outcome.flags, transcriptionRef: input.transcriptionRef });
+      return { filed: true as const, ...outcome };
     }),
 
   dispatchCheck: roleProcedure("academy.dispatchCheck")

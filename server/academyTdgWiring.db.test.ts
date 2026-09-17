@@ -214,3 +214,37 @@ d("an inspector's fifteen days", () => {
     expect(a.summary).toContain("INSPECTOR_PACKAGE_NO_TRAINING_MATERIAL");
   });
 });
+
+d("paper sheets are minted in blocks and filed exactly once", () => {
+  it("prints an assessment run only from an approved item set, then files a sheet once and refuses the second scan", async () => {
+    const office = await person("safety");
+    const f = await fixtureCourse();
+    await expect(callerFor(office).academy.sheetPrintRun({ courseVersionRef: f.versionRef, ticketCode: "TDGA", itemSetRef: "IS-1", itemSetReviewStatus: "draft", count: 3 }))
+      .rejects.toThrow(/ITEM_SET_NOT_APPROVED/);
+    const run = await callerFor(office).academy.sheetPrintRun({ courseVersionRef: f.versionRef, ticketCode: "TDGA", itemSetRef: "IS-1", itemSetReviewStatus: "approved", count: 3, printBatchRef: "PB-1" });
+    expect(run.serials).toHaveLength(3);
+    expect(run.ticketClass).toBe("assessment");
+    const first = await callerFor(office).academy.sheetScanFile({ serial: run.serials[0]!, transcriptionRef: "TR-1" });
+    expect(first.filed).toBe(true);
+    expect(first.supports).toBe("certificate_evidence");
+    const again = await callerFor(office).academy.sheetScanFile({ serial: run.serials[0]!, transcriptionRef: "TR-2" });
+    expect(again.filed).toBe(false);
+    expect(again.code).toBe("sheet_already_transcribed");
+    // Even around the router, the 0126 trigger refuses a second transcription.
+    await expect(pool.execute("UPDATE academyAssessmentSheets SET transcribedAt = NOW(), transcriptionRef = 'TR-3' WHERE serial = ?", [run.serials[0]]))
+      .rejects.toThrow(/filed exactly once/);
+  }, 20_000);
+
+  it("a practice sheet files as a study record only, and a mistyped serial is refused not guessed", async () => {
+    const office = await person("safety");
+    const f = await fixtureCourse();
+    const run = await callerFor(office).academy.sheetPrintRun({ courseVersionRef: f.versionRef, ticketCode: "PTDG", itemSetRef: "IS-P", itemSetReviewStatus: "draft", count: 1 });
+    const filed = await callerFor(office).academy.sheetScanFile({ serial: run.serials[0]!, transcriptionRef: "TR-P" });
+    expect(filed.filed).toBe(true);
+    expect(filed.supports).toBe("study_record_only");
+    const mistyped = run.serials[0]!.slice(0, -1) + (run.serials[0]!.endsWith("0") ? "1" : "0");
+    const bad = await callerFor(office).academy.sheetScanFile({ serial: mistyped, transcriptionRef: "TR-X" });
+    expect(bad.filed).toBe(false);
+    expect(["serial_checksum_invalid", "serial_unknown", "serial_malformed"]).toContain(bad.code);
+  }, 20_000);
+});

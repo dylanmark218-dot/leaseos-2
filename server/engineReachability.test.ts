@@ -37,10 +37,6 @@ const DECLARED_UNWIRED: Record<string, string> = {
   widgetRegistryV2: "the promotion-gate registry (source tiers); promotionGate.test is not yet ported",
   widgetSemantics: "per-widget semantics (variants, subjects); consumed by the client and tests",
   widgetSourceContract: "the twelve-source contract; enforced by widgetSourceContract.test, not by a procedure",
-  // 0125 — Chat 5 sheet-serial registry, ported from fix/chat5-module-paths-and-vitest.
-  // The print-run and scan-filing procedures that call these are register item P0.7.
-  sheetSerial: "paper assessment-sheet serials, checksums and scan resolution; no print/scan procedure calls it yet (P0.7)",
-  sheetSerialAllocator: "row-locked serial block allocation; no print-run procedure calls it yet (P0.7)",
   offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
   dashboardWidget: "widget contract; no dashboard surface consumes it yet",
@@ -158,7 +154,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(40);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; v22.22: +2 sheet-serial modules (0125) through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(38);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });

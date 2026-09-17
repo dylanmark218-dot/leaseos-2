@@ -2656,6 +2656,8 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "academy.inspectorRequestCreate": "academy.certificate.issue",
   "academy.inspectorRequestAssemble": "academy.certificate.issue",
   "academy.inspectorRequestList": "academy.certificate.issue",
+  "academy.sheetPrintRun": "academy.manage",
+  "academy.sheetScanFile": "academy.evaluate",
 
   /* ---- v21.20: workforce lifecycle ---- */
   "workforce.applicantCreate": "hr.applicant.manage",

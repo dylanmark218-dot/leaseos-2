@@ -1,8 +1,8 @@
 /**
- * Loads jest-dom matchers only under jsdom; node tests import nothing.
+ * Vitest setup for the jsdom client suites (B28).
+ *
+ * jest-dom's matchers extend `expect` at import time and need no document, so a
+ * static import is safe for the node suites too — and it avoids a top-level
+ * await, which this tsconfig's module setting does not allow.
  */
-export {};
-
-if (typeof document !== "undefined") {
-  await import("@testing-library/jest-dom/vitest");
-}
+import "@testing-library/jest-dom/vitest";
