@@ -547,11 +547,16 @@ export const commsRouter = router({
       // two statements, so two approvers could each see a clear scope and both
       // approve into it — manufacturing the ambiguity the release selector then
       // refuses, discovered only when a truck could not be released.
-      const lockName = `oospolicy:${p0.tenantId ?? ""}:${p0.scopeType}:${p0.scopeRef ?? ""}`.slice(0, 63);
+      // Serialize approvals per scope with a locking read of every policy row in the
+      // scope (oosReleasePolicies_scope index). A named GET_LOCK was used before, but it
+      // was released in a `finally` inside the transaction — before the commit — so a
+      // second approver could take the lock, read a snapshot that did not yet include
+      // the first approval, and approve too (gate run 2026-09-17 04:25). Row locks are
+      // held until commit; the second transaction's locking read then sees the first.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return await d.transaction(async (tx: Tx) => {
-      await tx.execute(sql`SELECT GET_LOCK(${lockName}, 10)`);
-      try {
+      await tx.execute(sql`SELECT id FROM oosReleasePolicies WHERE tenantId = ${p0.tenantId ?? ""} AND scopeType = ${p0.scopeType} AND scopeRef <=> ${p0.scopeRef ?? null} FOR UPDATE`);
+      {
       const p = (await tx.select().from(oosReleasePolicies).where(eq(oosReleasePolicies.policyRef, input.policyRef)).limit(1))[0];
       if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "No such release policy" });
       if (p.status !== "proposed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Policy is ${p.status}` });
@@ -562,7 +567,7 @@ export const commsRouter = router({
         return { policyRef: p.policyRef, status: "rejected" as const, superseded: null, note: "Recorded as reviewed and not approved." };
       }
 
-      const siblings = await tx.select().from(oosReleasePolicies).where(and(eq(oosReleasePolicies.status, "approved"), eq(oosReleasePolicies.tenantId, p.tenantId ?? "")));
+      const siblings = await tx.select().from(oosReleasePolicies).where(and(eq(oosReleasePolicies.status, "approved"), eq(oosReleasePolicies.tenantId, p.tenantId ?? ""))).for("update");
       const overlapping = siblings.filter((s2: typeof p) =>
         s2.scopeType === p.scopeType && (s2.scopeRef ?? null) === (p.scopeRef ?? null) &&
         s2.policyRef !== p.supersedesPolicyRef &&
@@ -585,8 +590,6 @@ export const commsRouter = router({
       const applied = await tx.update(oosReleasePolicies).set({ status: "approved", approvedByUserId: ctx.user.id, approvedAt: new Date(), decisionNote: input.decisionNote ?? null }).where(and(eq(oosReleasePolicies.id, p.id), eq(oosReleasePolicies.status, "proposed")));
       if (affectedRows(applied) !== 1) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Another decision on this policy completed first" });
       return { policyRef: p.policyRef, status: "approved" as const, superseded, note: "In force. Releases in its scope are now decided by it." };
-      } finally {
-        await tx.execute(sql`SELECT RELEASE_LOCK(${lockName})`);
       }
       });
     }),

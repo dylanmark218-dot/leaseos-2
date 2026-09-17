@@ -153,6 +153,22 @@ d("1B — two approvers cannot both approve into one scope", () => {
       caller(a2).comms.oosPolicyApprove({ policyRef: p2.policyRef, decision: "approve" }),
     ]);
     expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+    // Regression (2026-09-17): the named lock used to be released inside the transaction,
+    // before the commit, so the loser could read a snapshot without the winner's approval
+    // and approve too. Several more concurrent pairs into fresh scopes widen the window a
+    // regression would have to survive.
+    for (let round = 0; round < 3; round++) {
+      const ref = `B-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      const q1 = await caller(proposer).comms.oosPolicyPropose({ label: "r1", scopeType: "branch", scopeRef: ref, allowedFindingRoles: ROLES, effectiveFrom: new Date("2026-01-01") });
+      const q2 = await caller(proposer).comms.oosPolicyPropose({ label: "r2", scopeType: "branch", scopeRef: ref, allowedFindingRoles: ROLES, effectiveFrom: new Date("2026-01-01") });
+      const r = await Promise.allSettled([
+        caller(a1).comms.oosPolicyApprove({ policyRef: q1.policyRef, decision: "approve" }),
+        caller(a2).comms.oosPolicyApprove({ policyRef: q2.policyRef, decision: "approve" }),
+      ]);
+      expect(r.filter(x => x.status === "fulfilled"), `round ${round}`).toHaveLength(1);
+      const [n] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM oosReleasePolicies WHERE status='approved' AND scopeType='branch' AND scopeRef=?", [ref]);
+      expect(Number(n[0].n)).toBe(1);
+    }
 
     const [rows] = await pool.execute<mysql.RowDataPacket[]>(
       "SELECT COUNT(*) AS n FROM oosReleasePolicies WHERE status='approved' AND scopeType='branch' AND scopeRef=?", [scopeRef]);
