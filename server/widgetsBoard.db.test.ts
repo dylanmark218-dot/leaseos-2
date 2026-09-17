@@ -36,7 +36,13 @@ d("a driver's board", () => {
     expect(board.tiles.length).toBeGreaterThan(0);
     const myDay = board.tiles.find(t => t.widgetKey === "myDay");
     expect(myDay?.payload.state).toBe("ok");
-    const others = board.tiles.filter(t => t.widgetKey !== "myDay");
+    // inbox reads as the driver when seeded; hosRemaining is device-local by the
+    // engine's own plan (the clocks tick on the tablet), so the server says so.
+    const inbox = board.tiles.find(t => t.widgetKey === "inbox");
+    if (inbox) expect(["ok", "not_permitted"]).toContain(inbox.payload.state);
+    const hos = board.tiles.find(t => t.widgetKey === "hosRemaining");
+    if (hos) { expect(hos.payload.state).toBe("unknown"); if (hos.payload.state === "unknown") expect(hos.payload.reason).toMatch(/device-local/); }
+    const others = board.tiles.filter(t => !["myDay", "inbox", "hosRemaining", "exceptions"].includes(t.widgetKey));
     for (const t of others) {
       expect(["unknown", "not_permitted", "offline"]).toContain(t.payload.state);
       if (t.payload.state === "unknown") expect(t.payload.reason).toMatch(/not promoted|device-local|no (unit|trailer|job|trip) selected/);

@@ -2,6 +2,10 @@ import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { COURSE_CREDENTIALS, competencyDecision, hireReadiness, offboardingClose, onboardingGaps, probationDecision, screeningRecordDecision, trainingVerification } from "./_core/workforce";
 import { appRouter } from "./routers";
+// Onboarding due dates are startDate + dueDays and the gaps are read against the
+// real clock, so a start date fixed on the calendar goes overdue the day the
+// calendar passes it (which is how this was found, at 01:25 UTC on the 17th).
+const START = new Date(Math.floor(Date.now() / 86_400_000) * 86_400_000 + 7 * 86_400_000);
 import { grantUserRole } from "./db";
 import { authorize, type DomainRole } from "./_core/recordsAuthorization";
 
@@ -92,10 +96,10 @@ d("a person, hired to offboarded", () => {
     expect((await callerFor(hr).workforce.applicantList()).applicants.find(a => a.applicantRef === app.applicantRef)).toEqual({ applicantRef: app.applicantRef, fullName: "R. Cardinal", roleApplied: "Vac truck operator", status: "screening" }); // no contact in the list
     await expect(callerFor(hr).workforce.screeningRecord({ applicantRef: app.applicantRef, kind: "driver_abstract", result: "pass" })).rejects.toThrow(/needs its evidence record/);
     for (const k of ["licence_verification", "driver_abstract", "references", "right_to_work"] as const) await callerFor(hr).workforce.screeningRecord({ applicantRef: app.applicantRef, kind: k, result: "pass", evidenceRecordId: 1 });
-    await expect(callerFor(hr).workforce.applicantDecide({ applicantRef: app.applicantRef, decision: "hired", reason: "Strong references", userId: newUser, startDate: new Date("2026-09-14T00:00:00Z") })).rejects.toThrow(/Pending required screening: road test/);
+    await expect(callerFor(hr).workforce.applicantDecide({ applicantRef: app.applicantRef, decision: "hired", reason: "Strong references", userId: newUser, startDate: START })).rejects.toThrow(/Pending required screening: road test/);
     const last = await callerFor(hr).workforce.screeningRecord({ applicantRef: app.applicantRef, kind: "road_test", result: "pass", evidenceRecordId: 2 });
     expect(last.readiness.ready).toBe(true);
-    const hire = await callerFor(hr).workforce.applicantDecide({ applicantRef: app.applicantRef, decision: "hired", reason: "Strong references, clean abstract", userId: newUser, startDate: new Date("2026-09-14T00:00:00Z"), probationDays: 90 });
+    const hire = await callerFor(hr).workforce.applicantDecide({ applicantRef: app.applicantRef, decision: "hired", reason: "Strong references, clean abstract", userId: newUser, startDate: START, probationDays: 90 });
     expect(hire).toMatchObject({ status: "hired", tasks: 6 });
     const [op] = await pool.execute<mysql.RowDataPacket[]>("SELECT id, name FROM operators WHERE userId = ?", [newUser]);
     expect(op[0].name).toBe("R. Cardinal");                                   // a driver got an operator record
