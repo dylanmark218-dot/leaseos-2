@@ -90,3 +90,30 @@ d("units and operators belong to an organization through the ownership table", (
     expect((await callerFor(officeA).fieldRoute.identity.units.list()).some(u => u.unitNumber === unitNumber)).toBe(false);
   }, 20_000);
 });
+
+d("compliance documents belong to whoever owns the record they are about", () => {
+  it("lists a member's operator document to their organization only, and refuses filing against another organization's unit", async () => {
+    const a = await org(), b = await org();
+    const officeA = await member(a, "office"), officeB = await member(b, "office");
+    const unitNumber = `U-${rnd()}`;
+    await callerFor(officeA).fieldRoute.identity.units.create({ unitNumber, vehicleType: "hydrovac" } as never);
+    const [u] = await pool.query<mysql.RowDataPacket[]>("SELECT id FROM units WHERE unitNumber = ?", [unitNumber]);
+    const unitId = Number(u[0]!.id);
+    const title = `CVIP ${rnd()}`;
+    await callerFor(officeA).fieldRoute.identity.documents.create({ ownerType: "unit", ownerId: unitId, docType: "cvip", title, capturedAt: new Date() } as never);
+    expect((await callerFor(officeA).fieldRoute.identity.documents.list()).some(d => d.title === title)).toBe(true);
+    expect((await callerFor(officeB).fieldRoute.identity.documents.list()).some(d => d.title === title)).toBe(false);
+    // B may not file a document against A's unit.
+    await expect(callerFor(officeB).fieldRoute.identity.documents.create({ ownerType: "unit", ownerId: unitId, docType: "cvip", title: "intrusion", capturedAt: new Date() } as never))
+      .rejects.toThrow(/OWNED_BY_ANOTHER_ORGANIZATION/);
+  }, 20_000);
+
+  it("keeps a document about an unowned record with the default scope", async () => {
+    const a = await org(); const officeA = await member(a, "office"); const legacyUser = await member(null, "office");
+    const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [`U-LEGACY-${rnd()}`, "hydrovac"]);
+    const title = `Legacy registration ${rnd()}`;
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt) VALUES ('unit',?,?,?,NOW())", [u.insertId, "registration", title]);
+    expect((await callerFor(legacyUser).fieldRoute.identity.documents.list()).some(d => d.title === title)).toBe(true);
+    expect((await callerFor(officeA).fieldRoute.identity.documents.list()).some(d => d.title === title)).toBe(false);
+  }, 20_000);
+});

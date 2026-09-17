@@ -1358,7 +1358,7 @@ export const appRouter = router({
           .mutation(({ input }) => createInspection(input)),
       }),
       documents: router({
-        list: roleProcedure("documents.list").query(() => listComplianceDocuments()),
+        list: roleProcedure("documents.list").query(async ({ ctx }) => listComplianceDocuments(await scopeFor(ctx.user.id))),
         create: roleProcedure("documents.create")
           .input(
             z.object({
@@ -1375,7 +1375,7 @@ export const appRouter = router({
               confidence: z.enum(["low", "medium", "high"]).default("medium"),
             })
           )
-          .mutation(({ input }) => createComplianceDocument({ ...input, verificationStatus: "needs_review" })),   // review is documents.review
+          .mutation(async ({ ctx, input }) => createComplianceDocument({ ...input, verificationStatus: "needs_review" }, await scopeFor(ctx.user.id))),   // review is documents.review
         review: roleProcedure("documents.review")
           .input(
             z.object({

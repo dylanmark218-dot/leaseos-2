@@ -86,6 +86,9 @@ d("scoped tiles read their subject through the governing procedure", () => {
     const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [`U-${rnd()}`, "hydrovac"]);
     const tripNumber = `TRP-${rnd()}`;
     await pool.execute("INSERT INTO trips (tripNumber, jobId, unitId, operatorId, tripType, status, orgRef) VALUES (?,?,?,?,'one_way','planned',?)", [tripNumber, j.insertId, u.insertId, userId, orgRef]);
+    // The documents are filed against this person as an operator; since router 3 a document belongs to
+    // whoever owns the record it is about, so the organization owns the operator record.
+    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,?,?,1)", [orgRef, "operator", userId]);
     const soon = new Date(Date.now() + 10 * 86_400_000), later = new Date(Date.now() + 200 * 86_400_000);
     await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator',?,?,?,NOW(),?,'verified')", [userId, "licence", "Class 1", soon]);
     await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator',?,?,?,NOW(),?,'needs_review')", [userId, "h2s", "H2S Alive", later]);

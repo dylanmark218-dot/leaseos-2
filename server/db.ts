@@ -687,21 +687,60 @@ export async function createInspection(input: InsertInspection) {
   return result[0]?.insertId;
 }
 
-export async function listComplianceDocuments() {
+/**
+ * P4.1 router 3 — a compliance document belongs to whoever owns the record it
+ * is about: operators and units (and trailers/equipment, which are units)
+ * through coreRecordOwnership, jobs through jobs.orgRef. A carrier or user
+ * document has no organization owner on this branch and stays with the
+ * default scope. Nothing here guesses.
+ */
+const documentOwnerOrg = sql<string | null>`(
+  CASE ${complianceDocuments.ownerType}
+    WHEN 'operator' THEN (SELECT o.orgRef FROM coreRecordOwnership o WHERE o.recordType = 'operator' AND o.recordId = ${complianceDocuments.ownerId} LIMIT 1)
+    WHEN 'unit' THEN (SELECT o.orgRef FROM coreRecordOwnership o WHERE o.recordType = 'unit' AND o.recordId = ${complianceDocuments.ownerId} LIMIT 1)
+    WHEN 'trailer' THEN (SELECT o.orgRef FROM coreRecordOwnership o WHERE o.recordType = 'unit' AND o.recordId = ${complianceDocuments.ownerId} LIMIT 1)
+    WHEN 'equipment' THEN (SELECT o.orgRef FROM coreRecordOwnership o WHERE o.recordType = 'unit' AND o.recordId = ${complianceDocuments.ownerId} LIMIT 1)
+    WHEN 'job' THEN (SELECT j.orgRef FROM jobs j WHERE j.id = ${complianceDocuments.ownerId} LIMIT 1)
+    ELSE NULL
+  END)`;
+
+export async function listComplianceDocuments(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(complianceDocuments)
+    .where(scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId))
     .orderBy(desc(complianceDocuments.createdAt))
     .limit(100);
 }
 
+/** The organization that owns a document's subject record, or null when nobody does. */
+export async function documentSubjectOwner(ownerType: InsertComplianceDocument["ownerType"], ownerId: number): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  if (ownerType === "operator" || ownerType === "unit" || ownerType === "trailer" || ownerType === "equipment") {
+    const recordType = ownerType === "operator" ? "operator" : "unit";
+    const row = (await db.select({ orgRef: coreRecordOwnership.orgRef }).from(coreRecordOwnership)
+      .where(and(eq(coreRecordOwnership.recordType, recordType), eq(coreRecordOwnership.recordId, ownerId))).limit(1))[0];
+    return row?.orgRef ?? null;
+  }
+  if (ownerType === "job") {
+    const row = (await db.select({ orgRef: jobs.orgRef }).from(jobs).where(eq(jobs.id, ownerId)).limit(1))[0];
+    return row?.orgRef ?? null;
+  }
+  return null;
+}
+
 export async function createComplianceDocument(
-  input: InsertComplianceDocument
+  input: InsertComplianceDocument,
+  scope: TenantScope,
 ) {
   const db = await getDb();
   if (!db) return undefined;
+  // A member may not file a document against a record another organization owns.
+  const owner = await documentSubjectOwner(input.ownerType, input.ownerId);
+  if (scope.tenantId !== SINGLE_TENANT_ID && owner !== null && owner !== scope.tenantId) throw new Error("DOCUMENT_SUBJECT_OWNED_BY_ANOTHER_ORGANIZATION");
   const result = await db.insert(complianceDocuments).values(input);
   return result[0]?.insertId;
 }
