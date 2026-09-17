@@ -243,3 +243,38 @@ d("facility directory — regulator layer import and the LSD finder", () => {
     expect(bad.outcome).toBe("invalid");
   }, 30_000);
 });
+
+d("facility directory — Alberta's hydrovac list (OGL–Alberta) and duplicate proposals", () => {
+  it("imports the 89 listed facilities as confirmation-required hydrovac sites with cached OGL evidence, keeps WM 042's two sites apart, pins LSD rows at ±2 km, and proposes — never applies — same-LSD duplicates against the brief's sites", async () => {
+    const safety = await withRole("safety"), driver = await withRole("driver");
+    await callerFor(safety).facilityDirectory.seedBrief();
+    const first = await callerFor(safety).facilityDirectory.hydrovac.import();
+    expect(first.rows).toBe(89);
+    expect(first.inserted + first.existing).toBe(89);
+    expect(first.withCoordinates).toBeGreaterThanOrEqual(50);
+    expect(first.attribution).toContain("Open Government Licence – Alberta");
+    expect(await callerFor(safety).facilityDirectory.hydrovac.import()).toMatchObject({ inserted: 0, existing: 89 });
+    // WM 212 Pure Environmental, Fort Kent: AER-regulated, LSD-pinned, hazardous, confirmation required.
+    const pure = await callerFor(driver).facilityDirectory.driverView({ facilityKey: "ab_hydrovac:wm212:fort-kent" });
+    expect(pure.facility).toMatchObject({ regulatorRef: "WM 212", coordinatePrecision: "approximate_site", legalLocation: "9-14-063-04-W4M", commercialAccess: "commercial_preapproval_required", routable: false, province: "AB" });
+    expect(pure.contact.phone).toBe("587-792-0855");
+    expect(pure.accepts).toEqual([expect.objectContaining({ wasteCode: "hydrovac_slurry", acceptanceStatus: "confirmation_required", conditions: "A hazardous waste management facility" })]);
+    const g = await callerFor(driver).facilityDirectory.get({ facilityKey: "ab_hydrovac:wm212:fort-kent" });
+    expect(g.evidence[0]).toMatchObject({ licenceKey: "ogl_alberta", claimType: "accepts_waste_stream", cachedContent: true, reviewState: "lead" });
+    expect(g.evidence[0]!.claimValue).toContain("based on information provided by the facility");
+    // An EPEA row with an address and no LSD: no pin, location stays unknown, the phone is there.
+    const village = await callerFor(driver).facilityDirectory.driverView({ facilityKey: "ab_hydrovac:00432185:edmonton" });
+    expect(village.facility).toMatchObject({ regulatorRef: "EPEA 00432185", coordinatePrecision: "unknown", physicalAddress: expect.stringContaining("6415-75 Street") });
+    expect(village.contact.phone).toBe("780-446-8444");
+    // WM 042 twice on the list, two facilities here.
+    expect((await callerFor(driver).facilityDirectory.get({ facilityKey: "ab_hydrovac:wm042:elk-point" })).facility.name).toContain("Elk Point");
+    expect((await callerFor(driver).facilityDirectory.get({ facilityKey: "ab_hydrovac:wm042:niton-junction" })).facility.name).toContain("Niton Junction");
+    // The list still says Tervita for West Edson; the brief says R360 runs it, at the same LSD. Proposed as one site, not merged.
+    const dups = await callerFor(safety).facilityDirectory.duplicates();
+    const westEdson = dups.proposals.find(p => p.members.some(m => m.facilityKey === "r360-west-edson-trd"));
+    expect(westEdson).toBeDefined();
+    expect(westEdson!.members.map(m => m.facilityKey).sort()).toEqual(expect.arrayContaining(["r360-west-edson-trd", "ab_hydrovac:wm078:west-edson"]));
+    expect(westEdson!.applied).toBe(false);
+    expect((await callerFor(driver).facilityDirectory.get({ facilityKey: "ab_hydrovac:wm078:west-edson" })).aliases.some(a => a.relationship === "former_operator")).toBe(true);
+  }, 90_000);
+});

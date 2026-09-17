@@ -17,6 +17,8 @@ import brief from "../data/canada-disposal-facilities-brief-2026-09-17.json";
 import { approximateFromLegalLocation } from "./_core/legalLocation";
 import { parseLsd } from "./_core/dls";
 import { checkMapping, featureToCandidate, lifecycleFromStatus, SK_FACILITIES, type ArcgisFeature, type FieldMapping } from "./_core/arcgisImport";
+import { readFileSync } from "node:fs";
+import { HYDROVAC_LIST, hydrovacFacilityKey, parseHydrovacList } from "./_core/hydrovacList";
 import { facilities, facilityAliases, facilityCallAheads, facilityCapabilities, facilityEvidence, facilityOperatingHours, facilitySourceLicences, facilityWaitReports, loadFacilityAssessments, loads, wasteStreamVocabulary, facilityImportRuns, atsLegalSubdivisions } from "../drizzle/schema";
 import { acceptanceStatusSchema, coordinatePrecisionSchema, wasteCodeSchema, type CommercialAccess, type CoordinatePrecision, type FacilityLifecycle, type FacilityMapFeature } from "../shared/facilities";
 type BriefRow = { facilityKey: string; name: string; operatorKey: string; parentCompany: string | null; province: string; municipality: string | null; facilityType: string; facilityTypes: string[]; legalLocation: string | null; physicalAddress: string | null; phone: string | null; dispatchPhone: string | null; afterHoursPhone: string | null; salesContact: string | null; email: string | null; websiteUrl: string | null; licenceKey: string; sourceAuthority: string; commercialAccess: CommercialAccess; lifecycle: FacilityLifecycle; historicalOperators: string[]; normAccepted: boolean | null; sourAccepted: boolean | null; twentyFourHourCallout: boolean | null; notes: string | null; latitude?: number; longitude?: number; coordinatePrecision?: CoordinatePrecision; coordinateSourceUrl?: string; regulatorRef?: string };
@@ -405,6 +407,57 @@ export const facilityDirectoryRouter = router({
       const facilities = await nearbyFacilities(db, origin.latitude, origin.longitude, input.radiusKm, input.wasteCode, input.limit);
       return { outcome: "located" as const, origin, radiusKm: input.radiusKm, wasteCode: input.wasteCode ?? null, facilities, note: `Distances are straight-line from the ${origin.basis === "ats_grid" ? "surveyed" : "theoretical"} centroid. Routes come from the spatial engine; call ahead before travelling.` };
     }),
+
+  /**
+   * Alberta's "Facilities that Accept Hydrovac Waste" (OGL–Alberta, dated 2026-04-10): the one
+   * regulator list that is both authoritative and cacheable. Each row becomes a facility keyed
+   * by authorization + place, an evidence row with the list's acceptable-material text, and a
+   * hydrovac-slurry capability at confirmation_required — the list itself says to contact the
+   * facility. A WM row is AER-regulated and carries the WM number as its regulator ref.
+   */
+  hydrovac: router({
+    import: roleProcedure("facilityDirectory.hydrovacImport").mutation(async ({ ctx }) => {
+      const db = await dbOrThrow();
+      const rows = parseHydrovacList(readFileSync("data/ab-hydrovac-facilities-2026-04-10.txt", "utf8"));
+      let inserted = 0, existing = 0, withCoordinates = 0;
+      for (const r of rows) {
+        const facilityKey = hydrovacFacilityKey(r);
+        const c = r.legalLocation ? approximateFromLegalLocation(r.legalLocation) : null;
+        if (c) withCoordinates++;
+        const found = (await db.select({ id: facilities.id, coordinatePrecision: facilities.coordinatePrecision }).from(facilities).where(eq(facilities.facilityKey, facilityKey)).limit(1))[0];
+        if (found) {
+          // A row imported before the adapter read this spelling: pin it now, but never touch a coordinate a person verified.
+          if (c && found.coordinatePrecision === "unknown") await db.update(facilities).set({ latitude: c.latitude, longitude: c.longitude, coordinatePrecision: "approximate_site", coordinateSourceUrl: HYDROVAC_LIST.sourceUrl }).where(eq(facilities.id, found.id));
+          existing++; continue;
+        }
+        const ins = await db.insert(facilities).values({
+          facilityKey, name: `${r.company}${r.place ? ` — ${r.place}` : ""}`, status: "unknown", province: "AB", municipality: r.place, facilityType: "hydrovac", facilityTypes: ["hydrovac", ...(r.hazardousAllowed ? ["hazardous_treatment"] : [])],
+          legalLocation: r.legalLocation, physicalAddress: r.address, latitude: c?.latitude ?? null, longitude: c?.longitude ?? null, coordinatePrecision: c ? "approximate_site" : "unknown", coordinateSourceUrl: c ? HYDROVAC_LIST.sourceUrl : null,
+          disposition: "approximate_facility", operatorNameFromSource: r.company, phone: r.phones[0] ?? null, email: r.emails[0] ?? null, websiteUrl: null,
+          regulatorRef: r.regulator === "AER" ? r.authorization : `EPEA ${r.authorization}`, regulatorRefSourceUrl: HYDROVAC_LIST.sourceUrl, commercialAccess: "commercial_preapproval_required", lifecycle: "operating", statusVerifiedAt: new Date("2026-04-10T00:00:00Z"),
+          sourceAuthority: `${HYDROVAC_LIST.title}, ${HYDROVAC_LIST.dated} (${r.regulator === "AER" ? "AER-regulated, WM authorization" : "EPEA authorization"}; ${HYDROVAC_LIST.licenceKey})`, gateInstructions: r.contactFacility ? "The list says to contact the facility directly for acceptance." : null,
+        });
+        const facilityId = ins[0].insertId;
+        const ev = await db.insert(facilityEvidence).values({ facilityId, publisher: "Government of Alberta — Environment and Protected Areas", title: `${HYDROVAC_LIST.title} (${HYDROVAC_LIST.dated}), authorization ${r.authorization}`, sourceUrl: HYDROVAC_LIST.sourceUrl, licenceKey: HYDROVAC_LIST.licenceKey, claimType: "accepts_waste_stream", claimValue: `${r.acceptableMaterial}. ${HYDROVAC_LIST.caveat} Row: ${r.raw}`, cachedContent: true, retrievedAt: new Date("2026-09-17T00:00:00Z"), effectiveAt: new Date("2026-04-10T00:00:00Z"), confidence: r.parseConfidence === "high" ? "medium" : "low", reviewState: "lead", recordedByUserId: ctx.user.id });
+        await db.insert(facilityCapabilities).values({ facilityId, wasteCode: "hydrovac_slurry", acceptanceStatus: "confirmation_required", conditions: r.acceptableMaterial, evidenceId: ev[0].insertId, setByUserId: ctx.user.id });
+        if (r.phones.length > 1) await db.insert(facilityAliases).values({ facilityId, alias: `other phones: ${r.phones.slice(1).join(", ")}`, relationship: "contact_note", sourceUrl: HYDROVAC_LIST.sourceUrl });
+        if (/^tervita/i.test(r.company)) await db.insert(facilityAliases).values({ facilityId, alias: "Tervita (as named on the list; merged into SECURE, many sites divested to R360)", relationship: "former_operator", sourceUrl: HYDROVAC_LIST.sourceUrl });
+        inserted++;
+      }
+      return { inserted, existing, rows: rows.length, withCoordinates, attribution: "Contains information licensed under the Open Government Licence – Alberta", note: "Every acceptance is confirmation_required: the list says to contact the facility. Coordinates from legal land descriptions are ±2 km, never an entrance. Operator names are as the list states them — several say Tervita." };
+    }),
+  }),
+
+  /** Facilities that share a legal land description across sources — proposed as the same site, never merged here. */
+  duplicates: roleProcedure("facilityDirectory.duplicates").query(async () => {
+    const db = await dbOrThrow();
+    const rows = await db.select({ facilityKey: facilities.facilityKey, name: facilities.name, legalLocation: facilities.legalLocation, operatorNameFromSource: facilities.operatorNameFromSource, sourceAuthority: facilities.sourceAuthority }).from(facilities).where(and(isNotNull(facilities.facilityKey), isNotNull(facilities.legalLocation)));
+    const normLsd = (s: string) => s.toUpperCase().replace(/[\s-]+/g, "-").replace(/-?W(\d)-?M?$/, "-W$1M").replace(/^(\d)-/, "0$1-").replace(/-(\d)-(\d{2,3})-/, "-0$1-$2-");
+    const groups = new Map<string, typeof rows>();
+    for (const r of rows) { const k = normLsd(r.legalLocation!); groups.set(k, [...(groups.get(k) ?? []), r]); }
+    const proposals = Array.from(groups.entries()).filter(([, g]) => g.length > 1).map(([legalLocation, members]) => ({ legalLocation, members: members.map(m => ({ facilityKey: m.facilityKey!, name: m.name, operator: m.operatorNameFromSource, source: m.sourceAuthority })), evidence: "identical legal land description" as const, applied: false as const }));
+    return { proposals, note: "Same LSD, different sources — probably one site under different operator names or eras. A person links or retires; nothing is merged here." };
+  }),
 
   exportCsv: roleProcedure("facilityDirectory.exportCsv").query(async () => toCsv(await exportRows())),
   exportGeoJson: roleProcedure("facilityDirectory.exportGeoJson").query(async () => toGeoJson(await exportRows())),

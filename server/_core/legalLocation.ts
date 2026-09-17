@@ -15,10 +15,11 @@ export type ApproximateFromLegal = { latitude: number; longitude: number; precis
 const QUARTER_REPRESENTATIVE_LSD: Record<"NE" | "NW" | "SE" | "SW", number> = { SE: 2, SW: 6, NW: 12, NE: 15 };
 
 export function approximateFromLegalLocation(text: string): ApproximateFromLegal {
-  const t = text.trim().toUpperCase().replace(/\s+/g, " ");
-  const full = t.match(/^(\d{1,2})-(\d{1,2})-(\d{1,3})-(\d{1,2})[- ]?W(\d)M?$/);
-  const quarter = t.match(/^(NE|NW|SE|SW)-(\d{1,2})-(\d{1,3})-(\d{1,2})[- ]?W(\d)M?$/);
-  const section = t.match(/^(\d{1,2})-(\d{1,3})-(\d{1,2})[- ]?W(\d)M?$/);
+  // Regulators write the meridian several ways: "-W4M", "W5", " W4M", "-W6 M". Normalize to " W<n>M" first.
+  const t = text.trim().toUpperCase().replace(/\s+/g, " ").replace(/[-\s]*W\s?(\d)\s?M?$/, " W$1M").replace(/¼|1\/4/g, "").replace(/\s+/g, " ").trim();
+  const full = t.match(/^(\d{1,2})-(\d{1,2})-(\d{1,3})-(\d{1,2}) W(\d)M$/);
+  const quarter = t.match(/^(NE|NW|SE|SW)[- ]+(\d{1,2})-(\d{1,3})-(\d{1,2}) W(\d)M$/);
+  const section = t.match(/^(\d{1,2})-(\d{1,3})-(\d{1,2}) W(\d)M$/);
   let canonical: string, cell: string;
   if (full) { canonical = `${full[1]}-${full[2]}-${full[3]}-${full[4]}-W${full[5]}`; cell = "LSD"; }
   else if (quarter) { canonical = `${QUARTER_REPRESENTATIVE_LSD[quarter[1] as "NE"]}-${quarter[2]}-${quarter[3]}-${quarter[4]}-W${quarter[5]}`; cell = `${quarter[1]} quarter section (represented by a central LSD)`; }

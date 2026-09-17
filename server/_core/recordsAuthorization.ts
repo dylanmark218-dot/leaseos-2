@@ -2195,6 +2195,8 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "facilityDirectory.arcgisImportFromLayer": "facility.directory.review",
   "facilityDirectory.arcgisRuns": "facility.directory.read",
   "facilityDirectory.lsdFind": "facility.directory.read",
+  "facilityDirectory.hydrovacImport": "facility.directory.review",
+  "facilityDirectory.duplicates": "facility.directory.review",
   "facilityDirectory.features": "facility.directory.read",
   "facilityDirectory.get": "facility.directory.read",
   "facilityDirectory.evidenceRecord": "facility.directory.write",
