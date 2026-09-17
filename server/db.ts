@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import type { MySqlColumn } from "drizzle-orm/mysql-core";
-import { SINGLE_TENANT_ID } from "./_core/actingScope";
+import { SINGLE_TENANT_ID, resolveActingScope } from "./_core/actingScope";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   userRoleAssignments,
@@ -765,13 +765,33 @@ export async function reviewComplianceDocument(
  * tenant's); a member sees records their organization owns. A record created by
  * a member is assigned to their organization in the same call.
  */
-function ownershipScopeWhere(recordType: "unit" | "operator", idColumn: MySqlColumn, scope: TenantScope) {
+export function ownershipScopeWhere(recordType: "unit" | "operator", idColumn: MySqlColumn, scope: TenantScope) {
   const owner = db_sub(recordType, idColumn);
   return scope.tenantId === SINGLE_TENANT_ID ? isNull(owner) : eq(owner, scope.tenantId);
 }
 /** Correlated subquery: the owning organization of this record, or NULL. */
 function db_sub(recordType: "unit" | "operator", idColumn: MySqlColumn) {
   return sql<string | null>`(SELECT o.orgRef FROM coreRecordOwnership o WHERE o.recordType = ${recordType} AND o.recordId = ${idColumn} LIMIT 1)`;
+}
+
+/** P4.1 router 4 — the acting scope for a caller, for routers that key rows to units or operators. */
+export async function actingScopeFor(userId: number): Promise<TenantScope> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  return { tenantId: (await resolveActingScope(db, userId)).tenantId };
+}
+/** A unit the scope may see, or null. "Not found" is the only answer for one it may not — never "forbidden". */
+export async function unitInScope(unitId: number, scope: TenantScope): Promise<{ id: number; unitNumber: string } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select({ id: units.id, unitNumber: units.unitNumber }).from(units).where(and(eq(units.id, unitId), ownershipScopeWhere("unit", units.id, scope))).limit(1))[0] ?? null;
+}
+/** A work order the scope may see (through its unit), by number or by id, or null. */
+export async function workOrderInScope(key: string | number, scope: TenantScope): Promise<{ id: number; unitId: number } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const byKey = typeof key === "number" ? eq(workOrders.id, key) : eq(workOrders.workOrderNumber, key);
+  return (await db.select({ id: workOrders.id, unitId: workOrders.unitId }).from(workOrders).where(and(byKey, ownershipScopeWhere("unit", workOrders.unitId, scope))).limit(1))[0] ?? null;
 }
 
 export async function listOperators(scope: TenantScope) {

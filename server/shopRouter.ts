@@ -7,7 +7,7 @@ import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { evaluateMechanicRelease } from "./_core/mechanicRelease";
 import { appendWorkOrderRelease } from "./recordsService";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, unitInScope, workOrderInScope } from "./db";
 import { partMovements, parts, recallNotices, recallUnitStatus, serializedTools, tireInstallations, tireMeasurements, tires, toolCheckouts, vendorBillLines, warrantyClaims, warrantyPolicies, workOrders, maintenanceDefects } from "../drizzle/schema";
 import { claimDecision, claimEligibility, countAdjustment, installDecision, issueDecision, reorderFindings, signedQty, stockPositions, tireRun, treadStatus, workOrderCost, type Movement } from "./_core/fleetShop";
 
@@ -52,6 +52,9 @@ export const shopRouter = router({
   partIssue: roleProcedure("shop.partIssue")
     .input(z.object({ partNumber: z.string().min(1).max(80), bin: z.string().max(40).default("MAIN"), qty: z.number().int().positive(), workOrderNumber: z.string().min(1).max(64), reason: z.string().max(300).optional() }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
       const db = await dbOrThrow();
       const p = await partByNumber(input.partNumber);
       const wo = (await db.select({ id: workOrders.id, unitId: workOrders.unitId, status: workOrders.status }).from(workOrders).where(eq(workOrders.workOrderNumber, input.workOrderNumber)).limit(1))[0];
@@ -69,6 +72,9 @@ export const shopRouter = router({
   partReturn: roleProcedure("shop.partReturn")
     .input(z.object({ partNumber: z.string().min(1).max(80), bin: z.string().max(40).default("MAIN"), qty: z.number().int().positive(), workOrderNumber: z.string().max(64).optional(), reason: z.string().min(3).max(300) }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
       const p = await partByNumber(input.partNumber);
       const movementRef = await move({ partId: p.id, bin: input.bin, kind: "return_to_stock", qty: input.qty, reason: input.reason, byUserId: ctx.user.id });
       return { movementRef };
@@ -118,6 +124,10 @@ export const shopRouter = router({
   tireInstall: roleProcedure("shop.tireInstall")
     .input(z.object({ serial: z.string().min(1).max(80), unitId: z.number().int().positive(), axlePosition: z.string().min(2).max(8), installedAt: z.coerce.date(), installOdometerKm: z.number().int().nonnegative().nullable().optional(), installTreadMm: z.number().nonnegative().nullable().optional(), workOrderNumber: z.string().max(64).optional() }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+      if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
       const db = await dbOrThrow();
       const t = (await db.select().from(tires).where(eq(tires.serial, input.serial)).limit(1))[0];
       if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Tire not found" });
@@ -133,7 +143,10 @@ export const shopRouter = router({
 
   tireRemove: roleProcedure("shop.tireRemove")
     .input(z.object({ serial: z.string().min(1).max(80), removedAt: z.coerce.date(), removeOdometerKm: z.number().int().nonnegative().nullable().optional(), removeTreadMm: z.number().nonnegative().nullable().optional(), removalReason: z.enum(["worn", "damage", "rotation", "retread", "warranty", "other"]), workOrderNumber: z.string().max(64).optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
       const db = await dbOrThrow();
       const t = (await db.select().from(tires).where(eq(tires.serial, input.serial)).limit(1))[0];
       if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Tire not found" });
@@ -170,6 +183,9 @@ export const shopRouter = router({
   warrantyPolicyRecord: roleProcedure("shop.warrantyPolicyRecord")
     .input(z.object({ subjectType: z.enum(["part", "tire", "unit_component"]), subjectId: z.number().int().positive(), unitId: z.number().int().positive().nullable().optional(), vendorId: z.number().int().positive().nullable().optional(), coverageUntil: z.coerce.date().nullable().optional(), coverageKm: z.number().int().positive().nullable().optional(), coverageHours: z.number().int().positive().nullable().optional(), terms: z.string().max(600).optional(), sourceDocumentEvidenceId: z.number().int().positive().nullable().optional(), verified: z.boolean().default(false) }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (input.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
       const db = await dbOrThrow();
       if (input.verified && !input.sourceDocumentEvidenceId) throw new TRPCError({ code: "BAD_REQUEST", message: "A verified policy needs its source document in the evidence vault" });
       const policyRef = ref("WPOL");
@@ -180,6 +196,9 @@ export const shopRouter = router({
   warrantyClaimRaise: roleProcedure("shop.warrantyClaimRaise")
     .input(z.object({ policyRef: z.string().min(1).max(64), workOrderNumber: z.string().max(64).optional(), tireSerial: z.string().max(80).optional(), claimedCents: z.number().int().positive(), reason: z.string().min(10).max(600), kmSincePurchase: z.number().int().nonnegative().nullable().optional(), hoursSincePurchase: z.number().int().nonnegative().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
       const db = await dbOrThrow();
       const pol = (await db.select().from(warrantyPolicies).where(eq(warrantyPolicies.policyRef, input.policyRef)).limit(1))[0];
       if (!pol) throw new TRPCError({ code: "NOT_FOUND", message: "Policy not found" });
@@ -240,6 +259,9 @@ export const shopRouter = router({
 
   /** A recall is external data. Recorded unverified; verified by a person with the notice on file. */
   recallRecord: roleProcedure("shop.recallRecord").input(z.object({ source: z.string().min(1).max(120), sourceRef: z.string().min(1).max(120), issuedAt: z.coerce.date().nullable().optional(), summary: z.string().min(10).max(600), affectedCriteria: z.record(z.string(), z.unknown()).optional(), unitIds: z.array(z.number().int().positive()).max(500).default([]) })).mutation(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      for (const uid of input.unitIds) if (!(await unitInScope(uid, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${uid} not found` });
     const db = await dbOrThrow();
     const dup = (await db.select({ recallRef: recallNotices.recallRef }).from(recallNotices).where(and(eq(recallNotices.source, input.source), eq(recallNotices.sourceRef, input.sourceRef))).limit(1))[0];
     if (dup) return { recallRef: dup.recallRef, duplicate: true as const };
@@ -264,7 +286,10 @@ export const shopRouter = router({
       to: z.enum(["in_progress", "waiting_parts", "ready_for_service", "closed"]),
       note: z.string().max(400).optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await workOrderInScope(input.workOrderId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderId} not found` });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const wo = (await db.select().from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1))[0];
@@ -312,6 +337,9 @@ export const shopRouter = router({
       releasedAt: z.coerce.date().default(() => new Date()),
     }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await workOrderInScope(input.workOrderId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderId} not found` });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const wo = (await db.select().from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1))[0];
@@ -371,6 +399,10 @@ export const shopRouter = router({
     return { recallRef: r.recallRef, verificationStatus: "verified" as const };
   }),
   recallUnitDecide: roleProcedure("shop.recallUnitDecide").input(z.object({ recallRef: z.string().min(1).max(64), unitId: z.number().int().positive(), status: z.enum(["affected", "not_affected", "completed"]), workOrderNumber: z.string().max(64).optional() })).mutation(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+      if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
     const db = await dbOrThrow();
     const r = (await db.select().from(recallNotices).where(eq(recallNotices.recallRef, input.recallRef)).limit(1))[0];
     if (!r) throw new TRPCError({ code: "NOT_FOUND", message: "Recall not found" });
@@ -383,7 +415,10 @@ export const shopRouter = router({
     return { recallRef: r.recallRef, unitId: input.unitId, status: input.status };
   }),
 
-  workOrderCost: roleProcedure("shop.workOrderCost").input(z.object({ workOrderNumber: z.string().min(1).max(64), labourRateCentsPerHour: z.number().int().positive().nullable().optional() })).query(async ({ input }) => {
+  workOrderCost: roleProcedure("shop.workOrderCost").input(z.object({ workOrderNumber: z.string().min(1).max(64), labourRateCentsPerHour: z.number().int().positive().nullable().optional() })).query(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
     const db = await dbOrThrow();
     const wo = (await db.select().from(workOrders).where(eq(workOrders.workOrderNumber, input.workOrderNumber)).limit(1))[0];
     if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: "Work order not found" });
@@ -392,7 +427,10 @@ export const shopRouter = router({
   }),
 
   /** What a unit has cost the shop: work orders' parts and labour, tires by run. Every unknown is named; nothing is filled in. */
-  unitCost: roleProcedure("shop.unitCost").input(z.object({ unitId: z.number().int().positive(), labourRateCentsPerHour: z.number().int().positive().nullable().optional() })).query(async ({ input }) => {
+  unitCost: roleProcedure("shop.unitCost").input(z.object({ unitId: z.number().int().positive(), labourRateCentsPerHour: z.number().int().positive().nullable().optional() })).query(async ({ ctx, input }) => {
+      // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
     const db = await dbOrThrow();
     const wos = await db.select().from(workOrders).where(eq(workOrders.unitId, input.unitId));
     const issues = wos.length ? await db.select().from(partMovements).where(and(inArray(partMovements.workOrderId, wos.map(w => w.id)), eq(partMovements.kind, "issue"))) : [];
