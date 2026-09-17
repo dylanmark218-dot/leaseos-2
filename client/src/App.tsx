@@ -22,6 +22,7 @@ import BillingSafetyWorkspace from "./showcase/BillingSafetyWorkspace";
 import RouteSafetyWorkspace from "./showcase/RouteSafetyWorkspace";
 import DisposalDirectory from "./pages/DisposalDirectory";
 import DisposalFinder from "./pages/DisposalFinder";
+import CommercialOffice from "./pages/CommercialOffice";
 import CommunicationsPackage from "./pages/CommunicationsPackage";
 import TransmitCheck from "./pages/TransmitCheck";
 import CommunicationsPackageStatus from "./pages/CommunicationsPackageStatus";
@@ -89,6 +90,14 @@ function Router() {
         component={() => (
           <DashboardRoute>
             <DisposalFinder />
+          </DashboardRoute>
+        )}
+      />
+      <Route
+        path="/commercial-office"
+        component={() => (
+          <DashboardRoute>
+            <CommercialOffice />
           </DashboardRoute>
         )}
       />

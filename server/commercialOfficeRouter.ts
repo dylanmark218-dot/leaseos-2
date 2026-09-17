@@ -8,7 +8,7 @@
  * a sequence with no numbering policy mints no number.
  */
 import { TRPCError } from "@trpc/server";
-import { and, eq, gte, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, notInArray, or, sql, like, desc } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries, evidenceRecords, fieldTicketDocuments, retentionPolicies } from "../drizzle/schema";
@@ -35,6 +35,40 @@ const jsonArray = <T,>(v: unknown): T[] => (typeof v === "string" ? (JSON.parse(
 
 export const commercialOfficeRouter = router({
   /** What an organization can be: the built-in roles plus this business's own. */
+  /**
+   * The organization master itself. Until now an organization row came only from the tenancy
+   * layer (or a fixture); the office needs to create a client or vendor and then give it roles.
+   * Creating is a person's act with a name; roles and numbers follow through roles.assign.
+   */
+  organizations: router({
+    create: roleProcedure("commercialOffice.organizationCreate")
+      .input(z.object({ name: z.string().min(2).max(200) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const sameName = await db.select({ orgRef: organizations.orgRef, name: organizations.name }).from(organizations).where(eq(organizations.name, input.name.trim())).limit(3);
+        if (sameName.length) throw new TRPCError({ code: "CONFLICT", message: `An organization named "${input.name.trim()}" already exists (${sameName.map(s => s.orgRef).join(", ")}); assign it a role instead of creating another` });
+        const orgRef = (await nextTrackingNumber(db, { sequenceType: "ORG" })).trackingNumber;
+        await db.insert(organizations).values({ orgRef, name: input.name.trim(), status: "active" });
+        return { orgRef, name: input.name.trim(), bookOrgRef, note: "Give it a role with roles.assign; the commercial number is minted then." };
+      }),
+    list: roleProcedure("commercialOffice.organizationsList")
+      .input(z.object({ roleKey: z.string().max(40).optional(), q: z.string().max(120).optional(), status: z.enum(["active", "suspended", "closed"]).optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const roles = await db.select().from(organizationCommercialRoles).where(and(bookWhere(organizationCommercialRoles, bookOrgRef), eq(organizationCommercialRoles.status, "active")));
+        const byOrg = new Map<string, typeof roles>();
+        for (const r of roles) byOrg.set(r.orgRef, [...(byOrg.get(r.orgRef) ?? []), r]);
+        const conds = [];
+        if (input?.status) conds.push(eq(organizations.status, input.status));
+        if (input?.q) conds.push(like(organizations.name, `%${input.q}%`));
+        const orgs = await db.select().from(organizations).where(conds.length ? and(...conds) : undefined).limit(500);
+        return orgs
+          .map(o => ({ orgRef: o.orgRef, name: o.name, status: o.status, roles: (byOrg.get(o.orgRef) ?? []).map(r => ({ roleKey: r.roleKey, commercialNumber: r.commercialNumber, since: r.effectiveFrom })) }))
+          .filter(o => !input?.roleKey || o.roles.some(r => r.roleKey === input.roleKey))
+          .sort((a, b) => a.name.localeCompare(b.name));
+      }),
+  }),
+
   roleTypes: router({
     list: roleProcedure("commercialOffice.roleTypesList").query(async ({ ctx }) => {
       const { db, bookOrgRef } = await bookFor(ctx.user.id);
@@ -320,6 +354,16 @@ export const commercialOfficeRouter = router({
           await tx.insert(facilityStatementLines).values(lineValues.map(v => ({ ...v, facilityStatementId })));
         });
         return { statementRef, ...counts, lineCount: lineValues.length, facilityLinked: facility.orgRef !== null, note: counts.unmatched + counts.ambiguous + counts.match_with_variance ? "Lines other than clean matches wait for a person's resolution." : "Every line matched cleanly." };
+      }),
+    statements: roleProcedure("commercialOffice.facilityStatementsList")
+      .input(z.object({ status: z.enum(["open", "closed"]).optional(), facilityOrgRef: z.string().max(64).optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const conds = [bookWhere(facilityStatements, bookOrgRef)];
+        if (input?.status) conds.push(eq(facilityStatements.status, input.status));
+        if (input?.facilityOrgRef) conds.push(eq(facilityStatements.facilityOrgRef, input.facilityOrgRef));
+        const rows = await db.select().from(facilityStatements).where(and(...conds)).orderBy(desc(facilityStatements.importedAt)).limit(200);
+        return rows.map(st => ({ ...st, openLines: st.status === "open" ? st.varianceCount + st.unmatchedCount + st.ambiguousCount : 0 }));
       }),
     statementLines: roleProcedure("commercialOffice.facilityStatementLines")
       .input(z.object({ statementRef: z.string().min(1), outcome: z.enum(["match", "match_with_variance", "unmatched", "ambiguous"]).optional(), unresolvedOnly: z.boolean().default(false) }))

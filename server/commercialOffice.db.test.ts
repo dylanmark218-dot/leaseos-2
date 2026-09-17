@@ -431,3 +431,23 @@ d("P7.8 — the vendor audit package, from the ledger, the statements and the re
     expect(rel.status).toBe("released");
   }, 60_000);
 });
+
+d("P7.9 — the organization master from the office", () => {
+  it("creates an organization by name (refusing a duplicate name by pointing at the existing one), lists it with its roles and numbers once a role is assigned, and lists open facility statements with their open-line counts", async () => {
+    const book = await org();
+    const office = await member(book, ["office"]);
+    const name = `North Star Hauling ${rnd()}`;
+    const made = await callerFor(office).commercialOffice.organizations.create({ name });
+    expect(made.orgRef).toMatch(/^ORG-/);
+    await expect(callerFor(office).commercialOffice.organizations.create({ name })).rejects.toThrow(/already exists/);
+    const before = (await callerFor(office).commercialOffice.organizations.list({ q: name })).find(o => o.orgRef === made.orgRef)!;
+    expect(before.roles).toEqual([]);
+    await callerFor(office).commercialOffice.roles.assign({ orgRef: made.orgRef, roleKey: "client" });
+    const after = (await callerFor(office).commercialOffice.organizations.list({ roleKey: "client", q: name })).find(o => o.orgRef === made.orgRef)!;
+    expect(after.roles).toEqual([expect.objectContaining({ roleKey: "client", commercialNumber: expect.stringMatching(/^CLI-\d{6}$/) })]);
+    expect((await callerFor(office).commercialOffice.organizations.list({ roleKey: "vendor", q: name })).some(o => o.orgRef === made.orgRef)).toBe(false);
+    const statements = await callerFor(office).commercialOffice.disposal.statements({ status: "open" });
+    expect(Array.isArray(statements)).toBe(true);
+    for (const st of statements) expect(st.openLines).toBe(st.varianceCount + st.unmatchedCount + st.ambiguousCount);
+  }, 30_000);
+});
