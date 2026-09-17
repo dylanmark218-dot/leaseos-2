@@ -2188,6 +2188,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "facilityDirectory.vocabularyList": "facility.directory.read",
   "facilityDirectory.vocabularyVerify": "facility.directory.review",
   "facilityDirectory.seedLeads": "facility.directory.review",
+  "facilityDirectory.seedBrief": "facility.directory.review",
   "facilityDirectory.features": "facility.directory.read",
   "facilityDirectory.get": "facility.directory.read",
   "facilityDirectory.evidenceRecord": "facility.directory.write",

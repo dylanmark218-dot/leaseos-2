@@ -13,8 +13,11 @@ import { TRPCError } from "@trpc/server";
 import { and, desc, eq, gte, inArray, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import seed from "../data/western-canada-facilities.json";
+import brief from "../data/canada-disposal-facilities-brief-2026-09-17.json";
+import { approximateFromLegalLocation } from "./_core/legalLocation";
 import { facilities, facilityAliases, facilityCallAheads, facilityCapabilities, facilityEvidence, facilityOperatingHours, facilitySourceLicences, facilityWaitReports, loadFacilityAssessments, loads, wasteStreamVocabulary } from "../drizzle/schema";
-import { acceptanceStatusSchema, coordinatePrecisionSchema, wasteCodeSchema, type FacilityMapFeature } from "../shared/facilities";
+import { acceptanceStatusSchema, coordinatePrecisionSchema, wasteCodeSchema, type CommercialAccess, type CoordinatePrecision, type FacilityLifecycle, type FacilityMapFeature } from "../shared/facilities";
+type BriefRow = { facilityKey: string; name: string; operatorKey: string; parentCompany: string | null; province: string; municipality: string | null; facilityType: string; facilityTypes: string[]; legalLocation: string | null; physicalAddress: string | null; phone: string | null; dispatchPhone: string | null; afterHoursPhone: string | null; salesContact: string | null; email: string | null; websiteUrl: string | null; licenceKey: string; sourceAuthority: string; commercialAccess: CommercialAccess; lifecycle: FacilityLifecycle; historicalOperators: string[]; normAccepted: boolean | null; sourAccepted: boolean | null; twentyFourHourCallout: boolean | null; notes: string | null; latitude?: number; longitude?: number; coordinatePrecision?: CoordinatePrecision; coordinateSourceUrl?: string; regulatorRef?: string };
 import { assessFacilityCompatibility } from "./_core/facilityCompatibility";
 import { toCsv, toGeoJson } from "./_core/facilityExport";
 import { buildFacilityLinks } from "./_core/facilityNavigation";
@@ -79,6 +82,48 @@ export const facilityDirectoryRouter = router({
       inserted++;
     }
     return { inserted, existing, routable: 0, note: "Every seeded facility is a lead with community-level coordinates. Nothing here is a verified entrance; navigation stays disabled until a person verifies coordinates against reviewed evidence." };
+  }),
+
+  /**
+   * The operator briefs of 2026-09-17: R360's network, SECURE's landfills and WPFs, the Alberta
+   * hydrovac list's facilities, Aqua Terra, Miller, Lambton, Stablex. Legal land descriptions are
+   * converted to approximate coordinates (±2 km, never routable); contacts and access land in
+   * their columns; former operators become aliases; every row is a lead until reviewed.
+   */
+  seedBrief: roleProcedure("facilityDirectory.seedBrief").mutation(async ({ ctx }) => {
+    const db = await dbOrThrow();
+    const rows = brief as BriefRow[];
+    let inserted = 0, existing = 0, lsdConverted = 0, ntsUnconverted = 0;
+    for (const r of rows) {
+      const found = (await db.select({ id: facilities.id }).from(facilities).where(eq(facilities.facilityKey, r.facilityKey)).limit(1))[0];
+      if (found) { existing++; continue; }
+      let latitude = r.latitude ?? null, longitude = r.longitude ?? null, precision: typeof r.coordinatePrecision | "approximate_site" = r.coordinatePrecision ?? "unknown", sourceUrl = r.coordinateSourceUrl ?? null, coordNote: string | null = null;
+      if (r.legalLocation && latitude === null) {
+        const c = approximateFromLegalLocation(r.legalLocation);
+        if (c) { latitude = c.latitude; longitude = c.longitude; precision = "approximate_site"; sourceUrl = r.websiteUrl ?? null; coordNote = c.note; lsdConverted++; } else ntsUnconverted++;
+      }
+      const ins = await db.insert(facilities).values({
+        facilityKey: r.facilityKey, name: r.name, status: r.lifecycle === "operating" ? "unknown" : r.lifecycle === "closed" ? "closed" : "unknown", province: r.province, municipality: r.municipality ?? null, facilityType: r.facilityType, facilityTypes: r.facilityTypes,
+        legalLocation: r.legalLocation ?? null, physicalAddress: r.physicalAddress ?? null, latitude, longitude, coordinatePrecision: precision, coordinateSourceUrl: sourceUrl,
+        disposition: r.lifecycle === "conflicting" ? "ambiguous" : "approximate_facility", operatorNameFromSource: r.operatorKey, parentCompany: r.parentCompany ?? null,
+        phone: r.phone ?? null, dispatchPhone: r.dispatchPhone ?? null, afterHoursPhone: r.afterHoursPhone ?? null, salesContact: r.salesContact ?? null, email: r.email ?? null, websiteUrl: r.websiteUrl ?? null,
+        commercialAccess: r.commercialAccess, lifecycle: r.lifecycle, normAccepted: r.normAccepted ?? null, sourAccepted: r.sourAccepted ?? null, twentyFourHourCallout: r.twentyFourHourCallout ?? null,
+        regulatorRef: r.regulatorRef ?? null, regulatorRefSourceUrl: r.regulatorRef ? r.websiteUrl ?? null : null, sourceAuthority: r.sourceAuthority, gateInstructions: r.notes ?? null,
+      });
+      const facilityId = ins[0].insertId;
+      const claim = [r.legalLocation ? `LSD ${r.legalLocation}` : null, r.physicalAddress, r.phone ? `phone ${r.phone}` : null, coordNote].filter(Boolean).join("; ");
+      if (r.lifecycle === "conflicting") {
+        await db.insert(facilityEvidence).values([
+          { facilityId, publisher: "SECURE Waste Infrastructure", title: "Facility page: NO LONGER IN OPERATION", sourceUrl: r.websiteUrl ?? "", licenceKey: "company_website", claimType: "closure", claimValue: "SECURE's facility page states the Virden operation is no longer in operation", cachedContent: false, retrievedAt: new Date("2026-09-17T00:00:00Z"), confidence: "medium", reviewState: "conflicting", recordedByUserId: ctx.user.id, reviewNote: "conflicts with the Town of Virden's description" },
+          { facilityId, publisher: "Town of Virden", title: "Municipal/industrial waste facility managed by LOCAL Industrial Partners", sourceUrl: "https://www.virden.ca/", licenceKey: "company_website", claimType: "operator_identity", claimValue: "The Town describes a municipal/industrial waste facility managed by LOCAL Industrial Partners", cachedContent: false, retrievedAt: new Date("2026-09-17T00:00:00Z"), confidence: "medium", reviewState: "conflicting", recordedByUserId: ctx.user.id, reviewNote: "conflicts with SECURE's closure statement" },
+        ]);
+      } else {
+        await db.insert(facilityEvidence).values({ facilityId, publisher: r.operatorKey, title: "Facility lead from the operator brief of 2026-09-17", sourceUrl: r.websiteUrl ?? "", licenceKey: r.licenceKey, claimType: "facility_exists", claimValue: claim, cachedContent: false, retrievedAt: new Date("2026-09-17T00:00:00Z"), confidence: r.licenceKey === "ogl_alberta" ? "medium" : "low", reviewState: "lead", recordedByUserId: ctx.user.id });
+      }
+      for (const h of r.historicalOperators ?? []) await db.insert(facilityAliases).values({ facilityId, alias: `${h} ${r.name.replace(/^(R360|SECURE) /, "")}`, relationship: "former_operator", sourceUrl: r.websiteUrl ?? null });
+      inserted++;
+    }
+    return { inserted, existing, lsdConverted, ntsUnconverted, routable: 0, note: "Coordinates from legal land descriptions are the centre of the LSD, ±2 km, never an entrance. Contacts and hours are as the brief stated them; call ahead." };
   }),
 
   /** Map features: pins with their precision; routable only when a person verified the coordinates. */
@@ -182,11 +227,13 @@ export const facilityDirectoryRouter = router({
       const snapshot = {
         loadWasteCode: input.loadWasteCode, capabilityWasteCode: cap?.wasteCode as never, acceptanceStatus: (confirmedByCall ? "verified" : (cap?.acceptanceStatus ?? "unknown")) as never,
         coordinatePrecision: f.coordinatePrecision, coordinateSourceUrl: f.coordinateSourceUrl ?? undefined, evidenceIds: reviewed.map(e => e.id), evidenceVerifiedAt: confirmedByCall ? callAhead!.calledAt : (cap?.verifiedAt ?? undefined),
-        assessedAt: new Date(), accountRequired: input.accountRequired, accountApproved: input.accountApproved, facilityOpen: f.status === "open", routeReviewPassed: input.routeReviewPassed,
+        assessedAt: new Date(), accountRequired: input.accountRequired, accountApproved: input.accountApproved, facilityOpen: f.status === "open" && f.lifecycle !== "closed" && f.lifecycle !== "suspended" && f.lifecycle !== "conflicting" && f.commercialAccess !== "operator_private", routeReviewPassed: input.routeReviewPassed,
         conflictingEvidence: evidence.some(e => e.reviewState === "conflicting"),
       };
       const result = assessFacilityCompatibility(snapshot);
       if (callMeta?.outcome === "accepted_with_conditions" && result.outcome === "compatible_verified") result.reasonCodes.push("call_ahead_conditions");
+      if (f.lifecycle === "conflicting") result.reasonCodes.push("lifecycle_conflicting"); else if (f.lifecycle === "closed" || f.lifecycle === "suspended") result.reasonCodes.push(`lifecycle_${f.lifecycle}`);
+      if (f.commercialAccess === "operator_private") result.reasonCodes.push("operator_private");
       const assessmentRef = ref("FASSESS");
       await db.insert(loadFacilityAssessments).values({ assessmentRef, loadId: input.loadId, facilityId: f.id, outcome: result.outcome, blocking: result.blocking, reasonCodes: result.reasonCodes, evidenceIds: result.evidenceIds, inputSnapshot: { ...snapshot, assessedAt: snapshot.assessedAt.toISOString(), evidenceVerifiedAt: snapshot.evidenceVerifiedAt?.toISOString(), callAhead: callMeta }, engineVersion: result.engineVersion, assessedByUserId: ctx.user.id });
       return { assessmentRef, ...result, facilityKey: f.facilityKey, dispatchable: !result.blocking, callAhead: callMeta };
@@ -257,9 +304,11 @@ export const facilityDirectoryRouter = router({
       const dist = (lat: number, lon: number) => { const dLat = rad(lat - input.latitude), dLon = rad(lon - input.longitude); const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(input.latitude)) * Math.cos(rad(lat)) * Math.sin(dLon / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(a)); };
       const ids = rows.map(r => r.id);
       const caps = ids.length && input.wasteCode ? await db.select().from(facilityCapabilities).where(and(inArray(facilityCapabilities.facilityId, ids), eq(facilityCapabilities.wasteCode, input.wasteCode))) : [];
-      const out = rows.map(f => ({ facilityKey: f.facilityKey!, name: f.name, municipality: f.municipality, province: f.province, facilityType: f.facilityType, distanceKm: Math.round(dist(f.latitude!, f.longitude!) * 10) / 10, coordinatePrecision: f.coordinatePrecision, routable: routableOf(f), phone: f.phone, websiteUrl: f.websiteUrl,
+      const out = rows.map(f => ({ facilityKey: f.facilityKey!, name: f.name, municipality: f.municipality, province: f.province, facilityType: f.facilityType, facilityTypes: jsonArray<string>(f.facilityTypes), distanceKm: Math.round(dist(f.latitude!, f.longitude!) * 10) / 10, coordinatePrecision: f.coordinatePrecision, routable: routableOf(f), phone: f.phone, dispatchPhone: f.dispatchPhone, afterHoursPhone: f.afterHoursPhone, websiteUrl: f.websiteUrl, commercialAccess: f.commercialAccess, lifecycle: f.lifecycle, normAccepted: f.normAccepted, sourAccepted: f.sourAccepted, twentyFourHourCallout: f.twentyFourHourCallout, legalLocation: f.legalLocation,
         acceptance: input.wasteCode ? (caps.find(c => c.facilityId === f.id)?.acceptanceStatus ?? "unknown") : undefined,
-        distanceNote: f.coordinatePrecision === "community_only" ? "distance to the community, not the gate" : undefined }))
+        distanceNote: f.coordinatePrecision === "community_only" ? "distance to the community, not the gate" : f.coordinatePrecision === "approximate_site" ? "distance to the LSD centre, ±2 km, not the gate" : undefined,
+        accessNote: f.commercialAccess === "operator_private" ? "producer-owned: does not take third-party loads" : f.commercialAccess === "unknown" ? "commercial access unknown — confirm before travelling" : f.commercialAccess === "commercial_preapproval_required" ? "preapproval required" : undefined,
+        lifecycleNote: f.lifecycle === "conflicting" ? "sources disagree on whether this site operates" : f.lifecycle === "closed" ? "closed" : f.lifecycle === "suspended" ? "suspended" : undefined }))
         .filter(x => x.distanceKm <= input.radiusKm).sort((a, b) => a.distanceKm - b.distanceKm).slice(0, input.limit);
       return { origin: { latitude: input.latitude, longitude: input.longitude }, radiusKm: input.radiusKm, wasteCode: input.wasteCode ?? null, facilities: out, note: "Distances are straight-line. Routes come from the spatial engine with commercial-vehicle constraints; call ahead before travelling." };
     }),
@@ -281,8 +330,9 @@ export const facilityDirectoryRouter = router({
       const freshest = waits[0];
       const lastValid = calls.find(c => (c.outcome === "accepted" || c.outcome === "accepted_with_conditions") && c.validUntil && c.validUntil > now && (!input.loadId || c.loadId === null || c.loadId === input.loadId));
       return {
-        facility: { facilityKey: f.facilityKey, name: f.name, operatorNameFromSource: f.operatorNameFromSource, municipality: f.municipality, province: f.province, facilityType: f.facilityType, status: f.status, coordinatePrecision: f.coordinatePrecision, routable: routableOf(f), regulatorRef: f.regulatorRef },
-        contact: { phone: f.phone, emergencyPhone: f.emergencyPhone, websiteUrl: f.websiteUrl, accountRegistrationUrl: f.accountRegistrationUrl, gateInstructions: f.gateInstructions, requiredDocuments: f.requiredDocuments },
+        facility: { facilityKey: f.facilityKey, name: f.name, operatorNameFromSource: f.operatorNameFromSource, parentCompany: f.parentCompany, municipality: f.municipality, province: f.province, facilityType: f.facilityType, facilityTypes: jsonArray<string>(f.facilityTypes), status: f.status, lifecycle: f.lifecycle, commercialAccess: f.commercialAccess, coordinatePrecision: f.coordinatePrecision, legalLocation: f.legalLocation, physicalAddress: f.physicalAddress, routable: routableOf(f), regulatorRef: f.regulatorRef, preapprovalRequired: f.preapprovalRequired, manifestRequired: f.manifestRequired, tdgRequired: f.tdgRequired, normAccepted: f.normAccepted, sourAccepted: f.sourAccepted, twentyFourHourCallout: f.twentyFourHourCallout, sourceAuthority: f.sourceAuthority },
+        contact: { phone: f.phone, dispatchPhone: f.dispatchPhone, afterHoursPhone: f.afterHoursPhone, salesContact: f.salesContact, email: f.email, emergencyPhone: f.emergencyPhone, websiteUrl: f.websiteUrl, accountRegistrationUrl: f.accountRegistrationUrl, wasteApprovalFormUrl: f.wasteApprovalFormUrl, gateInstructions: f.gateInstructions, requiredDocuments: f.requiredDocuments },
+        warnings: [f.lifecycle === "conflicting" ? "Sources disagree on whether this site operates — resolve before dispatch" : null, f.lifecycle === "closed" ? "Closed" : null, f.commercialAccess === "operator_private" ? "Producer-owned: does not take third-party loads" : null, f.commercialAccess === "unknown" ? "Commercial access unknown — confirm on the call" : null, f.coordinatePrecision !== "verified_entrance" && f.coordinatePrecision !== "verified_site" ? "Coordinates are not a verified entrance — no directions link" : null].filter((x): x is string => x !== null),
         links: buildFacilityLinks({ precision: f.coordinatePrecision, site: f.latitude !== null && f.longitude !== null ? { lat: f.latitude, lon: f.longitude } : undefined, phone: f.phone ?? undefined, websiteUrl: f.websiteUrl ?? undefined, accountRegistrationUrl: f.accountRegistrationUrl ?? undefined }),
         hoursToday: today ? { ...today, state: "as_stated" as const } : { state: "unknown" as const, note: "No hours on file — call ahead" },
         hoursWeek: hours,

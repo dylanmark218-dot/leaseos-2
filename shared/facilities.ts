@@ -12,7 +12,12 @@ export const wasteCodeSchema = z.enum([
   "drilling_mud", "drill_cuttings", "produced_water", "flowback", "oily_water_emulsion",
   "contaminated_soil", "hazardous_solids", "asbestos", "construction_demolition",
   "commercial_msw", "tires", "scrap_metal", "clean_wood",
+  // 0141 — streams the operator briefs route separately; a sour or NORM-impacted load needs its own acceptance.
+  "sour_produced_water", "norm_impacted", "cement_returns", "oily_sludge", "pcb_waste", "dangerous_goods_solids",
 ]);
+/** Who a facility takes loads from. Government facility layers list producer-owned sites that take nobody's load but their owner's. */
+export const commercialAccessSchema = z.enum(["commercial_public", "commercial_preapproval_required", "operator_private", "transfer_only", "unknown"]);
+export const facilityLifecycleSchema = z.enum(["operating", "suspended", "closed", "conflicting", "unknown"]);
 
 export const facilityRecordSchema = z.object({
   facilityKey: z.string().min(1).max(100),
@@ -49,6 +54,8 @@ export type CoordinatePrecision = z.infer<typeof coordinatePrecisionSchema>;
 export type AcceptanceStatus = z.infer<typeof acceptanceStatusSchema>;
 export type CompatibilityOutcome = z.infer<typeof compatibilityOutcomeSchema>;
 export type WasteCode = z.infer<typeof wasteCodeSchema>;
+export type CommercialAccess = z.infer<typeof commercialAccessSchema>;
+export type FacilityLifecycle = z.infer<typeof facilityLifecycleSchema>;
 export type FacilityRecord = z.infer<typeof facilityRecordSchema>;
 
 export type FacilityMapFeature = Pick<FacilityRecord,

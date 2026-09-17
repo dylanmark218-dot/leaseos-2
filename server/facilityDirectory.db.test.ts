@@ -145,3 +145,46 @@ d("facility directory — the driver's half", () => {
     expect((await callerFor(driver).facilityDirectory.driverView({ facilityKey })).currentWait).toMatchObject({ state: "reported", waitMinutes: 45, trucksInQueue: 6, source: "driver_observed" });
   }, 60_000);
 });
+
+d("facility directory — the operator briefs of 2026-09-17", () => {
+  it("seeds 77 sites: LSDs become approximate_site pins (never routable), NTS stays unconverted, contacts land in their columns, former operators become aliases, Virden is conflicting and fails closed, a producer-private site fails closed", async () => {
+    const safety = await withRole("safety"), driver = await withRole("driver"), dispatcher = await withRole("dispatcher");
+    const first = await callerFor(safety).facilityDirectory.seedBrief();
+    expect(first.inserted + first.existing).toBe(77);
+    expect(first.routable).toBe(0);
+    const again = await callerFor(safety).facilityDirectory.seedBrief();
+    expect(again).toMatchObject({ inserted: 0, existing: 77 });
+    // R360 West Edson TRD: LSD-derived pin near Edson, dispatch and site phones, a former-operator alias, not routable.
+    const edson = await callerFor(driver).facilityDirectory.driverView({ facilityKey: "r360-west-edson-trd" });
+    expect(edson.facility).toMatchObject({ coordinatePrecision: "approximate_site", legalLocation: "07-18-053-18 W5M", routable: false, parentCompany: "Waste Connections", commercialAccess: "commercial_preapproval_required" });
+    expect(edson.contact).toMatchObject({ phone: "780-723-1912", dispatchPhone: "1-855-591-5360", email: "info@r360canada.com" });
+    expect(edson.links.googleDirections).toBeNull();
+    expect(edson.warnings).toEqual(expect.arrayContaining([expect.stringContaining("not a verified entrance")]));
+    const g = await callerFor(driver).facilityDirectory.get({ facilityKey: "r360-west-edson-trd" });
+    expect(g.aliases.map(a => a.alias)).toEqual(expect.arrayContaining(["SECURE West Edson TRD", "Tervita West Edson TRD"]));
+    expect(Math.abs(g.facility.latitude! - 53.56)).toBeLessThan(0.1);
+    // Silverberry Landfill has an NTS-style description: no pin, location stays unknown rather than guessed.
+    const nts = await callerFor(driver).facilityDirectory.get({ facilityKey: "r360-silverberry-landfill" });
+    expect(nts.facility).toMatchObject({ coordinatePrecision: "unknown", latitude: null, legalLocation: "A-08-088-20 W6M" });
+    // Nearby from Edson now finds the LSD-located sites with the ±2 km caveat.
+    const near = await callerFor(driver).facilityDirectory.nearby({ latitude: 53.58, longitude: -116.44, radiusKm: 60 });
+    expect(near.facilities.some(f => f.facilityKey === "r360-west-edson-trd" && f.distanceNote?.includes("LSD centre"))).toBe(true);
+    // Virden: two conflicting evidence rows, lifecycle conflicting; an assessment fails closed and names it.
+    const [l] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO loads (loadNumber, jobId, material) VALUES (?, 1, 'drill cuttings')", [`LD-${rnd()}`]);
+    const virden = await callerFor(driver).facilityDirectory.get({ facilityKey: "virden-facility-conflicting" });
+    expect(virden.evidence.filter(e => e.reviewState === "conflicting").length).toBe(2);
+    const a = await callerFor(dispatcher).facilityDirectory.assessLoad({ loadId: l.insertId, facilityKey: "virden-facility-conflicting", loadWasteCode: "drill_cuttings" });
+    expect(a.blocking).toBe(true);
+    expect(a.reasonCodes).toEqual(expect.arrayContaining(["evidence_conflict", "lifecycle_conflicting"]));
+    // A producer-private site: even fully verified, it does not take third-party loads.
+    const key = `private-${rnd()}`;
+    await pool.execute("INSERT INTO facilities (facilityKey, name, status, province, facilityType, latitude, longitude, coordinatePrecision, coordinateSourceUrl, disposition, commercialAccess, lifecycle) VALUES (?,?,'open','SK','swd',51.0,-108.0,'verified_site','https://example.org/v','verified_facility','operator_private','operating')", [key, "Producer SWD"]);
+    const p = await callerFor(dispatcher).facilityDirectory.assessLoad({ loadId: l.insertId, facilityKey: key, loadWasteCode: "produced_water" });
+    expect(p.reasonCodes).toContain("operator_private");
+    expect(p.blocking).toBe(true);
+    // The Alberta-registry rows carry the OGL licence and the WM number where the brief gave one.
+    const voda = await callerFor(driver).facilityDirectory.get({ facilityKey: "voda-grande-cache" });
+    expect(voda.facility.regulatorRef).toBe("WM 074");
+    expect(voda.evidence[0]).toMatchObject({ licenceKey: "ogl_alberta", reviewState: "lead" });
+  }, 60_000);
+});

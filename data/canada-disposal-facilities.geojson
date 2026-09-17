@@ -1,0 +1,2638 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": "secure-fox-creek-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.802,
+     54.395
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-fox-creek-lead",
+    "name": "SECURE Fox Creek facility lead",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Fox Creek",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "industrial_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": "1-877-518-4321",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-edson-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-edson-lead",
+    "name": "SECURE Edson facility lead",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "industrial_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": "1-877-518-4321",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-whitecourt-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.685,
+     54.142
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-whitecourt-lead",
+    "name": "SECURE Whitecourt facility lead",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Whitecourt",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "industrial_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": "1-877-518-4321",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-grande-prairie-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.795,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-grande-prairie-lead",
+    "name": "SECURE Grande Prairie facility lead",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "industrial_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": "1-877-518-4321",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-fort-st-john-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -120.847,
+     56.246
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-fort-st-john-lead",
+    "name": "SECURE Fort St. John facility lead",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "BC",
+    "municipality": "Fort St. John",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "industrial_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": "1-877-518-4321",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-rycroft-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.711,
+     55.759
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-rycroft-lead",
+    "name": "SECURE Rycroft facility lead",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Rycroft",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "industrial_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": "1-877-518-4321",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-willingdon-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.119,
+     53.828
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-willingdon-lead",
+    "name": "SECURE Willingdon facility lead",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Willingdon",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "industrial_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": "1-877-518-4321",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-kindersley-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.157,
+     51.467
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-kindersley-lead",
+    "name": "SECURE Kindersley facility lead",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "SK",
+    "municipality": "Kindersley",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "industrial_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": "1-877-518-4321",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-atmore-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.54,
+     54.8
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-atmore-lead",
+    "name": "R360 Atmore cavern/SWD lead",
+    "operator": "waste-connections-r360",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Atmore",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "cavern_swd"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.wasteconnectionscanada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-brazeau-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.13,
+     53.22
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-brazeau-lead",
+    "name": "R360 Brazeau TRD lead",
+    "operator": "waste-connections-r360",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Brazeau County",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.wasteconnectionscanada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-buck-creek-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.59,
+     53.23
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-buck-creek-lead",
+    "name": "R360 Buck Creek TRD lead",
+    "operator": "waste-connections-r360",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Buck Creek",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.wasteconnectionscanada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-west-edson-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-west-edson-lead",
+    "name": "R360 West Edson TRD lead",
+    "operator": "waste-connections-r360",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.wasteconnectionscanada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-elk-point-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.9,
+     53.9
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-elk-point-lead",
+    "name": "R360 Elk Point landfill lead",
+    "operator": "waste-connections-r360",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Elk Point",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "landfill"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.wasteconnectionscanada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-willesden-green-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.47,
+     52.34
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-willesden-green-lead",
+    "name": "R360 Willesden Green landfill lead",
+    "operator": "waste-connections-r360",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Willesden Green",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "landfill"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.wasteconnectionscanada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-unity-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.168,
+     52.445
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-unity-lead",
+    "name": "R360 Unity cavern lead",
+    "operator": "waste-connections-r360",
+    "parentCompany": null,
+    "province": "SK",
+    "municipality": "Unity",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "salt_cavern"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.wasteconnectionscanada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-ryley-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.428,
+     53.288
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-ryley-lead",
+    "name": "Clean Harbors Ryley Technical Services lead",
+    "operator": "clean-harbors",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Ryley",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_i_landfill"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.cleanharbors.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "aquatera-gp-septage-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.795,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "aquatera-gp-septage-lead",
+    "name": "Aquatera Grande Prairie septage receiving lead",
+    "operator": "aquatera",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "septage_receiving"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.aquatera.ca/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "edson-septage-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "edson-septage-lead",
+    "name": "Edson wastewater/septage receiving lead",
+    "operator": "town-edson",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "septage_receiving"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.edson.ca/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "west-yellowhead-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.5857,
+     53.4001
+    ]
+   },
+   "properties": {
+    "facilityKey": "west-yellowhead-landfill-lead",
+    "name": "West Yellowhead Regional Landfill lead",
+    "operator": "yellowhead-region",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Hinton",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://yhcounty.ca/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "peers-transfer-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.005,
+     53.658
+    ]
+   },
+   "properties": {
+    "facilityKey": "peers-transfer-lead",
+    "name": "Peers Transfer Station lead",
+    "operator": "yellowhead-county",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Peers",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "transfer_station"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://yhcounty.ca/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clairmont-crwm-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.793,
+     55.261
+    ]
+   },
+   "properties": {
+    "facilityKey": "clairmont-crwm-lead",
+    "name": "Clairmont Centre for Recycling and Waste Management lead",
+    "operator": "county-grande-prairie",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Clairmont",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.countygp.ab.ca/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-edson-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-edson-service",
+    "name": "GFL Edson service location",
+    "operator": "gfl",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "service_location"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://gflenv.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "prairie-disposal-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.795,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "prairie-disposal-service",
+    "name": "Prairie Disposal service location lead",
+    "operator": "prairie-disposal",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "service_location"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": null
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-nisku-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.55,
+     53.33
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-nisku-lead",
+    "name": "GFL Environmental Nisku industrial hub lead",
+    "operator": "gfl",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Nisku",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "hazardous_liquid_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://gflenv.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-calgary-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.07,
+     51.05
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-calgary-lead",
+    "name": "GFL Environmental Calgary industrial hub lead",
+    "operator": "gfl",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Calgary",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "hazardous_liquid_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://gflenv.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-nisku-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.55,
+     53.33
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-nisku-lead",
+    "name": "Clean Harbors Nisku lead",
+    "operator": "clean_harbors",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Nisku",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "hazardous_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.cleanharbors.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-fort-mcmurray-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.38,
+     56.73
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-fort-mcmurray-lead",
+    "name": "Clean Harbors Fort McMurray lead",
+    "operator": "clean_harbors",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Fort McMurray",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "hazardous_waste"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.cleanharbors.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "wm-thorhild-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.12,
+     54.16
+    ]
+   },
+   "properties": {
+    "facilityKey": "wm-thorhild-landfill-lead",
+    "name": "WM Thorhild Landfill lead",
+    "operator": "waste_management",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Thorhild",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.wm.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "wm-pembina-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.98,
+     53.22
+    ]
+   },
+   "properties": {
+    "facilityKey": "wm-pembina-landfill-lead",
+    "name": "WM Pembina Landfill lead",
+    "operator": "waste_management",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Drayton Valley",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.wm.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "aquatera-grande-prairie-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.8,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "aquatera-grande-prairie-landfill-lead",
+    "name": "Aquatera Utilities landfill lead",
+    "operator": "aquatera",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.aquatera.ca/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "heartland-disposal-edson-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.44,
+     53.58
+    ]
+   },
+   "properties": {
+    "facilityKey": "heartland-disposal-edson-service",
+    "name": "Heartland Disposal & Recycling (service — Edson & Central AB)",
+    "operator": "heartland_disposal",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "service"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": null
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "elite-vac-steam-grande-prairie-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.8,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "elite-vac-steam-grande-prairie-service",
+    "name": "Elite Vac & Steam (hauler — Grande Prairie & Peace Region)",
+    "operator": "elite_vac_steam",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "hauler"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "unknown",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": null
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-atmore-east-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.4982,
+     54.794
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-atmore-east-swd",
+    "name": "R360 Atmore East SWD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "11-21-067-17 W4M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "swd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-404-4209",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-atmore-west-cavern",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.5985,
+     54.794
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-atmore-west-cavern",
+    "name": "R360 Atmore West Cavern",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "11-23-067-18 W4M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "cavern"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-404-6799",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-berland-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.3806,
+     54.0981
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-berland-swd",
+    "name": "R360 Berland SWD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "09-19-059-23 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "swd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "825-606-9838",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-brazeau-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.5048,
+     53.0107
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-brazeau-trd",
+    "name": "R360 Brazeau TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "11-03-047-11 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-894-2291",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-buck-creek-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.838,
+     53.0107
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-buck-creek-trd",
+    "name": "R360 Buck Creek TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "12-05-047-06 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-542-6738",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-conklin-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.2391,
+     55.6385
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-conklin-trd",
+    "name": "R360 Conklin TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "15-12-077-09 W4M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-404-6499",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-elk-point-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.7973,
+     53.732
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-elk-point-landfill",
+    "name": "R360 Elk Point Landfill",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "06-15-055-06 W4M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-724-4333",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-fort-mcmurray-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.8938,
+     56.2221
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-fort-mcmurray-trd",
+    "name": "R360 Fort McMurray TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "02-05-084-06 W4M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-405-3607",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-fox-creek-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.6619,
+     54.3264
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-fox-creek-swd",
+    "name": "R360 Fox Creek SWD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "07-07-062-18 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "swd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "825-606-9840",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-fox-creek-terminal",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.8523,
+     54.3917
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-fox-creek-terminal",
+    "name": "R360 Fox Creek Terminal",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "13-36-062-20 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "transfer"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-622-3355",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-gordondale-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.4439,
+     55.8089
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-gordondale-trd",
+    "name": "R360 Gordondale TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "09-10-079-10 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-353-3770",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-kakwa-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.5479,
+     54.2793
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-kakwa-swd",
+    "name": "R360 Kakwa SWD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "01-29-061-04 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "swd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-783-3020",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-la-glace-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.19,
+     55.287
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-la-glace-trd",
+    "name": "R360 La Glace TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "12-08-073-08 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-766-3111",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-la-glace-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.2731,
+     55.3051
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-la-glace-landfill",
+    "name": "R360 La Glace Landfill",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "16-15-073-09 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-356-0007",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-lindbergh-cavern",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.6341,
+     53.848
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-lindbergh-cavern",
+    "name": "R360 Lindbergh Cavern",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "05-26-056-05 W4M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "cavern"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-724-3002",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-moose-creek-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.2965,
+     53.5508
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-moose-creek-swd",
+    "name": "R360 Moose Creek SWD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "15-08-053-16 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "swd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "587-792-1211",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-south-wapiti-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7648,
+     54.9571
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-south-wapiti-trd",
+    "name": "R360 South Wapiti TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "15-13-069-06 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-539-6917",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-south-wapiti-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7588,
+     54.9716
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-south-wapiti-landfill",
+    "name": "R360 South Wapiti Landfill",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "16-24-069-06 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-539-7677",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-spirit-river-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7663,
+     55.6929
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-spirit-river-trd",
+    "name": "R360 Spirit River TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "12-31-077-05 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-765-2395",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-spirit-river-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7661,
+     55.6857
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-spirit-river-landfill",
+    "name": "R360 Spirit River Landfill",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "04-31-077-05 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-765-3745",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-west-edson-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.6133,
+     53.558
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-west-edson-trd",
+    "name": "R360 West Edson TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "07-18-053-18 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-723-1912",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-willesden-green-terminal",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.8495,
+     52.6808
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-willesden-green-terminal",
+    "name": "R360 Willesden Green Terminal",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "14-07-043-06 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "transfer"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "403-844-8641",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-willesden-green-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.8732,
+     52.6736
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-willesden-green-landfill",
+    "name": "R360 Willesden Green Landfill",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "SW-12-043-07 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "403-845-2336",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-kindersley-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.1425,
+     51.5644
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-kindersley-trd",
+    "name": "R360 Kindersley TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "SK",
+    "municipality": null,
+    "legalLocation": "16-16-030-23 W3M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "306-463-6220",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-unity-cavern",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.0658,
+     52.4054
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-unity-cavern",
+    "name": "R360 Unity Cavern",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "SK",
+    "municipality": null,
+    "legalLocation": "15-04-040-22 W3M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "cavern"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "306-228-3001",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-silverberry-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -121.1281,
+     56.5955
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-silverberry-trd",
+    "name": "R360 Silverberry TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "BC",
+    "municipality": null,
+    "legalLocation": "16-07-088-20 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "250-827-6852",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-south-taylor-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -120.6169,
+     56.0373
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-south-taylor-trd",
+    "name": "R360 South Taylor TRD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "BC",
+    "municipality": null,
+    "legalLocation": "08-31-081-17 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "250-789-3603",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-tower-lake-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -120.5644,
+     56.0264
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-tower-lake-swd",
+    "name": "R360 Tower Lake SWD",
+    "operator": "r360",
+    "parentCompany": "Waste Connections",
+    "province": "BC",
+    "municipality": null,
+    "legalLocation": "09-28-081-17 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "swd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "250-262-6771",
+    "dispatchPhone": "1-855-591-5360",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.r360canada.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-fox-creek-east-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.6607,
+     54.3083
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-fox-creek-east-landfill",
+    "name": "SECURE Fox Creek East Landfill",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Fox Creek",
+    "legalLocation": "02-06-062-18 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-622-2981",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "1-877-518-4321",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-janvier-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.8491,
+     55.9611
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-janvier-landfill",
+    "name": "SECURE Janvier Landfill",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Janvier",
+    "legalLocation": "04-03-081-06 W4M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-808-4239",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "1-877-518-4321",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-pembina-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.5752,
+     53.2934
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-pembina-landfill",
+    "name": "SECURE Pembina Landfill",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Drayton Valley",
+    "legalLocation": "01-18-050-11 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_i_landfill",
+     "norm"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-542-4733",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "1-877-518-4321",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-saddle-hills-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.6743,
+     55.7835
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-saddle-hills-landfill",
+    "name": "SECURE Saddle Hills Landfill",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Bonanza",
+    "legalLocation": "16-31-078-11 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "855-306-3486",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "1-877-518-4321",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-south-grande-prairie-wpf",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7701,
+     54.9064
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-south-grande-prairie-wpf",
+    "name": "SECURE South Grande Prairie WPF",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Grovedale",
+    "legalLocation": "06-36-068-06 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "waste_processing"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "866-206-5395",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "1-877-518-4321",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-tulliby-lake",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.3027,
+     53.7755
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-tulliby-lake",
+    "name": "SECURE Tulliby Lake",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Marwayne",
+    "legalLocation": "07-36-055-03 W4M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "855-306-1442",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "1-877-518-4321",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-judy-creek-wpf",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.3967,
+     54.4823
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-judy-creek-wpf",
+    "name": "SECURE Judy Creek WPF",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Whitecourt",
+    "legalLocation": "01-03-064-10 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "waste_processing"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "855-391-9739 ext. 6180",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "780-225-2000",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-obed-wpf",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.2361,
+     53.5073
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-obed-wpf",
+    "name": "SECURE Obed WPF",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Hinton",
+    "legalLocation": "16-26-052-23 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "waste_processing"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "866-765-0798",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "780-225-2000",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-deerhill-edson-wpf",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4941,
+     53.703
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-deerhill-edson-wpf",
+    "name": "SECURE Deerhill / Edson WPF",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": "08-01-055-18 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "waste_processing"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "587-466-9831",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "1-877-518-4321",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-nosehill-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.8758,
+     53.7501
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-nosehill-swd",
+    "name": "SECURE Nosehill SWD",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": "11-21-055-20 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "swd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "587-466-9831",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "1-877-518-4321",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-marshall-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.6959,
+     53.1339
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-marshall-landfill",
+    "name": "SECURE Marshall Landfill",
+    "operator": "secure",
+    "parentCompany": null,
+    "province": "SK",
+    "municipality": null,
+    "legalLocation": "02-21-048-26 W3M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "306-387-6507",
+    "dispatchPhone": "1-866-391-0444",
+    "afterHoursPhone": "1-877-518-4321",
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "virden-facility-conflicting",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -100.93,
+     49.85
+    ]
+   },
+   "properties": {
+    "facilityKey": "virden-facility-conflicting",
+    "name": "Virden waste facility — status conflicting (SECURE: no longer in operation; Town of Virden: managed by LOCAL Industrial Partners)",
+    "operator": "unknown",
+    "parentCompany": null,
+    "province": "MB",
+    "municipality": "Virden",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "facilityTypes": [
+     "class_ii_landfill"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "conflicting",
+    "commercialAccess": "unknown",
+    "phone": null,
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://secure.ca/facilities-and-landfills"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "pure-environmental-fort-kent",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.4753,
+     54.4315
+    ]
+   },
+   "properties": {
+    "facilityKey": "pure-environmental-fort-kent",
+    "name": "Pure Environmental Fort Kent (WM 212)",
+    "operator": "pure_environmental",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Fort Kent",
+    "legalLocation": "09-14-063-04 W4M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "hazardous_treatment"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "587-792-0855",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "voda-grande-cache",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7149,
+     53.9168
+    ]
+   },
+   "properties": {
+    "facilityKey": "voda-grande-cache",
+    "name": "Voda Grande Cache (WM 074)",
+    "operator": "voda_midstream",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Grande Cache",
+    "legalLocation": "01-19-057-05 W6M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "hazardous_treatment"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "403-827-4801 (Dan Humphries, dhumphries@vodamidstream.com)",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "voda-paddle-river",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.1554,
+     53.8697
+    ]
+   },
+   "properties": {
+    "facilityKey": "voda-paddle-river",
+    "name": "Voda Paddle River (WM 060)",
+    "operator": "voda_midstream",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Paddle River",
+    "legalLocation": "16-31-056-08 W5M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "hazardous_treatment"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-674-0654 (Bill Hughes, bhughes@vodamidstream.com)",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "recover-lodgepole",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.2362,
+     53.0723
+    ]
+   },
+   "properties": {
+    "facilityKey": "recover-lodgepole",
+    "name": "Recover Inc. Lodgepole (WM 189)",
+    "operator": "recover",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Brazeau County",
+    "legalLocation": "15-28-047-09 W5M",
+    "physicalAddress": "9309 Township Road 475, Brazeau County",
+    "facilityTypes": [
+     "trd",
+     "hydrovac"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "780-514-5698",
+    "dispatchPhone": null,
+    "afterHoursPhone": "1-844-732-6864",
+    "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-calgary-44-st",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.9108,
+     50.9628
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-calgary-44-st",
+    "name": "GFL Calgary",
+    "operator": "gfl",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Calgary",
+    "legalLocation": "22-23-29-W4M",
+    "physicalAddress": "9611 44 St SE, Calgary",
+    "facilityTypes": [
+     "hazardous_treatment"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "403-215-6916 (Tom Kereluk)",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "enerstar-tide-lake",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.4081,
+     50.3683
+    ]
+   },
+   "properties": {
+    "facilityKey": "enerstar-tide-lake",
+    "name": "Enerstar Petroleum Tide Lake",
+    "operator": "enerstar",
+    "parentCompany": null,
+    "province": "AB",
+    "municipality": "Tide Lake",
+    "legalLocation": "08-27-016-11 W4M",
+    "physicalAddress": null,
+    "facilityTypes": [
+     "hydrovac",
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "403-875-2721 (Lee Materi) / 403-317-3978 (Kyle James)",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "aqua-terra-fort-st-john",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -120.8262,
+     56.2439
+    ]
+   },
+   "properties": {
+    "facilityKey": "aqua-terra-fort-st-john",
+    "name": "Aqua Terra Fort St. John (produced water incl. sour and frac flowback; non-hazardous waste)",
+    "operator": "aqua_terra",
+    "parentCompany": "Canadian Aqua Terra",
+    "province": "BC",
+    "municipality": "Fort St. John",
+    "legalLocation": "11-12-084-19 W6M",
+    "physicalAddress": "approx. 3.6 km north of Hwy 97 on 116 Street / West Bypass Road",
+    "facilityTypes": [
+     "swd",
+     "trd"
+    ],
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "250-261-4311",
+    "dispatchPhone": "1-888-538-3967",
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.canadianaquaterra.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "miller-vaughn-bullough-environmental-centre",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -97.33,
+     49.26
+    ]
+   },
+   "properties": {
+    "facilityKey": "miller-vaughn-bullough-environmental-centre",
+    "name": "Miller Environmental — Vaughn Bullough Environmental Centre",
+    "operator": "miller_environmental",
+    "parentCompany": null,
+    "province": "MB",
+    "municipality": "Saint Jean Baptiste",
+    "legalLocation": null,
+    "physicalAddress": "Hwy 14 & Hwy 75, Saint Jean Baptiste, MB R0G 2B0",
+    "facilityTypes": [
+     "class_i_landfill",
+     "hazardous_treatment",
+     "hydrovac"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "204-737-2045",
+    "dispatchPhone": "204-925-9600",
+    "afterHoursPhone": "204-957-6327",
+    "websiteUrl": "https://www.millerenvironmental.mb.ca/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-lambton",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -82.43,
+     42.88
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-lambton",
+    "name": "Clean Harbors Lambton / Sarnia (incineration, secure landfill, treatment)",
+    "operator": "clean_harbors",
+    "parentCompany": null,
+    "province": "ON",
+    "municipality": "Corunna",
+    "legalLocation": null,
+    "physicalAddress": "4090 Telfer Road, RR #1, Corunna, ON N0N 1G0",
+    "facilityTypes": [
+     "incineration",
+     "class_i_landfill",
+     "hazardous_treatment"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "519-864-3970; 519-864-1021",
+    "dispatchPhone": null,
+    "afterHoursPhone": "1-800-645-8265",
+    "websiteUrl": "https://www.cleanharbors.com/"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "stablex-blainville",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -73.88,
+     45.67
+    ]
+   },
+   "properties": {
+    "facilityKey": "stablex-blainville",
+    "name": "Stablex Canada Blainville (hazardous treatment / stabilization / secure placement)",
+    "operator": "stablex",
+    "parentCompany": null,
+    "province": "QC",
+    "municipality": "Blainville",
+    "legalLocation": null,
+    "physicalAddress": "760 Boulevard Industriel, Blainville, QC J7C 3V4",
+    "facilityTypes": [
+     "hazardous_treatment",
+     "class_i_landfill"
+    ],
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "lifecycle": "operating",
+    "commercialAccess": "commercial_preapproval_required",
+    "phone": "450-430-9230",
+    "dispatchPhone": null,
+    "afterHoursPhone": null,
+    "websiteUrl": "https://www.stablex.com/"
+   }
+  }
+ ]
+}
