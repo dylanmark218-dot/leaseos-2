@@ -1276,7 +1276,7 @@ export const appRouter = router({
     }),
     identity: router({
       operators: router({
-        list: roleProcedure("operators.list").query(() => listOperators()),
+        list: roleProcedure("operators.list").query(async ({ ctx }) => listOperators(await scopeFor(ctx.user.id))),
         create: roleProcedure("operators.create")
           .input(
             z.object({
@@ -1293,10 +1293,10 @@ export const appRouter = router({
               emergencyContact: z.string().max(220).optional(),
             })
           )
-          .mutation(({ input }) => createOperator(input)),
+          .mutation(async ({ ctx, input }) => createOperator(input, await scopeFor(ctx.user.id), ctx.user.id)),
       }),
       units: router({
-        list: roleProcedure("units.list").query(() => listUnits()),
+        list: roleProcedure("units.list").query(async ({ ctx }) => listUnits(await scopeFor(ctx.user.id))),
         create: roleProcedure("units.create")
           .input(
             z.object({
@@ -1314,7 +1314,7 @@ export const appRouter = router({
               qrTag: z.string().max(120).optional(),
             })
           )
-          .mutation(({ input }) => createUnit({ ...input, inspectionStatus: "due", maintenanceStatus: "review" })),   // a new row proves nothing: due and review until the facts exist
+          .mutation(async ({ ctx, input }) => createUnit({ ...input, inspectionStatus: "due", maintenanceStatus: "review" }, await scopeFor(ctx.user.id), ctx.user.id)),   // a new row proves nothing: due and review until the facts exist
       }),
       jobUnits: router({
         list: roleProcedure("jobUnits.list").query(() => listJobUnits()),

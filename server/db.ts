@@ -79,6 +79,7 @@ import {
   users,
   externalIdentities,
   integrationClients,
+  coreRecordOwnership,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -718,34 +719,55 @@ export async function reviewComplianceDocument(
   return true;
 }
 
-export async function listOperators() {
+/**
+ * P4.1 router 2 — units and operators are scoped through coreRecordOwnership,
+ * the table that already answers recordBelongsToOrganization for them. No new
+ * column: the default scope sees records with no owner (the historical single
+ * tenant's); a member sees records their organization owns. A record created by
+ * a member is assigned to their organization in the same call.
+ */
+function ownershipScopeWhere(recordType: "unit" | "operator", idColumn: MySqlColumn, scope: TenantScope) {
+  const owner = db_sub(recordType, idColumn);
+  return scope.tenantId === SINGLE_TENANT_ID ? isNull(owner) : eq(owner, scope.tenantId);
+}
+/** Correlated subquery: the owning organization of this record, or NULL. */
+function db_sub(recordType: "unit" | "operator", idColumn: MySqlColumn) {
+  return sql<string | null>`(SELECT o.orgRef FROM coreRecordOwnership o WHERE o.recordType = ${recordType} AND o.recordId = ${idColumn} LIMIT 1)`;
+}
+
+export async function listOperators(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(operators)
+    .where(ownershipScopeWhere("operator", operators.id, scope))
     .orderBy(desc(operators.updatedAt))
     .limit(100);
 }
 
-export async function createOperator(input: InsertOperator) {
+export async function createOperator(input: InsertOperator, scope: TenantScope, assignedByUserId: number) {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.insert(operators).values(input);
-  return result[0]?.insertId;
+  const id = result[0]?.insertId;
+  if (id && scope.tenantId !== SINGLE_TENANT_ID) await db.insert(coreRecordOwnership).values({ orgRef: scope.tenantId, recordType: "operator", recordId: id, assignedByUserId });
+  return id;
 }
 
-export async function listUnits() {
+export async function listUnits(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(units).orderBy(units.unitNumber).limit(100);
+  return db.select().from(units).where(ownershipScopeWhere("unit", units.id, scope)).orderBy(units.unitNumber).limit(100);
 }
 
-export async function createUnit(input: InsertUnit) {
+export async function createUnit(input: InsertUnit, scope: TenantScope, assignedByUserId: number) {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.insert(units).values(input);
-  return result[0]?.insertId;
+  const id = result[0]?.insertId;
+  if (id && scope.tenantId !== SINGLE_TENANT_ID) await db.insert(coreRecordOwnership).values({ orgRef: scope.tenantId, recordType: "unit", recordId: id, assignedByUserId });
+  return id;
 }
 
 export async function listLoadProfiles() {

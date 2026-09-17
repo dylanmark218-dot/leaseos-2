@@ -64,3 +64,29 @@ d("jobs and trips belong to an organization", () => {
     expect((await callerFor(dispB).fieldRoute.trips.list()).some(t => t.tripNumber === tripNumber)).toBe(false);
   }, 20_000);
 });
+
+d("units and operators belong to an organization through the ownership table", () => {
+  it("assigns a member's new unit and operator to their organization and hides them from another", async () => {
+    const a = await org(), b = await org();
+    const officeA = await member(a, "office"), officeB = await member(b, "office");
+    const unitNumber = `U-${rnd()}`;
+    await callerFor(officeA).fieldRoute.identity.units.create({ unitNumber, vehicleType: "hydrovac" } as never);
+    await callerFor(officeA).fieldRoute.identity.operators.create({ name: `Op ${rnd()}`, licenseNumber: `LIC-${rnd()}` } as never);
+    const [own] = await pool.query<mysql.RowDataPacket[]>("SELECT o.orgRef FROM coreRecordOwnership o JOIN units u ON u.id = o.recordId AND o.recordType = 'unit' WHERE u.unitNumber = ?", [unitNumber]);
+    expect(own[0]?.orgRef).toBe(a);
+    expect((await callerFor(officeA).fieldRoute.identity.units.list()).some(u => u.unitNumber === unitNumber)).toBe(true);
+    expect((await callerFor(officeB).fieldRoute.identity.units.list()).some(u => u.unitNumber === unitNumber)).toBe(false);
+    const opsA = await callerFor(officeA).fieldRoute.identity.operators.list();
+    const opsB = await callerFor(officeB).fieldRoute.identity.operators.list();
+    expect(opsA.length).toBeGreaterThan(0);
+    expect(opsB.some(o => opsA.some(x => x.id === o.id))).toBe(false);
+  }, 20_000);
+
+  it("shows unowned legacy units only to the default scope", async () => {
+    const a = await org(); const officeA = await member(a, "office"); const legacyUser = await member(null, "office");
+    const unitNumber = `U-LEGACY-${rnd()}`;
+    await pool.execute("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [unitNumber, "hydrovac"]);
+    expect((await callerFor(legacyUser).fieldRoute.identity.units.list()).some(u => u.unitNumber === unitNumber)).toBe(true);
+    expect((await callerFor(officeA).fieldRoute.identity.units.list()).some(u => u.unitNumber === unitNumber)).toBe(false);
+  }, 20_000);
+});
