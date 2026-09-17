@@ -188,3 +188,58 @@ d("facility directory — the operator briefs of 2026-09-17", () => {
     expect(voda.evidence[0]).toMatchObject({ licenceKey: "ogl_alberta", reviewState: "lead" });
   }, 60_000);
 });
+
+d("facility directory — regulator layer import and the LSD finder", () => {
+  it("imports SK-shaped features under the confirmed licence, refuses an unconfirmed licence or a missing field by name, records the run, and never overwrites a verified coordinate", async () => {
+    const safety = await withRole("safety"), safety2 = await withRole("safety");
+    const { latLonToUtm } = await import("./_core/projections");
+    const { SK_FACILITIES } = await import("./_core/arcgisImport");
+    const k = latLonToUtm(51.4667, -109.1667, 13);   // Kindersley
+    const ring = (e: number, n: number) => [[e - 40, n - 40], [e + 40, n - 40], [e + 40, n + 40], [e - 40, n + 40], [e - 40, n - 40]];
+    const lic = `WP${rnd()}`;
+    const features = [
+      { attributes: { LICENCENUM: lic, OWNERNAME: "R360 CANADA", LICTYPE: "WASTE FACILITY", LICSTATUS: "ACTIVE", SURFACELOC: "16-16-030-23W3" }, geometry: { rings: [ring(k.easting, k.northing)] } },
+      { attributes: { LICENCENUM: `WP${rnd()}`, OWNERNAME: "CENOVUS ENERGY INC.", LICTYPE: "OIL SATELLITE", LICSTATUS: "SUSPENDED", SURFACELOC: "08-29-052-23W3" }, geometry: { rings: [ring(k.easting + 5000, k.northing + 5000)] } },
+      { attributes: { OWNERNAME: "NO LICENCE NUMBER" }, geometry: null },
+    ];
+    const base = { source: "sk_facilities", layerUrl: SK_FACILITIES.layerUrl, wkid: 2957, layerFields: SK_FACILITIES.fields, mapping: SK_FACILITIES.mapping, features };
+    await expect(callerFor(safety).facilityDirectory.arcgis.importFeatures({ ...base, licenceKey: "mb_unconfirmed" })).rejects.toThrow(/permission_required/);
+    await expect(callerFor(safety).facilityDirectory.arcgis.importFeatures({ ...base, licenceKey: "sk_unrestricted_use_v2", layerFields: ["OBJECTID", "LICENCENUM"] })).rejects.toThrow(/no field for: operator → OWNERNAME/);
+    const run = await callerFor(safety).facilityDirectory.arcgis.importFeatures({ ...base, licenceKey: "sk_unrestricted_use_v2" });
+    expect(run).toMatchObject({ featureCount: 3, inserted: 2, updated: 0, skipped: 1, attribution: expect.stringContaining("Standard Unrestricted Use Data Licence") });
+    const key = `sk_facilities:${lic}`;
+    const v = await callerFor(safety).facilityDirectory.driverView({ facilityKey: key });
+    expect(v.facility).toMatchObject({ coordinatePrecision: "approximate_site", regulatorRef: lic, lifecycle: "operating", commercialAccess: "unknown", routable: false, province: "SK" });
+    expect(v.warnings).toEqual(expect.arrayContaining([expect.stringContaining("Commercial access unknown")]));
+    const g = await callerFor(safety).facilityDirectory.get({ facilityKey: key });
+    expect(Math.abs(g.facility.latitude! - 51.4667)).toBeLessThan(0.001);
+    expect(g.evidence[0]).toMatchObject({ licenceKey: "sk_unrestricted_use_v2", claimType: "site_coordinate", confidence: "high", reviewState: "lead", cachedContent: true });
+    const suspended = await callerFor(safety).facilityDirectory.get({ facilityKey: `sk_facilities:${features[1]!.attributes.LICENCENUM}` });
+    expect(suspended.facility.lifecycle).toBe("suspended");
+    // A person verifies the coordinate from the regulator's evidence; a re-import refreshes the record but keeps the verified coordinate.
+    await callerFor(safety2).facilityDirectory.evidenceReview({ evidenceId: g.evidence[0]!.id, reviewState: "reviewed", note: "regulator geometry; matches the LSD" });
+    await callerFor(safety2).facilityDirectory.coordinateVerify({ facilityKey: key, evidenceId: g.evidence[0]!.id, latitude: 51.4670, longitude: -109.1660, precision: "verified_site" });
+    const again = await callerFor(safety).facilityDirectory.arcgis.importFeatures({ ...base, licenceKey: "sk_unrestricted_use_v2" });
+    expect(again).toMatchObject({ inserted: 0, updated: 2 });
+    const after = await callerFor(safety).facilityDirectory.get({ facilityKey: key });
+    expect(after.facility).toMatchObject({ coordinatePrecision: "verified_site", latitude: 51.467, longitude: -109.166 });
+    expect(after.routable).toBe(true);
+    const runs = await callerFor(safety).facilityDirectory.arcgis.runs();
+    expect(runs.find(r => r.importRef === run.importRef)).toMatchObject({ source: "sk_facilities", licenceKey: "sk_unrestricted_use_v2", inserted: 2, skipped: 1 });
+    expect((await callerFor(safety).facilityDirectory.arcgis.presets()).sk_facilities.mapping.id).toBe("LICENCENUM");
+  }, 60_000);
+
+  it("finds sites from a legal land description, saying whether the origin is the surveyed grid or the theoretical centroid, and refuses gibberish", async () => {
+    const driver = await withRole("driver"), safety = await withRole("safety");
+    await callerFor(safety).facilityDirectory.seedBrief();
+    const r = await callerFor(driver).facilityDirectory.lsdFind({ lsd: "07-18-053-18 W5M", radiusKm: 80 });   // R360 West Edson TRD's own LSD
+    expect(r.outcome).toBe("located");
+    if (r.outcome !== "located") return;
+    expect(["ats_grid", "theoretical"]).toContain(r.origin.basis);
+    expect(r.facilities[0]).toMatchObject({ facilityKey: "r360-west-edson-trd" });
+    expect(r.facilities[0]!.distanceKm).toBeLessThan(2);
+    expect(r.note).toContain("call ahead");
+    const bad = await callerFor(driver).facilityDirectory.lsdFind({ lsd: "not-an-lsd" });
+    expect(bad.outcome).toBe("invalid");
+  }, 30_000);
+});

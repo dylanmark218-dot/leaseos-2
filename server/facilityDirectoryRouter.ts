@@ -15,7 +15,9 @@ import { z } from "zod";
 import seed from "../data/western-canada-facilities.json";
 import brief from "../data/canada-disposal-facilities-brief-2026-09-17.json";
 import { approximateFromLegalLocation } from "./_core/legalLocation";
-import { facilities, facilityAliases, facilityCallAheads, facilityCapabilities, facilityEvidence, facilityOperatingHours, facilitySourceLicences, facilityWaitReports, loadFacilityAssessments, loads, wasteStreamVocabulary } from "../drizzle/schema";
+import { parseLsd } from "./_core/dls";
+import { checkMapping, featureToCandidate, lifecycleFromStatus, SK_FACILITIES, type ArcgisFeature, type FieldMapping } from "./_core/arcgisImport";
+import { facilities, facilityAliases, facilityCallAheads, facilityCapabilities, facilityEvidence, facilityOperatingHours, facilitySourceLicences, facilityWaitReports, loadFacilityAssessments, loads, wasteStreamVocabulary, facilityImportRuns, atsLegalSubdivisions } from "../drizzle/schema";
 import { acceptanceStatusSchema, coordinatePrecisionSchema, wasteCodeSchema, type CommercialAccess, type CoordinatePrecision, type FacilityLifecycle, type FacilityMapFeature } from "../shared/facilities";
 type BriefRow = { facilityKey: string; name: string; operatorKey: string; parentCompany: string | null; province: string; municipality: string | null; facilityType: string; facilityTypes: string[]; legalLocation: string | null; physicalAddress: string | null; phone: string | null; dispatchPhone: string | null; afterHoursPhone: string | null; salesContact: string | null; email: string | null; websiteUrl: string | null; licenceKey: string; sourceAuthority: string; commercialAccess: CommercialAccess; lifecycle: FacilityLifecycle; historicalOperators: string[]; normAccepted: boolean | null; sourAccepted: boolean | null; twentyFourHourCallout: boolean | null; notes: string | null; latitude?: number; longitude?: number; coordinatePrecision?: CoordinatePrecision; coordinateSourceUrl?: string; regulatorRef?: string };
 import { assessFacilityCompatibility } from "./_core/facilityCompatibility";
@@ -299,17 +301,7 @@ export const facilityDirectoryRouter = router({
     .input(z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180), radiusKm: z.number().min(1).max(1500).default(250), wasteCode: wasteCodeSchema.optional(), limit: z.number().int().min(1).max(50).default(15) }))
     .query(async ({ input }) => {
       const db = await dbOrThrow();
-      const rows = await db.select().from(facilities).where(and(isNotNull(facilities.facilityKey), isNotNull(facilities.latitude), isNotNull(facilities.longitude)));
-      const R = 6371, rad = (x: number) => (x * Math.PI) / 180;
-      const dist = (lat: number, lon: number) => { const dLat = rad(lat - input.latitude), dLon = rad(lon - input.longitude); const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(input.latitude)) * Math.cos(rad(lat)) * Math.sin(dLon / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(a)); };
-      const ids = rows.map(r => r.id);
-      const caps = ids.length && input.wasteCode ? await db.select().from(facilityCapabilities).where(and(inArray(facilityCapabilities.facilityId, ids), eq(facilityCapabilities.wasteCode, input.wasteCode))) : [];
-      const out = rows.map(f => ({ facilityKey: f.facilityKey!, name: f.name, municipality: f.municipality, province: f.province, facilityType: f.facilityType, facilityTypes: jsonArray<string>(f.facilityTypes), distanceKm: Math.round(dist(f.latitude!, f.longitude!) * 10) / 10, coordinatePrecision: f.coordinatePrecision, routable: routableOf(f), phone: f.phone, dispatchPhone: f.dispatchPhone, afterHoursPhone: f.afterHoursPhone, websiteUrl: f.websiteUrl, commercialAccess: f.commercialAccess, lifecycle: f.lifecycle, normAccepted: f.normAccepted, sourAccepted: f.sourAccepted, twentyFourHourCallout: f.twentyFourHourCallout, legalLocation: f.legalLocation,
-        acceptance: input.wasteCode ? (caps.find(c => c.facilityId === f.id)?.acceptanceStatus ?? "unknown") : undefined,
-        distanceNote: f.coordinatePrecision === "community_only" ? "distance to the community, not the gate" : f.coordinatePrecision === "approximate_site" ? "distance to the LSD centre, ±2 km, not the gate" : undefined,
-        accessNote: f.commercialAccess === "operator_private" ? "producer-owned: does not take third-party loads" : f.commercialAccess === "unknown" ? "commercial access unknown — confirm before travelling" : f.commercialAccess === "commercial_preapproval_required" ? "preapproval required" : undefined,
-        lifecycleNote: f.lifecycle === "conflicting" ? "sources disagree on whether this site operates" : f.lifecycle === "closed" ? "closed" : f.lifecycle === "suspended" ? "suspended" : undefined }))
-        .filter(x => x.distanceKm <= input.radiusKm).sort((a, b) => a.distanceKm - b.distanceKm).slice(0, input.limit);
+      const out = await nearbyFacilities(db, input.latitude, input.longitude, input.radiusKm, input.wasteCode, input.limit);
       return { origin: { latitude: input.latitude, longitude: input.longitude }, radiusKm: input.radiusKm, wasteCode: input.wasteCode ?? null, facilities: out, note: "Distances are straight-line. Routes come from the spatial engine with commercial-vehicle constraints; call ahead before travelling." };
     }),
 
@@ -343,9 +335,131 @@ export const facilityDirectoryRouter = router({
       };
     }),
 
+  /**
+   * Regulator ArcGIS layers. `inspect` reads a layer's own schema; `importFeatures` maps
+   * features a person has already pulled (or a test supplies); `importFromLayer` pulls them
+   * with pagination. Every run is recorded with the licence and the mapping. Candidates land as
+   * facilities at approximate_site precision with regulator coordinate evidence as a lead —
+   * a person verifies (coordinateVerify) before directions exist. Caching obeys the licence.
+   */
+  arcgis: router({
+    presets: roleProcedure("facilityDirectory.arcgisPresets").query(() => ({ sk_facilities: SK_FACILITIES })),
+    inspect: roleProcedure("facilityDirectory.arcgisInspect")
+      .input(z.object({ layerUrl: z.string().url().max(1024) }))
+      .mutation(async ({ input }) => {
+        const res = await fetch(`${input.layerUrl.replace(/\/$/, "")}?f=pjson`);
+        if (!res.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Layer returned ${res.status}` });
+        const meta = (await res.json()) as { name?: string; geometryType?: string; extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string; type: string; alias?: string }[]; copyrightText?: string; maxRecordCount?: number };
+        return { name: meta.name ?? null, geometryType: meta.geometryType ?? null, wkid: meta.extent?.spatialReference?.latestWkid ?? meta.extent?.spatialReference?.wkid ?? null, fields: (meta.fields ?? []).map(f => ({ name: f.name, type: f.type, alias: f.alias ?? null })), copyrightText: meta.copyrightText ?? null, maxRecordCount: meta.maxRecordCount ?? null, note: "Map these fields to ours and record the licence before importing; an empty copyrightText is not a licence." };
+      }),
+    importFeatures: roleProcedure("facilityDirectory.arcgisImportFeatures")
+      .input(z.object({ source: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), layerUrl: z.string().url().max(1024), licenceKey: z.string().min(1).max(40), wkid: z.number().int(), layerFields: z.array(z.string()).min(1), mapping: z.object({ id: z.string().min(1), name: z.string().optional(), facilityName: z.string().optional(), operator: z.string().optional(), licenceNumber: z.string().optional(), facilityType: z.string().optional(), status: z.string().optional(), legalLocation: z.string().optional() }), features: z.array(z.object({ attributes: z.record(z.string(), z.unknown()), geometry: z.object({ x: z.number().optional(), y: z.number().optional(), rings: z.array(z.array(z.array(z.number()))).optional() }).nullable().optional() })).max(5000), note: z.string().max(500).optional() }))
+      .mutation(async ({ ctx, input }) => importArcgis(ctx.user.id, input)),
+    importFromLayer: roleProcedure("facilityDirectory.arcgisImportFromLayer")
+      .input(z.object({ source: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), layerUrl: z.string().url().max(1024), licenceKey: z.string().min(1).max(40), mapping: z.object({ id: z.string().min(1), name: z.string().optional(), facilityName: z.string().optional(), operator: z.string().optional(), licenceNumber: z.string().optional(), facilityType: z.string().optional(), status: z.string().optional(), legalLocation: z.string().optional() }), where: z.string().max(500).default("1=1"), maxFeatures: z.number().int().min(1).max(20000).default(5000), note: z.string().max(500).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const base = input.layerUrl.replace(/\/$/, "");
+        const metaRes = await fetch(`${base}?f=pjson`);
+        if (!metaRes.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Layer returned ${metaRes.status}` });
+        const meta = (await metaRes.json()) as { extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string }[]; maxRecordCount?: number };
+        const wkid = meta.extent?.spatialReference?.latestWkid ?? meta.extent?.spatialReference?.wkid;
+        if (!wkid) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The layer states no spatial reference; refusing to guess one" });
+        const page = Math.min(meta.maxRecordCount ?? 1000, 2000);
+        const features: { attributes: Record<string, unknown>; geometry?: { x?: number; y?: number; rings?: number[][][] } | null }[] = [];
+        for (let offset = 0; features.length < input.maxFeatures; offset += page) {
+          const q = new URLSearchParams({ where: input.where, outFields: "*", returnGeometry: "true", f: "json", resultOffset: String(offset), resultRecordCount: String(Math.min(page, input.maxFeatures - features.length)) });
+          const res = await fetch(`${base}/query?${q}`);
+          if (!res.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Query returned ${res.status} at offset ${offset}` });
+          const data = (await res.json()) as { features?: typeof features; exceededTransferLimit?: boolean };
+          features.push(...(data.features ?? []));
+          if (!data.exceededTransferLimit || !(data.features?.length)) break;
+        }
+        return importArcgis(ctx.user.id, { ...input, wkid, layerFields: (meta.fields ?? []).map(f => f.name), features });
+      }),
+    runs: roleProcedure("facilityDirectory.arcgisRuns").query(async () => (await dbOrThrow()).select().from(facilityImportRuns).orderBy(desc(facilityImportRuns.startedAt)).limit(50)),
+  }),
+
+  /**
+   * The LSD finder: a legal land description → where that is → the disposal sites near it.
+   * The imported ATS grid is used when the township is loaded (a surveyed centroid); otherwise
+   * the theoretical DLS centroid, ±2 km, and the answer says which it used.
+   */
+  lsdFind: roleProcedure("facilityDirectory.lsdFind")
+    .input(z.object({ lsd: z.string().min(4).max(80), radiusKm: z.number().min(1).max(1500).default(150), wasteCode: wasteCodeSchema.optional(), limit: z.number().int().min(1).max(50).default(15) }))
+    .query(async ({ input }) => {
+      const db = await dbOrThrow();
+      const parsed = parseLsd(input.lsd);
+      let origin: { latitude: number; longitude: number; basis: "ats_grid" | "theoretical"; descriptor: string; note: string } | null = null;
+      if (parsed.ok) {
+        const p = parsed.value;
+        const rows = await db.select({ centroidLatitude: atsLegalSubdivisions.centroidLatitude, centroidLongitude: atsLegalSubdivisions.centroidLongitude, descriptor: atsLegalSubdivisions.descriptor, roadAllowance: atsLegalSubdivisions.roadAllowance }).from(atsLegalSubdivisions)
+          .where(and(eq(atsLegalSubdivisions.meridian, p.meridian), eq(atsLegalSubdivisions.rangeNumber, p.range), eq(atsLegalSubdivisions.township, p.township), eq(atsLegalSubdivisions.sectionNumber, p.section), eq(atsLegalSubdivisions.legalSubdivision, p.lsd))).limit(4);
+        const land = rows.find(r => !r.roadAllowance || r.roadAllowance.trim() === "") ?? rows[0];
+        if (land) origin = { latitude: land.centroidLatitude, longitude: land.centroidLongitude, basis: "ats_grid", descriptor: land.descriptor, note: "surveyed parcel centroid from the imported ATS grid" };
+      }
+      if (!origin) {
+        const t = approximateFromLegalLocation(input.lsd);
+        if (!t) return { outcome: "invalid" as const, reason: parsed.ok ? "could not place this description" : parsed.reason, origin: null, facilities: [] };
+        origin = { latitude: t.latitude, longitude: t.longitude, basis: "theoretical", descriptor: input.lsd.trim().toUpperCase(), note: parsed.ok ? "the ATS grid for this township is not imported; theoretical DLS centroid, ±2 km" : t.note };
+      }
+      const facilities = await nearbyFacilities(db, origin.latitude, origin.longitude, input.radiusKm, input.wasteCode, input.limit);
+      return { outcome: "located" as const, origin, radiusKm: input.radiusKm, wasteCode: input.wasteCode ?? null, facilities, note: `Distances are straight-line from the ${origin.basis === "ats_grid" ? "surveyed" : "theoretical"} centroid. Routes come from the spatial engine; call ahead before travelling.` };
+    }),
+
   exportCsv: roleProcedure("facilityDirectory.exportCsv").query(async () => toCsv(await exportRows())),
   exportGeoJson: roleProcedure("facilityDirectory.exportGeoJson").query(async () => toGeoJson(await exportRows())),
 });
+
+
+type Db = Awaited<ReturnType<typeof dbOrThrow>>;
+/** Sites near a point by great-circle distance, with what is known about each — shared by nearby and the LSD finder. */
+async function nearbyFacilities(db: Db, latitude: number, longitude: number, radiusKm: number, wasteCode: string | undefined, limit: number) {
+  const rows = await db.select().from(facilities).where(and(isNotNull(facilities.facilityKey), isNotNull(facilities.latitude), isNotNull(facilities.longitude)));
+  const R = 6371, rad = (x: number) => (x * Math.PI) / 180;
+  const dist = (lat: number, lon: number) => { const dLat = rad(lat - latitude), dLon = rad(lon - longitude); const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(latitude)) * Math.cos(rad(lat)) * Math.sin(dLon / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(a)); };
+  const ids = rows.map(r => r.id);
+  const caps = ids.length && wasteCode ? await db.select().from(facilityCapabilities).where(and(inArray(facilityCapabilities.facilityId, ids), eq(facilityCapabilities.wasteCode, wasteCode))) : [];
+  return rows.map(f => ({ facilityKey: f.facilityKey!, name: f.name, municipality: f.municipality, province: f.province, facilityType: f.facilityType, facilityTypes: jsonArray<string>(f.facilityTypes), distanceKm: Math.round(dist(f.latitude!, f.longitude!) * 10) / 10, latitude: f.latitude!, longitude: f.longitude!, coordinatePrecision: f.coordinatePrecision, routable: routableOf(f), phone: f.phone, dispatchPhone: f.dispatchPhone, afterHoursPhone: f.afterHoursPhone, websiteUrl: f.websiteUrl, commercialAccess: f.commercialAccess, lifecycle: f.lifecycle, normAccepted: f.normAccepted, sourAccepted: f.sourAccepted, twentyFourHourCallout: f.twentyFourHourCallout, legalLocation: f.legalLocation,
+    acceptance: wasteCode ? (caps.find(c => c.facilityId === f.id)?.acceptanceStatus ?? "unknown") : undefined,
+    distanceNote: f.coordinatePrecision === "community_only" ? "distance to the community, not the gate" : f.coordinatePrecision === "approximate_site" ? "distance to the LSD centre or regulator site point, ±2 km, not the gate" : undefined,
+    accessNote: f.commercialAccess === "operator_private" ? "producer-owned: does not take third-party loads" : f.commercialAccess === "unknown" ? "commercial access unknown — confirm before travelling" : f.commercialAccess === "commercial_preapproval_required" ? "preapproval required" : undefined,
+    lifecycleNote: f.lifecycle === "conflicting" ? "sources disagree on whether this site operates" : f.lifecycle === "closed" ? "closed" : f.lifecycle === "suspended" ? "suspended" : undefined }))
+    .filter(x => x.distanceKm <= radiusKm).sort((a, b) => a.distanceKm - b.distanceKm).slice(0, limit);
+}
+
+/** One ArcGIS import run: check the mapping against the layer's fields, map, upsert, record evidence, write the run. */
+async function importArcgis(userId: number, input: { source: string; layerUrl: string; licenceKey: string; wkid: number; layerFields: string[]; mapping: FieldMapping; features: ArcgisFeature[]; note?: string }) {
+  const db = await dbOrThrow();
+  const lic = (await db.select().from(facilitySourceLicences).where(eq(facilitySourceLicences.licenceKey, input.licenceKey)).limit(1))[0];
+  if (!lic) throw new TRPCError({ code: "BAD_REQUEST", message: `Unknown licence ${input.licenceKey}; register it first` });
+  if (lic.status !== "confirmed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${lic.name} is ${lic.status}; an import caches the layer's data, which needs a confirmed licence` });
+  if (!lic.cachePermitted) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${lic.name} does not permit caching` });
+  const check = checkMapping(input.layerFields, input.mapping);
+  if (!check.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — the layer has no field for: ${check.missing.join(", ")}` });
+  const importRef = ref("IMPORT");
+  let inserted = 0, updated = 0, skipped = 0; const skipReasons: Record<string, number> = {};
+  for (const feature of input.features) {
+    const r = featureToCandidate(input.source, feature, input.mapping, input.wkid);
+    if ("skipped" in r) { skipped++; skipReasons[r.skipped] = (skipReasons[r.skipped] ?? 0) + 1; continue; }
+    const c = r.candidate;
+    const lifecycle = lifecycleFromStatus(c.sourceStatus);
+    const existing = (await db.select({ id: facilities.id, coordinatePrecision: facilities.coordinatePrecision }).from(facilities).where(eq(facilities.facilityKey, c.facilityKey)).limit(1))[0];
+    const values = { name: c.name, operatorNameFromSource: c.operatorNameFromSource, regulatorRef: c.regulatorRef, regulatorRefSourceUrl: input.layerUrl, facilityType: c.facilityType, legalLocation: c.legalLocation, lifecycle, sourceAuthority: `${lic.publisher}: ${input.layerUrl} (${input.licenceKey})`, statusVerifiedAt: new Date() };
+    let facilityId: number;
+    if (existing) {
+      // Never overwrite coordinates a person verified; refresh everything else from the regulator.
+      const keepCoords = existing.coordinatePrecision === "verified_entrance" || existing.coordinatePrecision === "verified_site";
+      await db.update(facilities).set({ ...values, ...(keepCoords || c.latitude === null ? {} : { latitude: c.latitude, longitude: c.longitude, coordinatePrecision: c.coordinatePrecision, coordinateSourceUrl: input.layerUrl }) }).where(eq(facilities.id, existing.id));
+      facilityId = existing.id; updated++;
+    } else {
+      const ins = await db.insert(facilities).values({ facilityKey: c.facilityKey, status: "unknown", province: input.source.startsWith("sk_") ? "SK" : input.source.startsWith("bcer_") ? "BC" : null, ...values, latitude: c.latitude, longitude: c.longitude, coordinatePrecision: c.coordinatePrecision, coordinateSourceUrl: c.latitude === null ? null : input.layerUrl, disposition: "approximate_facility", commercialAccess: "unknown" });
+      facilityId = ins[0].insertId; inserted++;
+    }
+    await db.insert(facilityEvidence).values({ facilityId, publisher: lic.publisher, title: `Regulator layer feature ${c.facilityKey} (run ${importRef})`, sourceUrl: input.layerUrl, licenceKey: input.licenceKey, claimType: c.latitude === null ? "facility_exists" : "site_coordinate", claimValue: `${c.coordinateNote}; status ${c.sourceStatus ?? "?"}; type ${c.facilityType ?? "?"}; licence ${c.regulatorRef ?? "?"}`, cachedContent: true, retrievedAt: new Date(), confidence: "high", reviewState: "lead", recordedByUserId: userId });
+  }
+  await db.insert(facilityImportRuns).values({ importRef, source: input.source, layerUrl: input.layerUrl, licenceKey: input.licenceKey, fieldMapping: input.mapping, wkid: input.wkid, featureCount: input.features.length, inserted, updated, skipped, skipReasons: Object.entries(skipReasons).map(([k, v]) => `${k} ×${v}`), startedByUserId: userId, note: input.note ?? null });
+  return { importRef, featureCount: input.features.length, inserted, updated, skipped, skipReasons, attribution: lic.attributionText, note: "Regulator coordinates are the site, ±, never an entrance; a person verifies from the evidence before directions exist. Commercial access is unknown until stated — a licensed facility is not necessarily a commercial one." };
+}
 
 async function exportRows(): Promise<FacilitySeedRow[]> {
   const db = await dbOrThrow();

@@ -8461,3 +8461,22 @@ export const facilityWaitReports = mysqlTable("facilityWaitReports", {
   note: varchar("note", { length: 300 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+// 0142 — regulator-layer import runs: the layer, the licence, the mapping a person chose, the counts.
+export const facilityImportRuns = mysqlTable("facilityImportRuns", {
+  id: int("id").autoincrement().primaryKey(),
+  importRef: varchar("importRef", { length: 40 }).notNull().unique(),
+  source: varchar("source", { length: 40 }).notNull(),
+  layerUrl: varchar("layerUrl", { length: 1024 }).notNull(),
+  licenceKey: varchar("licenceKey", { length: 40 }).notNull(),
+  fieldMapping: json("fieldMapping").notNull(),
+  wkid: int("wkid"),
+  featureCount: int("featureCount").default(0).notNull(),
+  inserted: int("inserted").default(0).notNull(),
+  updated: int("updated").default(0).notNull(),
+  skipped: int("skipped").default(0).notNull(),
+  skipReasons: json("skipReasons").$type<string[]>(),
+  startedByUserId: int("startedByUserId").notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  note: varchar("note", { length: 500 }),
+});

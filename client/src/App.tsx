@@ -21,6 +21,7 @@ import OfflineVault from "./showcase/OfflineVault";
 import BillingSafetyWorkspace from "./showcase/BillingSafetyWorkspace";
 import RouteSafetyWorkspace from "./showcase/RouteSafetyWorkspace";
 import DisposalDirectory from "./pages/DisposalDirectory";
+import DisposalFinder from "./pages/DisposalFinder";
 import CommunicationsPackage from "./pages/CommunicationsPackage";
 import TransmitCheck from "./pages/TransmitCheck";
 import CommunicationsPackageStatus from "./pages/CommunicationsPackageStatus";
@@ -80,6 +81,14 @@ function Router() {
         component={() => (
           <DashboardRoute>
             <DisposalDirectory />
+          </DashboardRoute>
+        )}
+      />
+      <Route
+        path="/disposal-finder"
+        component={() => (
+          <DashboardRoute>
+            <DisposalFinder />
           </DashboardRoute>
         )}
       />
