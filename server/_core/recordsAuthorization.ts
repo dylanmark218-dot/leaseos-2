@@ -915,6 +915,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    // P7.4 — the approval ladder names management above the first tier for write-offs too (credits were already here).
+    "ar.writeoff.decide",
     "commercial.read",
     "commercial.write",
     "commercial.policy",
@@ -2151,6 +2153,8 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "manifestCustody.evidenceProfileApprove": "manifest.write",
   "manifestCustody.chain": "manifest.read",
   /* ---- v22.24 P4.6 (0131): security incidents and privacy breach assessments ---- */
+  "commercialOffice.arAgingByOrganization": "commercial.read",
+  "commercialOffice.approvalLedger": "commercial.read",
   "commercialOffice.facilityStatementImport": "commercial.write",
   "commercialOffice.facilityStatementLines": "commercial.read",
   "commercialOffice.facilityStatementLineResolve": "commercial.write",

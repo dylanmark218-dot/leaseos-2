@@ -3,6 +3,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { decide as ledgerDecide } from "./_core/commercialApprovalService";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
@@ -195,8 +196,12 @@ export const arRouter = router({
       if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "Credit not found" });
       if (c.status !== "requested") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Credit is ${c.status}` });
       if (c.requestedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The requester may not decide their own credit" });
+      // P7.4 — the approval ladder (0133) decides who, and how many people, this amount needs.
+      const ledger = await ledgerDecide(db, { actorUserId: ctx.user.id, category: "credit", subjectType: "customer_credit", subjectRef: c.creditRef, amountCents: c.amountCents, preparedByUserId: c.requestedByUserId, decision: input.decision });
+      if (ledger.outcome === "blocked") throw new TRPCError({ code: ledger.reason.startsWith("REVIEW") ? "PRECONDITION_FAILED" : "FORBIDDEN", message: ledger.reason });
+      if (ledger.outcome === "awaiting") return { creditRef: c.creditRef, status: "requested" as const, ledger };
       await db.update(customerCredits).set({ status: input.decision, approvedByUserId: ctx.user.id, approvedAt: new Date() }).where(eq(customerCredits.id, c.id));
-      return { creditRef: c.creditRef, status: input.decision };
+      return { creditRef: c.creditRef, status: input.decision, ledger };
     }),
 
   collectionEvent: roleProcedure("ar.collectionEvent")
@@ -238,6 +243,13 @@ export const arRouter = router({
       const balance = invoiceBalanceCents({ id: invRow.id, invoiceNumber: invRow.invoiceNumber, customer: invRow.customer, totalCents: invRow.totalCents, dueAt: invRow.dueAt, issuedAt: invRow.issuedAt ?? invRow.createdAt, status: invRow.status, disputed: false }, allocs.map(a => ({ invoiceId: a.invoiceId, amountCents: a.amountCents })), creds.map(c => ({ invoiceId: c.invoiceId, customer: c.customer, amountCents: c.amountCents, status: c.status })) as ArCredit[]);
       const d = writeOffDecision({ requestedByUserId: w.requestedByUserId, deciderUserId: ctx.user.id, amountCents: w.amountCents, invoiceBalanceCents: balance });
       if (!d.permitted) throw new TRPCError({ code: input.decision === "approved" && d.refusals[0]?.includes("own") ? "FORBIDDEN" : "PRECONDITION_FAILED", message: d.refusals.join("; ") });
+      // P7.4 — the approval ladder (0133): tier by amount, second person above the top tier.
+      const ledger = await ledgerDecide(db, { actorUserId: ctx.user.id, category: "write_off", subjectType: "write_off_request", subjectRef: w.requestRef, amountCents: w.amountCents, preparedByUserId: w.requestedByUserId, decision: input.decision, note: input.reason });
+      if (ledger.outcome === "blocked") throw new TRPCError({ code: ledger.reason.startsWith("REVIEW") ? "PRECONDITION_FAILED" : "FORBIDDEN", message: ledger.reason });
+      if (ledger.outcome === "awaiting") {
+        await db.insert(collectionEvents).values({ invoiceId: w.invoiceId, eventType: "write_off_requested", note: `first approval recorded by user ${ctx.user.id}; ${ledger.awaiting}`, byUserId: ctx.user.id, at: new Date() });
+        return { requestRef: w.requestRef, status: "requested" as const, ledger };
+      }
       await db.update(writeOffRequests).set({ status: input.decision, decidedByUserId: ctx.user.id, decidedAt: new Date(), decisionReason: input.reason }).where(eq(writeOffRequests.id, w.id));
       await db.insert(collectionEvents).values({ invoiceId: w.invoiceId, eventType: "write_off_decided", note: `${input.decision}: ${input.reason}`, byUserId: ctx.user.id, at: new Date() });
       if (input.decision === "approved") {

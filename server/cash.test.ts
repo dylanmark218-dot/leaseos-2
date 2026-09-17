@@ -141,7 +141,7 @@ const ALL_ROLES: DomainRole[] = ["driver","dispatcher","mechanic","shop_lead","s
 
 describe("the collector follows up; the controller authorizes", () => {
   it("separates write-off requesting from deciding, and credit requesting from deciding", () => {
-    expect(ALL_ROLES.filter(r => authorize({ userId: 1, roles: [r], permission: "ar.writeoff.decide" }).allowed)).toEqual(["controller"]);
+    expect(ALL_ROLES.filter(r => authorize({ userId: 1, roles: [r], permission: "ar.writeoff.decide" }).allowed).sort()).toEqual(["controller", "management"]);   // P7.4: the ladder (0133) puts management above $5,000 for write-offs; the ledger enforces the tier and separation of duties
     expect(ALL_ROLES.filter(r => authorize({ userId: 1, roles: [r], permission: "ar.credit.decide" }).allowed).sort()).toEqual(["controller", "management"]);
     expect(authorize({ userId: 1, roles: ["bookkeeper"], permission: "ar.writeoff.request" }).allowed).toBe(true);
     expect(authorize({ userId: 1, roles: ["bookkeeper"], permission: "ar.writeoff.decide" }).allowed).toBe(false);

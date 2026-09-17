@@ -4650,6 +4650,8 @@ export type InsertWriteOffRequests = typeof writeOffRequests.$inferInsert;
 
 export const customerAccounts = mysqlTable("customerAccounts", {
   id: int("id").autoincrement().primaryKey(),
+  /** 0136 — the client organization a person linked this account to; NULL until someone does. */
+  orgRef: varchar("orgRef", { length: 64 }),
   accountRef: varchar("accountRef", { length: 64 }).notNull().unique(),
   financialEntityId: int("financialEntityId").notNull(),
   name: varchar("name", { length: 220 }).notNull(),
@@ -8184,7 +8186,7 @@ export const organizationRecordLinks = mysqlTable("organizationRecordLinks", {
   linkRef: varchar("linkRef", { length: 40 }).notNull().unique(),
   bookOrgRef: varchar("bookOrgRef", { length: 64 }),
   orgRef: varchar("orgRef", { length: 64 }).notNull(),
-  recordType: mysqlEnum("recordType", ["vendor", "facility", "job_customer"]).notNull(),
+  recordType: mysqlEnum("recordType", ["vendor", "facility", "job_customer", "customer_account"]).notNull(),
   recordId: int("recordId").notNull(),
   roleKeyRequired: varchar("roleKeyRequired", { length: 40 }).notNull(),
   status: mysqlEnum("status", ["active", "ended"]).default("active").notNull(),
@@ -8240,4 +8242,30 @@ export const facilityStatementLines = mysqlTable("facilityStatementLines", {
   resolvedByUserId: int("resolvedByUserId"),
   resolvedAt: timestamp("resolvedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// 0136 — P7.4 approval ledger: the requirement at the time, and each person's approval in order.
+export const commercialApprovals = mysqlTable("commercialApprovals", {
+  id: int("id").autoincrement().primaryKey(),
+  approvalRef: varchar("approvalRef", { length: 40 }).notNull().unique(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  category: varchar("category", { length: 40 }).notNull(),
+  subjectType: varchar("subjectType", { length: 40 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 64 }).notNull(),
+  amountCents: bigint("amountCents", { mode: "number" }).notNull(),
+  preparedByUserId: int("preparedByUserId"),
+  requirement: json("requirement").notNull(),
+  status: mysqlEnum("status", ["awaiting", "satisfied", "refused", "review"]).default("awaiting").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  satisfiedAt: timestamp("satisfiedAt"),
+});
+export const commercialApprovalSignatures = mysqlTable("commercialApprovalSignatures", {
+  id: int("id").autoincrement().primaryKey(),
+  commercialApprovalId: int("commercialApprovalId").notNull(),
+  sequence: int("sequence").notNull(),
+  userId: int("userId").notNull(),
+  rolesAtApproval: json("rolesAtApproval").$type<string[]>().notNull(),
+  decision: mysqlEnum("decision", ["approved", "refused"]).notNull(),
+  note: varchar("note", { length: 500 }),
+  at: timestamp("at").defaultNow().notNull(),
 });

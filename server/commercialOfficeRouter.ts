@@ -11,11 +11,12 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units } from "../drizzle/schema";
+import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { matchFacilityStatementLine, type DisposalTicketLite } from "./_core/facilityStatements";
+import { aging, type ArInvoice } from "./_core/accountsReceivable";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 
@@ -199,7 +200,7 @@ export const commercialOfficeRouter = router({
    */
   links: router({
     set: roleProcedure("commercialOffice.linkSet")
-      .input(z.object({ recordType: z.enum(["vendor", "facility", "job_customer"]), recordId: z.number().int().positive(), orgRef: z.string().min(1).max(64), note: z.string().max(500).optional() }))
+      .input(z.object({ recordType: z.enum(["vendor", "facility", "job_customer", "customer_account"]), recordId: z.number().int().positive(), orgRef: z.string().min(1).max(64), note: z.string().max(500).optional() }))
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         const roleKeyRequired = input.recordType === "vendor" ? "vendor" : input.recordType === "facility" ? "disposal_facility" : "client";
@@ -207,7 +208,7 @@ export const commercialOfficeRouter = router({
           .where(and(eq(organizationCommercialRoles.orgRef, input.orgRef), eq(organizationCommercialRoles.roleKey, roleKeyRequired), eq(organizationCommercialRoles.status, "active"),
             bookOrgRef ? eq(organizationCommercialRoles.bookOrgRef, bookOrgRef) : isNull(organizationCommercialRoles.bookOrgRef))).limit(1))[0];
         if (!role) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${input.orgRef} does not hold the ${roleKeyRequired} role in this book; assign it first` });
-        const table = input.recordType === "vendor" ? vendors : input.recordType === "facility" ? facilities : jobs;
+        const table = input.recordType === "vendor" ? vendors : input.recordType === "facility" ? facilities : input.recordType === "customer_account" ? customerAccounts : jobs;
         const record = (await db.select({ id: table.id }).from(table).where(eq(table.id, input.recordId)).limit(1))[0];
         if (!record) throw new TRPCError({ code: "NOT_FOUND", message: `${input.recordType} ${input.recordId} does not exist` });
         const open = (await db.select({ linkRef: organizationRecordLinks.linkRef, orgRef: organizationRecordLinks.orgRef }).from(organizationRecordLinks)
@@ -218,6 +219,7 @@ export const commercialOfficeRouter = router({
           await tx.insert(organizationRecordLinks).values({ linkRef, bookOrgRef, orgRef: input.orgRef, recordType: input.recordType, recordId: input.recordId, roleKeyRequired, note: input.note ?? null, linkedByUserId: ctx.user.id });
           if (input.recordType === "vendor") await tx.update(vendors).set({ orgRef: input.orgRef }).where(eq(vendors.id, input.recordId));
           else if (input.recordType === "facility") await tx.update(facilities).set({ orgRef: input.orgRef }).where(eq(facilities.id, input.recordId));
+          else if (input.recordType === "customer_account") await tx.update(customerAccounts).set({ orgRef: input.orgRef }).where(eq(customerAccounts.id, input.recordId));
           else await tx.update(jobs).set({ customerOrgRef: input.orgRef }).where(eq(jobs.id, input.recordId));
         });
         return { linkRef, recordType: input.recordType, recordId: input.recordId, orgRef: input.orgRef };
@@ -234,12 +236,13 @@ export const commercialOfficeRouter = router({
           // The reference is cleared; the legacy text on the record stays as it was captured.
           if (link.recordType === "vendor") await tx.update(vendors).set({ orgRef: null }).where(eq(vendors.id, link.recordId));
           else if (link.recordType === "facility") await tx.update(facilities).set({ orgRef: null }).where(eq(facilities.id, link.recordId));
+          else if (link.recordType === "customer_account") await tx.update(customerAccounts).set({ orgRef: null }).where(eq(customerAccounts.id, link.recordId));
           else await tx.update(jobs).set({ customerOrgRef: null }).where(eq(jobs.id, link.recordId));
         });
         return { linkRef: input.linkRef, status: "ended" as const };
       }),
     list: roleProcedure("commercialOffice.linksList")
-      .input(z.object({ orgRef: z.string().max(64).optional(), recordType: z.enum(["vendor", "facility", "job_customer"]).optional(), includeEnded: z.boolean().default(false) }).optional())
+      .input(z.object({ orgRef: z.string().max(64).optional(), recordType: z.enum(["vendor", "facility", "job_customer", "customer_account"]).optional(), includeEnded: z.boolean().default(false) }).optional())
       .query(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         const conds = [bookOrgRef ? eq(organizationRecordLinks.bookOrgRef, bookOrgRef) : isNull(organizationRecordLinks.bookOrgRef)];
@@ -361,6 +364,49 @@ export const commercialOfficeRouter = router({
         if (open.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${open.length} line(s) still need a person's resolution: ${open.map(o => `#${o.lineNo} (${o.outcome})`).join(", ")}` });
         await db.update(facilityStatements).set({ status: "closed", closedByUserId: ctx.user.id, closedAt: new Date() }).where(eq(facilityStatements.id, st.id));
         return { statementRef: input.statementRef, status: "closed" as const };
+      }),
+  }),
+
+  /**
+   * P7.4 — receivables by organization. Balances are derived from the same invoice,
+   * allocation and credit rows the existing ar.aging uses (one source of truth); the
+   * organization is the one a person linked the customer account to. Accounts nobody
+   * has linked are reported as `unlinked`, by their captured name — never guessed.
+   */
+  ar: router({
+    agingByOrganization: roleProcedure("commercialOffice.arAgingByOrganization")
+      .input(z.object({ financialEntityId: z.number().int().positive(), asOf: z.coerce.date().optional() }))
+      .query(async ({ ctx, input }) => {
+        const { db } = await bookFor(ctx.user.id);
+        const inv = await db.select({ i: invoices, accountOrgRef: customerAccounts.orgRef, accountRef: customerAccounts.accountRef }).from(invoices).leftJoin(customerAccounts, eq(customerAccounts.id, invoices.customerAccountId)).where(eq(invoices.financialEntityId, input.financialEntityId));
+        const ids = inv.map(r => r.i.id);
+        const [allocs, creds] = await Promise.all([
+          ids.length ? db.select().from(paymentAllocations).where(inArray(paymentAllocations.invoiceId, ids)) : [],
+          db.select().from(customerCredits).where(eq(customerCredits.financialEntityId, input.financialEntityId)),
+        ]);
+        const asOf = input.asOf ?? new Date();
+        const groups = new Map<string, { orgRef: string | null; label: string; invoices: ArInvoice[] }>();
+        for (const r of inv) {
+          const key = r.accountOrgRef ?? `unlinked:${r.i.customer}`;
+          const g = groups.get(key) ?? { orgRef: r.accountOrgRef ?? null, label: r.accountOrgRef ?? r.i.customer, invoices: [] };
+          g.invoices.push({ id: r.i.id, invoiceNumber: r.i.invoiceNumber, customer: r.i.customer, totalCents: r.i.totalCents, dueAt: r.i.dueAt, issuedAt: r.i.issuedAt ?? r.i.createdAt, status: r.i.status, disputed: r.i.status === "disputed" || r.i.disputedAt != null });
+          groups.set(key, g);
+        }
+        const out = Array.from(groups.values()).map(g => {
+          const a = aging({ invoices: g.invoices, allocations: allocs.map(x => ({ invoiceId: x.invoiceId, amountCents: x.amountCents })), credits: creds.map(c => ({ invoiceId: c.invoiceId, customer: c.customer, amountCents: c.amountCents, status: c.status as "requested" | "approved" | "refused" })), payments: [], paymentAllocatedCents: new Map(), asOf });
+          return { orgRef: g.orgRef, label: g.label, linked: g.orgRef !== null, invoiceCount: g.invoices.length, buckets: a.buckets, totalOutstandingCents: a.totalOutstandingCents };
+        }).sort((x, y) => y.totalOutstandingCents - x.totalOutstandingCents);
+        return { asOf, organizations: out.filter(o => o.linked), unlinked: out.filter(o => !o.linked), note: out.some(o => !o.linked) ? "Unlinked customer accounts are shown by their captured name; link them to an organization with commercialOffice.links.set (recordType customer_account)." : undefined };
+      }),
+    /** The approval ledger for a subject: the requirement at the time and every signature. */
+    approvalLedger: roleProcedure("commercialOffice.approvalLedger")
+      .input(z.object({ subjectType: z.string().min(1).max(40), subjectRef: z.string().min(1).max(64) }))
+      .query(async ({ ctx, input }) => {
+        const { db } = await bookFor(ctx.user.id);
+        const row = (await db.select().from(commercialApprovals).where(and(eq(commercialApprovals.subjectType, input.subjectType), eq(commercialApprovals.subjectRef, input.subjectRef))).limit(1))[0];
+        if (!row) return null;
+        const signatures = await db.select().from(commercialApprovalSignatures).where(eq(commercialApprovalSignatures.commercialApprovalId, row.id)).orderBy(commercialApprovalSignatures.sequence);
+        return { ...row, requirement: typeof row.requirement === "string" ? JSON.parse(row.requirement) : row.requirement, signatures: signatures.map(x => ({ ...x, rolesAtApproval: jsonArray<string>(x.rolesAtApproval) })) };
       }),
   }),
 });

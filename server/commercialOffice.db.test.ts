@@ -73,8 +73,10 @@ d("a business can answer differently", () => {
     const a = await org();
     const office = await member(a, ["office"]), mgr = await member(a, ["management"]);
     const dflt = await callerFor(office).commercialOffice.approvals.requirement({ category: "purchase_order", amountCents: 400_000, preparedByUserId: null });
-    expect(dflt.requirement).toMatchObject({ state: "KNOWN", approverRole: "office", layer: "default" });
-    expect(dflt.couldApprove.allowed).toBe(true);
+    expect(dflt.requirement).toMatchObject({ state: "KNOWN", approverRole: "controller", layer: "default" });
+    expect(dflt.couldApprove).toMatchObject({ allowed: false, reason: "BLOCKED — requires role controller" });   // office prepares; the controller approves
+    const controller = await member(a, ["controller"]);
+    expect((await callerFor(controller).commercialOffice.approvals.requirement({ category: "purchase_order", amountCents: 400_000, preparedByUserId: null })).couldApprove.allowed).toBe(true);
     // The preparer may not approve their own purchase order.
     const own = await callerFor(office).commercialOffice.approvals.requirement({ category: "purchase_order", amountCents: 400_000, preparedByUserId: office });
     expect(own.couldApprove).toMatchObject({ allowed: false, reason: expect.stringContaining("separation of duties") });
@@ -180,5 +182,68 @@ d("P7.3 — a facility statement is matched, never used to edit a ticket", () =>
     await expect(callerFor(office).commercialOffice.disposal.lineResolve({ statementRef: imp.statementRef, lineNo: 1, resolution: "accepted", note: "it is the afternoon load", chosenDisposalTicketId: 999_999_999 })).rejects.toThrow(/choosing one of its candidates/);
     const ok = await callerFor(office).commercialOffice.disposal.lineResolve({ statementRef: imp.statementRef, lineNo: 1, resolution: "accepted", note: "it is the afternoon load per the driver's day log", chosenDisposalTicketId: b.insertId });
     expect(ok.matchedDisposalTicketId).toBe(b.insertId);
+  }, 30_000);
+});
+
+d("P7.4 — receivables through the approval ladder, and by organization", () => {
+  async function invoice(entityId: number, customer: string, totalCents: number, accountId: number | null, dueAt: string) {
+    const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO billingBooks (bookNumber, jobId, customer, billingState, openedAt, createdAt, updatedAt) VALUES (?, 1, ?, 'invoiced', NOW(), NOW(), NOW())", [`BB-${rnd()}`, customer]);
+    const invoiceNumber = `INV-${rnd()}`;
+    await pool.execute("INSERT INTO invoices (invoiceNumber, financialEntityId, issuedAt, billingBookId, jobId, customer, customerAccountId, subtotalCents, taxCents, totalCents, currency, status, dueAt) VALUES (?, ?, '2026-08-05 00:00:00', ?, 1, ?, ?, ?, 0, ?, 'CAD', 'sent', ?)", [invoiceNumber, entityId, book.insertId, customer, accountId, totalCents, totalCents, dueAt]);
+    return invoiceNumber;
+  }
+
+  it("a $30,000 credit needs two different managers; the controller is stopped at $5,000 by name; the requester never approves; the ledger shows every signature", async () => {
+    const book = await org();
+    const requester = await member(book, ["controller"]), controller = await member(book, ["controller"]), mgr1 = await member(book, ["management"]), mgr2 = await member(book, ["management"]);
+    const entityId = 1_700_000 + Math.floor(Math.random() * 90_000);
+    const invoiceNumber = await invoice(entityId, "Fixture Energy", 3_500_000, null, "2026-09-04 00:00:00");
+    const req = await callerFor(requester).ar.creditRequest({ financialEntityId: entityId, invoiceNumber, amountCents: 3_000_000, reason: "standby disputed and conceded after the site log review" });
+    await expect(callerFor(requester).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" })).rejects.toThrow(/own credit/);
+    await expect(callerFor(controller).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" })).rejects.toThrow(/requires role management/);
+    const first = await callerFor(mgr1).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" });
+    expect(first).toMatchObject({ status: "requested", ledger: { outcome: "awaiting", approvals: 1, required: 2, awaiting: expect.stringContaining("second person") } });
+    await expect(callerFor(mgr1).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" })).rejects.toThrow(/already approved/);
+    const [still] = await pool.query<mysql.RowDataPacket[]>("SELECT status FROM customerCredits WHERE creditRef = ?", [req.creditRef]);
+    expect(still[0]!.status).toBe("requested");
+    const second = await callerFor(mgr2).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" });
+    expect(second).toMatchObject({ status: "approved", ledger: { outcome: "satisfied", approvals: 2, required: 2 } });
+    const ledger = await callerFor(mgr1).commercialOffice.ar.approvalLedger({ subjectType: "customer_credit", subjectRef: req.creditRef });
+    expect(ledger).toMatchObject({ status: "satisfied", category: "credit", amountCents: 3_000_000, requirement: { state: "KNOWN", approverRole: "management", secondPersonRequired: true, layer: "default" } });
+    expect(ledger!.signatures.map(s => s.userId)).toEqual([mgr1, mgr2]);
+    // A small credit: one controller approval is enough, and it is not the requester.
+    const small = await callerFor(requester).ar.creditRequest({ financialEntityId: entityId, invoiceNumber, amountCents: 40_000, reason: "duplicate hose charge on the second ticket" });
+    expect(await callerFor(controller).ar.creditDecide({ creditRef: small.creditRef, decision: "approved" })).toMatchObject({ status: "approved", ledger: { outcome: "satisfied", approvals: 1, required: 1 } });
+  }, 40_000);
+
+  it("a business whose own ladder stops short leaves a write-off in REVIEW rather than borrowing the default", async () => {
+    const book = await org();
+    const requester = await member(book, ["bookkeeper"]), mgr = await member(book, ["management"]);
+    await callerFor(mgr).commercialOffice.approvals.policySet({ category: "write_off", maxAmountCents: 50_000, approverRole: "management" });   // the business covers write-offs only to $500
+    const entityId = 1_700_000 + Math.floor(Math.random() * 90_000);
+    const invoiceNumber = await invoice(entityId, "Fixture Energy", 800_000, null, "2026-05-01 00:00:00");
+    const w = await callerFor(requester).ar.writeOffRequest({ invoiceNumber, amountCents: 80_000, reason: "customer insolvent; trustee confirmed no distribution" });
+    await expect(callerFor(mgr).ar.writeOffDecide({ requestRef: w.requestRef, decision: "approved", reason: "trustee letter on file" })).rejects.toThrow(/REVIEW — no business tier covers \$800\.00/);
+    const [row] = await pool.query<mysql.RowDataPacket[]>("SELECT status FROM writeOffRequests WHERE requestRef = ?", [w.requestRef]);
+    expect(row[0]!.status).toBe("requested");
+  }, 30_000);
+
+  it("ages receivables by the organization a person linked the account to, and reports unlinked accounts by their captured name", async () => {
+    const book = await org(), clientOrg = await org();
+    const office = await member(book, ["office"]);
+    await callerFor(office).commercialOffice.roles.assign({ orgRef: clientOrg, roleKey: "client" });
+    const entityId = 1_700_000 + Math.floor(Math.random() * 90_000);
+    const [acct] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO customerAccounts (accountRef, financialEntityId, name, paymentTermsDays, status) VALUES (?, ?, 'Fixture Energy', 30, 'active')", [`ACC-${rnd()}`, entityId]);
+    await callerFor(office).commercialOffice.links.set({ recordType: "customer_account", recordId: acct.insertId, orgRef: clientOrg });
+    await invoice(entityId, "Fixture Energy", 100_000, acct.insertId, "2026-05-01 00:00:00");   // long overdue, linked
+    await invoice(entityId, "Fixture Energy", 50_000, acct.insertId, "2037-01-01 00:00:00");    // not yet due, linked (TIMESTAMP tops out in 2038)
+    await invoice(entityId, "Somebody Else", 70_000, null, "2026-05-01 00:00:00");             // unlinked
+    const a = await callerFor(office).commercialOffice.ar.agingByOrganization({ financialEntityId: entityId, asOf: new Date("2026-09-17T00:00:00Z") });
+    const mine = a.organizations.find(o => o.orgRef === clientOrg)!;
+    expect(mine).toMatchObject({ linked: true, invoiceCount: 2, totalOutstandingCents: 150_000 });
+    expect(mine.buckets.d90_plus).toBe(100_000);
+    expect(mine.buckets.current).toBe(50_000);
+    expect(a.unlinked.find(u => u.label === "Somebody Else")).toMatchObject({ linked: false, totalOutstandingCents: 70_000 });
+    expect(a.note).toContain("customer_account");
   }, 30_000);
 });
