@@ -80,6 +80,12 @@ export type ExceptionSources = {
   /** 0131 security incidents: a required notification unsent, or personal information suspected with no privacy decision. */
   securityIncidents?: { incidentRef: string; title: string; severity: string; personalInformationSuspected: boolean; assessed: boolean; unsentNotifications: { recipientType: string; dueAt: Date | null }[] }[];
   periodsSoftClosed: { financialEntityId: number; period: string; reviewItems: number; since: Date }[];
+  /** The disposal-facility directory's open items: sources that disagree, regulator evidence nobody reviewed, same-LSD duplicates nobody resolved. */
+  facilityDirectory?: {
+    conflicting: { facilityKey: string; name: string }[];
+    unreviewedRegulatorEvidence: { facilityKey: string; name: string; count: number; oldestRetrievedAt: Date }[];
+    duplicateGroups: { legalLocation: string; facilityKeys: string[] }[];
+  };
 };
 
 /* ------------------------------------------------------------------ */
@@ -315,6 +321,34 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
         deepLink: { portal: "office", route: `/security/incidents/${si.incidentRef}` }, requiredPermission: "incident.review", since: null, dueAt: null,
       });
     }
+  }
+
+  for (const f of s.facilityDirectory?.conflicting ?? []) {
+    out.push({
+      key: `facility-conflict:${f.facilityKey}`, category: "dispatch", severity: "high",
+      title: `${f.name}: sources disagree on whether it operates`,
+      reason: "Two evidence rows conflict (one says closed, another names an operator). The compatibility engine fails closed on it, so no load can be dispatched there until a person resolves the conflict.",
+      subjectType: "facility", subjectId: f.facilityKey, action: "Review the conflicting evidence, set the lifecycle, retire or link the record",
+      deepLink: { portal: "office", route: `/disposal-finder?facility=${encodeURIComponent(f.facilityKey)}` }, requiredPermission: "facility.directory.review", since: null, dueAt: null,
+    });
+  }
+  for (const f of s.facilityDirectory?.unreviewedRegulatorEvidence ?? []) {
+    out.push({
+      key: `facility-evidence:${f.facilityKey}`, category: "dispatch", severity: "medium",
+      title: `${f.name}: ${f.count} regulator evidence row${f.count === 1 ? "" : "s"} unreviewed`,
+      reason: `Regulator-sourced coordinates or acceptance sit as leads since ${f.oldestRetrievedAt.toISOString().slice(0, 10)}. Until a second person reviews them, the site has no directions link and no verified acceptance.`,
+      subjectType: "facility", subjectId: f.facilityKey, action: "Review the evidence; verify coordinates if the claim is a coordinate",
+      deepLink: { portal: "office", route: `/disposal-finder?facility=${encodeURIComponent(f.facilityKey)}` }, requiredPermission: "facility.directory.review", since: f.oldestRetrievedAt, dueAt: null,
+    });
+  }
+  for (const g of s.facilityDirectory?.duplicateGroups ?? []) {
+    out.push({
+      key: `facility-duplicate:${g.legalLocation}`, category: "compliance", severity: "low",
+      title: `${g.facilityKeys.length} facility records share ${g.legalLocation}`,
+      reason: `Probably one site under different operator names or eras (${g.facilityKeys.join(", ")}). Nothing is merged automatically.`,
+      subjectType: "facility", subjectId: g.facilityKeys[0]!, action: "Decide which record is current; link the others as former names",
+      deepLink: { portal: "office", route: `/disposal-finder?facility=${encodeURIComponent(g.facilityKeys[0]!)}` }, requiredPermission: "facility.directory.review", since: null, dueAt: null,
+    });
   }
 
   for (const r of s.inspectorRequests ?? []) {   // older fixtures omit the field

@@ -17,6 +17,7 @@
  * about a person's medical fitness is "eligible" and nothing more.
  */
 
+import { destinationAcceptanceForJob } from "./_core/destinationAcceptance";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { faultDispatchEffect } from "./_core/telematics";
 import { getDb } from "./db";
@@ -361,6 +362,9 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   }
 
   /* ---- job ---- */
+  // Destination acceptance comes from the facility directory: the latest loadFacilityAssessment per load on this job.
+  // No loads or no assessments → null (review); any load whose latest assessment blocks → false; every load non-blocking → true.
+  const destination = await destinationAcceptanceForJob(db, job?.id ?? null);
   const jobInput: ReadinessInput["job"] = {
     classificationComplete: job ? Boolean(job.type && job.mode) : false,
     dangerousGoods,
@@ -368,7 +372,8 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     requiredDocumentsPresent: job ? true : false,
     permitRequired: false,
     permitOnFile: null,
-    destinationAcceptanceVerified: null,
+    destinationAcceptanceVerified: destination.verified,
+    destinationAssessments: destination.assessments,
     emergencyPlanOnFile: dangerousGoods ? null : true,
   };
   if (!job) contributions.push({ engine: "dispatch", finding: "No job supplied — job requirements not evaluated" });

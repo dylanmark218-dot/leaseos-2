@@ -7,14 +7,14 @@
  * and walks an entity's history into a timeline. Nothing here is a new store.
  */
 
-import { and, desc, eq, gte, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
 import { resolveActingScope } from "./_core/actingScope";
 import { getDb } from "./db";
 import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
   complianceDocuments, disposalTickets, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
   maintenanceDefects, measurementDevices, operationalTasks, operators, purchaseAuthorizations, roadsideServiceEvents,
-  syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders, academyInspectorRequests, securityIncidents, privacyBreachAssessments, incidentNotificationObligations } from "../drizzle/schema";
+  syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders, academyInspectorRequests, securityIncidents, privacyBreachAssessments, incidentNotificationObligations, facilities, facilityEvidence, facilitySourceLicences } from "../drizzle/schema";
 import { calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import type { ExceptionSources } from "./_core/exceptionCentre";
 import { loadUngatedAssignments } from "./dispatchEnforcementService";
@@ -25,6 +25,25 @@ const DAY = 86_400_000;
 /* ------------------------------------------------------------------ */
 /* Exception sources                                                    */
 /* ------------------------------------------------------------------ */
+
+/** The disposal-facility directory's open items, for the Exception Centre. Derived, never stored. */
+async function loadFacilityDirectoryExceptions(db: Awaited<ReturnType<typeof getDb>>) {
+  if (!db) return undefined;
+  const conflicting = await db.select({ facilityKey: facilities.facilityKey, name: facilities.name }).from(facilities).where(and(isNotNull(facilities.facilityKey), eq(facilities.lifecycle, "conflicting")));
+  const unreviewed = await db.select({ facilityKey: facilities.facilityKey, name: facilities.name, count: sql<number>`COUNT(*)`, oldest: sql<Date>`MIN(${facilityEvidence.retrievedAt})` })
+    .from(facilityEvidence).innerJoin(facilities, eq(facilities.id, facilityEvidence.facilityId)).innerJoin(facilitySourceLicences, eq(facilitySourceLicences.licenceKey, facilityEvidence.licenceKey))
+    .where(and(eq(facilityEvidence.reviewState, "lead"), eq(facilityEvidence.confidence, "high"), inArray(facilitySourceLicences.status, ["confirmed"]), sql`${facilitySourceLicences.publisher} NOT IN ('(the operator)')`, isNotNull(facilities.facilityKey)))
+    .groupBy(facilities.facilityKey, facilities.name).limit(200);
+  const withLsd = await db.select({ facilityKey: facilities.facilityKey, legalLocation: facilities.legalLocation }).from(facilities).where(and(isNotNull(facilities.facilityKey), isNotNull(facilities.legalLocation)));
+  const norm = (x: string) => x.toUpperCase().replace(/[\s-]+/g, "-").replace(/-?W(\d)-?M?$/, "-W$1M").replace(/^(\d)-/, "0$1-").replace(/-(\d)-(\d{2,3})-/, "-0$1-$2-");
+  const groups = new Map<string, string[]>();
+  for (const r of withLsd) { const k = norm(r.legalLocation!); groups.set(k, [...(groups.get(k) ?? []), r.facilityKey!]); }
+  return {
+    conflicting: conflicting.map(c => ({ facilityKey: c.facilityKey!, name: c.name })),
+    unreviewedRegulatorEvidence: unreviewed.map(u => ({ facilityKey: u.facilityKey!, name: u.name, count: Number(u.count), oldestRetrievedAt: new Date(u.oldest) })),
+    duplicateGroups: Array.from(groups.entries()).filter(([, ks]) => ks.length > 1).map(([legalLocation, facilityKeys]) => ({ legalLocation, facilityKeys })),
+  };
+}
 
 export async function loadExceptionSources(now = new Date()): Promise<ExceptionSources> {
   const db = await getDb();
@@ -89,6 +108,7 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
     now,
     inspectorRequests: inspector.map(r => ({ requestRef: r.requestRef, issuingAuthority: r.issuingAuthority, dueAt: r.dueAt, state: r.state, irrecoverable: !!r.irrecoverable })),
     securityIncidents: await loadOpenSecurityIncidents(db),
+    facilityDirectory: await loadFacilityDirectoryExceptions(db),
     criticalDefects: defects.map(d => ({ id: d.id, unitId: d.unitId, unitNumber: d.unitNumber ?? null, title: d.title, reportedAt: d.reportedAt, status: d.status })),
     roadsideOpen: roadside.map(r => ({ id: r.id, eventRef: r.eventRef, unitNumber: r.unitNumber ?? null, eventType: r.eventType, occurredAt: r.occurredAt, vendorAssigned: r.assignedVendorId != null })),
     vendorBills: bills.map(b => ({ id: b.id, billRef: b.billRef, vendorName: b.vendorName ?? null, total: b.totalCents / 100, status: b.status, matchOutcome: b.matchOutcome, receivedAt: b.receivedAt, dueAt: b.dueAt })),

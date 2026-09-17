@@ -246,7 +246,7 @@ export const facilityDirectoryRouter = router({
     .input(z.object({ loadId: z.number().int().positive() }))
     .query(async ({ input }) => {
       const db = await dbOrThrow();
-      const rows = await db.select().from(loadFacilityAssessments).where(eq(loadFacilityAssessments.loadId, input.loadId)).orderBy(loadFacilityAssessments.assessedAt);
+      const rows = await db.select().from(loadFacilityAssessments).where(eq(loadFacilityAssessments.loadId, input.loadId)).orderBy(loadFacilityAssessments.assessedAt, loadFacilityAssessments.id);
       return rows.map(r => ({ ...r, reasonCodes: jsonArray<string>(r.reasonCodes), evidenceIds: jsonArray<number>(r.evidenceIds) }));
     }),
 

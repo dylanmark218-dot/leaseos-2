@@ -93,6 +93,8 @@ export type ReadinessInput = {
     permitRequired: boolean;
     permitOnFile: boolean | null;
     destinationAcceptanceVerified: boolean | null;
+    /** The loads' latest facility assessments (loadFacilityAssessments), when some exist: the blocker names the facility and the reasons. */
+    destinationAssessments?: { loadNumber: string; facilityKey: string; facilityName: string; outcome: string; blocking: boolean; reasonCodes: string[]; assessedAt: Date }[];
     emergencyPlanOnFile: boolean | null;
   };
   route: {
@@ -364,18 +366,24 @@ export function evaluateDispatchReadiness(
       });
     }
   }
+  const blockingAssessments = (input.job.destinationAssessments ?? []).filter(a => a.blocking);
   if (input.job.destinationAcceptanceVerified === false) {
-    blockers.push({
-      code: "destination_not_accepting",
-      label: "Destination facility will not accept this material",
-      severity: "blocking",
-      subject: "job",
-      overridable: false,
-    });
+    // One blocker per blocking load, naming the facility and the engine's reasons; the generic line only when no assessment carried the detail.
+    if (blockingAssessments.length) {
+      for (const a of blockingAssessments) blockers.push({
+        code: "destination_not_accepting",
+        label: `Load ${a.loadNumber} → ${a.facilityName}: ${a.outcome.replaceAll("_", " ")} (${a.reasonCodes.join(", ")})`,
+        severity: "blocking",
+        subject: "job",
+        overridable: false,
+      });
+    } else {
+      blockers.push({ code: "destination_not_accepting", label: "Destination facility will not accept this material", severity: "blocking", subject: "job", overridable: false });
+    }
   } else if (input.job.destinationAcceptanceVerified === null) {
     blockers.push({
       code: "destination_acceptance_unverified",
-      label: "Destination facility acceptance not verified",
+      label: "Destination facility acceptance not verified — no non-blocking facility assessment on the job's loads",
       severity: "review",
       subject: "job",
       overridable: true,
