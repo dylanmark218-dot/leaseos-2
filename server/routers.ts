@@ -44,7 +44,16 @@ import { widgetReaderFor } from "./widgetSources";
 import { composeReadiness } from "./readinessComposer";
 import { branchRolesFor } from "./_core/widgetRoleKeys";
 import { isDomainRole, permissionsForDomainRole } from "./_core/recordsAuthorization";
-import { listActiveUserRoles } from "./db";
+import {
+  listActiveUserRoles,
+  actingScopeFor,
+  evidenceInScope,
+  jobInScope,
+  operatorInScope,
+  tripInScope,
+  unitInScope,
+  workOrderInScope,
+} from "./db";
 import { dispatchGateRouter } from "./dispatchRouter";
 import { createJobUnitGated } from "./dispatchEnforcementService";
 import { iftaRouter } from "./iftaRouter";
@@ -378,7 +387,7 @@ export const appRouter = router({
         .mutation(async ({ ctx, input }) => createJob(input, await scopeFor(ctx.user.id))),
     }),
     evidence: router({
-      list: roleProcedure("evidence.list").query(() => listEvidenceRecords()),
+      list: roleProcedure("evidence.list").query(async ({ ctx }) => listEvidenceRecords(await scopeFor(ctx.user.id))),
       upload: roleProcedure("evidence.upload")
         .input(
           z.object({
@@ -447,10 +456,18 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) => createEvidenceRecord({ ...input, status: "needs_review" })),   // verification is evidence.verify
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        return createEvidenceRecord({ ...input, status: "needs_review" });
+      }),   // verification is evidence.verify
       verify: roleProcedure("evidence.verify")
         .input(z.object({ id: z.number().int().positive() }))
-        .mutation(({ input }) => verifyEvidenceRecord(input.id)),
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await evidenceInScope(input.id, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${input.id} not found` });
+        return verifyEvidenceRecord(input.id);
+      }),
     }),
     trips: router({
       list: roleProcedure("trips.list").query(async ({ ctx }) => listTrips(await scopeFor(ctx.user.id))),
@@ -517,7 +534,10 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) => {
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.id != null && !(await tripInScope(input.id, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.id} not found` });
+        
           const { id, ...values } = input;
           return updateTrip(id, values);
         }),
@@ -525,7 +545,7 @@ export const appRouter = router({
     tripStops: router({
       list: roleProcedure("tripStops.list")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
-        .query(({ input }) => listTripStops(input?.tripId)),
+        .query(async ({ ctx, input }) => listTripStops(input?.tripId, await scopeFor(ctx.user.id))),
       create: roleProcedure("tripStops.create")
         .input(
           z.object({
@@ -548,7 +568,10 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) => {
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
+        
           const minutes = (a?: Date, b?: Date) =>
             a && b
               ? Math.max(0, (b.getTime() - a.getTime()) / 60000)
@@ -812,6 +835,9 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
+        
           const own = await operatorForUser(ctx.user.id);
           const active = own ? await activeTripForOperator(own.id) : null;
           if (!active) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No active trip is assigned to the signed-in operator; a position is not attached to a trip it was not assigned to" });
@@ -820,15 +846,27 @@ export const appRouter = router({
         }),
       breadcrumbs: roleProcedure("gps.breadcrumbs")
         .input(z.object({ tripId: z.number().int() }))
-        .query(({ input }) => listTripBreadcrumbs(input.tripId)),
+        .query(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
+        return listTripBreadcrumbs(input.tripId);
+      }),
       // Pending proposals a driver/dispatcher hasn't ruled on yet. Omit tripId
       // to review pending events across all active trips (dispatch view).
       pendingZoneEvents: roleProcedure("gps.pendingZoneEvents")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
-        .query(({ input }) => listZoneEvents(input?.tripId, "pending")),
+        .query(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
+        return listZoneEvents(input?.tripId, "pending");
+      }),
       zoneEvents: roleProcedure("gps.zoneEvents")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
-        .query(({ input }) => listZoneEvents(input?.tripId)),
+        .query(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
+        return listZoneEvents(input?.tripId);
+      }),
       // The human-in-the-loop step: a confirmed event can optionally be linked
       // to the tripStop it resolves (e.g. sets arrivedAt). Rejecting it leaves
       // the tripStop entirely untouched — the GPS engine never overwrites a
@@ -855,7 +893,11 @@ export const appRouter = router({
     dutyRecords: router({
       list: roleProcedure("dutyRecords.list")
         .input(z.object({ operatorId: z.number().int().optional() }).optional())
-        .query(({ input }) => listDutyRecords(input?.operatorId)),
+        .query(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.operatorId != null && !(await operatorInScope(input.operatorId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Operator ${input.operatorId} not found` });
+        return listDutyRecords(input?.operatorId);
+      }),
       create: roleProcedure("dutyRecords.create")
         .input(
           z.object({
@@ -879,6 +921,9 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.operatorId != null && !(await operatorInScope(input.operatorId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Operator ${input.operatorId} not found` });
+        
           const own = await operatorForUser(ctx.user.id);
           const roles = (ctx as unknown as { roles?: readonly string[] }).roles ?? [];
           const amending = input.operatorId != null && input.operatorId !== own?.id;
@@ -904,7 +949,11 @@ export const appRouter = router({
     workOrders: router({
       list: roleProcedure("workOrders.list")
         .input(z.object({ unitId: z.number().int().optional() }).optional())
-        .query(({ input }) => listWorkOrders(input?.unitId)),
+        .query(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.unitId != null && !(await unitInScope(input.unitId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+        return listWorkOrders(input?.unitId);
+      }),
       create: roleProcedure("workOrders.create")
         .input(
           z.object({
@@ -937,7 +986,11 @@ export const appRouter = router({
             correctiveAction: z.string().optional(),
           })
         )
-        .mutation(({ input }) => createWorkOrder(input)),
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.unitId != null && !(await unitInScope(input.unitId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+        return createWorkOrder(input);
+      }),
       update: roleProcedure("workOrders.update")
         .input(
           z.object({
@@ -964,7 +1017,10 @@ export const appRouter = router({
             correctiveAction: z.string().optional(),
           })
         )
-        .mutation(({ input }) => {
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await workOrderInScope(input.id, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.id} not found` });
+        
           const { id, ...values } = input;
           return updateWorkOrder(id, values);
         }),
@@ -988,7 +1044,7 @@ export const appRouter = router({
         .mutation(({ input }) => createRouteContext({ ...input, verifiedAt: null, confidence: "low", source: `stated: ${input.source}` })),   // a stated source is a claim; verification names its dataset
     }),
     routeDecisions: router({
-      list: roleProcedure("routeDecisions.list").query(() => listRouteDecisions()),
+      list: roleProcedure("routeDecisions.list").query(async ({ ctx }) => listRouteDecisions(await scopeFor(ctx.user.id))),
       create: roleProcedure("routeDecisions.create")
         .input(
           z.object({
@@ -1050,7 +1106,7 @@ export const appRouter = router({
       lines: router({
         list: roleProcedure("lines.list")
           .input(z.object({ jobId: z.number().int().optional() }).optional())
-          .query(({ input }) => listJobChargeLines(input?.jobId)),
+          .query(async ({ ctx, input }) => listJobChargeLines(input?.jobId, await scopeFor(ctx.user.id))),
         create: roleProcedure("lines.create")
           .input(
             z.object({
@@ -1061,12 +1117,14 @@ export const appRouter = router({
               source: z.string().max(80).default("rate_card"),
             })
           )
-          .mutation(({ input }) =>
-            createJobChargeLine({
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        return createJobChargeLine({
               ...input,
               amount: input.quantity * input.unitRate,
-            })
-          ),
+            });
+      }),
       }),
     }),
     vendors: router({
@@ -1132,7 +1190,11 @@ export const appRouter = router({
             version: z.number().int().default(1),
           })
         )
-        .mutation(({ input }) => createUnitSafetyPlan(input)),
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.unitId != null && !(await unitInScope(input.unitId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+        return createUnitSafetyPlan(input);
+      }),
     }),
     complianceEngine: router({
       artifacts: router({
@@ -1321,7 +1383,7 @@ export const appRouter = router({
           .mutation(async ({ ctx, input }) => createUnit({ ...input, inspectionStatus: "due", maintenanceStatus: "review" }, await scopeFor(ctx.user.id), ctx.user.id)),   // a new row proves nothing: due and review until the facts exist
       }),
       jobUnits: router({
-        list: roleProcedure("jobUnits.list").query(() => listJobUnits()),
+        list: roleProcedure("jobUnits.list").query(async ({ ctx }) => listJobUnits(await scopeFor(ctx.user.id))),
         create: roleProcedure("jobUnits.create")
           .input(
             z.object({
@@ -1341,7 +1403,10 @@ export const appRouter = router({
           )
           // v21.2 — under the enforcement setting: off as always, advisory
           // records findings, enforced refuses without a valid check.
-          .mutation(async ({ input }) => { const r = await createJobUnitGated(input); return r.id; }),
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+         const r = await createJobUnitGated(input); return r.id; }),
       }),
       inspections: router({
         list: roleProcedure("inspections.list").query(() => listInspections()),
@@ -1359,7 +1424,11 @@ export const appRouter = router({
               authenticatedOperatorId: z.number().int().optional(),
             })
           )
-          .mutation(({ input }) => createInspection(input)),
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.unitId != null && !(await unitInScope(input.unitId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+        return createInspection(input);
+      }),
       }),
       documents: router({
         list: roleProcedure("documents.list").query(async ({ ctx }) => listComplianceDocuments(await scopeFor(ctx.user.id))),
@@ -1394,7 +1463,7 @@ export const appRouter = router({
     }),
     compliance: router({
       loads: router({
-        list: roleProcedure("loads.list").query(() => listLoadProfiles()),
+        list: roleProcedure("loads.list").query(async ({ ctx }) => listLoadProfiles(await scopeFor(ctx.user.id))),
         create: roleProcedure("loads.create")
           .input(
             z.object({
@@ -1417,7 +1486,11 @@ export const appRouter = router({
               verifiedAt: REFUSED,
             })
           )
-          .mutation(({ input }) => createLoadProfile({ ...input, classificationStatus: "needs_verification", verifiedAt: null })),   // TDG is never self-certified
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        return createLoadProfile({ ...input, classificationStatus: "needs_verification", verifiedAt: null });
+      }),   // TDG is never self-certified
       }),
       facilities: router({
         list: roleProcedure("facilities.list").query(() => listFacilities()),
@@ -1460,10 +1533,14 @@ export const appRouter = router({
               completedAt: z.coerce.date().optional(),
             })
           )
-          .mutation(({ input }) => createMaintenanceDefect({ ...input, status: "open" })),   // resolution is a later act
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.unitId != null && !(await unitInScope(input.unitId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+        return createMaintenanceDefect({ ...input, status: "open" });
+      }),   // resolution is a later act
       }),
       deliveries: router({
-        list: roleProcedure("deliveries.list").query(() => listDeliveries()),
+        list: roleProcedure("deliveries.list").query(async ({ ctx }) => listDeliveries(await scopeFor(ctx.user.id))),
         create: roleProcedure("deliveries.create")
           .input(
             z.object({
@@ -1476,7 +1553,11 @@ export const appRouter = router({
               deliveredAt: z.coerce.date().optional(),
             })
           )
-          .mutation(({ input }) => createDelivery(input)),
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        return createDelivery(input);
+      }),
       }),
       sign: roleProcedure("compliance.sign")
         .input(
@@ -1489,10 +1570,14 @@ export const appRouter = router({
             status: REFUSED,
           })
         )
-        .mutation(({ input }) => createSignatureAudit({ ...input, authMethod: "legacy observation — not the frozen signature chain (use closeout.siteSign)", documentHash: null, status: "pending" })),
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        return createSignatureAudit({ ...input, authMethod: "legacy observation — not the frozen signature chain (use closeout.siteSign)", documentHash: null, status: "pending" });
+      }),
     }),
     safety: router({
-      list: roleProcedure("safety.list").query(() => listSafetyEvents()),
+      list: roleProcedure("safety.list").query(async ({ ctx }) => listSafetyEvents(await scopeFor(ctx.user.id))),
       create: roleProcedure("safety.create")
         .input(
           z.object({
@@ -1505,7 +1590,11 @@ export const appRouter = router({
             status: REFUSED,
           })
         )
-        .mutation(({ input }) => createSafetyEvent({ ...input, status: "open" })),
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        return createSafetyEvent({ ...input, status: "open" });
+      }),
     }),
   }),
 });

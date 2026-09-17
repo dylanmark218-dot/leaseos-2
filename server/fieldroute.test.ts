@@ -1,7 +1,13 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { grantUserRole, listActiveUserRoleNames } from "./db";
+import { getDb, grantUserRole, listActiveUserRoleNames } from "./db";
+import { jobs, units } from "../drizzle/schema";
+
+// P4.1: creates that name a job or unit must name one the caller may see. These were `jobId: FIXTURE_JOB_ID` / `unitId: FIXTURE_UNIT_ID`,
+// placeholders no row necessarily had; the suite now creates a real, unowned job and unit (the single tenant's).
+let FIXTURE_JOB_ID = 1;
+let FIXTURE_UNIT_ID = 1;
 
 /**
  * B20.4 put personnel, billing, compliance, safety and maintenance behind
@@ -15,6 +21,12 @@ const TEST_USER_ID = 1;
 
 beforeAll(async () => {
   if (!process.env.DATABASE_URL) return;
+  const db = await getDb();
+  if (db) {
+    const tag = Math.random().toString(36).slice(2, 8).toUpperCase();
+    FIXTURE_JOB_ID = (await db.insert(jobs).values({ jobCode: `JOB-FR-${tag}`, type: "Hydrovac", customer: "Fixture Energy", location: "Somewhere", status: "dispatched" } as never))[0].insertId;
+    FIXTURE_UNIT_ID = (await db.insert(units).values({ unitNumber: `U-FR-${tag}`, vehicleType: "hydrovac" } as never))[0].insertId;
+  }
   const held = new Set(await listActiveUserRoleNames(TEST_USER_ID));
   // Deliberately not `mechanic`: the shop is explicitly denied personnel.write,
   // and deny beats grant, so adding it here would block operator creation. That
@@ -201,7 +213,7 @@ describe("fieldRoute identity and compliance", () => {
     ).resolves.toBeDefined();
     await expect(
       caller.fieldRoute.compliance.loads.create({
-        jobId: 1,
+        jobId: FIXTURE_JOB_ID,
         material: "Used drilling fluid",
         isWaste: true,
         confidence: "low",
@@ -218,7 +230,7 @@ describe("fieldRoute identity and compliance", () => {
     ).resolves.toBeDefined();
     await expect(
       caller.fieldRoute.compliance.maintenance.create({
-        unitId: 1,
+        unitId: FIXTURE_UNIT_ID,
         title: "Test hydraulic inspection",
         severity: "inspection_required",
         reportedAt: new Date(),
@@ -226,7 +238,7 @@ describe("fieldRoute identity and compliance", () => {
     ).resolves.toBeDefined();
     await expect(
       caller.fieldRoute.compliance.deliveries.create({
-        jobId: 1,
+        jobId: FIXTURE_JOB_ID,
         recipientRole: "customer",
         recipient: "Authorized test recipient",
         status: "queued",
@@ -234,7 +246,7 @@ describe("fieldRoute identity and compliance", () => {
     ).resolves.toBeDefined();
     await expect(
       caller.fieldRoute.compliance.sign({
-        jobId: 1,
+        jobId: FIXTURE_JOB_ID,
         signerName: "Test Operator",
         signedAt: new Date(),
       })
@@ -247,8 +259,8 @@ describe("fieldRoute job units and inspections", () => {
     const caller = appRouter.createCaller(createContext());
     await expect(
       caller.fieldRoute.identity.jobUnits.create({
-        jobId: 1,
-        unitId: 1,
+        jobId: FIXTURE_JOB_ID,
+        unitId: FIXTURE_UNIT_ID,
         operatorId: 1,
         role: "support unit",
         joinedAt: new Date(),
@@ -259,7 +271,7 @@ describe("fieldRoute job units and inspections", () => {
     ).resolves.toBeDefined();
     await expect(
       caller.fieldRoute.identity.inspections.create({
-        unitId: 1,
+        unitId: FIXTURE_UNIT_ID,
         type: "pre_trip",
         status: "pass",
         checklist: JSON.stringify(["tires", "brakes", "lights"]),
@@ -290,7 +302,7 @@ describe("fieldRoute location identity and scans", () => {
       manifestNumber: `TEST-MANIFEST-${marker}`,
       locationId: typeof locationId === "number" ? locationId : undefined,
       material: "Used drilling fluid",
-      unitId: 1,
+      unitId: FIXTURE_UNIT_ID,
       driver: "Test Driver",
     });
     expect(manifestId).toBeDefined();
@@ -320,7 +332,7 @@ describe("fieldRoute compliance engine", () => {
     });
     const tailgate = await caller.fieldRoute.complianceEngine.tailgates.create({
       trackingNumber: `TB-TEST-${marker}`,
-      jobId: 1,
+      jobId: FIXTURE_JOB_ID,
       locationId: 1,
       supervisor: "Test Supervisor",
       hazards: "Traffic",
@@ -349,8 +361,8 @@ describe("trip operations", () => {
       status: "planned",
       odometerStartKm: 1000,
       odometerEndKm: 1142.6,
-      jobId: 1,
-      unitId: 1,
+      jobId: FIXTURE_JOB_ID,
+      unitId: FIXTURE_UNIT_ID,
       operatorId: 1,
       manifestId: 1,
     });
@@ -411,7 +423,7 @@ describe("trip operations", () => {
     await expect(
       caller.fieldRoute.workOrders.create({
         workOrderNumber: `WO-TEST-${Date.now()}`,
-        unitId: 1,
+        unitId: FIXTURE_UNIT_ID,
         priority: "urgent",
         openedAt: new Date(),
         odometerKm: 183500,

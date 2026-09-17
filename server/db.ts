@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import type { MySqlColumn } from "drizzle-orm/mysql-core";
 import { SINGLE_TENANT_ID, resolveActingScope } from "./_core/actingScope";
 import { drizzle } from "drizzle-orm/mysql2";
@@ -188,12 +188,13 @@ export async function createJob(input: InsertJob, scope: TenantScope) {
   return result[0]?.insertId;
 }
 
-export async function listEvidenceRecords() {
+export async function listEvidenceRecords(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(evidenceRecords)
+    .where(jobKeyedScope(db, evidenceRecords.jobId, scope))
     .orderBy(desc(evidenceRecords.capturedAt))
     .limit(100);
 }
@@ -239,12 +240,13 @@ export async function createRouteContext(input: InsertRouteContext) {
   return result[0]?.insertId;
 }
 
-export async function listSafetyEvents() {
+export async function listSafetyEvents(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(safetyEvents)
+    .where(jobKeyedScope(db, safetyEvents.jobId, scope))
     .orderBy(desc(safetyEvents.occurredAt))
     .limit(100);
 }
@@ -273,13 +275,13 @@ export async function updateTrip(id: number, input: Partial<InsertTrip>) {
   await db.update(trips).set(input).where(eq(trips.id, id));
   return true;
 }
-export async function listTripStops(tripId?: number) {
+export async function listTripStops(tripId: number | undefined, scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(tripStops)
-    .where(tripId ? eq(tripStops.tripId, tripId) : undefined)
+    .where(tripId ? and(eq(tripStops.tripId, tripId), tripKeyedScope(db, tripStops.tripId, scope)) : tripKeyedScope(db, tripStops.tripId, scope))
     .orderBy(tripStops.sequence)
     .limit(500);
 }
@@ -442,12 +444,13 @@ export async function updateWorkOrder(
   return true;
 }
 
-export async function listRouteDecisions() {
+export async function listRouteDecisions(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(routeDecisions)
+    .where(tripRefScope(db, routeDecisions.tripId, scope))
     .orderBy(desc(routeDecisions.createdAt))
     .limit(100);
 }
@@ -472,13 +475,13 @@ export async function createBillingRateCard(input: InsertBillingRateCard) {
   const result = await db.insert(billingRateCards).values(input);
   return result[0]?.insertId;
 }
-export async function listJobChargeLines(jobId?: number) {
+export async function listJobChargeLines(jobId: number | undefined, scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(jobChargeLines)
-    .where(jobId ? eq(jobChargeLines.jobId, jobId) : undefined)
+    .where(jobId ? and(eq(jobChargeLines.jobId, jobId), jobKeyedScope(db, jobChargeLines.jobId, scope)) : jobKeyedScope(db, jobChargeLines.jobId, scope))
     .orderBy(desc(jobChargeLines.createdAt))
     .limit(100);
 }
@@ -656,10 +659,10 @@ export async function createScanAudit(input: InsertScanAudit) {
   return result[0]?.insertId;
 }
 
-export async function listJobUnits() {
+export async function listJobUnits(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(jobUnits).orderBy(desc(jobUnits.joinedAt)).limit(100);
+  return db.select().from(jobUnits).where(jobKeyedScope(db, jobUnits.jobId, scope)).orderBy(desc(jobUnits.joinedAt)).limit(100);
 }
 
 export async function createJobUnit(input: InsertJobUnit) {
@@ -855,6 +858,43 @@ export async function incidentInScope(incidentNumber: string, scope: TenantScope
   return scope.tenantId === SINGLE_TENANT_ID ? { id: i.id } : null;
 }
 
+/** Subquery of job ids the scope may see; `inArray(col, jobScopeSubquery(db, scope))`. */
+export function jobScopeSubquery(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: TenantScope) {
+  return db.select({ id: jobs.id }).from(jobs).where(orgScopeWhere(jobs, scope));
+}
+/** Subquery of trip ids the scope may see (trips carry orgRef since 0132). */
+export function tripScopeSubquery(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: TenantScope) {
+  return db.select({ id: trips.id }).from(trips).where(orgScopeWhere(trips, scope));
+}
+/** A trip the scope may see, or null. */
+export async function tripInScope(tripId: number, scope: TenantScope): Promise<{ id: number; jobId: number | null } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select({ id: trips.id, jobId: trips.jobId }).from(trips).where(and(eq(trips.id, tripId), orgScopeWhere(trips, scope))).limit(1))[0] ?? null;
+}
+/** Rows keyed to a job: the job in scope, or (no job) only for the single tenant. */
+function jobKeyedScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, jobIdColumn: MySqlColumn, scope: TenantScope) {
+  const inScope = inArray(jobIdColumn, jobScopeSubquery(db, scope));
+  return scope.tenantId === SINGLE_TENANT_ID ? or(inScope, isNull(jobIdColumn)) : inScope;
+}
+function tripKeyedScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, tripIdColumn: MySqlColumn, scope: TenantScope) {
+  const inScope = inArray(tripIdColumn, tripScopeSubquery(db, scope));
+  return scope.tenantId === SINGLE_TENANT_ID ? or(inScope, isNull(tripIdColumn)) : inScope;
+}
+/**
+ * Rows whose trip reference is free text (routeDecisions.tripId): a trip number or an id as text.
+ * In scope when it names a trip the scope may see; text naming no trip at all is unowned — the
+ * single tenant's, and nobody else's.
+ */
+function tripRefScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, refColumn: MySqlColumn, scope: TenantScope) {
+  const numbers = db.select({ n: trips.tripNumber }).from(trips).where(orgScopeWhere(trips, scope));
+  const ids = db.select({ n: sql<string>`CAST(${trips.id} AS CHAR)` }).from(trips).where(orgScopeWhere(trips, scope));
+  const inScope = or(inArray(refColumn, numbers), inArray(refColumn, ids));
+  if (scope.tenantId !== SINGLE_TENANT_ID) return inScope;
+  const anyNumber = db.select({ n: trips.tripNumber }).from(trips), anyId = db.select({ n: sql<string>`CAST(${trips.id} AS CHAR)` }).from(trips);
+  return or(inScope, and(notInArray(refColumn, anyNumber), notInArray(refColumn, anyId)));
+}
+
 export async function listOperators(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
@@ -890,12 +930,13 @@ export async function createUnit(input: InsertUnit, scope: TenantScope, assigned
   return id;
 }
 
-export async function listLoadProfiles() {
+export async function listLoadProfiles(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(loadProfiles)
+    .where(jobKeyedScope(db, loadProfiles.jobId, scope))
     .orderBy(desc(loadProfiles.createdAt))
     .limit(100);
 }
@@ -937,12 +978,13 @@ export async function createMaintenanceDefect(input: InsertMaintenanceDefect) {
   return result[0]?.insertId;
 }
 
-export async function listDeliveries() {
+export async function listDeliveries(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(deliveries)
+    .where(jobKeyedScope(db, deliveries.jobId, scope))
     .orderBy(desc(deliveries.createdAt))
     .limit(100);
 }
