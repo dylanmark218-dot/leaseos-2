@@ -159,3 +159,6 @@ The audit in project knowledge was written against 515ce64 (118 migrations). Whe
 | 27 | **Field-package security blockers** | **DONE** — refusals were already rows; now the signature is verified over the exact bytes the tablet signed (`signedPayloadJson`, `exact_wire`) and the package processed is parsed from those bytes; packages without them are still accepted and marked `reconstructed` so the office can see un-updated devices; the tablet's own clock is taken (`deviceClockAt`): fresh by its clock, skew recorded, >5 min flagged, >24 h refused as a wrong clock |
 
 Cross-layer proof added this round: `server/crossLayerIntegrity.test.ts` — every tRPC path the client references exists on the server (98 references), the flat mounted surface is pinned (649), and over HTTP the real router + context refuses an anonymous role-gated call with UNAUTHORIZED and 404s an unknown path.
+
+
+**P4.1 router 4b (v22.41) — the shop:** twelve of 25 procedures scoped through unit ownership; parts/tools/tire registry are shop-level stock and stay unscoped on purpose until they carry an owner. Test: `tenantScopeShop.db.test.ts`.
