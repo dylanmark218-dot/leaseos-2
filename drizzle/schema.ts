@@ -7925,6 +7925,79 @@ export type HosRuleLimitHistoryRow = typeof hosRuleLimitHistory.$inferSelect;
  * `requestReceivedAt` are separate because the clock runs from the request and
  * the two dates can differ — see `_core/inspectorRequest.ts`.
  */
+/** 0131 — security incidents and privacy breach assessments (P4.6). Distinct from safety incidentReports. */
+export const securityIncidents = mysqlTable("securityIncidents", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  incidentRef: varchar("incidentRef", { length: 64 }).notNull(),
+  incidentType: mysqlEnum("incidentType", ["account_compromise", "unauthorized_access", "data_exposure", "malware", "ransomware", "credential_exposure", "cross_tenant_access", "lost_device", "vendor_incident", "availability", "integrity", "privacy", "other"]).notNull(),
+  severity: mysqlEnum("severity", ["low", "moderate", "high", "critical"]).default("moderate").notNull(),
+  status: mysqlEnum("status", ["open", "triaging", "contained", "investigating", "recovering", "monitoring", "closed"]).default("open").notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  summary: text("summary"),
+  discoveredAt: timestamp("discoveredAt").notNull(),
+  occurredFrom: timestamp("occurredFrom"),
+  occurredTo: timestamp("occurredTo"),
+  discoveredByUserId: int("discoveredByUserId").notNull(),
+  incidentOwnerUserId: int("incidentOwnerUserId"),
+  personalInformationSuspected: boolean("personalInformationSuspected").default(false).notNull(),
+  customerDataSuspected: boolean("customerDataSuspected").default(false).notNull(),
+  containedAt: timestamp("containedAt"),
+  closedAt: timestamp("closedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ orgIdx: index("securityIncidents_org_idx").on(t.orgRef, t.status), ref: uniqueIndex("securityIncidents_ref_unique").on(t.incidentRef) }));
+export const securityIncidentEvents = mysqlTable("securityIncidentEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  securityIncidentId: int("securityIncidentId").notNull(),
+  sequence: int("sequence").notNull(),
+  eventType: mysqlEnum("eventType", ["discovered", "triage", "evidence_added", "contained", "scope_changed", "customer_identified", "privacy_assessment", "notification_decision", "notification_sent", "recovery", "closed", "reopened"]).notNull(),
+  actorUserId: int("actorUserId").notNull(),
+  detail: text("detail"),
+  evidenceRecordId: int("evidenceRecordId"),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ seq: uniqueIndex("securityIncidentEvents_seq_unique").on(t.securityIncidentId, t.sequence) }));
+export const securityIncidentOrganizations = mysqlTable("securityIncidentOrganizations", {
+  id: int("id").autoincrement().primaryKey(),
+  securityIncidentId: int("securityIncidentId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  affectedStatus: mysqlEnum("affectedStatus", ["suspected", "confirmed", "ruled_out"]).default("suspected").notNull(),
+  dataCategoriesJson: text("dataCategoriesJson"),
+  identifiedAt: timestamp("identifiedAt").defaultNow().notNull(),
+}, (t) => ({ unique: uniqueIndex("securityIncidentOrganizations_unique").on(t.securityIncidentId, t.orgRef) }));
+export const privacyBreachAssessments = mysqlTable("privacyBreachAssessments", {
+  id: int("id").autoincrement().primaryKey(),
+  securityIncidentId: int("securityIncidentId").notNull(),
+  assessmentNo: int("assessmentNo").notNull(),
+  jurisdiction: varchar("jurisdiction", { length: 80 }).notNull(),
+  applicableLaw: varchar("applicableLaw", { length: 180 }),
+  status: mysqlEnum("status", ["draft", "in_review", "complete", "superseded"]).default("draft").notNull(),
+  sensitivity: mysqlEnum("sensitivity", ["low", "moderate", "high", "very_high", "unknown"]).default("unknown").notNull(),
+  misuseLikelihood: mysqlEnum("misuseLikelihood", ["low", "moderate", "high", "unknown"]).default("unknown").notNull(),
+  harmAssessmentJson: text("harmAssessmentJson"),
+  notificationDecision: mysqlEnum("notificationDecision", ["pending", "not_required", "required", "uncertain"]).default("pending").notNull(),
+  decisionReason: text("decisionReason"),
+  assessedByUserId: int("assessedByUserId"),
+  assessedAt: timestamp("assessedAt"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ no: uniqueIndex("privacyBreachAssessments_no_unique").on(t.securityIncidentId, t.assessmentNo) }));
+export const incidentNotificationObligations = mysqlTable("incidentNotificationObligations", {
+  id: int("id").autoincrement().primaryKey(),
+  securityIncidentId: int("securityIncidentId").notNull(),
+  assessmentId: int("assessmentId"),
+  recipientType: mysqlEnum("recipientType", ["commissioner", "individuals", "customer_organization", "law_enforcement", "insurer", "vendor", "other"]).notNull(),
+  recipientRef: varchar("recipientRef", { length: 220 }),
+  basis: varchar("basis", { length: 300 }).notNull(),
+  dueAt: timestamp("dueAt"),
+  state: mysqlEnum("state", ["required", "sent", "not_required", "withdrawn"]).default("required").notNull(),
+  sentAt: timestamp("sentAt"),
+  sentByUserId: int("sentByUserId"),
+  evidenceRecordId: int("evidenceRecordId"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ openIdx: index("incidentNotificationObligations_open_idx").on(t.state, t.dueAt) }));
+
 /** 0127/0128 — B28 widget dashboards (renumbered from the engine's 0089/0090). */
 export const widgetLayouts = mysqlTable("widgetLayouts", {
   id: int("id").autoincrement().primaryKey(),

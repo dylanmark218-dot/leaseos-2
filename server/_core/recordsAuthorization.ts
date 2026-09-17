@@ -2139,6 +2139,16 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "manifestCustody.evidenceProfileSet": "manifest.write",
   "manifestCustody.evidenceProfileApprove": "manifest.write",
   "manifestCustody.chain": "manifest.read",
+  /* ---- v22.24 P4.6 (0131): security incidents and privacy breach assessments ---- */
+  "securityIncidents.open": "incident.create",
+  "securityIncidents.timelineAppend": "incident.create",
+  "securityIncidents.organizationAffect": "incident.review",
+  "securityIncidents.breachAssess": "incident.review",
+  "securityIncidents.obligationCreate": "incident.review",
+  "securityIncidents.obligationSent": "incident.review",
+  "securityIncidents.close": "incident.review",
+  "securityIncidents.view": "incident.read_investigation",
+  "securityIncidents.list": "incident.read_summary",
   "deliveries.list": "delivery.read",
   "deliveries.create": "delivery.write",
 

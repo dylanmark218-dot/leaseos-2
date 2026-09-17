@@ -77,6 +77,8 @@ export type ExceptionSources = {
   tanksOutOfTolerance: { tankRef: string; name: string; variancePct: number; varianceLitres: number; reason: string }[];
   /** s.6.7 inspector requests still open (0122): the fifteen-day clock, surfaced from five days out. */
   inspectorRequests: { requestRef: string; issuingAuthority: string; dueAt: Date; state: string; irrecoverable: boolean }[];
+  /** 0131 security incidents: a required notification unsent, or personal information suspected with no privacy decision. */
+  securityIncidents?: { incidentRef: string; title: string; severity: string; personalInformationSuspected: boolean; assessed: boolean; unsentNotifications: { recipientType: string; dueAt: Date | null }[] }[];
   periodsSoftClosed: { financialEntityId: number; period: string; reviewItems: number; since: Date }[];
 };
 
@@ -293,6 +295,28 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
       since: null, dueAt: null,
     });
   }
+  for (const si of s.securityIncidents ?? []) {
+    for (const n of si.unsentNotifications) {
+      const overdue = n.dueAt ? n.dueAt.getTime() < now.getTime() : false;
+      out.push({
+        key: `security-notify:${si.incidentRef}:${n.recipientType}`, category: "compliance", severity: overdue || si.severity === "critical" ? "critical" : "high",
+        title: `${si.incidentRef}: notification to ${n.recipientType} is required and unsent${overdue ? " — overdue" : ""}`,
+        reason: `${si.title}. The privacy reviewer decided notification is required${n.dueAt ? `, due ${n.dueAt.toISOString().slice(0, 10)}` : " (no due date set)"}.`,
+        subjectType: "security_incident", subjectId: si.incidentRef, action: "Send the notification and record it with its evidence",
+        deepLink: { portal: "office", route: `/security/incidents/${si.incidentRef}` }, requiredPermission: "incident.review", since: null, dueAt: n.dueAt,
+      });
+    }
+    if (si.personalInformationSuspected && !si.assessed) {
+      out.push({
+        key: `security-assess:${si.incidentRef}`, category: "compliance", severity: "high",
+        title: `${si.incidentRef}: personal information suspected, no privacy decision`,
+        reason: `${si.title}. A privacy breach assessment decides whether notification is required; nothing decides it automatically.`,
+        subjectType: "security_incident", subjectId: si.incidentRef, action: "Complete the privacy breach assessment (uncertain is an answer; pending is not)",
+        deepLink: { portal: "office", route: `/security/incidents/${si.incidentRef}` }, requiredPermission: "incident.review", since: null, dueAt: null,
+      });
+    }
+  }
+
   for (const r of s.inspectorRequests ?? []) {   // older fixtures omit the field
     const daysLeft = Math.floor((r.dueAt.getTime() - now.getTime()) / DAY);
     if (daysLeft > 5) continue;                       // five days out and closer; overdue is negative

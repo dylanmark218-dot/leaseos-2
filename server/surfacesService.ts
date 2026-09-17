@@ -14,7 +14,7 @@ import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
   complianceDocuments, disposalTickets, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
   maintenanceDefects, measurementDevices, operationalTasks, operators, purchaseAuthorizations, roadsideServiceEvents,
-  syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders, academyInspectorRequests } from "../drizzle/schema";
+  syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders, academyInspectorRequests, securityIncidents, privacyBreachAssessments, incidentNotificationObligations } from "../drizzle/schema";
 import { calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import type { ExceptionSources } from "./_core/exceptionCentre";
 import { loadUngatedAssignments } from "./dispatchEnforcementService";
@@ -88,6 +88,7 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   return {
     now,
     inspectorRequests: inspector.map(r => ({ requestRef: r.requestRef, issuingAuthority: r.issuingAuthority, dueAt: r.dueAt, state: r.state, irrecoverable: !!r.irrecoverable })),
+    securityIncidents: await loadOpenSecurityIncidents(db),
     criticalDefects: defects.map(d => ({ id: d.id, unitId: d.unitId, unitNumber: d.unitNumber ?? null, title: d.title, reportedAt: d.reportedAt, status: d.status })),
     roadsideOpen: roadside.map(r => ({ id: r.id, eventRef: r.eventRef, unitNumber: r.unitNumber ?? null, eventType: r.eventType, occurredAt: r.occurredAt, vendorAssigned: r.assignedVendorId != null })),
     vendorBills: bills.map(b => ({ id: b.id, billRef: b.billRef, vendorName: b.vendorName ?? null, total: b.totalCents / 100, status: b.status, matchOutcome: b.matchOutcome, receivedAt: b.receivedAt, dueAt: b.dueAt })),
@@ -270,4 +271,19 @@ export async function loadTimeline(args: { entityType: "unit" | "job" | "trip" |
     for (const t of tk) ev.push({ occurredAt: t.scaleInAt ?? t.createdAt, recordedAt: t.createdAt, kind: "disposal_ticket", title: `Disposal ticket ${t.facilityTicketNumber ?? t.ticketNumber} (${t.verificationStatus})`, detail: t.netKg != null ? `${t.netKg} kg net` : null, actor: null, ref: t.ticketNumber, readPermission: "evidence.read_job_operational" });
   }
   return ev.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime()).slice(-(args.limit ?? 200));
+}
+
+
+/** 0131 — open security incidents with what the exception centre needs to know about them. */
+async function loadOpenSecurityIncidents(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
+  const open = await db.select({ id: securityIncidents.id, incidentRef: securityIncidents.incidentRef, title: securityIncidents.title, severity: securityIncidents.severity, personalInformationSuspected: securityIncidents.personalInformationSuspected })
+    .from(securityIncidents).where(inArray(securityIncidents.status, ["open", "triaging", "contained", "investigating", "recovering", "monitoring"])).limit(200);
+  if (!open.length) return [];
+  const ids = open.map(o => o.id);
+  const [assessed, unsent] = await Promise.all([
+    db.select({ securityIncidentId: privacyBreachAssessments.securityIncidentId }).from(privacyBreachAssessments).where(and(inArray(privacyBreachAssessments.securityIncidentId, ids), eq(privacyBreachAssessments.status, "complete"))),
+    db.select({ securityIncidentId: incidentNotificationObligations.securityIncidentId, recipientType: incidentNotificationObligations.recipientType, dueAt: incidentNotificationObligations.dueAt }).from(incidentNotificationObligations).where(and(inArray(incidentNotificationObligations.securityIncidentId, ids), eq(incidentNotificationObligations.state, "required"))),
+  ]);
+  const assessedIds = new Set(assessed.map(a => a.securityIncidentId));
+  return open.map(o => ({ incidentRef: o.incidentRef, title: o.title, severity: o.severity, personalInformationSuspected: !!o.personalInformationSuspected, assessed: assessedIds.has(o.id), unsentNotifications: unsent.filter(u => u.securityIncidentId === o.id).map(u => ({ recipientType: u.recipientType, dueAt: u.dueAt })) }));
 }
