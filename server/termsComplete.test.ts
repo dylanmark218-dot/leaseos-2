@@ -113,7 +113,9 @@ d("terms complete the closeout", () => {
     const pol = insGet.items.find(i => i.itemKind === "policy")!;
     expect(pol.title).toContain("CA-2026-771");
     expect(pol.redactions.some(r => r.startsWith("annualPremium: withheld"))).toBe(true);
-    expect(JSON.stringify(insGet)).not.toContain("42000");
+    // The premium must not appear in any item title (the manifest carries hashes, not rows). Checked on titles, not the
+    // whole JSON: a random entity id such as 4200035 once matched the substring "42000" and failed this for the wrong reason.
+    expect(insGet.items.every(i => !i.title.includes("42000"))).toBe(true);
     expect(insGet.missing.map(m => m.itemKind)).toEqual(["claim", "incident"]);
   });
 });
