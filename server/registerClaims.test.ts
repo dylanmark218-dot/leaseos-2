@@ -80,6 +80,28 @@ const STATUS_VOCABULARY = [
 ] as const;
 
 describe("the register does not understate the branch either", () => {
+  it("keeps the state in the marker, not buried in the prose after it", () => {
+    /*
+     * The narrowing above is right — a guard that fires on "**GPS-monitoring notices built**" in
+     * the middle of a sentence is one somebody deletes. But it leaves a row whose status cell opens
+     * with prose invisible to the check entirely, which is how P4.6 came to read "Corrected, then
+     * partly DONE." and be treated as having no state at all. A row may certainly explain itself;
+     * it just has to say what it is first, where a reader and a check both find it.
+     */
+    const buried: string[] = [];
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("| P")) continue;
+      const cell = line.split("|")[3] ?? "";
+      const first = /\*\*([^*]+)\*\*/.exec(cell);
+      if (!first) continue;
+      if (/^[A-Z][A-Z /]{2,40}/.test(first[1]!)) continue;   // opens with a marker: fine
+      if (new RegExp(`\\b(${STATUS_VOCABULARY.join("|")})\\b`).test(cell)) {
+        buried.push(`${rowId(line)} → opens with "${first[1]!.slice(0, 40)}"`);
+      }
+    }
+    expect(buried, "a row states its state in prose instead of leading with the marker").toEqual([]);
+  });
+
   it("uses only status words the guard knows, so a new one is a deliberate act", () => {
     const offenders: string[] = [];
     for (const line of text.split("\n")) {
