@@ -23,6 +23,7 @@
  * "insufficient evidence" needs to be able to show it said so, and one that
  * answered from a retired revision needs to be findable afterwards.
  */
+import { checkSourceGate } from "./_core/knowledge/sourceGate";
 import { TRPCError } from "@trpc/server";
 import { createHash } from "crypto";
 import { z } from "zod";
@@ -576,10 +577,31 @@ export const assistantAskRouter = router({
       effectiveFrom: z.coerce.date().optional(),
       supersededAt: z.coerce.date().optional(),
       jurisdiction: z.string().max(20).optional(),
+      // 0150: why this text may be reproduced. There is no default: a person states it.
+      reproductionBasis: z.enum(["own_document", "licensed_source"]),
+      /** Required for a licensed source: the same assessment id the corpus gate uses. */
+      licenceAssessmentRef: z.string().min(1).max(64).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const d = await db();
       const acting = await resolveActingScope(d, ctx.user.id);
+      // 0150: a licensed source must name the assessment that permits reproduction, and it must be
+      // an assessment that actually permits it — the same gate the corpus ingestion runs through.
+      // The company's own document needs no licence, but it does need the person who said so.
+      if (input.reproductionBasis === "licensed_source") {
+        if (!input.licenceAssessmentRef) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "A licensed source must name the licence assessment that permits reproduction" });
+        }
+        // The assistant quotes a passage back to a person using the product, so the purpose is
+        // commercial_redisplay - the most demanding of the gate's purposes, and the honest one.
+        // A source cleared only for link_only or rag_ingestion does not clear this.
+        const gate = checkSourceGate(input.licenceAssessmentRef, "commercial_redisplay");
+        if (!gate.allowed) {
+          throw new TRPCError({ code: "FORBIDDEN", message: `Quoting ${input.licenceAssessmentRef} to a person is not permitted: ${gate.reason}` });
+        }
+      } else if (input.licenceAssessmentRef) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "An own document does not carry a licence assessment; remove it or state the basis as licensed_source" });
+      }
       const passageRef = ref("PSG");
       await d.insert(knowledgePassages).values({
         passageRef, tenantId: acting.tenantId,
@@ -588,8 +610,11 @@ export const assistantAskRouter = router({
         body: input.body, revision: input.revision,
         effectiveFrom: input.effectiveFrom ?? null, supersededAt: input.supersededAt ?? null,
         jurisdiction: input.jurisdiction ?? null,
+        reproductionBasis: input.reproductionBasis,
+        licenceAssessmentRef: input.licenceAssessmentRef ?? null,
+        loadedByUserId: ctx.user.id,
       });
-      return { passageRef, note: "Loaded. A passage with no effective date is usable; one with no revision would not have been." };
+      return { passageRef, basis: input.reproductionBasis, note: "Loaded, with the basis and the person who stated it recorded. A passage with no effective date is usable; one with no revision would not have been." };
     }),
 
   /** Retire a revision without deleting it. */

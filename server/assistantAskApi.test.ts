@@ -37,7 +37,9 @@ async function load(safety: number, body: string, over: Record<string, unknown> 
   return caller(safety).assistantAsk.addPassage({
     documentRef: `DOC-${rnd()}`, documentTitle: "Air Brake Maintenance Manual",
     section: "4.7", page: 92, body, revision: "4",
-    effectiveFrom: new Date("2026-01-10T00:00:00Z"), jurisdiction: "AB", ...over,
+    effectiveFrom: new Date("2026-01-10T00:00:00Z"), jurisdiction: "AB",
+    reproductionBasis: "own_document",   // 0150: the company's own manual; a person states this
+    ...over,
   });
 }
 
@@ -590,5 +592,38 @@ d("the retriever's mechanics, against the real database", () => {
     const a = await caller(driver).assistantAsk.ask({ question: t, asOf: AT });
     const b = await caller(driver).assistantAsk.ask({ question: t, asOf: AT });
     expect(b.passages.map(p => p.passageRef)).toEqual(a.passages.map(p => p.passageRef));
+  });
+});
+
+d("reproduced text records why it may be reproduced, and who said so", () => {
+  it("records the basis and the person for the company's own document", async () => {
+    const safety = await withRole("safety");
+    const r = await load(safety, brakeText(token()));
+    expect(r.basis).toBe("own_document");
+    const [row] = await pool.query<mysql.RowDataPacket[]>(
+      "SELECT reproductionBasis, licenceAssessmentRef, loadedByUserId FROM knowledgePassages WHERE passageRef = ?", [r.passageRef]);
+    expect(row[0]).toMatchObject({ reproductionBasis: "own_document", licenceAssessmentRef: null, loadedByUserId: safety });
+  });
+
+  it("refuses a licensed source with no assessment named, and an own document that names one", async () => {
+    const safety = await withRole("safety");
+    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source" }))
+      .rejects.toThrow(/must name the licence assessment/);
+    await expect(load(safety, brakeText(token()), { reproductionBasis: "own_document", licenceAssessmentRef: "LIC-AB-511-2026-09-13" }))
+      .rejects.toThrow(/does not carry a licence assessment/);
+  });
+
+  it("refuses to quote a source whose licence does not permit showing it to a customer", async () => {
+    const safety = await withRole("safety");
+    // 511 Alberta: its terms permit non-commercial reproduction and require written permission for
+    // commercial use, which is not stored. Quoting it to a person in the product is that use.
+    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source", licenceAssessmentRef: "gov-ab-511" }))
+      .rejects.toThrow(/is not permitted/);
+  });
+
+  it("refuses a source nobody has assessed at all — an unknown licence is not a permissive one", async () => {
+    const safety = await withRole("safety");
+    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source", licenceAssessmentRef: "some-source-nobody-assessed" }))
+      .rejects.toThrow(/is not permitted/);
   });
 });
