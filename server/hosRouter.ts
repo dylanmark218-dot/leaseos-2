@@ -12,7 +12,7 @@ import { z } from "zod";
 import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { dutyRecords, hosAttestations, hosRuleLimits, hosRuleProfiles } from "../drizzle/schema";
+import { complianceDocuments, dutyRecords, hosAttestations, hosRuleLimits, hosRuleProfiles } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { ALL_HOS_PROFILE_SEEDS, HOS_SEED_CAVEAT, HOS_SEED_RETRIEVAL_DATE } from "./_core/hosRuleSeeds";
 import { divergences, promote as promoteLimit } from "./_core/knowledge/promotionLedger";
@@ -49,6 +49,64 @@ const CONTEXT = z.object({
 });
 
 export const hosRouter = router({
+
+  /**
+   * P8.3 — record a scanned paper log as a compliance record.
+   *
+   * This and `attestHours` answer two different questions, and the whole value is in not letting
+   * them blur:
+   *
+   *   this one satisfies **retention and audit** — the log book page exists, it is on file, and a
+   *     regulator asking for six months of records can be given them;
+   *   `attestHours` answers **dispatch** — can this driver legally start this run right now.
+   *
+   * A scanned page is after-the-fact proof. It says what happened yesterday; it does not say what
+   * is left today, and a scan arriving must not quietly clear a dispatch check. So this writes a
+   * compliance document and deliberately touches nothing the readiness engine reads.
+   *
+   * `confidence: "low"` is not pessimism about the paperwork: the company's record may be perfect.
+   * It is about what LeaseOS itself can vouch for, which is an image of a page nobody here has
+   * totalled. A person verifies it through the ordinary credential path.
+   */
+  recordScannedLog: roleProcedure("hos.recordScannedLog")
+    .input(z.object({
+      operatorId: z.number().int().positive(),
+      dutyDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "The duty date the page covers, as YYYY-MM-DD"),
+      storageKey: z.string().min(1).max(500),
+      /** Who put the page in front of the scanner, in their words. */
+      note: z.string().min(10).max(400),
+      jurisdiction: z.string().max(80).nullish(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const dutyDate = new Date(`${input.dutyDate}T00:00:00Z`);
+      if (dutyDate.getTime() > Date.now() + 24 * 60 * 60 * 1000) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "A duty date in the future has no log page to scan" });
+      }
+      const ins = await db.insert(complianceDocuments).values({
+        ownerType: "operator", ownerId: input.operatorId,
+        docType: "hos_daily_log", requirementKey: "hos.daily_log",
+        title: `Paper log — ${input.dutyDate}`,
+        identifier: input.dutyDate,
+        storageKey: input.storageKey,
+        capturedAt: new Date(), issuedAt: dutyDate, expiresAt: null,
+        jurisdiction: input.jurisdiction ?? null,
+        // Recorded is not verified, as everywhere else.
+        verificationStatus: "needs_review",
+        source: "scanned_paper",
+        // What LeaseOS can vouch for is an image of a page nobody here has totalled.
+        confidence: "low",
+        privateDetail: false,
+      });
+      return {
+        documentId: Number(ins[0]?.insertId ?? 0),
+        source: "scanned_paper" as const,
+        verificationStatus: "needs_review" as const,
+        recordedByUserId: ctx.user.id,
+        note: `On file for retention and audit. It is after-the-fact proof for ${input.dutyDate} and does not answer whether this driver has hours available now — dispatch still needs an attestation or a live figure for that.`,
+      };
+    }),
 
   /**
    * P8.3 — attest a driver's hours for one duty day, when the company runs paper logs.

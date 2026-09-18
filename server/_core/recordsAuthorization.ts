@@ -270,6 +270,8 @@ export type Permission =
   | "hos.read" | "hos.rule.manage" | "hos.rule.verify"
   /* P8.3 — stating a driver's hours for one duty day when the company runs paper logs. */
   | "hos.attest"
+  /* P8.3 — putting a scanned log page on file. Retention, not a dispatch answer. */
+  | "hos.recordScannedLog"
   | "portal.identity.manage" | "portal.submission.review"
   // v21.12 — render a frozen revision; propose payroll from a client bonus; record what a person saw.
   | "closeout.document.render" | "closeout.adjustment.payroll_propose" | "observation.record"
@@ -411,6 +413,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
     "automation.override.operational",
@@ -673,6 +676,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
     "facility.directory.report",
@@ -789,6 +793,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
   ],
   office: [
+    "hos.recordScannedLog",
     "automation.policy.read",
     "facility.directory.report",
     "facility.directory.write",
@@ -948,6 +953,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
     "automation.policy.manage",
@@ -2477,6 +2483,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
 
   /* ---- v21.1: dispatch gate ---- */
   "hos.attestHours": "hos.attest",
+  "hos.recordScannedLog": "hos.recordScannedLog",
   "dispatch.evaluate": "dispatch.evaluate",
   // P8.2 — the policy surface. manage is management-only by grant; read is wider; the operational
   // override is held widely precisely because it can only move toward more human involvement.

@@ -179,3 +179,54 @@ d("recording an attestation, end to end", () => {
     })).rejects.toThrow(/future cannot be attested/);
   }, 90_000);
 });
+
+d("a scanned log satisfies retention, and answers nothing about today", () => {
+  it("files the page with source scanned_paper at low confidence, needing review", async () => {
+    const office = await withRole("office");
+    const [o] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Paper ${rnd()}`]);
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const r = await callerFor(office).hos.recordScannedLog({
+      operatorId: Number(o.insertId), dutyDate: yesterday,
+      storageKey: `scans/logs/${rnd()}.pdf`,
+      note: "Scanned the driver's book page for yesterday at the end of the shift.",
+    });
+    expect(r.source).toBe("scanned_paper");
+    expect(r.verificationStatus).toBe("needs_review");           // recorded is not verified
+    expect(r.note).toMatch(/does not answer whether this driver has hours available now/);
+    const [row] = await pool.query<mysql.RowDataPacket[]>(
+      "SELECT docType, source, confidence, verificationStatus, identifier FROM complianceDocuments WHERE id = ?", [r.documentId]);
+    expect(row[0]).toMatchObject({
+      docType: "hos_daily_log", source: "scanned_paper",
+      // An image of a page nobody here has totalled: low is about what LeaseOS can vouch for.
+      confidence: "low", verificationStatus: "needs_review", identifier: yesterday,
+    });
+  }, 90_000);
+
+  it("does not clear the dispatch check — retention evidence and dispatch evidence stay separate", async () => {
+    const office = await withRole("office");
+    const [o] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Paper ${rnd()}`]);
+    const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [`U-${rnd().toUpperCase()}`]);
+    const operatorId = Number(o.insertId);
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Even a page scanned for TODAY is after-the-fact: it says what has happened, not what is left.
+    await callerFor(office).hos.recordScannedLog({
+      operatorId, dutyDate: today, storageKey: `scans/logs/${rnd()}.pdf`,
+      note: "Scanned today's page mid-shift so the office has it on file.",
+    });
+    const r = await composeReadiness({ operatorId, unitId: Number(u.insertId), trailerId: null, jobId: null });
+    expect(r.eligibility.blockers.some(b => b.code === "hos_unknown"),
+      "a scan arriving must not quietly satisfy a dispatch check").toBe(true);
+    expect(r.eligibility.blockers.some(b => b.code === "hos_attested")).toBe(false);
+  }, 90_000);
+
+  it("refuses a duty date with no page to scan yet", async () => {
+    const office = await withRole("office");
+    const [o] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Paper ${rnd()}`]);
+    const future = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+    await expect(callerFor(office).hos.recordScannedLog({
+      operatorId: Number(o.insertId), dutyDate: future, storageKey: "scans/logs/x.pdf",
+      note: "Trying to file a page for a day that has not happened.",
+    })).rejects.toThrow(/no log page to scan/);
+  }, 90_000);
+});
