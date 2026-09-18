@@ -5,6 +5,7 @@
 import { TRPCError } from "@trpc/server";
 import { decide as ledgerDecide } from "./_core/commercialApprovalService";
 import { z } from "zod";
+import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
@@ -182,7 +183,7 @@ export const arRouter = router({
         if (!input.financialEntityId || !input.customer) throw new TRPCError({ code: "BAD_REQUEST", message: "A credit not tied to an invoice needs the entity and the customer" });
         financialEntityId = input.financialEntityId; customer = input.customer; customerAccountId = await resolveCustomerAccount(financialEntityId, customer);
       }
-      const creditRef = ref("CR");
+      const creditRef = (await nextTrackingNumber(db, { sequenceType: "CR" })).trackingNumber;
       await db.insert(customerCredits).values({ creditRef, financialEntityId, customer, customerAccountId, invoiceId: inv?.id ?? null, amountCents: input.amountCents, reason: input.reason, requestedByUserId: ctx.user.id, evidenceRecordId: input.evidenceRecordId ?? null });
       return { creditRef, status: "requested" as const, financialEntityId, customer };
     }),
@@ -221,7 +222,7 @@ export const arRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const inv = await invoiceByNumber(input.invoiceNumber);
-      const requestRef = ref("WO");
+      const requestRef = (await nextTrackingNumber(db, { sequenceType: "WO" })).trackingNumber;
       await db.insert(writeOffRequests).values({ requestRef, invoiceId: inv.id, amountCents: input.amountCents, reason: input.reason, requestedByUserId: ctx.user.id, requestedAt: new Date() });
       await db.insert(collectionEvents).values({ invoiceId: inv.id, eventType: "write_off_requested", note: input.reason, byUserId: ctx.user.id, at: new Date() });
       return { requestRef, status: "requested" as const };
@@ -253,7 +254,7 @@ export const arRouter = router({
       await db.update(writeOffRequests).set({ status: input.decision, decidedByUserId: ctx.user.id, decidedAt: new Date(), decisionReason: input.reason }).where(eq(writeOffRequests.id, w.id));
       await db.insert(collectionEvents).values({ invoiceId: w.invoiceId, eventType: "write_off_decided", note: `${input.decision}: ${input.reason}`, byUserId: ctx.user.id, at: new Date() });
       if (input.decision === "approved") {
-        const creditRef = ref("CR");
+        const creditRef = (await nextTrackingNumber(db, { sequenceType: "CR" })).trackingNumber;
         await db.insert(customerCredits).values({ creditRef, financialEntityId: invRow.financialEntityId, customer: invRow.customer, customerAccountId: invRow.customerAccountId, invoiceId: invRow.id, amountCents: w.amountCents, reason: `Write-off ${w.requestRef}: ${w.reason}`, requestedByUserId: w.requestedByUserId, approvedByUserId: ctx.user.id, approvedAt: new Date(), status: "approved" });
         if (balance - w.amountCents === 0) await db.update(invoices).set({ status: "paid" }).where(eq(invoices.id, invRow.id));
         return { requestRef: w.requestRef, status: "approved" as const, creditRef, invoiceBalanceAfterCents: balance - w.amountCents };

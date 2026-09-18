@@ -4,6 +4,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { createHash } from "node:crypto";
 import { INVITATION_TTL_MS, newToken } from "./_core/externalIdentityPolicy";
 import { queueCustomerAlert } from "./customerAlertService";
@@ -154,7 +155,7 @@ export const portalAdminRouter = router({
           resultRef = billRef;
         } else if (sub.kind === "disposal_ticket") {
           const p = JSON.parse(sub.payloadJson) as DisposalTicketPayload & { scaleInAt: string; confidence?: "low" | "medium" | "high" };
-          const ticketNumber = ref("DSP");
+          const ticketNumber = (await nextTrackingNumber(db, { sequenceType: "DSP" })).trackingNumber;
           await db.insert(disposalTickets).values({ ticketNumber, loadId: input.loadId ?? null, facilityId: identity.facilityId!, facilityTicketNumber: p.facilityTicketNumber, scaleInAt: new Date(p.scaleInAt), grossKg: p.grossKg, tareKg: p.tareKg, netKg: p.netKg, quantity: p.quantity, quantityUnit: p.quantityUnit, verificationStatus: "needs_review", source: "facility_portal", confidence: p.confidence ?? "medium", evidenceRefs: p.scaleRecordHash ? JSON.stringify({ scaleRecordHash: p.scaleRecordHash }) : null });
           resultRef = ticketNumber;
         } else if (sub.kind === "invoice_dispute") {

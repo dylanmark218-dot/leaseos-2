@@ -104,7 +104,7 @@ export const invoicingRouter = router({
     if (!res.permitted) return { resolved: false as const, refusals: res.refusals };
     let creditRef: string | null = null;
     if (res.creditCents > 0) {
-      creditRef = ref("CR");
+      creditRef = (await nextTrackingNumber(d, { sequenceType: "CR" })).trackingNumber;
       if (inv.financialEntityId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The invoice carries no financial entity — assign it before a credit is requested against it" });
       await d.insert(customerCredits).values({ creditRef, financialEntityId: inv.financialEntityId, customer: inv.customer, customerAccountId: inv.customerAccountId, invoiceId: inv.id, amountCents: res.creditCents, reason: `Dispute ${c.caseNumber}: ${input.narrative}`.slice(0, 400), requestedByUserId: ctx.user.id, status: "requested" });
     }
@@ -151,7 +151,7 @@ export const invoicingRouter = router({
       // the job's billing book, opened if absent
       let book = (await d.select().from(billingBooks).where(eq(billingBooks.jobId, x.t.jobId)).limit(1))[0];
       if (!book) {
-        const ins = await d.insert(billingBooks).values({ bookNumber: ref("BB"), jobId: x.t.jobId, customer: x.account.name, afeNumber: input.afeNumber ?? null, purchaseOrder: input.purchaseOrder ?? null, billingState: "billing_review", openedAt: new Date() });
+        const ins = await d.insert(billingBooks).values({ bookNumber: (await nextTrackingNumber(d, { sequenceType: "BB" })).trackingNumber, jobId: x.t.jobId, customer: x.account.name, afeNumber: input.afeNumber ?? null, purchaseOrder: input.purchaseOrder ?? null, billingState: "billing_review", openedAt: new Date() });
         book = (await d.select().from(billingBooks).where(eq(billingBooks.id, Number(ins[0]?.insertId ?? 0))).limit(1))[0]!;
       }
       // Configured, transactional sequence (rule §18): INV-<year>-<000001>, format from trackingSequences.
