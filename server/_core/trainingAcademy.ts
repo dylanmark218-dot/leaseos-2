@@ -206,12 +206,41 @@ export type TrainingRequirement = { code: string; qualificationCode: string; tit
 export type ActiveQualification = { code: string; status: "pending" | "current" | "expired" | "revoked" | "rejected"; expiresAt?: Date | null };
 export function trainingDispatchDecision(requirements: readonly TrainingRequirement[], qualifications: readonly ActiveQualification[], now = new Date()) {
   const blockers: string[] = [], review: string[] = [], satisfied: string[] = [];
+  const blocking: { code: string; state: string; detail: string }[] = [];
+  const reviewing: { code: string; state: string; detail: string }[] = [];
   for (const r of requirements) {
     const q = qualifications.find(x => x.code === r.qualificationCode);
     const current = q?.status === "current" && (!q.expiresAt || q.expiresAt > now);
     if (current) { satisfied.push(r.code); continue; }
-    const detail = `${r.title}: ${r.recoveryPath ?? `obtain/verify ${r.qualificationCode}`}`;
-    if (r.enforcement === "block") blockers.push(detail); else if (r.enforcement === "review") review.push(detail);
+    /*
+     * P0.6 — say WHICH of the five states this is.
+     *
+     * "Not on file" for a certificate that was revoked understates the situation materially: one is
+     * paperwork to chase and the other is a decision somebody made about this person. The states
+     * were already carried on the qualification and thrown away at the last step, so the same
+     * sentence covered a driver who never took the course and one whose ticket was pulled.
+     */
+    const state =
+      q == null ? "never held"
+        : q.status === "current" ? "expired" // current but past expiry — the only way to reach here
+        : q.status;
+    const because =
+      state === "never held" ? "no qualification on file"
+        : state === "expired" ? `expired${q?.expiresAt ? ` ${q.expiresAt.toISOString().slice(0, 10)}` : ""}`
+        : state === "pending" ? "issued but awaiting signature"
+        : `${state}`;
+    const detail = `${r.title} — ${because}: ${r.recoveryPath ?? `obtain/verify ${r.qualificationCode}`}`;
+    // The code is the requirement's own, never derived from the title: a code built from label text
+    // changes the moment somebody edits a requirement's wording, and every override, exception and
+    // report keyed to the old one silently stops matching.
+    const entry = { code: r.code, state, detail } as const;
+    if (r.enforcement === "block") { blockers.push(detail); blocking.push(entry); }
+    else if (r.enforcement === "review") { review.push(detail); reviewing.push(entry); }
   }
-  return { status: blockers.length ? "blocked" : review.length ? "needs_review" : "ready", blockers, review, satisfied } as const;
+  return {
+    status: blockers.length ? "blocked" : review.length ? "needs_review" : "ready",
+    blockers, review, satisfied,
+    /** The same findings with their stable requirement code and the state that caused them. */
+    blocking, reviewing,
+  } as const;
 }
