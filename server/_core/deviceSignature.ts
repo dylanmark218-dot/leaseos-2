@@ -83,3 +83,108 @@ export function signatureFreshness(args: { signedAt: Date; now: Date; deviceCloc
   if (byDevice > DEVICE_SIGNATURE_MAX_SKEW_MS) return { fresh: false, reason: `signature is ${Math.round(byDevice / 60_000)} minutes old by the device's own clock`, skewMs };
   return { fresh: true, mode: "device_clock", skewMs, warn: Math.abs(skewMs) > DEVICE_CLOCK_WARN_SKEW_MS };
 }
+
+/* ------------------------------------------------------------------ */
+/* P1.4 — a field-ticket signature that proves which device made it    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The payload a device signs when a person signs a field ticket.
+ *
+ * It binds the signature to *this* ticket at *this* revision with *this* payload hash. Signing the
+ * hash alone would let a signature be replayed onto another ticket that happened to hash the same
+ * scope; signing the ticket alone would let it survive an amendment. Both, and the revision, so the
+ * proof is of a specific act on a specific version.
+ */
+export function canonicalSignaturePayload(input: {
+  ticketNumber: string; revision: number; payloadHash: string; signerName: string; signedAt: Date;
+}): Buffer {
+  return Buffer.from(canonical({
+    ticketNumber: input.ticketNumber,
+    revision: input.revision,
+    payloadHash: input.payloadHash,
+    signerName: input.signerName,
+    signedAt: input.signedAt.toISOString(),
+  }), "utf8");
+}
+
+export type DeviceAttestation = {
+  deviceRef: string;
+  keyFingerprint: string;
+  signatureP1363Base64: string;
+  signedAt: Date;
+};
+
+export type EnrolledDevice = {
+  deviceRef: string;
+  keyFingerprint: string;
+  publicKeySpkiBase64: string;
+  status: string;
+  revokedAt: Date | null;
+  suspendedAt: Date | null;
+};
+
+export type AttestationResult =
+  | { ok: true }
+  | { ok: false; code: "DEVICE_NOT_ENROLLED" | "DEVICE_NOT_ACTIVE" | "KEY_FINGERPRINT_MISMATCH" | "SIGNATURE_INVALID" | "SIGNATURE_STALE"; reason: string };
+
+/**
+ * Check a device attestation on a signature.
+ *
+ * Order matters, and it is cheapest-and-most-specific first so the refusal names the real problem:
+ * a revoked device that also sends a bad signature should be told its device is revoked, because
+ * that is the fact someone has to act on.
+ *
+ * The fingerprint check is not redundant with verification. Verification proves *a* key signed it;
+ * the fingerprint proves it was the key we enrolled, so a device that quietly rotated to a key we
+ * never attested cannot sign in the old device's name.
+ */
+export function checkSignatureAttestation(args: {
+  attestation: DeviceAttestation;
+  device: EnrolledDevice | null;
+  payload: Buffer;
+  now: Date;
+}): AttestationResult {
+  const { attestation: a, device: d } = args;
+  if (!d) {
+    return { ok: false, code: "DEVICE_NOT_ENROLLED", reason: `Device ${a.deviceRef} is not enrolled. A signature can only be attested by a device this company enrolled.` };
+  }
+  if (d.revokedAt || d.suspendedAt || d.status !== "active") {
+    return { ok: false, code: "DEVICE_NOT_ACTIVE", reason: `Device ${a.deviceRef} is ${d.revokedAt ? "revoked" : d.suspendedAt ? "suspended" : `not active (${d.status})`}. Revocation takes effect for signatures too, not only for sync.` };
+  }
+  if (d.keyFingerprint !== a.keyFingerprint) {
+    return { ok: false, code: "KEY_FINGERPRINT_MISMATCH", reason: `The signature names key ${a.keyFingerprint.slice(0, 12)}… but ${a.deviceRef} is enrolled with ${d.keyFingerprint.slice(0, 12)}…. A rotated key must be enrolled before it signs.` };
+  }
+  if (!signatureTimeIsFresh(a.signedAt, args.now)) {
+    return { ok: false, code: "SIGNATURE_STALE", reason: "The device signed this more than ten minutes from the server's clock. That is either a stale replay or a device whose clock needs fixing." };
+  }
+  if (!verifyP256PackageSignature({ publicKeySpkiBase64: d.publicKeySpkiBase64, payload: args.payload, signatureP1363Base64: a.signatureP1363Base64 })) {
+    return { ok: false, code: "SIGNATURE_INVALID", reason: "The device signature does not verify against the enrolled public key for this device." };
+  }
+  return { ok: true };
+}
+
+/**
+ * The rule this whole design exists for: **no biometric material is ever stored.**
+ *
+ * The platform biometric unlocks the private key *on the device*. It does not travel, it is not
+ * sent, and there is nowhere here to put it. That is not squeamishness: a key can be rotated after
+ * a compromise and a fingerprint cannot, so storing a template would create a permanent credential
+ * sitting next to the signatures it authorises.
+ *
+ * The risk is not that someone adds a `fingerprintTemplate` column on purpose. It is that a vendor
+ * SDK returns a rich object and somebody persists the whole thing. So this names the shapes, and
+ * `deviceSignature.test.ts` runs it across the schema and the signature paths.
+ */
+export const BIOMETRIC_MATERIAL_PATTERNS: readonly RegExp[] = [
+  // `[A-Za-z_]*` so snake_case is caught too: fingerprint_minutiae is the same column as
+  // fingerprintMinutiae, and a guard that only reads one casing is half a guard.
+  /fingerprint(?!P256|Spki|P1363)[A-Za-z_]*(template|image|data|minutiae|scan|raw|blob|sample)/i,
+  /\b(face|facial|iris|retina|voice)[A-Za-z_]*(template|embedding|vector|print|geometry|scan|model)/i,
+  /biometric[A-Za-z_]*(template|data|sample|payload|blob|image|vector)/i,
+  /\b(minutiae|faceEmbedding|irisCode)\b/i,
+];
+
+export function looksLikeBiometricMaterial(name: string): boolean {
+  return BIOMETRIC_MATERIAL_PATTERNS.some(r => r.test(name));
+}

@@ -1246,6 +1246,12 @@ export const fieldTicketSignatures = mysqlTable("fieldTicketSignatures", {
   capturedOffline: boolean("capturedOffline").default(false).notNull(),
   witnessedByOperatorId: int("witnessedByOperatorId"),
   externalIdentityId: int("externalIdentityId"),
+  // 0157 (P1.4): proof the enrolled device made this signature. No biometric material, ever:
+  // the platform biometric unlocks the key on the device and never leaves it.
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  deviceKeyFingerprint: varchar("deviceKeyFingerprint", { length: 80 }),
+  deviceSignatureBase64: text("deviceSignatureBase64"),
+  deviceSignedAt: timestamp("deviceSignedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
