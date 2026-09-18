@@ -168,6 +168,16 @@ export function widgetReaderFor(actor: RoleActor, callerFor: (userId: number) =>
         // so there is nothing to read until a person types one. The client asks
         // surfaces.search / surfaces.timeline directly at that moment.
         return { state: "unknown", reason: `${task.widgetKey === "search" ? "type a query" : "enter a tracking number"} in the tile; results are read on demand` };
+      case "syncStatus":
+        // Device-local, by the registry's own offline classification. The queue lives on the device,
+        // so the server cannot answer this and must not appear to: no count, no "failed", no
+        // borrowed number from a push endpoint. The tile reads `Outbox.status()` itself. The
+        // registry's `procedure: "sync.receivePackage"` is there because the type demands a
+        // procedure name, and the permission it lends (`sync.push_own`) governs pushing, not
+        // reading your own queue — see docs/b28/... and server/_core/widgetSourceContract.ts, which
+        // splits the three questions the one field conflates. Naming it here beats a server reader
+        // that would have to invent the answer.
+        return { state: "unknown", reason: "the sync queue is on this device; the tile reads it locally and the server has no view of it" };
       default:
         return NOT_PROMOTED(task.widgetKey);
     }
