@@ -164,6 +164,8 @@ d("commercial setup, end to end", () => {
     const controller = await withRole("controller");
     const management = await withRole("management");
     const entityId = 4_500_000 + Math.floor(Math.random() * 90_000);
+    // P4.1: a financial entity is the money boundary (0146) and must exist; this one is unowned — the historical single tenant's.
+    await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay) VALUES (?,?,?,'corporation','AB',12,31)", [entityId, key("FE"), `entity ${entityId}`]);
     const acctRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'ABC Energy')", [acctRef, entityId]);
     const vendorRef = key("VEN").slice(0, 40);
@@ -212,6 +214,8 @@ d("commercial setup, end to end", () => {
   it("refuses an AI-extracted or imported rate that names no source document, and takes one that does as a proposal only", async () => {
     const office = await withRole("office");
     const entityId = 4_400_000 + Math.floor(Math.random() * 90_000);
+    // P4.1: a financial entity is the money boundary (0146) and must exist; this one is unowned — the historical single tenant's.
+    await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay) VALUES (?,?,?,'corporation','AB',12,31)", [entityId, key("FE"), `entity ${entityId}`]);
     await expect(callerFor(office).commercialSetup.definitionPropose({ financialEntityId: entityId, rateKind: "sell", serviceCode: "hydrovac", pricingMethod: "per_unit", unit: "hour", rateMillis: 325_000, scopeLevel: "company", effectiveFrom: new Date("2026-01-01T00:00:00Z"), sourceKind: "ai_extracted" })).rejects.toThrow(/names the source document/);
     const proposed = await callerFor(office).commercialSetup.definitionPropose({ financialEntityId: entityId, rateKind: "sell", serviceCode: "hydrovac", pricingMethod: "per_unit", unit: "hour", rateMillis: 325_000, scopeLevel: "company", effectiveFrom: new Date("2026-01-01T00:00:00Z"), sourceKind: "ai_extracted", sourceDocumentEvidenceId: 1, sourceClause: "ABC Energy Master Rate Sheet p.4" });
     const [row] = await pool.execute<mysql.RowDataPacket[]>("SELECT approvalStatus, sourceKind, sourceDocumentEvidenceId FROM chargeDefinitions WHERE definitionRef = ?", [proposed.definitionRef]);
@@ -222,6 +226,8 @@ d("commercial setup, end to end", () => {
     const office = await withRole("office");
     const controller = await withRole("controller");
     const entityId = 4_600_000 + Math.floor(Math.random() * 90_000);
+    // P4.1: a financial entity is the money boundary (0146) and must exist; this one is unowned — the historical single tenant's.
+    await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay) VALUES (?,?,?,'corporation','AB',12,31)", [entityId, key("FE"), `entity ${entityId}`]);
     const c = callerFor(office).commercialSetup;
     const r26 = await c.definitionPropose({ financialEntityId: entityId, rateKind: "sell", serviceCode: "vac_truck", pricingMethod: "per_unit", unit: "hour", rateMillis: 300_000, scopeLevel: "company", effectiveFrom: new Date("2026-01-01T00:00:00Z"), effectiveTo: new Date("2027-01-01T00:00:00Z"), sourceKind: "human" });
     await callerFor(controller).commercialSetup.definitionApprove({ definitionRef: r26.definitionRef });

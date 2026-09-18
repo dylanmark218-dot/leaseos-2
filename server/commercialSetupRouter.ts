@@ -9,6 +9,8 @@
  * unless the account is open-book.
  */
 import { z } from "zod";
+import { assertEntityInScope, entityIdsInScope, type MoneyScope } from "./_core/entityScope";
+import { resolveActingScope } from "./_core/actingScope";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { chargeDefinitions, commercialSetupProfiles, customerAccounts, customerContractTerms, customerPurchaseOrders, fieldTicketLines, fieldTickets, pricingDecisions, units, vendorBillLines, vendorBills, vendors } from "../drizzle/schema";
@@ -50,18 +52,31 @@ async function guardrailsFor(d: Awaited<ReturnType<typeof db>>, financialEntityI
   return p ? { targetMarginBps: p.targetMarginBps, warningMarginBps: p.warningMarginBps, minimumAuthorityMarginBps: p.minimumAuthorityMarginBps, discountAuthority: JSON.parse(p.discountAuthorityJson) } : null;
 }
 
+/** P4.1 — the financial entity is the money boundary (0146); commercial setup keys to it throughout. */
+async function moneyScope(userId: number): Promise<{ db: NonNullable<Awaited<ReturnType<typeof db>>>; scope: MoneyScope; entityIds: number[] }> {
+  const database = await db();
+  const scope = { tenantId: (await resolveActingScope(database, userId)).tenantId };
+  return { db: database, scope, entityIds: await entityIdsInScope(database, scope) };
+}
+
 export const commercialSetupRouter = router({
   /** The company's service selections and its margin guardrails — business policy, set by management or the controller. */
   profileSet: roleProcedure("commercialSetup.profileSet")
     .input(z.object({ financialEntityId: z.number().int(), services: z.array(z.string().min(1).max(60)).max(40), targetMarginBps: z.number().int().min(0).max(10_000).nullable(), warningMarginBps: z.number().int().min(0).max(10_000).nullable(), minimumAuthorityMarginBps: z.number().int().min(0).max(10_000).nullable(), discountAuthority: z.record(z.string(), z.number().int().min(0).max(10_000)), openBookCustomerRefs: z.array(z.string()).default([]) }))
     .mutation(async ({ ctx, input }) => {
+      // P4.1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
+
       const d = await db();
       if (input.targetMarginBps != null && input.warningMarginBps != null && input.warningMarginBps > input.targetMarginBps) throw new TRPCError({ code: "BAD_REQUEST", message: "The warning line cannot sit above the target" });
       const row = { financialEntityId: input.financialEntityId, servicesJson: JSON.stringify(input.services), targetMarginBps: input.targetMarginBps, warningMarginBps: input.warningMarginBps, minimumAuthorityMarginBps: input.minimumAuthorityMarginBps, discountAuthorityJson: JSON.stringify(input.discountAuthority), openBookCustomersJson: JSON.stringify(input.openBookCustomerRefs), setByUserId: ctx.user.id };
       await d.insert(commercialSetupProfiles).values(row).onDuplicateKeyUpdate({ set: row });
       return { financialEntityId: input.financialEntityId, services: input.services };
     }),
-  profileGet: roleProcedure("commercialSetup.profileGet").input(z.object({ financialEntityId: z.number().int() })).query(async ({ input }) => {
+  profileGet: roleProcedure("commercialSetup.profileGet").input(z.object({ financialEntityId: z.number().int() })).query(async ({ ctx, input }) => {
+      // P4.1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
+
     const d = await db();
     const p = (await d.select().from(commercialSetupProfiles).where(eq(commercialSetupProfiles.financialEntityId, input.financialEntityId)).limit(1))[0];
     return p ? { services: JSON.parse(p.servicesJson) as string[], targetMarginBps: p.targetMarginBps, warningMarginBps: p.warningMarginBps, minimumAuthorityMarginBps: p.minimumAuthorityMarginBps, discountAuthority: JSON.parse(p.discountAuthorityJson) as Record<string, number>, openBookCustomerRefs: JSON.parse(p.openBookCustomersJson) as string[] } : null;
@@ -131,6 +146,9 @@ export const commercialSetupRouter = router({
   definitionList: roleProcedure("commercialSetup.definitionList")
     .input(z.object({ financialEntityId: z.number().int(), serviceCode: z.string().max(60).optional(), rateKind: z.enum(["sell", "vendor_payable", "payroll_reference", "internal_cost"]).optional() }))
     .query(async ({ ctx, input }) => {
+      // P4.1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
+
       const d = await db();
       const rows = await d.select().from(chargeDefinitions).where(eq(chargeDefinitions.financialEntityId, input.financialEntityId)).orderBy(desc(chargeDefinitions.id));
       const roles = rolesOf(ctx);
@@ -148,7 +166,10 @@ export const commercialSetupRouter = router({
       : res.outcome === "conflict" ? { outcome: res.outcome, scopeLevel: res.scopeLevel, candidates: res.candidates.map(c => c.definitionRef), considered: res.considered, reasons: res.reasons }
       : { outcome: res.outcome, considered: res.considered, reasons: res.reasons };
   }),
-  sheetGaps: roleProcedure("commercialSetup.sheetGaps").input(z.object({ financialEntityId: z.number().int(), serviceCode: z.string().min(1).max(60), customerAccountRef: z.string().max(64).optional() })).query(async ({ input }) => {
+  sheetGaps: roleProcedure("commercialSetup.sheetGaps").input(z.object({ financialEntityId: z.number().int(), serviceCode: z.string().min(1).max(60), customerAccountRef: z.string().max(64).optional() })).query(async ({ ctx, input }) => {
+      // P4.1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
+
     const d = await db();
     const cid = await accountId(d, input.customerAccountRef);
     const defs = (await d.select().from(chargeDefinitions).where(and(eq(chargeDefinitions.financialEntityId, input.financialEntityId), eq(chargeDefinitions.rateKind, "sell")))) as ChargeDefinition[];
@@ -187,6 +208,9 @@ export const commercialSetupRouter = router({
   marginSimulate: roleProcedure("commercialSetup.marginSimulate")
     .input(z.object({ financialEntityId: z.number().int(), serviceCode: z.string().min(1).max(60), at: z.coerce.date(), customerAccountRef: z.string().max(64).optional(), vendorRef: z.string().max(64).optional(), projectRef: z.string().max(80).optional(), jobId: z.number().int().optional(), unitId: z.number().int().optional(), quantityMillis: z.number().int().positive(), unit: UNIT, proposedSellRateMillis: z.number().int().nonnegative().optional() }))
     .query(async ({ ctx, input }) => {
+      // P4.1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
+
       const d = await db();
       const base = { financialEntityId: input.financialEntityId, serviceCode: input.serviceCode, at: input.at, customerAccountRef: input.customerAccountRef, vendorRef: input.vendorRef, projectRef: input.projectRef, jobId: input.jobId, unitId: input.unitId };
       const sellRes = resolveRate(await definitionsFor(d, input.financialEntityId, input.serviceCode, "sell"), await context(d, { ...base, rateKind: "sell" }));
@@ -230,7 +254,10 @@ export const commercialSetupRouter = router({
   }),
 
   /** Vendor lines whose billed unit price differs from the agreed payable, or that had no agreed rate to compare against. */
-  vendorRateVariances: roleProcedure("commercialSetup.vendorRateVariances").input(z.object({ financialEntityId: z.number().int(), vendorRef: z.string().max(64).optional() })).query(async ({ input }) => {
+  vendorRateVariances: roleProcedure("commercialSetup.vendorRateVariances").input(z.object({ financialEntityId: z.number().int(), vendorRef: z.string().max(64).optional() })).query(async ({ ctx, input }) => {
+      // P4.1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
+
     const d = await db();
     const vid = await vendorId(d, input.vendorRef);
     const bills = await d.select({ id: vendorBills.id, billRef: vendorBills.billRef, vendorId: vendorBills.vendorId, vendorInvoiceNumber: vendorBills.vendorInvoiceNumber, status: vendorBills.status }).from(vendorBills).where(vid != null ? and(eq(vendorBills.financialEntityId, input.financialEntityId), eq(vendorBills.vendorId, vid)) : eq(vendorBills.financialEntityId, input.financialEntityId));
@@ -244,7 +271,10 @@ export const commercialSetupRouter = router({
   }),
 
   /** Exactly what remains before the company can dispatch, bill and pay with confidence. */
-  goLiveReadiness: roleProcedure("commercialSetup.goLiveReadiness").input(z.object({ financialEntityId: z.number().int() })).query(async ({ input }) => {
+  goLiveReadiness: roleProcedure("commercialSetup.goLiveReadiness").input(z.object({ financialEntityId: z.number().int() })).query(async ({ ctx, input }) => {
+      // P4.1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
+
     const d = await db();
     const profile = (await d.select().from(commercialSetupProfiles).where(eq(commercialSetupProfiles.financialEntityId, input.financialEntityId)).limit(1))[0];
     const defs = await d.select().from(chargeDefinitions).where(eq(chargeDefinitions.financialEntityId, input.financialEntityId));

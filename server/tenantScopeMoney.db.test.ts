@@ -72,3 +72,16 @@ d("money is scoped by financial entity", () => {
     await expect(callerFor(workerInB).payroll.myTimeEntries({ from: new Date("2026-09-01"), to: new Date("2026-09-30") })).rejects.toThrow(/in this organization/);
   }, 30_000);
 });
+
+d("commercial setup shares the money boundary", () => {
+  it("answers not-found for another organization's financial entity, and serves the owner", async () => {
+    const A = await org(), B = await org();
+    const ctrlA = await member(A, ["controller"]), ctrlB = await member(B, ["controller"]);
+    const entityId = 1_900_000 + Math.floor(Math.random() * 90_000);
+    await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay, orgRef) VALUES (?,?,?,'corporation','AB',12,31,?)", [entityId, `FE-${rnd()}`, `entity ${rnd()}`, A]);
+    await expect(callerFor(ctrlB).commercialSetup.goLiveReadiness({ financialEntityId: entityId })).rejects.toMatchObject({ code: "NOT_FOUND", message: `Financial entity ${entityId} not found` });
+    await expect(callerFor(ctrlA).commercialSetup.goLiveReadiness({ financialEntityId: entityId })).resolves.toBeDefined();
+    await expect(callerFor(ctrlB).commercialSetup.definitionList({ financialEntityId: entityId } as never)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(callerFor(ctrlA).commercialSetup.definitionList({ financialEntityId: entityId } as never)).resolves.toBeDefined();
+  }, 60_000);
+});

@@ -228,7 +228,7 @@ export const payrollRouter = router({
 
   ratesList: roleProcedure("payroll.ratesList")
     .input(z.object({ earningType: z.string().max(80).optional() }).optional())
-    .query(({ input }) => svc.listPayRates(input?.earningType)),
+    .query(async ({ ctx, input }) => svc.listPayRates(input?.earningType, await (async () => { const m = await moneyScope(ctx.user.id); return profileIdsInScope(m.db, m.entityIds); })())),
 
   rateCreate: roleProcedure("payroll.rateCreate")
     .input(
@@ -245,6 +245,10 @@ export const payrollRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // P4.1: rateCreate mints a company-wide rate VERSION by rateKey — it names no profile and no entity, so there is
+      // nothing here to scope. A rate becomes an organization's when a profile in that organization is put on it
+      // (payRates.employeePayrollProfileId), which is what ratesList filters by. Left unscoped on purpose.
+
       // Always a new version. The prior rate's window is closed, never deleted.
       const r = await svc.createPayRateVersion({
         ...input,

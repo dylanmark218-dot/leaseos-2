@@ -106,12 +106,14 @@ export async function upsertPayrollProfile(
 /* Rates                                                               */
 /* ------------------------------------------------------------------ */
 
-export async function listPayRates(earningType?: string): Promise<PayRate[]> {
+export async function listPayRates(earningType?: string, profileIds?: number[]): Promise<PayRate[]> {
   const db = await getDb();
   if (!db) return [];
+  if (profileIds && profileIds.length === 0) return [];
+  const scopeCond = profileIds ? inArray(payRates.employeePayrollProfileId, profileIds) : undefined;
   const rows = earningType
-    ? await db.select().from(payRates).where(eq(payRates.earningType, earningType))
-    : await db.select().from(payRates).limit(500);
+    ? await db.select().from(payRates).where(scopeCond ? and(eq(payRates.earningType, earningType), scopeCond) : eq(payRates.earningType, earningType))
+    : await db.select().from(payRates).where(scopeCond).limit(500);
   return rows.map(r => ({
     rateKey: r.rateKey,
     version: r.version,
