@@ -11,7 +11,10 @@
 --
 -- `device_auth` now means what it says, and since 0157 it must carry an attestation to be written.
 ALTER TABLE `fieldTicketSignatures`
-  MODIFY COLUMN `signatureMethod` enum('drawn','device_auth','pin','paper_scan','portal_link') NOT NULL;
+  -- NULL-able, as it was. A MODIFY restates the whole definition, so omitting the original
+  -- nullability would silently tighten the column and reject rows that were legal the day before —
+  -- caught by the column-parity check, which compares schema.ts against the applied migrations.
+  MODIFY COLUMN `signatureMethod` enum('drawn','device_auth','pin','paper_scan','portal_link') NULL;
 --> statement-breakpoint
 -- Existing rows were written by the portal path and are portal-link signatures mislabelled. They
 -- are corrected rather than left reading as device authentication that never happened; no row is
