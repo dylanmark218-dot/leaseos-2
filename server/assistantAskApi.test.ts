@@ -704,12 +704,15 @@ d("a legacy passage nobody has classified is present but unquotable", () => {
     const safety = await withRole("safety");
     const marker = `zzlegacy${rnd().toLowerCase()}`;
     const body = `${marker}: maximum pushrod travel is 2 inches when measured with the brakes applied.`;
-    const before = await caller(safety).assistantAsk.passageList({});
     // The row must sit in the CALLER'S OWN tenant, or this would prove the tenant filter and say
-    // nothing about the basis filter. Take the tenant from a passage the caller just loaded.
+    // nothing about the basis filter. Take the tenant from a passage the caller just loaded — and
+    // load it BEFORE the baseline, or that load is itself the difference the count then reports.
     const own = await load(safety, brakeText(token()));
     const [t] = await pool.query<mysql.RowDataPacket[]>("SELECT tenantId FROM knowledgePassages WHERE passageRef = ?", [own.passageRef]);
     const tenantId = t[0]!.tenantId as string;
+    // An explicit high limit: the default of 50 saturates on a database that has been accumulating
+    // rows, and two capped counts compare equal whatever happened between them.
+    const before = await caller(safety).assistantAsk.passageList({ limit: 200 });
     // Written the way a pre-0150 row exists: no basis stated. 0150's backfill marks it 'unstated'.
     await pool.execute(
       "INSERT INTO knowledgePassages (passageRef, tenantId, documentRef, documentTitle, section, body, revision, reproductionBasis) VALUES (?,?,?,?,?,?,?,'unstated')",
@@ -719,7 +722,7 @@ d("a legacy passage nobody has classified is present but unquotable", () => {
 
     const asked = await caller(safety).assistantAsk.ask({ question: `what is the maximum pushrod travel ${marker}` });
     expect(JSON.stringify(asked)).not.toContain(marker);     // and it answers nothing
-    const after = await caller(safety).assistantAsk.passageList({});
+    const after = await caller(safety).assistantAsk.passageList({ limit: 200 });
     // Nor does it appear in the library a person browses.
     expect(JSON.stringify(after)).not.toContain(marker);
     expect(after.passages.length).toBe(before.passages.length);
