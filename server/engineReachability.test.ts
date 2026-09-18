@@ -38,6 +38,7 @@ const DECLARED_UNWIRED: Record<string, string> = {
   widgetRegistryV2: "the promotion-gate registry (source tiers); promotionGate.test is not yet ported",
   widgetSemantics: "per-widget semantics (variants, subjects); consumed by the client and tests",
   widgetSourceContract: "the twelve-source contract; enforced by widgetSourceContract.test, not by a procedure",
+  preDepartureCache: "P1.5 - what a job needs on the device before it leaves coverage, and whether what is there is still current. Not reached from a router yet: the procedure has to report what THIS device holds, and the device side of that (the cache index) is P1.1 work on hardware. Mounting a server-side guess about a device's contents would answer confidently about a machine it cannot see.",
   migrationLedger: "the production migration ledger; reached from scripts/migrate.ts (the deploy path), not from a router — declared by the session that reconciled 5f3bef4",
   offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
@@ -156,7 +157,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(40);   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(41);   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });
