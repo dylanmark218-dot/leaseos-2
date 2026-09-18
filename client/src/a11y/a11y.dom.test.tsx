@@ -8,6 +8,13 @@ import { NEEDS_A_RENDERER, VIEWPORTS, describeRun, runAxe, setViewport } from ".
 import { DisposalFinderView, type DisposalFinderViewProps } from "../pages/DisposalFinderView";
 import { CommercialOfficeView, type CommercialOfficeViewProps } from "../pages/CommercialOfficeView";
 import { SourcedPanel } from "../showcase/SourcedPanel";
+import { WidgetBoard } from "../widgets/WidgetBoard";
+import { WidgetTileShell } from "../widgets/WidgetTileShell";
+import { AddWidgetPicker } from "../widgets/AddWidgetPicker";
+import { blocked, ok, unknown, type Provenance } from "../../../server/_core/widgetPayload";
+import type { BoardTileView } from "../widgets/WidgetBoard";
+import { listOfferable } from "../../../server/_core/widgetService";
+import type { RoleActor } from "../../../server/_core/roleActor";
 import { demonstration, fromQuery } from "../showcase/panelSource";
 
 afterEach(cleanup);
@@ -40,6 +47,16 @@ const office = (tab: CommercialOfficeViewProps["tab"]): CommercialOfficeViewProp
   profitDimension: "job", onProfitDimension: () => {},
 });
 
+const A11Y_NOW = new Date("2026-09-12T14:00:00Z");
+const a11yProv: Provenance = { source: "measured", verification: "verified", exact: true, observedAt: A11Y_NOW };
+const a11yTiles: BoardTileView[] = [
+  { instanceRef: "a", widgetKey: "myDay", title: "My Day", variant: "list", payload: ok({ rows: [{ id: "1", primary: "3 stops" }] }, a11yProv), position: 0, spanColumns: 2, spanRows: 1, variants: ["list"] } as never,
+  { instanceRef: "b", widgetKey: "exceptions", title: "Exception Centre", variant: "kpi", payload: { state: "not_permitted", permission: "surface.exceptions.read" }, position: 1, spanColumns: 1, spanRows: 1, variants: ["kpi"] } as never,
+  { instanceRef: "c", widgetKey: "unitReadiness", title: "Unit Readiness", variant: "status", payload: blocked([{ code: "X", detail: "Annual inspection expired 2026-08-14" }]), position: 2, spanColumns: 1, spanRows: 1, variants: ["status"] } as never,
+  { instanceRef: "d", widgetKey: "search", title: "Search", variant: "form", payload: unknown("no verified axle limit loaded"), position: 3 } as never,
+];
+const A11Y_DRIVER: RoleActor = { roles: ["driver"], permissions: [] } as never;
+
 const surfaces = [
   { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
   { name: "commercial office — organizations", render: () => render(<CommercialOfficeView {...office("organizations")} />) },
@@ -47,6 +64,10 @@ const surfaces = [
   { name: "commercial office — disposal", render: () => render(<CommercialOfficeView {...office("disposal")} />) },
   { name: "commercial office — month close", render: () => render(<CommercialOfficeView {...office("month_close")} />) },
   { name: "showcase panel — records", render: () => render(<SourcedPanel title="Saved decisions" source={fromQuery("x.list", [{ id: 1 }])}><p>body</p></SourcedPanel>) },
+  { name: "widget board", render: () => render(<WidgetBoard name="Yard mornings" seeded={false} deviceClass="desktop" tiles={a11yTiles} />) },
+  { name: "widget tile — blocked", render: () => render(<WidgetTileShell title="Unit Readiness" variant="status" payload={blocked([{ code: "A", detail: "Annual inspection expired" }])} />) },
+  { name: "widget tile — unknown", render: () => render(<WidgetTileShell title="Hours Remaining" variant="kpi" payload={unknown("no verified duty record loaded")} />) },
+  { name: "add-widget picker", render: () => render(<AddWidgetPicker offers={listOfferable(A11Y_DRIVER)} alreadyAdded={[]} onAdd={() => {}} />) },
   { name: "showcase panel — demonstration", render: () => render(<SourcedPanel title="Route alternatives" source={demonstration("no routing engine result is read on this page")}><p>body</p></SourcedPanel>) },
 ];
 
