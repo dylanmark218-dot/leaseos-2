@@ -1,6 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PanelSourceBadge } from "./SourcedPanel";
+import { demonstration, fromQuery } from "./panelSource";
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -128,6 +130,7 @@ export default function OfflineVault() {
                 <CardTitle className="text-[15px] text-[#172033]">
                   Compliance Vault
                 </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.complianceEngine.artifacts.list", artifacts, { whenEmpty: "no compliance artifact exists on this database yet" })} />
                 <p className="mt-1 text-xs text-[#8492a4]">
                   Search structured objects by job, unit, location, trip, or
                   tracking ID.
@@ -175,6 +178,7 @@ export default function OfflineVault() {
                 <CardTitle className="text-[15px] text-white">
                   Trip Passport · TR-2026-000812
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("TR-2026-000812 is a demonstration trip; this passport reads no trip record")} />
               </div>
               <p className="mt-1 text-xs text-[#aabbd0]">
                 Secure identifier only · authorized viewer required
@@ -233,6 +237,7 @@ export default function OfflineVault() {
                 <CardTitle className="text-[15px] text-[#254e46]">
                   Offline operating region
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("the cached region and tile counts are laid out to show the shape of the screen")} />
                 <p className="mt-1 text-xs text-[#729189]">
                   Northern Alberta Oilfield · roads, LSDs, facilities,
                   restrictions, emergency context.

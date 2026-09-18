@@ -1,6 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PanelSourceBadge } from "./SourcedPanel";
+import { demonstration, fromQuery } from "./panelSource";
 import { trpc } from "@/lib/trpc";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -166,6 +168,7 @@ export default function RouteSafetyWorkspace() {
                 <CardTitle className="text-[15px] text-white">
                   Live route context
                 </CardTitle>
+                <PanelSourceBadge source={demonstration("the context line names JOB-08421, a demonstration job, and no job record is read here")} />
               </div>
               <p className="mt-1 text-xs text-[#aabbd0]">
                 {facilityContext || "Northern Alberta"} · JOB-08421 · Class 3
@@ -208,6 +211,7 @@ export default function RouteSafetyWorkspace() {
               <CardTitle className="text-[15px] text-[#172033]">
                 Vehicle + load constraints
               </CardTitle>
+              <PanelSourceBadge source={demonstration("these are the values typed into this form, not a verified vehicle profile")} />
               <p className="mt-1 text-xs text-[#8492a4]">
                 The routing engine evaluates this snapshot before recommending
                 alternatives.
@@ -311,6 +315,7 @@ export default function RouteSafetyWorkspace() {
                 <CardTitle className="text-[15px] text-[#172033]">
                   Route alternatives
                 </CardTitle>
+                <PanelSourceBadge source={demonstration("laid out to show the comparison; no routing engine result is read on this page")} />
                 <p className="mt-1 text-xs text-[#8492a4]">
                   Back roads are compared by operator exposure, not just elapsed
                   time.
@@ -387,6 +392,7 @@ export default function RouteSafetyWorkspace() {
               <CardTitle className="text-[15px] text-[#254e46]">
                 Driver route acknowledgement
               </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.routeDecisions.list", decisions, { whenEmpty: "no route decision has been retained on this database yet" })} />
               <p className="mt-1 text-xs text-[#729189]">
                 Persist the selected route and the constraint snapshot for the
                 trip record.

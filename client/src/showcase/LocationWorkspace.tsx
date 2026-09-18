@@ -1,6 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PanelSourceBadge } from "./SourcedPanel";
+import { demonstration, fromQuery } from "./panelSource";
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -203,6 +205,7 @@ export default function LocationWorkspace() {
                 <CardTitle className="text-[15px] text-[#172033]">
                   Location identity card
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("the LSD, well and lease strings on this card are demonstration values; no location record is read here")} />
               </div>
             </CardHeader>
             <CardContent className="grid gap-4 px-5 pb-5 sm:grid-cols-2 sm:px-6">
@@ -242,6 +245,7 @@ export default function LocationWorkspace() {
                 <CardTitle className="text-[15px] text-[#254e46]">
                   Unit 247 · digital passport
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("unit 247 is a demonstration unit; the passport panel reads no unit record")} />
               </div>
               <p className="mt-1 text-xs text-[#729189]">
                 QR-ID: 8F72-91C4-247 · sensitive documents stay behind
@@ -299,6 +303,7 @@ export default function LocationWorkspace() {
                 <CardTitle className="text-[15px] text-[#172033]">
                   Manifest ↔ truck ↔ well
                 </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.manifests.list", manifests, { whenEmpty: "no manifest exists on this database yet" })} />
                 <p className="mt-1 text-xs text-[#8492a4]">
                   {manifest?.manifestNumber || "MANIFEST #58241"} · linked
                   operational chain

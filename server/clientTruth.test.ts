@@ -91,3 +91,42 @@ describe("the first-run setup wizard", () => {
     expect(percentToBps("120")).toBeNull();
   });
 });
+
+/**
+ * P5.1 — a showcase panel says where its content came from. Every showcase page carries the
+ * per-panel statement, and the count of panels that carry it is pinned, so a new panel cannot
+ * quietly show invented rows with no badge. The reason strings themselves are checked by
+ * `client/src/showcase/panelSource.dom.test.tsx`; this only holds the coverage.
+ */
+describe("showcase panels declare their source", () => {
+  const PINNED: Record<string, number> = {
+    "RouteSafetyWorkspace.tsx": 4,
+    "LocationWorkspace.tsx": 3,
+    "OfflineVault.tsx": 3,
+    "ComplianceEngine.tsx": 3,
+    "BillingSafetyWorkspace.tsx": 3,
+    "TripOperationsWorkspace.tsx": 3,
+  };
+  const pages = readdirSync("client/src/showcase").filter(f => f.endsWith(".tsx") && !/^(ShowcaseFrame|SourcedPanel)\.tsx$/.test(f) && !f.endsWith(".test.tsx"));
+
+  it("carries the statement on every page that has been converted, at the pinned count", () => {
+    for (const [file, count] of Object.entries(PINNED)) {
+      const src = readFileSync(`client/src/showcase/${file}`, "utf8");
+      expect(src.split("PanelSourceBadge source=").length - 1, file).toBe(count);
+      expect(src, file).toContain('from "./panelSource"');
+    }
+  });
+
+  it("names the pages not yet converted, so the gap is a number rather than a surprise", () => {
+    const unconverted = pages.filter(f => !(f in PINNED) && !readFileSync(`client/src/showcase/${f}`, "utf8").includes("PanelSourceBadge"));
+    // Home and FleetWorkspace are the two largest screens (2,150 and 1,578 lines); they are next.
+    expect(unconverted.sort()).toEqual(["FleetWorkspace.tsx", "Home.tsx"]);
+  });
+
+  it("refuses a badge whose reason was left empty", () => {
+    for (const f of pages) {
+      const src = readFileSync(`client/src/showcase/${f}`, "utf8");
+      expect(src.includes('demonstration("")') || src.includes("demonstration('')"), f).toBe(false);
+    }
+  });
+});

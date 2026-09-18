@@ -77,7 +77,7 @@ gate is green before a checkpoint is called complete.
 
 | # | Checkpoint | Definition of done |
 |---|---|---|
-| P5.1 | Showcase screens | every screen in the audit's showcase list renders from **records**, not fixtures; a screen backed by a fixture says so on its face |
+| P5.1 | Showcase screens | **PARTLY DONE (v22.53)** — the page banner said "demonstration data" but each panel looked the same whether its rows came from a query or from a literal. `client/src/showcase/panelSource.ts` makes a panel state its source, and the rule it exists for: **a query that returned nothing is not records** — it is a demonstration with a named reason (`fromQuery(..., { whenEmpty })`), and a `demonstration()` panel must say why in at least ten characters or it throws. `PanelSourceBadge` shows it on the panel; `SourcedPanel` wraps new ones. Six screens converted (19 panels: route safety 4, location / offline vault / compliance engine / billing safety / trip operations 3 each); the per-page count is pinned in `server/clientTruth.test.ts`, which also **names the two not yet converted** (Home, FleetWorkspace — the two largest, 2,150 and 1,578 lines) so the gap is a number rather than a surprise. Tests: 3 jsdom + 3 source. |
 | P5.2 | Portal shells | driver / dispatcher / office / customer / vendor / facility portals mount only their permitted procedures (7b/7c gates already pin the external counts) |
 | P5.3 | Accessibility | the B28h Chromium accessibility suite (48 cases) runs against the real app, three viewports |
 | P5.4 | Demo dataset | a seeded, fixture-labelled organization that exercises the full chain end-to-end without touching a real customer or a real regulatory figure |

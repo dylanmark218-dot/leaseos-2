@@ -1,6 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PanelSourceBadge } from "./SourcedPanel";
+import { demonstration, fromQuery } from "./panelSource";
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -176,6 +178,7 @@ export default function ComplianceEngine() {
                 <CardTitle className="text-[15px] text-[#172033]">
                   Job readiness · JOB-08421
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("JOB-08421 is a demonstration job; the readiness engine is not run on this page")} />
                 <p className="mt-1 text-xs text-[#8492a4]">
                   Jurisdiction: Canada · Alberta · Road · TDG profile
                 </p>
@@ -251,6 +254,7 @@ export default function ComplianceEngine() {
                   <CardTitle className="text-[15px] text-[#254e46]">
                     Tailgate / JSA voice entry
                   </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.complianceEngine.tailgates.list", tailgates, { whenEmpty: "no tailgate meeting exists on this database yet" })} />
                 </div>
                 <p className="mt-1 text-xs text-[#729189]">
                   Voice becomes structured fields for human review; it does not
@@ -279,6 +283,7 @@ export default function ComplianceEngine() {
                 <CardTitle className="text-[15px] text-[#172033]">
                   Tracked artifact types
                 </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.complianceEngine.artifacts.list", artifacts, { whenEmpty: "no compliance artifact exists on this database yet" })} />
               </CardHeader>
               <CardContent className="grid gap-2 px-5 pb-5 sm:grid-cols-2">
                 {artifactTypes.map((item, i) => (

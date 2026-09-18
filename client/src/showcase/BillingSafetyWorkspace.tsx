@@ -1,6 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PanelSourceBadge } from "./SourcedPanel";
+import { demonstration, fromQuery } from "./panelSource";
 import { trpc } from "@/lib/trpc";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -153,6 +155,7 @@ export default function BillingSafetyWorkspace() {
                 <CardTitle className="text-[15px] text-[#172033]">
                   Job billing calculator · JOB-08421
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("JOB-08421 is a demonstration job; these totals are calculated from the inputs on this page, not from a field ticket")} />
                 <p className="mt-1 text-xs text-[#8492a4]">
                   Rate card: {rate.name} · {rate.currency || "CAD"}
                 </p>
@@ -254,6 +257,7 @@ export default function BillingSafetyWorkspace() {
                 <CardTitle className="text-[15px] text-[#172033]">
                   Company rate cards
                 </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.billing.rateCards.list", rates, { whenEmpty: "no rate card exists on this database yet" })} />
                 <p className="mt-1 text-xs text-[#8492a4]">
                   Hourly, daily, jump-hour, disposal, and specialty equipment.
                 </p>
@@ -325,6 +329,7 @@ export default function BillingSafetyWorkspace() {
                 <CardTitle className="text-[15px] text-[#254e46]">
                   Unit safety + emergency plans
                 </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.unitSafety.list", plans, { whenEmpty: "no unit safety plan exists on this database yet" })} />
                 <p className="mt-1 text-xs text-[#729189]">
                   The same safety snapshot follows the unit offline.
                 </p>

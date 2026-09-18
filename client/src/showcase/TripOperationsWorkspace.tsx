@@ -1,6 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PanelSourceBadge } from "./SourcedPanel";
+import { demonstration, fromQuery } from "./panelSource";
 import { trpc } from "@/lib/trpc";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -223,6 +225,7 @@ export default function TripOperationsWorkspace() {
                 <CardTitle className="text-[15px]">
                   Live route + operating zones
                 </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.operatingZones.list", zones, { whenEmpty: "no operating zone exists on this database yet" })} />
                 <p className="mt-1 text-xs text-[#8492a4]">
                   Loading and unloading zones are persistent map objects with
                   radius and verification metadata.
@@ -291,6 +294,7 @@ export default function TripOperationsWorkspace() {
               <CardTitle className="text-[15px] text-white">
                 One-tap trip clock
               </CardTitle>
+              <PanelSourceBadge source={demonstration("the clock reflects this page\u2019s own state; no trip record is advanced from here")} />
               <p className="mt-1 text-xs text-[#aabbd0]">
                 Driver records events once; the system reuses them for the log
                 book, trip passport and billing evidence.
@@ -413,6 +417,7 @@ export default function TripOperationsWorkspace() {
               <CardTitle className="text-[15px]">
                 Manifest + billing handoff
               </CardTitle>
+              <PanelSourceBadge source={demonstration("the handoff is laid out to show the chain; no manifest or ticket record is read here")} />
               <p className="mt-1 text-xs text-[#8492a4]">
                 Trip distance and stop durations become source-labelled billing
                 inputs instead of handwritten guesses.
