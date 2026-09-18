@@ -79,7 +79,7 @@ import {
   users,
   externalIdentities,
   integrationClients,
-  coreRecordOwnership, organizationMemberships, fieldTickets, incidentReports } from "../drizzle/schema";
+  coreRecordOwnership, organizationMemberships, fieldTickets, incidentReports, loads } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -581,12 +581,15 @@ export async function createTailgateMeeting(input: InsertTailgateMeeting) {
   const result = await db.insert(tailgateMeetings).values(input);
   return result[0]?.insertId;
 }
-export async function listTransferAcknowledgements() {
+export async function listTransferAcknowledgements(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
+  const subs = trackingScopeSubqueries(db, scope);
+  const inScope = or(...subs.map(s => inArray(transferAcknowledgements.trackingNumber, s)));
   return db
     .select()
     .from(transferAcknowledgements)
+    .where(scope.tenantId === SINGLE_TENANT_ID ? or(inScope, and(...allTrackingSubqueries(db).map(s => notInArray(transferAcknowledgements.trackingNumber, s)))) : inScope)
     .orderBy(desc(transferAcknowledgements.createdAt))
     .limit(100);
 }
@@ -647,12 +650,13 @@ export async function createManifest(input: InsertManifest, scope: TenantScope) 
   return result[0]?.insertId;
 }
 
-export async function listScanAudits() {
+export async function listScanAudits(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(scanAudits)
+    .where(scope.tenantId === SINGLE_TENANT_ID ? isNull(scanSubjectOwnerOrg) : eq(scanSubjectOwnerOrg, scope.tenantId))
     .orderBy(desc(scanAudits.scannedAt))
     .limit(100);
 }
@@ -755,10 +759,15 @@ export async function createComplianceDocument(
 
 export async function reviewComplianceDocument(
   id: number,
-  status: "verified" | "rejected"
+  status: "verified" | "rejected",
+  scope: TenantScope,
 ) {
   const db = await getDb();
   if (!db) return false;
+  // P4.1: only a document whose owner (operator, unit, job) is in scope can be reviewed here; otherwise "not found".
+  const inScope = (await db.select({ id: complianceDocuments.id }).from(complianceDocuments)
+    .where(and(eq(complianceDocuments.id, id), scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId))).limit(1))[0];
+  if (!inScope) return false;
   await db
     .update(complianceDocuments)
     .set({ verificationStatus: status })
@@ -894,11 +903,14 @@ function tripKeyedScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, trip
  */
 function tripRefScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, refColumn: MySqlColumn, scope: TenantScope) {
   const numbers = db.select({ n: trips.tripNumber }).from(trips).where(orgScopeWhere(trips, scope));
-  const ids = db.select({ n: sql<string>`CAST(${trips.id} AS CHAR)` }).from(trips).where(orgScopeWhere(trips, scope));
-  const inScope = or(inArray(refColumn, numbers), inArray(refColumn, ids));
+  const ids = db.select({ n: trips.id }).from(trips).where(orgScopeWhere(trips, scope));
+  // The text side is cast to a number for the id match (non-numeric text becomes 0, which no trip has), which
+  // avoids comparing two collations.
+  const asNumber = sql`CAST(${refColumn} AS UNSIGNED)`;
+  const inScope = or(inArray(refColumn, numbers), inArray(asNumber, ids));
   if (scope.tenantId !== SINGLE_TENANT_ID) return inScope;
-  const anyNumber = db.select({ n: trips.tripNumber }).from(trips), anyId = db.select({ n: sql<string>`CAST(${trips.id} AS CHAR)` }).from(trips);
-  return or(inScope, and(notInArray(refColumn, anyNumber), notInArray(refColumn, anyId)));
+  const anyNumber = db.select({ n: trips.tripNumber }).from(trips), anyId = db.select({ n: trips.id }).from(trips);
+  return or(inScope, and(notInArray(refColumn, anyNumber), notInArray(asNumber, anyId)));
 }
 
 /** An assistant proposal the scope may see, or null: through its job, else its trip, else its unit, else the single tenant only. */
@@ -929,6 +941,81 @@ export async function manifestInScope(manifestNumber: string, scope: TenantScope
   const db = await getDb();
   if (!db) return null;
   return (await db.select({ id: manifests.id }).from(manifests).where(and(eq(manifests.manifestNumber, manifestNumber), orgScopeWhere(manifests, scope))).limit(1))[0] ?? null;
+}
+
+/** The organization that owns a scanned subject, or NULL: units/trailers/equipment and operators through ownership, jobs through orgRef. */
+const scanSubjectOwnerOrg = sql<string | null>`(
+  CASE ${scanAudits.subjectType}
+    WHEN 'operator' THEN (SELECT o.orgRef FROM coreRecordOwnership o WHERE o.recordType = 'operator' AND o.recordId = ${scanAudits.subjectId} LIMIT 1)
+    WHEN 'unit' THEN (SELECT o.orgRef FROM coreRecordOwnership o WHERE o.recordType = 'unit' AND o.recordId = ${scanAudits.subjectId} LIMIT 1)
+    WHEN 'trailer' THEN (SELECT o.orgRef FROM coreRecordOwnership o WHERE o.recordType = 'unit' AND o.recordId = ${scanAudits.subjectId} LIMIT 1)
+    WHEN 'equipment' THEN (SELECT o.orgRef FROM coreRecordOwnership o WHERE o.recordType = 'unit' AND o.recordId = ${scanAudits.subjectId} LIMIT 1)
+    WHEN 'job' THEN (SELECT j.orgRef FROM jobs j WHERE j.id = ${scanAudits.subjectId} LIMIT 1)
+    ELSE NULL
+  END)`;
+/** A tracking number's subject in scope: a trip, job, manifest, field ticket or load by its number; a number naming none is unowned. */
+export async function trackingSubjectInScope(trackingNumber: string, scope: TenantScope): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const t = (await db.select({ id: trips.id }).from(trips).where(eq(trips.tripNumber, trackingNumber)).limit(1))[0];
+  if (t) return !!(await tripInScope(t.id, scope));
+  const j = (await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.jobCode, trackingNumber)).limit(1))[0];
+  if (j) return !!(await jobInScope(j.id, scope));
+  if ((await db.select({ id: manifests.id }).from(manifests).where(eq(manifests.manifestNumber, trackingNumber)).limit(1))[0]) return !!(await manifestInScope(trackingNumber, scope));
+  const ft = (await db.select({ id: fieldTickets.id }).from(fieldTickets).where(eq(fieldTickets.ticketNumber, trackingNumber)).limit(1))[0];
+  if (ft) return !!(await fieldTicketInScope(trackingNumber, scope));
+  const ld = (await db.select({ jobId: loads.jobId }).from(loads).where(eq(loads.loadNumber, trackingNumber)).limit(1))[0];
+  if (ld) return ld.jobId != null ? !!(await jobInScope(ld.jobId, scope)) : scope.tenantId === SINGLE_TENANT_ID;
+  return scope.tenantId === SINGLE_TENANT_ID;
+}
+/** Subquery of tracking numbers the scope may see, for filtering rows keyed only by a tracking number. */
+function trackingScopeSubqueries(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: TenantScope) {
+  return [
+    db.select({ n: trips.tripNumber }).from(trips).where(orgScopeWhere(trips, scope)),
+    db.select({ n: jobs.jobCode }).from(jobs).where(orgScopeWhere(jobs, scope)),
+    db.select({ n: manifests.manifestNumber }).from(manifests).where(orgScopeWhere(manifests, scope)),
+    db.select({ n: fieldTickets.ticketNumber }).from(fieldTickets).where(inArray(fieldTickets.jobId, jobScopeSubquery(db, scope))),
+    db.select({ n: loads.loadNumber }).from(loads).where(inArray(loads.jobId, jobScopeSubquery(db, scope))),
+  ];
+}
+
+function allTrackingSubqueries(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
+  return [
+    db.select({ n: trips.tripNumber }).from(trips),
+    db.select({ n: jobs.jobCode }).from(jobs),
+    db.select({ n: manifests.manifestNumber }).from(manifests),
+    db.select({ n: fieldTickets.ticketNumber }).from(fieldTickets),
+    db.select({ n: loads.loadNumber }).from(loads),
+  ];
+}
+
+/** The tracking number a transfer acknowledgement names, or null. */
+export async function transferTrackingNumber(id: number): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select({ trackingNumber: transferAcknowledgements.trackingNumber }).from(transferAcknowledgements).where(eq(transferAcknowledgements.id, id)).limit(1))[0]?.trackingNumber ?? null;
+}
+
+/** Parent lookups for the monolith's by-id updates: the trip behind a stop or a zone event, the unit behind a safety plan. */
+export async function tripStopTripId(id: number): Promise<number | null> {
+  const db = await getDb(); if (!db) return null;
+  return (await db.select({ tripId: tripStops.tripId }).from(tripStops).where(eq(tripStops.id, id)).limit(1))[0]?.tripId ?? null;
+}
+export async function zoneEventTripId(id: number): Promise<number | null> {
+  const db = await getDb(); if (!db) return null;
+  return (await db.select({ tripId: zoneEvents.tripId }).from(zoneEvents).where(eq(zoneEvents.id, id)).limit(1))[0]?.tripId ?? null;
+}
+export async function unitSafetyPlanUnitId(id: number): Promise<number | null> {
+  const db = await getDb(); if (!db) return null;
+  return (await db.select({ unitId: unitSafetyPlans.unitId }).from(unitSafetyPlans).where(eq(unitSafetyPlans.id, id)).limit(1))[0]?.unitId ?? null;
+}
+/** A trip named by free text — its number or its id as text — in scope, or (naming no trip) the single tenant's. */
+export async function tripRefInScope(ref: string, scope: TenantScope): Promise<boolean> {
+  const db = await getDb(); if (!db) return false;
+  const byNumber = (await db.select({ id: trips.id }).from(trips).where(eq(trips.tripNumber, ref)).limit(1))[0];
+  const byId = /^\d+$/.test(ref) ? (await db.select({ id: trips.id }).from(trips).where(eq(trips.id, Number(ref))).limit(1))[0] : undefined;
+  const t = byNumber ?? byId;
+  return t ? !!(await tripInScope(t.id, scope)) : scope.tenantId === SINGLE_TENANT_ID;
 }
 
 export async function listOperators(scope: TenantScope) {

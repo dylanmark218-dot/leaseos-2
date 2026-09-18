@@ -55,6 +55,12 @@ import {
   workOrderInScope,
   proposalInScope,
   rateCardInScope,
+  trackingSubjectInScope,
+  transferTrackingNumber,
+  tripStopTripId,
+  zoneEventTripId,
+  unitSafetyPlanUnitId,
+  tripRefInScope,
 } from "./db";
 import { dispatchGateRouter } from "./dispatchRouter";
 import { createJobUnitGated } from "./dispatchEnforcementService";
@@ -608,7 +614,10 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) => {
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        { const tid = await tripStopTripId(input.id); if (tid != null && !(await tripInScope(tid, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip stop ${input.id} not found` }); }
+        
           const { id, ...values } = input;
           return updateTripStop(id, values);
         }),
@@ -907,6 +916,9 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        { const tid = await zoneEventTripId(input.id); if (tid != null && !(await tripInScope(tid, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Zone event ${input.id} not found` }); }
+        
           await updateZoneEvent(input.id, {
             status: input.action === "confirm" ? "confirmed" : "rejected",
             confirmedAt: new Date(),
@@ -1094,7 +1106,11 @@ export const appRouter = router({
             driverAcknowledged: z.number().int().default(0),
           })
         )
-        .mutation(({ input }) => createRouteDecision({ ...input, source: `manual choice (routing source ${routingSourceStatus().status})`, confidence: "manual — not authority data" })),   // a person's choice, labelled as one; never authority
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await tripRefInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
+        return createRouteDecision({ ...input, source: `manual choice (routing source ${routingSourceStatus().status})`, confidence: "manual — not authority data" });
+      }),   // a person's choice, labelled as one; never authority
     }),
     billing: router({
       rateCards: router({
@@ -1203,7 +1219,10 @@ export const appRouter = router({
             version: z.number().int().optional(),
           })
         )
-        .mutation(({ input }) => {
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        { const uid = await unitSafetyPlanUnitId(input.id); if (uid != null && !(await unitInScope(uid, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit safety plan ${input.id} not found` }); }
+        
           const { id, ...values } = input;
           return updateUnitSafetyPlan(id, values);
         }),
@@ -1282,7 +1301,7 @@ export const appRouter = router({
       }),
       }),
       transfers: router({
-        list: roleProcedure("transfers.list").query(() => listTransferAcknowledgements()),
+        list: roleProcedure("transfers.list").query(async ({ ctx }) => listTransferAcknowledgements(await scopeFor(ctx.user.id))),
         create: roleProcedure("transfers.create")
           .input(
             z.object({
@@ -1298,7 +1317,11 @@ export const appRouter = router({
               acknowledgedAt: z.coerce.date().optional(),
             })
           )
-          .mutation(({ input }) => createTransferAcknowledgement(input)),
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        if (!(await trackingSubjectInScope(input.trackingNumber, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `${input.trackingNumber} not found` });
+        return createTransferAcknowledgement(input);
+      }),
         acknowledge: roleProcedure("transfers.acknowledge")
           .input(
             z.object({
@@ -1306,9 +1329,11 @@ export const appRouter = router({
               acknowledgedBy: z.string().min(1).max(180),
             })
           )
-          .mutation(({ input }) =>
-            acknowledgeTransfer(input.id, input.acknowledgedBy)
-          ),
+          .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        { const tn = await transferTrackingNumber(input.id); if (tn && !(await trackingSubjectInScope(tn, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Transfer ${input.id} not found` }); }
+        return acknowledgeTransfer(input.id, input.acknowledgedBy);
+      }),
       }),
     }),
     locations: router({
@@ -1367,7 +1392,7 @@ export const appRouter = router({
       }),
     }),
     scans: router({
-      list: roleProcedure("scans.list").query(() => listScanAudits()),
+      list: roleProcedure("scans.list").query(async ({ ctx }) => listScanAudits(await scopeFor(ctx.user.id))),
       create: roleProcedure("scans.create")
         .input(
           z.object({
@@ -1380,7 +1405,11 @@ export const appRouter = router({
             longitude: z.number().optional(),
           })
         )
-        .mutation(({ ctx, input }) => createScanAudit({ ...input, accessRole: scanRoleOf((ctx as unknown as { roles?: readonly string[] }).roles ?? []) })),   // the caller's role, never the caller's claim
+        .mutation(async ({ ctx, input }) => {
+        // P4.1: scope guard
+        { const scope = await scopeFor(ctx.user.id); const st = input.subjectType as string; const sid = Number(input.subjectId); if (["unit", "trailer", "equipment"].includes(st) && !(await unitInScope(sid, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Subject ${st} ${sid} not found` }); if (st === "operator" && !(await operatorInScope(sid, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Subject operator ${sid} not found` }); if (st === "job" && !(await jobInScope(sid, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Subject job ${sid} not found` }); }
+        return createScanAudit({ ...input, accessRole: scanRoleOf((ctx as unknown as { roles?: readonly string[] }).roles ?? []) });
+      }),   // the caller's role, never the caller's claim
     }),
     identity: router({
       operators: router({
@@ -1498,9 +1527,7 @@ export const appRouter = router({
               status: z.enum(["verified", "rejected"]),
             })
           )
-          .mutation(({ input }) =>
-            reviewComplianceDocument(input.id, input.status)
-          ),
+          .mutation(async ({ ctx, input }) => { const ok = await reviewComplianceDocument(input.id, input.status, await scopeFor(ctx.user.id)); if (!ok) throw new TRPCError({ code: "NOT_FOUND", message: `Document ${input.id} not found` }); return ok; }),
       }),
     }),
     compliance: router({
