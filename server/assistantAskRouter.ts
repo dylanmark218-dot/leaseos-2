@@ -23,7 +23,7 @@
  * "insufficient evidence" needs to be able to show it said so, and one that
  * answered from a retired revision needs to be findable afterwards.
  */
-import { checkSourceGate } from "./_core/knowledge/sourceGate";
+import { checkAssistantPassageUse } from "./_core/knowledge/sourceGate";
 import { TRPCError } from "@trpc/server";
 import { createHash } from "crypto";
 import { z } from "zod";
@@ -68,7 +68,9 @@ function passageResolver(d: DbOrTx): ContextResolver {
   return {
     resolverKey: "knowledgePassage",
     resolve: async (sourceRef, acting) => {
-      const row = (await d.select().from(knowledgePassages).where(eq(knowledgePassages.passageRef, sourceRef)).limit(1))[0];
+      // An unclassified passage answers as absent here too: the same words for "no such passage"
+      // as admission gives another organization's, rather than a different, informative refusal.
+      const row = (await d.select().from(knowledgePassages).where(and(eq(knowledgePassages.passageRef, sourceRef), quotable())).limit(1))[0];
       // Absent and foreign answer alike; admission turns both into "no such".
       if (!row || row.tenantId !== acting.tenantId) return null;
       return {
@@ -111,6 +113,19 @@ function lexicalScore(body: string, question: string): number {
  * Shared with the probe harness on purpose: a harness that measured its own
  * private copy would report the recall of code nobody runs.
  */
+/**
+ * 0151 — the passages that may be quoted to a person.
+ *
+ * A row whose `reproductionBasis` is `unstated` predates the rule and nobody has classified it.
+ * Unknown is not permission: it stays in the table so a person can classify it, and stays out of
+ * every customer-visible answer until they do. One predicate, used by all four read paths —
+ * retrieval, the direct passage read, the corpus fingerprint and the library listing — because a
+ * condition repeated four times is a condition that will be forgotten once. The listing was in
+ * fact forgotten in the first draft, and a probe with the filter disabled is what found it.
+ */
+const QUOTABLE_BASES = ["own_document", "licensed_source"] as const;
+const quotable = () => inArray(knowledgePassages.reproductionBasis, QUOTABLE_BASES as unknown as string[]);
+
 async function retrieve(d: DbOrTx, args: { tenantId: string; question: string; limit: number }) {
   /* Ordered by relevance, explicitly.
    *
@@ -122,7 +137,7 @@ async function retrieve(d: DbOrTx, args: { tenantId: string; question: string; l
    * deterministic one. */
   const relevance = sql<number>`MATCH(${knowledgePassages.body}) AGAINST (${args.question} IN NATURAL LANGUAGE MODE)`;
   return d.select().from(knowledgePassages)
-    .where(and(eq(knowledgePassages.tenantId, args.tenantId), sql`${relevance} > 0`))
+    .where(and(eq(knowledgePassages.tenantId, args.tenantId), quotable(), sql`${relevance} > 0`))
     .orderBy(desc(relevance), asc(knowledgePassages.id))
     .limit(args.limit);
 }
@@ -142,7 +157,7 @@ async function corpusFingerprint(d: DbOrTx, tenantId: string): Promise<{ hash: s
     revision: knowledgePassages.revision, effectiveFrom: knowledgePassages.effectiveFrom,
     supersededAt: knowledgePassages.supersededAt, jurisdiction: knowledgePassages.jurisdiction,
     createdAt: knowledgePassages.createdAt,
-  }).from(knowledgePassages).where(eq(knowledgePassages.tenantId, tenantId)).limit(20_000);
+  }).from(knowledgePassages).where(and(eq(knowledgePassages.tenantId, tenantId), quotable())).limit(20_000);
 
   const ordered = [...rows].sort((a, b) => a.passageRef.localeCompare(b.passageRef));
   const basis = ordered.map(r => ({
@@ -415,6 +430,8 @@ export const assistantAskRouter = router({
       const rows = await d.select().from(knowledgePassages)
         .where(and(
           eq(knowledgePassages.tenantId, acting.tenantId),
+          // The fourth read path: browsing the library is a customer-visible answer like any other.
+          quotable(),
           input.documentRef ? eq(knowledgePassages.documentRef, input.documentRef) : undefined,
           // LIKE, not MATCH. Substring rather than relevance, so a term the
           // retriever's index does not carry is still findable.
@@ -577,30 +594,52 @@ export const assistantAskRouter = router({
       effectiveFrom: z.coerce.date().optional(),
       supersededAt: z.coerce.date().optional(),
       jurisdiction: z.string().max(20).optional(),
-      // 0150: why this text may be reproduced. There is no default: a person states it.
+      // 0150/0151: why this text may be reproduced. There is no default: a person states it.
       reproductionBasis: z.enum(["own_document", "licensed_source"]),
-      /** Required for a licensed source: the same assessment id the corpus gate uses. */
-      licenceAssessmentRef: z.string().min(1).max(64).optional(),
+      /** Required for a licensed source: the source id the licence registry keys. */
+      sourceId: z.string().min(1).max(64).optional(),
+      /**
+       * Required for an own document: what the person is actually claiming. It is an assertion,
+       * not a proof of title, and it is recorded as one so a later review can find who claimed
+       * what. An anonymous own-document claim is how third-party text gets in unlabelled.
+       */
+      rightsAssertion: z.string().min(20).max(500).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const d = await db();
       const acting = await resolveActingScope(d, ctx.user.id);
-      // 0150: a licensed source must name the assessment that permits reproduction, and it must be
-      // an assessment that actually permits it — the same gate the corpus ingestion runs through.
-      // The company's own document needs no licence, but it does need the person who said so.
+      /*
+       * 0151, after human review. Two bases, two different obligations, and they are not
+       * interchangeable: company-owned material does not go through a third-party licence
+       * assessment, and third-party material does not get in as an anonymous own-document claim.
+       *
+       * A licensed source must clear BOTH rights the library exercises — storing and indexing the
+       * text (rag_ingestion) and returning it to a person in a paid product (commercial_redisplay).
+       * checkAssistantPassageUse asks both; the first version asked only redisplay, which would
+       * have admitted a source that may be shown but not stored.
+       */
+      let stampedAssessment: string | null = null;
+      let stampedSource: string | null = null;
       if (input.reproductionBasis === "licensed_source") {
-        if (!input.licenceAssessmentRef) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "A licensed source must name the licence assessment that permits reproduction" });
+        if (!input.sourceId) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "A licensed source must name the source id the licence registry keys" });
         }
-        // The assistant quotes a passage back to a person using the product, so the purpose is
-        // commercial_redisplay - the most demanding of the gate's purposes, and the honest one.
-        // A source cleared only for link_only or rag_ingestion does not clear this.
-        const gate = checkSourceGate(input.licenceAssessmentRef, "commercial_redisplay");
-        if (!gate.allowed) {
-          throw new TRPCError({ code: "FORBIDDEN", message: `Quoting ${input.licenceAssessmentRef} to a person is not permitted: ${gate.reason}` });
+        if (input.rightsAssertion) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "A licensed source is authorized by its assessment, not by an assertion; remove rightsAssertion" });
         }
-      } else if (input.licenceAssessmentRef) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "An own document does not carry a licence assessment; remove it or state the basis as licensed_source" });
+        const use = checkAssistantPassageUse(input.sourceId);
+        if (!use.allowed) throw new TRPCError({ code: "FORBIDDEN", message: use.reason });
+        // Stamped from the gate's own record, never from the request: the assessment is what a
+        // revocation sweeps by, and a typed value could name an assessment that says otherwise.
+        stampedAssessment = use.assessmentId;
+        stampedSource = use.sourceId;
+      } else {
+        if (!input.rightsAssertion) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "An own document needs the rights assertion the person is making — that this organization holds the right to load and quote this text" });
+        }
+        if (input.sourceId) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "An own document names no licensed source; remove sourceId or state the basis as licensed_source" });
+        }
       }
       const passageRef = ref("PSG");
       await d.insert(knowledgePassages).values({
@@ -611,10 +650,18 @@ export const assistantAskRouter = router({
         effectiveFrom: input.effectiveFrom ?? null, supersededAt: input.supersededAt ?? null,
         jurisdiction: input.jurisdiction ?? null,
         reproductionBasis: input.reproductionBasis,
-        licenceAssessmentRef: input.licenceAssessmentRef ?? null,
+        sourceId: stampedSource,
+        licenceAssessmentRef: stampedAssessment,
+        rightsAssertion: input.rightsAssertion ?? null,
         loadedByUserId: ctx.user.id,
       });
-      return { passageRef, basis: input.reproductionBasis, note: "Loaded, with the basis and the person who stated it recorded. A passage with no effective date is usable; one with no revision would not have been." };
+      return {
+        passageRef, basis: input.reproductionBasis,
+        authorizedBy: stampedAssessment,
+        note: stampedAssessment
+          ? `Loaded. Both rights the library exercises — storing the text and returning it to a person — are authorized by ${stampedAssessment}, which is what a revocation will sweep by.`
+          : "Loaded. Recorded as this organization's own material on the assertion of the person who loaded it; that is an assertion, not a proof of title.",
+      };
     }),
 
   /** Retire a revision without deleting it. */

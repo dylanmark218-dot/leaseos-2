@@ -126,6 +126,27 @@ export const AB_511: SourceLicenceRecord = {
 const REGISTRY = new Map<string, SourceLicenceRecord>([[AB_511.source_id, AB_511]]);
 
 export const licenceFor = (sourceId: string): SourceLicenceRecord | null => REGISTRY.get(sourceId) ?? null;
+
+/**
+ * A test seam, in the style of `setWebhookPoster`. The registry holds real assessments of real
+ * sources, and the only one assessed so far refuses both of the rights the passage library needs —
+ * which means a test written against it cannot tell "refused because ingestion is denied" from
+ * "refused because redisplay is denied". A synthetic record with one right and not the other is the
+ * only way to prove the composite gate asks both questions rather than one twice.
+ *
+ * It refuses to run outside a test runner, so it cannot become a way to grant a licence at runtime.
+ */
+export function __registerAssessmentForTest(record: SourceLicenceRecord): void {
+  if (!process.env.VITEST && process.env.NODE_ENV !== "test") {
+    throw new Error("__registerAssessmentForTest is a test seam; a licence is granted by an assessment, not by code");
+  }
+  REGISTRY.set(record.source_id, record);
+}
+
+/** Undo the seam, so one test's synthetic licence cannot authorize another's source. */
+export function __clearTestAssessments(): void {
+  for (const key of Array.from(REGISTRY.keys())) if (key !== AB_511.source_id) REGISTRY.delete(key);
+}
 export const registeredSources = (): readonly string[] => Array.from(REGISTRY.keys());
 
 /* ------------------------------------------------------------------ */
@@ -342,5 +363,58 @@ export function authorityFrom(
     licenceStatus: record.commercial_reuse_authorized ? "licensed" : "permission_required",
     allowedUses: allowedUsesFrom(record),
     confidence: "imported",
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Composite use: the assistant's passage library                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The assistant's passage library does two licensable things to the same text, and a single
+ * purpose describes neither completely:
+ *
+ *   it **stores and indexes** the reproduced text so it can be retrieved  → `rag_ingestion`
+ *   it **returns that text to a person** using a paid product            → `commercial_redisplay`
+ *
+ * Those read different flags (`rag_ingestion_authorized`, `commercial_reuse_authorized`), so
+ * clearing one says nothing about the other. Checking only redisplay — as the first version of
+ * `assistant.addPassage` did — passes a source that may be shown but not stored; checking only
+ * ingestion passes one that may be stored but not shown. Both are wrong, and neither failure is
+ * visible from the row afterwards.
+ *
+ * This asks both questions and refuses on the first no. It redefines neither: each purpose keeps
+ * the meaning `checkSourceGate` already gives it, and the refusal names which right was missing so
+ * the answer is actionable rather than a flat denial.
+ */
+export type PassageUseDecision =
+  | { allowed: true; assessmentId: string; sourceId: string; note: string }
+  | { allowed: false; missing: readonly IngestionPurpose[]; code: GateRefusal; reason: string; conditions: readonly string[] };
+
+export function checkAssistantPassageUse(sourceId: string): PassageUseDecision {
+  const REQUIRED: readonly IngestionPurpose[] = ["rag_ingestion", "commercial_redisplay"];
+  const decisions = REQUIRED.map((purpose) => ({ purpose, d: checkSourceGate(sourceId, purpose) }));
+  const denied = decisions.filter((x) => !x.d.allowed);
+
+  if (denied.length > 0) {
+    const first = denied[0]!.d as Extract<GateDecision, { allowed: false }>;
+    const missing = denied.map((x) => x.purpose);
+    return {
+      allowed: false,
+      missing,
+      code: first.code,
+      // Both rights are named even when only one is missing: a reader should not have to infer
+      // which of the two the library needs.
+      reason: `The assistant's passage library needs both rag_ingestion (to store and index the text) and commercial_redisplay (to return it to a person). ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not authorized for ${sourceId}: ${first.reason}`,
+      conditions: first.conditions,
+    };
+  }
+
+  const record = licenceFor(sourceId)!;   // both decisions allowed, so a record exists
+  return {
+    allowed: true,
+    assessmentId: record.assessment_id,
+    sourceId: record.source_id,
+    note: `rag_ingestion and commercial_redisplay both authorized by ${record.assessment_id}`,
   };
 }

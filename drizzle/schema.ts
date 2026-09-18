@@ -7091,7 +7091,9 @@ export const knowledgePassages = mysqlTable("knowledgePassages", {
   body: text("body").notNull(),
   // 0150: why this text may be reproduced, and who said so.
   reproductionBasis: varchar("reproductionBasis", { length: 24 }),   // own_document | licensed_source | unstated (pre-0150 rows)
-  licenceAssessmentRef: varchar("licenceAssessmentRef", { length: 64 }),   // the corpus gate's assessment id, when the basis is a licensed source
+  sourceId: varchar("sourceId", { length: 64 }),   // 0151: the named source, as the licence registry keys it
+  licenceAssessmentRef: varchar("licenceAssessmentRef", { length: 64 }),   // 0151: the assessment that authorized it — stamped by the gate, never typed
+  rightsAssertion: varchar("rightsAssertion", { length: 500 }),   // 0151: for an own document, the statement the person made
   loadedByUserId: int("loadedByUserId"),
   revision: varchar("revision", { length: 40 }).notNull(),
   effectiveFrom: timestamp("effectiveFrom"),

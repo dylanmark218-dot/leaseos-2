@@ -239,14 +239,21 @@ export function WidgetBoard({
   );
 }
 
+/**
+ * A div, not a p. The rejected-save banner carries a <ul> of the rejections, and HTML forbids a
+ * list inside a paragraph: the browser closes the <p> early, so the parsed DOM stops matching
+ * React's tree and hydration mismatches. React warns about exactly this. A save banner is a live
+ * region anyway, so role="status" is the accurate element as well as the valid one — a screen
+ * reader announces the outcome instead of a person having to go looking for it.
+ */
 const Banner = ({ tone, children }: { tone: string; children: React.ReactNode }) => (
-  <p style={{
+  <div role="status" style={{
     margin: 0, padding: "8px 10px", background: "var(--panel2)",
     border: "1px solid var(--line)", borderLeft: `3px solid ${tone}`, borderRadius: "var(--r)",
     font: "400 13px/1.45 'Barlow', sans-serif", color: "var(--dim)",
   }}>
     {children}
-  </p>
+  </div>
 );
 
 const control = {

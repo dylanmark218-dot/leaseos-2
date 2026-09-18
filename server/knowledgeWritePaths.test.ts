@@ -15,24 +15,38 @@
  * the source and fails if a write path appears that is not one of the two, which is the failure
  * mode a licence obligation actually has.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const walk = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap(e =>
-    e.isDirectory() ? walk(`${dir}/${e.name}`) : /\.ts$/.test(e.name) && !/\.test\.ts$/.test(e.name) ? [`${dir}/${e.name}`] : []);
+    e.isDirectory() && e.name !== "node_modules" ? walk(`${dir}/${e.name}`)
+      : /\.(ts|tsx|mjs|js|sql)$/.test(e.name) && !/\.test\.(ts|tsx)$/.test(e.name) ? [`${dir}/${e.name}`] : []);
 
-const files = [...walk("server"), ...walk("scripts")];
+/* Every production tree that could hold a writer, not only the router we happen to know about:
+ * server code, the scripts an operator runs (importers, backfills, seeds) and the migration SQL. A
+ * raw INSERT in an import script bypasses the gate exactly as an ORM call does. */
+const TREES = ["server", "scripts", "drizzle", "client/src"].filter(existsSync);
+const files = TREES.flatMap(walk);
 const CORPUS = ["knowledgeSources", "knowledgeDocuments", "knowledgeChunks"];
 
 /** The chosen paths. Anything else writing these tables is the finding. */
 const ALLOWED: Record<string, string> = {
+  "drizzle/0150_passage_reproduction_basis.sql": "adds the basis columns and backfills pre-rule rows to 'unstated'; it classifies nothing and admits no new text",
+  "drizzle/0151_passage_basis_correction.sql": "separates sourceId from the stamped assessment and moves 0150's misplaced value; it admits no new text",
   "server/_core/knowledge/repository.ts": "the corpus's only writer, by design; it runs the licence gate and stamps the authorizing assessment",
   "server/assistantAskRouter.ts": "the passage library's only writer; since 0150 it requires a stated reproduction basis and records who stated it",
 };
 
+/* Three ways a row gets in, all of them counted: the ORM call, raw SQL through a pool or a
+ * `sql` template, and a migration that seeds rows rather than only shaping the table. Matching only
+ * `insert(table)` would have let an importer using pool.execute("INSERT INTO ...") through. */
 const writersOf = (table: string) =>
-  files.filter(f => new RegExp(`insert\\(${table}\\)`).test(readFileSync(f, "utf8"))).sort();
+  files.filter(f => {
+    const src = readFileSync(f, "utf8");
+    return new RegExp(`insert\\(${table}\\)`).test(src)
+      || new RegExp(`(INSERT\\s+INTO|REPLACE\\s+INTO|LOAD\\s+DATA[\\s\\S]{0,80}INTO\\s+TABLE)\\s+\`?${table}\`?`, "i").test(src);
+  }).sort();
 
 describe("reproduced text has exactly the write paths we chose", () => {
   it("lets nothing but the repository write the corpus tables", () => {

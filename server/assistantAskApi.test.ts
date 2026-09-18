@@ -1,7 +1,7 @@
 /**
  * v22.20 (0101) — a question answered only from what the company loaded.
  */
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
 import { grantUserRole } from "./db";
@@ -30,6 +30,7 @@ const AT = new Date("2027-04-01T00:00:00Z");
  * database, so a passage left by an earlier case is retrieved by a later one —
  * which is the retriever working and the fixture lying.
  */
+import { __clearTestAssessments, __registerAssessmentForTest } from "./_core/knowledge/sourceGate";
 const token = () => `zzq${rnd().toLowerCase()}`;
 const brakeText = (t: string) => `${t}: maximum pushrod travel is 2 inches when measured with the brakes applied.`;
 
@@ -38,7 +39,9 @@ async function load(safety: number, body: string, over: Record<string, unknown> 
     documentRef: `DOC-${rnd()}`, documentTitle: "Air Brake Maintenance Manual",
     section: "4.7", page: 92, body, revision: "4",
     effectiveFrom: new Date("2026-01-10T00:00:00Z"), jurisdiction: "AB",
-    reproductionBasis: "own_document",   // 0150: the company's own manual; a person states this
+    // 0151: the company's own manual, on the stated assertion of the person loading it.
+    reproductionBasis: "own_document",
+    rightsAssertion: "This organization wrote this manual and holds the right to load and quote it.",
     ...over,
   });
 }
@@ -596,34 +599,129 @@ d("the retriever's mechanics, against the real database", () => {
 });
 
 d("reproduced text records why it may be reproduced, and who said so", () => {
-  it("records the basis and the person for the company's own document", async () => {
+  const OWN = "This organization wrote this manual and holds the right to load and quote it.";
+
+  it("records the assertion, the person, and no licence for the organization's own document", async () => {
     const safety = await withRole("safety");
     const r = await load(safety, brakeText(token()));
-    expect(r.basis).toBe("own_document");
+    expect(r).toMatchObject({ basis: "own_document", authorizedBy: null });
+    expect(r.note).toMatch(/assertion, not a proof of title/);
     const [row] = await pool.query<mysql.RowDataPacket[]>(
-      "SELECT reproductionBasis, licenceAssessmentRef, loadedByUserId FROM knowledgePassages WHERE passageRef = ?", [r.passageRef]);
-    expect(row[0]).toMatchObject({ reproductionBasis: "own_document", licenceAssessmentRef: null, loadedByUserId: safety });
+      "SELECT reproductionBasis, sourceId, licenceAssessmentRef, rightsAssertion, loadedByUserId FROM knowledgePassages WHERE passageRef = ?", [r.passageRef]);
+    expect(row[0]).toMatchObject({ reproductionBasis: "own_document", sourceId: null, licenceAssessmentRef: null, rightsAssertion: OWN, loadedByUserId: safety });
   });
 
-  it("refuses a licensed source with no assessment named, and an own document that names one", async () => {
+  it("refuses an own document with no assertion, and one that names a licensed source", async () => {
     const safety = await withRole("safety");
-    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source" }))
-      .rejects.toThrow(/must name the licence assessment/);
-    await expect(load(safety, brakeText(token()), { reproductionBasis: "own_document", licenceAssessmentRef: "LIC-AB-511-2026-09-13" }))
-      .rejects.toThrow(/does not carry a licence assessment/);
+    await expect(load(safety, brakeText(token()), { rightsAssertion: undefined })).rejects.toThrow(/needs the rights assertion/);
+    await expect(load(safety, brakeText(token()), { sourceId: "gov-ab-511" })).rejects.toThrow(/names no licensed source/);
   });
 
-  it("refuses to quote a source whose licence does not permit showing it to a customer", async () => {
+  it("refuses a licensed source with no source named, or carrying an assertion instead of an assessment", async () => {
     const safety = await withRole("safety");
-    // 511 Alberta: its terms permit non-commercial reproduction and require written permission for
-    // commercial use, which is not stored. Quoting it to a person in the product is that use.
-    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source", licenceAssessmentRef: "gov-ab-511" }))
-      .rejects.toThrow(/is not permitted/);
+    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source", rightsAssertion: undefined }))
+      .rejects.toThrow(/must name the source id/);
+    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source", sourceId: "gov-ab-511" }))
+      .rejects.toThrow(/authorized by its assessment, not by an assertion/);
   });
 
-  it("refuses a source nobody has assessed at all — an unknown licence is not a permissive one", async () => {
+  it("still refuses 511 Alberta: no written permission covering commercial ingestion or redisplay is held", async () => {
     const safety = await withRole("safety");
-    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source", licenceAssessmentRef: "some-source-nobody-assessed" }))
-      .rejects.toThrow(/is not permitted/);
+    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source", sourceId: "gov-ab-511", rightsAssertion: undefined }))
+      .rejects.toThrow(/rag_ingestion and commercial_redisplay are not authorized for gov-ab-511/);
+  });
+
+  it("refuses a source nobody has assessed — an unknown licence is not a permissive one", async () => {
+    const safety = await withRole("safety");
+    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source", sourceId: `nobody-assessed-${rnd()}`, rightsAssertion: undefined }))
+      .rejects.toThrow(/not authorized/);
+  });
+});
+
+/**
+ * The composite gate, proved in both directions.
+ *
+ * 511 Alberta denies ingestion AND redisplay, so a test built only on it cannot tell a gate that
+ * asks both questions from one that asks either question twice. These use synthetic assessments
+ * with exactly one right, which is the only way to see the difference.
+ */
+d("the passage library needs both rights, and one is not enough", () => {
+  const synthetic = (over: Partial<Parameters<typeof __registerAssessmentForTest>[0]>) => {
+    const source_id = `synthetic-${rnd()}`;
+    __registerAssessmentForTest({
+      assessment_id: `LIC-SYNTH-${rnd().toUpperCase()}`, source_id,
+      source_name: "Synthetic source, for the gate's own tests", jurisdiction: "AB", owner: "test",
+      assessed_at: "2026-09-18", commercial_product: true, status: "authorized_commercial",
+      commercial_reuse_authorized: true, api_production_authorized: false,
+      rag_ingestion_authorized: true, model_training_authorized: false,
+      linking_authorized: true, metadata_only_authorized: true,
+      permission_document_id: "PERM-SYNTH-1",
+      reasons: ["synthetic"], conditions_to_unblock: [], sources: [],
+      ...over,
+    } as never);
+    return source_id;
+  };
+  afterAll(() => __clearTestAssessments());
+
+  it("refuses redisplay-allowed but ingestion-denied: it may be shown, but not stored and indexed", async () => {
+    const safety = await withRole("safety");
+    const sourceId = synthetic({ rag_ingestion_authorized: false });
+    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source", sourceId, rightsAssertion: undefined }))
+      .rejects.toThrow(/rag_ingestion is not authorized/);
+  });
+
+  it("refuses ingestion-allowed but redisplay-denied: it may be stored, but not returned to a person", async () => {
+    const safety = await withRole("safety");
+    // In a commercial product the one commercial_reuse flag governs both content uses, so this case
+    // is only reachable through an assessment made for non-commercial use: material cleared for
+    // internal indexing and not for showing to paying customers. Probed against the gate to be
+    // sure exactly one right is missing, rather than assuming.
+    const sourceId = synthetic({ commercial_product: false, commercial_reuse_authorized: false, status: "authorized_non_commercial_only" });
+    await expect(load(safety, brakeText(token()), { reproductionBasis: "licensed_source", sourceId, rightsAssertion: undefined }))
+      .rejects.toThrow(/commercial_redisplay is not authorized/);
+  });
+
+  it("permits a source whose recorded assessment authorizes both, and stamps that assessment on the row", async () => {
+    const safety = await withRole("safety");
+    const sourceId = synthetic({});
+    const r = await load(safety, brakeText(token()), { reproductionBasis: "licensed_source", sourceId, rightsAssertion: undefined });
+    expect(r.basis).toBe("licensed_source");
+    expect(r.authorizedBy).toMatch(/^LIC-SYNTH-/);
+    const [row] = await pool.query<mysql.RowDataPacket[]>(
+      "SELECT sourceId, licenceAssessmentRef, rightsAssertion FROM knowledgePassages WHERE passageRef = ?", [r.passageRef]);
+    // The assessment is stamped from the gate's record, not from the request: a revocation sweeps by it.
+    expect(row[0]).toMatchObject({ sourceId, rightsAssertion: null });
+    expect(row[0]!.licenceAssessmentRef).toBe(r.authorizedBy);
+  });
+});
+
+/**
+ * A pre-0150 row exists and is unclassified. It stays in the table so a person can classify it,
+ * and stays out of every customer-visible answer until they do.
+ */
+d("a legacy passage nobody has classified is present but unquotable", () => {
+  it("is physically in the table, yet cannot be retrieved, cited or counted in the corpus", async () => {
+    const safety = await withRole("safety");
+    const marker = `zzlegacy${rnd().toLowerCase()}`;
+    const body = `${marker}: maximum pushrod travel is 2 inches when measured with the brakes applied.`;
+    const before = await caller(safety).assistantAsk.passageList({});
+    // The row must sit in the CALLER'S OWN tenant, or this would prove the tenant filter and say
+    // nothing about the basis filter. Take the tenant from a passage the caller just loaded.
+    const own = await load(safety, brakeText(token()));
+    const [t] = await pool.query<mysql.RowDataPacket[]>("SELECT tenantId FROM knowledgePassages WHERE passageRef = ?", [own.passageRef]);
+    const tenantId = t[0]!.tenantId as string;
+    // Written the way a pre-0150 row exists: no basis stated. 0150's backfill marks it 'unstated'.
+    await pool.execute(
+      "INSERT INTO knowledgePassages (passageRef, tenantId, documentRef, documentTitle, section, body, revision, reproductionBasis) VALUES (?,?,?,?,?,?,?,'unstated')",
+      [`PSG-LEGACY-${rnd()}`, tenantId, `DOC-${rnd()}`, "Legacy manual", "1.1", body, "1"]);
+    const [exists] = await pool.query<mysql.RowDataPacket[]>("SELECT reproductionBasis, tenantId FROM knowledgePassages WHERE body = ?", [body]);
+    expect(exists[0]).toMatchObject({ reproductionBasis: "unstated", tenantId });   // really there, and in the caller's own tenant
+
+    const asked = await caller(safety).assistantAsk.ask({ question: `what is the maximum pushrod travel ${marker}` });
+    expect(JSON.stringify(asked)).not.toContain(marker);     // and it answers nothing
+    const after = await caller(safety).assistantAsk.passageList({});
+    // Nor does it appear in the library a person browses.
+    expect(JSON.stringify(after)).not.toContain(marker);
+    expect(after.passages.length).toBe(before.passages.length);
   });
 });
