@@ -65,8 +65,15 @@ const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
 let userSeq = 3_200_000 + Math.floor(Math.random() * 50_000);
 const nextUser = () => userSeq++;
+let FIXTURE_ENTITY_ID = 1;   // P4.1: a real, unowned financial entity, created in beforeAll
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
-beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 6 }); });
+beforeAll(async () => {
+  if (!URL) return;
+  pool = mysql.createPool({ uri: URL, connectionLimit: 6 });
+  FIXTURE_ENTITY_ID = 5_100_000 + Math.floor(Math.random() * 90_000);
+  // P4.1: a financial entity is the money boundary (0146) and must exist; this one is unowned — the historical single tenant's.
+  await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay) VALUES (?,?,?,'corporation','AB',12,31)", [FIXTURE_ENTITY_ID, key("FE"), `entity ${FIXTURE_ENTITY_ID}`]);
+});
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 const machine = (k: string | null) => appRouter.createCaller({ req: { headers: k ? { "x-integration-key": k } : {} } as never, res: {} as never, user: null as never });
 async function withRole(role: DomainRole) { const id = nextUser(); await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
@@ -84,12 +91,12 @@ d("machines, in and out", () => {
 
     const unitNo = key("U").slice(0, 20);
     await pool.execute("INSERT INTO units (unitNumber, vehicleType, inspectionStatus, maintenanceStatus, createdAt) VALUES (?, 'vac truck', 'current', 'clear', NOW())", [unitNo]);
-    const r1 = await machine(reg.key).inbound.ingest({ feed: "fuel_transaction", idempotencyKey: "txn-88192", payload: { occurredAt: "2026-09-10T09:40:00Z", quantity: 275, total: 412.5, unitRef: unitNo, jurisdiction: "CA-AB", vendorName: "Cardlock Nisku", fuelType: "diesel", financialEntityId: 1 } });
+    const r1 = await machine(reg.key).inbound.ingest({ feed: "fuel_transaction", idempotencyKey: "txn-88192", payload: { occurredAt: "2026-09-10T09:40:00Z", quantity: 275, total: 412.5, unitRef: unitNo, jurisdiction: "CA-AB", vendorName: "Cardlock Nisku", fuelType: "diesel", financialEntityId: FIXTURE_ENTITY_ID } });
     expect(r1).toMatchObject({ status: "accepted", becomes: "fuel transaction proposal" });
     const [fuel] = await pool.execute<mysql.RowDataPacket[]>("SELECT status, jurisdiction, jurisdictionSource, payerType, hosRuleConclusion FROM fuelTransactions WHERE fuelRef = ?", [r1.resultRef]);
     expect(fuel[0]).toMatchObject({ status: "needs_review", jurisdiction: "CA-AB", jurisdictionSource: "fleet_card_statement", payerType: "company", hosRuleConclusion: "unknown" }); // a proposal, never confirmed
     // Same key again: the same event, and no second transaction; different content under the same key is named.
-    const r2 = await machine(reg.key).inbound.ingest({ feed: "fuel_transaction", idempotencyKey: "txn-88192", payload: { occurredAt: "2026-09-10T09:40:00Z", quantity: 275, total: 412.5, unitRef: unitNo, jurisdiction: "CA-AB", vendorName: "Cardlock Nisku", fuelType: "diesel", financialEntityId: 1 } });
+    const r2 = await machine(reg.key).inbound.ingest({ feed: "fuel_transaction", idempotencyKey: "txn-88192", payload: { occurredAt: "2026-09-10T09:40:00Z", quantity: 275, total: 412.5, unitRef: unitNo, jurisdiction: "CA-AB", vendorName: "Cardlock Nisku", fuelType: "diesel", financialEntityId: FIXTURE_ENTITY_ID } });
     expect(r2).toMatchObject({ status: "duplicate", inboundRef: r1.inboundRef, resultRef: r1.resultRef });
     const r3 = await machine(reg.key).inbound.ingest({ feed: "fuel_transaction", idempotencyKey: "txn-88192", payload: { occurredAt: "2026-09-10T09:40:00Z", quantity: 999, total: 1, unitRef: unitNo } });
     expect(r3.note).toContain("DIFFERENT content");

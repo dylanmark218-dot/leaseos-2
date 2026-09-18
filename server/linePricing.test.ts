@@ -36,6 +36,8 @@ d("a field-ticket line is priced as it is recorded", () => {
     const controller = await withRole("controller");
     const driver = await withRole("driver");
     const entityId = 4_800_000 + Math.floor(Math.random() * 90_000);
+    // P4.1: a financial entity is the money boundary (0146) and must exist; this one is unowned — the historical single tenant's.
+    await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay) VALUES (?,?,?,'corporation','AB',12,31)", [entityId, `FE-${entityId}`, `entity ${entityId}`]);
     const acctRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'ABC Energy')", [acctRef, entityId]);
     const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress, createdAt) VALUES (?, 'hydrovac', 'hydrovac', 'ABC Energy', '10-22-045-06-W5', 'on_site', 0, NOW())", [key("JOB").slice(0, 40)]);
@@ -71,6 +73,8 @@ d("a vendor bill line is priced against the agreed payable", () => {
     const office = await withRole("office");
     const controller = await withRole("controller");
     const entityId = 4_900_000 + Math.floor(Math.random() * 90_000);
+    // P4.1: a financial entity is the money boundary (0146) and must exist; this one is unowned — the historical single tenant's.
+    await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay) VALUES (?,?,?,'corporation','AB',12,31)", [entityId, `FE-${entityId}`, `entity ${entityId}`]);
     const acctRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'ABC Energy')", [acctRef, entityId]);
     const vendorRef = key("VEN").slice(0, 40);

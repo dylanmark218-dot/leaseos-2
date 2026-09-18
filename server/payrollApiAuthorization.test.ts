@@ -24,9 +24,15 @@ let pool: mysql.Pool;
 let nextId = 700000 + Math.floor(Math.random() * 90000);
 const newUserId = () => nextId++;
 
+let FIXTURE_ENTITY_ID = 1;   // P4.1: real, unowned financial entities, created below
+let FIXTURE_PAYER_ID = 2;
 beforeAll(async () => {
   if (!URL) return;
   pool = mysql.createPool({ uri: URL, connectionLimit: 4 });
+  FIXTURE_ENTITY_ID = 5_200_000 + Math.floor(Math.random() * 90_000);
+  // P4.1: a financial entity is the money boundary (0146) and must exist; this one is unowned — the historical single tenant's.
+  FIXTURE_PAYER_ID = FIXTURE_ENTITY_ID + 1;
+  for (const id of [FIXTURE_ENTITY_ID, FIXTURE_PAYER_ID]) await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay) VALUES (?,?,?,'corporation','AB',12,31)", [id, `FE-${id}`, `entity ${id}`]);
 });
 
 const callerFor = (userId: number) =>
@@ -147,7 +153,7 @@ d("running payroll is not approving it", () => {
     const caller = callerFor(await userWithRoles(["payroll_admin"]));
     expect(
       await attempt(() =>
-        caller.payroll.runCreate({ payRunRef: "PR-1", payPeriodId: 1, financialEntityId: 1 })
+        caller.payroll.runCreate({ payRunRef: "PR-1", payPeriodId: 1, financialEntityId: FIXTURE_ENTITY_ID })
       )
     ).toBe("passed_gate");
     expect(
@@ -159,7 +165,7 @@ d("running payroll is not approving it", () => {
     const caller = callerFor(await userWithRoles(["controller"]));
     expect(
       await attempt(() =>
-        caller.payroll.runCreate({ payRunRef: "PR-2", payPeriodId: 1, financialEntityId: 1 })
+        caller.payroll.runCreate({ payRunRef: "PR-2", payPeriodId: 1, financialEntityId: FIXTURE_ENTITY_ID })
       )
     ).toBe("forbidden");
     expect(
@@ -208,7 +214,7 @@ d("the external accountant reads books and runs nothing", () => {
     const caller = callerFor(await userWithRoles(["external_accountant"]));
     for (const call of [
       () => caller.payroll.runsList(),
-      () => caller.payroll.runCreate({ payRunRef: "PR-x", payPeriodId: 1, financialEntityId: 1 }),
+      () => caller.payroll.runCreate({ payRunRef: "PR-x", payPeriodId: 1, financialEntityId: FIXTURE_ENTITY_ID }),
       () => caller.fieldRoute.trips.create({ jobId: 1 }),
       () => caller.fieldRoute.workOrders.create({ unitId: 1, workOrderNumber: "WO-x" }),
       () => caller.records.incident.readInvestigation({ incidentNumber: "INC-1" }),
@@ -351,7 +357,7 @@ d("expenses and contractor settlement", () => {
     await expect(
       caller.contractors.settlementCreate({
         settlementRef: `S-${Date.now()}`,
-        contractorEntityId: 1, payingEntityId: 2,
+        contractorEntityId: FIXTURE_ENTITY_ID, payingEntityId: FIXTURE_PAYER_ID,
         periodStart: new Date("2026-01-01"), periodEnd: new Date("2026-01-15"),
         workerKind: "employee",
         lines: [{ lineType: "freight", description: "Haul", amount: 100 }],
@@ -364,7 +370,7 @@ d("expenses and contractor settlement", () => {
     await expect(
       caller.payroll.profileUpsert({
         employeeNumber: `EMP-${Date.now()}`,
-        financialEntityId: 1,
+        financialEntityId: FIXTURE_ENTITY_ID,
         employmentType: "full_time",
         defaultPayMethod: "hourly",
         workerKind: "contractor",
@@ -376,7 +382,7 @@ d("expenses and contractor settlement", () => {
     const caller = callerFor(await userWithRoles(["office"]));
     const ref = `S-${Date.now()}`;
     await caller.contractors.settlementCreate({
-      settlementRef: ref, contractorEntityId: 1, payingEntityId: 2,
+      settlementRef: ref, contractorEntityId: FIXTURE_ENTITY_ID, payingEntityId: FIXTURE_PAYER_ID,
       periodStart: new Date("2026-01-01"), periodEnd: new Date("2026-01-15"),
       workerKind: "contractor",
       lines: [
