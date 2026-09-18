@@ -142,3 +142,46 @@ d("the vault, end to end", () => {
     }
   }, 90_000);
 });
+
+d("the sector has its own index, so break-glass has something to aim at", () => {
+  it("lists restricted records by existence only, for a permission holder, and logs the listing", async () => {
+    const mgr = await withRole("management");
+    const id = await incident();
+    await callerFor(mgr).restrictedVault.matterOpen({ incidentReportId: id, matterType: "WCB_CLAIM" });
+    const inv = await callerFor(mgr).restrictedVault.matterOpen({ incidentReportId: id, matterType: "INTERNAL_INVESTIGATION" });
+
+    const index = await callerFor(mgr).restrictedVault.restrictedIndex({ incidentReportId: id });
+    // Only the restricted ones: the outward matters have their own, ordinary list.
+    expect(index.records.map(r => r.matterType)).toEqual(["INTERNAL_INVESTIGATION"]);
+    expect(index.records[0]!.trackingNumber).toBe(inv.trackingNumber);
+
+    // Existence only. Nothing here is the content the sector exists to protect.
+    const keys = Object.keys(index.records[0]!).sort();
+    expect(keys).toEqual(["createdAt", "id", "incidentReportId", "matterType", "sensitivityTier", "status", "trackingNumber"]);
+
+    // And the listing is itself audited: knowing an investigation exists is a smaller disclosure
+    // than reading it, and a smaller one is still one.
+    const [events] = await pool.query<mysql.RowDataPacket[]>(
+      "SELECT action, recordType, decisionCode FROM restrictedAccessEvents WHERE userId = ? AND recordType = 'restrictedIndex' ORDER BY id DESC LIMIT 1", [mgr]);
+    expect(events[0]).toMatchObject({ action: "READ", recordType: "restrictedIndex", decisionCode: "INDEX_LISTED" });
+  }, 90_000);
+
+  it("does not let the index serve content, so it is not a way around the grant", async () => {
+    const mgr = await withRole("management");
+    const id = await incident();
+    const inv = await callerFor(mgr).restrictedVault.matterOpen({ incidentReportId: id, matterType: "INTERNAL_INVESTIGATION" });
+    const index = await callerFor(mgr).restrictedVault.restrictedIndex({ incidentReportId: id });
+    expect(JSON.stringify(index)).not.toMatch(/openedAt|closedAt|createdByUserId/);
+    // The read still refuses without a grant: listing it changed nothing about opening it.
+    const read = await callerFor(mgr).restrictedVault.restrictedRead({ matterId: inv.matterId });
+    expect(read.served).toBe(false);
+    if (read.served) throw new Error("unreachable");
+    expect(read.code).toBe("BREAK_GLASS_REQUIRED");
+  }, 90_000);
+
+  it("refuses the index to someone without the restricted permission", async () => {
+    const driver = await withRole("driver");
+    await expect(callerFor(driver).restrictedVault.restrictedIndex({}))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+  }, 90_000);
+});

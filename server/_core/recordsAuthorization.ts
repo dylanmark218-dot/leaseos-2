@@ -2495,6 +2495,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "restrictedVault.investigationPropose": "vault.matter.manage",
   "restrictedVault.investigationDecide": "restricted.read",
   "restrictedVault.breakGlass": "restricted.read",
+  "restrictedVault.restrictedIndex": "restricted.read",
   "restrictedVault.restrictedRead": "restricted.read",
   "restrictedVault.grantRevoke": "restricted.read",
   "restrictedVault.accessHistory": "restricted.audit.read",

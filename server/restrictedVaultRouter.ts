@@ -101,6 +101,50 @@ export const restrictedVaultRouter = router({
       };
     }),
 
+  /**
+   * The restricted sector's own index — the discovery path the break-glass flow presupposes.
+   *
+   * §3.2 excludes restricted records from every **general** query path, and `mattersForIncident`
+   * does exactly that. But §6.1 begins "admin requests restricted record", which takes for granted
+   * that they know a record is there to request. Without a dedicated listing the only person who
+   * can ever break the glass is whoever wrote the tracking number down when it was created — and
+   * the natural fix, when someone hits that wall, is to widen the general list, which is the one
+   * thing the sector exists to prevent.
+   *
+   * So: a separate path, its own permission, existence only. It returns what a person needs in
+   * order to ask — type, tracking number, status, which incident — and no content. Listing it is
+   * itself a disclosure, so it is audited like any other.
+   */
+  restrictedIndex: roleProcedure("restrictedVault.restrictedIndex")
+    .input(z.object({ incidentReportId: z.number().int().positive().nullish() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const orgRef = await orgOf(ctx.user.id);
+      const rows = await db.select({
+        id: incidentMatters.id, matterType: incidentMatters.matterType,
+        trackingNumber: incidentMatters.trackingNumber, status: incidentMatters.status,
+        sensitivityTier: incidentMatters.sensitivityTier,
+        incidentReportId: incidentMatters.incidentReportId, createdAt: incidentMatters.createdAt,
+      }).from(incidentMatters).where(and(
+        scopeWhere(incidentMatters.orgRef as never, orgRef),
+        input.incidentReportId ? eq(incidentMatters.incidentReportId, input.incidentReportId) : undefined,
+        inArray(incidentMatters.sensitivityTier, ["RESTRICTED", "HIGHLY_RESTRICTED"]),
+      )).orderBy(desc(incidentMatters.id));
+      // Audited before it is returned, on the same reasoning as a read: knowing an investigation
+      // exists is a smaller disclosure than reading it, and a smaller one is still one.
+      await db.insert(restrictedAccessEvents).values({
+        orgRef, grantId: null, userId: ctx.user.id,
+        recordType: "restrictedIndex", recordId: input.incidentReportId ?? 0,
+        action: "READ", purpose: null,
+        decisionCode: "INDEX_LISTED",
+        decisionReason: `Listed ${rows.length} restricted record(s) by existence only; no content was served.`,
+      });
+      return {
+        records: rows,
+        note: "Existence only — type, number, status and which incident. Opening any of these still needs a stated purpose, and this listing was itself logged.",
+      };
+    }),
+
   /** §5.3 — raise a proposal from a stated rule. Returns null when no rule fires; it does not guess. */
   investigationPropose: roleProcedure("restrictedVault.investigationPropose")
     .input(z.object({ incidentReportId: z.number().int().positive() }))
