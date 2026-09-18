@@ -19,6 +19,8 @@
 
 import { type CapabilityResult, type CombinedVerdict } from "./_core/interEngineStatus";
 import { CAPABILITY, dispatchContractFor, pictureFor, type EvaluationMap } from "./_core/readinessCapabilities";
+import { entitlementToEvaluation, snapshotOf, type PolicySnapshot } from "./_core/automationPolicy";
+import { resolveCapabilities } from "./_core/automationPolicyStore";
 import { destinationAcceptanceForJob } from "./_core/destinationAcceptance";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { faultDispatchEffect } from "./_core/telematics";
@@ -106,6 +108,12 @@ export type ComposedReadiness = {
   capabilities: CapabilityResult[];
   /** The same picture combined against dispatch's declared requirements. */
   capabilityVerdict: CombinedVerdict;
+  /**
+   * P8.2 — the automation policy each capability was decided under. Stored with the decision so an
+   * audit reads the policy that governed it; re-resolving later would answer with today's
+   * configuration for yesterday's dispatch.
+   */
+  automationPolicy: PolicySnapshot[];
 };
 
 /* ------------------------------------------------------------------ */
@@ -504,6 +512,35 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
    * required only when the trip uses them — requiring them always would stall every mapping-only
    * customer on a destination they never had, which is the failure this contract exists to prevent.
    */
+  /*
+   * P8.2 → P8.1. Until now the composer reported every capability as evaluated because it had no
+   * way to know otherwise; routing was the single exception, and only because "no route named" is
+   * visible locally. The resolver supplies the rest: a capability this tenant is not entitled to
+   * has no automation mode and reports NOT_EVALUATED with the reason, rather than being silently
+   * counted as satisfied.
+   *
+   * A capability nobody has ruled on resolves as `unresolved`, which also fails closed — and says
+   * so differently, so a missing entitlement feed can be found rather than looking like a customer
+   * who never bought the feature.
+   */
+  const ALL_CAPABILITIES = Object.values(CAPABILITY);
+  // The tenant is the job's, when there is a job: policy belongs to the business whose work this is.
+  // Without a job this is the historical single tenant, the same NULL rule as 0132.
+  const policyOrgRef = (job as { orgRef?: string | null } | null)?.orgRef ?? null;
+  const resolutions = await resolveCapabilities(policyOrgRef, ALL_CAPABILITIES, {
+    role: null, task: subject.jobId ? `job:${subject.jobId}` : null, customer: null,
+  });
+  const automationPolicy: PolicySnapshot[] = [];
+  for (const capability of ALL_CAPABILITIES) {
+    const r = resolutions[capability]!;
+    automationPolicy.push(snapshotOf(r, { engineProfileVersion: "readinessComposer", decidedAt: now }));
+    const e = entitlementToEvaluation(r);
+    // Routing's local "no route named" is more specific than "not entitled" and is kept.
+    if (!e.evaluated && !evaluation[capability]) {
+      evaluation[capability] = { evaluated: false, reason: e.reason, detail: e.detail };
+    }
+  }
+
   const contract = dispatchContractFor({
     routingInUse: subject.routeApprovalRef != null,
     destinationRequired: jobInput?.destinationAcceptanceVerified !== undefined && jobInput?.destinationAcceptanceVerified !== null,
@@ -537,7 +574,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   };
   return {
     eligibility, facts, fingerprint: computeEligibilityFingerprint(facts), contributions,
-    capabilities: picture.capabilities, capabilityVerdict: picture.verdict,
+    capabilities: picture.capabilities, capabilityVerdict: picture.verdict, automationPolicy,
   };
 }
 

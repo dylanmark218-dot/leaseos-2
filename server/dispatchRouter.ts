@@ -71,7 +71,9 @@ export const dispatchGateRouter = router({
         verdict: r.eligibility.verdict, blockersJson: JSON.stringify(r.eligibility.blockers), fingerprint: r.fingerprint,
         // 0152: what was and was not evaluated when this decision was made. Stored, not recomputed:
         // recomputing would answer with today's configuration for yesterday's dispatch.
-        capabilitiesJson: JSON.stringify(r.capabilities), capabilityVerdict: r.capabilityVerdict.status, evaluatedAt: now, evaluatedByUserId: ctx.user.id,
+        capabilitiesJson: JSON.stringify(r.capabilities), capabilityVerdict: r.capabilityVerdict.status,
+        // 0153: and the policy each capability was decided under, for the same reason.
+        automationPolicyJson: JSON.stringify(r.automationPolicy), evaluatedAt: now, evaluatedByUserId: ctx.user.id,
         routeApprovalRef: input.routeApprovalRef ?? null,
       });
       return { checkId: Number(ins[0]?.insertId ?? 0), verdict: r.eligibility.verdict, explanation: r.eligibility.explanation, blockers: r.eligibility.blockers, fingerprint: r.fingerprint, evaluatedAt: now, contributions: r.contributions };

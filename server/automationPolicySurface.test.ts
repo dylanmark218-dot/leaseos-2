@@ -169,3 +169,62 @@ d("the policy surface, against the database", () => {
     expect(snap.trace).toMatch(/resolved=HYBRID/);
   }, 60_000);
 });
+
+d("the join to P8.1, the snapshot, and the conflict surface", () => {
+  it("makes an unentitled capability NOT_EVALUATED in a real composition, and does not brick the entitled ones", async () => {
+    const mgr = await withRole("management");
+    const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [`U-${rnd().toUpperCase()}`]);
+    const [o] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Op ${rnd()}`]);
+    const { composeReadiness } = await import("./readinessComposer");
+
+    // 0154 left the existing deployment entitled, so a composition carries no capability blockers.
+    const before = await composeReadiness({ operatorId: Number(o.insertId), unitId: Number(u.insertId), trailerId: null, jobId: null });
+    expect(before.eligibility.blockers.filter(b => b.code.startsWith("capability_not_evaluated"))).toEqual([]);
+    expect(before.automationPolicy.find(p => p.capability === "hos")!.resolvedMode).toBe("MANUAL");
+
+    // Withdraw one capability's entitlement: it becomes NOT_EVALUATED and, being required, surfaces.
+    await callerFor(mgr).automationPolicy.setEntitlement({ capability: "hos", state: "not_entitled", reason: "not_in_product_set" });
+    try {
+      const after = await composeReadiness({ operatorId: Number(o.insertId), unitId: Number(u.insertId), trailerId: null, jobId: null });
+      const hos = after.capabilities.find(c => c.capability === "hos")!;
+      expect(hos.status).toBe("NOT_EVALUATED");
+      expect(hos.reason).toBe("not_licensed");
+      expect(after.eligibility.blockers.some(b => b.code === "capability_not_evaluated_hos")).toBe(true);
+      // The others are untouched: one capability leaving the product set is not a system failure.
+      expect(after.capabilities.find(c => c.capability === "unit inspection")!.status).not.toBe("NOT_EVALUATED");
+      expect(after.automationPolicy.find(p => p.capability === "hos")!.resolvedMode).toBeNull();
+      expect(after.automationPolicy.find(p => p.capability === "hos")!.entitled).toBe(false);
+    } finally {
+      await callerFor(mgr).automationPolicy.setEntitlement({ capability: "hos", state: "entitled", reference: "restored by test" });
+    }
+  }, 90_000);
+
+  it("stores the policy snapshot with the decision, so the check can be explained later", async () => {
+    const dispatcher = await withRole("dispatcher");
+    const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [`U-${rnd().toUpperCase()}`]);
+    const [o] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Op ${rnd()}`]);
+    const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, createdAt) VALUES (?, 'hydrovac', 'Policy fixture', 'LSD 01-02-003-04W5', 'dispatched', NOW())", [`JOB-${rnd().toUpperCase()}`]);
+    const check = await callerFor(dispatcher).dispatch.evaluate({ jobId: Number(j.insertId), operatorId: Number(o.insertId), unitId: Number(u.insertId) });
+    const [row] = await pool.query<mysql.RowDataPacket[]>("SELECT automationPolicyJson FROM dispatchEligibilityChecks WHERE id = ?", [check.checkId]);
+    expect(row[0]!.automationPolicyJson, "the decision must keep the policy it was made under").toBeTruthy();
+    const snaps = JSON.parse(row[0]!.automationPolicyJson as string) as { capability: string; resolvedMode: string | null; trace: string }[];
+    expect(snaps.length).toBe(8);
+    expect(snaps.every(s => typeof s.trace === "string" && s.trace.length > 0)).toBe(true);
+    expect(snaps.find(s => s.capability === "hos")!.resolvedMode).toBe("MANUAL");
+  }, 90_000);
+});
+
+describe("a policy conflict is surfaced, not swallowed", () => {
+  it("becomes a named exception with the versions that disagree and the fix", async () => {
+    const { automationPolicyExceptions } = await import("./_core/exceptionCentre");
+    const [ex] = automationPolicyExceptions([
+      { capability: "hos", scope: "role", scopeId: "dispatcher", modes: ["AUTO", "MANUAL"], policyVersionIds: ["PV-a", "PV-b"] },
+    ]);
+    expect(ex!.severity).toBe("high");
+    expect(ex!.title).toMatch(/Automation policy conflict — hos/);
+    expect(ex!.reason).toMatch(/will not choose between them/);
+    expect(ex!.reason).toMatch(/PV-a, PV-b/);
+    expect(ex!.action).toMatch(/Supersede all but one/);
+    expect(ex!.requiredPermission).toBe("automation.policy.manage");
+  });
+});

@@ -425,3 +425,33 @@ export function summarize(xs: readonly Exception[]): { total: number; bySeverity
   const headline = xs.length === 0 ? "Nothing needs your attention" : bySeverity.critical > 0 ? `${bySeverity.critical} critical` : bySeverity.high > 0 ? `${bySeverity.high} high priority` : `${xs.length} item(s)`;
   return { total: xs.length, bySeverity, byCategory, headline };
 }
+
+/**
+ * P8.2 — a policy configuration error is an exception, not a silent MANUAL.
+ *
+ * When two rows at the same scope disagree, the resolver refuses to pick one: a tie broken by date
+ * or row order makes the effective mode depend on the database rather than on a decision. But
+ * refusing is only half the job — a refusal nobody sees becomes a capability that quietly fails
+ * closed forever, and "why is this always manual?" is a hard question to answer from behaviour.
+ * So the conflict surfaces here, named, with the versions that disagree and the fix.
+ */
+export function automationPolicyExceptions(
+  conflicts: readonly { capability: string; scope: string; scopeId: string | null; modes: readonly string[]; policyVersionIds: readonly string[] }[],
+): Exception[] {
+  return conflicts.map(c => ({
+    key: `automation_policy_conflict:${c.capability}:${c.scope}:${c.scopeId ?? "-"}`,
+    category: "ai" as const,
+    // High, not critical: nothing unsafe is happening — the capability fails closed meanwhile —
+    // but a configuration nobody can resolve will not fix itself.
+    severity: "high" as const,
+    title: `Automation policy conflict — ${c.capability}`,
+    reason: `${c.policyVersionIds.length} policies at the same ${c.scope} scope${c.scopeId ? ` (${c.scopeId})` : ""} ask for different modes: ${c.modes.join(", ")}. The resolver will not choose between them, so ${c.capability} is not evaluated until one is superseded. Versions: ${c.policyVersionIds.join(", ")}.`,
+    subjectType: "capability",
+    subjectId: c.capability,
+    action: `Supersede all but one of the ${c.scope} policies for ${c.capability}.`,
+    deepLink: { portal: "office_administration", route: `/automation-policy?capability=${encodeURIComponent(c.capability)}` },
+    requiredPermission: "automation.policy.manage" as Permission,
+    since: null,
+    dueAt: null,
+  }));
+}
