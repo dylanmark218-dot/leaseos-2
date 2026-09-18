@@ -191,6 +191,22 @@ recreates the database before the gate applies its migrations, so a green run me
 migrations, not green from sediment.
 
 
+### One gate, one database (2026-09-18)
+
+The rebuild-each-run change earlier today fixed a real problem and created a smaller one. Two
+sessions launched gates a minute apart; both used `leaseos_gate_shop`, and each dropped it under the
+other. The first reported **eight failures across seven suites**, including a missing
+`organizations` table and two of its own brand-new pure tests, none of which had anything wrong with
+them — every one of them re-ran green.
+
+A false failure is not free. It costs a diagnosis cycle, and more than that it teaches whoever reads
+the log to treat a red gate as probably-noise, which is the one thing a gate cannot afford.
+
+`run-gate-wt.sh` now names its database for the run (`leaseos_gate_<time>_<pid>`) and drops it on
+exit, so two runs cannot see each other. The runner lives outside the repository, so the reasoning
+is recorded here: **a gate that rebuilds a shared database is worse than one that reuses it.**
+Rebuilding is right; sharing the name is what makes it dangerous.
+
 ### The register's claims are checked (2026-09-18)
 
 `server/registerClaims.test.ts` reads this document and fails if a row claiming DONE names a
