@@ -17,6 +17,8 @@
  * about a person's medical fitness is "eligible" and nothing more.
  */
 
+import { type CapabilityResult, type CombinedVerdict } from "./_core/interEngineStatus";
+import { CAPABILITY, dispatchContractFor, pictureFor, type EvaluationMap } from "./_core/readinessCapabilities";
 import { destinationAcceptanceForJob } from "./_core/destinationAcceptance";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { faultDispatchEffect } from "./_core/telematics";
@@ -95,6 +97,15 @@ export type ComposedReadiness = {
   fingerprint: string;
   /** What each engine contributed, for the explanation and the audit row. */
   contributions: { engine: string; finding: string }[];
+  /**
+   * P8.1 — one result per capability this dispatch reads, including the ones that were never asked.
+   * The eligibility above is unchanged and still governs; this is what the eligibility could not
+   * say, because a verdict assembled from blockers cannot distinguish a capability that passed from
+   * one that was never consulted.
+   */
+  capabilities: CapabilityResult[];
+  /** The same picture combined against dispatch's declared requirements. */
+  capabilityVerdict: CombinedVerdict;
 };
 
 /* ------------------------------------------------------------------ */
@@ -184,6 +195,12 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   if (!db) throw new Error("Database unavailable");
   const contributions: ComposedReadiness["contributions"] = [];
   const extra: DispatchBlocker[] = [];
+  /*
+   * P8.1: what was actually asked. A capability absent from this map was evaluated; one present
+   * with evaluated:false was not, and says why. The composer is the only place that knows the
+   * difference, which is why the map is filled here rather than inferred downstream.
+   */
+  const evaluation: EvaluationMap = {};
 
   /* ---- operator ---- */
   const op = (await db.select().from(operators).where(eq(operators.id, subject.operatorId)).limit(1))[0];
@@ -407,8 +424,10 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   let communicationPlanVersion = "none";
 
   if (!subject.routeApprovalRef) {
-    // Unchanged, and still true: without a named route there is nothing to read.
+    // Unchanged, and still true: without a named route there is nothing to read. What is new is
+    // that the absence is now structured, so a consumer sees it instead of reading past it.
     contributions.push({ engine: "routing", finding: "No route named for this readiness — the route axis is not evaluated" });
+    evaluation[CAPABILITY.routeRestrictions] = { evaluated: false, reason: "not_applicable", detail: "no route named for this readiness" };
   } else {
     const approval = (await db.select().from(routeApprovals).where(eq(routeApprovals.approvalRef, subject.routeApprovalRef)).limit(1))[0];
     if (!approval) {
@@ -478,7 +497,28 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     truck, trailer, job: jobInput, route,
   };
   const base = evaluateDispatchReadiness(input);
-  const eligibility = mergeBlockers(base, extra);
+  const eligibilityBeforeCapabilities = mergeBlockers(base, extra);
+
+  /*
+   * P8.1, per the owner decision of 2026-09-18. Routing, a destination and a mechanic release are
+   * required only when the trip uses them — requiring them always would stall every mapping-only
+   * customer on a destination they never had, which is the failure this contract exists to prevent.
+   */
+  const contract = dispatchContractFor({
+    routingInUse: subject.routeApprovalRef != null,
+    destinationRequired: jobInput?.destinationAcceptanceVerified !== undefined && jobInput?.destinationAcceptanceVerified !== null,
+    mechanicReleaseApplicable: eligibilityBeforeCapabilities.blockers.some(b => /defect|work_order|mechanic/i.test(b.code)),
+  });
+  const picture = pictureFor(contract, eligibilityBeforeCapabilities.blockers, evaluation);
+  /*
+   * A required capability that was not evaluated becomes a blocker of severity `unknown` — the
+   * engine's own existing word for "an unevaluated condition is not a known-minor one". Dispatch
+   * therefore cannot read the silence as satisfaction, and it travels through the engine's
+   * vocabulary rather than around it in a second verdict.
+   */
+  const eligibility = picture.extraBlockers.length
+    ? mergeBlockers(eligibilityBeforeCapabilities, picture.extraBlockers)
+    : eligibilityBeforeCapabilities;
 
   const facts: EligibilityFacts = {
     operatorId: op.id,
@@ -495,7 +535,10 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     destinationAcceptanceVersion: "none",
     routeProfileId, routeDecisionVersion, communicationPlanVersion,
   };
-  return { eligibility, facts, fingerprint: computeEligibilityFingerprint(facts), contributions };
+  return {
+    eligibility, facts, fingerprint: computeEligibilityFingerprint(facts), contributions,
+    capabilities: picture.capabilities, capabilityVerdict: picture.verdict,
+  };
 }
 
 /* ------------------------------------------------------------------ */

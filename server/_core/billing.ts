@@ -1,3 +1,5 @@
+import { combineForConsumer, type CapabilityResult, type CombinedVerdict } from "./interEngineStatus";
+import { BILLING_CAPABILITY, billingContractFor } from "./readinessCapabilities";
 /**
  * Billing readiness.
  *
@@ -64,10 +66,25 @@ export type BillingReadiness = {
   blockers: Blocker[];
   billable: boolean;
   completionPercent: number;
+  /**
+   * P8.1 — the capability picture behind this answer, including capabilities that were never
+   * evaluated. Billing does not require live hours because dispatch did: an operational capability
+   * irrelevant to the billed evidence travels here as NOT_EVALUATED and does **not** hold the
+   * invoice. It is carried rather than dropped so the invoice can still say what was not checked
+   * against the work it bills.
+   */
+  capabilities: CapabilityResult[];
+  capabilityVerdict: CombinedVerdict;
 };
 
 export function evaluateBillingReadiness(
-  input: BillingReadinessInput
+  input: BillingReadinessInput,
+  /**
+   * Operational capabilities the caller knows were not evaluated — a disabled module, an
+   * unlicensed one, or one irrelevant to this invoice. Optional: a caller that passes none gets
+   * exactly the behaviour it had before, which is what keeps this additive.
+   */
+  unevaluated: readonly CapabilityResult[] = [],
 ): BillingReadiness {
   const blockers: Blocker[] = [];
 
@@ -209,7 +226,27 @@ export function evaluateBillingReadiness(
     (gates.filter(Boolean).length / gates.length) * 100
   );
 
-  return { state, blockers, billable: !hasBlocking, completionPercent };
+  /*
+   * P8.1: billing's own requirements, not dispatch's. The evidence capabilities are derived from
+   * the blockers this function already raised; anything the caller reports as unevaluated is
+   * carried as-is. `combineForConsumer` will not let an unevaluated *required* capability leave a
+   * PASS standing, and will not let an unevaluated *irrelevant* one change the verdict at all.
+   */
+  const contract = billingContractFor({ lineNeedsSupportingEvidence: input.disposalTicketsRequired > 0 });
+  const evidence: CapabilityResult[] = [
+    { capability: BILLING_CAPABILITY.fieldTicket, status: blockers.some(b => /ticket|trip/i.test(b.code) && b.severity === "blocking") ? "BLOCKED" : blockers.some(b => /ticket|trip/i.test(b.code)) ? "REVIEW" : "PASS" },
+    { capability: BILLING_CAPABILITY.acceptedLines, status: blockers.some(b => /line|accept/i.test(b.code)) ? "REVIEW" : "PASS" },
+    { capability: BILLING_CAPABILITY.customerAcceptance, status: blockers.some(b => /signature|accept|dispute/i.test(b.code) && b.severity === "blocking") ? "BLOCKED" : blockers.some(b => /signature|accept|dispute/i.test(b.code)) ? "REVIEW" : "PASS" },
+    { capability: BILLING_CAPABILITY.signatureIntegrity, status: blockers.some(b => /amend|integrity|hash/i.test(b.code)) ? "REVIEW" : "PASS" },
+    { capability: BILLING_CAPABILITY.chargeEvidence, status: input.unconfirmedValues > 0 ? "REVIEW" : "PASS" },
+    ...(input.disposalTicketsRequired > 0
+      ? [{ capability: BILLING_CAPABILITY.supportingEvidence, status: (input.disposalTicketsVerified < input.disposalTicketsRequired ? "BLOCKED" : "PASS") as CapabilityResult["status"] }]
+      : []),
+  ];
+  const capabilities = [...evidence, ...unevaluated];
+  const capabilityVerdict = combineForConsumer(contract, capabilities);
+
+  return { state, blockers, billable: !hasBlocking, completionPercent, capabilities, capabilityVerdict };
 }
 
 function deriveIncompleteState(input: BillingReadinessInput): BillingState {
