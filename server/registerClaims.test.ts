@@ -79,6 +79,37 @@ const STATUS_VOCABULARY = [
   "DECIDED AND DONE",
 ] as const;
 
+describe("a test claim in the register is checkable", () => {
+  /*
+   * A row saying "11 tests" names no file, so nobody can check it and nobody notices when it goes
+   * stale — three of mine had, all understated, after later commits added cases. A number nobody
+   * can check is worse than no number: it reads as evidence.
+   *
+   * The checkable form is `path/to.test.ts` (N cases). This verifies N against the file.
+   */
+  const claims = Array.from(text.matchAll(/`((?:server|client)\/[^`]*\.test\.tsx?)`\s*\((\d+) cases?\)/g));
+
+  it("has claims to check", () => {
+    expect(claims.length).toBeGreaterThan(5);
+  });
+
+  it("matches every claimed case count to the file it names", () => {
+    const wrong: string[] = [];
+    for (const [, file, claimed] of claims) {
+      const actual = (readFileSync(file!, "utf8").match(/^\s*it\(/gm) ?? []).length;
+      if (actual !== Number(claimed)) wrong.push(`${file}: register says ${claimed}, file has ${actual}`);
+    }
+    expect(wrong, "a register row states a test count its file does not have").toEqual([]);
+  });
+
+  it("counts the rows still using a bare, uncheckable number, so the gap shrinks rather than hides", () => {
+    const bare = text.split("\n").filter(l => l.startsWith("| P") && /\b\d+ tests?\b/.test(l)).map(l => l.split("|")[1]!.trim());
+    // Rows written before the checkable form existed. Converting one needs its author to name the
+    // file — guessing would put a wrong path in the document to make a check pass.
+    expect(bare.sort()).toEqual(["P0.1", "P0.3", "P1.2", "P1.6", "P3.8", "P4.6"]);
+  });
+});
+
 describe("the register does not understate the branch either", () => {
   it("keeps the state in the marker, not buried in the prose after it", () => {
     /*
