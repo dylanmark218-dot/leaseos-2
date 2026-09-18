@@ -366,3 +366,88 @@ export function calibrationInvalidationReason(input: {
   const reasons = Object.entries(input).filter(([, value]) => value).map(([key]) => key.replace(/([A-Z])/g, " $1").toLowerCase());
   return reasons.length ? `Calibration review required after ${reasons.join(", ")}.` : null;
 }
+
+/* ------------------------------------------------------------------ */
+/* P4.2 — a weight is not an axle determination                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Whether an onboard weight may be used as a **legal axle determination** — the number a carrier
+ * would stand behind at a scale or in a prosecution.
+ *
+ * Until now this rule lived in a sentence: the ingest returns a note reading "Billing authority:
+ * not_granted. Certified-scale authority: not_granted." That is true today and enforces nothing —
+ * a string in a response cannot stop the next change from reading an axle row and treating it as
+ * the legal figure, and nothing would fail when it did.
+ *
+ * Three conditions, and each one has cost somebody money somewhere:
+ *
+ *   **A calibration, current at the time of the reading.** An expired calibration is not a
+ *   slightly worse one — the drift it was meant to correct is unbounded and unknown, and a number
+ *   corrected by a stale model reads exactly like a number corrected by a good one.
+ *
+ *   **A stable reading.** A truck rolling, pitched on a lease approach, or with air still settling
+ *   gives a number that is real and not a weight. Stability is already assessed; this is what makes
+ *   the assessment binding.
+ *
+ *   **A source that can bear it.** An operator-entered figure and an estimate are legitimate for
+ *   operations and cannot become a legal determination by passing through a calibration.
+ *
+ * Failing any of them is not an error. The weight remains perfectly good for loading decisions,
+ * dispatch and the driver's own judgement — it is simply not the number to put in front of an
+ * officer, and the refusal says which condition is missing so somebody can fix it.
+ */
+export type AxleDeterminationRefusalCode =
+  | "NO_CALIBRATION" | "CALIBRATION_EXPIRED" | "READING_UNSTABLE" | "SOURCE_NOT_ELIGIBLE";
+
+export type AxleDeterminationVerdict =
+  | { legal: true; confidence: WeightConfidence; basis: string }
+  | { legal: false; code: AxleDeterminationRefusalCode; reason: string; stillUsableFor: string };
+
+/** Sources that can carry a legal determination at all, given everything else holds. */
+const LEGALLY_ELIGIBLE_SOURCES: readonly WeightSource[] = ["certified_scale", "loadsense_calibrated"];
+
+export function legalAxleDetermination(input: {
+  source: WeightSource;
+  /** The calibration in force for this device, if any, and when it stops being current. */
+  calibration: { verifiedAt: Date; expiresAt: Date | null } | null;
+  stability: { stable: boolean; reasons: readonly string[] };
+  readingAt: Date;
+}): AxleDeterminationVerdict {
+  const usable = "loading decisions, dispatch and the driver's own judgement";
+
+  if (!LEGALLY_ELIGIBLE_SOURCES.includes(input.source)) {
+    return {
+      legal: false, code: "SOURCE_NOT_ELIGIBLE", stillUsableFor: usable,
+      reason: `A ${input.source.replace(/_/g, " ")} figure cannot become a legal axle determination. Passing it through a calibration does not change what it is.`,
+    };
+  }
+  // A certified scale is the determination; it does not need our calibration to be current.
+  if (input.source !== "certified_scale") {
+    if (!input.calibration) {
+      return {
+        legal: false, code: "NO_CALIBRATION", stillUsableFor: usable,
+        reason: "No calibration is on file for this device, so there is nothing establishing what its raw reading means.",
+      };
+    }
+    if (input.calibration.expiresAt && input.calibration.expiresAt <= input.readingAt) {
+      return {
+        legal: false, code: "CALIBRATION_EXPIRED", stillUsableFor: usable,
+        reason: `The calibration expired ${input.calibration.expiresAt.toISOString().slice(0, 10)}, before this reading. An expired calibration is not a slightly worse one: the drift it corrects is unbounded and unknown, and the corrected number looks identical either way.`,
+      };
+    }
+  }
+  if (!input.stability.stable) {
+    return {
+      legal: false, code: "READING_UNSTABLE", stillUsableFor: usable,
+      reason: `The reading was not stable: ${input.stability.reasons.join("; ") || "stability could not be established"}. A truck still settling gives a number that is real and is not a weight.`,
+    };
+  }
+  return {
+    legal: true,
+    confidence: confidenceFor(input.source, true),
+    basis: input.source === "certified_scale"
+      ? "Certified scale reading."
+      : `Calibration verified ${input.calibration!.verifiedAt.toISOString().slice(0, 10)}${input.calibration!.expiresAt ? `, current to ${input.calibration!.expiresAt.toISOString().slice(0, 10)}` : ""}, on a stable reading.`,
+  };
+}
