@@ -10,9 +10,11 @@
  * Merging those would let one omission either silently enable automation or falsely claim the
  * customer never had the feature, and neither is recoverable from the record afterwards.
  */
+import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  AUTOMATION_LEVEL, evaluateOperationalOverride, resolveAutomation, snapshotOf,
+  AUTOMATION_LEVEL, REQUIRED_PROVENANCE_FIELDS, committedProvenance, evaluateOperationalOverride,
+  resolveAutomation, snapshotOf,
   type Entitlement, type PolicyRow, type SafetyCeiling,
 } from "./automationPolicy";
 
@@ -202,5 +204,77 @@ describe("the decision keeps the policy it was made under", () => {
     expect(now.winningPolicyVersionId).toBe("PV-2026-09");
     // A policy change must never make yesterday's decision appear to have been made under today's.
     expect(old.resolvedMode).not.toBe(now.resolvedMode);
+  });
+});
+
+/**
+ * P8.2's last named test: the mode governs how a record reaches confirmed, and nothing else.
+ *
+ * This one was missing when the checkpoint was marked done. It is the invariant that stops three
+ * modes becoming three record types — the failure the owner decision names directly — and its
+ * absence would not have shown up until somebody wrote a query that worked on two thirds of the
+ * rows.
+ */
+describe("AUTO, HYBRID and MANUAL produce the same record shape", () => {
+  const AT = new Date("2026-09-18T12:00:00Z");
+  const modes = ["AUTO", "HYBRID", "MANUAL"] as const;
+
+  it("fills every required provenance field in every mode", () => {
+    for (const mode of modes) {
+      const p = committedProvenance(mode, AT);
+      for (const field of REQUIRED_PROVENANCE_FIELDS) {
+        expect(p[field], `${mode} is missing ${field}`).toBeDefined();
+        expect(String(p[field]).length, `${mode} left ${field} empty`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("produces exactly the same keys, so no mode has a shape of its own", () => {
+    const keys = modes.map(m => Object.keys(committedProvenance(m, AT)).sort());
+    expect(keys[1]).toEqual(keys[0]);
+    expect(keys[2]).toEqual(keys[0]);
+    // And the set is the declared one: a field added to one mode and not the others fails here.
+    expect(keys[0]).toEqual([...REQUIRED_PROVENANCE_FIELDS].sort());
+  });
+
+  it("fills confirmedByKind even where it is obvious, because the obvious field is the one dropped", () => {
+    // A manual record has no engine and an automatic one has no person. Leaving the field off in
+    // each case is the two edits that end in three shapes.
+    expect(committedProvenance("AUTO", AT).confirmedByKind).toBe("engine");
+    expect(committedProvenance("MANUAL", AT).confirmedByKind).toBe("person");
+  });
+
+  it("keeps HYBRID and MANUAL apart, though both end with a person confirming", () => {
+    // In HYBRID an engine proposed the value and a person agreed; in MANUAL the person supplied it.
+    // Someone will later ask whether a figure was the machine's or the operator's.
+    const hybrid = committedProvenance("HYBRID", AT);
+    const manual = committedProvenance("MANUAL", AT);
+    expect(hybrid.verification).toBe(manual.verification);
+    expect(hybrid.source).toBe("engine_proposed");
+    expect(manual.source).toBe("person_entered");
+    expect(manual.confidence).toBe("asserted");   // a person's figure is asserted, not measured
+  });
+
+  it("records the mode on the row, so the question is answerable from the record", () => {
+    for (const mode of modes) expect(committedProvenance(mode, AT).automationMode).toBe(mode);
+  });
+});
+
+describe("no write path branches its record shape on the mode", () => {
+  it("has no insert whose columns depend on the automation mode", () => {
+    /*
+     * The tripwire for "do not create three parallel record types". It passes today because no
+     * write path consumes a mode yet — and that is exactly when to put it in, since the first
+     * `mode === "AUTO" ? {...} : {...}` inside a values() call is the one nobody reviews twice.
+     */
+    const src = readdirSync("server").filter(f => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+      .map(f => ({ f: `server/${f}`, text: readFileSync(`server/${f}`, "utf8") }));
+    const offenders: string[] = [];
+    for (const { f, text } of src) {
+      for (const m of text.matchAll(/\.values\(\{[\s\S]{0,1200}?\}\)/g)) {
+        if (/\b(mode|automationMode)\s*===\s*["'](AUTO|HYBRID|MANUAL)["']/.test(m[0])) offenders.push(f);
+      }
+    }
+    expect(Array.from(new Set(offenders)), "a record's columns are being chosen by automation mode").toEqual([]);
   });
 });

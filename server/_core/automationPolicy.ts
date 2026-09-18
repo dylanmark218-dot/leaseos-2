@@ -342,3 +342,63 @@ export function entitlementToEvaluation(r: Resolution): { evaluated: true; mode:
   }
   return { evaluated: true, mode: r.mode };
 }
+
+/* ------------------------------------------------------------------ */
+/* The mode governs how a record is confirmed, never what it looks like */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The provenance a committed record carries, whichever mode produced it.
+ *
+ * This is the owner's rule made checkable: `AUTO`, `HYBRID` and `MANUAL` govern **how** a record
+ * reaches confirmed, and nothing else. The committed row, its evidence requirements, its provenance
+ * fields, its hashes and its relationships are structurally identical in all three.
+ *
+ * The temptation is obvious and the cost is delayed. A manually entered record has no engine
+ * confidence, so it is tempting to leave the field off; an automatic one has no confirming person,
+ * so it is tempting to leave that off too. Do it twice and there are three record shapes, queries
+ * that work on some rows, and no answer at all to "what mode were we in when this was made" —
+ * because the evidence for it was the field somebody dropped as redundant.
+ *
+ * So every mode fills every field. What differs is the **values**: who acted, and what kind of
+ * thing they were.
+ */
+export const REQUIRED_PROVENANCE_FIELDS = [
+  "source",           // what produced the value
+  "confidence",       // how far it can be relied on
+  "verification",     // whether a person has stood behind it
+  "confirmedByKind",  // engine or person — never absent, even when obvious
+  "confirmedAt",
+  "automationMode",   // the mode in force, so the question is answerable from the row
+] as const;
+
+export type CommittedProvenance = {
+  source: "engine_proposed" | "person_entered";
+  confidence: "measured" | "asserted";
+  verification: "self_committed" | "person_confirmed";
+  confirmedByKind: "engine" | "person";
+  confirmedAt: string;
+  automationMode: AutomationMode;
+};
+
+/**
+ * The provenance for a commit in a given mode.
+ *
+ * `HYBRID` and `MANUAL` both end with a person confirming, and they are still different records:
+ * in HYBRID an engine proposed the value and a person agreed with it; in MANUAL the person supplied
+ * it. `source` keeps that apart, which matters when someone later asks whether a figure was the
+ * machine's or the operator's.
+ */
+export function committedProvenance(
+  mode: AutomationMode,
+  at: Date,
+): CommittedProvenance {
+  const confirmedAt = at.toISOString();
+  if (mode === "AUTO") {
+    return { source: "engine_proposed", confidence: "measured", verification: "self_committed", confirmedByKind: "engine", confirmedAt, automationMode: mode };
+  }
+  if (mode === "HYBRID") {
+    return { source: "engine_proposed", confidence: "measured", verification: "person_confirmed", confirmedByKind: "person", confirmedAt, automationMode: mode };
+  }
+  return { source: "person_entered", confidence: "asserted", verification: "person_confirmed", confirmedByKind: "person", confirmedAt, automationMode: mode };
+}
