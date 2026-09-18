@@ -159,3 +159,42 @@ d("packages over the chain", () => {
     expect(dg.missing.map(m => m.itemKind)).toEqual(["training", "duty_record"]);
   });
 });
+
+d("P8.1 — a package says what was not evaluated when the dispatch was decided", () => {
+  it("carries the stored capability picture, with NOT_EVALUATED preserved rather than normalized away", async () => {
+    const office = await withRole("office");
+    const dispatcher = await withRole("dispatcher");
+    const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);
+    const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Op ${Math.random().toString(36).slice(2, 8)}`]);
+    const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, createdAt) VALUES (?, 'hydrovac', 'Audit fixture', 'LSD 04-12-055-20W4', 'dispatched', NOW())", [`JOB-${Math.random().toString(36).slice(2, 8).toUpperCase()}`]);
+
+    // A real dispatch decision. No route is named, so routing is genuinely not evaluated — the one
+    // absence the composer can detect today without the entitlement source that P8.2 will provide.
+    const check = await callerFor(dispatcher).dispatch.evaluate({
+      jobId: Number(j.insertId), operatorId: Number(op.insertId), unitId: Number(u.insertId),
+    });
+    expect(check.checkId).toBeGreaterThan(0);
+
+    const [stored] = await pool.query<mysql.RowDataPacket[]>(
+      "SELECT capabilitiesJson, capabilityVerdict FROM dispatchEligibilityChecks WHERE id = ?", [check.checkId]);
+    expect(stored[0]!.capabilitiesJson, "the picture must be stored with the decision, not recomputed later").toBeTruthy();
+    const capabilities = JSON.parse(stored[0]!.capabilityVerdict ? stored[0]!.capabilitiesJson as string : "[]") as { capability: string; status: string; reason?: string }[];
+    const route = capabilities.find(c => c.capability === "route restrictions")!;
+    expect(route.status).toBe("NOT_EVALUATED");
+    expect(route.reason).toBe("not_applicable");
+
+    // And it reaches the package for that unit, as itself.
+    const pkg = await callerFor(office).audit.packagePrepare({
+      kind: "vehicle", subjectRef: (await pool.query<mysql.RowDataPacket[]>("SELECT unitNumber FROM units WHERE id = ?", [u.insertId]))[0][0]!.unitNumber as string,
+      recipient: "Auditor — capability picture", purpose: "P8.1 evidence of what was and was not evaluated",
+    });
+    const got = await callerFor(office).audit.packageGet({ packageRef: pkg.packageRef });
+    const caps = got.items.filter(i => i.itemKind === "capability_evaluation");
+    expect(caps.length, "the package carries the capability picture").toBeGreaterThan(0);
+    const routeItem = caps.find(i => (i.sourceRef ?? "").endsWith("route restrictions"))!;
+    expect(routeItem, "the unevaluated capability is in the package, not dropped").toBeTruthy();
+    expect(routeItem.title).toMatch(/NOT_EVALUATED \(not_applicable\)/);
+    // Not collapsed into a neighbouring state, and not summarised into a count.
+    expect(JSON.stringify(got.items)).not.toMatch(/"interEngineStatus":"PASS","capability":"route restrictions"/);
+  }, 60_000);
+});

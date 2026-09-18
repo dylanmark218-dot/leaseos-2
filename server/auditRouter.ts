@@ -7,6 +7,10 @@ import { z } from "zod";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
+import { dispatchEligibilityChecks } from "../drizzle/schema";
+import { type SQL } from "drizzle-orm";
+import { type CapabilityResult } from "./_core/interEngineStatus";
+import { capabilityItems, dispatchContractFor } from "./_core/readinessCapabilities";
 import { auditPackageAccess, auditPackageItems, auditPackages, ccaSchedules, clientAdjustments, competencySignoffs, complianceDocuments, disposalTickets, drivingEvents, dutyRecords, faultCodes, fieldTicketDocuments, fieldTicketEvents, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, gstReturns, iftaReturns, inspections, insuranceClaims, insurancePolicies, loads, maintenanceDefects, operators, programAcknowledgements, recallUnitStatus, safetyEvents, tailgateMeetings, tireInstallations, trainingRecords, units, workOrderReleases, workOrders, writtenProgramVersions, vendors, vendorBills, commercialApprovals, commercialApprovalSignatures, contractorPayables, facilityStatements, facilityStatementLines, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries } from "../drizzle/schema";
 import { assemble, releaseDecision, sha256, type PackageKind, type RawItem } from "./_core/auditPackage";
 import { renderPdf } from "./_core/ticketPdf";
@@ -35,6 +39,54 @@ async function registryDocumentsFor(db: Awaited<ReturnType<typeof dbOrThrow>>, k
   return out;
 }
 
+/**
+ * P8.1 — the capability picture the dispatch decisions were made on, as package items.
+ *
+ * Read from `dispatchEligibilityChecks`, never recomputed. A package assembled months later must
+ * say what was and was not evaluated **at the time**; running the composer again would answer with
+ * today's configuration for yesterday's dispatch, which would look like evidence and not be any.
+ *
+ * A check written before `0152` has no picture. That is reported as an item saying so, rather than
+ * being skipped — "we do not know what was evaluated" is itself a fact an auditor should see, and
+ * silently omitting it would make an old package look as complete as a new one.
+ */
+async function capabilityPictureItems(
+  db: Awaited<ReturnType<typeof dbOrThrow>>,
+  where: SQL | undefined,
+): Promise<RawItem[]> {
+  if (!where) return [];
+  const checks = await db.select().from(dispatchEligibilityChecks).where(where);
+  const items: RawItem[] = [];
+  for (const c of checks) {
+    if (!c.capabilitiesJson) {
+      items.push({
+        itemKind: "capability_evaluation",
+        sourceTable: "dispatchEligibilityChecks", sourceId: c.id, sourceRef: `check:${c.id}`,
+        title: `Eligibility check ${c.id} — capability picture not recorded (predates 0152)`,
+        row: { checkId: c.id, evaluatedAt: c.evaluatedAt?.toISOString() ?? null, verdict: c.verdict, capabilityPicture: "not_recorded", note: "This check was made before the capability contract existed; what was not evaluated at the time is unknown and is not assumed." },
+      });
+      continue;
+    }
+    const capabilities = JSON.parse(c.capabilitiesJson) as CapabilityResult[];
+    const contract = dispatchContractFor({
+      routingInUse: c.routeApprovalRef != null,
+      destinationRequired: capabilities.some(x => x.capability === "destination acceptance"),
+      mechanicReleaseApplicable: capabilities.some(x => x.capability === "mechanic release"),
+    });
+    for (const item of capabilityItems("dispatch readiness", contract, capabilities, {
+      engine: "readinessComposer", profileVersion: c.fingerprint,
+    })) {
+      items.push({
+        ...item,
+        sourceTable: "dispatchEligibilityChecks", sourceId: c.id,
+        sourceRef: `check:${c.id}:${item.row.capability as string}`,
+        row: { ...item.row, checkId: c.id, evaluatedAt: c.evaluatedAt?.toISOString() ?? null, checkVerdict: c.verdict, capabilityVerdict: c.capabilityVerdict },
+      });
+    }
+  }
+  return items;
+}
+
 async function gather(kind: PackageKind, subjectRef: string, from: Date | null, to: Date | null): Promise<{ subjectType: string; items: RawItem[] }> {
   const db = await dbOrThrow();
   const items: RawItem[] = [];
@@ -42,6 +94,7 @@ async function gather(kind: PackageKind, subjectRef: string, from: Date | null, 
     const unit = (await db.select().from(units).where(eq(units.unitNumber, subjectRef)).limit(1))[0];
     if (!unit) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${subjectRef} not found` });
     for (const c of await db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, "unit"), eq(complianceDocuments.ownerId, unit.id)))) items.push({ itemKind: /inspection/i.test(c.docType) ? "inspection_credential" : "unit_credential", sourceTable: "complianceDocuments", sourceId: c.id, sourceRef: c.identifier, title: `${c.docType}: ${c.title}`, row: row(c) });
+    items.push(...await capabilityPictureItems(db, eq(dispatchEligibilityChecks.unitId, unit.id)));
     const wos = inPeriod(await db.select().from(workOrders).where(eq(workOrders.unitId, unit.id)), "openedAt", from, to);
     for (const w of wos) items.push({ itemKind: "work_order", sourceTable: "workOrders", sourceId: w.id, sourceRef: w.workOrderNumber, title: `Work order ${w.workOrderNumber} (${w.status})`, row: row(w) });
     for (const d of inPeriod(await db.select().from(maintenanceDefects).where(eq(maintenanceDefects.unitId, unit.id)), "reportedAt", from, to)) items.push({ itemKind: "defect", sourceTable: "maintenanceDefects", sourceId: d.id, sourceRef: null, title: `Defect: ${d.title} (${d.severity}, ${d.status})`, row: row(d) });
@@ -54,6 +107,7 @@ async function gather(kind: PackageKind, subjectRef: string, from: Date | null, 
   if (kind === "driver") {
     const op = (await db.select().from(operators).where(eq(operators.id, Number(subjectRef))).limit(1))[0];
     if (!op) throw new TRPCError({ code: "NOT_FOUND", message: `Operator ${subjectRef} not found` });
+    items.push(...await capabilityPictureItems(db, eq(dispatchEligibilityChecks.operatorId, op.id)));
     for (const c of await db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, op.id)))) items.push({ itemKind: c.privateDetail ? `medical_${c.docType}` : /licen/i.test(c.docType) ? "licence_credential" : "credential", sourceTable: "complianceDocuments", sourceId: c.id, sourceRef: c.identifier, title: `${c.docType}: ${c.title}`, row: row(c) });
     if (op.userId) {
       for (const t of await db.select().from(trainingRecords).where(and(eq(trainingRecords.userId, op.userId), eq(trainingRecords.verificationStatus, "verified")))) items.push({ itemKind: "training", sourceTable: "trainingRecords", sourceId: t.id, sourceRef: t.trainingRef, title: `Training: ${t.title}`, row: row(t) });
@@ -91,6 +145,7 @@ async function gather(kind: PackageKind, subjectRef: string, from: Date | null, 
   if (kind === "job" || kind === "customer") {
     const t = (await db.select().from(fieldTickets).where(eq(fieldTickets.ticketNumber, subjectRef)).limit(1))[0];
     if (!t) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${subjectRef} not found` });
+    if (t.jobId) items.push(...await capabilityPictureItems(db, eq(dispatchEligibilityChecks.jobId, t.jobId)));
     items.push({ itemKind: "field_ticket", sourceTable: "fieldTickets", sourceId: t.id, sourceRef: t.ticketNumber, title: `Field ticket ${t.ticketNumber}`, row: row(t) });
     for (const d of await registryDocumentsFor(db, [["field_ticket", t.ticketNumber]])) items.push(d);
     for (const e of await db.select().from(fieldTicketEvents).where(eq(fieldTicketEvents.fieldTicketId, t.id))) items.push({ itemKind: e.customerBillable === "no" ? "company_activity" : "ticket_event", sourceTable: "fieldTicketEvents", sourceId: e.id, sourceRef: null, title: `${e.eventType} ${e.occurredAt.toISOString()}`, row: row(e) });

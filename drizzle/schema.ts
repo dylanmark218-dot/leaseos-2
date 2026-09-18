@@ -1951,7 +1951,11 @@ export const dispatchEligibilityChecks = mysqlTable(
     fingerprint: varchar("fingerprint", { length: 32 }).notNull(),
     // v22.18 — the route this check asked about, so the award-time recompute
     // asks the same question rather than a smaller one.
-    routeApprovalRef: varchar("routeApprovalRef", { length: 64 }),
+    // 0152: the capability picture this decision was made on, including what was not evaluated.
+  // NULL = the check predates the contract; it is not backfilled with an assumption.
+  capabilitiesJson: text("capabilitiesJson"),
+  capabilityVerdict: varchar("capabilityVerdict", { length: 16 }),
+  routeApprovalRef: varchar("routeApprovalRef", { length: 64 }),
     evaluatedAt: timestamp("evaluatedAt").notNull(),
     evaluatedByUserId: int("evaluatedByUserId"),
     usedForAward: boolean("usedForAward").default(false).notNull(),

@@ -68,7 +68,10 @@ export const dispatchGateRouter = router({
       const r = await composeReadiness({ operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null, jobId, routeApprovalRef: input.routeApprovalRef ?? null, loneWorker: input.loneWorker }, now);
       const ins = await db.insert(dispatchEligibilityChecks).values({
         postingId: input.postingId ?? null, jobId, roleId: input.roleId ?? null, operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null,
-        verdict: r.eligibility.verdict, blockersJson: JSON.stringify(r.eligibility.blockers), fingerprint: r.fingerprint, evaluatedAt: now, evaluatedByUserId: ctx.user.id,
+        verdict: r.eligibility.verdict, blockersJson: JSON.stringify(r.eligibility.blockers), fingerprint: r.fingerprint,
+        // 0152: what was and was not evaluated when this decision was made. Stored, not recomputed:
+        // recomputing would answer with today's configuration for yesterday's dispatch.
+        capabilitiesJson: JSON.stringify(r.capabilities), capabilityVerdict: r.capabilityVerdict.status, evaluatedAt: now, evaluatedByUserId: ctx.user.id,
         routeApprovalRef: input.routeApprovalRef ?? null,
       });
       return { checkId: Number(ins[0]?.insertId ?? 0), verdict: r.eligibility.verdict, explanation: r.eligibility.explanation, blockers: r.eligibility.blockers, fingerprint: r.fingerprint, evaluatedAt: now, contributions: r.contributions };
