@@ -74,4 +74,15 @@ describe("reproduced text has exactly the write paths we chose", () => {
     expect(router).toMatch(/loadedByUserId: ctx\.user\.id/);   // an anonymous copy is not a record
     expect(router).toMatch(/commercial_redisplay/);            // quoting to a person is that purpose
   });
+
+  it("keeps the licence test seam out of production code: a licence is granted by an assessment, not by a call", () => {
+    // sourceGate guards it at runtime (it throws outside a test), but a call in production code
+    // would still be a line that reads as if code can grant a licence. Nothing outside a test may
+    // name it.
+    const callers = files.filter(f => /__registerAssessmentForTest|__clearTestAssessments/.test(readFileSync(f, "utf8")));
+    expect(callers, "production code names the licence test seam").toEqual(["server/_core/knowledge/sourceGate.ts"]);
+    const gate = readFileSync("server/_core/knowledge/sourceGate.ts", "utf8");
+    expect(gate).toMatch(/process\.env\.VITEST/);            // and the runtime guard is still there
+    expect(gate).toMatch(/REAL_SOURCE_IDS/);                  // clearing restores the real set, not a hard-coded id
+  });
 });

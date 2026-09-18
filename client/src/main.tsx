@@ -8,6 +8,7 @@ import superjson from "superjson";
 import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
+import { installAnalytics } from "./lib/analytics";
 
 const queryClient = new QueryClient();
 
@@ -81,3 +82,7 @@ createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </trpc.Provider>
 );
+
+
+// Optional, and off unless both variables are set — see lib/analytics.ts.
+installAnalytics(document, import.meta.env as unknown as Record<string, string | undefined>);

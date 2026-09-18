@@ -13,6 +13,8 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script defer src="%VITE_ANALYTICS_ENDPOINT%/umami" data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
+    <!-- Analytics is optional and off by default. When VITE_ANALYTICS_ENDPOINT and
+         VITE_ANALYTICS_WEBSITE_ID are both set, client/src/lib/analytics.ts attaches the beacon at
+         runtime. A static tag here left an unresolved placeholder in the shipped HTML. -->
   </body>
 </html>

@@ -124,6 +124,10 @@ export const AB_511: SourceLicenceRecord = {
  * other Alberta dataset.
  */
 const REGISTRY = new Map<string, SourceLicenceRecord>([[AB_511.source_id, AB_511]]);
+/* The real assessments, snapshotted before any test seam can add to the map. __clearTestAssessments
+ * restores exactly this set, so adding a second real assessment above does not silently make it
+ * something tests delete. */
+const REAL_SOURCE_IDS: ReadonlySet<string> = new Set(REGISTRY.keys());
 
 export const licenceFor = (sourceId: string): SourceLicenceRecord | null => REGISTRY.get(sourceId) ?? null;
 
@@ -145,7 +149,7 @@ export function __registerAssessmentForTest(record: SourceLicenceRecord): void {
 
 /** Undo the seam, so one test's synthetic licence cannot authorize another's source. */
 export function __clearTestAssessments(): void {
-  for (const key of Array.from(REGISTRY.keys())) if (key !== AB_511.source_id) REGISTRY.delete(key);
+  for (const key of Array.from(REGISTRY.keys())) if (!REAL_SOURCE_IDS.has(key)) REGISTRY.delete(key);
 }
 export const registeredSources = (): readonly string[] => Array.from(REGISTRY.keys());
 

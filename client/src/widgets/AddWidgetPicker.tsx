@@ -146,7 +146,12 @@ export function AddWidgetPicker({ offers, alreadyAdded, onAdd, onClose }: AddWid
 }
 
 const btn = {
-  background: "transparent", color: "var(--dim)", border: "1px solid var(--line)",
+  background: "transparent", color: "var(--dim)",
+  // Longhand, deliberately. A caller that overrides only borderColor against a `border`
+  // shorthand makes React warn that a conflicting property is being updated during
+  // rerender, and the resulting border is whichever the style object happened to apply
+  // last. Three longhand properties compose; a shorthand plus one longhand does not.
+  borderWidth: 1, borderStyle: "solid", borderColor: "var(--line)",
   borderRadius: "var(--r)", padding: "8px 11px",
   font: "500 12px/1 'Barlow', sans-serif", cursor: "pointer", minHeight: 38,
 } as const;
