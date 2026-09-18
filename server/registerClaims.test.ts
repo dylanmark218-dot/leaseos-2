@@ -71,7 +71,13 @@ describe("every DONE claim in the register points at something that exists", () 
  * true, informative and invisible to a check looking for DONE. A new word now has to be added here
  * deliberately rather than invented in a row nobody re-reads.
  */
-const STATUS_VOCABULARY = ["DONE", "PARTLY DONE", "PARTIAL", "STAGED", "STARTED", "CORE BUILT"] as const;
+const STATUS_VOCABULARY = [
+  "DONE", "PARTLY DONE", "PARTIAL", "STAGED", "STARTED", "CORE BUILT",
+  // Added v22.82, by the guard's own insistence: P0.6 was a choice between two implementations, so
+  // the row records that the choice was made as well as that the work is finished. The guard caught
+  // me inventing it, which is the point — a status word is now a decision rather than a phrase.
+  "DECIDED AND DONE",
+] as const;
 
 describe("the register does not understate the branch either", () => {
   it("uses only status words the guard knows, so a new one is a deliberate act", () => {
