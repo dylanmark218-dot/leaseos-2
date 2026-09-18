@@ -138,11 +138,14 @@ export function evaluateRestrictedAccess(args: {
 /** A purpose that explains nothing a year later is not a purpose. */
 export function validatePurpose(purpose: string): { ok: true } | { ok: false; reason: string } {
   const p = purpose.trim();
-  if (p.length < 20) {
-    return { ok: false, reason: "State the purpose in a sentence — at least twenty characters. A word like \"audit\" or \"review\" will not explain this access to anyone reading it later, including you." };
-  }
-  if (/^(audit|review|check|investigation|work|admin|test)$/i.test(p)) {
+  // The category check runs FIRST. It used to run after the length check, where it was dead code:
+  // every word in this list is shorter than twenty characters, so the length check always answered
+  // and the more useful message was never reachable. Found by a test that asked for it by name.
+  if (/^(audit|review|check|investigation|work|admin|test|compliance|legal)$/i.test(p)) {
     return { ok: false, reason: "That is a category, not a purpose. Say what you are trying to establish and why this record is the one that answers it." };
+  }
+  if (p.length < 20) {
+    return { ok: false, reason: "State the purpose in a sentence — at least twenty characters. A word or two will not explain this access to anyone reading it later, including you." };
   }
   return { ok: true };
 }
@@ -196,3 +199,35 @@ export function declineRecordsOnly(disposition: Disposition): readonly string[] 
 
 /** The decline must never create an investigation. A helper the router and its tests share. */
 export const createsInvestigation = (d: Disposition): boolean => d === "OPENED";
+
+/* ------------------------------------------------------------------ */
+/* Serving a restricted record: the log comes first                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * §6.1 — the access event is written **before** the content is returned, and if that write fails,
+ * access fails.
+ *
+ * This is a seam rather than two statements in a router because the ordering is the guarantee, and
+ * a guarantee that lives in whichever order someone happened to type two `await`s is not one. A
+ * later edit that moves the fetch up would still compile, still pass every test about grants, and
+ * still serve records that no log records — the exact failure an access log exists to prevent. Here
+ * the order is the function's shape: `serveRestricted` cannot return content it has not logged.
+ *
+ * `logAccess` throwing is deliberately not caught. An access log that degrades to best-effort under
+ * load is a log that is complete exactly when nothing has gone wrong, which is when nobody needs it.
+ */
+export async function serveRestricted<T>(args: {
+  decision: AccessDecision;
+  logAccess: () => Promise<void>;
+  fetchContent: () => Promise<T>;
+  logDenial: (code: AccessDenialCode, reason: string) => Promise<void>;
+}): Promise<{ served: true; content: T } | { served: false; code: AccessDenialCode; reason: string; promptRequired: boolean }> {
+  if (!args.decision.allowed) {
+    // A refusal is an audited event too: an attempt nobody can see is a gap in the same record.
+    await args.logDenial(args.decision.code, args.decision.reason);
+    return { served: false, code: args.decision.code, reason: args.decision.reason, promptRequired: args.decision.promptRequired };
+  }
+  await args.logAccess();          // first, and if it throws the caller never reaches the content
+  return { served: true, content: await args.fetchContent() };
+}

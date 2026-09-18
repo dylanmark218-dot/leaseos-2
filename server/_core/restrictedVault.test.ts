@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import {
   TIER_OF_MATTER, createsInvestigation, declineRecordsOnly, evaluateRestrictedAccess, isRestricted,
-  matterTrackingNumber, proposeInternalInvestigation, trackingNumberLeaksCategory, validatePurpose,
+  matterTrackingNumber, proposeInternalInvestigation, serveRestricted, trackingNumberLeaksCategory, validatePurpose,
   type ExistingGrant,
 } from "./restrictedVault";
 
@@ -154,5 +154,45 @@ describe("the system proposes an investigation; it never compels one", () => {
     for (const d of ["PENDING", "NOT_WARRANTED", "DEFERRED", "HANDLED_INTERNALLY"] as const) {
       expect(createsInvestigation(d), d).toBe(false);
     }
+  });
+});
+
+describe("the log is written before the content, and a failed log means no content", () => {
+  const allowed = { allowed: true as const, grantId: 1, mustLogBeforeServing: true as const };
+
+  it("logs first, then fetches — proved by the order they record themselves in", async () => {
+    const order: string[] = [];
+    const r = await serveRestricted({
+      decision: allowed,
+      logAccess: async () => { order.push("log"); },
+      fetchContent: async () => { order.push("fetch"); return { secret: "x" }; },
+      logDenial: async () => { order.push("denial"); },
+    });
+    expect(order).toEqual(["log", "fetch"]);        // not ["fetch", "log"], and not just "both ran"
+    expect(r).toMatchObject({ served: true, content: { secret: "x" } });
+  });
+
+  it("serves nothing when the audit write fails — the content is never even fetched", async () => {
+    let fetched = false;
+    await expect(serveRestricted({
+      decision: allowed,
+      logAccess: async () => { throw new Error("audit store unavailable"); },
+      fetchContent: async () => { fetched = true; return { secret: "x" }; },
+      logDenial: async () => {},
+    })).rejects.toThrow(/audit store unavailable/);
+    // The failure that matters: a record served under a log that was never written.
+    expect(fetched, "content must not be fetched when the access could not be logged").toBe(false);
+  });
+
+  it("logs a refusal too, and returns the code rather than the record", async () => {
+    let denialLogged: string | null = null;
+    const r = await serveRestricted({
+      decision: { allowed: false, code: "BREAK_GLASS_REQUIRED", reason: "state a purpose", promptRequired: true },
+      logAccess: async () => { throw new Error("must not be called"); },
+      fetchContent: async () => { throw new Error("must not be called"); },
+      logDenial: async (code) => { denialLogged = code; },
+    });
+    expect(denialLogged).toBe("BREAK_GLASS_REQUIRED");   // an attempt nobody can see is a gap too
+    expect(r).toMatchObject({ served: false, code: "BREAK_GLASS_REQUIRED", promptRequired: true });
   });
 });

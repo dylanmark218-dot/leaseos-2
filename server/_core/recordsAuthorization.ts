@@ -272,6 +272,9 @@ export type Permission =
   | "hos.attest"
   /* P8.3 — putting a scanned log page on file. Retention, not a dispatch answer. */
   | "hos.recordScannedLog"
+  /* P8.5 — the vault. `restricted.read` is the permission the break-glass prompt sits behind; it is
+     NOT implied by an administration role, which is the point of the whole subsystem. */
+  | "vault.matter.manage" | "restricted.read" | "restricted.audit.read"
   | "portal.identity.manage" | "portal.submission.review"
   // v21.12 — render a frozen revision; propose payroll from a client bonus; record what a person saw.
   | "closeout.document.render" | "closeout.adjustment.payroll_propose" | "observation.record"
@@ -676,6 +679,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "vault.matter.manage",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -793,6 +797,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
   ],
   office: [
+    "vault.matter.manage",
     "hos.recordScannedLog",
     "automation.policy.read",
     "facility.directory.report",
@@ -953,6 +958,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "vault.matter.manage",
+    "restricted.read",
+    "restricted.audit.read",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -2482,6 +2490,14 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "surfaces.timeline": "surface.timeline.read",
 
   /* ---- v21.1: dispatch gate ---- */
+  "restrictedVault.matterOpen": "vault.matter.manage",
+  "restrictedVault.mattersForIncident": "vault.matter.manage",
+  "restrictedVault.investigationPropose": "vault.matter.manage",
+  "restrictedVault.investigationDecide": "restricted.read",
+  "restrictedVault.breakGlass": "restricted.read",
+  "restrictedVault.restrictedRead": "restricted.read",
+  "restrictedVault.grantRevoke": "restricted.read",
+  "restrictedVault.accessHistory": "restricted.audit.read",
   "hos.attestHours": "hos.attest",
   "hos.recordScannedLog": "hos.recordScannedLog",
   "dispatch.evaluate": "dispatch.evaluate",
