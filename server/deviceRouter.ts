@@ -16,7 +16,7 @@ import { getDb } from "./db";
 import { sealIsTrustworthy, verifySealAgainstStored } from "./_core/evidenceSeal";
 import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
 import { createHash } from "node:crypto";
-import { DEVICE_SIGNATURE_MAX_SKEW_MS, canonicalDevicePackage, fingerprintP256Spki, signatureFreshness, verifyP256PackageSignature } from "./_core/deviceSignature";
+import { handleSyncRefusal, type SyncRefusalCode, DEVICE_SIGNATURE_MAX_SKEW_MS, canonicalDevicePackage, fingerprintP256Spki, signatureFreshness, verifyP256PackageSignature } from "./_core/deviceSignature";
 import { resolveActingScope } from "./_core/actingScope";
 import { storageRead } from "./storage";
 import {
@@ -187,19 +187,25 @@ export const syncRouter = router({
       // ref — the caller is an authenticated user, so this is bounded — and
       // returned as a rejection so the runtime marks the capture failed rather
       // than retrying forever.
-      const refuse = async (reason: string) => {
+      const refuse = async (reason: string, code?: SyncRefusalCode, skewMs?: number | null) => {
         await db.insert(syncPackages).values({
           packageRef: input.packageRef, deviceId: input.deviceRef, fieldDeviceId: d?.id ?? null,
           signedWithFingerprint: input.signedWithFingerprint, operatorId: null, state: "rejected",
           itemCount: input.items.length, queuedAt: input.queuedAt, lastAttemptAt: now, attemptCount: 1,
           serverReceivedAt: null, refusalReason: reason,
         }).catch(() => undefined);
-        return { packageRef: input.packageRef, state: "rejected" as const, reason, verified: 0, rejected: input.items.length, conflicts: 0 };
+        return {
+          packageRef: input.packageRef, state: "rejected" as const, reason, verified: 0, rejected: input.items.length, conflicts: 0,
+          // P1.6 — what the device should DO, decided here rather than inferred from the sentence.
+          refusal: code ? { code, skewMs: skewMs ?? null, serverTimeIso: now.toISOString(), handling: handleSyncRefusal({ code, skewMs, serverTimeIso: now.toISOString() }) } : null,
+        };
       };
       const freshness = signatureFreshness({ signedAt: input.signedAt, now, deviceClockAt: input.deviceClockAt ?? null });
       if (!freshness.fresh) {
         // The device can only fix its clock if it is told what the server's is.
-        return refuse(`Device signature timestamp refused: ${freshness.reason} (server time ${now.toISOString()}; allowed ±${DEVICE_SIGNATURE_MAX_SKEW_MS / 60_000} min)`);
+        // P1.6: the code travels with the sentence. A device that has to parse prose to learn its
+        // clock is wrong will retry for ever the first time the wording changes.
+        return refuse(`Device signature timestamp refused: ${freshness.reason} (server time ${now.toISOString()}; allowed ±${DEVICE_SIGNATURE_MAX_SKEW_MS / 60_000} min)`, freshness.code, freshness.skewMs);
       }
       const clockSkewMs = freshness.skewMs;
       const signingKey = d?.keyFingerprint === input.signedWithFingerprint

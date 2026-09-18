@@ -61,7 +61,10 @@ export const DEVICE_CLOCK_WARN_SKEW_MS = 5 * 60 * 1000;
 export type FreshnessVerdict =
   | { fresh: true; mode: "device_clock"; skewMs: number; warn: boolean }
   | { fresh: true; mode: "server_clock"; skewMs: null; warn: false }
-  | { fresh: false; reason: string; skewMs: number | null };
+  /* P1.6 — the code is what a device acts on; the reason is what a person reads. A device that
+     parsed the sentence would break silently on the first reword, and what breaks is whether a
+     driver's evidence ever reaches the office. */
+  | { fresh: false; code: SyncRefusalCode; reason: string; skewMs: number | null };
 
 /**
  * Freshness with the tablet's clock taken into account. When the device reports
@@ -75,12 +78,12 @@ export function signatureFreshness(args: { signedAt: Date; now: Date; deviceCloc
   if (!args.deviceClockAt) {
     return signatureTimeIsFresh(args.signedAt, args.now)
       ? { fresh: true, mode: "server_clock", skewMs: null, warn: false }
-      : { fresh: false, reason: `signed ${args.signedAt.toISOString()}, server time ${args.now.toISOString()}; no device clock reported`, skewMs: null };
+      : { fresh: false, code: "NO_DEVICE_CLOCK" as const, reason: `signed ${args.signedAt.toISOString()}, server time ${args.now.toISOString()}; no device clock reported`, skewMs: null };
   }
   const skewMs = args.now.getTime() - args.deviceClockAt.getTime();
-  if (Math.abs(skewMs) > DEVICE_CLOCK_MAX_ABS_SKEW_MS) return { fresh: false, reason: `device clock is ${Math.round(skewMs / 60_000)} minutes from the server's — beyond a day; set the tablet's clock`, skewMs };
+  if (Math.abs(skewMs) > DEVICE_CLOCK_MAX_ABS_SKEW_MS) return { fresh: false, code: "CLOCK_SKEW_TOO_LARGE" as const, reason: `device clock is ${Math.round(skewMs / 60_000)} minutes from the server's — beyond a day; set the tablet's clock`, skewMs };
   const byDevice = Math.abs(args.deviceClockAt.getTime() - args.signedAt.getTime());
-  if (byDevice > DEVICE_SIGNATURE_MAX_SKEW_MS) return { fresh: false, reason: `signature is ${Math.round(byDevice / 60_000)} minutes old by the device's own clock`, skewMs };
+  if (byDevice > DEVICE_SIGNATURE_MAX_SKEW_MS) return { fresh: false, code: "SIGNATURE_STALE" as const, reason: `signature is ${Math.round(byDevice / 60_000)} minutes old by the device's own clock`, skewMs };
   return { fresh: true, mode: "device_clock", skewMs, warn: Math.abs(skewMs) > DEVICE_CLOCK_WARN_SKEW_MS };
 }
 
@@ -188,3 +191,92 @@ export const BIOMETRIC_MATERIAL_PATTERNS: readonly RegExp[] = [
 export function looksLikeBiometricMaterial(name: string): boolean {
   return BIOMETRIC_MATERIAL_PATTERNS.some(r => r.test(name));
 }
+
+/* ------------------------------------------------------------------ */
+/* P1.6 — a refusal the device can act on                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Why a package was refused, as a code rather than a sentence.
+ *
+ * The reason string is for a person to read. A device deciding what to do next must not parse it:
+ * the first reword breaks the behaviour silently, and the behaviour in question is whether a
+ * driver's evidence ever reaches the office.
+ */
+export type SyncRefusalCode =
+  | "CLOCK_SKEW_TOO_LARGE"       // the device's clock is wrong by more than a day
+  | "SIGNATURE_STALE"            // signed too long ago, by whichever clock was used
+  | "NO_DEVICE_CLOCK"            // no device clock reported and the server's window has passed
+  | "DEVICE_NOT_ENROLLED"
+  | "DEVICE_NOT_ACTIVE"
+  | "SIGNATURE_INVALID"
+  | "REPLAY"
+  | "MALFORMED";
+
+/**
+ * What the device should do about it.
+ *
+ * The distinction is the point of this file. A package refused for a wrong clock will be refused
+ * again on every retry, for ever, because retrying does not move a clock. Left alone, the outbox
+ * grows, the screen says "syncing", and the evidence never lands — a failure that looks like
+ * progress, which is worse than one that looks like a failure.
+ */
+export type RefusalHandling =
+  /** Retrying is reasonable: the cause is outside the device and may pass. */
+  | { action: "retry"; reason: string }
+  /**
+   * Retrying cannot work. The queue holds, and the person is told what to fix — the fix is theirs,
+   * not the software's, and a spinner would hide that from them indefinitely.
+   */
+  | { action: "stop_and_prompt"; title: string; instruction: string }
+  /** The package can never be accepted as it stands; it needs the office, not the driver. */
+  | { action: "stop_and_escalate"; title: string; instruction: string };
+
+export function handleSyncRefusal(args: {
+  code: SyncRefusalCode;
+  /** Server minus device, in milliseconds, when the server could work it out. */
+  skewMs?: number | null;
+  serverTimeIso?: string;
+}): RefusalHandling {
+  switch (args.code) {
+    case "CLOCK_SKEW_TOO_LARGE": {
+      const minutes = args.skewMs == null ? null : Math.round(args.skewMs / 60_000);
+      const direction = minutes == null ? "" : minutes > 0 ? " behind" : " ahead of";
+      const by = minutes == null ? "" : ` by about ${Math.abs(Math.round(minutes / 60))} hour(s)${direction} the server`;
+      return {
+        action: "stop_and_prompt",
+        title: "This device's clock is wrong",
+        // Named, and with the server's own time, because the driver cannot correct a clock they
+        // cannot compare against.
+        instruction: `Your device's date and time are off${by}.${args.serverTimeIso ? ` The server's time is ${args.serverTimeIso}.` : ""} Set the device to network time, then sync again. Nothing is lost in the meantime — the queue is holding your work, and retrying without fixing the clock will keep failing.`,
+      };
+    }
+    case "SIGNATURE_STALE":
+    case "NO_DEVICE_CLOCK":
+      return {
+        action: "stop_and_prompt",
+        title: "This device's clock is wrong",
+        instruction: `The work was signed too long ago for the server to accept it.${args.serverTimeIso ? ` The server's time is ${args.serverTimeIso}.` : ""} Set the device to network time and sync again; the queue is holding your work.`,
+      };
+    case "DEVICE_NOT_ENROLLED":
+    case "DEVICE_NOT_ACTIVE":
+      return {
+        action: "stop_and_escalate",
+        title: "This device cannot sync",
+        instruction: "This device is not enrolled, or its enrolment was suspended or revoked. Your work is held on the device and is not lost. The office has to re-enrol it — nothing you can do here will change the answer.",
+      };
+    case "SIGNATURE_INVALID":
+    case "MALFORMED":
+      return {
+        action: "stop_and_escalate",
+        title: "The office has to look at this package",
+        instruction: "The server could not verify this package. It is held on the device and not lost; retrying will not change the result, so tell the office rather than waiting.",
+      };
+    case "REPLAY":
+      // The server already has it. Retrying is how a duplicate gets created.
+      return { action: "retry", reason: "The server has already accepted this package; the device can move on to the next one." };
+  }
+}
+
+/** True when retrying could ever succeed. The outbox uses this instead of reading prose. */
+export const isRetryable = (code: SyncRefusalCode): boolean => handleSyncRefusal({ code }).action === "retry";
