@@ -492,15 +492,19 @@ export async function createJobChargeLine(input: InsertJobChargeLine) {
   const result = await db.insert(jobChargeLines).values(input);
   return result[0]?.insertId;
 }
-export async function listVendors() {
+/** The book (business) that keeps a vendor record, under the 0132 record rule. */
+function vendorBookWhere(scope: TenantScope) {
+  return scope.tenantId === SINGLE_TENANT_ID ? isNull(vendors.bookOrgRef) : eq(vendors.bookOrgRef, scope.tenantId);
+}
+export async function listVendors(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(vendors).orderBy(vendors.name).limit(100);
+  return db.select().from(vendors).where(vendorBookWhere(scope)).orderBy(vendors.name).limit(100);
 }
-export async function createVendor(input: InsertVendor) {
+export async function createVendor(input: InsertVendor, scope: TenantScope) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.insert(vendors).values(input);
+  const result = await db.insert(vendors).values({ ...input, bookOrgRef: scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId });
   return result[0]?.insertId;
 }
 export async function listUnitSafetyPlans(scope: TenantScope) {
@@ -531,9 +535,11 @@ export async function updateBillingRateCard(
     .where(eq(billingRateCards.id, id));
   return true;
 }
-export async function updateVendor(id: number, input: Partial<InsertVendor>) {
+export async function updateVendor(id: number, input: Partial<InsertVendor>, scope: TenantScope) {
   const db = await getDb();
   if (!db) return false;
+  const inScope = (await db.select({ id: vendors.id }).from(vendors).where(and(eq(vendors.id, id), vendorBookWhere(scope))).limit(1))[0];
+  if (!inScope) return false;   // not this book's vendor: "not found" at the router
   await db.update(vendors).set(input).where(eq(vendors.id, id));
   return true;
 }

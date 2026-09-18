@@ -1174,7 +1174,7 @@ export const appRouter = router({
       }),
     }),
     vendors: router({
-      list: roleProcedure("vendors.list").query(() => listVendors()),
+      list: roleProcedure("vendors.list").query(async ({ ctx }) => listVendors(await scopeFor(ctx.user.id))),
       update: roleProcedure("vendors.update")
         .input(
           z.object({
@@ -1185,9 +1185,12 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) => {
+        .mutation(async ({ ctx, input }) => {
           const { id, ...values } = input;
-          return updateVendor(id, values);
+          // P4.1: only this book's vendor can be updated here; another book's is not found.
+          const ok = await updateVendor(id, values, await scopeFor(ctx.user.id));
+          if (!ok) throw new TRPCError({ code: "NOT_FOUND", message: `Vendor ${id} not found` });
+          return ok;
         }),
       create: roleProcedure("vendors.create")
         .input(
@@ -1203,7 +1206,7 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) => createVendor(input)),
+        .mutation(async ({ ctx, input }) => createVendor(input, await scopeFor(ctx.user.id))),
     }),
     unitSafety: router({
       list: roleProcedure("unitSafety.list").query(async ({ ctx }) => listUnitSafetyPlans(await scopeFor(ctx.user.id))),

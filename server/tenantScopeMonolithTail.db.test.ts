@@ -76,3 +76,25 @@ d("by-id updates resolve their parent", () => {
     expect((await callerFor(mgrB).fieldRoute.routeDecisions.list()).some(r => r.tripId === tripNumber)).toBe(false);
   }, 60_000);
 });
+
+d("vendor records belong to the book that keeps them", () => {
+  it("stamps a vendor with the creating business, lists only its own, and refuses another business's update as not found", async () => {
+    const A = await org(), B = await org();
+    const mgrA = await member(A, ["management"]), mgrB = await member(B, ["management"]), legacy = await member(null, ["management"]);
+    const name = `Big Iron ${rnd()}`;
+    const id = await callerFor(mgrA).fieldRoute.vendors.create({ name, category: "parts" } as never);
+    const [row] = await pool.query<mysql.RowDataPacket[]>("SELECT bookOrgRef, orgRef FROM vendors WHERE id = ?", [id]);
+    expect(row[0]!.bookOrgRef).toBe(A);
+    expect(row[0]!.orgRef).toBeNull();   // the vendor's own organization is a separate, later link (P7.2)
+    expect((await callerFor(mgrA).fieldRoute.vendors.list()).some(v => v.name === name)).toBe(true);
+    expect((await callerFor(mgrB).fieldRoute.vendors.list()).some(v => v.name === name)).toBe(false);
+    expect((await callerFor(legacy).fieldRoute.vendors.list()).some(v => v.name === name)).toBe(false);
+    await expect(callerFor(mgrB).fieldRoute.vendors.update({ id: Number(id), phone: "780-555-0100" } as never)).rejects.toMatchObject({ code: "NOT_FOUND", message: `Vendor ${id} not found` });
+    await expect(callerFor(mgrA).fieldRoute.vendors.update({ id: Number(id), phone: "780-555-0100" } as never)).resolves.toBe(true);
+    const legacyName = `Parts Depot ${rnd()}`;
+    const lid = await callerFor(legacy).fieldRoute.vendors.create({ name: legacyName, category: "parts" } as never);
+    const [lrow] = await pool.query<mysql.RowDataPacket[]>("SELECT bookOrgRef FROM vendors WHERE id = ?", [lid]);
+    expect(lrow[0]!.bookOrgRef).toBeNull();
+    expect((await callerFor(mgrA).fieldRoute.vendors.list()).some(v => v.name === legacyName)).toBe(false);
+  }, 60_000);
+});

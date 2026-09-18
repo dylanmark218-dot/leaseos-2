@@ -802,6 +802,7 @@ export const vendors = mysqlTable("vendors", {
   /** 0134 — the organization a person linked this vendor to; NULL until someone does. */
   orgRef: varchar("orgRef", { length: 64 }),
   // v20.19
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),   // 0149: the business that keeps this vendor record; NULL = the historical single tenant (orgRef is the vendor's own organization, P7.2)
   vendorRef: varchar("vendorRef", { length: 64 }),
   name: varchar("name", { length: 180 }).notNull(),
   category: varchar("category", { length: 100 }).notNull(),
