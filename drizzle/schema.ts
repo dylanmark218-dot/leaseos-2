@@ -8597,3 +8597,69 @@ export const hosAttestations = mysqlTable("hosAttestations", {
   supersededByAttestationId: int("supersededByAttestationId"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 });
+
+/* ---- P8.5 (0156) — the restricted records vault ---- */
+
+/** The fan-out spine. Derived matters reference the incident root; they never copy its facts. */
+export const incidentMatters = mysqlTable("incidentMatters", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  incidentReportId: int("incidentReportId").notNull(),
+  matterType: mysqlEnum("matterType", ["INSURANCE_CLAIM", "WCB_CLAIM", "REGULATORY_REPORT", "POLICE_FILE", "CLIENT_NOTICE", "THIRD_PARTY_CLAIM", "INTERNAL_INVESTIGATION", "LITIGATION"]).notNull(),
+  /** Book 17 PRV-CLS-001. Stored, never inferred at read time. */
+  sensitivityTier: mysqlEnum("sensitivityTier", ["INTERNAL", "CONFIDENTIAL", "RESTRICTED", "HIGHLY_RESTRICTED"]).notNull(),
+  /** Category-neutral: a number that spells out the category leaks it to anyone who sees it. */
+  trackingNumber: varchar("trackingNumber", { length: 40 }).notNull(),
+  status: mysqlEnum("status", ["PROPOSED", "OPEN", "SUBMITTED", "IN_REVIEW", "CLOSED", "DECLINED", "UNKNOWN"]).notNull().default("PROPOSED"),
+  openedAt: timestamp("openedAt"),
+  closedAt: timestamp("closedAt"),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+});
+
+/** A proposal is raised by a rule and decided by a person. Declining creates no investigation. */
+export const investigationProposals = mysqlTable("investigationProposals", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  incidentReportId: int("incidentReportId").notNull(),
+  triggerRule: varchar("triggerRule", { length: 80 }).notNull(),
+  triggerPolicy: varchar("triggerPolicy", { length: 80 }),
+  proposedAt: timestamp("proposedAt").notNull().defaultNow(),
+  disposition: mysqlEnum("disposition", ["PENDING", "OPENED", "HANDLED_INTERNALLY", "NOT_WARRANTED", "DEFERRED"]).notNull().default("PENDING"),
+  decidedByUserId: int("decidedByUserId"),
+  decidedByRole: varchar("decidedByRole", { length: 40 }),
+  decidedAt: timestamp("decidedAt"),
+  decisionReason: varchar("decisionReason", { length: 500 }),
+  matterId: int("matterId"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+});
+
+/** Record-scoped, time-limited, non-transferable. A grant opens one record, not the vault. */
+export const restrictedAccessGrants = mysqlTable("restrictedAccessGrants", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  userId: int("userId").notNull(),
+  recordType: varchar("recordType", { length: 40 }).notNull(),
+  recordId: int("recordId").notNull(),
+  purpose: varchar("purpose", { length: 500 }).notNull(),
+  grantedAt: timestamp("grantedAt").notNull().defaultNow(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokedByUserId: int("revokedByUserId"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+});
+
+/** Written BEFORE content is served. If this write fails, access fails. */
+export const restrictedAccessEvents = mysqlTable("restrictedAccessEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  grantId: int("grantId"),
+  userId: int("userId").notNull(),
+  recordType: varchar("recordType", { length: 40 }).notNull(),
+  recordId: int("recordId").notNull(),
+  action: mysqlEnum("action", ["READ", "EXPORT", "PRINT", "GRANT_CREATED", "GRANT_REVOKED", "DENIED"]).notNull(),
+  purpose: varchar("purpose", { length: 500 }),
+  decisionCode: varchar("decisionCode", { length: 60 }),
+  decisionReason: varchar("decisionReason", { length: 500 }),
+  occurredAt: timestamp("occurredAt").notNull().defaultNow(),
+});
