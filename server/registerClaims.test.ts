@@ -65,9 +65,45 @@ describe("every DONE claim in the register points at something that exists", () 
   });
 });
 
+/*
+ * The status words a row may carry. Stated, because they were ad hoc and that is why the guard
+ * could not tell "done" from "in progress": P8.1 read WIRED INTO ALL THREE CONSUMERS, which is
+ * true, informative and invisible to a check looking for DONE. A new word now has to be added here
+ * deliberately rather than invented in a row nobody re-reads.
+ */
+const STATUS_VOCABULARY = ["DONE", "PARTLY DONE", "PARTIAL", "STAGED", "STARTED", "CORE BUILT"] as const;
+
 describe("the register does not understate the branch either", () => {
+  it("uses only status words the guard knows, so a new one is a deliberate act", () => {
+    const offenders: string[] = [];
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("| P")) continue;
+      const marker = /\*\*([A-Z][A-Z /]{2,40})/.exec(line);
+      if (!marker) continue;   // a row with no marker is simply open, which is a legitimate state
+      const word = marker[1]!.trim();
+      if (!STATUS_VOCABULARY.some(v => word.startsWith(v))) offenders.push(`${rowId(line)} → "${word}"`);
+    }
+    expect(offenders, "a register row invented a status word the guard cannot read").toEqual([]);
+  });
+
   /** Work whose artefacts are on the branch: the row must not still read as undone. */
+  /*
+   * Every checkpoint whose artefacts are on the branch. The list was six rows, and that was the
+   * bug: P4.1 sat reading "IN PROGRESS - router 3 done" for twenty versions after it closed,
+   * because an edit targeting the wrong row title matched nothing and nobody checked. A guard that
+   * only watches the rows you remembered to list is a guard against the mistakes you did not make.
+   */
   const LANDED: { row: string; artefact: string }[] = [
+    { row: "P0.5", artefact: "server/widgetPromotion.test.ts" },
+    { row: "P4.1", artefact: "drizzle/0149_vendor_book_scope.sql" },
+    { row: "P4.4", artefact: "drizzle/0151_passage_basis_correction.sql" },
+    { row: "P5.1", artefact: "client/src/showcase/panelSource.ts" },
+    { row: "P5.2", artefact: "client/src/portal/panelContract.ts" },
+    { row: "P5.3", artefact: "client/src/a11y/axeHarness.ts" },
+    { row: "P8.1", artefact: "server/_core/interEngineStatus.ts" },
+    { row: "P8.2", artefact: "drizzle/0153_automation_policy.sql" },
+    { row: "P8.3", artefact: "drizzle/0155_hos_attestation.sql" },
+    { row: "P8.5", artefact: "drizzle/0156_restricted_records_vault.sql" },
     { row: "P7.2", artefact: "drizzle/0134_organization_record_links.sql" },
     { row: "P7.3", artefact: "drizzle/0135_facility_statements.sql" },
     { row: "P7.4", artefact: "drizzle/0136_commercial_approval_ledger.sql" },
@@ -82,7 +118,7 @@ describe("the register does not understate the branch either", () => {
       expect(existsSync(artefact), `${row}: the artefact this check is built on moved`).toBe(true);
       const line = text.split("\n").find(l => l.startsWith(`| ${row} `));
       expect(line, `${row} is not in the register`).toBeTruthy();
-      if (!/\*\*(DONE|PARTLY DONE|STAGED)/.test(line!)) silent.push(row);
+      if (!new RegExp(`\\*\\*(${STATUS_VOCABULARY.join("|")})`).test(line!)) silent.push(row);
     }
     expect(silent, "work that is on the branch but whose register row still reads as undone").toEqual([]);
   });
