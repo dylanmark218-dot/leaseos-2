@@ -162,3 +162,16 @@ Cross-layer proof added this round: `server/crossLayerIntegrity.test.ts` — eve
 
 
 **P4.1 router 4b (v22.41) — the shop:** twelve of 25 procedures scoped through unit ownership; parts/tools/tire registry are shop-level stock and stay unscoped on purpose until they carry an owner. Test: `tenantScopeShop.db.test.ts`.
+
+### The gate database is rebuilt each run (2026-09-18)
+
+The worktree gate reused `leaseos_gate_shop` from run to run, so every run inherited the rows of
+every run before it. That masks fixture debt of exactly the kind P4.1 kept surfacing: a suite that
+names a row it never creates passes on what some other suite left behind, and fails on a fresh
+deployment. `customerLiveView` had been green for days that way — it named `operatorId: 7`, no row
+had it, and on a fresh database the pre-clearance answer was a blanket UNKNOWN ("the contractor has
+no record of this subject") instead of the unit BLOCKED the case is about. The fix is the same one
+applied fifteen times in P4.1: create the row the fixture names. `run-gate-wt.sh` now drops and
+recreates the database before the gate applies its migrations, so a green run means green from the
+migrations, not green from sediment.
+

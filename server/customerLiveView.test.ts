@@ -113,7 +113,10 @@ d("the customer's live view, through the gate", () => {
     const jobId = Number(job.insertId);
     const c = callerFor(driver).closeout;
     const [fixtureUnit251] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, ?)", [`U-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, "hydrovac"]);   // P4.1: a ticket names a real unit the caller may see; 142 was a placeholder no unit had
-    const t = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: fixtureUnit251.insertId, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: false });
+    // An operator row with nothing on file. Naming an operator id no row has made the whole pre-clearance answer
+    // UNKNOWN ("the contractor has no record of this subject") and hid the unit verdict the case is about.
+    const [fixtureOperator] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [key("Op").slice(0, 40)]);
+    const t = await c.ticketOpen({ jobId, customerAccountRef: acctRef, unitId: fixtureUnit251.insertId, operatorId: Number(fixtureOperator.insertId), serviceDescription: "Hydrovac excavation", postSiteRequired: false });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("07:31"), endedAt: at("12:00"), source: "pto", confidence: "high" });
     await c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "customer_hold", occurredAt: at("12:00"), detail: "Waiting on wireline" });
     await pool.execute("INSERT INTO loads (loadNumber, jobId, material, quantity, quantityUnit, chainState, createdAt) VALUES (?, ?, 'produced water', 12.4, 'm3', 'disposal_verified', NOW()), (?, ?, 'slurry', 11.8, 'm3', 'in_transit', NOW())", [key("LD").slice(0, 40), jobId, key("LD").slice(0, 40), jobId]);
@@ -133,7 +136,7 @@ d("the customer's live view, through the gate", () => {
     const board2 = await portalCaller(token).portal.jobBoard();
     expect(board2.tickets.find(x => x.ticketNumber === t.ticketNumber)!.operational).toMatchObject({ state: "CUSTOMER_HOLD" });
 
-    // Pre-clearance: the operator is one the contractor has no record of, so the worker's items stay UNKNOWN; the unit is
+    // Pre-clearance: the operator is a real row with no licence or qualification on file, so the worker's items stay UNKNOWN; the unit is
     // real (P4.1 made the fixture name a real unit) and has no inspection, registration or insurance on file, so the
     // whole verdict is BLOCKED — a real unit with nothing verified is blocked, not unknown. Categories only, no detail.
     const pcUnknown = await portalCaller(token).portal.preClearance({ ticketNumber: t.ticketNumber });
