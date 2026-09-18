@@ -171,3 +171,44 @@ describe("no biometric material is ever stored", () => {
     expect(offenders, "biometric material named in the code").toEqual([]);
   });
 });
+
+/**
+ * The rule as the capture path enforces it, read from the source.
+ *
+ * The behavioural end-to-end lives with the closeout suites, which own a ticket fixture. What is
+ * asserted here is the pair of refusals, because they are easy to lose in a later refactor and
+ * neither is visible from a passing happy path: a claim with no proof, and a proof filed under
+ * another method where nobody would look for it.
+ */
+describe("the capture path refuses a claim without proof, and proof without the claim", () => {
+  const src = readFileSync("server/closeoutRouter.ts", "utf8");
+
+  it("requires the attestation when the method says device_auth", () => {
+    expect(src).toMatch(/args\.method === "device_auth" && !args\.deviceAttestation/);
+    expect(src).toMatch(/this row would read exactly like one typed on a laptop/);
+  });
+
+  it("refuses an attestation offered under any other method", () => {
+    // A proof filed under `drawn` would put an attestation on a row nobody would think to check —
+    // which is how a verified signature quietly becomes an unverified one.
+    expect(src).toMatch(/args\.method !== "device_auth" && args\.deviceAttestation/);
+  });
+
+  it("verifies before the row is written, not after", () => {
+    const check = src.indexOf("checkSignatureAttestation(");
+    const insert = src.indexOf("insert(fieldTicketSignatures)");
+    expect(check).toBeGreaterThan(-1);
+    expect(insert).toBeGreaterThan(check);   // a row written first is a row that survives a refusal
+  });
+
+  it("signs the ticket's own scope hash, so the proof is of this version", () => {
+    expect(src).toMatch(/canonicalSignaturePayload\(\{ ticketNumber: x\.t\.ticketNumber, revision: 1, payloadHash: hash/);
+  });
+
+  it("no longer lets the customer portal claim device_auth", () => {
+    const portal = readFileSync("server/portalRouter.ts", "utf8");
+    expect(portal).toMatch(/method: "portal_link"/);
+    expect(portal).not.toMatch(/method: "device_auth"/);
+    expect(portal).toMatch(/claim an enrolled device the customer never had/);
+  });
+});

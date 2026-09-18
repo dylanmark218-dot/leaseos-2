@@ -1237,6 +1237,8 @@ export const fieldTicketSignatures = mysqlTable("fieldTicketSignatures", {
     "device_auth",
     "pin",
     "paper_scan",
+    // 0158 — identity proved through the signed portal link; the customer has no enrolled device.
+    "portal_link",
   ]),
   payloadHash: varchar("payloadHash", { length: 128 }),
   refusalReason: text("refusalReason"),

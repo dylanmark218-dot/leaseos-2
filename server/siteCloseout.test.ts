@@ -185,7 +185,11 @@ d("a day on the lease, signed before the truck leaves", () => {
     expect(signed).toMatchObject({ documentRef: `${t.ticketNumber}-R1`, revision: 1, exercised: ["work_confirmation", "time_confirmation", "standby_approval"], withinAuthority: "no" });
     expect(signed.refused[0].reason).toBe("M. Johnson may not exercise invoice approval");
     const [sig] = await pool.execute<mysql.RowDataPacket[]>("SELECT signatureMethod, payloadHash, externalIdentityId, capturedLatitude FROM fieldTicketSignatures WHERE fieldTicketId = (SELECT id FROM fieldTickets WHERE ticketNumber = ?)", [t.ticketNumber]);
-    expect(sig[0]).toMatchObject({ signatureMethod: "device_auth", payloadHash: prep.snapshotHash, capturedLatitude: 53.5 });
+    // 0158: portal_link, not device_auth. The consultant signed on their OWN phone through a secure
+    // link — they have no device enrolled with this company and never could have, so device_auth
+    // claimed an authentication that had not happened. The externalIdentityId below is what
+    // actually proved who they were.
+    expect(sig[0]).toMatchObject({ signatureMethod: "portal_link", payloadHash: prep.snapshotHash, capturedLatitude: 53.5 });
     expect(sig[0].externalIdentityId).not.toBeNull();
 
     // Frozen: no second signature, no new site event, no edit to lines.

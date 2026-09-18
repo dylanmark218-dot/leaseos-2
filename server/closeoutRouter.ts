@@ -13,6 +13,8 @@ import { approvalDecision, decideBillable, termsInEffect, type Terms } from "./_
 import { storagePut } from "./storage";
 import { actingScopeFor, fieldTicketInScope, getDb, jobInScope, unitInScope } from "./db";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
+import { fieldDevices } from "../drizzle/schema";
+import { canonicalSignaturePayload, checkSignatureAttestation } from "./_core/deviceSignature";
 import { clientAdjustments, customerAccounts, customerContractTerms, delayEvents, disposalTickets, fieldTicketDocuments, fieldTicketEvents, fieldTicketLines, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, jobs, loads, payrollAdjustments, roadHazardObservations, signatoryAuthorities, tripStops, weatherObservations } from "../drizzle/schema";
 import { EVENT_CLOCK, canonicalJson, classifyDelay, closeoutState, composeSiteSnapshot, lineDecision, postSiteSupplement, sha256, signatureDecision, whyTheseHours, type Authority, type DelayRules, type EventType, type PostSiteAuthorization, type SiteSnapshot, type Supplement, type TicketEvent, type TicketLine } from "./_core/siteCloseout";
 
@@ -46,7 +48,12 @@ export function snapshotFor(x: Awaited<ReturnType<typeof loadTicket>>) {
 }
 
 /** Shared by the internal witness path and the portal's own-signature path. */
-export async function recordSignature(args: { ticketNumber: string; signer: { name: string; company: string; role: string | null; phone?: string | null }; method: "drawn" | "device_auth" | "pin" | "paper_scan"; requested: Authority[]; extraWorkCents: number; postSiteAuthorization: PostSiteAuthorization | null; snapshotHash: string; authority: { signatoryName: string; mayConfirmWork: boolean; maySignTicket: boolean; mayApproveStandby: boolean; extraWorkLimitCents: number | null; mayApproveInvoice: boolean; mayChangeRates: boolean; validTo: Date | null; status: "active" | "revoked" } | null; gps: { latitude: number; longitude: number } | null; offline: boolean; witnessedByOperatorId: number | null; externalIdentityId: number | null; paperScanEvidenceRecordId: number | null; generatedByUserId: number | null }) {
+export async function recordSignature(args: { ticketNumber: string; signer: { name: string; company: string; role: string | null; phone?: string | null }; method: "drawn" | "device_auth" | "pin" | "paper_scan" | "portal_link"; /**
+ * P1.4 (0157) — proof the enrolled device made this signature. Required when the method claims
+ * `device_auth`: a method that names a device without proving one is a label, which is what this
+ * replaces.
+ */
+deviceAttestation?: { deviceRef: string; keyFingerprint: string; signatureP1363Base64: string; signedAt: Date } | null; requested: Authority[]; extraWorkCents: number; postSiteAuthorization: PostSiteAuthorization | null; snapshotHash: string; authority: { signatoryName: string; mayConfirmWork: boolean; maySignTicket: boolean; mayApproveStandby: boolean; extraWorkLimitCents: number | null; mayApproveInvoice: boolean; mayChangeRates: boolean; validTo: Date | null; status: "active" | "revoked" } | null; gps: { latitude: number; longitude: number } | null; offline: boolean; witnessedByOperatorId: number | null; externalIdentityId: number | null; paperScanEvidenceRecordId: number | null; generatedByUserId: number | null }) {
   const x = await loadTicket(args.ticketNumber);
   if (x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Ticket already signed (revision ${x.signature.revision}); a later change is a new revision, not a second signature` });
   if (!x.t.completedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Site work has not been marked complete — prepare the ticket first" });
@@ -58,7 +65,30 @@ export async function recordSignature(args: { ticketNumber: string; signer: { na
   if (!d.permitted) throw new TRPCError({ code: "PRECONDITION_FAILED", message: d.refusals.join("; ") });
   if (snapshot.postSiteRequired && !args.postSiteAuthorization) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Post-site work is expected — the consultant signs the billing basis, not a future number" });
   const scope = `Work performed confirmed: ${snapshot.siteBillableHours} h site billable, ${snapshot.loads} load(s), standby ${snapshot.standbyHours} h (${snapshot.standbyBillable}). Exercised: ${d.exercised.join(", ")}.${d.refused.length ? ` Not within authority: ${d.refused.map(r => r.authority).join(", ")}.` : ""}${snapshot.postSiteRequired ? " Post-site: billing basis signed; final time pending." : ""}`;
-  await x.db.insert(fieldTicketSignatures).values({ fieldTicketId: x.t.id, revision: 1, result: d.refused.length ? "partially_accepted" : "accepted", signerName: args.signer.name, signerCompany: args.signer.company, signerRole: args.signer.role, signerPhone: args.signer.phone ?? null, authoritiesExercised: JSON.stringify(d.exercised), withinAuthority: d.withinAuthority, signedScopeStatement: scope, postSiteAuthorizationJson: args.postSiteAuthorization ? JSON.stringify(args.postSiteAuthorization) : null, signatureStorageKey: args.paperScanEvidenceRecordId ? `evidence:${args.paperScanEvidenceRecordId}` : null, signatureMethod: args.method, payloadHash: hash, capturedAt: now, capturedLatitude: args.gps?.latitude ?? null, capturedLongitude: args.gps?.longitude ?? null, capturedOffline: args.offline, witnessedByOperatorId: args.witnessedByOperatorId, externalIdentityId: args.externalIdentityId });
+  /*
+   * P1.4 — a device_auth signature must prove the device, and a proof offered under any other
+   * method is refused rather than quietly stored. Both directions matter: a claim with no proof is
+   * the label this replaced, and a proof filed under `drawn` would put an attestation on a row
+   * nobody would think to check.
+   */
+  if (args.method === "device_auth" && !args.deviceAttestation) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "A device_auth signature must carry the device attestation. Without it the method is a label: this row would read exactly like one typed on a laptop." });
+  }
+  if (args.method !== "device_auth" && args.deviceAttestation) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `A ${args.method} signature carries no device attestation; state the method as device_auth or remove it.` });
+  }
+  if (args.deviceAttestation) {
+    const a = args.deviceAttestation;
+    const dev = (await x.db.select().from(fieldDevices).where(eq(fieldDevices.deviceRef, a.deviceRef)).limit(1))[0] ?? null;
+    const verdict = checkSignatureAttestation({
+      attestation: a, now,
+      device: dev ? { deviceRef: dev.deviceRef, keyFingerprint: dev.keyFingerprint ?? "", publicKeySpkiBase64: dev.publicKeySpkiBase64 ?? "", status: dev.status, revokedAt: dev.revokedAt, suspendedAt: dev.suspendedAt } : null,
+      // The same payload the device signed: this ticket, this revision, this scope hash, this signer.
+      payload: canonicalSignaturePayload({ ticketNumber: x.t.ticketNumber, revision: 1, payloadHash: hash, signerName: args.signer.name, signedAt: a.signedAt }),
+    });
+    if (!verdict.ok) throw new TRPCError({ code: "FORBIDDEN", message: `${verdict.code}: ${verdict.reason}` });
+  }
+  await x.db.insert(fieldTicketSignatures).values({ fieldTicketId: x.t.id, revision: 1, result: d.refused.length ? "partially_accepted" : "accepted", signerName: args.signer.name, signerCompany: args.signer.company, signerRole: args.signer.role, signerPhone: args.signer.phone ?? null, authoritiesExercised: JSON.stringify(d.exercised), withinAuthority: d.withinAuthority, signedScopeStatement: scope, postSiteAuthorizationJson: args.postSiteAuthorization ? JSON.stringify(args.postSiteAuthorization) : null, signatureStorageKey: args.paperScanEvidenceRecordId ? `evidence:${args.paperScanEvidenceRecordId}` : null, signatureMethod: args.method, payloadHash: hash, capturedAt: now, capturedLatitude: args.gps?.latitude ?? null, capturedLongitude: args.gps?.longitude ?? null, capturedOffline: args.offline, witnessedByOperatorId: args.witnessedByOperatorId, deviceRef: args.deviceAttestation?.deviceRef ?? null, deviceKeyFingerprint: args.deviceAttestation?.keyFingerprint ?? null, deviceSignatureBase64: args.deviceAttestation?.signatureP1363Base64 ?? null, deviceSignedAt: args.deviceAttestation?.signedAt ?? null, externalIdentityId: args.externalIdentityId });
   const documentRef = `${x.t.ticketNumber}-R1`;
   await x.db.insert(fieldTicketRevisions).values({ documentRef, fieldTicketId: x.t.id, revision: 1, kind: "site_signed", snapshotJson: canonicalJson(snapshot), snapshotHash: hash, billableHoursSite: snapshot.siteBillableHours, billableHoursPostSite: null, generatedByUserId: args.generatedByUserId, generatedAt: now });
   await x.db.update(fieldTickets).set({ status: "closed", signatureStatus: d.refused.length ? "partially_accepted" : "accepted" }).where(eq(fieldTickets.id, x.t.id));
