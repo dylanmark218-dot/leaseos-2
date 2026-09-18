@@ -7,6 +7,7 @@
  *
  * Each case below is a real truck state, and each refusal has cost somebody money somewhere.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { legalAxleDetermination } from "./loadSense";
 
@@ -94,5 +95,64 @@ describe("the rule is structural, not a sentence in a response", () => {
     // The note may stay — it is useful — but it must not be the only thing saying so.
     expect(router).toMatch(/Billing authority: not_granted/);
     expect(readFileSync("server/_core/loadSense.ts", "utf8")).toMatch(/export function legalAxleDetermination/);
+  });
+});
+
+describe("an invalidated calibration is not a lapsed one", () => {
+  it("says which, because the two are different mornings", () => {
+    // "Recalibrate the device" and "the last calibration was bad — check what it certified" are
+    // different problems, and a single EXPIRED code would send someone to the wrong one.
+    const lapsed = legalAxleDetermination({
+      source: "loadsense_calibrated", stability: { stable: true, reasons: [] }, readingAt: AT,
+      calibration: { verifiedAt: new Date("2025-01-01T00:00:00Z"), expiresAt: new Date("2026-01-01T00:00:00Z") },
+    });
+    const withdrawn = legalAxleDetermination({
+      source: "loadsense_calibrated", stability: { stable: true, reasons: [] }, readingAt: AT,
+      calibration: { verifiedAt: new Date("2025-01-01T00:00:00Z"), expiresAt: null, invalidatedAt: new Date("2026-05-01T00:00:00Z") },
+    });
+    if (lapsed.legal || withdrawn.legal) throw new Error("unreachable");
+    expect(lapsed.code).toBe("CALIBRATION_EXPIRED");
+    expect(withdrawn.code).toBe("CALIBRATION_INVALIDATED");
+    expect(withdrawn.reason).toMatch(/Invalidated is not lapsed/);
+  });
+
+  it("refuses a model that is not in force whatever its numbers say", () => {
+    const v = legalAxleDetermination({
+      source: "loadsense_calibrated", stability: { stable: true, reasons: [] }, readingAt: AT,
+      calibration: { verifiedAt: new Date("2026-01-01T00:00:00Z"), expiresAt: null, status: "superseded" },
+    });
+    if (v.legal) throw new Error("unreachable");
+    expect(v.code).toBe("CALIBRATION_INVALIDATED");
+    expect(v.reason).toMatch(/is superseded, not in force/);
+  });
+
+  it("refuses a calibration that takes effect after the reading", () => {
+    // A calibration cannot certify a number taken before it existed. Without this, back-dating a
+    // reading into a newly calibrated window would launder it.
+    const v = legalAxleDetermination({
+      source: "loadsense_calibrated", stability: { stable: true, reasons: [] }, readingAt: AT,
+      calibration: { verifiedAt: new Date("2026-10-01T00:00:00Z"), expiresAt: null },
+    });
+    if (v.legal) throw new Error("unreachable");
+    expect(v.code).toBe("CALIBRATION_NOT_YET_EFFECTIVE");
+  });
+});
+
+describe("the ingest stores the verdict and speaks from it", () => {
+  const router = () => readFileSync("server/integrationRouter.ts", "utf8");
+
+  it("computes the determination where the inputs are, and stores it on the snapshot", async () => {
+    const src = router();
+    expect(src).toMatch(/legalAxleDetermination\(\{/);
+    expect(src).toMatch(/legalDetermination: determination\.legal/);
+    expect(src).toMatch(/legalDeterminationCode: determination\.legal \? null : determination\.code/);
+  });
+
+  it("generates the authority line from the verdict instead of asserting it", () => {
+    const src = router();
+    expect(src).toMatch(/const authority = snapshotVerdict == null/);
+    expect(src).toMatch(/snapshotVerdict\.legal/);
+    // The sentence and the behaviour can no longer drift apart, which is the whole change.
+    expect(src).not.toMatch(/note: `\$\{classification\}\. Billing authority: not_granted\. Certified-scale authority: not_granted\.`/);
   });
 });

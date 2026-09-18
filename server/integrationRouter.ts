@@ -15,7 +15,7 @@ import { dispatchWebhooks } from "./webhookDispatchService";
 import { encryptSecret, mfaKey } from "./_core/externalIdentityPolicy";
 import { resolveActingScope } from "./_core/actingScope";
 import { frameKey, validateGatewayFrame } from "./_core/loadSenseProtocol";
-import { applyCalibration, assessWeightStability, buildWeightSnapshot, fitMultiPointCalibration } from "./_core/loadSense";
+import { applyCalibration, assessWeightStability, buildWeightSnapshot, fitMultiPointCalibration, legalAxleDetermination } from "./_core/loadSense";
 import { assignRecordOwner, recordBelongsToOrganization, type OwnedRecordType } from "./_core/coreRecordOwnership";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -221,6 +221,7 @@ export const inboundRouter = router({
         if (!prior) await db.insert(loadSenseGatewayFrames).values({ orgRef: i.orgRef, sourceClientId: i.clientId, frameKey: scopedFrameKey, gatewayDeviceRef: f.gatewayDeviceId, sequence: f.sequence, measurementDeviceId: binding?.measurementDeviceId ?? null, loadId: f.loadId ?? null, calibrationModelId: calibrationCurrent ? model!.id : null, measuredAt, buffered: f.buffered, readingsJson: JSON.stringify(f.readings), vehicleStateJson: f.vehicle ? JSON.stringify(f.vehicle) : null, receivedAt });
 
         let snapshotRef: string | null = null;
+        let snapshotVerdict: ReturnType<typeof legalAxleDetermination> | null = null;
         if (!prior && binding && f.loadId != null && calibrationCurrent && model) {
           const vehicleComplete = !!f.vehicle && [f.vehicle.speedKph, f.vehicle.pitchDeg, f.vehicle.rollDeg, f.vehicle.accelerationMps2].every(v => typeof v === "number" && Number.isFinite(v));
           const stability = vehicleComplete ? assessWeightStability(f.vehicle!) : { stable: false, score: 0, reasons: ["Vehicle stability telemetry incomplete"] };
@@ -228,15 +229,39 @@ export const inboundRouter = router({
           try { config = binding.channelConfigJson ? JSON.parse(binding.channelConfigJson) : {}; } catch { config = {}; }
           const axleGroups = Object.entries(f.readings).map(([channel, raw]) => ({ axleGroupKey: channel, label: config[channel]?.label ?? channel, weightKg: applyCalibration(raw, { slope: model.slope, offset: model.interceptOffset, pointCount: model.pointCount, rSquared: model.rSquared ?? undefined }), configuredLimitKg: config[channel]?.configuredLimitKg ?? null, limitSource: config[channel]?.limitSource ?? null, sourceChannels: [channel] }));
           const draft = buildWeightSnapshot({ loadId: f.loadId, unitId: binding.unitId, trailerId: binding.trailerId, tareKg: binding.tareKg, axleGroups, measurementSource: "loadsense_calibrated", calibrationId: model.modelRef, stability, measuredAt });
+          /*
+           * P4.2 (0159) — decide whether this reading may stand as a legal axle determination, and
+           * store the decision rather than the sentence. Everything it rests on is frozen on the
+           * snapshot except one thing: a calibration model can be invalidated later, and
+           * re-deriving at read time would make a reading that was legal in March stop having been
+           * legal in June. "Was it legal when taken?" and "is the calibration still trusted?" are
+           * different questions; the second is answered by sweeping calibrationModelId.
+           */
+          const determination = snapshotVerdict = legalAxleDetermination({
+            source: "loadsense_calibrated",
+            calibration: model
+              ? { verifiedAt: model.effectiveAt, expiresAt: calibrationEvent?.validUntil ?? null, invalidatedAt: model.invalidatedAt, status: model.status }
+              : null,
+            stability,
+            readingAt: measuredAt,
+          });
           snapshotRef = ref("LSW");
-          const ins = await db.insert(loadSenseWeightSnapshots).values({ snapshotRef, loadId: f.loadId, unitId: binding.unitId, trailerId: binding.trailerId, measurementDeviceId: binding.measurementDeviceId, calibrationModelId: model.id, measurementSource: "loadsense_calibrated", tareKg: draft.tareKg, grossKg: draft.grossKg, payloadKg: draft.payloadKg, stable: draft.stable, stabilityScore: draft.stabilityScore, measuredAt, payloadHash: draft.payloadHash });
+          const ins = await db.insert(loadSenseWeightSnapshots).values({ snapshotRef, legalDetermination: determination.legal, legalDeterminationCode: determination.legal ? null : determination.code, legalDeterminationReason: determination.legal ? determination.basis : determination.reason, loadId: f.loadId, unitId: binding.unitId, trailerId: binding.trailerId, measurementDeviceId: binding.measurementDeviceId, calibrationModelId: model.id, measurementSource: "loadsense_calibrated", tareKg: draft.tareKg, grossKg: draft.grossKg, payloadKg: draft.payloadKg, stable: draft.stable, stabilityScore: draft.stabilityScore, measuredAt, payloadHash: draft.payloadHash });
           const snapshotId = Number(ins[0]?.insertId ?? 0);
           if (snapshotId > 0) for (const axle of draft.axleGroups) await db.insert(loadSenseAxleWeights).values({ snapshotId, axleGroupKey: axle.axleGroupKey, label: axle.label, weightKg: axle.weightKg, configuredLimitKg: axle.configuredLimitKg ?? null, limitSource: axle.limitSource ?? null, status: axle.status, sourceChannelsJson: JSON.stringify(axle.sourceChannels ?? []) });
         }
         resultKind = snapshotRef ? "loadSenseWeightSnapshot" : "loadSenseGatewayFrame"; resultRef = snapshotRef ?? scopedFrameKey;
         await db.insert(inboundEvents).values({ orgRef: i.orgRef, inboundRef, clientId: i.clientId, feed: input.feed, idempotencyKey: input.idempotencyKey, payloadJson, payloadHash, status: "accepted", resultKind, resultRef, receivedAt });
         const classification = snapshotRef ? "server-calibrated LoadSense snapshot" : binding ? "raw LoadSense evidence; no current usable calibration/load" : "raw LoadSense evidence; gateway not bound";
-        return { inboundRef, status: "accepted" as const, becomes: d.becomes, note: `${classification}. Billing authority: not_granted. Certified-scale authority: not_granted.`, resultRef };
+        // The authority line is now produced by the rule, not asserted beside it. It still says
+        // not_granted in every case the rule refuses — which is the point: the sentence and the
+        // behaviour can no longer drift apart.
+        const authority = snapshotVerdict == null
+          ? "Billing authority: not_granted. Certified-scale authority: not_granted."
+          : snapshotVerdict.legal
+            ? `Legal axle determination: granted. ${snapshotVerdict.basis} Billing authority: not_granted until a person accepts it.`
+            : `Legal axle determination: not_granted (${snapshotVerdict.code}). ${snapshotVerdict.reason} Still usable for ${snapshotVerdict.stillUsableFor}.`;
+        return { inboundRef, status: "accepted" as const, becomes: d.becomes, note: `${classification}. ${authority}`, resultRef };
       }
 
       if (input.feed === "fuel_transaction") {

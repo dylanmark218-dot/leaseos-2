@@ -7650,6 +7650,11 @@ export const loadSenseWeightSnapshots = mysqlTable("loadSenseWeightSnapshots", {
   longitude: double("longitude"),
   measuredAt: timestamp("measuredAt").notNull(),
   payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
+  // 0159: the verdict as decided, not re-derived. A calibration invalidated later must not
+  // silently un-make a determination that was legal when the reading was taken.
+  legalDetermination: boolean("legalDetermination"),
+  legalDeterminationCode: varchar("legalDeterminationCode", { length: 40 }),
+  legalDeterminationReason: varchar("legalDeterminationReason", { length: 500 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

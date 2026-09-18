@@ -398,7 +398,8 @@ export function calibrationInvalidationReason(input: {
  * officer, and the refusal says which condition is missing so somebody can fix it.
  */
 export type AxleDeterminationRefusalCode =
-  | "NO_CALIBRATION" | "CALIBRATION_EXPIRED" | "READING_UNSTABLE" | "SOURCE_NOT_ELIGIBLE";
+  | "NO_CALIBRATION" | "CALIBRATION_EXPIRED" | "CALIBRATION_INVALIDATED" | "CALIBRATION_NOT_YET_EFFECTIVE"
+  | "READING_UNSTABLE" | "SOURCE_NOT_ELIGIBLE";
 
 export type AxleDeterminationVerdict =
   | { legal: true; confidence: WeightConfidence; basis: string }
@@ -409,8 +410,16 @@ const LEGALLY_ELIGIBLE_SOURCES: readonly WeightSource[] = ["certified_scale", "l
 
 export function legalAxleDetermination(input: {
   source: WeightSource;
-  /** The calibration in force for this device, if any, and when it stops being current. */
-  calibration: { verifiedAt: Date; expiresAt: Date | null } | null;
+  /**
+   * The calibration in force for this device, if any.
+   *
+   * `invalidatedAt` and `expiresAt` are kept apart deliberately. A calibration that lapsed was
+   * fine and got old; one that was invalidated is one somebody withdrew, usually because it was
+   * found wrong. Both refuse the determination, and a person chasing the refusal needs to know
+   * which — "recalibrate the device" and "the last calibration was bad, check what it certified"
+   * are different mornings.
+   */
+  calibration: { verifiedAt: Date; expiresAt: Date | null; invalidatedAt?: Date | null; status?: string } | null;
   stability: { stable: boolean; reasons: readonly string[] };
   readingAt: Date;
 }): AxleDeterminationVerdict {
@@ -428,6 +437,25 @@ export function legalAxleDetermination(input: {
       return {
         legal: false, code: "NO_CALIBRATION", stillUsableFor: usable,
         reason: "No calibration is on file for this device, so there is nothing establishing what its raw reading means.",
+      };
+    }
+    const cal = input.calibration;
+    if (cal.verifiedAt > input.readingAt) {
+      return {
+        legal: false, code: "CALIBRATION_NOT_YET_EFFECTIVE", stillUsableFor: usable,
+        reason: `The calibration takes effect ${cal.verifiedAt.toISOString().slice(0, 10)}, after this reading. A calibration cannot certify a number taken before it existed.`,
+      };
+    }
+    if (cal.invalidatedAt && cal.invalidatedAt <= input.readingAt) {
+      return {
+        legal: false, code: "CALIBRATION_INVALIDATED", stillUsableFor: usable,
+        reason: `The calibration was invalidated ${cal.invalidatedAt.toISOString().slice(0, 10)}, before this reading. Invalidated is not lapsed: somebody withdrew it, so what it certified is in question rather than merely old.`,
+      };
+    }
+    if (cal.status != null && cal.status !== "active" && cal.status !== "current") {
+      return {
+        legal: false, code: "CALIBRATION_INVALIDATED", stillUsableFor: usable,
+        reason: `The calibration model is ${cal.status}, not in force. A model that is not in force cannot carry a legal determination whatever its numbers say.`,
       };
     }
     if (input.calibration.expiresAt && input.calibration.expiresAt <= input.readingAt) {
