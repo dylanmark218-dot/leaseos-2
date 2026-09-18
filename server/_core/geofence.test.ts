@@ -116,3 +116,36 @@ describe("detectTransitions", () => {
     expect(events.find(e => e.zoneId === 15)?.eventType).toBe("exit");
   });
 });
+
+describe("where the fix came from caps how far it can be trusted", () => {
+  // Deliberately generous geometry: well inside the zone, a metre of claimed accuracy. On the
+  // arithmetic alone every one of these is `high`, which is the point — the cap is the only thing
+  // separating a satellite fix from someone typing where they think they are.
+  const wellInside = { latitude: 53.5461, longitude: -113.4938, accuracyMetres: 1 };
+  const zone = { id: 7, latitude: 53.5461, longitude: -113.4938, radiusMetres: 200 };
+
+  it("leaves a satellite fix at high", () => {
+    expect(evaluateZoneMembership(wellInside, zone, "gps").confidence).toBe("high");
+  });
+
+  it("caps dead reckoning at medium — inference from the last fix, not an observation", () => {
+    expect(evaluateZoneMembership(wellInside, zone, "dead_reckoning").confidence).toBe("medium");
+  });
+
+  it("caps a manual position at low, however precise it claims to be", () => {
+    // A driver typing "I'm at the lease" can be recorded with one metre of accuracy. Nothing stops
+    // that, and without the cap it would propose an arrival that looks measured.
+    expect(evaluateZoneMembership(wellInside, zone, "manual").confidence).toBe("low");
+  });
+
+  it("only ever lowers: a poor fix is not promoted by being a satellite one", () => {
+    const edge = { latitude: 53.5461, longitude: -113.4920, accuracyMetres: 500 };
+    const plain = evaluateZoneMembership(edge, zone).confidence;
+    expect(evaluateZoneMembership(edge, zone, "gps").confidence).toBe(plain);
+    expect(plain).toBe("low");
+  });
+
+  it("is unchanged when no source is given, so existing callers keep their behaviour", () => {
+    expect(evaluateZoneMembership(wellInside, zone).confidence).toBe("high");
+  });
+});

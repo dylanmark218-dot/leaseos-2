@@ -66,9 +66,43 @@ export function haversineMetres(
  * where accuracy degrades, this naturally downgrades to "low" instead of
  * pretending precision that isn't there.
  */
+/**
+ * Where the fix came from. Accuracy alone cannot tell these apart, and they are not comparable
+ * kinds of evidence: a GPS receiver reports a measurement with an error estimate, a network fix
+ * reports a coarser one whose estimate is often optimistic, and a typed position reports what a
+ * person believes. All three arrive as a latitude, a longitude and a number called accuracy.
+ */
+export type FixSource = "gps" | "dead_reckoning" | "manual";
+
+/**
+ * The highest confidence each source may reach, whatever accuracy it claims.
+ *
+ * This is the same distinction the HOS attestation draws between stated and computed, one layer
+ * down. A driver typing "I'm at the lease" can be recorded with `accuracyMetres: 5` — nothing
+ * stops that, and the arithmetic below would then call it `high` and propose an arrival that looks
+ * measured. A typed position is a statement; it may be perfectly true and it is still not a
+ * measurement, so it is capped where a person can see it is one.
+ */
+const CONFIDENCE_CEILING: Readonly<Record<FixSource, Confidence>> = {
+  gps: "high",
+  // Dead reckoning is inference from the last known fix and a heading — a real method, and one
+  // whose error grows with every metre travelled since the signal was lost.
+  dead_reckoning: "medium",
+  manual: "low",       // a statement about position, not an observation of it
+};
+
+const CONFIDENCE_RANK: Readonly<Record<Confidence, number>> = { low: 0, medium: 1, high: 2 };
+
 export function evaluateZoneMembership(
   point: BreadcrumbPoint,
-  zone: ZoneCandidate
+  zone: ZoneCandidate,
+  /**
+   * The value `tripBreadcrumbs.source` already carries. The column has recorded it since the table
+   * existed; the confidence arithmetic simply never read it, so a typed position and a satellite
+   * fix of the same claimed accuracy produced the same verdict. Optional here so existing callers
+   * are unchanged; `tripGps` passes it, which is the boundary where a zone event is proposed.
+   */
+  fixSource?: FixSource
 ): ZoneMembership {
   const distanceMetres = haversineMetres(
     point.latitude,
@@ -87,6 +121,13 @@ export function evaluateZoneMembership(
   if (accuracyMetres <= margin * 0.5) confidence = "high";
   else if (accuracyMetres <= margin) confidence = "medium";
   else confidence = "low";
+
+  // The ceiling only ever lowers. A source can make a tight fix less trusted; none can make a
+  // loose one more trusted, which is why this is a cap and not a second opinion.
+  if (fixSource) {
+    const ceiling = CONFIDENCE_CEILING[fixSource];
+    if (CONFIDENCE_RANK[confidence] > CONFIDENCE_RANK[ceiling]) confidence = ceiling;
+  }
 
   return { zoneId: zone.id, distanceMetres, inside, confidence };
 }

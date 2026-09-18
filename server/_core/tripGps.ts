@@ -12,6 +12,7 @@ import {
   detectTransitions,
   evaluateZoneMembership,
   type ZoneCandidate,
+  type FixSource,
 } from "./geofence";
 
 export type IngestBreadcrumbResult = {
@@ -54,7 +55,10 @@ export async function ingestBreadcrumb(
         longitude: input.longitude,
         accuracyMetres: input.accuracyMetres ?? null,
       },
-      zone
+      zone,
+      // The breadcrumb's own source, which the column has always carried and the confidence
+      // arithmetic never read. A typed position must not be read as a satellite fix.
+      (input.source ?? "gps") as FixSource
     )
   );
 
