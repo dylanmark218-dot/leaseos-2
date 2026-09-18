@@ -4,6 +4,8 @@ import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PanelSourceBadge } from "./SourcedPanel";
+import { demonstration, fromQuery } from "./panelSource";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
@@ -546,6 +548,7 @@ function Overview() {
                 <CardTitle className="text-[15px] font-semibold text-[#172033]">
                   Live field picture
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("this overview reads no records; the fleet picture is the demonstration layout")} />
                 <p className="mt-1 text-xs text-[#8492a5]">
                   Vehicles, active routes, and key operating locations
                 </p>
@@ -567,6 +570,7 @@ function Overview() {
                 <CardTitle className="text-[15px] font-semibold text-[#172033]">
                   Signals that need you
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("the overview signals are the demonstration layout; the safety workspace below reads the real events")} />
                 <p className="mt-1 text-xs text-[#8492a5]">
                   Priority items from the field
                 </p>
@@ -670,6 +674,7 @@ function Overview() {
                 <CardTitle className="text-[15px] font-semibold text-[#172033]">
                   Active work
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("JOB-08421 and its companions are demonstration jobs; no job record is read on this page")} />
                 <p className="mt-1 text-xs text-[#8492a5]">
                   A glance at every crew currently in motion
                 </p>
@@ -749,6 +754,7 @@ function Overview() {
                   <CardTitle className="text-[15px] font-semibold text-[#172033]">
                     Shift pulse
                   </CardTitle>
+              <PanelSourceBadge source={demonstration("the shift figures are laid out to show the shape of the screen; no duty record is read")} />
                   <p className="mt-1 text-xs text-[#8492a5]">
                     Field performance today
                   </p>
@@ -1972,6 +1978,7 @@ function SafetyWorkspace() {
                 <CardTitle className="text-[15px] font-semibold text-[#172033]">
                   Pre-job checklist
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("the checklist is the demonstration layout; the readiness engine is not run on this page")} />
                 <p className="mt-1 text-xs text-[#8492a5]">
                   Hydrovac 42 · JOB-08421
                 </p>
@@ -2068,6 +2075,7 @@ function SafetyWorkspace() {
                   <CardTitle className="text-[15px] font-semibold text-[#172033]">
                     Compliance timeline
                   </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.safety.list", persistedSafety, { whenEmpty: "no safety event exists on this database yet" })} />
                   <p className="mt-1 text-xs text-[#8492a5]">
                     Chronological record for the selected job
                   </p>

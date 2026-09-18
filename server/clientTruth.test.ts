@@ -106,6 +106,8 @@ describe("showcase panels declare their source", () => {
     "ComplianceEngine.tsx": 3,
     "BillingSafetyWorkspace.tsx": 3,
     "TripOperationsWorkspace.tsx": 3,
+    "Home.tsx": 6,
+    "FleetWorkspace.tsx": 9,
   };
   const pages = readdirSync("client/src/showcase").filter(f => f.endsWith(".tsx") && !/^(ShowcaseFrame|SourcedPanel)\.tsx$/.test(f) && !f.endsWith(".test.tsx"));
 
@@ -117,10 +119,10 @@ describe("showcase panels declare their source", () => {
     }
   });
 
-  it("names the pages not yet converted, so the gap is a number rather than a surprise", () => {
-    const unconverted = pages.filter(f => !(f in PINNED) && !readFileSync(`client/src/showcase/${f}`, "utf8").includes("PanelSourceBadge"));
-    // Home and FleetWorkspace are the two largest screens (2,150 and 1,578 lines); they are next.
-    expect(unconverted.sort()).toEqual(["FleetWorkspace.tsx", "Home.tsx"]);
+  it("leaves no showcase page without the statement", () => {
+    const unconverted = pages.filter(f => !readFileSync(`client/src/showcase/${f}`, "utf8").includes("PanelSourceBadge"));
+    expect(unconverted.sort()).toEqual([]);   // every showcase page is converted as of v22.54
+    expect(pages.sort()).toEqual(Object.keys(PINNED).sort());
   });
 
   it("refuses a badge whose reason was left empty", () => {

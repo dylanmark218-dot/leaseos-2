@@ -1,6 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PanelSourceBadge } from "./SourcedPanel";
+import { demonstration, fromQuery } from "./panelSource";
 import { Separator } from "@/components/ui/separator";
 import { trpc } from "@/lib/trpc";
 import { useMemo, useState } from "react";
@@ -313,6 +315,7 @@ function IdentityTab() {
                 <CardTitle className="text-[15px] text-[#3a4655]">
                   Document readiness
                 </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.identity.documents.list", documents, { whenEmpty: "no compliance document exists on this database yet" })} />
                 <p className="mt-1 text-xs text-[#a27d70]">
                   OCR proposes fields; a human confirms before authority.
                 </p>
@@ -344,6 +347,7 @@ function IdentityTab() {
             <CardTitle className="text-[15px] text-[#172033]">
               Secure document wallet
             </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.identity.documents.list", documents, { whenEmpty: "no compliance document exists on this database yet" })} />
             <p className="mt-1 text-xs text-[#8492a4]">
               Driver licence, insurance, permits, certificates, and
               authorizations.
@@ -468,6 +472,7 @@ function UnitsTab() {
               <CardTitle className="text-[15px] text-[#172033]">
                 Unit identity wallet
               </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.identity.units.list", units, { whenEmpty: "no unit exists on this database yet" })} />
               <p className="mt-1 text-xs text-[#8492a4]">
                 Scan a physical unit to load its verified configuration.
               </p>
@@ -610,6 +615,7 @@ function UnitsTab() {
             <CardTitle className="text-[15px] text-[#172033]">
               Unit document wallet
             </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.identity.documents.list", documents, { whenEmpty: "no compliance document exists on this database yet" })} />
             <p className="mt-1 text-xs text-[#8492a4]">
               VIN, inspection, insurance, and equipment records linked to a
               physical unit.
@@ -631,6 +637,7 @@ function UnitsTab() {
           <CardTitle className="text-[15px] text-[#172033]">
             Travel readiness engine
           </CardTitle>
+              <PanelSourceBadge source={demonstration("the readiness engine is not run on this page; these states are the demonstration layout")} />
           <p className="mt-1 text-xs text-[#8492a4]">
             Documented conditions only; not a mechanic, legal determination, or
             guarantee.
@@ -675,6 +682,7 @@ function LoadTab() {
                 <CardTitle className="text-[15px] text-[#172033]">
                   Tell the app what you’re hauling
                 </CardTitle>
+              <PanelSourceBadge source={demonstration("this is the form on this page, not a classified load record")} />
                 <p className="mt-1 text-xs text-[#8492a4]">
                   Voice or text becomes a structured load profile for review.
                 </p>
@@ -767,6 +775,7 @@ function LoadTab() {
             <CardTitle className="text-[15px] text-[#172033]">
               Placard assistant
             </CardTitle>
+              <PanelSourceBadge source={demonstration("a placard suggestion is a candidate for a person to verify, never a certification; nothing here is read from a TDG record")} />
             <p className="mt-1 text-xs text-[#8492a4]">
               Populates only after classification is verified.
             </p>
@@ -903,6 +912,7 @@ function FacilitiesTab() {
               <CardTitle className="text-[15px] text-[#6f4135]">
                 Dangerous-hours alert
               </CardTitle>
+              <PanelSourceBadge source={demonstration("the alert is laid out to show the shape of the screen; no duty record or HOS rule is read here")} />
             </div>
           </CardHeader>
           <CardContent className="px-5 pb-5 sm:px-6">
@@ -985,6 +995,7 @@ function MaintenanceTab() {
               <CardTitle className="mt-2 text-2xl tracking-[-0.05em] text-[#172033]">
                 Unit 247 health
               </CardTitle>
+              <PanelSourceBadge source={fromQuery("fieldRoute.compliance.maintenance.list", defects, { whenEmpty: "no maintenance defect exists on this database yet" })} />
               <p className="mt-1 text-sm text-[#8492a4]">
                 Photograph defects, parts, odometers, and completed repairs.
               </p>
