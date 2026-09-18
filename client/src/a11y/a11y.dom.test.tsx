@@ -1,0 +1,97 @@
+/**
+ * P5.3 — the real axe WCAG A/AA rules against our real components, at three widths.
+ * See axeHarness.ts for what a renderer-free environment can and cannot decide.
+ */
+import { cleanup, render } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { NEEDS_A_RENDERER, VIEWPORTS, describeRun, runAxe, setViewport } from "./axeHarness";
+import { DisposalFinderView, type DisposalFinderViewProps } from "../pages/DisposalFinderView";
+import { CommercialOfficeView, type CommercialOfficeViewProps } from "../pages/CommercialOfficeView";
+import { SourcedPanel } from "../showcase/SourcedPanel";
+import { demonstration, fromQuery } from "../showcase/panelSource";
+
+afterEach(cleanup);
+
+const finder = (): DisposalFinderViewProps => ({
+  lsd: "07-18-053-18 W5M", onLsdChange: () => {}, wasteCode: "", onWasteCodeChange: () => {}, wasteCodes: ["produced_water"], onFind: () => {}, finding: false,
+  result: { outcome: "located", origin: { latitude: 53.5, longitude: -116.6, basis: "theoretical", descriptor: "07-18-053-18 W5M", note: "theoretical centroid" }, facilities: [{ facilityKey: "a", name: "Edson TRD", municipality: "Edson", province: "AB", facilityType: "trd", distanceKm: 1.4, coordinatePrecision: "approximate_site", routable: false, phone: "780-723-1912", dispatchPhone: null, afterHoursPhone: null, websiteUrl: null, commercialAccess: "commercial_preapproval_required", lifecycle: "operating", legalLocation: "07-18-053-18 W5M" }], note: "call ahead" },
+  selectedKey: "a", onSelect: () => {},
+  view: { facility: { name: "Edson TRD", coordinatePrecision: "approximate_site", routable: false, commercialAccess: "commercial_preapproval_required", lifecycle: "operating", legalLocation: "07-18-053-18 W5M", physicalAddress: null, regulatorRef: "WM 078", preapprovalRequired: null, manifestRequired: null, normAccepted: null, sourAccepted: null, twentyFourHourCallout: null }, contact: { phone: "780-723-1912", dispatchPhone: null, afterHoursPhone: null, email: null, websiteUrl: null, gateInstructions: null }, links: { call: "tel:7807231912", googleDirections: null, appleDirections: null, website: null }, warnings: ["Coordinates are not a verified entrance"], hoursToday: { state: "unknown", note: "No hours on file" }, currentWait: { state: "unknown", note: "No wait report" }, callAhead: { state: "none_valid", note: "No valid call-ahead" }, accepts: [] },
+  viewLoading: false, onCallAhead: () => {}, callAheadBusy: false, onWaitReport: () => {}, waitBusy: false,
+});
+
+const office = (tab: CommercialOfficeViewProps["tab"]): CommercialOfficeViewProps => ({
+  tab, onTab: () => {}, orgQuery: "", onOrgQuery: () => {},
+  organizations: [{ orgRef: "ORG-1", name: "Fixture Energy", status: "active", roles: [{ roleKey: "client", commercialNumber: "CLI-000001" }] }],
+  roleTypes: [{ roleKey: "client", label: "Client" }], onCreateOrganization: () => {}, creating: false, onAssignRole: () => {},
+  candidateType: "vendor", onCandidateType: () => {}, candidates: [{ recordType: "vendor", recordId: 7, capturedName: "Big Iron", orgRef: "ORG-2", organizationName: "Big Iron", evidence: "exact_name_match", applied: false }], unlinkedCount: 1, onLink: () => {},
+  docFilter: { documentType: "", recordType: "", recordRef: "", includeSuperseded: false }, onDocFilter: () => {},
+  documents: [{ documentRef: "DOC-1", documentType: "invoice", title: "Invoice", version: 1, status: "current", contentHash: "a".repeat(64), counterpartyOrgRef: null, issuedAt: null, retentionClass: null }],
+  selectedDoc: null, onSelectDoc: () => {},
+  statements: [{ statementRef: "FST-1", facilityOrgRef: "ORG-9", periodStart: "2026-08-01", periodEnd: "2026-08-31", lineCount: 3, matchedCount: 1, varianceCount: 1, unmatchedCount: 0, ambiguousCount: 1, status: "open", openLines: 2 }],
+  selectedStatement: "FST-1", onSelectStatement: () => {},
+  lines: [{ lineNo: 2, facilityTicketNumber: null, matchOutcome: "ambiguous", resolution: null, variances: null, candidateTicketIds: [11, 12], quantity: 8, amountCents: 120000 }],
+  onResolveLine: () => {}, resolving: false,
+  entityId: "7", onEntityId: () => {}, period: { from: "2026-09-01", to: "2026-09-30" }, onPeriod: () => {},
+  arAging: { organizations: [{ orgRef: "ORG-1", label: "Fixture Energy", buckets: {}, totalOutstandingCents: 350000 }], unlinked: [] },
+  apAging: { organizations: [], unlinked: [] },
+  glReadiness: { state: "BLOCKED", blockers: [{ reason: "revenue:disposal has no GL account" }] },
+  profitability: { dimension: "job", derivable: "yes", rows: [{ key: "JOB-1", label: "JOB-1", marginCents: 120000 }] },
+  profitDimension: "job", onProfitDimension: () => {},
+});
+
+const surfaces = [
+  { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
+  { name: "commercial office — organizations", render: () => render(<CommercialOfficeView {...office("organizations")} />) },
+  { name: "commercial office — documents", render: () => render(<CommercialOfficeView {...office("documents")} />) },
+  { name: "commercial office — disposal", render: () => render(<CommercialOfficeView {...office("disposal")} />) },
+  { name: "commercial office — month close", render: () => render(<CommercialOfficeView {...office("month_close")} />) },
+  { name: "showcase panel — records", render: () => render(<SourcedPanel title="Saved decisions" source={fromQuery("x.list", [{ id: 1 }])}><p>body</p></SourcedPanel>) },
+  { name: "showcase panel — demonstration", render: () => render(<SourcedPanel title="Route alternatives" source={demonstration("no routing engine result is read on this page")}><p>body</p></SourcedPanel>) },
+];
+
+describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {
+  for (const v of VIEWPORTS) {
+    for (const s of surfaces) {
+      it(`${s.name} at ${v.name} (${v.width}px) has no violation`, async () => {
+        setViewport(v);
+        const { container } = s.render();
+        const run = await runAxe(container);
+        expect(run.violations, describeRun(run)).toEqual([]);
+      }, 30_000);
+    }
+  }
+
+  it("catches a real violation, so a green suite means the rules ran and not that they were inert", async () => {
+    setViewport(VIEWPORTS[0]);
+    const { container } = render(
+      <div>
+        <img src="x.png" />
+        <input type="text" />
+        <a href="#x" />
+      </div>,
+    );
+    const run = await runAxe(container);
+    const ids = run.violations.map(v => v.id);
+    expect(ids, describeRun(run)).toEqual(expect.arrayContaining(["image-alt"]));
+    expect(ids.length).toBeGreaterThanOrEqual(2);   // the unlabelled input and the empty link are found too
+  }, 30_000);
+
+  it("actually applies the rule set — a suite that checked nothing is not a pass", async () => {
+    setViewport(VIEWPORTS[2]);
+    const { container } = render(<CommercialOfficeView {...office("month_close")} />);
+    const run = await runAxe(container);
+    // A small fragment can legitimately match no rule; a full screen cannot. This is where the floor belongs.
+    expect(run.passes, describeRun(run)).toBeGreaterThanOrEqual(5);
+  }, 30_000);
+
+  it("says plainly which rules it did not evaluate, so a green run is not read as accessible", async () => {
+    setViewport(VIEWPORTS[0]);
+    const { container } = render(<SourcedPanel title="Any" source={demonstration("a panel to run the rules against")}><p>body</p></SourcedPanel>);
+    const run = await runAxe(container);
+    expect(run.notEvaluated).toEqual(NEEDS_A_RENDERER);
+    expect(describeRun(run)).toContain("need a renderer and were not evaluated");
+    expect(NEEDS_A_RENDERER).toContain("color-contrast");   // contrast is the one people assume is covered
+    expect(NEEDS_A_RENDERER).toContain("target-size");
+  });
+});
