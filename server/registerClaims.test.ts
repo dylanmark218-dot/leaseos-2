@@ -84,8 +84,18 @@ describe("the register does not understate the branch either", () => {
     const offenders: string[] = [];
     for (const line of text.split("\n")) {
       if (!line.startsWith("| P")) continue;
-      const marker = /\*\*([A-Z][A-Z /]{2,40})/.exec(line);
-      if (!marker) continue;   // a row with no marker is simply open, which is a legitimate state
+      /*
+       * The marker is the FIRST bolded span in the status cell, not any bolded capitals in the
+       * line. Matching anywhere fired on "**GPS-monitoring notices built**" in the middle of a
+       * sentence — and a guard that fails on ordinary prose is a guard somebody deletes.
+       */
+      const statusCell = line.split("|")[3] ?? "";
+      const first = /\*\*([^*]+)\*\*/.exec(statusCell);
+      if (!first) continue;   // a row with no marker is simply open, which is a legitimate state
+      // Only an all-caps opening reads as a status word; a sentence like "Corrected, then partly
+      // DONE" is prose describing the row and is left alone.
+      const marker = /^([A-Z][A-Z /]{2,40})/.exec(first[1]!.trim());
+      if (!marker) continue;
       const word = marker[1]!.trim();
       if (!STATUS_VOCABULARY.some(v => word.startsWith(v))) offenders.push(`${rowId(line)} → "${word}"`);
     }

@@ -8679,3 +8679,24 @@ export const restrictedAccessEvents = mysqlTable("restrictedAccessEvents", {
   decisionReason: varchar("decisionReason", { length: 500 }),
   occurredAt: timestamp("occurredAt").notNull().defaultNow(),
 });
+
+/** P4.6 (0160) — the record that a worker was told what is collected about them. Absence means not notified. */
+export const monitoringNotices = mysqlTable("monitoringNotices", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  subjectUserId: int("subjectUserId").notNull(),
+  purpose: mysqlEnum("purpose", ["vehicle_location", "driver_duty_hours", "in_cab_camera", "device_telemetry", "app_usage", "biometric_device_unlock"]).notNull(),
+  noticeVersion: varchar("noticeVersion", { length: 40 }).notNull(),
+  /** A notice nobody can reproduce proves nothing. */
+  noticeTextHash: varchar("noticeTextHash", { length: 128 }).notNull(),
+  issuedAt: timestamp("issuedAt").notNull().defaultNow(),
+  issuedByUserId: int("issuedByUserId").notNull(),
+  /** Null until the person acknowledges. Issued and unacknowledged is a real state, not an error. */
+  acknowledgedAt: timestamp("acknowledgedAt"),
+  acknowledgementMethod: mysqlEnum("acknowledgementMethod", ["in_app", "signed_document", "verbal_witnessed"]),
+  acknowledgementEvidenceRecordId: int("acknowledgementEvidenceRecordId"),
+  supersededAt: timestamp("supersededAt"),
+  supersededByNoticeId: int("supersededByNoticeId"),
+  withdrawnAt: timestamp("withdrawnAt"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+});
