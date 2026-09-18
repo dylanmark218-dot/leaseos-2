@@ -22,6 +22,11 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { roleProcedure, router } from "./_core/trpc";
 import * as svc from "./payrollService";
+import { getDb } from "./db";
+import { resolveActingScope } from "./_core/actingScope";
+import { assertAdjustmentInScope, assertDisputeInScope, assertEntityInScope, assertPeriodInScope, assertProfileInScope, assertRunInScope, assertSettlementInScope, entityIdsInScope, entityOwnerFor, type MoneyScope } from "./_core/entityScope";
+import { employeePayrollProfiles } from "../drizzle/schema";
+import { inArray } from "drizzle-orm";
 import {
   assertPayrollEligibility,
   assertSettlementEligibility,
@@ -44,12 +49,27 @@ import {
 const notFound = (m: string) => new TRPCError({ code: "NOT_FOUND", message: m });
 const badRequest = (m: string) => new TRPCError({ code: "BAD_REQUEST", message: m });
 
-/** Resolve the caller's own profile or refuse. Never takes an id from input. */
+/** 0146 — the acting scope, as the money boundary: which financial entities this caller may see. */
+async function moneyScope(userId: number): Promise<{ db: NonNullable<Awaited<ReturnType<typeof getDb>>>; scope: MoneyScope; entityIds: number[] }> {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  const scope = { tenantId: (await resolveActingScope(db, userId)).tenantId };
+  return { db, scope, entityIds: await entityIdsInScope(db, scope) };
+}
+/** Profile ids the scope may see — the join key for earnings and disputes. */
+async function profileIdsInScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, entityIds: number[]): Promise<number[]> {
+  if (!entityIds.length) return [];
+  return (await db.select({ id: employeePayrollProfiles.id }).from(employeePayrollProfiles).where(inArray(employeePayrollProfiles.financialEntityId, entityIds))).map(r => r.id);
+}
+
+/** Resolve the caller's own profile or refuse. Never takes an id from input; the profile's entity must be in the acting scope. */
 async function ownProfileOrThrow(userId: number) {
   const p = await svc.resolveOwnPayrollProfile(userId);
   if (!p) {
     throw notFound("No payroll profile is linked to your account");
   }
+  const { db, scope } = await moneyScope(userId);
+  try { await assertEntityInScope(db, p.financialEntityId, scope); } catch { throw notFound("No payroll profile is linked to your account in this organization"); }
   return p;
 }
 
@@ -166,8 +186,8 @@ export const payrollRouter = router({
 
   /* ---------------- Administration ---------------- */
 
-  profilesList: roleProcedure("payroll.profilesList").query(() =>
-    svc.listPayrollProfiles()
+  profilesList: roleProcedure("payroll.profilesList").query(async ({ ctx }) =>
+    svc.listPayrollProfiles((await moneyScope(ctx.user.id)).entityIds)
   ),
 
   profileUpsert: roleProcedure("payroll.profileUpsert")
@@ -186,7 +206,8 @@ export const payrollRouter = router({
         workerKind: z.enum(["employee", "contractor"]).default("employee"),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope);
       // A contractor does not get an employee payroll profile because they
       // drove a truck. Hard refusal, not a warning.
       const eligible = assertPayrollEligibility({ kind: input.workerKind });
@@ -233,7 +254,7 @@ export const payrollRouter = router({
       return { version: r?.version ?? null, supersededPriorVersion: true };
     }),
 
-  periodsList: roleProcedure("payroll.periodsList").query(() => svc.listPayPeriods()),
+  periodsList: roleProcedure("payroll.periodsList").query(async ({ ctx }) => svc.listPayPeriods((await moneyScope(ctx.user.id)).entityIds)),
 
   periodOpen: roleProcedure("payroll.periodOpen")
     .input(
@@ -244,7 +265,8 @@ export const payrollRouter = router({
         endsOn: z.coerce.date(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope);
       if (input.endsOn <= input.startsOn) {
         throw badRequest("Pay period ends before it starts");
       }
@@ -254,7 +276,7 @@ export const payrollRouter = router({
 
   earningsList: roleProcedure("payroll.earningsList")
     .input(z.object({ payPeriodId: z.number().int().optional() }).optional())
-    .query(({ input }) => svc.listEarnings({ payPeriodId: input?.payPeriodId })),
+    .query(async ({ ctx, input }) => { const m = await moneyScope(ctx.user.id); if (input?.payPeriodId != null) await assertPeriodInScope(m.db, input.payPeriodId, m.scope); return svc.listEarnings({ payPeriodId: input?.payPeriodId, profileIds: await profileIdsInScope(m.db, m.entityIds) }); }),
 
   /**
    * Propose an earning. The amount is calculated here from the rate in force
@@ -280,7 +302,8 @@ export const payrollRouter = router({
         // No rate, no amount. Those are server business.
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertPeriodInScope(m.db, input.payPeriodId, m.scope); await assertProfileInScope(m.db, input.employeePayrollProfileId, m.scope);
       const rates = await svc.listPayRates(input.earningType);
       const calc = calculateEarning({
         proposal: {
@@ -335,7 +358,8 @@ export const payrollRouter = router({
         toleranceMinutes: z.number().int().min(0).max(240).optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertProfileInScope(m.db, input.employeePayrollProfileId, m.scope);
       const r = reconcileClocks({
         readings: {
           employeeSubmittedMinutes: input.employeeSubmittedMinutes ?? null,
@@ -357,7 +381,7 @@ export const payrollRouter = router({
       return { ...r, employeeSubmittedTimeChanged: false };
     }),
 
-  disputesList: roleProcedure("payroll.disputesList").query(() => svc.listDisputes()),
+  disputesList: roleProcedure("payroll.disputesList").query(async ({ ctx }) => { const m = await moneyScope(ctx.user.id); return svc.listDisputes(await profileIdsInScope(m.db, m.entityIds)); }),
 
   disputeResolve: roleProcedure("payroll.disputeResolve")
     .input(
@@ -368,6 +392,7 @@ export const payrollRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertDisputeInScope(m.db, input.disputeRef, m.scope);
       await svc.resolveDispute({ ...input, resolvedByUserId: ctx.user.id });
       // Both sides survive: the employee statement is untouched.
       return { resolved: true, employeeStatementPreserved: true };
@@ -375,7 +400,7 @@ export const payrollRouter = router({
 
   /* ---------------- Runs ---------------- */
 
-  runsList: roleProcedure("payroll.runsList").query(() => svc.listPayRuns()),
+  runsList: roleProcedure("payroll.runsList").query(async ({ ctx }) => svc.listPayRuns((await moneyScope(ctx.user.id)).entityIds)),
 
   runCreate: roleProcedure("payroll.runCreate")
     .input(
@@ -385,7 +410,8 @@ export const payrollRouter = router({
         financialEntityId: z.number().int(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); await assertPeriodInScope(m.db, input.payPeriodId, m.scope);
       const id = await svc.createPayRun({ ...input, state: "draft" });
       return { id: id ? Number(id) : null, state: "draft" };
     }),
@@ -402,6 +428,7 @@ export const payrollRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertRunInScope(m.db, input.payRunRef, m.scope);
       const run = await svc.loadPayRun(input.payRunRef);
       if (!run) throw notFound("No such pay run");
 
@@ -433,6 +460,7 @@ export const payrollRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertProfileInScope(m.db, input.employeePayrollProfileId, m.scope);
       const id = await svc.requestAdjustment({
         adjustmentRef: input.adjustmentRef,
         employeePayrollProfileId: input.employeePayrollProfileId,
@@ -448,6 +476,7 @@ export const payrollRouter = router({
   adjustmentApprove: roleProcedure("payroll.adjustmentApprove")
     .input(z.object({ adjustmentRef: z.string().min(3).max(64) }))
     .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertAdjustmentInScope(m.db, input.adjustmentRef, m.scope);
       await svc.approveAdjustment({
         adjustmentRef: input.adjustmentRef,
         approvedByUserId: ctx.user.id,
@@ -457,7 +486,8 @@ export const payrollRouter = router({
 
   export: roleProcedure("payroll.export")
     .input(z.object({ payRunRef: z.string().min(3).max(64) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertRunInScope(m.db, input.payRunRef, m.scope);
       const run = await svc.loadPayRun(input.payRunRef);
       if (!run) throw notFound("No such pay run");
       return { payRunRef: run.payRunRef, state: run.state, exported: true };
@@ -465,8 +495,8 @@ export const payrollRouter = router({
 });
 
 export const contractorRouter = router({
-  settlementsList: roleProcedure("contractors.settlementsList").query(() =>
-    svc.listSettlements()
+  settlementsList: roleProcedure("contractors.settlementsList").query(async ({ ctx }) =>
+    svc.listSettlements((await moneyScope(ctx.user.id)).entityIds)
   ),
 
   settlementCreate: roleProcedure("contractors.settlementCreate")
@@ -495,7 +525,8 @@ export const contractorRouter = router({
           .min(1),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.payingEntityId, m.scope); }
       // An employee is not settled as a contractor.
       const eligible = assertSettlementEligibility({ kind: input.workerKind });
       if (!eligible.allowed) throw badRequest(eligible.reason!);
@@ -539,6 +570,7 @@ export const contractorRouter = router({
   settlementApprove: roleProcedure("contractors.settlementApprove")
     .input(z.object({ settlementRef: z.string().min(3).max(64) }))
     .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id); await assertSettlementInScope(m.db, input.settlementRef, m.scope);
       await svc.approveSettlement({
         settlementRef: input.settlementRef,
         approvedByUserId: ctx.user.id,
@@ -548,8 +580,8 @@ export const contractorRouter = router({
 });
 
 export const financeRouter = router({
-  entitiesList: roleProcedure("finance.entitiesList").query(() =>
-    svc.listFinancialEntities()
+  entitiesList: roleProcedure("finance.entitiesList").query(async ({ ctx }) =>
+    svc.listFinancialEntities((await moneyScope(ctx.user.id)).entityIds)
   ),
 
   entityCreate: roleProcedure("finance.entityCreate")
@@ -567,8 +599,10 @@ export const financeRouter = router({
         fiscalYearEndDay: z.number().int().min(1).max(31).optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const m = await moneyScope(ctx.user.id);
       const id = await svc.createFinancialEntity({
+        orgRef: entityOwnerFor(m.scope),   // 0146: owned by the acting organization, or unowned under the default scope
         ...input,
         operatingName: input.operatingName ?? null,
         fiscalYearEndMonth: input.fiscalYearEndMonth ?? null,
@@ -579,11 +613,11 @@ export const financeRouter = router({
 
   registrationsList: roleProcedure("finance.registrationsList")
     .input(z.object({ financialEntityId: z.number().int() }))
-    .query(({ input }) => svc.listRegistrations(input.financialEntityId)),
+    .query(async ({ ctx, input }) => { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); return svc.listRegistrations(input.financialEntityId); }),
 
   expensesList: roleProcedure("finance.expensesList")
     .input(z.object({ financialEntityId: z.number().int().optional() }).optional())
-    .query(({ input }) => svc.listExpenses(input?.financialEntityId)),
+    .query(async ({ ctx, input }) => { const m = await moneyScope(ctx.user.id); if (input?.financialEntityId != null) { await assertEntityInScope(m.db, input.financialEntityId, m.scope); return svc.listExpenses(input.financialEntityId); } const all = await svc.listExpenses(); return all.filter(e => m.entityIds.includes(e.financialEntityId)); }),
 
   /** Assess without persisting — what a human needs to look at, and why. */
   expenseAssess: roleProcedure("finance.expenseAssess")

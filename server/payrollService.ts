@@ -11,7 +11,7 @@
  * purpose-built shapes.
  */
 
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, lte, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 import {
   contractorSettlementLines,
@@ -73,9 +73,10 @@ export async function resolveOwnPayrollProfile(userId: number) {
   return viaOperator[0] ?? null;
 }
 
-export async function listPayrollProfiles() {
+export async function listPayrollProfiles(entityIds?: number[]) {
   const db = await getDb();
   if (!db) return [];
+  if (entityIds && entityIds.length === 0) return [];
   // Deliberately narrow: no rate, no banking, no tax identifier.
   return db
     .select({
@@ -88,6 +89,7 @@ export async function listPayrollProfiles() {
       effectiveFrom: employeePayrollProfiles.effectiveFrom,
     })
     .from(employeePayrollProfiles)
+    .where(entityIds ? inArray(employeePayrollProfiles.financialEntityId, entityIds) : undefined)
     .limit(500);
 }
 
@@ -212,17 +214,18 @@ export async function submitTimeEntry(
 export async function listEarnings(args: {
   payPeriodId?: number;
   profileId?: number;
+  profileIds?: number[];   // 0146: the profiles the acting scope may see
 }) {
   const db = await getDb();
   if (!db) return [];
-  const where =
-    args.profileId != null
-      ? eq(payrollEarningEvents.employeePayrollProfileId, args.profileId)
-      : args.payPeriodId != null
-        ? eq(payrollEarningEvents.payPeriodId, args.payPeriodId)
-        : undefined;
+  if (args.profileIds && args.profileIds.length === 0) return [];
+  const conds = [
+    args.profileId != null ? eq(payrollEarningEvents.employeePayrollProfileId, args.profileId) : undefined,
+    args.payPeriodId != null ? eq(payrollEarningEvents.payPeriodId, args.payPeriodId) : undefined,
+    args.profileIds ? inArray(payrollEarningEvents.employeePayrollProfileId, args.profileIds) : undefined,
+  ].filter((c): c is NonNullable<typeof c> => c !== undefined);
   const q = db.select().from(payrollEarningEvents);
-  return where ? q.where(where).limit(500) : q.limit(500);
+  return conds.length ? q.where(and(...conds)).limit(500) : q.limit(500);
 }
 
 export async function insertEarning(
@@ -247,10 +250,11 @@ export async function recordReconciliation(
 /* Periods and runs                                                    */
 /* ------------------------------------------------------------------ */
 
-export async function listPayPeriods() {
+export async function listPayPeriods(entityIds?: number[]) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(payPeriods).orderBy(desc(payPeriods.startsOn)).limit(200);
+  if (entityIds && entityIds.length === 0) return [];
+  return db.select().from(payPeriods).where(entityIds ? inArray(payPeriods.financialEntityId, entityIds) : undefined).orderBy(desc(payPeriods.startsOn)).limit(200);
 }
 
 export async function openPayPeriod(values: typeof payPeriods.$inferInsert) {
@@ -260,10 +264,11 @@ export async function openPayPeriod(values: typeof payPeriods.$inferInsert) {
   return r[0]?.insertId;
 }
 
-export async function listPayRuns() {
+export async function listPayRuns(entityIds?: number[]) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(payRuns).orderBy(desc(payRuns.createdAt)).limit(200);
+  if (entityIds && entityIds.length === 0) return [];
+  return db.select().from(payRuns).where(entityIds ? inArray(payRuns.financialEntityId, entityIds) : undefined).orderBy(desc(payRuns.createdAt)).limit(200);
 }
 
 export async function loadPayRun(payRunRef: string) {
@@ -346,10 +351,11 @@ export async function raiseDispute(values: typeof payrollDisputes.$inferInsert) 
   return r[0]?.insertId;
 }
 
-export async function listDisputes() {
+export async function listDisputes(profileIds?: number[]) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(payrollDisputes).orderBy(desc(payrollDisputes.createdAt)).limit(200);
+  if (profileIds && profileIds.length === 0) return [];
+  return db.select().from(payrollDisputes).where(profileIds ? inArray(payrollDisputes.employeePayrollProfileId, profileIds) : undefined).orderBy(desc(payrollDisputes.createdAt)).limit(200);
 }
 
 /**
@@ -379,12 +385,14 @@ export async function resolveDispute(args: {
 /* Contractor settlement — a separate ledger                            */
 /* ------------------------------------------------------------------ */
 
-export async function listSettlements() {
+export async function listSettlements(entityIds?: number[]) {
   const db = await getDb();
   if (!db) return [];
+  if (entityIds && entityIds.length === 0) return [];
   return db
     .select()
     .from(contractorSettlements)
+    .where(entityIds ? inArray(contractorSettlements.payingEntityId, entityIds) : undefined)
     .orderBy(desc(contractorSettlements.createdAt))
     .limit(200);
 }
@@ -425,10 +433,11 @@ export async function approveSettlement(args: {
 /* Finance and tax                                                     */
 /* ------------------------------------------------------------------ */
 
-export async function listFinancialEntities() {
+export async function listFinancialEntities(entityIds?: number[]) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(financialEntities).limit(200);
+  if (entityIds && entityIds.length === 0) return [];
+  return db.select().from(financialEntities).where(entityIds ? inArray(financialEntities.id, entityIds) : undefined).limit(200);
 }
 
 export async function createFinancialEntity(

@@ -3019,6 +3019,7 @@ export type RoleBootstrapEvent = typeof roleBootstrapEvents.$inferSelect;
 
 export const financialEntities = mysqlTable("financialEntities", {
   id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),   // 0146: NULL = the historical single tenant; a member sees the entities its organization owns
   entityRef: varchar("entityRef", { length: 64 }).notNull().unique(),
   legalName: varchar("legalName", { length: 220 }).notNull(),
   operatingName: varchar("operatingName", { length: 220 }),
