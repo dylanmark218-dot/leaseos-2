@@ -64,6 +64,22 @@ export type ReadinessInput = {
     licence: CredentialState;
     requiredCredentials: CredentialState[];
     hoursAvailableMinutes: number | null;
+    /**
+     * P8.3 — a person's statement about this driver's hours for this duty day, when the company
+     * runs paper logs and there is no live figure. Deliberately a SEPARATE field: a stated number
+     * copied into `hoursAvailableMinutes` would be indistinguishable from an ELD reading, and the
+     * difference between "the system computed this" and "a named person said it" is exactly what
+     * an audit turns on.
+     */
+    hoursAttestation?: {
+      attestedByUserId: number;
+      attestedAt: Date;
+      dutyDate: string;
+      method: "paper_log_reviewed" | "driver_declaration";
+      statement: string;
+      /** Their figure, if they gave one. Read for the label; never treated as computed. */
+      minutesStated: number | null;
+    } | null;
     projectedJobMinutes: number | null;
     availabilityDeclared: boolean;
   };
@@ -172,14 +188,33 @@ export function evaluateDispatchReadiness(
   }
 
   if (input.operator.hoursAvailableMinutes === null) {
-    blockers.push({
-      code: "hos_unknown",
-      label: "Operator hours-of-service state unknown",
-      severity: "unknown",
-      subject: "operator",
-      overridable: true,
-      overrideAuthority: "manager",
-    });
+    const att = input.operator.hoursAttestation ?? null;
+    if (att) {
+      /*
+       * P8.3 — the paper-log path. A named person reviewed the book for this duty day and said so,
+       * which is the compliance position for a carrier running paper: after-the-fact proof rather
+       * than a live number. It is `review`, not clear: the check was satisfied by a person's word,
+       * and the record says whose word and when so that remains visible rather than becoming
+       * indistinguishable from a computed figure two screens later.
+       */
+      blockers.push({
+        code: "hos_attested",
+        label: `Hours attested by user ${att.attestedByUserId} for ${att.dutyDate} (${att.method === "paper_log_reviewed" ? "paper log reviewed" : "driver declaration"})${att.minutesStated != null ? `, stated ${att.minutesStated} min` : ""} — stated, not computed`,
+        severity: "review",
+        subject: "operator",
+        overridable: true,
+        overrideAuthority: "dispatcher",
+      });
+    } else {
+      blockers.push({
+        code: "hos_unknown",
+        label: "Operator hours-of-service state unknown",
+        severity: "unknown",
+        subject: "operator",
+        overridable: true,
+        overrideAuthority: "manager",
+      });
+    }
   } else if (
     input.operator.projectedJobMinutes !== null &&
     input.operator.projectedJobMinutes > input.operator.hoursAvailableMinutes

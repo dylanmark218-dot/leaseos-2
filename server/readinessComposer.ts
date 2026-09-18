@@ -22,7 +22,8 @@ import { CAPABILITY, dispatchContractFor, pictureFor, type EvaluationMap } from 
 import { entitlementToEvaluation, snapshotOf, type PolicySnapshot } from "./_core/automationPolicy";
 import { resolveCapabilities } from "./_core/automationPolicyStore";
 import { destinationAcceptanceForJob } from "./_core/destinationAcceptance";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { hosAttestations } from "../drizzle/schema";
 import { faultDispatchEffect } from "./_core/telematics";
 import { getDb } from "./db";
 import {
@@ -425,6 +426,29 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     contributions.push({ engine: "enforcement", finding: `Enforcement: ${enf.verdict}${enf.blockers.length ? ` — ${enf.blockers.length} active order(s)` : ""}` });
   }
 
+  /* ---- P8.3: the paper-log fallback ---- */
+  /*
+   * Scoped to THIS duty day. Hours are a daily fact, so yesterday's statement says nothing about
+   * today, and a lookup that ignored the date would quietly make one attestation cover a week.
+   */
+  const dutyDate = now.toISOString().slice(0, 10);
+  const dutyDateValue = new Date(`${dutyDate}T00:00:00Z`);
+  const attRow = (await db.select().from(hosAttestations).where(and(
+    eq(hosAttestations.operatorId, op.id),
+    eq(hosAttestations.dutyDate, dutyDateValue),
+    isNull(hosAttestations.supersededAt),
+  )).orderBy(desc(hosAttestations.attestedAt)).limit(1))[0];
+  const hoursAttestation = attRow
+    ? {
+        attestedByUserId: attRow.attestedByUserId, attestedAt: attRow.attestedAt,
+        dutyDate: attRow.dutyDate instanceof Date ? attRow.dutyDate.toISOString().slice(0, 10) : String(attRow.dutyDate), method: attRow.method,
+        statement: attRow.statement, minutesStated: attRow.hoursAvailableMinutesStated ?? null,
+      }
+    : null;
+  if (hoursAttestation) {
+    contributions.push({ engine: "hos", finding: `Hours attested for ${dutyDate} by user ${hoursAttestation.attestedByUserId} — stated, not computed` });
+  }
+
   /* ---- route and communications ---- */
   const route: ReadinessInput["route"] = { dispatchStatus: null, dataTrustworthy: null };
   let routeProfileId: string | null = null;
@@ -501,7 +525,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
 
   const input: ReadinessInput = {
     evaluatedAt: now,
-    operator: { operatorId: op.id, name: op.name, licence, requiredCredentials: required, hoursAvailableMinutes: null, projectedJobMinutes: null, availabilityDeclared: false },
+    operator: { operatorId: op.id, name: op.name, licence, requiredCredentials: required, hoursAvailableMinutes: null, hoursAttestation, projectedJobMinutes: null, availabilityDeclared: false },
     truck, trailer, job: jobInput, route,
   };
   const base = evaluateDispatchReadiness(input);

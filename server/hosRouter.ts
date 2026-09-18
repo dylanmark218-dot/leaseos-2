@@ -9,10 +9,11 @@
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, eq, gte, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { dutyRecords, hosRuleLimits, hosRuleProfiles } from "../drizzle/schema";
+import { dutyRecords, hosAttestations, hosRuleLimits, hosRuleProfiles } from "../drizzle/schema";
+import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { ALL_HOS_PROFILE_SEEDS, HOS_SEED_CAVEAT, HOS_SEED_RETRIEVAL_DATE } from "./_core/hosRuleSeeds";
 import { divergences, promote as promoteLimit } from "./_core/knowledge/promotionLedger";
 import { checkPromotionScope } from "./_core/knowledge/scopeGuard";
@@ -48,6 +49,62 @@ const CONTEXT = z.object({
 });
 
 export const hosRouter = router({
+
+  /**
+   * P8.3 — attest a driver's hours for one duty day, when the company runs paper logs.
+   *
+   * This is the statement that was previously impossible to make. A carrier on paper has no live
+   * figure, so dispatch could only answer `hos_unknown` and be overridden — which recorded that
+   * someone clicked past it, not that anyone had checked anything.
+   *
+   * What it deliberately does NOT do: write `hoursAvailableMinutes`. A stated figure copied into
+   * the computed field would be indistinguishable from an ELD reading the moment it left this
+   * table, and every screen downstream would present a person's word as a measurement.
+   */
+  attestHours: roleProcedure("hos.attestHours")
+    .input(z.object({
+      operatorId: z.number().int().positive(),
+      dutyDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "A duty date, as YYYY-MM-DD"),
+      method: z.enum(["paper_log_reviewed", "driver_declaration"]),
+      /** What was actually checked, in the attester's words. A checkbox is not an attestation. */
+      statement: z.string().min(15).max(500),
+      /** Optional, and stated. Omitting it is honest when the book was reviewed but not totalled. */
+      hoursAvailableMinutesStated: z.number().int().min(0).max(24 * 60).nullish(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const acting = await resolveActingScope(db, ctx.user.id);
+      const dutyDate = new Date(`${input.dutyDate}T00:00:00Z`);
+      if (dutyDate.getTime() > Date.now() + 24 * 60 * 60 * 1000) {
+        // Hours are a fact about a day that has begun. Attesting the future is a promise.
+        throw new TRPCError({ code: "BAD_REQUEST", message: "A duty date in the future cannot be attested" });
+      }
+      // A correction is a second statement, not an edit: both stay on the record.
+      const prior = await db.select({ id: hosAttestations.id }).from(hosAttestations).where(and(
+        eq(hosAttestations.operatorId, input.operatorId),
+        eq(hosAttestations.dutyDate, dutyDate),
+        isNull(hosAttestations.supersededAt),
+      ));
+      const ins = await db.insert(hosAttestations).values({
+        orgRef: acting.tenantId === SINGLE_TENANT_ID ? null : acting.tenantId,
+        operatorId: input.operatorId, dutyDate, method: input.method, statement: input.statement,
+        hoursAvailableMinutesStated: input.hoursAvailableMinutesStated ?? null,
+        attestedByUserId: ctx.user.id, attestedAt: new Date(),
+      });
+      const attestationId = Number(ins[0]?.insertId ?? 0);
+      if (prior.length) {
+        await db.update(hosAttestations)
+          .set({ supersededAt: new Date(), supersededByAttestationId: attestationId })
+          .where(inArray(hosAttestations.id, prior.map(r => r.id)));
+      }
+      return {
+        attestationId, supersededCount: prior.length,
+        provenance: "attested" as const,
+        note: "Recorded as a statement by you, for this duty day only. It is not a computed hours figure and dispatch will show it as attested, not as clear.",
+      };
+    }),
+
   /** Load the candidate profiles. Additive and idempotent: a profile already present is left exactly as it is. */
   profileSeed: roleProcedure("hos.profileSeed").mutation(async ({ ctx }) => {
     const d = await db();

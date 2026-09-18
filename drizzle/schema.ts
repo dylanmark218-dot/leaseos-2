@@ -8580,3 +8580,20 @@ export const automationPolicies = mysqlTable("automationPolicies", {
   supersededByVersionId: varchar("supersededByVersionId", { length: 64 }),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 });
+
+/** P8.3 (0155) — a person's statement about a driver's hours when there is no live figure. Stated, never computed. */
+export const hosAttestations = mysqlTable("hosAttestations", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  operatorId: int("operatorId").notNull(),
+  dutyDate: date("dutyDate").notNull(),
+  method: mysqlEnum("method", ["paper_log_reviewed", "driver_declaration"]).notNull(),
+  statement: varchar("statement", { length: 500 }).notNull(),
+  /** The person's figure, when they gave one. NEVER copied into hoursAvailableMinutes. */
+  hoursAvailableMinutesStated: int("hoursAvailableMinutesStated"),
+  attestedByUserId: int("attestedByUserId").notNull(),
+  attestedAt: timestamp("attestedAt").notNull().defaultNow(),
+  supersededAt: timestamp("supersededAt"),
+  supersededByAttestationId: int("supersededByAttestationId"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+});

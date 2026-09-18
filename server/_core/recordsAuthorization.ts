@@ -268,6 +268,8 @@ export type Permission =
   // v22.20 — hours of service as versioned rules. A verified figure is what a
   // driver's legal driving time is computed from, so verifying is its own act.
   | "hos.read" | "hos.rule.manage" | "hos.rule.verify"
+  /* P8.3 — stating a driver's hours for one duty day when the company runs paper logs. */
+  | "hos.attest"
   | "portal.identity.manage" | "portal.submission.review"
   // v21.12 — render a frozen revision; propose payroll from a client bonus; record what a person saw.
   | "closeout.document.render" | "closeout.adjustment.payroll_propose" | "observation.record"
@@ -409,6 +411,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "hos.attest",
     "automation.policy.read",
     "automation.override.operational",
     "facility.directory.report",
@@ -670,6 +673,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "hos.attest",
     "automation.policy.read",
     "facility.directory.report",
     "facility.directory.review",
@@ -944,6 +948,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "hos.attest",
     "automation.policy.read",
     "automation.policy.manage",
     "automation.override.operational",
@@ -2471,6 +2476,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "surfaces.timeline": "surface.timeline.read",
 
   /* ---- v21.1: dispatch gate ---- */
+  "hos.attestHours": "hos.attest",
   "dispatch.evaluate": "dispatch.evaluate",
   // P8.2 — the policy surface. manage is management-only by grant; read is wider; the operational
   // override is held widely precisely because it can only move toward more human involvement.
