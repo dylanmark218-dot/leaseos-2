@@ -41,6 +41,7 @@ import { facilityDirectoryRouter } from "./facilityDirectoryRouter";
 import type { WidgetLayoutStore } from "./_core/widgetService";
 import { drizzleWidgetLayoutStore } from "./widgetLayouts";
 import { widgetReaderFor } from "./widgetSources";
+import { automationPolicyRouter } from "./automationPolicyRouter";
 import { composeReadiness } from "./readinessComposer";
 import { branchRolesFor } from "./_core/widgetRoleKeys";
 import { isDomainRole, permissionsForDomainRole } from "./_core/recordsAuthorization";
@@ -316,6 +317,7 @@ const widgetDeps: WidgetDeps = {
 
 export const appRouter = router({
   widgets: widgetsRouter(widgetDeps),
+  automationPolicy: automationPolicyRouter,
   manifestCustody: manifestCustodyRouter,
   securityIncidents: securityIncidentsRouter,
   commercialOffice: commercialOfficeRouter,

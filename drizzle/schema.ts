@@ -1954,6 +1954,8 @@ export const dispatchEligibilityChecks = mysqlTable(
     // 0152: the capability picture this decision was made on, including what was not evaluated.
   // NULL = the check predates the contract; it is not backfilled with an assumption.
   capabilitiesJson: text("capabilitiesJson"),
+  // 0153: the automation policy this decision was made under. Read by audit; never re-resolved.
+  automationPolicyJson: text("automationPolicyJson"),
   capabilityVerdict: varchar("capabilityVerdict", { length: 16 }),
   routeApprovalRef: varchar("routeApprovalRef", { length: 64 }),
     evaluatedAt: timestamp("evaluatedAt").notNull(),
@@ -8544,4 +8546,37 @@ export const commercialDocumentDeliveries = mysqlTable("commercialDocumentDelive
   deliveryEvidence: varchar("deliveryEvidence", { length: 300 }),
   failureReason: varchar("failureReason", { length: 500 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** P8.2 (0153) — whether a capability is available to a tenant at all. An ABSENT row is unresolved, not "not entitled". */
+export const capabilityEntitlements = mysqlTable("capabilityEntitlements", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  capability: varchar("capability", { length: 64 }).notNull(),
+  state: mysqlEnum("state", ["entitled", "not_entitled"]).notNull(),
+  reason: mysqlEnum("reason", ["unlicensed", "disabled", "not_in_product_set"]),
+  reference: varchar("reference", { length: 128 }),
+  effectiveFrom: timestamp("effectiveFrom").notNull().defaultNow(),
+  supersededAt: timestamp("supersededAt"),
+  setByUserId: int("setByUserId"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+});
+
+/** P8.2 (0153) — automation policy, append-only with supersession. An UPDATE would erase the answer to "what mode were we in". */
+export const automationPolicies = mysqlTable("automationPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  policyVersionId: varchar("policyVersionId", { length: 64 }).notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  capability: varchar("capability", { length: 64 }).notNull(),
+  scope: mysqlEnum("scope", ["tenant", "role", "task", "customer"]).notNull(),
+  scopeId: varchar("scopeId", { length: 64 }),
+  requestedMode: mysqlEnum("requestedMode", ["AUTO", "HYBRID", "MANUAL"]).notNull(),
+  safetyCeilingApplied: mysqlEnum("safetyCeilingApplied", ["AUTO", "HYBRID", "MANUAL"]),
+  source: varchar("source", { length: 64 }).notNull(),
+  reason: varchar("reason", { length: 500 }),
+  actorUserId: int("actorUserId"),
+  effectiveFrom: timestamp("effectiveFrom").notNull().defaultNow(),
+  supersededAt: timestamp("supersededAt"),
+  supersededByVersionId: varchar("supersededByVersionId", { length: 64 }),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
 });

@@ -196,6 +196,12 @@ export type Permission =
   // act; granting an override is a named authority's; an operator may read
   // their own readiness and nobody else's.
   | "dispatch.evaluate" | "dispatch.award" | "dispatch.override.request" | "dispatch.override.grant"
+  /* P8.2 — changing standing automation policy. Deliberately NOT implied by any operational
+     permission: choosing that a machine may act unwatched is a different act from dispatching. */
+  | "automation.policy.manage" | "automation.policy.read"
+  /* P8.2 — a one-task or one-trip move toward MORE human involvement only. Held widely on purpose;
+     it can never increase automation, so it cannot become a way around the permission above. */
+  | "automation.override.operational"
   | "dispatch.readiness_own"
   // v21.2 — turning enforcement on or off changes what the company is bound by.
   | "dispatch.enforcement.manage"
@@ -320,6 +326,7 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    "automation.override.operational",
     "facility.directory.report",
     "facility.directory.read",
     "assistant.ask",
@@ -402,6 +409,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "automation.policy.read",
+    "automation.override.operational",
     "facility.directory.report",
     "facility.directory.write",
     "facility.directory.read",
@@ -661,6 +670,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "automation.policy.read",
     "facility.directory.report",
     "facility.directory.review",
     "facility.directory.write",
@@ -775,6 +785,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
   ],
   office: [
+    "automation.policy.read",
     "facility.directory.report",
     "facility.directory.write",
     "facility.directory.read",
@@ -933,6 +944,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "automation.policy.read",
+    "automation.policy.manage",
+    "automation.override.operational",
     "facility.directory.report",
     "facility.directory.review",
     "facility.directory.write",
@@ -2458,6 +2472,14 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
 
   /* ---- v21.1: dispatch gate ---- */
   "dispatch.evaluate": "dispatch.evaluate",
+  // P8.2 — the policy surface. manage is management-only by grant; read is wider; the operational
+  // override is held widely precisely because it can only move toward more human involvement.
+  "automationPolicy.resolve": "automation.policy.read",
+  "automationPolicy.history": "automation.policy.read",
+  "automationPolicy.snapshotFor": "automation.policy.read",
+  "automationPolicy.set": "automation.policy.manage",
+  "automationPolicy.setEntitlement": "automation.policy.manage",
+  "automationPolicy.operationalOverride": "automation.override.operational",
   "dispatch.award": "dispatch.award",
   "dispatch.overrideRequest": "dispatch.override.request",
   "dispatch.overrideGrant": "dispatch.override.grant",
