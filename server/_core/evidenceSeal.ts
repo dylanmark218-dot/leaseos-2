@@ -235,3 +235,75 @@ export function amendSealedEvidence(args: {
 
   return { seal, version, supersedesVersion: args.previous.version };
 }
+
+/* ------------------------------------------------------------------ */
+/* P1.2 — the third leg: what the stored bytes actually hash to        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A seal records what the **device** said the bytes hashed to. Nothing has ever checked that claim
+ * against the object the server is actually holding, so `evidenceSeals.serverVerifiedAt` and
+ * `verificationResult` have sat unwritten since the table was created.
+ *
+ * That gap is narrower than it sounds and worse than it sounds. The device hash is a real control:
+ * it catches tampering *after* capture, because a later edit produces different bytes. What it
+ * cannot catch is anything that went wrong between the device computing it and the server storing
+ * it — a truncated upload, a swapped storage key, a half-written object, a restore that put the
+ * wrong file back. In all of those the seal still reads "sealed" and still carries a hash, and the
+ * hash is right about a file nobody has. An unverified seal looks exactly like a verified one,
+ * which makes it worse than no seal: it is evidence of diligence that was never done.
+ *
+ * Three legs, and each answers a different question:
+ *
+ *   `deviceContentHash`  what the device said, at capture
+ *   `storedContentHash`  what the bytes on this server hash to, now
+ *   `manifestHash`       what the recorded manifest hashes to, recomputed from the manifest itself
+ *
+ * The third catches a manifest edited after sealing even when the bytes are untouched, which is the
+ * quiet one: change the capture time or the operator in the manifest and the photo still matches.
+ */
+export type SealVerification =
+  | { result: "verified"; checkedAt: Date; note: string }
+  | { result: "hash_mismatch"; checkedAt: Date; deviceContentHash: string; storedContentHash: string; note: string }
+  | { result: "manifest_mismatch"; checkedAt: Date; recordedManifestHash: string; recomputedManifestHash: string; note: string }
+  | { result: "content_unavailable"; checkedAt: Date; note: string };
+
+export function verifySealAgainstStored(args: {
+  deviceContentHash: string;
+  /** Null when the object could not be read — which is unverifiable, never "verified". */
+  storedContentHash: string | null;
+  recordedManifestHash: string;
+  canonicalManifest: string;
+  hashOfManifest: (manifest: string) => string;
+  checkedAt: Date;
+}): SealVerification {
+  const recomputed = args.hashOfManifest(args.canonicalManifest);
+  if (recomputed !== args.recordedManifestHash) {
+    return {
+      result: "manifest_mismatch", checkedAt: args.checkedAt,
+      recordedManifestHash: args.recordedManifestHash, recomputedManifestHash: recomputed,
+      note: "The manifest recorded with this seal does not hash to the value stored beside it. The described circumstances of the capture have changed since it was sealed, whether or not the bytes have.",
+    };
+  }
+  if (args.storedContentHash == null) {
+    // Unknown stays unknown. A seal we could not check is not a seal that passed.
+    return {
+      result: "content_unavailable", checkedAt: args.checkedAt,
+      note: "The stored object could not be read, so the device's hash could not be checked against it. This is not a pass: it is a verification that did not happen.",
+    };
+  }
+  if (args.storedContentHash !== args.deviceContentHash) {
+    return {
+      result: "hash_mismatch", checkedAt: args.checkedAt,
+      deviceContentHash: args.deviceContentHash, storedContentHash: args.storedContentHash,
+      note: "The bytes this server holds do not hash to what the device recorded at capture. The seal is honest about the original; the stored object is not the object it describes.",
+    };
+  }
+  return {
+    result: "verified", checkedAt: args.checkedAt,
+    note: "Device hash, stored bytes and manifest all agree.",
+  };
+}
+
+/** Only one result means the evidence may be relied on. Named so no caller has to remember. */
+export const sealIsTrustworthy = (v: SealVerification): boolean => v.result === "verified";

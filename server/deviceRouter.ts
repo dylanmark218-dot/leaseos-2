@@ -13,6 +13,7 @@ import { z } from "zod";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
+import { sealIsTrustworthy, verifySealAgainstStored } from "./_core/evidenceSeal";
 import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
 import { createHash } from "node:crypto";
 import { DEVICE_SIGNATURE_MAX_SKEW_MS, canonicalDevicePackage, fingerprintP256Spki, signatureFreshness, verifyP256PackageSignature } from "./_core/deviceSignature";
@@ -329,6 +330,67 @@ export const syncRouter = router({
         conflicts, note: admission.note,
         // v21.6 — per item, so the device marks the right capture failed rather than guessing from counts.
         itemVerdicts: verification.verdicts.map(v => ({ evidenceRecordId: v.evidenceRecordId, outcome: v.outcome, reason: v.reason })),
+      };
+    }),
+
+  /**
+   * P1.2 — the third leg of the seal, run against the object this server is actually holding.
+   *
+   * `evidenceSeals.serverVerifiedAt` and `verificationResult` have been columns nobody wrote since
+   * the table was created: the seal recorded what the device said and nothing ever checked it. A
+   * truncated upload, a swapped storage key or a restore that put the wrong file back all leave a
+   * seal reading "sealed" with a hash that is correct about a file nobody has.
+   *
+   * Every outcome is written, including the failures. A verification that only records its passes
+   * is a verification whose absence is indistinguishable from a success, which is the shape of the
+   * problem it was built to fix.
+   */
+  verifySeal: roleProcedure("device.verifySeal")
+    .input(z.object({ evidenceRecordId: z.number().int().positive(), version: z.number().int().positive().nullish() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const seal = (await db.select().from(evidenceSeals).where(and(
+        eq(evidenceSeals.evidenceRecordId, input.evidenceRecordId),
+        input.version ? eq(evidenceSeals.version, input.version) : undefined,
+      )).orderBy(desc(evidenceSeals.version)).limit(1))[0];
+      if (!seal) throw new TRPCError({ code: "NOT_FOUND", message: `No seal on record for evidence ${input.evidenceRecordId}` });
+
+      const rec = (await db.select({ storageKey: evidenceRecords.storageKey }).from(evidenceRecords)
+        .where(eq(evidenceRecords.id, input.evidenceRecordId)).limit(1))[0];
+
+      /*
+       * A read failure is reported as unverifiable, never thrown away and never treated as a pass.
+       * "We could not check" is a finding, and the one a person needs to act on soonest.
+       */
+      let storedContentHash: string | null = null;
+      if (rec?.storageKey) {
+        try {
+          const bytes = await storageRead(rec.storageKey);
+          storedContentHash = createHash("sha256").update(bytes).digest("hex");
+        } catch {
+          storedContentHash = null;
+        }
+      }
+
+      const checkedAt = new Date();
+      const verdict = verifySealAgainstStored({
+        deviceContentHash: seal.contentHash,
+        storedContentHash,
+        recordedManifestHash: seal.manifestHash,
+        canonicalManifest: seal.canonicalManifest,
+        hashOfManifest: (m) => createHash("sha256").update(m, "utf8").digest("hex"),
+        checkedAt,
+      });
+
+      await db.update(evidenceSeals)
+        .set({ serverVerifiedAt: checkedAt, verificationResult: verdict.result })
+        .where(eq(evidenceSeals.id, seal.id));
+
+      return {
+        evidenceRecordId: input.evidenceRecordId, version: seal.version,
+        ...verdict,
+        trustworthy: sealIsTrustworthy(verdict),
       };
     }),
 

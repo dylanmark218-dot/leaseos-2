@@ -2686,6 +2686,9 @@ export const evidenceSeals = mysqlTable("evidenceSeals", {
   serverVerifiedAt: timestamp("serverVerifiedAt"),
   verificationResult: mysqlEnum("verificationResult", [
     "pending", "verified", "hash_mismatch", "manifest_mismatch",
+    // 0157: the server tried to read the stored object and could not. Not "pending", which would
+    // say the check has not happened; not a mismatch, which nobody observed.
+    "content_unavailable",
   ]).default("pending").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

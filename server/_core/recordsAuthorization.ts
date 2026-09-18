@@ -173,6 +173,8 @@ export type Permission =
   // v20.20 — field devices. Enrolling and rotating your own device is
   // self-scoped in code; revoking one and resolving conflicts are not.
   | "device.enroll_own" | "device.rotate_own" | "device.manage"
+  /* P1.2 — running the seal's third leg against the stored object. */
+  | "device.verifySeal"
   | "sync.push_own" | "sync.resolve_conflict"
   // v20.21 — compliance master registry. Reading a passport is broad
   // verifying evidence, loading requirements and reading private credential
@@ -679,6 +681,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
     "hos.attest",
@@ -797,6 +800,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
   ],
   office: [
+    "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
     "automation.policy.read",
@@ -958,6 +962,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
     "restricted.audit.read",
@@ -2501,6 +2506,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "restrictedVault.accessHistory": "restricted.audit.read",
   "hos.attestHours": "hos.attest",
   "hos.recordScannedLog": "hos.recordScannedLog",
+  "device.verifySeal": "device.verifySeal",
   "dispatch.evaluate": "dispatch.evaluate",
   // P8.2 — the policy surface. manage is management-only by grant; read is wider; the operational
   // override is held widely precisely because it can only move toward more human involvement.
