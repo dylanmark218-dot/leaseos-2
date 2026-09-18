@@ -26,6 +26,7 @@ import { join } from "path";
  * directions.
  */
 const DECLARED_UNWIRED: Record<string, string> = {
+  demoDataset: "the demonstration dataset's rules and step shape; reached from server/demoDataset.db.test.ts and scripts/demo-dataset.ts (the demo path), not from a router — a router that could seed demonstration rows into a customer's database is not something to build",
   // B28 widget engine (v22.23): the v1 service (widgetService/widgetDashboard/widgetLayoutWrite/
   // widgetRegistry/widgetPayload/roleActor) is reached through widgetsRouter. The layer below is
   // the promotion gate and the client's rendering semantics — read by tests and by
@@ -155,7 +156,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(39);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(40);   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });
