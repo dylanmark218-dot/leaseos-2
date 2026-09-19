@@ -38,6 +38,18 @@ thing that was never built.
 | P5.4 | a seeded, fixture-labelled organization walks the full chain | `demoDataset.db.test`: one caller, zero direct DB writes, `DEMO` marks asserted in rows |
 | P0.1–P0.4 | reconciliation merges | already DONE **in the original**, so there is no later claim to check |
 
+## Second pass — rows with no original text, checked against the owner decision that created them
+
+| Row | The decision | What is there |
+|---|---|---|
+| **P8.2** | the named minimum tests | one was missing: "MANUAL/HYBRID/AUTO produce the same committed record shape" (fixed v22.88) |
+| **P8.5** | internal-only material is *near misses, drug & alcohol test results, internal investigations* | **only internal investigations.** Near misses exist as an incident type and are not tier-gated at all; drug & alcohol results are not stored anywhere. Recorded and asked rather than fixed — see below. |
+
+**The P8.5 ambiguity, unresolved on purpose.** The decision says this material is "accessible only to company
+administration"; its stated rationale is that it "stays off the insurance books". Those are different rules. Admin-only
+would hide near misses from the safety staff whose programme depends on seeing them. Off-the-books would not. Building
+either reading would be a guess with a real cost attached, so it is a question rather than a commit.
+
 ## What this audit does not cover
 
 - **The 14 rows with no original text.** Checking them means re-reading the owner decisions that
