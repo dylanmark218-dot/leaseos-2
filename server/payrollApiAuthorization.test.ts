@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
@@ -117,7 +118,7 @@ d("own pay is own pay", () => {
     // the .input() schemas specifically — the service call downstream does pass
     // the resolved id, and an earlier version of this test matched that and my
     // own comment, which is exactly the kind of false green worth avoiding.
-    const src = require("node:fs").readFileSync("server/payrollRouter.ts", "utf8");
+    const src = readFileSync("server/payrollRouter.ts", "utf8");
     const selfService = src.slice(
       src.indexOf("myPay: roleProcedure"),
       src.indexOf("/* ---------------- Administration")
@@ -126,7 +127,7 @@ d("own pay is own pay", () => {
       t.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
     const inputSchemas = Array.from(
       selfService.matchAll(/\.input\(([\s\S]*?)\)\s*\.(?:query|mutation)\(/g)
-    ).map((m: RegExpMatchArray) => stripComments(m[1]));
+    ).map((m: RegExpExecArray) => stripComments(m[1]!));
     expect(inputSchemas.length).toBeGreaterThan(0);
     for (const schema of inputSchemas) {
       expect(schema).not.toContain("employeePayrollProfileId");
@@ -215,8 +216,8 @@ d("the external accountant reads books and runs nothing", () => {
     for (const call of [
       () => caller.payroll.runsList(),
       () => caller.payroll.runCreate({ payRunRef: "PR-x", payPeriodId: 1, financialEntityId: FIXTURE_ENTITY_ID }),
-      () => caller.fieldRoute.trips.create({ jobId: 1 }),
-      () => caller.fieldRoute.workOrders.create({ unitId: 1, workOrderNumber: "WO-x" }),
+      () => caller.fieldRoute.trips.create({ tripNumber: "TRIP-AUTHZ-PROBE", jobId: 1 }),
+      () => caller.fieldRoute.workOrders.create({ unitId: 1, workOrderNumber: "WO-x", openedAt: new Date("2026-09-19T00:00:00Z") }),
       () => caller.records.incident.readInvestigation({ incidentNumber: "INC-1" }),
       () => caller.finance.entityCreate({
         entityRef: "E-1", legalName: "X", taxpayerType: "corporation", jurisdiction: "CA",
@@ -401,16 +402,16 @@ d("expenses and contractor settlement", () => {
 
 d("coverage and sensitivity", () => {
   it("gates every payroll and finance procedure", () => {
-    const src = require("node:fs").readFileSync("server/payrollRouter.ts", "utf8");
+    const src = readFileSync("server/payrollRouter.ts", "utf8");
     expect(/\w+:\s*protectedProcedure\b/.test(src)).toBe(false);
     const wired = (src.match(/roleProcedure\(/g) ?? []).length;
     expect(wired).toBe(40);
   });
 
   it("declares a permission for every one of them", () => {
-    const src = require("node:fs").readFileSync("server/payrollRouter.ts", "utf8");
+    const src = readFileSync("server/payrollRouter.ts", "utf8");
     const names = Array.from(src.matchAll(/roleProcedure\("([^"]+)"\)/g)).map(
-      (m: RegExpMatchArray) => m[1]
+      (m: RegExpExecArray) => m[1]!
     );
     for (const n of names) {
       expect(

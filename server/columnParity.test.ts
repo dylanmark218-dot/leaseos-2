@@ -51,7 +51,11 @@ async function liveColumns(): Promise<Map<string, LiveColumn>> {
 }
 
 function drizzleTables(): MySqlTable[] {
-  return Object.values(schema).filter((v): v is MySqlTable => is(v, MySqlTable));
+  // `Object.values(schema)` is a union of every export — tables, enums, relations, types — and
+  // narrowing straight to MySqlTable is unsound because that union does not contain it as a
+  // subtype. The runtime filter was always right; the predicate just could not be checked, which
+  // is the whole reason test files were worth type-checking.
+  return (Object.values(schema) as unknown[]).filter((v): v is MySqlTable => is(v, MySqlTable));
 }
 
 d("column-level parity between schema.ts and the applied migrations", () => {
