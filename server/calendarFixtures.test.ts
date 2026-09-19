@@ -25,6 +25,7 @@ const FAIL_WITHIN_DAYS = 21;
 
 /** Reviewed files: the dates seen at review and why the clock never meets them. Re-review when the dates change. */
 const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; reason: string }> = {
+  "server/_core/calibrationEvidence.test.ts": { dates: ["2026-09-20", "2026-10-01"], verdict: "clock_independent", reason: "both are compared only against fixed dates — 2026-10-01 against a reading at a fixed AT, 2026-09-20 against the finding's own performedAt. The two tests in this file that DO read the real clock pass it to deriveExceptions and involve neither date" },
   "server/_core/evidenceVault.test.ts": { dates: ["2026-09-20", "2026-09-21"], verdict: "clock_independent", reason: "every evaluation receives an explicit `now`; the only real read stamps amendedAt" },
   "server/communications.test.ts": { dates: ["2026-09-18", "2026-09-25"], verdict: "clock_independent", reason: "effectiveTo and planForPath `at` are both explicit; Date.now() only mints keys" },
   "server/cash.test.ts": { dates: ["2026-09-20", "2026-09-25", "2026-09-28", "2026-09-30", "2026-10-02", "2026-10-10", "2026-10-20"], verdict: "clock_independent", reason: "statement periods and END are fixed ranges compared with each other, not with now" },
