@@ -406,6 +406,32 @@ refused before a database read, and the evidence check is what makes the rule tr
 
 ---
 
+### 10.1 / 10.2 — BUILT (v23.15)
+
+`_core/phoneLocationGate.ts` implements the approved §10.1: **no acknowledgement, no personal-phone
+monitoring — which is not the same as no work.** `monitoringNotice.ts` had deliberately stopped
+short of this, its own comment naming it owner policy.
+
+Two questions kept apart on purpose. *May this phone stream?* needs an acknowledged
+`vehicle_location` notice and an active trip, and a **withdrawal is named as a withdrawal** rather
+than as a lapse, so nobody chases an acknowledgement a person revoked. *Does the job need a stream,
+and is one available?* prefers a company source over the handset wherever one exists — not because
+the phone is worse data, often it is better, but because the truck belongs to the employer and the
+handset does not, and a system that reaches for the personal device first will keep reaching for it.
+
+When the job requires a stream and none exists, the answer is a **missing capability**
+(`live_location_stream_unavailable`) with the driver's decision nowhere in the reason. That is
+guarded, not merely intended: a blocker reading "driver declined monitoring" turns a privacy choice
+into a performance record, and once dispatch can see who declined, the decline becomes the thing
+being managed rather than the missing device.
+
+§10.2's *hidden/null location field* rule is guarded too — `customerProjections.ts` carries no
+coordinate or driver-identity field in any form. The nulled form is the one worth catching: a
+`latitude: null` proves the concept exists in the shape, and the next person who needs a coordinate
+fills it in rather than asking whether they may. `server/_core/phoneLocationGate.test.ts` (14 cases).
+
+---
+
 ## 11. What this specification deliberately does not do
 
 - **It does not redesign UNKNOWN / silent checks.** That behaviour is correct and tested.
