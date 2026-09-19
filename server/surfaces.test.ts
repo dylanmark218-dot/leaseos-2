@@ -9,7 +9,7 @@ import { UNIVERSAL_PERMISSIONS, type DomainRole } from "./_core/recordsAuthoriza
 const NOW = new Date("2026-09-10T12:00:00Z");
 const days = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
 
-const empty = (): ExceptionSources => ({
+const empty = (): ExceptionSources => ({ openCalibrationSweeps: [], inspectorRequests: [],
   now: NOW, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [],
   syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [],
 });

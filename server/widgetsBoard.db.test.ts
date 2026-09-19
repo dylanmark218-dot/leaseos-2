@@ -111,8 +111,16 @@ d("scoped tiles read their subject through the governing procedure", () => {
     const t = (ref: string) => board.tiles.find(x => x.instanceRef === ref)!.payload;
     expect(t("j1").state).toBe("ok");
     expect(t("t1").state).toBe("ok");
-    expect(t("j2").state).toBe("unknown");
-    if (t("j2").state === "unknown") expect(t("j2").reason).toContain("no job matches");
+    /*
+     * Bound once. Calling t("j2") three times meant TypeScript could not narrow the union, so the
+     * `if` was load-bearing for compilation — and load-bearing `if`s around assertions are how an
+     * assertion stops running without anybody noticing: had the state ever changed, the reason check
+     * would simply have been skipped while the test stayed green.
+     */
+    const j2 = t("j2");
+    expect(j2.state).toBe("unknown");
+    if (j2.state !== "unknown") throw new Error("unreachable");
+    expect(j2.reason).toContain("no job matches");
   }, 20_000);
 
   it("documentExpiry shows the operator's own documents in the vault's states", async () => {

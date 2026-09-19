@@ -247,7 +247,13 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
    * what it costs: nothing here has looked at a price, and a case that guessed would send somebody
    * to argue with a customer about a number the system invented.
    */
-  for (const sw of s.openCalibrationSweeps ?? []) {
+  /*
+   * No `?? []` here any more. The fallback existed because older test fixtures omitted the field —
+   * defensive code carried in a production engine for a fixture's benefit, which is backwards: the
+   * type has always required it, so the only thing the fallback could hide was a real caller
+   * silently getting "no sweeps" instead of failing. The fixtures are complete now.
+   */
+  for (const sw of s.openCalibrationSweeps) {
     out.push({
       key: `calibration_sweep:${sw.sweepRef}`,
       category: "calibration",
@@ -382,7 +388,7 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
     });
   }
 
-  for (const r of s.inspectorRequests ?? []) {   // older fixtures omit the field
+  for (const r of s.inspectorRequests) {
     const daysLeft = Math.floor((r.dueAt.getTime() - now.getTime()) / DAY);
     if (daysLeft > 5) continue;                       // five days out and closer; overdue is negative
     const overdue = daysLeft < 0;

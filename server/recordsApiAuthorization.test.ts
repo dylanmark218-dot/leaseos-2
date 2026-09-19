@@ -98,7 +98,10 @@ d("the gate is on every records procedure", () => {
     // system — an unmapped name throws when the module is constructed, so it
     // is an application failure rather than a runtime denial nobody notices.
     const { roleProcedure } = await import("./_core/trpc");
-    expect(() => roleProcedure("records.evidence.deleteEverything")).toThrow(
+    // Deliberately not a real procedure name. TypeScript now rejects it at compile time as well,
+    // which is the better layer; the cast keeps this runtime check meaningful for anything that
+    // reaches roleProcedure without going through the types.
+    expect(() => roleProcedure("records.evidence.deleteEverything" as never)).toThrow(
       /No permission mapped/
     );
     expect(() => roleProcedure("records.evidence.seal")).not.toThrow();

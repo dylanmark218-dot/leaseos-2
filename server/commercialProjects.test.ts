@@ -100,7 +100,7 @@ d("a job, sold and changed", () => {
     expect(coAuth).toMatchObject({ status: "authorized", withinAuthority: "no" });
     expect(coAuth.detail).toContain("$7400.00 exceeds the signatory's $5000.00 limit");
     const alerts = (await portalCaller(token).portal.alerts()).alerts;
-    expect(alerts.some(a => a.body.includes("above the signatory's authority"))).toBe(true);
+    expect(alerts.some(a => a.body!.includes("above the signatory's authority"))).toBe(true);
 
     // An RFI: asked inside, answered outside, the answer kept; a second answer is refused.
     const rfi = await callerFor(office).project.rfiAsk({ accountRef: acctRef, jobId, question: "Is the north access road open after the washout?" });
