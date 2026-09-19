@@ -39,15 +39,22 @@ async function owned(orgRef: string, recordType: "unit" | "operator" | "load", r
   await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,?,?,1)", [orgRef, recordType, recordId]);
 }
 async function fixtures(orgRef: string) {
-  const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, licenseNumber) VALUES (?,?)", [`Op ${rnd()}`, `LIC-${rnd()}`]);
+  /*
+   * P3.1 (0162): the printed names must be the ones the references resolve to. This fixture used
+   * to bind a real operator and print "Text Driver", which nothing compared — and which the seal
+   * gate correctly refuses as a contradiction. Naming them properly is what a real manifest does,
+   * and it makes the happy path below actually exercise the check rather than dodge it.
+   */
+  const opName = `Op ${rnd()}`, trailerNumber = `T-${rnd()}`, facilityName = `Fixture Disposal ${rnd()}`;
+  const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, licenseNumber) VALUES (?,?)", [opName, `LIC-${rnd()}`]);
   const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [`U-${rnd()}`, "hydrovac"]);
-  const [tr] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [`T-${rnd()}`, "trailer"]);
-  const [f] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO facilities (name) VALUES (?)", [`Fixture Disposal ${rnd()}`]);
+  const [tr] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [trailerNumber, "trailer"]);
+  const [f] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO facilities (name) VALUES (?)", [facilityName]);
   await owned(orgRef, "operator", op.insertId); await owned(orgRef, "unit", u.insertId); await owned(orgRef, "unit", tr.insertId);
   const manifestNumber = `MAN-${rnd()}`;
   // P4.1: a manifest belongs to a tenant (manifests.orgRef, written since v22.48); the fixture stamps the one it is for.
-  await pool.execute("INSERT INTO manifests (manifestNumber, material, driver, trailer, facility, status, orgRef) VALUES (?,?,?,?,?,'draft',?)", [manifestNumber, "produced water", "Text Driver", "Text Trailer", "Text Facility", orgRef]);
-  return { operatorId: op.insertId, unitId: u.insertId, trailerId: tr.insertId, facilityId: f.insertId, manifestNumber };
+  await pool.execute("INSERT INTO manifests (manifestNumber, material, driver, trailer, facility, status, orgRef) VALUES (?,?,?,?,?,'draft',?)", [manifestNumber, "produced water", opName, trailerNumber, facilityName, orgRef]);
+  return { operatorId: op.insertId, unitId: u.insertId, trailerId: tr.insertId, facilityId: f.insertId, manifestNumber, opName, trailerNumber, facilityName };
 }
 async function evidence(title: string) {
   const [e] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt) VALUES (?,?,NOW())", [title, "ticket"]);
@@ -163,4 +170,93 @@ d("the backfill", () => {
     expect(chain.manifest.facility).toBe("Old Facility Name Ltd.");
     expect(chain.manifest.destinationFacilityId).toBeNull();
   }, 20_000);
+});
+
+/**
+ * P3.1 (0162) — the owner decision of 2026-09-19, end to end.
+ *
+ * A manifest that contradicts its own records does not get sealed; an incomplete printed field is
+ * not a contradiction; and an override records both facts and changes neither.
+ */
+d("a manifest that contradicts itself does not seal", () => {
+  /** Walk the chain up to the point where the next event seals. */
+  const readyToDepart = async (c: ReturnType<typeof callerFor>, manifestNumber: string) => {
+    await c.manifestCustody.custodyRecord({ manifestNumber, eventType: "loaded", occurredAt: T(7), notes: null });
+  };
+
+
+  it("blocks on a printed driver who is not the bound operator, naming the fact", async () => {
+    const a = await org();
+    const office = await member(a, ["office"]);
+    const f = await fixtures(a);
+    const c = callerFor(office);
+    await c.manifestCustody.bind({ manifestNumber: f.manifestNumber, operatorId: f.operatorId, unitId: f.unitId, trailerUnitId: f.trailerId, destinationFacilityId: f.facilityId, loadClass: "produced_water" });
+    // Somebody retypes the driver. In the yard this is a typo; on a roadside it is a document that
+    // names one person and points at another.
+    await readyToDepart(c, f.manifestNumber);
+    await pool.execute("UPDATE manifests SET driver = ? WHERE manifestNumber = ?", ["M. Whitford", f.manifestNumber]);
+    await expect(c.manifestCustody.custodyRecord({ manifestNumber: f.manifestNumber, eventType: "departed_origin", occurredAt: T(8), notes: null }))
+      .rejects.toThrow(/MANIFEST_CONTRADICTS_RECORD.*prints "M\. Whitford".*resolves to "Op /s);
+  });
+
+  it("does not treat an incomplete printed field as a contradiction", async () => {
+    // Blank is not wrong. Whether the manifest may seal without it is the evidence profile's call.
+    const a = await org();
+    const office = await member(a, ["office"]);
+    const f = await fixtures(a);
+    const c = callerFor(office);
+    await c.manifestCustody.bind({ manifestNumber: f.manifestNumber, operatorId: f.operatorId, unitId: f.unitId, trailerUnitId: f.trailerId, destinationFacilityId: f.facilityId, loadClass: "produced_water" });
+    await readyToDepart(c, f.manifestNumber);
+    await pool.execute("UPDATE manifests SET driver = NULL WHERE manifestNumber = ?", [f.manifestNumber]);
+    const r = await c.manifestCustody.custodyRecord({ manifestNumber: f.manifestNumber, eventType: "departed_origin", occurredAt: T(8), notes: null });
+    expect(r.sealed).toBe(true);
+  });
+
+  it("refuses an override from the person who raised the manifest", async () => {
+    // An override the author can grant themselves is not a control, it is a second button.
+    const a = await org();
+    // Somebody who COULD override — otherwise this proves the permission works, not that
+    // authorship is refused, which is the actual control.
+    const boss = await member(a, ["management"]);
+    const f = await fixtures(a);
+    const c = callerFor(boss);
+    await c.manifestCustody.bind({ manifestNumber: f.manifestNumber, operatorId: f.operatorId, unitId: f.unitId, loadClass: "produced_water" });
+    await c.manifestCustody.custodyRecord({ manifestNumber: f.manifestNumber, eventType: "loaded", occurredAt: T(7), notes: null });
+    await pool.execute("UPDATE manifests SET driver = ? WHERE manifestNumber = ?", ["M. Whitford", f.manifestNumber]);
+    await expect(c.manifestCustody.reconciliationOverride({ manifestNumber: f.manifestNumber, factKey: "driver", reason: "Operator record is mid-correction; name verified against licence." }))
+      .rejects.toThrow(/OVERRIDE_BY_AUTHOR_REFUSED|FORBIDDEN/);
+  });
+
+  it("records an override append-only, keeping both facts", async () => {
+    const a = await org();
+    const office = await member(a, ["office"]), manager = await member(a, ["management"]);
+    const f = await fixtures(a);
+    await callerFor(office).manifestCustody.bind({ manifestNumber: f.manifestNumber, operatorId: f.operatorId, unitId: f.unitId, loadClass: "produced_water" });
+    await pool.execute("UPDATE manifests SET driver = ? WHERE manifestNumber = ?", ["M. Whitford", f.manifestNumber]);
+    const r = await callerFor(manager).manifestCustody.reconciliationOverride({
+      manifestNumber: f.manifestNumber, factKey: "driver",
+      reason: "Operator legal name changed last week; licence and payroll confirm the printed name.",
+    });
+    expect(r.overrideRef).toMatch(/^MRO-/);
+    const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT canonicalValue, printedValue, reason, state FROM manifestReconciliationOverrides WHERE overrideRef = ?", [r.overrideRef]);
+    // Both values on the row; neither written back over the other.
+    expect(rows[0]!.printedValue).toBe("M. Whitford");
+    expect(rows[0]!.canonicalValue).toBe(f.opName);
+    expect(rows[0]!.state).toBe("granted");
+    const [man] = await pool.query<mysql.RowDataPacket[]>("SELECT driver, operatorId FROM manifests WHERE manifestNumber = ?", [f.manifestNumber]);
+    expect(man[0]!.driver).toBe("M. Whitford");          // the manifest still says what it said
+    expect(man[0]!.operatorId).toBe(f.operatorId);       // the record still says what it says
+  });
+
+  it("seals once the override covers the contradiction", async () => {
+    const a = await org();
+    const office = await member(a, ["office"]), manager = await member(a, ["management"]);
+    const f = await fixtures(a);
+    await callerFor(office).manifestCustody.bind({ manifestNumber: f.manifestNumber, operatorId: f.operatorId, unitId: f.unitId, loadClass: "produced_water" });
+    await pool.execute("UPDATE manifests SET driver = ? WHERE manifestNumber = ?", ["M. Whitford", f.manifestNumber]);
+    await callerFor(manager).manifestCustody.reconciliationOverride({ manifestNumber: f.manifestNumber, factKey: "driver", reason: "Legal name change confirmed against the licence on file." });
+    await readyToDepart(callerFor(office), f.manifestNumber);
+    const r = await callerFor(office).manifestCustody.custodyRecord({ manifestNumber: f.manifestNumber, eventType: "departed_origin", occurredAt: T(8), notes: null });
+    expect(r.sealed).toBe(true);
+  });
 });

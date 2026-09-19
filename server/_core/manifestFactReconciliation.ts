@@ -42,8 +42,10 @@ export type FactFinding = {
 export type ReconciliationVerdict = {
   sealed: boolean;
   findings: readonly FactFinding[];
-  /** Before sealing, a disagreement is a blocker. After, it is history. */
+  /** Before sealing, a contradiction is a blocker. After, it is history. */
   blocking: readonly FactFinding[];
+  /** A printed field left blank whose reference is known: fillable, not a contradiction. */
+  review: readonly FactFinding[];
   explanation: string;
 };
 
@@ -52,7 +54,14 @@ const LABEL: Record<ManifestFactKey, string> = { driver: "driver", trailer: "tra
 /** Compare loosely enough to survive spacing and case, strictly enough to catch a different person. */
 const same = (a: string, b: string) => a.trim().toLowerCase().replace(/\s+/g, " ") === b.trim().toLowerCase().replace(/\s+/g, " ");
 
-export function reconcileManifestFacts(pairs: readonly FactPair[], opts: { sealed: boolean }): ReconciliationVerdict {
+export function reconcileManifestFacts(
+  pairs: readonly FactPair[],
+  opts: {
+    sealed: boolean;
+    /** Facts an authorized person has accepted in writing (0162). Never granted by the author. */
+    overriddenFactKeys?: readonly ManifestFactKey[];
+  },
+): ReconciliationVerdict {
   const findings: FactFinding[] = pairs.map(p => {
     if (p.printed && p.resolved) {
       return same(p.printed, p.resolved)
@@ -69,20 +78,43 @@ export function reconcileManifestFacts(pairs: readonly FactPair[], opts: { seale
     return { key: p.key, kind: "neither", detail: `${LABEL[p.key]}: neither printed nor referenced.` };
   });
 
-  // After sealing, a divergence is the document being a document: a name corrected or a trailer
-  // renumbered afterwards does not retroactively make the sealed page wrong.
-  const blocking = opts.sealed ? [] : findings.filter(f => f.kind === "differs" || f.kind === "printed_without_reference");
+  /*
+   * Owner decision (2026-09-19): a real **contradiction** blocks sealing; an **incomplete** printed
+   * field whose canonical reference is known is REVIEW, not a contradiction, and may be filled from
+   * that record before sealing so long as the manifest says the value was generated rather than
+   * stated.
+   *
+   * `printed_without_reference` is the one case the decision does not name, and it is **review**,
+   * not a block. A printed trailer with no `trailerUnitId` is unverifiable, which is worth saying
+   * loudly — but whether a manifest may seal without that binding is the **evidence profile's**
+   * question, and the decision says so explicitly ("if the applicable profile requires the printed
+   * value ... the existing evidence-profile rules may block sealing"). Blocking it here would be
+   * this gate deciding a requirement that belongs to the profile, and two engines answering the
+   * same question is how they start disagreeing.
+   *
+   * So: contradictions are this gate's business. Completeness is the profile's.
+   *
+   * After sealing nothing blocks: a name corrected or a trailer renumbered afterwards does not
+   * retroactively make the sealed page wrong.
+   */
+  const overridden = new Set(opts.overriddenFactKeys ?? []);
+  const blocking = opts.sealed ? [] : findings.filter(f => f.kind === "differs" && !overridden.has(f.key));
+  const review = opts.sealed ? [] : findings.filter(f =>
+    f.kind === "reference_without_print" || (f.kind === "printed_without_reference" && !overridden.has(f.key)));
 
   return {
     sealed: opts.sealed,
     findings,
     blocking,
+    review,
     explanation: opts.sealed
       ? findings.some(f => f.kind === "differs")
         ? `Sealed. The printed text stands as what was presented; the records have since moved: ${findings.filter(f => f.kind === "differs").map(f => f.detail).join(" ")} This is history, not an error to repair.`
         : "Sealed, and the printed text still matches the records it was drawn from."
       : blocking.length === 0
-        ? "Not sealed, and every printed fact agrees with the record behind it."
+        ? review.length === 0
+          ? "Not sealed, and every printed fact agrees with the record behind it."
+          : `Not sealed. Nothing contradicts the record; ${review.length} field(s) need review: ${review.map(f => f.detail).join(" ")}`
         : `Not sealed. Fix before sealing — the cheapest moment is now: ${blocking.map(f => f.detail).join(" ")}`,
   };
 }

@@ -198,6 +198,10 @@ export type Permission =
   // act; granting an override is a named authority's; an operator may read
   // their own readiness and nobody else's.
   | "dispatch.evaluate" | "dispatch.award" | "dispatch.override.request" | "dispatch.override.grant"
+  // 0162 (P3.1): accepting a manifest reference-versus-print contradiction. Held by the same two
+  // roles that hold dispatch.override.grant, because it is the same kind of act: a named person
+  // taking responsibility for proceeding past a refusal.
+  | "manifest.override.grant"
   /* P8.2 — changing standing automation policy. Deliberately NOT implied by any operational
      permission: choosing that a machine may act unwatched is a different act from dispatching. */
   | "automation.policy.manage" | "automation.policy.read"
@@ -497,6 +501,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "dispatch.award",
     "dispatch.override.request",
     "dispatch.override.grant",
+    "manifest.override.grant",
     "ifta.distance.record",
     "ifta.read",
     "fuel.review",
@@ -1143,6 +1148,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "dispatch.award",
     "dispatch.override.request",
     "dispatch.override.grant",
+    "manifest.override.grant",
     "dispatch.enforcement.manage",
     "ifta.read",
     "fuel.tank.manage",
@@ -2212,6 +2218,9 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "manifestCustody.custodyRecord": "manifest.write",
   "manifestCustody.evidenceAttach": "manifest.write",
   "manifestCustody.amend": "manifest.write",
+  // 0162 (P3.1): accepting a reference-versus-print contradiction is a compliance act, so it does
+  // not ride on manifest.write — the people who write manifests are the people it constrains.
+  "manifestCustody.reconciliationOverride": "manifest.override.grant",
   "manifestCustody.close": "manifest.write",
   "manifestCustody.evidenceProfileSet": "manifest.write",
   "manifestCustody.evidenceProfileApprove": "manifest.write",

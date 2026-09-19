@@ -10,13 +10,15 @@
  * recordBelongsToOrganization.
  */
 import { z } from "zod";
+import { nextTrackingNumber } from "./_core/trackingNumbers";
+import { reconcileManifestFacts, type ManifestFactKey } from "./_core/manifestFactReconciliation";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq } from "drizzle-orm";
 import { router, roleProcedure } from "./_core/trpc";
 import { actingScopeFor, getDb, manifestInScope } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
 import { recordBelongsToOrganization } from "./_core/coreRecordOwnership";
-import { evidenceRecords, facilities, manifestAmendments, manifestCustodyEvents, manifestEvidenceLinks, manifestEvidenceProfiles, manifestPartySnapshots, manifests, operators, units } from "../drizzle/schema";
+import { evidenceRecords, facilities, manifestAmendments, manifestReconciliationOverrides, manifestCustodyEvents, manifestEvidenceLinks, manifestEvidenceProfiles, manifestPartySnapshots, manifests, operators, units } from "../drizzle/schema";
 import { CUSTODY_EVENT_TYPES, EVIDENCE_RELATIONSHIPS, TICKET_RELATIONSHIPS, amendmentAllowed, closeDecision, manifestHash, nextCustodyEvent, type EvidenceRelationship, type ManifestState } from "./_core/manifestCustody";
 
 async function dbOrThrow() {
@@ -41,6 +43,25 @@ const stateOf = (m: typeof manifests.$inferSelect): ManifestState => ({
   originFacilityId: m.originFacilityId, destinationFacilityId: m.destinationFacilityId, material: m.material, unNumber: m.unNumber, loadClass: m.loadClass,
   driver: m.driver, trailer: m.trailer, route: m.route, facility: m.facility,
 });
+
+/**
+ * P3.1 (0162) — the facts a manifest states twice, and what the references resolve to now.
+ *
+ * Read at seal time rather than stored: the whole question is whether the printed word still
+ * matches the record, and a cached answer cannot tell you that.
+ */
+async function reconcileAtSeal(db: Db, m: typeof manifests.$inferSelect) {
+  const [op] = m.operatorId ? await db.select({ n: operators.name }).from(operators).where(eq(operators.id, m.operatorId)).limit(1) : [];
+  const [tr] = m.trailerUnitId ? await db.select({ n: units.unitNumber }).from(units).where(eq(units.id, m.trailerUnitId)).limit(1) : [];
+  const [fa] = m.destinationFacilityId ? await db.select({ n: facilities.name }).from(facilities).where(eq(facilities.id, m.destinationFacilityId)).limit(1) : [];
+  const granted = await db.select().from(manifestReconciliationOverrides)
+    .where(and(eq(manifestReconciliationOverrides.manifestId, m.id), eq(manifestReconciliationOverrides.state, "granted")));
+  return reconcileManifestFacts([
+    { key: "driver", printed: m.driver, resolved: op?.n ?? null, referenceId: m.operatorId },
+    { key: "trailer", printed: m.trailer, resolved: tr?.n ?? null, referenceId: m.trailerUnitId },
+    { key: "facility", printed: m.facility, resolved: fa?.n ?? null, referenceId: m.destinationFacilityId },
+  ], { sealed: !!m.sealedAt, overriddenFactKeys: granted.map(g => g.factKey as ManifestFactKey) });
+}
 
 async function chainOf(db: Db, manifestId: number) {
   return db.select().from(manifestCustodyEvents).where(eq(manifestCustodyEvents.manifestId, manifestId)).orderBy(asc(manifestCustodyEvents.sequence));
@@ -108,6 +129,51 @@ export const manifestCustodyRouter = router({
       return { manifestNumber: m.manifestNumber, snapshots: snapshots.map(s => ({ role: s.role, capturedName: s.capturedName })), hash: manifestHash(stateOf(after)) };
     }),
 
+  /**
+   * P3.1 (0162) — accept a reference-versus-print contradiction in writing.
+   *
+   * Three things this deliberately does not do. It does not change the printed value, it does not
+   * change the record, and it does not let the manifest's author grant it. The first two because
+   * an override is somebody's judgement about a disagreement, not a repair of it — repairing would
+   * destroy the thing an auditor came to see. The third because an override the author can grant
+   * themselves is not a control, it is a second button.
+   */
+  reconciliationOverride: roleProcedure("manifestCustody.reconciliationOverride")
+    .input(z.object({
+      manifestNumber: z.string().min(1).max(80),
+      factKey: z.enum(["driver", "trailer", "facility"]),
+      reason: z.string().min(20).max(500),
+    }).strict())
+    .mutation(async ({ ctx, input }) => {
+      if (!(await manifestInScope(input.manifestNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Manifest not found" });
+      const db = await dbOrThrow();
+      const { m } = await ownedManifest(db, ctx.user.id, input.manifestNumber);
+
+      // The author cannot clear their own contradiction. `createdByUserId` is not on this table, so
+      // the first custody event's actor stands as the person who put the manifest into the world.
+      const [firstEvent] = await db.select({ a: manifestCustodyEvents.actorUserId }).from(manifestCustodyEvents)
+        .where(eq(manifestCustodyEvents.manifestId, m.id)).orderBy(asc(manifestCustodyEvents.sequence)).limit(1);
+      if (firstEvent && firstEvent.a === ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "OVERRIDE_BY_AUTHOR_REFUSED: the person who raised this manifest cannot authorize its own contradiction. Management or a delegated compliance authority has to look at it." });
+      }
+
+      const rec = await reconcileAtSeal(db, m);
+      const finding = rec.findings.find(f => f.key === input.factKey && (f.kind === "differs" || f.kind === "printed_without_reference"));
+      if (!finding) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `NOTHING_TO_OVERRIDE: ${input.factKey} does not contradict the record.` });
+
+      const pair = { driver: { p: m.driver, r: m.operatorId }, trailer: { p: m.trailer, r: m.trailerUnitId }, facility: { p: m.facility, r: m.destinationFacilityId } }[input.factKey];
+      const overrideRef = (await nextTrackingNumber(db, { sequenceType: "MRO" })).trackingNumber;
+      // Both facts, verbatim; neither corrected. Append-only — a withdrawal would be a second row.
+      await db.insert(manifestReconciliationOverrides).values({
+        overrideRef, manifestId: m.id, manifestRevisionHash: m.currentHash ?? null, amendmentCountAtOverride: m.amendmentCount ?? 0,
+        factKey: input.factKey, canonicalValue: finding.detail.match(/resolves to "([^"]*)"/)?.[1] ?? null,
+        printedValue: pair.p ?? null, referenceId: pair.r ?? null,
+        requestedByUserId: ctx.user.id, authorizedByUserId: ctx.user.id,
+        authorityRole: "manifestCustody.reconciliationOverride", reason: input.reason,
+      });
+      return { overrideRef, manifestNumber: m.manifestNumber, factKey: input.factKey, accepted: finding.detail };
+    }),
+
   /** Record the next custody event. Departure from origin seals the manifest. */
   custodyRecord: roleProcedure("manifestCustody.custodyRecord")
     .input(z.object({
@@ -126,6 +192,21 @@ export const manifestCustodyRouter = router({
       if (input.eventType === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Closure is recorded by `close`, which checks the evidence profile" });
       await db.transaction(async (tx) => {
         await tx.insert(manifestCustodyEvents).values({ manifestId: m.id, sequence: decision.sequence, eventType: input.eventType, actorUserId: ctx.user.id, facilityId: input.facilityId ?? null, occurredAt: input.occurredAt, evidenceRecordId: input.evidenceRecordId ?? null, notes: input.notes ?? null });
+      /*
+       * P3.1 — a manifest that contradicts itself does not get sealed. Checked here rather than at
+       * draft time because sealing is the moment the document stops being changeable: a mismatch
+       * caught now costs a correction, and the same mismatch caught after sealing costs an
+       * amendment, an override, or an argument with a customer.
+       */
+      if (decision.seals) {
+        const rec = await reconcileAtSeal(db, m);
+        if (rec.blocking.length > 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `MANIFEST_CONTRADICTS_RECORD: ${rec.blocking.map(f => f.detail).join(" ")} Correct the draft, or have management or a delegated compliance authority record an override.`,
+          });
+        }
+      }
         if (decision.seals) await tx.update(manifests).set({ sealedAt: input.occurredAt, status: "sealed", currentHash: manifestHash(stateOf(m)) }).where(eq(manifests.id, m.id));
       });
       return { manifestNumber: m.manifestNumber, sequence: decision.sequence, sealed: decision.seals || !!m.sealedAt };

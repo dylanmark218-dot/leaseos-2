@@ -447,6 +447,9 @@ export const manifests = mysqlTable("manifests", {
   status: mysqlEnum("status", ["draft", "verified", "sealed", "complete"])
     .default("draft")
     .notNull(),
+  // 0162 (P3.1): which printed fields were rendered from the authoritative record rather than
+  // typed by a person. A filled field is evidence of a different kind from a stated one.
+  generatedFromReferenceJson: text("generatedFromReferenceJson"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   /** 0129 (P3.1) — canonical references beside the captured text; the text stays as the snapshot. */
   orgRef: varchar("orgRef", { length: 64 }),
@@ -8702,4 +8705,27 @@ export const monitoringNotices = mysqlTable("monitoringNotices", {
   supersededByNoticeId: int("supersededByNoticeId"),
   withdrawnAt: timestamp("withdrawnAt"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
+});
+
+/**
+ * 0162 (P3.1) — overriding a manifest reference-versus-print contradiction. Append-only: both
+ * conflicting facts are recorded and neither is changed, and a withdrawal is a second row.
+ */
+export const manifestReconciliationOverrides = mysqlTable("manifestReconciliationOverrides", {
+  id: int("id").autoincrement().primaryKey(),
+  overrideRef: varchar("overrideRef", { length: 64 }).notNull().unique(),
+  manifestId: int("manifestId").notNull(),
+  manifestRevisionHash: varchar("manifestRevisionHash", { length: 128 }),
+  amendmentCountAtOverride: int("amendmentCountAtOverride").notNull().default(0),
+  factKey: varchar("factKey", { length: 40 }).notNull(),
+  canonicalValue: varchar("canonicalValue", { length: 300 }),
+  printedValue: varchar("printedValue", { length: 300 }),
+  referenceId: int("referenceId"),
+  requestedByUserId: int("requestedByUserId").notNull(),
+  authorizedByUserId: int("authorizedByUserId").notNull(),
+  authorityRole: varchar("authorityRole", { length: 80 }).notNull(),
+  reason: varchar("reason", { length: 500 }).notNull(),
+  state: mysqlEnum("state", ["granted", "withdrawn"]).default("granted").notNull(),
+  supersedesOverrideId: int("supersedesOverrideId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

@@ -30,10 +30,16 @@ describe("before sealing, the reference is authoritative", () => {
     expect(v.explanation).toMatch(/the cheapest moment is now/);
   });
 
-  it("blocks a printed name with nothing behind it", () => {
+  it("reviews a printed name with nothing behind it, and leaves the blocking to the evidence profile", () => {
+    /*
+     * Unverifiable, permanently — worth saying loudly. But whether a manifest may seal without that
+     * binding is the evidence profile's question, and the owner decision says so. Two engines
+     * answering the same question is how they start disagreeing.
+     */
     const v = reconcileManifestFacts([pair({ resolved: null, referenceId: null })], { sealed: false });
-    expect(v.blocking[0]!.kind).toBe("printed_without_reference");
-    expect(v.blocking[0]!.detail).toMatch(/nothing can confirm who or what that was/);
+    expect(v.blocking).toEqual([]);
+    expect(v.review[0]!.kind).toBe("printed_without_reference");
+    expect(v.review[0]!.detail).toMatch(/nothing can confirm who or what that was/);
   });
 
   it("notes a record with nothing printed without blocking on it", () => {
@@ -43,13 +49,23 @@ describe("before sealing, the reference is authoritative", () => {
     expect(v.findings[0]!.detail).toMatch(/the manifest prints nothing, so the document is short a field/);
   });
 
+  it("accepts a fact an authorized override has covered, without changing either value", () => {
+    const pairs = [pair({ resolved: "M. Whitford" })];
+    expect(reconcileManifestFacts(pairs, { sealed: false }).blocking).toHaveLength(1);
+    const covered = reconcileManifestFacts(pairs, { sealed: false, overriddenFactKeys: ["driver"] });
+    expect(covered.blocking).toEqual([]);
+    // The disagreement is still on the record. An override is a judgement about it, not a repair.
+    expect(covered.findings[0]!.kind).toBe("differs");
+    expect(covered.findings[0]!.detail).toMatch(/resolves to "M\. Whitford"/);
+  });
+
   it("checks every fact, not just the first that fails", () => {
     const v = reconcileManifestFacts([
       pair({ key: "driver", resolved: "M. Whitford" }),
       pair({ key: "trailer", printed: "T-4412", resolved: "T-4412", referenceId: 22 }),
       pair({ key: "facility", printed: "West Ridge", resolved: "Westridge Disposal", referenceId: 9 }),
     ], { sealed: false });
-    expect(v.blocking.map(f => f.key)).toEqual(["driver", "facility"]);
+    expect(v.blocking.map(f => f.key)).toEqual(["driver", "facility"]);   // contradictions only
   });
 });
 
