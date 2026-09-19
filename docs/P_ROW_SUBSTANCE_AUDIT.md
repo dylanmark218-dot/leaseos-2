@@ -51,6 +51,30 @@ administration"; its stated rationale is that it "stays off the insurance books"
 would hide near misses from the safety staff whose programme depends on seeing them. Off-the-books would not. Building
 either reading would be a guess with a real cost attached, so it is a question rather than a commit.
 
+### P7.1–P7.8 against the Commercial Office spec (2026-09-19)
+
+Four of the spec's checkable rules hold:
+
+| Rule | Verified |
+|---|---|
+| "A client should never be deleted once referenced financially" | no hard delete of `customerAccounts` or `organizations` anywhere; an `inactive` status exists |
+| "OCR should never silently turn an image into an accounting fact" | `documentExtraction` produces **proposals** with provenance `photo_ocr`; no path writes OCR output into a `vendorBill`, and new bills land `received` / `needs_coding` / `missing_receipt`, never `ready_to_pay` |
+| "Every material movement should have a unique Load Manifest ID" | `manifests_manifestNumber_unique` |
+| "Once an accounting period is closed, normal users should not be able to rewrite it" | `assertPeriodOpen` at **12 call sites** across cash, asset, GST, IFTA, fuel and purchasing |
+
+**A false alarm I raised against myself.** My first pass grepped the financial routers for
+`periodState|closed|PERIOD` and found nothing in five of them — which reads as "a closed period is
+enforced in one place". The guard is named `assertPeriodOpen`; the grep simply missed it. Recorded
+because the near-miss is the lesson: a check for an absence is only as good as the name it searches
+for, and an absence is exactly what nobody double-checks.
+
+**One question left open, with evidence rather than a verdict.** `invoicing.void` mutates the
+invoice in place — `status: "void"`, `voidedAt`, `voidReason` — with no `assertPeriodOpen`, and
+`invoices` carries **no accounting date** at all, only `createdAt`. So voiding an invoice that was
+finalized in a now-closed period changes that period's state. Standard accounting practice is a
+reversing entry in the **current** period rather than an edit to the closed one, and I cannot tell
+from the code which was intended. Raising it as a question rather than building either answer.
+
 ## What this audit does not cover
 
 - **The 14 rows with no original text.** Checking them means re-reading the owner decisions that
