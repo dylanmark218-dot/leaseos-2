@@ -117,7 +117,7 @@ describe("a test claim in the register is checkable", () => {
     expect(wrong, "a register row states a test count its file does not have").toEqual([]);
     // If this list grows, the exact check is covering less than it looks like it covers.
     expect(loose.sort(), "files whose claim is checked loosely because they use it.each")
-      .toEqual(["server/_core/degradationSuite.test.ts"]);
+      .toEqual(["server/_core/degradationSuite.test.ts", "server/alberta511Gate.test.ts"]);
   });
 
   it("counts the rows still using a bare, uncheckable number, so the gap shrinks rather than hides", () => {

@@ -262,14 +262,14 @@ describe("migrated operational procedures", () => {
 });
 
 describe("the data source document matches the seeded registry", () => {
-  it("states the corrected count of eight verified and ten not", () => {
+  it("states the corrected count of eight verified and thirteen not", () => {
     // The research summary said nine of eleven were clean; three were unresolved,
     // so it was eight. v22.17 added six spectrum and coverage sources, none of
     // them licence-cleared, so nine are now blocked. The document and the seed
     // must agree or a future reader trusts the wrong number.
-    expect(dataSources).toContain("Eight verified, ten not");
+    expect(dataSources).toContain("Eight verified, thirteen not");
     expect(VERIFIED_DATA_SOURCES).toHaveLength(8);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(10);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(13);
   });
 
   it("lists exactly the blocked sources as blocked", () => {

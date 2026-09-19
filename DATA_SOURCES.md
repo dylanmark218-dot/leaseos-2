@@ -5,7 +5,7 @@ publisher and is now seeded into `externalDataSources` by
 `seedExternalDataSources()`. This document describes what the runtime enforces;
 it is not the enforcement itself.
 
-## Eight verified, ten not
+## Eight verified, thirteen not
 
 | | Count |
 |---|---|
@@ -38,6 +38,9 @@ it is not the enforcement itself.
 | `aer_st37` | AER Terms of Use, not an open licence. Commercial use and redistribution **unknown**. |
 | `aer_st102` | Same. |
 | `ab511` | Developer terms via account registration. No open licence stated. Commercial use and redistribution **unknown**. |
+| `aer_st107` | Well and facility licence status. AER Terms of Use, not an open licence. The directory stores the WM approval number and links out; mirroring is **unknown** pending the written answer requested in `docs/P6_DATA_PERMISSION_REQUESTS.md` §2. |
+| `sk_iris` | Believed to be published under a standard unrestricted use licence, and believed is not recorded. Confirmation requested (§3); **unknown** until it arrives. |
+| `mb_petroleum` | Same question, second province (§3). **Unknown**. |
 | `ised_b1_western` | ISED's western and northern mobile appendix. Published openly; redistributing it to field tablets as an operational channel bank is a different question and was not confirmed. |
 | `ised_bc_rr` | ISED's BC resource-road channel conditions. Same question, and the publisher states the channels are for use where posted. |
 | `ised_cb_grs` | RSS-236, the General Radio Service allocation. Same. |
