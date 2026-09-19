@@ -366,6 +366,22 @@ So the two ideas are separated, and **`_core/routeApprovalPolicy.ts` implements 
   approver is permission to proceed on what nobody could establish, not on what was established as
   false.
 
+### 10.5 The FAIL rule, enforced where approvals are written (v23.13)
+
+10.4 says a known FAIL remains a FAIL and no second signature clears it. The policy core answered
+that correctly from the day it was written. The **procedure** did not: its one refusal read
+`input.dispatchStatus`, a free-form string the caller supplies, so the rule protecting route
+approval checked what the caller *said* about the route rather than what the evaluation *found*.
+Approving a failing route needed nothing more than sending `"review"`.
+
+Not an exploit — a caller assembling its input from a stale verdict does it by accident, and the
+approval looks ordinary afterwards. `spatial.approveRoute` now reads `routeEvidenceEntries` for this
+route's own segments and refuses on any stored `fail`, naming the segment, the check and the reason.
+The caller-supplied check is kept as well: a caller that correctly reports `blocked` is still
+refused before a database read, and the evidence check is what makes the rule true when it does not.
+
+---
+
 ## 11. What this specification deliberately does not do
 
 - **It does not redesign UNKNOWN / silent checks.** That behaviour is correct and tested.

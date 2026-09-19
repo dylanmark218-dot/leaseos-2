@@ -252,7 +252,28 @@ export const spatialRouter = router({
       if (!(await unitInScope(input.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      /*
+       * S10.4 — "a known FAIL remains a FAIL; a second signature cannot turn it into PASS."
+       *
+       * The refusal used to read `input.dispatchStatus`, a free-form string the caller supplies.
+       * So the rule protecting route approval checked what the caller SAID about the route rather
+       * than what the evaluation FOUND, and approving a failing route needed nothing more than
+       * sending "review" instead of "blocked". Not an exploit — a caller assembling the input from
+       * a stale verdict would do it by accident, and the approval would look ordinary afterwards.
+       *
+       * The stored evidence is the authority. It is already written per segment and per check by
+       * the evaluator, so there is a fact to consult instead of a claim to trust.
+       */
       if (input.dispatchStatus === "blocked") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A blocked route is not approved" });
+      const failing = await db.select({ segmentId: routeEvidenceEntries.segmentId, checkKey: routeEvidenceEntries.checkKey, reason: routeEvidenceEntries.reason })
+        .from(routeEvidenceEntries)
+        .where(and(inArray(routeEvidenceEntries.segmentId, input.segmentIds), eq(routeEvidenceEntries.result, "fail")));
+      if (failing.length) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `ROUTE_HAS_FAILING_EVIDENCE: ${failing.length} check(s) on this route evaluated FAIL and no approval clears them — ${failing.slice(0, 3).map(f => `${f.segmentId} ${f.checkKey}: ${f.reason}`).join("; ")}`,
+        });
+      }
       if (input.buildRef) {
         const build = (await db.select({ buildRef: roadGraphBuilds.buildRef, status: roadGraphBuilds.status }).from(roadGraphBuilds).where(eq(roadGraphBuilds.buildRef, input.buildRef)).limit(1))[0];
         if (!build) throw new TRPCError({ code: "NOT_FOUND", message: `No routing graph build ${input.buildRef}` });

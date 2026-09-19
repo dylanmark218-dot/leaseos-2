@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 /**
  * §10.4 — coverage is evidence, risk is the trigger, and a FAIL is nobody's to sign.
  *
@@ -104,5 +105,44 @@ describe("coverage is computed per axis, not as one number", () => {
     expect(byAxis.weight).toBe(0);
     // A single blended figure would read as 50% and describe neither.
     expect(a.byAxis).toHaveLength(2);
+  });
+});
+
+/**
+ * S10.4 at the place an approval is actually written.
+ *
+ * The policy core answers correctly — a FAIL is blocking, never a trigger. What this pins is the
+ * procedure, where the rule used to rest on `input.dispatchStatus`: a free-form string the caller
+ * supplies. The refusal therefore checked what the caller said about the route rather than what the
+ * evaluation found, and approving a failing route needed nothing more than sending "review".
+ *
+ * Not an exploit. A caller assembling its input from a stale verdict does it by accident, and the
+ * approval looks ordinary afterwards.
+ */
+describe("the approval procedure consults the evidence, not the caller's word for it", () => {
+  const src = readFileSync("server/spatialRouter.ts", "utf8");
+
+  it("reads stored evidence for a failing check before approving", () => {
+    expect(src).toMatch(/from\(routeEvidenceEntries\)/);
+    expect(src).toMatch(/eq\(routeEvidenceEntries\.result, "fail"\)/);
+    expect(src).toMatch(/ROUTE_HAS_FAILING_EVIDENCE/);
+  });
+
+  it("scopes that read to this route's own segments", () => {
+    // A query that checked every segment in the database would refuse every approval; one that
+    // checked none would refuse nothing. It has to be this route.
+    expect(src).toMatch(/inArray\(routeEvidenceEntries\.segmentId, input\.segmentIds\)/);
+  });
+
+  it("names the segment and the check, so the refusal is actionable", () => {
+    // "Not approved" sends somebody looking. "AB-ACCESS-88 bridge_capacity: 31,500 kg exceeds
+    // 29,000 kg" sends them to the bridge.
+    expect(src).toMatch(/\$\{f\.segmentId\} \$\{f\.checkKey\}: \$\{f\.reason\}/);
+  });
+
+  it("keeps the caller-supplied status check as well, rather than replacing it", () => {
+    // Belt and braces: a caller that correctly reports "blocked" is still refused early, before a
+    // database read. The evidence check is what makes the rule true when the caller is wrong.
+    expect(src).toMatch(/input\.dispatchStatus === "blocked"/);
   });
 });
