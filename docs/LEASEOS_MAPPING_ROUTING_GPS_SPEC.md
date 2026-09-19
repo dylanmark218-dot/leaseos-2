@@ -455,3 +455,31 @@ writes a new set under a new ref and leaves the approved set untouched — the s
 **An approval with no named evaluation stores null.** Inferring the most recent evaluation would
 attach evidence to an approval that may never have seen it, which is the false precision this
 removes. Historical rows stay null and read as unattributable, because that is what they are.
+
+### Source coverage — British Columbia added (v23.18)
+
+`geofabrik_osm_bc` registered: `OSM-BC-`, `unverified`, jurisdiction **`CA-BC`** — the first source
+to exercise `0164`'s jurisdiction-from-source rather than the constant it replaced. A BC road
+evaluated under Alberta's limits would be a quiet, confident wrong answer.
+
+Measured on `british-columbia-260918.osm.pbf` (1.25 GB):
+
+| | Alberta | British Columbia |
+|---|---|---|
+| vehicle ways | 512,979 | 490,986 |
+| `maxweight` | 24 | 108 |
+| `maxaxleload` | 4 | 5 |
+| `maxheight` | 936 | 988 |
+| **`maxwidth`** | 23 | **0** |
+| `maxlength` | 1 | 14 |
+| bridges mapped | 7,882 | 10,157 |
+| back-road names | 43,294 Range Rd · 31,118 Township Rd | 7,180 Forest Service Road |
+| `ford` | — | 113 |
+
+**Not one width restriction in British Columbia**, in the province whose Forest Service Roads are
+where a wide load actually gets stopped. And 10,157 bridges of which roughly **one percent** state a
+capacity. §0's conclusion holds harder here than in Alberta: OSM establishes where a road is and how
+it connects, and nothing about whether this truck may use it.
+
+`ford` is new — 113 water crossings BC tags and Alberta barely has. Worth a check key of its own
+when the importer lands; a ford is a real constraint for a loaded unit, not a surface quality.

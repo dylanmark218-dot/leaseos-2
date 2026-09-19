@@ -154,6 +154,17 @@ export const ROAD_SOURCE_STANDING: Record<string, RoadSourceStanding> = {
   ats_road_allowance: { idPrefix: "AB-ACCESS-", confidence: "authority_confirmed", jurisdiction: "CA-AB" },
   /** Geofabrik's Alberta extract: excellent topology, and not an authority on anything. */
   geofabrik_osm_ab: { idPrefix: "OSM-AB-", confidence: "unverified", jurisdiction: "CA-AB" },
+  /**
+   * Geofabrik's British Columbia extract. Same standing, different province — and the jurisdiction
+   * is the whole reason this registry exists rather than a constant: a BC road is governed by BC,
+   * and the evaluator has to be told so by the source rather than by whoever called it.
+   *
+   * BC's numbers are worse than Alberta's where it counts. 490,986 vehicle ways carry 108
+   * `maxweight` tags, 5 `maxaxleload`, 14 `maxlength` — and **zero** `maxwidth`, in a province
+   * whose Forest Service Roads are exactly where a wide load gets stopped. 10,157 bridges are
+   * mapped and about one percent of them state a capacity.
+   */
+  geofabrik_osm_bc: { idPrefix: "OSM-BC-", confidence: "unverified", jurisdiction: "CA-BC" },
 };
 
 /**

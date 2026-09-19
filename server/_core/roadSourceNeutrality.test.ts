@@ -131,3 +131,37 @@ describe("no production call site manufactures a source", () => {
     expect(offenders, "a production call site names a road source instead of carrying it").toEqual([]);
   });
 });
+
+describe("a second province exercises the boundary the registry was built for", () => {
+  const bc = (over: Partial<ImportedRoad> = {}) =>
+    road({ sourceKey: "geofabrik_osm_bc", sourceLayer: "lines", sourceFeatureId: "way/1234567", ...over });
+
+  it("carries BC's jurisdiction from the source, not Alberta's from a constant", () => {
+    /*
+     * The defect `0164` replaced hard-coded `jurisdiction: "CA-AB"`. A BC road evaluated under
+     * Alberta's rules would be a quiet, confident wrong answer — the evaluator would apply the
+     * wrong province's limits and report a clean verdict.
+     */
+    expect(roadAsSegment(bc()).attributes[0]!.jurisdiction).toBe("CA-BC");
+    expect(roadAsSegment(road()).attributes[0]!.jurisdiction).toBe("CA-AB");
+  });
+
+  it("gives BC its own identity namespace", () => {
+    // Three sources, one integer: ATS OBJECTID, an Alberta OSM way and a BC OSM way can all be
+    // 1234567 and none of them is the same road.
+    const ids = [road(), osm(), bc()].map(r => roadAsSegment(r).segmentId);
+    expect(new Set(ids).size).toBe(3);
+    expect(ids[2]).toBe("OSM-BC-way/1234567");
+  });
+
+  it("does not let BC data claim authority either", () => {
+    // 490,986 vehicle ways, 108 maxweight tags and zero maxwidth. Excellent topology; no standing.
+    expect(roadAsSegment(bc()).attributes[0]!.confidence).toBe("unverified");
+  });
+
+  it("still answers nothing about width, which is the tag BC does not have at all", () => {
+    const seg = roadAsSegment(bc());
+    expect(seg.silentChecks).toContain("width_restriction");
+    expect(seg.attributes.map(a => a.check)).not.toContain("width_restriction");
+  });
+});
