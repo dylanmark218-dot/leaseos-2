@@ -121,7 +121,7 @@ d("routing over the imported fabric, through the database", () => {
       fromLatitude: Number(from.latitude), fromLongitude: Number(from.longitude), toLatitude: Number(to.latitude), toLongitude: Number(to.longitude),
       vehicle: { grossWeightKg: 63_500, maxAxleGroupKg: 24_000, heightM: 4.15, widthM: 2.6, lengthM: 27.5, dangerousGoods: false, requiresEscort: false },
       requiredChecks: ["road_weight_restriction", "bridge_clearance", "surface_condition"],
-    }, 20_000);   // v23.14: builds a graph, routes it and evaluates it against the database; the
+    });   // v23.14: builds a graph, routes it and evaluates it against the database; the
 
     expect(evaluated.outcome).toBe("evaluated");
     expect(evaluated.verdict).not.toBeNull();
@@ -138,5 +138,5 @@ d("routing over the imported fabric, through the database", () => {
     expect(unreachable.path).toBeNull();
     await expect(callerFor(dispatcher).geo.graphBuild({ label: "not a dispatcher's act", minLatitude: 53.6, minLongitude: -116.7, maxLatitude: 53.75, maxLongitude: -116.45 })).rejects.toThrow(/geo.graph.build/);   // building is not a dispatcher's act
     await expect(callerFor(controller).geo.graphBuild({ label: "empty", minLatitude: 51.0, minLongitude: -110.0, maxLatitude: 51.1, maxLongitude: -109.9 })).rejects.toThrow(/No imported road segments/);
-  });
+  }, 20_000);
 });
