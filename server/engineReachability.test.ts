@@ -43,6 +43,7 @@ const DECLARED_UNWIRED: Record<string, string> = {
   routeApprovalPolicy: "S10.4 - coverage as evidence, risk as the trigger. Not mounted: it needs the evaluator's per-check outcomes tagged with applicability (does this route actually cross that bridge), which is the importer's job in M2. Feeding it untagged checks would make every unknown high-consequence and demand a second signature for every route - the exact failure the percentage threshold was rejected for.",
   sourcePrecedence: "S10.3 - asymmetric precedence between road sources. Not mounted: the evaluator consumes segment attributes, and wiring this means deciding where a field observation enters that stream, which is M3's evidence compiler rather than a wiring choice.",
   phoneLocationGate: "S10.1 - whether LeaseOS may collect location from a driver's personal phone. Not mounted: there is no phone yet. The collector it governs is P1.1 device work, and a gate wired ahead of the thing it gates is a gate nothing passes through - it would report a decision about a collection that cannot happen, which is worse than reporting nothing.",
+  osmImport: "M2 - an OSM way becomes a road edge or says why it did not. Pure and validated against all 734,600 Alberta highway ways; not mounted because the bulk loader that would call it is the rest of M2, and a conversion wired to nothing is easier to review than a half-written import job.",
   migrationLedger: "the production migration ledger; reached from scripts/migrate.ts (the deploy path), not from a router — declared by the session that reconciled 5f3bef4",
   offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
@@ -161,7 +162,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(45);   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(46);   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });

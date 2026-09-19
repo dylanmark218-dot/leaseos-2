@@ -515,3 +515,41 @@ than inferred from one:
 
 Surface is the mirror image at 83% in Saskatchewan. Both facts are true at once, and they are not in
 tension: coverage is about accuracy, standing is about who is speaking.
+
+### M2 — the way→edge conversion (BUILT, v23.21)
+
+`server/_core/osmImport.ts`. Pure: one way's tags and geometry in, an edge or a named refusal out.
+No database, no file reading, no bulk loading — the conversion is the part worth testing against
+real tag combinations, and the loader that calls it is the rest of M2.
+
+**Validated over all 734,600 Alberta `highway` ways**, not only fixtures:
+
+| | |
+|---|---|
+| imported | **508,807** |
+| refused — not vehicle-accessible | 223,334 |
+| refused — `access=no` / `motor_vehicle=no` | 2,240 |
+| refused — class not recognised | **219** |
+
+Those 219 are `rest_area` (105), `busway` (58), `services` (41), `future`, `escape`, `no` — so the
+class list is effectively complete for Alberta, and what it misses is refused **by name** rather
+than guessed at. `rest_area` and `services` are places a truck genuinely goes; they are destinations
+rather than through-routes, which is why they stay out for now and stay **visible** in the skipped
+report.
+
+**`highway=track` is imported deliberately.** Excluding it would drop lease approaches, resource
+roads and most of BC's 7,180 Forest Service Roads — the roads this product exists to route on.
+
+**An untagged surface is not assumed paved.** On a Range Road that guess is wrong most of the time
+and wrong in the expensive direction, so it reads `dry_weather`, which the suitability table already
+treats as `review`.
+
+**No OSM tag answers a legal check.** Every check stays silent — including the ones OSM has a tag
+for. A stated limit becomes an **advisory** whose own text says it is not a limit: *"nobody has told
+us the weight here"* and *"OSM says 10 t and nobody verified it"* are different situations for a
+dispatcher, and neither is permission to send 52 tonnes.
+
+**The advisory volume to plan for:** 14,768 `hgv`, **13,511 `access=private`**, 7,775 bridges, 1,904
+`hazmat`, 928 `maxheight`, 26 fords, 23 `maxweight`, 4 `maxaxleload`. The private-access count is
+the one that matters operationally — 2.7% of imported Alberta roads are somebody's to grant, which
+in oilfield work is the lease approach itself.
