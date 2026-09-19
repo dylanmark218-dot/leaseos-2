@@ -1683,6 +1683,9 @@ export const routeEvidenceEntries = mysqlTable("routeEvidenceEntries", {
     .default("unverified")
     .notNull(),
   evaluatedAt: timestamp("evaluatedAt").notNull(),
+  // 0167: which evaluation produced this row. A trip evaluated three times leaves three sets;
+  // without this, none of them can be told apart.
+  evaluationRef: varchar("evaluationRef", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -6180,6 +6183,9 @@ export const routeApprovals = mysqlTable("routeApprovals", {
   approvedAt: timestamp("approvedAt").defaultNow().notNull(),
   revokedByUserId: int("revokedByUserId"),
   revokedAt: timestamp("revokedAt"),
+  // 0167: the evaluation this approval was made from, so its evidence stays retrievable after a
+  // later evaluation writes a newer set.
+  evaluationRef: varchar("evaluationRef", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type RouteApprovalRow = typeof routeApprovals.$inferSelect;

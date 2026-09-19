@@ -183,8 +183,16 @@ export const spatialRouter = router({
       const evaluatedAt = new Date();
       // The evidence is written against the unit's profile, as the B12 table requires: a verdict is always about a profile.
       const routeProfileId = `unit:${input.unitId}:vp${p.id}:${p.verificationStatus}`;
-      for (const e of verdict.evidence) await db.insert(routeEvidenceEntries).values({ routeDecisionId: null, routeProfileId, tripId: input.tripId ?? null, jobId: input.jobId ?? null, segmentId: e.segmentId.slice(0, 64), segmentLabel: e.segmentLabel.slice(0, 220), checkKey: e.check, axis: e.axis, result: e.result, reason: e.reason.slice(0, 400), vehicleValue: e.inputs.vehicleValue ?? null, limitValue: e.inputs.limitValue ?? null, unit: e.inputs.unit ?? null, jurisdiction: e.jurisdiction, source: e.source?.slice(0, 300) ?? null, sourceVersion: e.sourceVersion?.slice(0, 60) ?? null, verifiedAt: e.verifiedAt ? new Date(e.verifiedAt) : null, confidence: e.confidence, evaluatedAt } as never);
-      return { unitId: input.unitId, profileVerified: p.verificationStatus === "verified", vehicle, legal: verdict.legal, physicallyFeasible: verdict.physicallyFeasible, operationallyPreferred: verdict.operationallyPreferred, dataConfidence: verdict.dataConfidence, dispatchStatus: verdict.dispatchStatus, explanation: verdict.explanation, counts: { failing: verdict.failingCount, unknown: verdict.unknownCount, review: verdict.reviewCount }, evidence: verdict.evidence, routingSource: routingSourceStatus().status, evaluatedAt: input.at, dateNotes, structureNotes };
+      /*
+       * 0167 — this evaluation's identity. Evidence rows are written per check per segment and were
+       * tagged only with trip, job and segment, so a trip evaluated three times left three
+       * indistinguishable sets. An approval that cannot name its own set cannot produce the
+       * evidence it rests on, which is the detail behind the coverage numbers 0165 stores.
+       */
+      const evaluationRef = `RE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      for (const e of verdict.evidence) await db.insert(routeEvidenceEntries).values({ evaluationRef, routeDecisionId: null, routeProfileId, tripId: input.tripId ?? null, jobId: input.jobId ?? null, segmentId: e.segmentId.slice(0, 64), segmentLabel: e.segmentLabel.slice(0, 220), checkKey: e.check, axis: e.axis, result: e.result, reason: e.reason.slice(0, 400), vehicleValue: e.inputs.vehicleValue ?? null, limitValue: e.inputs.limitValue ?? null, unit: e.inputs.unit ?? null, jurisdiction: e.jurisdiction, source: e.source?.slice(0, 300) ?? null, sourceVersion: e.sourceVersion?.slice(0, 60) ?? null, verifiedAt: e.verifiedAt ? new Date(e.verifiedAt) : null, confidence: e.confidence, evaluatedAt } as never);
+      // Returned so an approval can name the evaluation it was made from rather than guessing.
+      return { evaluationRef, unitId: input.unitId, profileVerified: p.verificationStatus === "verified", vehicle, legal: verdict.legal, physicallyFeasible: verdict.physicallyFeasible, operationallyPreferred: verdict.operationallyPreferred, dataConfidence: verdict.dataConfidence, dispatchStatus: verdict.dispatchStatus, explanation: verdict.explanation, counts: { failing: verdict.failingCount, unknown: verdict.unknownCount, review: verdict.reviewCount }, evidence: verdict.evidence, routingSource: routingSourceStatus().status, evaluatedAt: input.at, dateNotes, structureNotes };
     }),
 
   /** A route against the road network. With no source loaded, the answer is UNKNOWN and the request is kept as a record of the ask. */
@@ -236,6 +244,14 @@ export const spatialRouter = router({
       dispatchStatus: z.string().min(3).max(40), explanation: z.string().min(3).max(2000), requiredChecks: z.array(z.string().min(2).max(60)).min(1).max(20),
       load: z.object({ grossWeightKg: z.number().int().positive(), dangerousGoods: z.boolean().default(false), unNumber: z.string().max(12).optional(), heightM: z.number().positive().optional(), widthM: z.number().positive().optional(), lengthM: z.number().positive().optional() }),
       permitRefs: z.array(z.string().max(64)).max(20).default([]), tripId: z.number().int().positive().optional(), jobId: z.number().int().positive().optional(),
+      /*
+       * 0167 — the evaluation this approval is being made from, as returned by
+       * `routeEvaluateSegments`. Optional because an approval can legitimately be recorded without
+       * one; when it is absent the coverage summary still stands and the evidence behind it simply
+       * cannot be retrieved, which is a weaker record and should look like one rather than silently
+       * borrowing whichever evaluation ran most recently.
+       */
+      evaluationRef: z.string().min(1).max(64).optional(),
       /**
        * v22.20 — the graph build this route was computed on, as `routeCompute`
        * returned it. Optional, and NULL means exactly "not recorded": an
@@ -284,7 +300,7 @@ export const spatialRouter = router({
       }
       const deps = await routeDependencies(db, { unitId: input.unitId, segmentIds: input.segmentIds, load: input.load, permitRefs: input.permitRefs, requiredChecks: input.requiredChecks, at: input.at });
       const approvalRef = `RA-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      await db.insert(routeApprovals).values({ approvalRef, tripId: input.tripId ?? null, jobId: input.jobId ?? null, unitId: input.unitId, originRef: input.originRef, destinationRef: input.destinationRef, dispatchStatus: input.dispatchStatus, segmentIdsJson: JSON.stringify(input.segmentIds), buildRef: input.buildRef ?? null, fingerprintJson: JSON.stringify(deps), fingerprintHash: fingerprintHash(deps), explanation: input.explanation, approvedByUserId: ctx.user.id });
+      await db.insert(routeApprovals).values({ approvalRef, evaluationRef: input.evaluationRef ?? null, tripId: input.tripId ?? null, jobId: input.jobId ?? null, unitId: input.unitId, originRef: input.originRef, destinationRef: input.destinationRef, dispatchStatus: input.dispatchStatus, segmentIdsJson: JSON.stringify(input.segmentIds), buildRef: input.buildRef ?? null, fingerprintJson: JSON.stringify(deps), fingerprintHash: fingerprintHash(deps), explanation: input.explanation, approvedByUserId: ctx.user.id });
       return { approvalRef, status: "approved" as const, buildRef: input.buildRef ?? null, geographyRecorded: !!input.buildRef, fingerprintHash: fingerprintHash(deps), dependencies: Object.keys(deps) };
     }),
 

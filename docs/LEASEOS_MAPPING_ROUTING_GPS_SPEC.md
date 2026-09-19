@@ -439,3 +439,19 @@ fills it in rather than asking whether they may. `server/_core/phoneLocationGate
   reasonable future option for comparison; whatever finds a path, the LeaseOS evaluator decides
   whether that path may be used. Finding a route is not permission to drive it.
 - **It does not import anything yet.** The boundary is source-safe as of `0164`; the importer is M2.
+
+### 10.4 addendum — evidence binding (BUILT, v23.17, `0167`)
+
+`0165` freezes what was known at approval time as **numbers**. The **detail** behind them lives in
+`routeEvidenceEntries` — source, version, verifiedAt, confidence per check per segment — and those
+rows were tagged only with trip, job and segment. A trip evaluated three times left three
+indistinguishable sets, so "the evidence this approval rests on" had no answer.
+
+Resolved as identity rather than policy: each evaluation mints an `evaluationRef`, every evidence
+row it writes carries it, and an approval records the one it was made from. A later re-evaluation
+writes a new set under a new ref and leaves the approved set untouched — the same reasoning as
+`0159` storing an axle determination rather than re-deriving it.
+
+**An approval with no named evaluation stores null.** Inferring the most recent evaluation would
+attach evidence to an approval that may never have seen it, which is the false precision this
+removes. Historical rows stay null and read as unattributable, because that is what they are.
