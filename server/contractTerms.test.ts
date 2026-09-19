@@ -11,7 +11,7 @@ import type { PostSiteAuthorization } from "./_core/siteCloseout";
 
 process.env.LEASEOS_PORTAL_MFA_KEY = "c".repeat(64);
 const at = (hhmm: string, day = "2026-09-10") => new Date(`${day}T${hhmm}:00Z`);
-const TERMS: Terms = { termsRef: "TERMS-ABC-2", version: 2, title: "MSA 2026", standbyBillable: "yes", standbyFreeMinutes: 30, customerHoldBillable: "yes", weatherHoldBillable: "no", travelToDisposalBillable: "yes", disposalQueueBillable: "yes", disposalBillable: "yes", returnTravelBillable: "no", clauses: { standby: "§4.3", weather_hold: "§4.5", return_travel: "§6.1" }, effectiveFrom: at("00:00", "2026-01-01"), effectiveTo: null, status: "approved" };
+const TERMS: Terms = { termsRef: "TERMS-ABC-2", version: 2, title: "MSA 2026", standbyBillable: "yes", standbyFreeMinutes: 30, customerHoldBillable: "yes", weatherHoldBillable: "no", travelToDisposalBillable: "yes", disposalQueueBillable: "yes", disposalBillable: "yes", returnTravelBillable: "no", clauses: { standby: "§4.3", weather_hold: "§4.5", return_travel: "§6.1" }, minimumHours: null, effectiveFrom: at("00:00", "2026-01-01"), effectiveTo: null, status: "approved" };
 
 describe("a contract term decides, cites its clause, and never touches the clock", () => {
   it("answers each review kind from the terms; grace reduces billable minutes; no terms means REVIEW", () => {
@@ -34,7 +34,7 @@ describe("a contract term decides, cites its clause, and never touches the clock
   });
   it("sums billable minutes in the snapshot while the standby clock stays whole", () => {
     const base = { id: 0, source: null, confidence: null, detail: null } as const;
-    const snap = composeSiteSnapshot({ ticket: { ticketNumber: "FT-1", jobId: null, customer: "ABC", site: null, unitId: null, operatorId: null }, lines: [], events: [
+    const snap = composeSiteSnapshot({ ticket: { ticketNumber: "FT-1", jobId: null, customer: "ABC", site: null, unitId: null, operatorId: null }, postSiteRequired: false, lines: [], events: [
       { ...base, id: 1, eventType: "site_work", occurredAt: at("07:00"), endedAt: at("12:00"), customerBillable: "yes" },
       { ...base, id: 2, eventType: "standby", occurredAt: at("12:00"), endedAt: at("13:15"), customerBillable: "yes", billableMinutes: 45, billingRuleRef: "TERMS-ABC-2 v2 §4.3" },
     ], siteWorkCompleteAt: at("13:15") });

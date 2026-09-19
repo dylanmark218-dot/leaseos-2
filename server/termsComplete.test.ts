@@ -21,14 +21,14 @@ const base = { id: 0, source: null, confidence: null, detail: null } as const;
 describe("a minimum raises what is billed, never what was worked, and names the raise", () => {
   it("applies below the minimum, not above it, and not to a ticket with nothing billable", () => {
     const ev: TicketEvent[] = [{ ...base, id: 1, eventType: "site_work", occurredAt: at("07:00"), endedAt: at("09:30"), customerBillable: "yes" }];
-    const raised = composeSiteSnapshot({ ticket: { ticketNumber: "FT-1", jobId: null, customer: "ABC", site: null, unitId: null, operatorId: null }, lines: [], events: ev, siteWorkCompleteAt: at("09:30"), minimum: { hours: 4, ruleRef: "TERMS-ABC-1 v1 §3.1" } });
+    const raised = composeSiteSnapshot({ ticket: { ticketNumber: "FT-1", jobId: null, customer: "ABC", site: null, unitId: null, operatorId: null }, postSiteRequired: false, lines: [], events: ev, siteWorkCompleteAt: at("09:30"), minimum: { hours: 4, ruleRef: "TERMS-ABC-1 v1 §3.1" } });
     expect(raised.snapshot.siteBillableHours).toBe(4);
     expect(raised.snapshot.minimumApplied).toEqual({ minimumHours: 4, billableHoursBefore: 2.5, ruleRef: "TERMS-ABC-1 v1 §3.1" });
     expect(raised.findings).toContain("Minimum 4 h per TERMS-ABC-1 v1 §3.1: 2.5 h billable raised to 4 h");
     expect(raised.snapshot.events[0].hours).toBe(2.5);                                        // worked time untouched
-    const above = composeSiteSnapshot({ ticket: { ticketNumber: "FT-1", jobId: null, customer: "ABC", site: null, unitId: null, operatorId: null }, lines: [], events: [{ ...ev[0], endedAt: at("14:00") }], siteWorkCompleteAt: at("14:00"), minimum: { hours: 4, ruleRef: "x" } });
+    const above = composeSiteSnapshot({ ticket: { ticketNumber: "FT-1", jobId: null, customer: "ABC", site: null, unitId: null, operatorId: null }, postSiteRequired: false, lines: [], events: [{ ...ev[0], endedAt: at("14:00") }], siteWorkCompleteAt: at("14:00"), minimum: { hours: 4, ruleRef: "x" } });
     expect(above.snapshot).toMatchObject({ siteBillableHours: 7, minimumApplied: null });
-    const nothing = composeSiteSnapshot({ ticket: { ticketNumber: "FT-1", jobId: null, customer: "ABC", site: null, unitId: null, operatorId: null }, lines: [], events: [], siteWorkCompleteAt: null, minimum: { hours: 4, ruleRef: "x" } });
+    const nothing = composeSiteSnapshot({ ticket: { ticketNumber: "FT-1", jobId: null, customer: "ABC", site: null, unitId: null, operatorId: null }, postSiteRequired: false, lines: [], events: [], siteWorkCompleteAt: null, minimum: { hours: 4, ruleRef: "x" } });
     expect(nothing.snapshot).toMatchObject({ siteBillableHours: 0, minimumApplied: null });
   });
   it("lets the contract decide return travel where the signatory wrote per contract, and reviews it where no contract answers", () => {

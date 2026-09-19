@@ -1,5 +1,15 @@
 {
+  // Type-checks the test files, which `tsconfig.json` excludes. Kept separate so the production
+  // build's settings are untouched.
+  //
+  // `target` is set here and not there on purpose. The root config sets `lib: esnext` but no
+  // `target`, so TypeScript falls back to ES5 and refuses to iterate a `matchAll` result — while
+  // vitest transpiles these files with esbuild at a modern target, where the same code runs fine.
+  // Checking tests against ES5 would report defects that cannot happen and hide the ones that can.
+  // Changing the root `target` would alter what the production build emits, which is a different
+  // decision from wanting the tests type-checked.
   "extends": "./tsconfig.json",
+  "compilerOptions": { "target": "ES2022" },
   "include": ["server/**/*", "shared/**/*", "client/src/**/*"],
   "exclude": ["node_modules", "build", "dist"]
 }
