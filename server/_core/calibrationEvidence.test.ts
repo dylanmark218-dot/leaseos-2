@@ -5,6 +5,8 @@
  * not fine until September, and somebody has to be told which loads and which invoices those were.
  */
 import { describe, expect, it } from "vitest";
+import { deriveExceptions, type ExceptionSources } from "./exceptionCentre";
+import { permissionsForDomainRole } from "./recordsAuthorization";
 import {
   fitQuality, projectCalibrationEvidence, sweepSuspectReadings, suspectWindow,
   type CalibrationEvent, type CalibrationModel, type SnapshotRef,
@@ -114,5 +116,72 @@ describe("what a failure finding calls into question", () => {
     const r = sweepSuspectReadings(failed, [snap("LSW-2", "2026-07-02", true)]);
     expect(r.explanation).toMatch(/Their stored verdicts are left as they were/);
     expect(r.determinationsInQuestion[0]!.legalDetermination).toBe(true);
+  });
+});
+
+/**
+ * P4.2 — the owner decision of 2026-09-19 on what a sweep is, and what it is not.
+ *
+ * "These determinations were made during a calibration interval we can no longer fully stand behind
+ * and require review." Not "these invoices are wrong."
+ */
+/**
+ * The engine's full source shape, taken verbatim from the fuel-line suite rather than hand-rolled.
+ * A partial fixture would satisfy these tests and prove nothing about the engine callers use.
+ */
+const EMPTY = (NOW: Date): ExceptionSources => ({ now: NOW, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [], syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [] });
+
+describe("one parent case, not one per finding", () => {
+  it("raises exactly one exception for a sweep however many readings it names", () => {
+    const base = EMPTY(new Date("2026-09-18T12:00:00Z"));
+    const sweep = {
+      sweepRef: "CSW-2026-000004", deviceRef: "SCALE-11", determinationsInQuestion: 40,
+      measurementsInQuestion: 12, suspectFrom: new Date("2026-06-20T00:00:00Z"), runAt: new Date("2026-09-15T09:00:00Z"),
+    };
+    const out = deriveExceptions({ ...base, openCalibrationSweeps: [sweep] } as never)
+      .filter(e => e.subjectType === "calibration_sweep");
+    // Forty rows in the Exception Centre would bury every other exception raised that day.
+    expect(out).toHaveLength(1);
+    expect(out[0]!.key).toBe("calibration_sweep:CSW-2026-000004");
+    expect(out[0]!.reason).toMatch(/40 legal axle determination\(s\) and 12 other reading\(s\)/);
+  });
+
+  it("says what is in question and never what it costs", () => {
+    const base = EMPTY(new Date());
+    const e = deriveExceptions({ ...base, openCalibrationSweeps: [{ sweepRef: "CSW-1", deviceRef: "SCALE-2", determinationsInQuestion: 3, measurementsInQuestion: 0, suspectFrom: new Date(), runAt: new Date() }] } as never)
+      .find(x => x.subjectType === "calibration_sweep")!;
+    // Nothing here has looked at a price. A case that guessed would send somebody to argue with a
+    // customer about a number the system invented.
+    expect(`${e.title} ${e.reason}`).not.toMatch(/\$|invoice|credit|refund|owed|overcharg/i);
+    expect(e.action).toMatch(/Any credit or rebill follows the Commercial Office approval path/);
+    expect(e.requiredPermission).toBe("loadsense.calibration.sweep");
+  });
+
+  it("drops to medium when nothing was relied on as a determination", () => {
+    const base = EMPTY(new Date());
+    const e = deriveExceptions({ ...base, openCalibrationSweeps: [{ sweepRef: "CSW-2", deviceRef: null, determinationsInQuestion: 0, measurementsInQuestion: 5, suspectFrom: new Date(), runAt: new Date() }] } as never)
+      .find(x => x.subjectType === "calibration_sweep")!;
+    expect(e.severity).toBe("medium");
+    expect(e.reason).toMatch(/None of them was relied on as a legal determination/);
+  });
+});
+
+describe("the sweep is not given to everyone, and confers nothing", () => {
+  it("is not held by the ordinary office role", () => {
+    // The sweep names which invoices may rest on a device later found bad. That list is not
+    // something everyone with a desk should be able to produce on a whim.
+    expect(permissionsForDomainRole("office")).not.toContain("loadsense.calibration.sweep");
+    expect(permissionsForDomainRole("management")).toContain("loadsense.calibration.sweep");
+    expect(permissionsForDomainRole("safety")).toContain("loadsense.calibration.sweep");
+  });
+
+  it("grants no financial authority to whoever holds it", () => {
+    // The point of separating them: running a sweep must not become a way to approve the credit it
+    // suggests. `safety` may sweep and still cannot touch money.
+    const safety = permissionsForDomainRole("safety") as readonly string[];
+    expect(safety).toContain("loadsense.calibration.sweep");
+    for (const financial of ["billing.write", "invoice.approve", "billing.approve", "credit.issue"]) {
+      expect(safety, `safety must not hold ${financial}`).not.toContain(financial);
+    }
   });
 });

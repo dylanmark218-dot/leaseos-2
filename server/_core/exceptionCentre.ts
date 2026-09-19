@@ -67,6 +67,12 @@ export type ExceptionSources = {
   aiQuestions: { count: number; oldest: Date | null; askedToUserId: number | null }[];
   syncConflicts: { id: number; conflictRef: string; recordType: string; recordRef: string; material: boolean; detectedAt: Date }[];
   revokedDevicesWithQueue: { deviceRef: string; userId: number; queued: number; revokedAt: Date | null }[];
+  /**
+   * P4.2 (0163): open calibration sweeps. ONE exception per sweep, never one per affected
+   * determination — a device with forty readings in its suspect window is one thing for a person
+   * to look at, and forty rows in the Exception Centre would bury every other exception that day.
+   */
+  openCalibrationSweeps: { sweepRef: string; deviceRef: string | null; determinationsInQuestion: number; measurementsInQuestion: number; suspectFrom: Date; runAt: Date }[];
   measurementDevices: { deviceRef: string; deviceType: string; status: string; calibrationState: "current" | "due_soon" | "expired" | "failed" | "unknown"; daysRemaining: number | null }[];
   insurancePolicies: { policyRef: string; policyType: string; expiresAt: Date; status: string }[];
   carrierProfileReviews: { reviewRef: string; unmatchedExternalEvents: number; reviewedAt: Date | null; nextReviewDueAt: Date | null }[];
@@ -232,6 +238,31 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
       subjectType: "fieldDevice", subjectId: d.deviceRef, action: "Recapture the evidence on an enrolled device",
       deepLink: { portal: "safety_compliance", route: `/devices/${d.deviceRef}` }, requiredPermission: "device.manage",
       since: d.revokedAt, dueAt: null,
+    });
+  }
+
+  /*
+   * P4.2 — one parent case per sweep. The sweep already names the affected determinations; this is
+   * the thing that puts a person in front of them. It says what is in question and does not say
+   * what it costs: nothing here has looked at a price, and a case that guessed would send somebody
+   * to argue with a customer about a number the system invented.
+   */
+  for (const sw of s.openCalibrationSweeps ?? []) {
+    out.push({
+      key: `calibration_sweep:${sw.sweepRef}`,
+      category: "calibration",
+      severity: sw.determinationsInQuestion > 0 ? "high" : "medium",
+      title: `Calibration sweep ${sw.sweepRef} needs review`,
+      reason: sw.determinationsInQuestion > 0
+        ? `${sw.determinationsInQuestion} legal axle determination(s) and ${sw.measurementsInQuestion} other reading(s) were taken on ${sw.deviceRef ?? "this device"} during an interval we can no longer fully stand behind.`
+        : `${sw.measurementsInQuestion} reading(s) were taken on ${sw.deviceRef ?? "this device"} during an interval we can no longer fully stand behind. None of them was relied on as a legal determination.`,
+      subjectType: "calibration_sweep",
+      subjectId: sw.sweepRef,
+      action: "Review each affected determination and decide whether it had any consequence. Any credit or rebill follows the Commercial Office approval path.",
+      deepLink: { portal: "compliance", route: `/calibration/sweeps/${sw.sweepRef}` },
+      requiredPermission: "loadsense.calibration.sweep",
+      since: sw.runAt,
+      dueAt: null,
     });
   }
 

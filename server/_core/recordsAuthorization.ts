@@ -202,6 +202,15 @@ export type Permission =
   // roles that hold dispatch.override.grant, because it is the same kind of act: a named person
   // taking responsibility for proceeding past a refusal.
   | "manifest.override.grant"
+  /*
+   * 0163 (P4.2): running a calibration sweep. Deliberately NOT given to the ordinary office role —
+   * the sweep names which invoices may rest on a device later found bad, and that list is not
+   * something everyone with a desk should be able to produce on a whim. Seeded to management and
+   * to the compliance authority; a company may delegate it through the normal grant system.
+   *
+   * It confers nothing financial. Whoever runs it still cannot approve a credit.
+   */
+  | "loadsense.calibration.sweep"
   /* P8.2 — changing standing automation policy. Deliberately NOT implied by any operational
      permission: choosing that a machine may act unwatched is a different act from dispatching. */
   | "automation.policy.manage" | "automation.policy.read"
@@ -803,6 +812,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.read",
     "spatial.structure.record",
     "spatial.structure.verify",
+      // 0163 (P4.2): the designated compliance authority named in the owner decision.
+    "loadsense.calibration.sweep",
   ],
   office: [
     "device.verifySeal",
@@ -1149,6 +1160,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "dispatch.override.request",
     "dispatch.override.grant",
     "manifest.override.grant",
+    "loadsense.calibration.sweep",
     "dispatch.enforcement.manage",
     "ifta.read",
     "fuel.tank.manage",
@@ -2220,6 +2232,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "manifestCustody.amend": "manifest.write",
   // 0162 (P3.1): accepting a reference-versus-print contradiction is a compliance act, so it does
   // not ride on manifest.write — the people who write manifests are the people it constrains.
+  "requirement.calibrationSweep": "loadsense.calibration.sweep",
   "manifestCustody.reconciliationOverride": "manifest.override.grant",
   "manifestCustody.close": "manifest.write",
   "manifestCustody.evidenceProfileSet": "manifest.write",

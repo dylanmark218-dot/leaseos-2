@@ -4,11 +4,13 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { sweepSuspectReadings } from "./_core/calibrationEvidence";
+import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import {
-  calibrationEvents, companyPackActivations, complianceDocuments, disposalTickets, invoices, loads,
+  calibrationEvents, calibrationSweepFindings, calibrationSweeps, companyPackActivations, complianceDocuments, disposalTickets, invoices, loadSenseWeightSnapshots, loads,
   measurementDevices, operatorEquipmentAuthorizations,
 } from "../drizzle/schema";
 import {
@@ -40,6 +42,66 @@ async function credentialsFor(ownerType: string, ownerId: number): Promise<Crede
 const ATTRS = z.record(z.string(), z.unknown()).default({});
 
 export const requirementRouter = router({
+  /**
+   * P4.2 (0163) — sweep the readings a failure finding calls into question.
+   *
+   * What this produces is a list and one case for a person to open. What it deliberately does not
+   * produce is any consequence: no invoice is marked, held, credited or reopened, no manifest or
+   * ticket is altered, no customer is told anything, and no stored determination verdict is
+   * rewritten. The sweep means "these determinations were made during an interval we can no longer
+   * fully stand behind"; it does not mean "these invoices are wrong", and only a person who has
+   * looked can tell the difference.
+   *
+   * Running it confers nothing. Whoever runs it still cannot approve a credit afterwards — the
+   * financial path is the Commercial Office one, with the separation of duties it always had.
+   */
+  calibrationSweep: roleProcedure("requirement.calibrationSweep")
+    .input(z.object({ calibrationEventId: z.number().int().positive() }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Database unavailable" });
+      const [ev] = await db.select().from(calibrationEvents).where(eq(calibrationEvents.id, input.calibrationEventId)).limit(1);
+      if (!ev) throw new TRPCError({ code: "NOT_FOUND", message: "Calibration event not found" });
+
+      const snaps = await db.select().from(loadSenseWeightSnapshots)
+        .where(eq(loadSenseWeightSnapshots.measurementDeviceId, ev.measurementDeviceId));
+      const result = sweepSuspectReadings(
+        { id: ev.id, measurementDeviceId: ev.measurementDeviceId, eventType: ev.eventType as never, performedAt: ev.performedAt,
+          performedBy: ev.performedBy, standardReference: ev.standardReference, toleranceStated: ev.toleranceStated,
+          errorFound: ev.errorFound, suspectFrom: ev.suspectFrom, validUntil: ev.validUntil, certificateEvidenceId: ev.certificateEvidenceId },
+        snaps.map(s => ({ snapshotRef: s.snapshotRef, measuredAt: s.measuredAt, measurementDeviceId: s.measurementDeviceId, legalDetermination: s.legalDetermination, loadId: s.loadId })),
+      );
+      if (!result.window) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `NO_SUSPECT_WINDOW: ${result.explanation}` });
+
+      const sweepRef = (await nextTrackingNumber(db, { sequenceType: "CSW" })).trackingNumber;
+      const byRef = new Map(snaps.map(s => [s.snapshotRef, s]));
+      const sweepId = await db.transaction(async (tx) => {
+        const ins = await tx.insert(calibrationSweeps).values({
+          sweepRef, measurementDeviceId: ev.measurementDeviceId, calibrationEventId: ev.id,
+          suspectFrom: result.window!.from, suspectTo: result.window!.to, eventType: ev.eventType,
+          errorFound: ev.errorFound, determinationsInQuestion: result.determinationsInQuestion.length,
+          measurementsInQuestion: result.measurementsInQuestion.length,
+          explanation: result.explanation.slice(0, 1000), runByUserId: ctx.user.id,
+        });
+        const id = Number((ins as unknown as { insertId: number }).insertId ?? (ins as unknown as [{ insertId: number }])[0]?.insertId);
+        const rows = [...result.determinationsInQuestion, ...result.measurementsInQuestion].map(f => {
+          const s = byRef.get(f.snapshotRef)!;
+          // Recorded as it stood. Never re-derived against a calibration since invalidated — which
+          // is precisely why 0159 stored the verdict rather than computing it on read.
+          return { sweepId: id, snapshotId: s.id, snapshotRef: s.snapshotRef, measuredAt: s.measuredAt, loadId: s.loadId, wasLegalDetermination: s.legalDetermination === true, determinationBasis: s.legalDeterminationReason };
+        });
+        if (rows.length) await tx.insert(calibrationSweepFindings).values(rows);
+        return id;
+      });
+      return {
+        sweepRef, sweepId, state: "open" as const,
+        determinationsInQuestion: result.determinationsInQuestion.length,
+        measurementsInQuestion: result.measurementsInQuestion.length,
+        explanation: result.explanation,
+        note: "Review only. No invoice, credit, payment, manifest, ticket, customer record or stored determination has been changed by this sweep.",
+      };
+    }),
+
   packActivate: roleProcedure("compliance.packActivate")
     .input(z.object({ financialEntityId: z.number().int().positive(), packKey: z.string().min(2).max(80), reason: z.string().max(300).optional() }))
     .mutation(async ({ ctx, input }) => {

@@ -12,7 +12,7 @@ import { resolveActingScope } from "./_core/actingScope";
 import { getDb } from "./db";
 import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
-  billingBooks, complianceDocuments, disposalTickets, fieldTickets, manifests, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
+  billingBooks, calibrationSweeps, complianceDocuments, disposalTickets, fieldTickets, manifests, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
   maintenanceDefects, measurementDevices, operationalTasks, operators, purchaseAuthorizations, roadsideServiceEvents,
   syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders, academyInspectorRequests, securityIncidents, privacyBreachAssessments, incidentNotificationObligations, facilities, facilityEvidence, facilitySourceLicences } from "../drizzle/schema";
 import { calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
@@ -49,7 +49,7 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   const db = await getDb();
   const empty: ExceptionSources = {
     now, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [],
-    syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], inspectorRequests: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [],
+    syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], openCalibrationSweeps: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], inspectorRequests: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [],
   };
   if (!db) return empty;
   const horizon = new Date(now.getTime() + 90 * DAY);
@@ -102,10 +102,20 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   const latestReviews = new Map<string, (typeof reviews)[number]>();
   for (const r of reviews) if (!latestReviews.has(r.reviewRef)) latestReviews.set(r.reviewRef, r);
 
+  // P4.2 (0163): open sweeps only. A triaged one has had its person and is not an exception any more.
+  const sweeps = await db.select({
+    sweepRef: calibrationSweeps.sweepRef, deviceRef: measurementDevices.deviceRef,
+    determinationsInQuestion: calibrationSweeps.determinationsInQuestion,
+    measurementsInQuestion: calibrationSweeps.measurementsInQuestion,
+    suspectFrom: calibrationSweeps.suspectFrom, runAt: calibrationSweeps.runAt,
+  }).from(calibrationSweeps)
+    .leftJoin(measurementDevices, eq(measurementDevices.id, calibrationSweeps.measurementDeviceId))
+    .where(eq(calibrationSweeps.state, "open")).limit(200);
   const inspector = await db.select({ requestRef: academyInspectorRequests.requestRef, issuingAuthority: academyInspectorRequests.issuingAuthority, dueAt: academyInspectorRequests.dueAt, state: academyInspectorRequests.state, irrecoverable: academyInspectorRequests.irrecoverable })
     .from(academyInspectorRequests).where(inArray(academyInspectorRequests.state, ["received", "assembling", "incomplete"])).limit(200);
   return {
     now,
+    openCalibrationSweeps: sweeps,
     inspectorRequests: inspector.map(r => ({ requestRef: r.requestRef, issuingAuthority: r.issuingAuthority, dueAt: r.dueAt, state: r.state, irrecoverable: !!r.irrecoverable })),
     securityIncidents: await loadOpenSecurityIncidents(db),
     facilityDirectory: await loadFacilityDirectoryExceptions(db),

@@ -8729,3 +8729,36 @@ export const manifestReconciliationOverrides = mysqlTable("manifestReconciliatio
   supersedesOverrideId: int("supersedesOverrideId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+/** 0163 (P4.2): an immutable record of one calibration sweep. Written once; a second look is a second sweep. */
+export const calibrationSweeps = mysqlTable("calibrationSweeps", {
+  id: int("id").autoincrement().primaryKey(),
+  sweepRef: varchar("sweepRef", { length: 64 }).notNull().unique(),
+  measurementDeviceId: int("measurementDeviceId").notNull(),
+  calibrationEventId: int("calibrationEventId").notNull(),
+  suspectFrom: timestamp("suspectFrom").notNull(),
+  suspectTo: timestamp("suspectTo").notNull(),
+  eventType: varchar("eventType", { length: 40 }).notNull(),
+  errorFound: varchar("errorFound", { length: 300 }),
+  determinationsInQuestion: int("determinationsInQuestion").default(0).notNull(),
+  measurementsInQuestion: int("measurementsInQuestion").default(0).notNull(),
+  explanation: varchar("explanation", { length: 1000 }).notNull(),
+  runByUserId: int("runByUserId").notNull(),
+  runAt: timestamp("runAt").defaultNow().notNull(),
+  state: mysqlEnum("state", ["open", "triaged"]).default("open").notNull(),
+  triagedByUserId: int("triagedByUserId"),
+  triagedAt: timestamp("triagedAt"),
+  triageNote: varchar("triageNote", { length: 1000 }),
+});
+
+/** 0163: one reading inside the window, recorded as it stood — never re-derived later. */
+export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
+  id: int("id").autoincrement().primaryKey(),
+  sweepId: int("sweepId").notNull(),
+  snapshotId: int("snapshotId").notNull(),
+  snapshotRef: varchar("snapshotRef", { length: 64 }).notNull(),
+  measuredAt: timestamp("measuredAt").notNull(),
+  loadId: int("loadId"),
+  wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
+  determinationBasis: varchar("determinationBasis", { length: 500 }),
+});
