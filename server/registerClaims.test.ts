@@ -95,11 +95,29 @@ describe("a test claim in the register is checkable", () => {
 
   it("matches every claimed case count to the file it names", () => {
     const wrong: string[] = [];
+    const loose: string[] = [];
     for (const [, file, claimed] of claims) {
-      const actual = (readFileSync(file!, "utf8").match(/^\s*it\(/gm) ?? []).length;
+      const src = readFileSync(file!, "utf8");
+      const declarations = (src.match(/^\s*it[.(]/gm) ?? []).length;
+      /*
+       * `it.each(SOMETHING)` declares once and runs many, and the multiplier is usually a variable
+       * this guard cannot resolve without executing the file. The register states the number vitest
+       * reports, which is the meaningful one — so for a file using `.each` the rule is that the
+       * claim must be at least the declaration count, and such files are listed below so the looser
+       * rule stays visible rather than quietly becoming the default.
+       */
+      if (/^\s*it\.each/m.test(src)) {
+        loose.push(file!);
+        if (Number(claimed) < declarations) wrong.push(`${file}: register says ${claimed}, fewer than its ${declarations} declarations`);
+        continue;
+      }
+      const actual = (src.match(/^\s*it\(/gm) ?? []).length;
       if (actual !== Number(claimed)) wrong.push(`${file}: register says ${claimed}, file has ${actual}`);
     }
     expect(wrong, "a register row states a test count its file does not have").toEqual([]);
+    // If this list grows, the exact check is covering less than it looks like it covers.
+    expect(loose.sort(), "files whose claim is checked loosely because they use it.each")
+      .toEqual(["server/_core/degradationSuite.test.ts"]);
   });
 
   it("counts the rows still using a bare, uncheckable number, so the gap shrinks rather than hides", () => {
