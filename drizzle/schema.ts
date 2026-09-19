@@ -6165,6 +6165,17 @@ export const routeApprovals = mysqlTable("routeApprovals", {
   status: mysqlEnum("status", ["approved", "stale", "revoked", "superseded"]).default("approved").notNull(),
   staleReasonsJson: text("staleReasonsJson"),
   stalenessDetectedAt: timestamp("stalenessDetectedAt"),
+  // 0165 (§10.4): evidence about what was known, not a gate. Stored rather than re-derived so a
+  // 13% approval still reads 13% after the data improves.
+  coverageByAxisJson: text("coverageByAxisJson"),
+  totalApplicableChecks: int("totalApplicableChecks"),
+  totalVerifiedChecks: int("totalVerifiedChecks"),
+  // The gate: specific unresolved high-consequence facts on roads this route uses.
+  highConsequenceUnresolved: int("highConsequenceUnresolved"),
+  secondApprovalRequired: boolean("secondApprovalRequired"),
+  secondApprovalReasonsJson: text("secondApprovalReasonsJson"),
+  secondApproverUserId: int("secondApproverUserId"),
+  secondApprovedAt: timestamp("secondApprovedAt"),
   approvedByUserId: int("approvedByUserId").notNull(),
   approvedAt: timestamp("approvedAt").defaultNow().notNull(),
   revokedByUserId: int("revokedByUserId"),

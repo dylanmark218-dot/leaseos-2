@@ -40,6 +40,7 @@ const DECLARED_UNWIRED: Record<string, string> = {
   widgetSourceContract: "the twelve-source contract; enforced by widgetSourceContract.test, not by a procedure",
   preDepartureCache: "P1.5 - what a job needs on the device before it leaves coverage, and whether what is there is still current. Not reached from a router yet: the procedure has to report what THIS device holds, and the device side of that (the cache index) is P1.1 work on hardware. Mounting a server-side guess about a device's contents would answer confidently about a machine it cannot see.",
   monitoringNotice: "P4.6 - whether a worker has been told what is collected about them. Not reached from a router yet, and deliberately not enforcing: whether unacknowledged monitoring should stop a dispatch is a decision with real operational teeth - a hard block would strand trucks over paperwork - and it belongs to the owner through the automation policy, not to a module that happens to know the answer. The procedures and the Exception Centre surfacing are the next step.",
+  routeApprovalPolicy: "S10.4 - coverage as evidence, risk as the trigger. Not mounted: it needs the evaluator's per-check outcomes tagged with applicability (does this route actually cross that bridge), which is the importer's job in M2. Feeding it untagged checks would make every unknown high-consequence and demand a second signature for every route - the exact failure the percentage threshold was rejected for.",
   migrationLedger: "the production migration ledger; reached from scripts/migrate.ts (the deploy path), not from a router — declared by the session that reconciled 5f3bef4",
   offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
@@ -158,7 +159,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(42);   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(43);   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });

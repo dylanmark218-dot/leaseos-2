@@ -326,19 +326,45 @@ The 680 MB GeoPackage feeds display, search and POIs. It is not a routing author
 
 ---
 
-## 10. Owner decisions required before M1 closes
+## 10. Owner decisions — APPROVED 2026-09-19
 
-1. **Missing monitoring acknowledgement** → blocks personal-phone monitoring, or blocks dispatch?
-   *Recommended: monitoring only.*
-2. **Exact position to a customer, ever?** *Recommended: never from a personal phone; telematics as a
-   separate permissioned feature.*
-3. **Precedence confirmation** — is §4's asymmetric rule right for your operation?
-4. **Coverage thresholds** — at what verified-coverage percentage does a route require a second
-   approver, if any? (This is the operational half of §3 and cannot be inferred from the data.)
+**10.1 Missing monitoring acknowledgement — APPROVED.** It blocks personal-phone monitoring, not
+employment and not dispatch. Where a job independently requires a live location stream and no
+authorized source supplies one, readiness may answer REVIEW/BLOCKED — **for the missing capability,
+never as a consequence of declining personal-phone monitoring**. Closing the trip ends collection.
+Issued and acknowledged stay separate facts.
 
-Items 1–3 were recommended in the review chain and are recorded here for approval, not assumed.
+**10.2 Exact customer position — APPROVED.** Never originates from a driver's personal phone. The
+customer projection carries stage, ETA, approximate progress, loads, delay status, business events
+and last update — and **no latitude/longitude, no driver identity, and no nulled location fields**,
+because a nulled field proves the concept exists. Exact asset tracking, if ever contracted, is a
+separate feature on an approved asset source with its own entitlement, purpose, retention and
+projection boundary.
 
----
+**10.3 Source precedence — APPROVED** as §4's asymmetric rule. A lower-authority or field source may
+make a segment **less** permissive, never more. Official OPEN + credible washout → BLOCKED/REVIEW.
+Official CLOSED + "looks open" → CLOSED. UNKNOWN + "looks clear" → UNKNOWN. Conflicting evidence is
+preserved and surfaced, never settled by arrival order.
+
+**10.4 Coverage and second approval — APPROVED WITH CHANGE. Not a percentage.**
+
+A threshold would have been the wrong design and the dataset is why: **24 `maxweight` tags across
+512,979 vehicle-road ways**. Verified weight coverage on an ordinary Alberta back-road route starts
+near zero, so "under 70% needs two signatures" would demand a second approver for every load in the
+province — and a signature given hundreds of times a week is a keystroke, not a control.
+
+So the two ideas are separated, and **`_core/routeApprovalPolicy.ts` implements the split**
+(`server/_core/routeApprovalPolicy.test.ts`, 9 cases):
+
+- **Coverage is evidence.** Per axis, persisted on the approval by `0165`, never a gate. Stored
+  rather than re-derived so a route approved at 13% still reads 13% after the data reaches 60%.
+- **Risk is the trigger.** A second approver is required for a **specific** unresolved
+  high-consequence fact on a road this route uses — an unrated bridge it crosses, a clearance
+  resting on unverified evidence, two authorities disagreeing. "Alberta has not published weight
+  limits" is a fact about Alberta, not about this route, and never triggers.
+- **A FAIL is nobody's to sign.** Carried separately from the triggers and reported first: a second
+  approver is permission to proceed on what nobody could establish, not on what was established as
+  false.
 
 ## 11. What this specification deliberately does not do
 
