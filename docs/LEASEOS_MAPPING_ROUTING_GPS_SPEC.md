@@ -483,3 +483,35 @@ it connects, and nothing about whether this truck may use it.
 
 `ford` is new — 113 water crossings BC tags and Alberta barely has. Worth a check key of its own
 when the importer lands; a ford is a real constraint for a loaded unit, not a surface quality.
+
+### Source coverage — Saskatchewan added (v23.19), and the three-province total
+
+`geofabrik_osm_sk` registered: `OSM-SK-`, `unverified`, jurisdiction `CA-SK`.
+
+| | Alberta | British Columbia | Saskatchewan | **Total** |
+|---|---|---|---|---|
+| vehicle ways | 512,979 | 490,986 | 263,951 | **1,267,916** |
+| `maxweight` | 24 | 108 | 9 | **141** |
+| `maxaxleload` | 4 | 5 | **0** | **9** |
+| `maxwidth` | 23 | **0** | **0** | **23** |
+| `maxlength` | 1 | 14 | **0** | **15** |
+| `maxheight` | 936 | 988 | 205 | 2,129 |
+| `hgv` | 14,934 | 10,053 | **121** | 25,108 |
+| `hazmat` | 1,922 | 1,782 | **1** | 3,705 |
+| bridges | 7,882 | 10,157 | 2,815 | 20,854 |
+| `surface` | 268,989 | — | 220,208 (83%) | — |
+
+**Nine axle-load tags across 1.27 million roads.** Twenty-three widths. Fifteen lengths. Saskatchewan
+alone has none of the three, and 121 `hgv` tags against Alberta's 14,934 — a hundredfold drop across
+a provincial border, which is a fact about who edits OSM rather than about Saskatchewan's roads.
+
+This is the number the whole design rests on, and it is now measured across three provinces rather
+than inferred from one:
+
+> **UNKNOWN is not a gap in this data. It is the data.** The silent checks, the REVIEW-not-PASS rule
+> on unverified evidence, and the risk-triggered approval of §10.4 are not conservatism — they are
+> the only honest way to route on a source that says almost nothing about legal clearance while
+> describing geometry superbly.
+
+Surface is the mirror image at 83% in Saskatchewan. Both facts are true at once, and they are not in
+tension: coverage is about accuracy, standing is about who is speaking.

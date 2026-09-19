@@ -165,6 +165,17 @@ export const ROAD_SOURCE_STANDING: Record<string, RoadSourceStanding> = {
    * mapped and about one percent of them state a capacity.
    */
   geofabrik_osm_bc: { idPrefix: "OSM-BC-", confidence: "unverified", jurisdiction: "CA-BC" },
+
+  /**
+   * Geofabrik's Saskatchewan extract — the sparsest of the three, and the one that settles the
+   * argument. 263,951 vehicle ways carry **nine** `maxweight` tags and **zero** `maxaxleload`,
+   * `maxwidth` and `maxlength`. `hgv` appears 121 times against Alberta's 14,934, and `hazmat`
+   * exactly once in the province.
+   *
+   * Surface is the opposite story at 83% coverage, which is the shape of all three: OSM is good at
+   * what a road IS and silent on what may use it.
+   */
+  geofabrik_osm_sk: { idPrefix: "OSM-SK-", confidence: "unverified", jurisdiction: "CA-SK" },
 };
 
 /**

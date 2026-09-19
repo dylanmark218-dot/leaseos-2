@@ -165,3 +165,41 @@ describe("a second province exercises the boundary the registry was built for", 
     expect(seg.attributes.map(a => a.check)).not.toContain("width_restriction");
   });
 });
+
+const bcRoad = (over: Partial<ImportedRoad> = {}) =>
+  road({ sourceKey: "geofabrik_osm_bc", sourceLayer: "lines", sourceFeatureId: "way/1234567", ...over });
+
+describe("three provinces, one boundary", () => {
+  const sk = (over: Partial<ImportedRoad> = {}) =>
+    road({ sourceKey: "geofabrik_osm_sk", sourceLayer: "lines", sourceFeatureId: "way/1234567", ...over });
+
+  it("gives each province its own jurisdiction and namespace", () => {
+    /*
+     * The same integer, four sources, four roads. And three different provinces whose rules differ:
+     * an SK road judged under AB limits is a confident wrong answer, which is worse than UNKNOWN.
+     */
+    const all = [road(), osm(), bcRoad(), sk()].map(r => roadAsSegment(r));
+    expect(new Set(all.map(s => s.segmentId)).size).toBe(4);
+    expect(all.map(s => s.attributes[0]!.jurisdiction)).toEqual(["CA-AB", "CA-AB", "CA-BC", "CA-SK"]);
+    expect(all[3]!.segmentId).toBe("OSM-SK-way/1234567");
+  });
+
+  it("holds every OSM province at unverified, whatever its coverage", () => {
+    // Saskatchewan has 83% surface coverage and nine weight tags in the province. Good data and no
+    // standing are not in tension: the first is about accuracy, the second about who is speaking.
+    for (const r of [osm(), bcRoad(), sk()]) {
+      expect(roadAsSegment(r).attributes[0]!.confidence).toBe("unverified");
+    }
+  });
+
+  it("answers nothing about axle, width or length for any of them", () => {
+    // Across all three extracts those three tags total 9, 23 and 15 against 1.27 million vehicle
+    // ways. The silent checks are not a temporary gap; they are the normal state of this data.
+    for (const r of [osm(), bcRoad(), sk()]) {
+      const seg = roadAsSegment(r);
+      for (const check of ["axle_group_limit", "width_restriction", "road_weight_restriction"]) {
+        expect(seg.silentChecks, check).toContain(check);
+      }
+    }
+  });
+});
