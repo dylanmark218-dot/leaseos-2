@@ -189,7 +189,18 @@ d("the join to P8.1, the snapshot, and the conflict surface", () => {
       const hos = after.capabilities.find(c => c.capability === "hos")!;
       expect(hos.status).toBe("NOT_EVALUATED");
       expect(hos.reason).toBe("not_licensed");
-      expect(after.eligibility.blockers.some(b => b.code === "capability_not_evaluated_hos")).toBe(true);
+      /*
+       * v22.99 — this asserted the blocker WAS raised, which is the behaviour the owner decision of
+       * 2026-09-17 forbids: "unlicensed features are absent, not off", and mapping-only customers
+       * "never stall" on HOS. The test had been written to the implementation rather than to the
+       * decision, so it pinned the bug in place.
+       *
+       * Both halves matter and they are different things. The capability picture still records the
+       * capability as NOT_EVALUATED with its reason — so "what did we know, and why" stays
+       * answerable. Dispatch simply does not ask for it, so nothing reports its silence as a fault.
+       */
+      expect(after.eligibility.blockers.some(b => b.code === "capability_not_evaluated_hos")).toBe(false);
+      expect(after.eligibility.blockers.length, "the other checks still run").toBeGreaterThan(0);
       // The others are untouched: one capability leaving the product set is not a system failure.
       expect(after.capabilities.find(c => c.capability === "unit inspection")!.status).not.toBe("NOT_EVALUATED");
       expect(after.automationPolicy.find(p => p.capability === "hos")!.resolvedMode).toBeNull();
