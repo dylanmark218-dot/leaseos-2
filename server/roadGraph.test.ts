@@ -121,7 +121,8 @@ d("routing over the imported fabric, through the database", () => {
       fromLatitude: Number(from.latitude), fromLongitude: Number(from.longitude), toLatitude: Number(to.latitude), toLongitude: Number(to.longitude),
       vehicle: { grossWeightKg: 63_500, maxAxleGroupKg: 24_000, heightM: 4.15, widthM: 2.6, lengthM: 27.5, dangerousGoods: false, requiresEscort: false },
       requiredChecks: ["road_weight_restriction", "bridge_clearance", "surface_condition"],
-    });
+    }, 20_000);   // v23.14: builds a graph, routes it and evaluates it against the database; the
+
     expect(evaluated.outcome).toBe("evaluated");
     expect(evaluated.verdict).not.toBeNull();
     expect(evaluated.verdict!.unknownCount).toBeGreaterThan(0);

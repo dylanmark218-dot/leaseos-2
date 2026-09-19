@@ -191,6 +191,30 @@ data answers `review`, not `pass`), extended to a second.
 
 ---
 
+### 4.1 Built (v23.14) — `_core/sourcePrecedence.ts`
+
+Owner-approved 2026-09-19. `AUTHORITY_RANK`: posted road authority → official restriction →
+operator instruction → LeaseOS field hazard → open map data. Restrictiveness order: open → unknown
+→ restricted → closed.
+
+**Anything may tighten; nothing may loosen below the highest-ranking source.** The asymmetry is the
+rule, and the two directions carry different consequences: a driver reporting a washed-out bridge
+describes something he can see — believing him costs a detour, disbelieving him costs a truck. A
+driver reporting that a closed road "looks fine" describes the *absence* of something, and the
+absence of a visible reason is not evidence that the reason is absent: the closure may be a load
+restriction, a permit condition, or work starting tomorrow.
+
+A **credible safety-negative observation acts before verification** — waiting for corroboration on a
+reported washout means the next truck drives at it. It is temporary by construction: it names the
+authority that can lift it, and lifting takes that path rather than the passage of time. An
+unattributed report raises nothing; there is nobody to ask.
+
+Conflicts are **kept and surfaced**, never settled by arrival order — the same two claims resolve
+identically either way round, asserted. `server/_core/sourcePrecedence.test.ts` (11 cases).
+
+**Not mounted:** where a field observation enters the attribute stream is M3's evidence compiler,
+not a wiring choice.
+
 ## 5. GPS: evidence, never job state
 
 **ALREADY BUILT:** a breadcrumb produces `proposedEvents`; `zoneEvents.state` is
