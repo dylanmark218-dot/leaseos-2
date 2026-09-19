@@ -300,7 +300,8 @@ d("one policy, fifty trucks, one document; a collision; a customer certificate",
 /* Promotion review — roadside scope is the P4 allowlist's, not insurance's */
 /* ------------------------------------------------------------------ */
 
-import { INSURANCE_ROADSIDE_CATEGORY, roadsideInsuranceItems, assessCoverage as assessCoverageP } from "./_core/insuranceRisk";
+// Appended later; the top-of-file import already has roadsideInsuranceItems and assessCoverage.
+import { INSURANCE_ROADSIDE_CATEGORY } from "./_core/insuranceRisk";
 import { NEVER_IN_ROADSIDE_PACKAGE, ROADSIDE_PACKAGE_CATEGORIES, roadsidePackagePermits } from "./_core/fieldDevice";
 
 describe("roadside mode is built on the P4 allowlist, not beside it", () => {
@@ -339,26 +340,26 @@ describe("when the policy and the document disagree, the policy decides first", 
   });
 
   it("calls an expired policy with a perfectly verified current proof card coverage_expired — the card does not resurrect the policy", () => {
-    const a = assessCoverageP({ coverageType: "commercial_auto", policies: [pol({ expiresAt: d(-2), document: { expiresAt: d(300), verificationStatus: "verified" } })], now: NOWP });
+    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ expiresAt: d(-2), document: { expiresAt: d(300), verificationStatus: "verified" } })], now: NOWP });
     expect(a.status).toBe("coverage_expired");
     expect(a.effect).toBe("blocked");
   });
 
   it("calls a current policy with an expired proof card document_expired — review, the truck is still insured", () => {
-    const a = assessCoverageP({ coverageType: "commercial_auto", policies: [pol({ document: { expiresAt: d(-10), verificationStatus: "verified" } })], now: NOWP });
+    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ document: { expiresAt: d(-10), verificationStatus: "verified" } })], now: NOWP });
     expect(a.status).toBe("document_expired");
     expect(a.effect).toBe("review");
     expect(a.reason).toContain("refresh the document");
   });
 
   it("prefers the renewal over the expired predecessor for the same coverage", () => {
-    const a = assessCoverageP({ coverageType: "commercial_auto", policies: [pol({ policyRef: "POL-OLD", expiresAt: d(-1), status: "expired" }), pol({ policyRef: "POL-NEW", status: "renewal_pending", expiresAt: d(364) })], now: NOWP });
+    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ policyRef: "POL-OLD", expiresAt: d(-1), status: "expired" }), pol({ policyRef: "POL-NEW", status: "renewal_pending", expiresAt: d(364) })], now: NOWP });
     expect(a.policyRef).toBe("POL-NEW");
     expect(a.status).toBe("coverage_verified");
   });
 
   it("holds coverage_reported when the insurer has not confirmed, even with a verified card", () => {
-    const a = assessCoverageP({ coverageType: "commercial_auto", policies: [pol({ coverageVerificationStatus: "coverage_reported" })], now: NOWP });
+    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ coverageVerificationStatus: "coverage_reported" })], now: NOWP });
     expect(a.status).toBe("coverage_reported");
     expect(a.effect).toBe("review");
   });

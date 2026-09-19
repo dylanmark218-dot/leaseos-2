@@ -120,7 +120,7 @@ describe("a compliance tile never rounds up to green", () => {
 describe("personalization has a floor", () => {
   const contracts = [
     contract({ widgetKey: "defect_alert", title: "Critical defect", category: "safety", pinned: true }),
-    contract({ widgetKey: "fuel_level", position: undefined as never }),
+    contract({ widgetKey: "fuel_level" }),
     contract({ widgetKey: "ytd_pay", category: "financial", requiresPermission: "payroll.read" }),
   ];
 

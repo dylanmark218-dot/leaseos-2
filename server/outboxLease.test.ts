@@ -69,7 +69,11 @@ d("a failed event waits", () => {
   it("persists the backoff the classifier computed, instead of discarding it", async () => {
     const { id } = await anEvent();
     const ports = createWorkerPorts(pool as never);
-    await ports.markFailed(id, { status: "retry", reason: "upstream timeout", retryAfterMs: 60_000 });
+    // `classifyFailure` returns "failed" for a retryable attempt; there is no "retry" status. The old
+    // value fell through the same branch as "failed" — markFailed only special-cases dead_letter —
+    // so the assertions held, while the test described a state that cannot occur. If that branch
+    // ever grew an explicit default, this would have quietly started testing something else.
+    await ports.markFailed(id, { status: "failed", reason: "upstream timeout", retryAfterMs: 60_000 });
     const [rows] = await pool.execute<mysql.RowDataPacket[]>(
       "SELECT claimedAt, claimedBy, lastError, retryAvailableAt, TIMESTAMPDIFF(SECOND, NOW(), retryAvailableAt) AS waitS FROM domainEventOutbox WHERE id = ?", [id]);
     expect(rows[0].claimedAt).toBeNull();

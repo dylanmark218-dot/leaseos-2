@@ -271,7 +271,7 @@ outside the typechecker for the life of the branch — which is how a test I wro
 `dispatchContractFor` with **three parameter names that do not exist** and pass anyway, asserting
 against a contract it had silently defaulted.
 
-There were **85** pre-existing type errors across test files; **15** remain (v23.04). Turning the check on outright means
+There were **85** pre-existing type errors across test files; **10** remain (v23.05). Turning the check on outright means
 triaging all of them in one sitting, so `scripts/ci-gate.sh` **pins the count** against
 `tsconfig.tests.json`: new test code is type-checked in effect, because anything that adds an error
 fails the gate. Verified by planting one — 86 against a ceiling of 85.

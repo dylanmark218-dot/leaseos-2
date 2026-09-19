@@ -12,7 +12,7 @@ describe("role vocabulary bridge", () => {
     expect(branchRolesFor("YARD_MARSHAL")).toEqual(["yard_marshal"]);
   });
   it("names every branch role that shares an engine key", () => {
-    expect(branchRolesFor("MECHANIC").sort()).toEqual(["mechanic", "shop_lead"]);
+    expect([...branchRolesFor("MECHANIC")].sort()).toEqual(["mechanic", "shop_lead"]);
     expect(branchRolesFor("DRIVER")).toEqual(["driver"]);
   });
 });
