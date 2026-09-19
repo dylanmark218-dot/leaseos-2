@@ -10,7 +10,7 @@ import { authorize, type DomainRole } from "./_core/recordsAuthorization";
 const NOW = new Date("2026-09-10T12:00:00Z");
 const mins = (n: number) => new Date(NOW.getTime() + n * 60_000);
 const blk = (over: Partial<DispatchBlocker> & { code: string }): DispatchBlocker => ({ label: over.code, severity: "blocking", subject: "truck", overridable: false, ...over });
-const facts = { operatorId: 1, operatorCredentialVersion: "a", hoursAvailableMinutes: null, unitId: 2, unitStatusVersion: "b", criticalDefectCount: 0, mechanicReleaseVersion: "c", trailerId: null, trailerStatusVersion: "none", jobClassificationVersion: "d", materialClassificationVersion: "none", permitVersion: "none", destinationAcceptanceVersion: "none", routeProfileId: null, routeDecisionVersion: "not_evaluated" };
+const facts = { operatorId: 1, operatorCredentialVersion: "a", hoursAvailableMinutes: null, unitId: 2, unitStatusVersion: "b", criticalDefectCount: 0, mechanicReleaseVersion: "c", trailerId: null, trailerStatusVersion: "none", jobClassificationVersion: "d", materialClassificationVersion: "none", permitVersion: "none", destinationAcceptanceVersion: "none", routeProfileId: null, routeDecisionVersion: "not_evaluated" , communicationPlanVersion: "none" };
 const check = (over: Partial<StoredEligibilityCheck> = {}): StoredEligibilityCheck => ({ checkId: 10, fingerprint: "EF-x", operatorId: 1, verdict: "eligible", blockers: [], evaluatedAt: mins(-5), explanation: "", ...over });
 const subject = { operatorId: 1, unitId: 2, jobId: 3 };
 
@@ -205,5 +205,33 @@ d("jobUnits.create under off, advisory and enforced", () => {
     // Back to off, so other suites' legacy assignments are unaffected.
     await callerFor(manager).dispatch.enforcementSet({ mode: "off", reason: "Test teardown — restore default" });
     expect((await callerFor(dispatcher).dispatch.enforcementGet()).mode).toBe("off");
+  });
+});
+
+/**
+ * The fingerprint's job is to notice when **any** input changed. A fixture missing a field cannot
+ * test that field's contribution — and `communicationPlanVersion` was missing, so nothing here
+ * would have noticed if it quietly stopped feeding the hash.
+ *
+ * Derived from the fixture rather than listed, so a fact added later is covered the day it arrives
+ * instead of the day somebody remembers this file.
+ */
+describe("every fact moves the fingerprint", () => {
+  const base = computeEligibilityFingerprint(facts);
+
+  it("covers every field the facts carry", () => {
+    expect(Object.keys(facts).length).toBeGreaterThan(8);
+  });
+
+  it.each(Object.keys(facts))("changes when %s changes", (key) => {
+    const current = (facts as Record<string, unknown>)[key];
+    // A different value of the same kind — changing the type would prove nothing about the field.
+    const altered = typeof current === "number" ? current + 1
+      : typeof current === "string" ? `${current}-moved`
+      : typeof current === "boolean" ? !current
+      : current === null ? 1
+      : current;
+    const moved = computeEligibilityFingerprint({ ...facts, [key]: altered } as typeof facts);
+    expect(moved, `${key} does not reach the fingerprint`).not.toBe(base);
   });
 });

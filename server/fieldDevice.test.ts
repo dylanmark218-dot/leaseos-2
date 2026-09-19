@@ -1,4 +1,6 @@
+import type { z } from "zod";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { ITEM, RECORD_UPDATE } from "./deviceRouter";
 import mysql from "mysql2/promise";
 import { createHash } from "node:crypto";
 
@@ -253,7 +255,16 @@ function deviceKey(): DeviceKey {
   return { spki, fingerprint: fingerprintP256Spki(spki), pem: privateKey.export({ format: "pem", type: "pkcs8" }).toString() };
 }
 /** A fully signed receivePackage input, signed with `k` and claiming `k`'s fingerprint. */
-function signedPackage(k: DeviceKey, i: { deviceRef: string; packageRef: string; queuedAt: Date; items: unknown[]; recordUpdates?: unknown[]; claimFingerprint?: string }) {
+/*
+ * The item and record-update shapes come from the router's own schemas. They were `unknown[]`,
+ * which meant nothing checked that what this helper SIGNS is what the procedure accepts — and the
+ * signature covers the items, so a drift between the two would have been a failing signature with
+ * no hint of why. Taking the type from the schema means the drift is a compile error instead.
+ */
+type PackageItem = z.infer<typeof ITEM>;
+type PackageRecordUpdate = z.infer<typeof RECORD_UPDATE>;
+
+function signedPackage(k: DeviceKey, i: { deviceRef: string; packageRef: string; queuedAt: Date; items: PackageItem[]; recordUpdates?: PackageRecordUpdate[]; claimFingerprint?: string }) {
   const signedAt = new Date();
   const nonce = key("n").padEnd(24, "0");
   const recordUpdates = i.recordUpdates ?? [];
@@ -318,7 +329,9 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
     const rot = await callerFor(driver).device.rotateKey({ deviceRef: en.deviceRef, newPublicKeySpkiBase64: B.spki });
     expect(rot.retiredFingerprint).toBe(kA);
     const graced = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
-    expect(graced.state).toBe("hash_verified");
+    // Narrowed rather than asserted loosely: `note` lives on one branch of the result union, and
+    // reading it off the union was the type error. The runtime behaviour is unchanged.
+    if (graced.state !== "hash_verified") throw new Error(`expected hash_verified, got ${graced.state}`);
     expect(graced.note).toContain("grace window");
     // A package signed by a key the device never held is refused — and, as with
     // every other refusal, the refusal is a row the office can see.

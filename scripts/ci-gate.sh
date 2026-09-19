@@ -45,8 +45,9 @@ pnpm exec tsc --noEmit
 #
 # Turning it on outright means triaging the pre-existing errors in one sitting. So the
 # count is pinned instead: new test code is type-checked in effect, because anything
-# that adds an error fails here. The pin is a debt to pay down, not a setting to keep.
-TEST_TS_PIN=55
+# that adds an error fails here. The pin is a debt to pay down, not a setting to keep:
+# 85 at v23.00, 37 now. It only ever goes down.
+TEST_TS_PIN=37
 TEST_TS_NOW=$(pnpm exec tsc --noEmit -p tsconfig.tests.json 2>&1 | grep -cE "\.test\.tsx?\(" || true)
 echo "test-file type errors: $TEST_TS_NOW (pinned ceiling $TEST_TS_PIN)"
 if [ "$TEST_TS_NOW" -gt "$TEST_TS_PIN" ]; then

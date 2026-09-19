@@ -287,6 +287,9 @@ answer, and writing plausible-looking bodies is what let them drift to field nam
 longer declare. **One was not a placeholder** — a maintenance defect carrying a real driver
 statement under `description`, which the procedure calls `title`.
 
-**The pin is a debt, not a setting.** 85 unchecked assertions is 85 places a test may be proving
-something other than what it says.
+**The pin is a debt, not a setting, and it only goes down.** 85 → 37 so far. Two of the fixes were
+not cosmetic: `dispatchEnforcement`'s facts fixture was missing `communicationPlanVersion`, so
+nothing tested that field's contribution to the decision **fingerprint** — the hash whose whole job
+is noticing that an input moved; and a test was calling `.sort()` on an array the engine returned,
+mutating it in place.
 

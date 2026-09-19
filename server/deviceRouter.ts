@@ -128,7 +128,19 @@ export const deviceRouter = router({
     }),
 });
 
-const ITEM = z.object({
+/**
+ * A record the device changed while offline. Named rather than inline because it is **part of the
+ * signed payload**: an anonymous shape inside a signature is one nothing else can refer to, which
+ * is how a helper that signs packages came to type it as `unknown[]`.
+ */
+export const RECORD_UPDATE = z.object({
+  recordType: z.string().min(1).max(60), recordRef: z.string().min(1).max(120),
+  baseVersion: z.number().int().nonnegative(),
+  baseValues: z.record(z.string(), z.unknown()), deviceValues: z.record(z.string(), z.unknown()),
+});
+
+/** Exported so tests take this shape from the schema rather than restating it as `unknown[]`. */
+export const ITEM = z.object({
   evidenceRecordId: z.number().int().positive(),
   declaredContentHash: FINGERPRINT,
   declaredManifestHash: FINGERPRINT,
@@ -162,11 +174,7 @@ export const syncRouter = router({
       queuedAt: z.coerce.date(),
       items: z.array(ITEM).min(1).max(500),
       // Also signed, so also no default: the device always sends it (empty when it has none).
-      recordUpdates: z.array(z.object({
-        recordType: z.string().min(1).max(60), recordRef: z.string().min(1).max(120),
-        baseVersion: z.number().int().nonnegative(),
-        baseValues: z.record(z.string(), z.unknown()), deviceValues: z.record(z.string(), z.unknown()),
-      })),
+      recordUpdates: z.array(RECORD_UPDATE),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();

@@ -6,7 +6,7 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **v23.01** | `LEASEOS_RELEASE` (or explicit argument 1) |
+| Release | **v23.02** | `LEASEOS_RELEASE` (or explicit argument 1) |
 | Tables | **408** | `mysqlTable(` declarations in `drizzle/schema.ts` |
 | Migrations | **160** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
 | Role-authorized procedures | **646** | `roleProcedure(` call sites across all routers |
@@ -16,7 +16,7 @@ here can be added rather than read.
 | Permissions | **355** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **124** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **273 / 3720** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **273 / 3721** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)

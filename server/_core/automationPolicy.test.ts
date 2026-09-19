@@ -24,7 +24,7 @@ const CAP = "hos";
 const policy = (scope: PolicyRow["scope"], mode: PolicyRow["requestedMode"], scopeId: string | null = null, version = `PV-${scope}-1`): PolicyRow =>
   ({ capability: CAP, scope, scopeId, requestedMode: mode, policyVersionId: version, source: "test" });
 
-const resolve = (policies: PolicyRow[], entitlement = ENTITLED, ceiling: SafetyCeiling = null) =>
+const resolve = (policies: PolicyRow[], entitlement: Entitlement = ENTITLED, ceiling: SafetyCeiling = null) =>
   resolveAutomation({ capability: CAP, entitlement, ceiling, policies });
 
 describe("entitlement and policy are different questions", () => {
@@ -102,7 +102,7 @@ describe("resolution order: tenant → role → task → customer", () => {
     expect(r.outcome).toBe("policy_error");
     if (r.outcome !== "policy_error") throw new Error("unreachable");
     expect(r.conflict.scope).toBe("role");
-    expect(r.conflict.modes.sort()).toEqual(["AUTO", "MANUAL"]);
+    expect([...r.conflict.modes].sort()).toEqual(["AUTO", "MANUAL"]);   // copy: .sort() mutates what the engine returned
     expect(r.conflict.policyVersionIds).toEqual(["PV-a", "PV-b"]);
     expect(r.reason).toMatch(/depend on the database rather than on a decision/);
   });
@@ -271,7 +271,7 @@ describe("no write path branches its record shape on the mode", () => {
       .map(f => ({ f: `server/${f}`, text: readFileSync(`server/${f}`, "utf8") }));
     const offenders: string[] = [];
     for (const { f, text } of src) {
-      for (const m of text.matchAll(/\.values\(\{[\s\S]{0,1200}?\}\)/g)) {
+      for (const m of Array.from(text.matchAll(/\.values\(\{[\s\S]{0,1200}?\}\)/g))) {
         if (/\b(mode|automationMode)\s*===\s*["'](AUTO|HYBRID|MANUAL)["']/.test(m[0])) offenders.push(f);
       }
     }
