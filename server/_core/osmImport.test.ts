@@ -51,7 +51,8 @@ describe("what becomes a road", () => {
   });
 
   it("refuses a road closed to motor vehicles", () => {
-    for (const tags of [{ highway: "track", access: "no" }, { highway: "track", motor_vehicle: "no" }]) {
+    const closed: Record<string, string>[] = [{ highway: "track", access: "no" }, { highway: "track", motor_vehicle: "no" }];
+    for (const tags of closed) {
       const r = importOsmWay(way(tags), AB);
       expect(r.imported).toBe(false);
     }
