@@ -18,7 +18,7 @@ import { evaluateRoute } from "./routeEvaluation";
 const road = (over: Partial<ImportedRoad> = {}): ImportedRoad => ({
   objectId: 1234567, name: "Range Road 51", highwayNumber: null, roadClass: null,
   featureTypeLabel: null, surfaceKind: "gravel", lanes: null, lengthMetres: 4200,
-  path: [{ lng: -114.1, lat: 53.4 }, { lng: -114.0, lat: 53.5 }],
+  path: [[-114.1, 53.4], [-114.0, 53.5]],
   sourceKey: "ats_road_allowance", sourceLayer: "Access and Facility Roads",
   retrievedAt: new Date("2026-09-01T00:00:00Z"), geometrySource: "v3", ...over,
 });
