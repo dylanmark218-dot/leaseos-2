@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { deriveExceptions, type ExceptionSources } from "./exceptionCentre";
-import { permissionsForDomainRole } from "./recordsAuthorization";
+import { OPERATIONAL_PROCEDURE_PERMISSIONS, RECORDS_PROCEDURE_PERMISSIONS, permissionsForDomainRole } from "./recordsAuthorization";
 import {
   fitQuality, projectCalibrationEvidence, sweepSuspectReadings, suspectWindow,
   type CalibrationEvent, type CalibrationModel, type SnapshotRef,
@@ -180,8 +180,40 @@ describe("the sweep is not given to everyone, and confers nothing", () => {
     // suggests. `safety` may sweep and still cannot touch money.
     const safety = permissionsForDomainRole("safety") as readonly string[];
     expect(safety).toContain("loadsense.calibration.sweep");
-    for (const financial of ["billing.write", "invoice.approve", "billing.approve", "credit.issue"]) {
-      expect(safety, `safety must not hold ${financial}`).not.toContain(financial);
+    /*
+     * These names are checked against the Permission union first, because three of the four this
+     * originally listed — `invoice.approve`, `billing.approve`, `credit.issue` — do not exist. An
+     * assertion that a role lacks a permission nobody defined can never fail: it was one real check
+     * wearing four, and it would have kept passing while somebody handed `safety` the real one.
+     */
+    /*
+     * Derived, not hand-listed. The list this replaced named four permissions of which three —
+     * `invoice.approve`, `billing.approve`, `credit.issue` — do not exist, so those assertions
+     * could never fail: one real check wearing four, passing happily while somebody handed `safety`
+     * the real one. Taking the names from what financial procedures actually require means the
+     * check grows with the surface instead of drifting behind it.
+     */
+    const ALL = { ...RECORDS_PROCEDURE_PERMISSIONS, ...OPERATIONAL_PROCEDURE_PERMISSIONS } as Record<string, string>;
+    const financialPermissions = Array.from(new Set(
+      Object.entries(ALL).filter(([name]) => /^(invoicing|cash|billing|commercial)\./.test(name)).map(([, p]) => p),
+    ));
+    expect(financialPermissions.length, "no financial permissions found — the filter has drifted").toBeGreaterThan(2);
+    for (const f of financialPermissions) {
+      expect(safety, `safety may sweep and must not hold ${f}`).not.toContain(f);
     }
+  });
+
+  it("leaves the financial path exactly where it was — the sweep adds no route to money", () => {
+    /*
+     * The decision's last clause: a financial consequence still goes through the Commercial Office
+     * authorization and separation-of-duties path. The static half is above. This is the dynamic
+     * half — that no procedure anywhere accepts the sweep permission as authorization for a
+     * financial write, which is the shape the shortcut would actually take.
+     */
+    const entries = Object.entries({ ...RECORDS_PROCEDURE_PERMISSIONS, ...OPERATIONAL_PROCEDURE_PERMISSIONS } as Record<string, string>);
+    const financialProcedures = entries.filter(([name]) => /^(invoicing|cash|billing|commercial)\./.test(name));
+    expect(financialProcedures.length, "there should be financial procedures to check").toBeGreaterThan(5);
+    const shortcuts = financialProcedures.filter(([, perm]) => perm === "loadsense.calibration.sweep");
+    expect(shortcuts, "a financial procedure accepts the calibration sweep permission").toEqual([]);
   });
 });
