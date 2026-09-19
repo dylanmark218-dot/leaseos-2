@@ -42,6 +42,7 @@ const DECLARED_UNWIRED: Record<string, string> = {
   monitoringNotice: "P4.6 - whether a worker has been told what is collected about them. Not reached from a router yet, and deliberately not enforcing: whether unacknowledged monitoring should stop a dispatch is a decision with real operational teeth - a hard block would strand trucks over paperwork - and it belongs to the owner through the automation policy, not to a module that happens to know the answer. The procedures and the Exception Centre surfacing are the next step.",
   calibrationEvidence: "P4.2 - the evidence behind a weight, and the sweep a failure finding opens. Not reached from a router yet: the sweep is a governance action with real consequences (it tells an office which invoices rest on a device later found out of tolerance), so who may run it and what it triggers is an owner decision, not one to make while wiring a query.",
   evidenceChainWalk: "P3.6 - resolve a tracking number, then walk the chain it sits in. Not mounted yet: the walk is pure and the joins differ per anchor, so wiring it means a dozen scoped reads through surfaces.search's permission filter, and a hop the caller is not allowed to see must be absent rather than appear as a gap - a chain that reports what you cannot read is a disclosure, not a search result.",
+  manifestFactReconciliation: "P3.1 - which is true, the manifest's printed word or the reference beside it. Not mounted: the seal path is the place for it, and adding a blocker there changes when a manifest can be sealed, which is an operational decision rather than a wiring one.",
   migrationLedger: "the production migration ledger; reached from scripts/migrate.ts (the deploy path), not from a router — declared by the session that reconciled 5f3bef4",
   offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
@@ -160,7 +161,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(44);   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(45);   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });
