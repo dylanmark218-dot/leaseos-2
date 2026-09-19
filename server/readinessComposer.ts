@@ -571,6 +571,11 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     routingInUse: subject.routeApprovalRef != null,
     destinationRequired: jobInput?.destinationAcceptanceVerified !== undefined && jobInput?.destinationAcceptanceVerified !== null,
     mechanicReleaseApplicable: eligibilityBeforeCapabilities.blockers.some(b => /defect|work_order|mechanic/i.test(b.code)),
+      // The resolver has already answered; an unlicensed capability leaves the contract entirely,
+    // so nothing asks for it and nothing reports its silence as a blocker.
+    notLicensed: Object.entries(evaluation)
+      .filter(([, e]) => !e.evaluated && e.reason === "not_licensed")
+      .map(([capability]) => capability),
   });
   const picture = pictureFor(contract, eligibilityBeforeCapabilities.blockers, evaluation);
   /*

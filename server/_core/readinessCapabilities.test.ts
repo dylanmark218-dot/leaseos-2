@@ -190,3 +190,51 @@ describe("blockers are attributed to the capability that raised them", () => {
     expect(capabilityOf({ code: "something_nobody_mapped", subject: "truck" })).toBe(CAPABILITY.unitInspection);
   });
 });
+
+/**
+ * The owner decision of 2026-09-17: "unlicensed features are absent, not off" and
+ * "mapping/routing-only customers never receive an HOS input and never stall on it."
+ *
+ * Found by auditing P8.1/P8.2 against that decision. `DISPATCH_REQUIRED_ALWAYS` made HOS required
+ * for everybody; an unlicensed tenant resolved to `not_licensed` → unevaluated; and a required
+ * capability that was not evaluated became a blocker. The contract that exists to stop a disabled
+ * module bricking dispatch was bricking dispatch for the customers who never bought the module.
+ */
+describe("an unlicensed capability is absent from the contract, not unsatisfied", () => {
+  const base = { routingInUse: true, destinationRequired: false, mechanicReleaseApplicable: false };
+
+  it("still requires HOS of a tenant who has it", () => {
+    expect(dispatchContractFor(base).requires).toContain(CAPABILITY.hos);
+  });
+
+  it("does not require it of a mapping-only tenant", () => {
+    const c = dispatchContractFor({ ...base, notLicensed: [CAPABILITY.hos] });
+    expect(c.requires).not.toContain(CAPABILITY.hos);
+    // Nor quietly optional, which would still have it reported. Absent means absent.
+    expect(c.optional).not.toContain(CAPABILITY.hos);
+  });
+
+  it("keeps every other blocker the decision names", () => {
+    // "dispatch drops the HOS check and returns its other blockers (inspection, insurance, defects)"
+    const c = dispatchContractFor({ ...base, notLicensed: [CAPABILITY.hos] });
+    expect(c.requires).toContain(CAPABILITY.unitInspection);
+    expect(c.requires).toContain(CAPABILITY.operatingDocuments);
+    expect(c.requires).toContain(CAPABILITY.operatorQualification);
+  });
+
+  it("drops a conditionally-required capability too, when it was never bought", () => {
+    const c = dispatchContractFor({ ...base, destinationRequired: true, notLicensed: [CAPABILITY.destinationAcceptance] });
+    expect(c.requires).not.toContain(CAPABILITY.destinationAcceptance);
+    expect(c.optional).not.toContain(CAPABILITY.destinationAcceptance);
+  });
+
+  it("does NOT drop a capability whose feed is merely broken", () => {
+    /*
+     * The distinction P8.2 exists to keep. `unresolved` means the entitlement could not be
+     * determined — "we cannot tell" is not "you did not buy it", and treating the two alike would
+     * turn every outage into a silently relaxed dispatch check.
+     */
+    const c = dispatchContractFor({ ...base, notLicensed: [] });
+    expect(c.requires).toContain(CAPABILITY.hos);
+  });
+});

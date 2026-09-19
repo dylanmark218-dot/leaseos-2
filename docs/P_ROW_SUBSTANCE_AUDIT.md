@@ -43,6 +43,7 @@ thing that was never built.
 | Row | The decision | What is there |
 |---|---|---|
 | **P8.2** | the named minimum tests | one was missing: "MANUAL/HYBRID/AUTO produce the same committed record shape" (fixed v22.88) |
+| **P8.1** | "unlicensed features are absent, not off"; mapping-only customers "never stall" on HOS | **they stalled** — HOS was unconditionally required, so an unlicensed tenant's `not_licensed` became a blocker (fixed v22.99) |
 | **P8.5** | internal-only material is *near misses, drug & alcohol test results, internal investigations* | **only internal investigations.** Near misses exist as an incident type and are not tier-gated at all; drug & alcohol results are not stored anywhere. Recorded and asked rather than fixed — see below. |
 
 **The P8.5 ambiguity, unresolved on purpose.** The decision says this material is "accessible only to company

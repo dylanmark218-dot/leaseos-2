@@ -64,16 +64,35 @@ export function dispatchContractFor(applicability: {
   routingInUse: boolean;
   destinationRequired: boolean;
   mechanicReleaseApplicable: boolean;
+  /**
+   * Capabilities this tenant is **not licensed for**.
+   *
+   * The owner decision is explicit: "unlicensed features are absent, not off", and
+   * "mapping/routing-only customers never receive an HOS input and never stall on it."
+   *
+   * Without this, `DISPATCH_REQUIRED_ALWAYS` made HOS required for everybody, an unlicensed tenant
+   * resolved to `not_licensed` → unevaluated, and a required-but-unevaluated capability became a
+   * blocker. So the contract that exists to stop a disabled module bricking dispatch was itself
+   * bricking dispatch for the customers who never bought the module.
+   *
+   * Only `not_licensed` is dropped, and the distinction matters: a **broken feed** (`unresolved`)
+   * still blocks, because "we cannot tell" is not "you did not buy it". That is the whole reason
+   * P8.2 kept the two apart.
+   */
+  notLicensed?: readonly string[];
 }): ConsumerContract {
-  const requires = [...DISPATCH_REQUIRED_ALWAYS];
-  if (applicability.routingInUse) requires.push(CAPABILITY.routeRestrictions);
-  if (applicability.destinationRequired) requires.push(CAPABILITY.destinationAcceptance);
-  if (applicability.mechanicReleaseApplicable) requires.push(CAPABILITY.mechanicRelease);
+  const unlicensed = new Set(applicability.notLicensed ?? []);
+  const requires = DISPATCH_REQUIRED_ALWAYS.filter(c => !unlicensed.has(c));
+  if (applicability.routingInUse && !unlicensed.has(CAPABILITY.routeRestrictions)) requires.push(CAPABILITY.routeRestrictions);
+  if (applicability.destinationRequired && !unlicensed.has(CAPABILITY.destinationAcceptance)) requires.push(CAPABILITY.destinationAcceptance);
+  if (applicability.mechanicReleaseApplicable && !unlicensed.has(CAPABILITY.mechanicRelease)) requires.push(CAPABILITY.mechanicRelease);
   return {
     consumer: "dispatch readiness",
     requires,
+    // An unlicensed capability is neither required nor optional. It is absent: nothing asks for it,
+    // so nothing reports its silence.
     optional: [CAPABILITY.routeRestrictions, CAPABILITY.destinationAcceptance, CAPABILITY.mechanicRelease]
-      .filter(c => !requires.includes(c)),
+      .filter(c => !requires.includes(c) && !unlicensed.has(c)),
   };
 }
 
