@@ -293,3 +293,19 @@ nothing tested that field's contribution to the decision **fingerprint** — the
 is noticing that an input moved; and a test was calling `.sort()` on an array the engine returned,
 mutating it in place.
 
+
+### Mapping / routing / GPS / job tracking — spec drafted (2026-09-19)
+
+`docs/LEASEOS_MAPPING_ROUTING_GPS_SPEC.md`, written against `8a03803` after the source-neutrality
+repair and **before** any OSM import. Awaiting owner approval; four decisions listed in its §10.
+
+The fact that shapes it: the verified Alberta extract carries 512,979 vehicle-road ways and
+**24 `maxweight` tags** — 0.005% — with one `maxlength` in the province. So UNKNOWN is not an edge
+case to be closed later, it is the normal answer, and the design is about making the system usable
+while that is true: coverage reported per axis rather than 122 individual warnings a driver learns
+to dismiss.
+
+Three things it deliberately does not do: redesign the UNKNOWN/silent-check behaviour (correct and
+tested), adopt an external router as the authority (finding a path is not permission to drive it),
+or import anything (M2).
+
