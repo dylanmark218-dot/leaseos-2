@@ -111,7 +111,9 @@ d("an agent cannot buy its way past the safeguards", () => {
     // Sending an origin is now simply ignored — the field does not exist.
     const r = await caller(manager).agent.requestAction({
       runRef, capability: "jobs.read", target, payload: { note: "x" },
-      ...({ origin: "external_content" } as Record<string, never>),
+      // Two-step cast on purpose: the whole test is sending a field the input type forbids, so
+      // there is no honest single-step conversion to write here.
+      ...({ origin: "external_content" } as unknown as Record<string, never>),
     });
     expect(r.decision).toBe("allow");
     const [rows] = await pool.execute<mysql.RowDataPacket[]>(

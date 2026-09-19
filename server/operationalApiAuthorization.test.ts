@@ -119,9 +119,22 @@ async function attempt(fn: () => Promise<unknown>): Promise<"forbidden" | "passe
     // A mistyped router path comes back as NOT_FOUND, which is not a gate
     // result. The previous hardening caught non-tRPC errors and missed this
     // one, so ten path mistakes read as passes. Fail loudly instead.
-    if (code === "NOT_FOUND") {
+    /*
+     * NOT_FOUND arrives from two places and they mean opposite things.
+     *
+     * tRPC raises it when the path does not resolve — a harness mistake, and the reason this check
+     * exists: ten mistyped paths once read as ten passes. But a procedure that RAN and could not
+     * find the row it was asked about raises the same code, and that is a pass: authorization let
+     * it through and the domain answered.
+     *
+     * Only tRPC's own message names the path, so that is what separates them. Before this, any
+     * procedure that legitimately answers NOT_FOUND was untestable here — the original fix for
+     * paths-reading-as-passes had over-corrected into domain-answers-reading-as-harness-failures.
+     */
+    const message = typeof e === "object" && e !== null && "message" in e ? String((e as { message: unknown }).message) : "";
+    if (code === "NOT_FOUND" && /-procedure on path|No procedure found on path/i.test(message)) {
       throw new Error(
-        `Harness error: procedure path not found (tRPC NOT_FOUND). Fix the path, do not treat this as authorization.`
+        `Harness error: procedure path not found (${message}). Fix the path, do not treat this as authorization.`
       );
     }
     // A domain-level error means authorization let it through.
@@ -250,6 +263,10 @@ d("safety and maintenance writes stay with the people who do them", () => {
         caller.fieldRoute.compliance.maintenance.create({
           unitId: 1,
           title: "Pump grinding on PTO",
+          // Required by the input and omitted here, so the call was failing validation rather than
+          // reaching the procedure. This suite asserts the authorization gate, which a validation
+          // error also passes — so the assertion held while testing one layer less than it names.
+          reportedAt: new Date("2026-09-18T08:00:00Z"),
           severity: "critical",
         })
       )

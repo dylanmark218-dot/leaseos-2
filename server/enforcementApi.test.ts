@@ -137,7 +137,7 @@ d("a finding is the policy's decision, not the caller's", () => {
     const orphanBranch = `B-${rnd()}`;   // no policy approved for it, and none at company scope in this tenant
     const c = await caller(safety).enforcement.eventConfirm(stop({ branchId: orphanBranch }));
     const orderRef = c.orderRefs[0];
-    const [[{ n }]] = await pool.query<mysql.RowDataPacket[][]>("SELECT COUNT(*) AS n FROM oosReleasePolicies WHERE status='approved' AND scopeType='company'");
+    const [[{ n }]] = await pool.query<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM oosReleasePolicies WHERE status='approved' AND scopeType='company'");
     if (Number(n) === 0) {
       await expect(caller(safety).enforcement.findingRecord({ orderRef, finding: "satisfied", findingType: "reinspection" }))
         .rejects.toThrow(/No approved release policy is in force/i);
