@@ -6224,6 +6224,12 @@ export const roadGraphEdges = mysqlTable("roadGraphEdges", {
   lengthMetres: double("lengthMetres").notNull(),
   surfaceKind: varchar("surfaceKind", { length: 20 }).notNull(),
   featureTypeLabel: varchar("featureTypeLabel", { length: 80 }),
+  // 0164: which source produced this edge. Without it the path→evaluator conversion had nothing to
+  // read and manufactured `ats_road_allowance` for every edge whatever made it.
+  sourceKey: varchar("sourceKey", { length: 64 }),
+  sourceLayer: varchar("sourceLayer", { length: 160 }),
+  sourceFeatureId: varchar("sourceFeatureId", { length: 96 }),
+  sourceVersion: varchar("sourceVersion", { length: 96 }),
   componentId: int("componentId").default(0).notNull(),
 });
 export type RoadGraphEdgeRow = typeof roadGraphEdges.$inferSelect;

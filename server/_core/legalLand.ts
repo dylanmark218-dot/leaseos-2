@@ -11,7 +11,7 @@
  *     absent so the evaluator reads UNKNOWN rather than pass.
  */
 import type { RequiredCheck } from "./routingCompiler";
-import type { SegmentAttribute } from "./routeEvaluation";
+import type { DataConfidence, SegmentAttribute } from "./routeEvaluation";
 import { distanceToPathMetres, pointInRing, type LngLat, type SurfaceKind } from "./geoImport";
 
 /* ---- GPS → legal land ---- */
@@ -88,7 +88,7 @@ export function configurationFingerprint(v: { grossWeightKg: number; heightM: nu
 
 /* ---- imported roads → evaluator attributes ---- */
 
-export type ImportedRoad = { objectId: number; name: string | null; highwayNumber: string | null; roadClass: string | null; featureTypeLabel: string | null; surfaceKind: SurfaceKind; lanes: number | null; lengthMetres: number; path: LngLat[]; sourceKey: string; sourceLayer: string; retrievedAt: Date; geometrySource: string | null };
+export type ImportedRoad = { objectId: number; name: string | null; highwayNumber: string | null; roadClass: string | null; featureTypeLabel: string | null; surfaceKind: SurfaceKind; lanes: number | null; lengthMetres: number; path: LngLat[]; sourceKey: string; sourceLayer: string; retrievedAt: Date; geometrySource: string | null; /** The provider's own stable id where it is not the numeric objectId (OSM: `way/1234567`). */ sourceFeatureId?: string | null };
 
 /** Surfaces a loaded commercial unit may travel, and what each implies operationally. */
 const SURFACE_SUITABILITY: Record<SurfaceKind, { textValue: string; operational: "suitable" | "review" | "unsuitable" }> = {
@@ -113,22 +113,90 @@ const SURFACE_SUITABILITY: Record<SurfaceKind, { textValue: string; operational:
  * A verified restriction row, recorded separately, is what turns any of them
  * into a pass. The map's silence is never a permission.
  */
+/* ------------------------------------------------------------------ */
+/* Road sources — what each one may claim, and under whose name         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A road source and the standing its data has.
+ *
+ * This exists because `roadAsSegment` used to stamp `confidence: "authority_confirmed"`
+ * unconditionally and mint `AB-ACCESS-<objectId>` for every caller. That was correct while the only
+ * source was Alberta's own access-road layer, and it becomes wrong the moment a second source
+ * arrives: an OpenStreetMap `surface=gravel` is a contributor's observation, and routed through
+ * that function it would reach the evaluator indistinguishable from a provincial statement — which
+ * is the one thing that turns REVIEW into PASS.
+ *
+ * So the standing lives with the source, not with the function that formats it.
+ */
+export type RoadSourceStanding = {
+  /** Namespace for segment identity. Two sources must never mint the same segment id. */
+  idPrefix: string;
+  /**
+   * What this source's claims are worth. `unverified` is the honest default for open map data: it
+   * may be perfectly accurate and it is still nobody's legal statement.
+   */
+  confidence: DataConfidence;
+  /**
+   * The jurisdiction the source establishes, or null when it establishes none. Null stays null —
+   * a caller's location is not evidence of whose rules apply.
+   */
+  jurisdiction: string | null;
+};
+
+export const ROAD_SOURCE_STANDING: Record<string, RoadSourceStanding> = {
+  /*
+   * Alberta's own layer, and it keeps its historical `AB-ACCESS-` prefix deliberately. Segment ids
+   * are referenced by stored route evidence, fingerprints and decisions; re-minting them would
+   * orphan every route already approved against them, to fix an identity that was never ambiguous
+   * while this was the only source.
+   */
+  ats_road_allowance: { idPrefix: "AB-ACCESS-", confidence: "authority_confirmed", jurisdiction: "CA-AB" },
+  /** Geofabrik's Alberta extract: excellent topology, and not an authority on anything. */
+  geofabrik_osm_ab: { idPrefix: "OSM-AB-", confidence: "unverified", jurisdiction: "CA-AB" },
+};
+
+/**
+ * A source nobody has registered claims nothing.
+ *
+ * Not a permissive default with a warning attached: an unregistered source reaching the evaluator
+ * as `unverified` with no jurisdiction is a route that reads REVIEW, which is the correct answer to
+ * "we do not know what this data is worth."
+ */
+/**
+ * What an edge built before `0164` reports. Those rows are backfilled with their real source, so
+ * this is for an edge that somehow has none: it resolves to unverified with no jurisdiction, which
+ * reads REVIEW rather than silently borrowing Alberta's standing.
+ */
+export const UNREGISTERED_SOURCE = "unregistered_road_source";
+
+export function standingFor(sourceKey: string): RoadSourceStanding {
+  return ROAD_SOURCE_STANDING[sourceKey]
+    ?? { idPrefix: `${sourceKey}:`, confidence: "unverified", jurisdiction: null };
+}
+
 export function roadAsSegment(road: ImportedRoad): { segmentId: string; label: string; lengthKm: number; attributes: SegmentAttribute[]; silentChecks: RequiredCheck[] } {
+  const standing = standingFor(road.sourceKey);
   const s = SURFACE_SUITABILITY[road.surfaceKind];
   const retrieved = road.retrievedAt.toISOString();
   const attributes: SegmentAttribute[] = [{
     check: "surface_condition",
     textValue: s.textValue,
-    jurisdiction: "CA-AB",
+    jurisdiction: standing.jurisdiction,
     source: `${road.sourceKey}: ${road.sourceLayer}`,
     sourceVersion: road.geometrySource ?? null,
-    // Alberta states the surface; that it is Alberta's own layer makes it authority-sourced, and nothing more than the surface.
-    confidence: "authority_confirmed",
+    /*
+     * From the source, never from this function. Alberta states the surface on its own layer, so
+     * that is authority-confirmed and nothing more than the surface. An OSM contributor stating the
+     * same word is unverified — accurate, very possibly, and still nobody's legal statement.
+     */
+    confidence: standing.confidence,
     verifiedAt: retrieved,
   }];
   const silentChecks: RequiredCheck[] = ["road_weight_restriction", "axle_group_limit", "bridge_capacity", "bridge_axle_limit", "overhead_clearance", "bridge_clearance", "width_restriction", "length_restriction", "seasonal_closure", "road_ban_level"];
   return {
-    segmentId: `AB-ACCESS-${road.objectId}`,
+    // Namespaced by source: an ATS OBJECTID and an OSM way id may be the same number.
+    segmentId: `${standing.idPrefix}${road.sourceFeatureId ?? road.objectId}`,
     label: road.name ?? road.highwayNumber ?? road.featureTypeLabel ?? `Access road ${road.objectId}`,
     lengthKm: Math.round(road.lengthMetres) / 1000,
     attributes,

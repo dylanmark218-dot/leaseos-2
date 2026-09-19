@@ -14,9 +14,9 @@
  */
 import { distanceToPathMetres, haversineMetres, pathLengthMetres, type LngLat, type SurfaceKind } from "./geoImport";
 
-export type GraphSegment = { segmentId: string; accessRoadObjectId: number; label: string; surfaceKind: SurfaceKind; path: LngLat[] };
+export type GraphSegment = { segmentId: string; accessRoadObjectId: number; label: string; surfaceKind: SurfaceKind; path: LngLat[]; sourceKey?: string | null; sourceLayer?: string | null; sourceFeatureId?: string | null; sourceVersion?: string | null };
 export type GraphNode = { nodeKey: string; latitude: number; longitude: number; degree: number; componentId: number };
-export type GraphEdge = { segmentId: string; accessRoadObjectId: number; label: string; fromNodeKey: string; toNodeKey: string; lengthMetres: number; surfaceKind: SurfaceKind; featureTypeLabel?: string | null; componentId: number; path: LngLat[] };
+export type GraphEdge = { segmentId: string; accessRoadObjectId: number; label: string; /** 0164: the source that produced this edge, carried so the evaluator is told the truth about it. */ sourceKey?: string | null; sourceLayer?: string | null; sourceFeatureId?: string | null; sourceVersion?: string | null; fromNodeKey: string; toNodeKey: string; lengthMetres: number; surfaceKind: SurfaceKind; featureTypeLabel?: string | null; componentId: number; path: LngLat[] };
 export type Graph = { nodes: Map<string, GraphNode>; edges: GraphEdge[]; adjacency: Map<string, GraphEdge[]>; componentCount: number; largestComponentEdges: number; isolatedEdges: number; excludedSurfaces: SurfaceKind[]; segmentsConsidered: number };
 
 /** Surfaces a loaded commercial unit is never routed down. A driveway is somebody's yard; a ferry and a ford are not roads. */
@@ -51,7 +51,7 @@ export function buildGraph(segments: readonly GraphSegment[], opts: { snapTolera
     const from = nodeFor(s.path[0]!), to = nodeFor(s.path[s.path.length - 1]!);
     if (from.nodeKey === to.nodeKey) continue;                       // a loop that returns to its own start connects nothing
     from.degree += 1; to.degree += 1;
-    edges.push({ segmentId: s.segmentId, accessRoadObjectId: s.accessRoadObjectId, label: s.label, fromNodeKey: from.nodeKey, toNodeKey: to.nodeKey, lengthMetres: pathLengthMetres(s.path), surfaceKind: s.surfaceKind, componentId: 0, path: s.path });
+    edges.push({ segmentId: s.segmentId, accessRoadObjectId: s.accessRoadObjectId, label: s.label, sourceKey: s.sourceKey ?? null, sourceLayer: s.sourceLayer ?? null, sourceFeatureId: s.sourceFeatureId ?? null, sourceVersion: s.sourceVersion ?? null, fromNodeKey: from.nodeKey, toNodeKey: to.nodeKey, lengthMetres: pathLengthMetres(s.path), surfaceKind: s.surfaceKind, componentId: 0, path: s.path });
   }
 
   const adjacency = new Map<string, GraphEdge[]>();
