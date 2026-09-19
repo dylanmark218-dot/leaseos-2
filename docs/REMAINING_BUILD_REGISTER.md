@@ -247,3 +247,19 @@ a list**, not quietly tolerated: converting one needs its author to name the fil
 path to make a check pass would put a wrong claim in the document to satisfy the thing meant to
 catch wrong claims.
 
+
+### The DONE rows were audited against their original definitions (2026-09-19)
+
+`docs/P_ROW_SUBSTANCE_AUDIT.md` records the pass. Method: the register as first written is
+recoverable at `d6a3433`, and each DONE row was compared against **its original definition there**
+— checking a row against its current wording proves nothing, since the current wording is what the
+person closing it believed.
+
+21 of 35 DONE rows have an original definition. **Three had been closed without meeting a clause**
+(P3.6's evidence-chain walk, P3.2's customer permission, P3.1's reference-versus-printed rule), all
+now built. Eleven checked clear. The other 14 rows post-date `d6a3433` and can only be checked by
+re-reading the owner decision that created them — the pass that found P8.2's missing test.
+
+None of the three was a bug. Each was a clause with **no implementation and no note saying so**,
+which is the failure a green gate cannot see: nothing tests for a thing that was never built.
+
