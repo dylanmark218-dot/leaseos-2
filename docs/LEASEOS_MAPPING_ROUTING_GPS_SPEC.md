@@ -553,3 +553,32 @@ dispatcher, and neither is permission to send 52 tonnes.
 `hazmat`, 928 `maxheight`, 26 fords, 23 `maxweight`, 4 `maxaxleload`. The private-access count is
 the one that matters operationally — 2.7% of imported Alberta roads are somebody's to grant, which
 in oilfield work is the lease approach itself.
+
+### M2 — topology (BUILT, v23.22)
+
+`server/_core/osmTopology.ts`. Ways become a graph by being cut at the nodes they share.
+
+**Connection is shared node ids and nothing else.** Two ways connect if and only if OSM says they
+share a node. Geometric proximity does not connect them and must not: a highway and its overpass
+cross at identical coordinates and a truck cannot turn between them. Every "snap within N metres"
+heuristic eventually invents a junction that does not exist, and an invented junction is invisible
+until a driver is standing at a fence.
+
+Measured on Alberta:
+
+| | |
+|---|---|
+| routable ways | 508,807 |
+| distinct nodes | 2,851,772 |
+| **junctions (2+ ways)** | **536,506** |
+| **graph edges after cuts** | **883,380** |
+| ways meeting nothing | **525 — 0.1%** |
+
+That 0.1% settles the argument. If exact matching were fragmenting the graph, isolated ways would
+run to tens of thousands. At 525 the source's topology is sound, so snapping would buy almost
+nothing and risk the failure that cannot be seen.
+
+A node one way uses twice is **not** a junction — a loop or a turning circle joins nothing — so
+membership is counted per way rather than per occurrence. And `edgesLeaving` honours direction: a
+`forward` edge can be left only from its start, or a router plans a route the wrong way up a
+divided highway.
