@@ -12,7 +12,7 @@ import { resolveActingScope } from "./_core/actingScope";
 import { getDb } from "./db";
 import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
-  complianceDocuments, disposalTickets, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
+  billingBooks, complianceDocuments, disposalTickets, fieldTickets, manifests, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
   maintenanceDefects, measurementDevices, operationalTasks, operators, purchaseAuthorizations, roadsideServiceEvents,
   syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders, academyInspectorRequests, securityIncidents, privacyBreachAssessments, incidentNotificationObligations, facilities, facilityEvidence, facilitySourceLicences } from "../drizzle/schema";
 import { calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
@@ -306,4 +306,80 @@ async function loadOpenSecurityIncidents(db: NonNullable<Awaited<ReturnType<type
   ]);
   const assessedIds = new Set(assessed.map(a => a.securityIncidentId));
   return open.map(o => ({ incidentRef: o.incidentRef, title: o.title, severity: o.severity, personalInformationSuspected: !!o.personalInformationSuspected, assessed: assessedIds.has(o.id), unsentNotifications: unsent.filter(u => u.securityIncidentId === o.id).map(u => ({ recipientType: u.recipientType, dueAt: u.dueAt })) }));
+}
+
+/* ------------------------------------------------------------------ */
+/* P3.6 — walking the chain around a resolved record                   */
+/* ------------------------------------------------------------------ */
+
+/** The read permission each hop needs, so the walk can tell "not allowed" from "not there". */
+export const CHAIN_READ_PERMISSION: Record<string, string> = {
+  customer: "customer.read", job: "job.read", trip: "trip.read", load: "load.read",
+  manifest: "manifest.read", disposal_ticket: "disposal.read", field_ticket: "closeout.read",
+  billing_book: "billing.read", invoice: "billing.read",
+};
+
+/**
+ * Resolve the records around an anchor, reading each hop only if the caller may.
+ *
+ * Every hop is reached by walking **up** to the job and back down, because that is how the data is
+ * shaped: a load knows its job and trip, a disposal ticket knows its load, and an invoice knows its
+ * billing book. A hop the caller may not read is never queried at all — not queried and discarded,
+ * which would still let timing say something.
+ */
+export async function resolveChainAround(
+  anchor: { kind: string; id: number },
+  can: (permission: string) => boolean,
+): Promise<{ found: Record<string, { ref: string; id: number | null; status?: string | null }>; unreadable: string[] }> {
+  const db = await getDb();
+  const found: Record<string, { ref: string; id: number | null; status?: string | null }> = {};
+  if (!db) return { found, unreadable: Object.keys(CHAIN_READ_PERMISSION).filter(k => !can(CHAIN_READ_PERMISSION[k]!)) };
+  const unreadable = Object.keys(CHAIN_READ_PERMISSION).filter(k => !can(CHAIN_READ_PERMISSION[k]!));
+  const allowed = (k: string) => !unreadable.includes(k);
+
+  // Find the load the anchor hangs from, since the rest of the chain hangs from it too.
+  let loadId: number | null = anchor.kind === "load" ? anchor.id : null;
+  if (loadId == null && anchor.kind === "disposal_ticket" && allowed("disposal_ticket")) {
+    const [d] = await db.select({ l: disposalTickets.loadId }).from(disposalTickets).where(eq(disposalTickets.id, anchor.id)).limit(1);
+    loadId = d?.l ?? null;
+  }
+
+  if (loadId != null && allowed("load")) {
+    const [l] = await db.select().from(loads).where(eq(loads.id, loadId)).limit(1);
+    if (l) {
+      found.load = { ref: l.loadNumber, id: l.id, status: l.chainState };
+      if (l.jobId && allowed("job")) {
+        const [j] = await db.select().from(jobs).where(eq(jobs.id, l.jobId)).limit(1);
+        if (j) {
+          found.job = { ref: j.jobCode, id: j.id, status: j.status };
+          if (j.customer && allowed("customer")) found.customer = { ref: j.customer, id: null };
+        }
+      }
+      if (l.tripId && allowed("trip")) {
+        const [t] = await db.select().from(trips).where(eq(trips.id, l.tripId)).limit(1);
+        if (t) found.trip = { ref: t.tripNumber, id: t.id, status: t.status };
+      }
+      if (l.billingBookId && allowed("billing_book")) {
+        const [b] = await db.select().from(billingBooks).where(eq(billingBooks.id, l.billingBookId)).limit(1);
+        if (b) found.billing_book = { ref: b.bookNumber, id: b.id, status: null };
+      }
+      if (allowed("disposal_ticket")) {
+        const [d] = await db.select().from(disposalTickets).where(eq(disposalTickets.loadId, l.id)).limit(1);
+        if (d) found.disposal_ticket = { ref: d.ticketNumber, id: d.id, status: d.verificationStatus };
+      }
+      if (allowed("manifest")) {
+        const [mf] = await db.select().from(manifests).where(eq(manifests.loadId, l.id)).limit(1);
+        if (mf) found.manifest = { ref: mf.manifestNumber, id: mf.id, status: mf.status };
+      }
+    }
+  }
+  if (found.job?.id && allowed("field_ticket")) {
+    const [ft] = await db.select().from(fieldTickets).where(eq(fieldTickets.jobId, found.job.id)).limit(1);
+    if (ft) found.field_ticket = { ref: ft.ticketNumber, id: ft.id, status: ft.status };
+  }
+  if (found.billing_book?.id && allowed("invoice")) {
+    const [inv] = await db.select().from(invoices).where(eq(invoices.billingBookId, found.billing_book.id)).limit(1);
+    if (inv) found.invoice = { ref: inv.invoiceNumber, id: inv.id, status: inv.status };
+  }
+  return { found, unreadable };
 }

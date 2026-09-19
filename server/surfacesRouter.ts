@@ -9,11 +9,12 @@
  */
 
 import { z } from "zod";
+import { ACCESS_SCOPE_NOTICE, walkEvidenceChain, type ChainNodeKind } from "./_core/evidenceChainWalk";
 import { roleProcedure, router } from "./_core/trpc";
 import { listActiveUserRoleNames } from "./db";
 import { authorize, isDomainRole, type Permission, type RoleGrant } from "./_core/recordsAuthorization";
 import { deriveExceptions, summarize, visibleTo } from "./_core/exceptionCentre";
-import { loadExceptionSources, loadInbox, loadTimeline, searchEverything } from "./surfacesService";
+import { CHAIN_READ_PERMISSION, loadExceptionSources, loadInbox, loadTimeline, resolveChainAround, searchEverything } from "./surfacesService";
 import { composeSession } from "./_core/portalComposition";
 
 async function grantsFor(userId: number): Promise<{ roles: string[]; grants: RoleGrant[] }> {
@@ -83,6 +84,39 @@ export const surfacesRouter = router({
       const can = may(ctx.user.id, grants);
       const hits = (await searchEverything(input.q)).filter(h => can(h.readPermission));
       return { q: input.q, total: hits.length, hits };
+    }),
+
+  /**
+   * P3.6 — resolve a number, then walk the chain it sits in.
+   *
+   * Somebody holding a tracking number is almost never asking whether it exists. They are asking
+   * what it belongs to: a dispatcher with a disposal ticket wants the load, trip, job and customer;
+   * a driver on the phone has one number written on his hand.
+   *
+   * Owner decision (2026-09-19) on what the caller may not see: the hop is **absent**. Not a
+   * redacted node, not a placeholder, not a count, not its position. And the access-scope notice is
+   * on **every** chain, because a notice that appeared only when something was withheld would be
+   * the disclosure — its presence would confirm a record exists.
+   */
+  chain: roleProcedure("surfaces.chain")
+    .input(z.object({ entityType: z.enum(["load", "disposal_ticket"]), entityId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const { grants } = await grantsFor(ctx.user.id);
+      const can = may(ctx.user.id, grants);
+      // The anchor itself is subject to the same rule: no permission, nothing to say.
+      if (!can(CHAIN_READ_PERMISSION[input.entityType]!)) {
+        return {
+          anchor: null, nodes: [], gaps: [], accessScopeNotice: ACCESS_SCOPE_NOTICE,
+          explanation: "No chain is available for that reference within your access scope.",
+        };
+      }
+      const { found, unreadable } = await resolveChainAround({ kind: input.entityType, id: input.entityId }, can);
+      const walk = walkEvidenceChain({
+        anchorKind: input.entityType as ChainNodeKind,
+        found: found as Parameters<typeof walkEvidenceChain>[0]["found"],
+        unreadable: unreadable as ChainNodeKind[],
+      });
+      return { ...walk, anchor: walk.anchor };
     }),
 
   /** What happened to this thing, in order. Events filtered to what the caller may read. */

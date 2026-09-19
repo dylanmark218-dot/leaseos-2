@@ -2501,6 +2501,9 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "widgets.boardResolve": "myday.read_own",
   "widgets.layoutSave": "myday.read_own",
   "surfaces.search": "surface.search",
+  // P3.6: no permission of its own — every hop is gated by the permission of the record it is,
+  // and a caller with none of them gets an empty chain and the same notice everybody gets.
+  "surfaces.chain": "surface.timeline.read",
   "surfaces.timeline": "surface.timeline.read",
 
   /* ---- v21.1: dispatch gate ---- */

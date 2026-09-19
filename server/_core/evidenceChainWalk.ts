@@ -52,8 +52,21 @@ export type ChainWalk = {
   anchor: ChainNode;
   nodes: readonly ChainNode[];
   gaps: readonly ChainGap[];
+  /**
+   * Owner decision (2026-09-19): one generic, chain-level notice, carried on **every** chain — not
+   * only on chains where something was actually withheld.
+   *
+   * This is the whole design. A notice that appeared only when a hop was hidden would itself be the
+   * disclosure: its presence would confirm that a record exists, that it belongs to somebody, and
+   * roughly where in the chain it sits. Carrying it always means the notice says nothing about this
+   * particular result — which is exactly what makes it safe to say.
+   */
+  accessScopeNotice: string;
   explanation: string;
 };
+
+export const ACCESS_SCOPE_NOTICE =
+  "Some related records may be omitted because of your access scope. Do not treat this chain as proof that no additional related records exist.";
 
 const LABEL: Record<ChainNodeKind, string> = {
   customer: "customer", job: "job", trip: "trip", load: "load", manifest: "manifest",
@@ -101,8 +114,18 @@ export function walkEvidenceChain(args: {
   found: Partial<Record<ChainNodeKind, { ref: string; id: number | null; status?: string | null }>>;
   /** Kinds this anchor's chain cannot contain, so their absence is not reported as a gap. */
   notApplicable?: readonly ChainNodeKind[];
+  /**
+   * Kinds the caller may not read. These are **omitted**, and — critically — they raise **no gap**.
+   *
+   * A gap is a statement: "this relationship genuinely has no record." Saying that about a hop the
+   * caller cannot read would be a claim the search is not entitled to make, and saying the opposite
+   * would confirm the record exists. So an unreadable hop produces nothing at all, and the
+   * chain-level notice (always present) is the only thing that speaks to it.
+   */
+  unreadable?: readonly ChainNodeKind[];
 }): ChainWalk {
   const na = new Set(args.notApplicable ?? []);
+  const hidden = new Set(args.unreadable ?? []);
   const statusOf = (k: ChainNodeKind) => args.found[k]?.status ?? null;
 
   const nodes: ChainNode[] = [];
@@ -110,7 +133,7 @@ export function walkEvidenceChain(args: {
   let previous: ChainNodeKind | null = null;
 
   for (const kind of CHAIN_ORDER) {
-    if (na.has(kind)) continue;
+    if (na.has(kind) || hidden.has(kind)) continue;
     const hit = args.found[kind];
     if (hit) {
       nodes.push({
@@ -128,7 +151,7 @@ export function walkEvidenceChain(args: {
     ?? { kind: args.anchorKind, ref: args.found[args.anchorKind]?.ref ?? "(unresolved)", id: null, status: null, via: null };
 
   return {
-    anchor, nodes, gaps,
+    anchor, nodes, gaps, accessScopeNotice: ACCESS_SCOPE_NOTICE,
     explanation: gaps.length === 0
       ? `${LABEL[args.anchorKind]} ${anchor.ref}: chain complete — ${nodes.map(n => `${LABEL[n.kind]} ${n.ref}`).join(" → ")}.`
       : `${LABEL[args.anchorKind]} ${anchor.ref}: ${nodes.map(n => `${LABEL[n.kind]} ${n.ref}`).join(" → ")}. Not attached: ${gaps.map(g => `${LABEL[g.missing]} (${g.note})`).join("; ")}.`,

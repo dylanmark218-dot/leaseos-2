@@ -6,7 +6,7 @@
  * never asking "does this exist" — they are asking what it belongs to.
  */
 import { describe, expect, it } from "vitest";
-import { CHAIN_ORDER, walkEvidenceChain } from "./evidenceChainWalk";
+import { ACCESS_SCOPE_NOTICE, CHAIN_ORDER, walkEvidenceChain } from "./evidenceChainWalk";
 
 const full = {
   customer: { ref: "Ridgeline Energy", id: 4 },
@@ -87,5 +87,81 @@ describe("a missing hop is named, never skipped", () => {
     expect(w.anchor.ref).toBe("INV-2026-001904");
     expect(w.nodes.map(n => n.kind)).toEqual(["invoice"]);
     expect(w.gaps).toEqual([]);   // nothing precedes it that was looked for and missed
+  });
+});
+
+/**
+ * P3.6 — the owner decision of 2026-09-19 on what a caller may not see.
+ *
+ * The rule that shapes everything: a search result must not confirm the existence, owner, type,
+ * number, count or position of a record the caller is not authorized to see.
+ */
+describe("a hop the caller may not read is absent, not redacted", () => {
+  const full = {
+    customer: { ref: "Ridgeline Energy", id: 4 },
+    job: { ref: "JOB-08421", id: 12, status: "active" },
+    trip: { ref: "TRIP-2026-000812", id: 31, status: "closed" },
+    load: { ref: "LOAD-000455", id: 77, status: "delivered" },
+    disposal_ticket: { ref: "DSP-2026-000412", id: 51, status: "verified" },
+    invoice: { ref: "INV-2026-001904", id: 81, status: "sent" },
+  };
+
+  it("omits it entirely — no node, no placeholder, no identifier", () => {
+    const { invoice, ...visible } = full;
+    const w = walkEvidenceChain({ anchorKind: "load", found: visible, unreadable: ["invoice", "billing_book"] });
+    const text = JSON.stringify(w);
+    expect(w.nodes.map(n => n.kind)).not.toContain("invoice");
+    expect(text).not.toMatch(/INV-2026-001904/);
+    expect(text).not.toMatch(/[Rr]estricted|[Rr]edacted|[Hh]idden|\[withheld\]/);
+  });
+
+  it("raises no gap for it, because a gap is a claim the search cannot make", () => {
+    /*
+     * "No invoice is attached" about a hop the caller cannot read would be a statement the search
+     * is not entitled to make — and the opposite would confirm the record exists. So: nothing.
+     */
+    const { invoice, ...visible } = full;
+    const w = walkEvidenceChain({ anchorKind: "load", found: visible, unreadable: ["invoice", "billing_book"] });
+    expect(w.gaps.map(g => g.missing)).not.toContain("invoice");
+    expect(w.gaps.map(g => g.missing)).not.toContain("billing_book");
+  });
+
+  it("cannot be told apart from a chain where nothing was withheld", () => {
+    // The decision's real test. Two callers, one with a hidden invoice and one whose chain simply
+    // ends at the disposal ticket, must receive results that differ in no observable way.
+    const { invoice, ...visible } = full;
+    const hidden = walkEvidenceChain({ anchorKind: "load", found: visible, unreadable: ["invoice", "billing_book"] });
+    const nothingToHide = walkEvidenceChain({ anchorKind: "load", found: visible, notApplicable: ["invoice", "billing_book"] });
+    expect(JSON.stringify(hidden.nodes)).toBe(JSON.stringify(nothingToHide.nodes));
+    expect(JSON.stringify(hidden.gaps)).toBe(JSON.stringify(nothingToHide.gaps));
+    expect(hidden.accessScopeNotice).toBe(nothingToHide.accessScopeNotice);
+  });
+
+  it("still names a genuine gap in a hop the caller CAN read", () => {
+    // The three-way distinction: visible and present, visible and genuinely absent, not visible.
+    // Collapsing the middle case into silence would make the chain useless for the thing it is for.
+    const { disposal_ticket, invoice, ...visible } = full;
+    const w = walkEvidenceChain({ anchorKind: "load", found: visible, unreadable: ["invoice", "billing_book"] });
+    expect(w.gaps.map(g => g.missing)).toContain("disposal_ticket");
+    expect(w.gaps.find(g => g.missing === "disposal_ticket")!.note).toMatch(/cannot be billed as disposed/);
+  });
+});
+
+describe("the access-scope notice says nothing about this result", () => {
+  it("is on every chain, including ones where nothing was withheld", () => {
+    // A notice that appeared only when something was hidden would BE the disclosure: its presence
+    // would confirm a record exists, belongs to somebody, and sits somewhere in this chain.
+    const complete = walkEvidenceChain({ anchorKind: "load", found: { load: { ref: "LOAD-1", id: 1 } } });
+    const withHidden = walkEvidenceChain({ anchorKind: "load", found: { load: { ref: "LOAD-1", id: 1 } }, unreadable: ["invoice"] });
+    expect(complete.accessScopeNotice).toBe(ACCESS_SCOPE_NOTICE);
+    expect(withHidden.accessScopeNotice).toBe(complete.accessScopeNotice);
+  });
+
+  it("is generic — it names no hop, record, number or organization", () => {
+    expect(ACCESS_SCOPE_NOTICE).toMatch(/Some related records may be omitted because of your access scope/);
+    expect(ACCESS_SCOPE_NOTICE).toMatch(/not.*proof that no additional related records exist/);
+    for (const leak of ["invoice", "job", "load", "disposal", "billing", "organization", "restricted"]) {
+      expect(ACCESS_SCOPE_NOTICE.toLowerCase()).not.toContain(leak);
+    }
   });
 });
