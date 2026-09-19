@@ -107,3 +107,43 @@ describe("no credential is committed", () => {
     expect(offenders, "a credential-shaped literal is committed").toEqual([]);
   });
 });
+
+describe("the three sources awaiting a written answer stay shut", () => {
+  /*
+   * P6.3, P6.8, P6.9. Requests drafted in `docs/P6_DATA_PERMISSION_REQUESTS.md`; each source is
+   * seeded so a reply has somewhere to land, and each stays `unknown` until one arrives.
+   *
+   * The failure this guards is not somebody forging a permission. It is the slow one: a source sits
+   * at `unknown` for months, nobody remembers whether the email was ever answered, and a developer
+   * needing the data flips it to `yes` on the reasoning that it is probably fine. Silence is not
+   * consent, and no amount of elapsed time converts an unanswered question into a permission.
+   */
+  const all = [...VERIFIED_DATA_SOURCES, ...UNVERIFIED_DATA_SOURCES];
+  const awaiting = ["ab511", "aer_st107", "sk_iris", "mb_petroleum"] as const;
+
+  it.each(awaiting)("has %s seeded, so an answer has somewhere to land", (key) => {
+    expect(all.find(s => s.sourceKey === key), `${key} must be seeded`).toBeDefined();
+  });
+
+  it.each(awaiting)("keeps %s at unknown with no licence recorded", (key) => {
+    const src = all.find(s => s.sourceKey === key)!;
+    expect(src.commercialUsePermitted).toBe("unknown");
+    expect(src.redistributionPermitted).toBe("unknown");
+    expect(src.status).toBe("unverified");
+    // A licence name with no document behind it is the shape a remembered conversation takes.
+    expect(src.licenceName).toBeNull();
+  });
+
+  it("keeps commercial use and redistribution as separate answers", () => {
+    /*
+     * v22.74 established this the hard way: permission for one purpose proves nothing about
+     * another. An authority may well allow us to store its data and not to show it to a customer,
+     * and a single boolean would round that to whichever answer someone wrote first.
+     */
+    for (const key of awaiting) {
+      const src = all.find(s => s.sourceKey === key)!;
+      expect(Object.keys(src)).toContain("commercialUsePermitted");
+      expect(Object.keys(src)).toContain("redistributionPermitted");
+    }
+  });
+});

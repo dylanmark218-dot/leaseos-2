@@ -279,6 +279,78 @@ export const UNVERIFIED_DATA_SOURCES: readonly ExternalDataSource[] = [
     status: "unverified",
   },
   {
+    /*
+     * The directory stores a facility's WM approval number and links out to AER for its status,
+     * because a copy of a regulator's record that nobody refreshes is worse than no copy: it looks
+     * current. Seeded so a written answer has somewhere to land — P6.8, request drafted in
+     * `docs/P6_DATA_PERMISSION_REQUESTS.md`.
+     */
+    sourceKey: "aer_st107",
+    displayName: "AER ST107 — Well and Facility Licence Status",
+    authority: "Alberta Energy Regulator",
+    category: "oilfield_assets",
+    jurisdiction: "CA-AB",
+    licenceName: null,
+    licenceUrl: null,
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: null,
+    rateLimitWindowSeconds: null,
+    updateIntervalHours: 24,
+    retrievedAt: SOURCE_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
+  {
+    /*
+     * Believed to be published under a standard unrestricted use licence. Believed is not recorded:
+     * until somebody confirms it in writing this stays unknown, because "we understood it was open"
+     * is not a licence. P6.9.
+     */
+    sourceKey: "sk_iris",
+    displayName: "Saskatchewan IRIS — Well and Facility Data",
+    authority: "Government of Saskatchewan — Ministry of Energy and Resources",
+    category: "oilfield_assets",
+    jurisdiction: "CA-SK",
+    licenceName: null,
+    licenceUrl: null,
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: null,
+    rateLimitWindowSeconds: null,
+    updateIntervalHours: 24,
+    retrievedAt: SOURCE_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
+  {
+    /** Same question, second province. P6.9. */
+    sourceKey: "mb_petroleum",
+    displayName: "Manitoba Petroleum Branch GIS",
+    authority: "Government of Manitoba — Petroleum Branch",
+    category: "oilfield_assets",
+    jurisdiction: "CA-MB",
+    licenceName: null,
+    licenceUrl: null,
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: null,
+    rateLimitWindowSeconds: null,
+    updateIntervalHours: 24,
+    retrievedAt: SOURCE_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
+  {
     sourceKey: "ised_b1_western",
     displayName: "ISED B1: Western and Northern Canada Mobile-Only Frequencies",
     authority: "Innovation, Science and Economic Development Canada",
