@@ -5844,6 +5844,9 @@ export const customerContractTerms = mysqlTable("customerContractTerms", {
   disposalBillable: mysqlEnum("disposalBillable", ["yes", "no"]).notNull(),
   returnTravelBillable: mysqlEnum("returnTravelBillable", ["yes", "no"]).notNull(),
   minimumHours: double("minimumHours"),
+  // 0161: may accepted lines bill while others are disputed? NULL = nobody recorded what this
+  // contract says, which is not permission — readiness answers REVIEW, never PASS.
+  partialAcceptanceBillable: boolean("partialAcceptanceBillable"),
   clausesJson: text("clausesJson").notNull(),
   effectiveFrom: timestamp("effectiveFrom").notNull(),
   effectiveTo: timestamp("effectiveTo"),

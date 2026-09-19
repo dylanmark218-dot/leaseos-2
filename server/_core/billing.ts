@@ -48,6 +48,11 @@ export type BillingReadinessInput = {
     | "missing";
   /** Lines the customer representative disputed. Never silently dropped. */
   disputedLineCount?: number;
+  /**
+   * From this customer's contract terms (0161): may accepted lines bill while others are disputed?
+   * `undefined` means nobody recorded it — which readiness treats as unrecorded, not as yes.
+   */
+  partialAcceptanceBillable?: boolean | null;
   /** Oilfield AP rejects invoices with no cost coding. */
   afeOrPoPresent: boolean;
   rateCardAssigned: boolean;
@@ -178,14 +183,29 @@ export function evaluateBillingReadiness(
         severity: "review",
       });
     } else if (s === "partially_accepted") {
-      // The accepted lines can still bill. Only the disputed ones wait.
+      /*
+       * 0161 (P3.2) — whether the accepted lines may bill while others are disputed is the
+       * customer's contract to decide. This engine used to answer "accepted lines may still be
+       * billed" for every customer on every ticket. Some contracts work that way; others require
+       * the whole ticket accepted before any of it invoices, and billing part of a disputed ticket
+       * against one of those is a dispute generator and arguably a breach.
+       *
+       * `undefined`/`null` is not permission. It means nobody recorded what this contract says,
+       * which is a different fact from "the contract allows it" — and only one of them is a reason
+       * to send an invoice.
+       */
       const n = input.disputedLineCount ?? 0;
+      const permitted = input.partialAcceptanceBillable;
       blockers.push({
         code: "lines_disputed",
         label:
-          n > 0
-            ? `${n} line(s) disputed by the customer — accepted lines may still be billed`
-            : "Ticket partially accepted — review disputed lines",
+          permitted === true
+            ? (n > 0
+                ? `${n} line(s) disputed by the customer — this customer's terms permit billing the accepted lines`
+                : "Ticket partially accepted — review disputed lines")
+            : permitted === false
+              ? `${n || "Some"} line(s) disputed — this customer's terms require the whole ticket accepted before any of it bills`
+              : `${n || "Some"} line(s) disputed — nobody has recorded whether this customer's terms allow billing the accepted lines; record the term before invoicing`,
         severity: "review",
       });
     } else if (s === "no_representative") {

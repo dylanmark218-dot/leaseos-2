@@ -194,3 +194,41 @@ describe("calculateChargeLines", () => {
     expect(lines.every(l => l.derivedFrom.length > 0)).toBe(true);
   });
 });
+
+/**
+ * P3.2 — the permission half of "accepted lines flow to billing when customer config permits."
+ *
+ * Found by auditing this row against its original definition. The engine answered "accepted lines
+ * may still be billed" for every customer on every ticket; the customer's contract was never
+ * consulted, because there was no term to consult.
+ */
+describe("whether accepted lines may bill is the customer's contract to decide", () => {
+  const partially = (partialAcceptanceBillable?: boolean | null) =>
+    evaluateBillingReadiness({ ...READY, fieldTicketStatus: "partially_accepted", disputedLineCount: 2, partialAcceptanceBillable } as unknown as BillingReadinessInput);
+
+  const dispute = (r: ReturnType<typeof evaluateBillingReadiness>) => r.blockers.find(b => b.code === "lines_disputed")!;
+
+  it("says the terms permit it when they do", () => {
+    expect(dispute(partially(true)).label).toMatch(/this customer's terms permit billing the accepted lines/);
+  });
+
+  it("says the whole ticket is required when the terms say so", () => {
+    // Billing part of a disputed ticket against such a customer is a dispute generator and
+    // arguably a breach.
+    expect(dispute(partially(false)).label).toMatch(/require the whole ticket accepted before any of it bills/);
+  });
+
+  it("treats an unrecorded term as unrecorded, not as permission", () => {
+    // "We never asked" and "the contract allows it" are different facts, and only one of them is a
+    // reason to send an invoice.
+    for (const unset of [undefined, null]) {
+      const label = dispute(partially(unset)).label;
+      expect(label).toMatch(/nobody has recorded whether this customer's terms allow billing the accepted lines/);
+      expect(label).not.toMatch(/permit billing/);
+    }
+  });
+
+  it("keeps the finding at review in every case, since none of them is a clean pass", () => {
+    for (const v of [true, false, null, undefined]) expect(dispute(partially(v)).severity).toBe("review");
+  });
+});
