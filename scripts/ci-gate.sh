@@ -43,10 +43,10 @@ pnpm exec tsc --noEmit
 # That is how a test came to call dispatchContractFor with three parameter names that
 # do not exist and still pass: vitest does not typecheck, and tsc never saw the file.
 #
-# Turning it on outright means triaging 85 pre-existing errors in one sitting. So the
+# Turning it on outright means triaging the pre-existing errors in one sitting. So the
 # count is pinned instead: new test code is type-checked in effect, because anything
 # that adds an error fails here. The pin is a debt to pay down, not a setting to keep.
-TEST_TS_PIN=85
+TEST_TS_PIN=55
 TEST_TS_NOW=$(pnpm exec tsc --noEmit -p tsconfig.tests.json 2>&1 | grep -cE "\.test\.tsx?\(" || true)
 echo "test-file type errors: $TEST_TS_NOW (pinned ceiling $TEST_TS_PIN)"
 if [ "$TEST_TS_NOW" -gt "$TEST_TS_PIN" ]; then

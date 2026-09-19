@@ -271,10 +271,21 @@ outside the typechecker for the life of the branch — which is how a test I wro
 `dispatchContractFor` with **three parameter names that do not exist** and pass anyway, asserting
 against a contract it had silently defaulted.
 
-There are **85** pre-existing type errors across test files. Turning the check on outright means
+There were **85** pre-existing type errors across test files; **55** remain (v23.01). Turning the check on outright means
 triaging all of them in one sitting, so `scripts/ci-gate.sh` **pins the count** against
 `tsconfig.tests.json`: new test code is type-checked in effect, because anything that adds an error
 fails the gate. Verified by planting one — 86 against a ceiling of 85.
+
+**First 30 paid down (v23.01), all in `operationalApiAuthorization.test.ts`.** That file proves the
+wrong caller is refused, and its helper reads any non-`FORBIDDEN` tRPC error as "passed the gate" —
+which is only sound if authorization runs **before** input validation. Nothing recorded that
+dependency; it was true by luck. Settled empirically (an unauthorized caller with a malformed body
+comes back `FORBIDDEN`) and now **pinned by a test**, because if tRPC ever parsed input first, every
+"forbidden" case in the file would silently flip. The thirty-one malformed bodies were then made
+explicit placeholders rather than repaired into new fictions: the input genuinely cannot change the
+answer, and writing plausible-looking bodies is what let them drift to field names the procedures no
+longer declare. **One was not a placeholder** — a maintenance defect carrying a real driver
+statement under `description`, which the procedure calls `title`.
 
 **The pin is a debt, not a setting.** 85 unchecked assertions is 85 places a test may be proving
 something other than what it says.

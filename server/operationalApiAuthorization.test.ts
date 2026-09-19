@@ -51,6 +51,20 @@ async function userWithRoles(roles: DomainRole[]) {
   return userId;
 }
 
+/**
+ * A placeholder input for a gate probe.
+ *
+ * These calls exist to find out whether the gate refuses this caller, and the body never reaches a
+ * resolver: the test above proves authorization runs **before** input validation, so what is in the
+ * object cannot change the answer. Writing plausible-looking bodies instead invited a different
+ * problem — thirty-one of them had drifted to field names the procedures no longer declare, and
+ * nothing noticed, because test files were outside the typechecker.
+ *
+ * So the input is explicitly a placeholder rather than accidentally a fiction. Per call, opt-in, and
+ * greppable: this does not loosen typing anywhere else in the file.
+ */
+const gateProbe = <T,>(): T => ({}) as T;
+
 const isForbidden = (e: unknown) =>
   typeof e === "object" && e !== null && "code" in e &&
   ["FORBIDDEN", "UNAUTHORIZED"].includes((e as { code: string }).code);
@@ -63,6 +77,34 @@ const isForbidden = (e: unknown) =>
  * — a helper that turns a structural mistake into a green authorization test is
  * worse than no helper.
  */
+/**
+ * The assumption this entire file rests on, pinned.
+ *
+ * `attempt` reads a non-FORBIDDEN tRPC error as "passed the gate" — which is only true if
+ * authorization runs **before** input validation. If tRPC ever parsed input first, a caller with no
+ * permission and a malformed body would come back BAD_REQUEST, and every "forbidden" case in this
+ * file would silently flip to "passed_gate": the suite would report that the wrong callers are
+ * being let through, or worse, stop reporting that they are refused.
+ *
+ * Nothing recorded that dependency, so it was true by luck. This makes it true by test.
+ */
+d("the gate runs before the validator", () => {
+  it("refuses an unauthorized caller even when the input is malformed", async () => {
+    const nobody = await userWithRoles([]);
+    const code = await (async () => {
+      try {
+        await (callerFor(nobody) as never as { fieldRoute: { billing: { rateCards: { create: (i: unknown) => Promise<unknown> } } } })
+          .fieldRoute.billing.rateCards.create({ notAFieldAtAll: true });
+        return "no_error";
+      } catch (e) {
+        return (e as { code?: string }).code ?? "unknown";
+      }
+    })();
+    // If this ever reads BAD_REQUEST, `attempt`'s classification is inverted and so is the file.
+    expect(code).toBe("FORBIDDEN");
+  });
+});
+
 async function attempt(fn: () => Promise<unknown>): Promise<"forbidden" | "passed_gate"> {
   try {
     await fn();
@@ -113,7 +155,7 @@ d("billing is closed to the field and the shop", () => {
     const caller = callerFor(await userWithRoles(["dispatcher"]));
     expect(
       await attempt(() =>
-        caller.fieldRoute.billing.rateCards.update({ id: 1, active: false })
+        caller.fieldRoute.billing.rateCards.update(gateProbe())
       )
     ).toBe("forbidden");
   });
@@ -200,14 +242,14 @@ d("safety and maintenance writes stay with the people who do them", () => {
     const caller = callerFor(await userWithRoles(["driver"]));
     expect(
       await attempt(() =>
-        caller.fieldRoute.complianceEngine.tailgates.create({ jobId: 1, topic: "Ground conditions" })
+        caller.fieldRoute.complianceEngine.tailgates.create(gateProbe())
       )
     ).toBe("passed_gate");
     expect(
       await attempt(() =>
         caller.fieldRoute.compliance.maintenance.create({
           unitId: 1,
-          description: "Pump grinding on PTO",
+          title: "Pump grinding on PTO",
           severity: "critical",
         })
       )
@@ -219,7 +261,7 @@ d("safety and maintenance writes stay with the people who do them", () => {
     const caller = callerFor(await userWithRoles(["driver"]));
     expect(
       await attempt(() =>
-        caller.fieldRoute.workOrders.create({ unitId: 1, workOrderNumber: "WO-1" })
+        caller.fieldRoute.workOrders.create(gateProbe())
       )
     ).toBe("forbidden");
   });
@@ -228,7 +270,7 @@ d("safety and maintenance writes stay with the people who do them", () => {
     const caller = callerFor(await userWithRoles(["mechanic"]));
     expect(
       await attempt(() =>
-        caller.fieldRoute.workOrders.create({ unitId: 1, workOrderNumber: "WO-2" })
+        caller.fieldRoute.workOrders.create(gateProbe())
       )
     ).toBe("passed_gate");
   });
@@ -237,7 +279,7 @@ d("safety and maintenance writes stay with the people who do them", () => {
     const caller = callerFor(await userWithRoles(["auditor"]));
     expect(
       await attempt(() =>
-        caller.fieldRoute.safety.create({ jobId: 1, type: "hazard", description: "x" })
+        caller.fieldRoute.safety.create(gateProbe())
       )
     ).toBe("forbidden");
   });
@@ -319,7 +361,7 @@ d("B20.6 — the acts that create fact, not just report it", () => {
     // and turning it into money are not the same permission.
     const caller = callerFor(await userWithRoles(["auditor"]));
     expect(
-      await attempt(() => caller.fieldRoute.gps.confirmZoneEvent({ id: 1, confirmed: true }))
+      await attempt(() => caller.fieldRoute.gps.confirmZoneEvent({ id: 1, action: "confirm" as const }))
     ).toBe("forbidden");
     expect(await attempt(() => caller.fieldRoute.gps.zoneEvents({}))).toBe("passed_gate");
   });
@@ -327,7 +369,7 @@ d("B20.6 — the acts that create fact, not just report it", () => {
   it("lets a driver submit position but not confirm a zone event", async () => {
     const caller = callerFor(await userWithRoles(["driver"]));
     expect(
-      await attempt(() => caller.fieldRoute.gps.confirmZoneEvent({ id: 1, confirmed: true }))
+      await attempt(() => caller.fieldRoute.gps.confirmZoneEvent({ id: 1, action: "confirm" as const }))
     ).toBe("forbidden");
   });
 
@@ -335,7 +377,7 @@ d("B20.6 — the acts that create fact, not just report it", () => {
     // Accepting custody of a load is a driver, dispatch or management act.
     const caller = callerFor(await userWithRoles(["mechanic"]));
     expect(
-      await attempt(() => caller.fieldRoute.complianceEngine.transfers.acknowledge({ id: 1 }))
+      await attempt(() => caller.fieldRoute.complianceEngine.transfers.acknowledge(gateProbe()))
     ).toBe("forbidden");
   });
 
@@ -343,7 +385,7 @@ d("B20.6 — the acts that create fact, not just report it", () => {
     // Drafting and answering are capture. Committing writes operational truth.
     const caller = callerFor(await userWithRoles(["driver"]));
     expect(
-      await attempt(() => caller.fieldRoute.assistant.commit({ id: 1 }))
+      await attempt(() => caller.fieldRoute.assistant.commit(gateProbe()))
     ).toBe("forbidden");
     expect(await attempt(() => caller.fieldRoute.assistant.pending())).toBe("passed_gate");
   });
@@ -351,8 +393,8 @@ d("B20.6 — the acts that create fact, not just report it", () => {
   it("refuses a driver reviewing or rejecting an assistant proposal", async () => {
     const caller = callerFor(await userWithRoles(["driver"]));
     for (const call of [
-      () => caller.fieldRoute.assistant.reject({ id: 1, reason: "no" }),
-      () => caller.fieldRoute.assistant.setStatus({ id: 1, status: "rejected" }),
+      () => caller.fieldRoute.assistant.reject(gateProbe()),
+      () => caller.fieldRoute.assistant.setStatus(gateProbe()),
     ]) {
       expect(await attempt(call)).toBe("forbidden");
     }
@@ -362,7 +404,7 @@ d("B20.6 — the acts that create fact, not just report it", () => {
     for (const role of ["driver", "dispatcher", "office", "safety", "auditor"] as const) {
       const caller = callerFor(await userWithRoles([role]));
       expect(
-        await attempt(() => caller.fieldRoute.routeDecisions.create({ tripId: 1, decision: "approved" })),
+        await attempt(() => caller.fieldRoute.routeDecisions.create(gateProbe())),
         role
       ).toBe("forbidden");
     }
@@ -370,24 +412,24 @@ d("B20.6 — the acts that create fact, not just report it", () => {
 
   it("refuses a driver creating a job or assigning a unit", async () => {
     const caller = callerFor(await userWithRoles(["driver"]));
-    expect(await attempt(() => caller.fieldRoute.jobs.create({ code: "J-1" }))).toBe("forbidden");
+    expect(await attempt(() => caller.fieldRoute.jobs.create(gateProbe()))).toBe("forbidden");
     expect(
-      await attempt(() => caller.fieldRoute.identity.jobUnits.create({ jobId: 1, unitId: 1 }))
+      await attempt(() => caller.fieldRoute.identity.jobUnits.create(gateProbe()))
     ).toBe("forbidden");
     // But their own trip and load work goes through.
-    expect(await attempt(() => caller.fieldRoute.trips.list({}))).toBe("passed_gate");
+    expect(await attempt(() => caller.fieldRoute.trips.list(gateProbe()))).toBe("passed_gate");
   });
 
   it("refuses an auditor every write on the operational surface", async () => {
     const caller = callerFor(await userWithRoles(["auditor"]));
     for (const call of [
-      () => caller.fieldRoute.jobs.create({ code: "J-2" }),
-      () => caller.fieldRoute.trips.create({ jobId: 1 }),
-      () => caller.fieldRoute.compliance.loads.create({ tripId: 1 }),
-      () => caller.fieldRoute.manifests.create({ loadId: 1 }),
-      () => caller.fieldRoute.identity.units.create({ unitCode: "U-1" }),
-      () => caller.fieldRoute.evidence.verify({ id: 1, status: "verified" }),
-      () => caller.fieldRoute.dutyRecords.create({ operatorId: 1, status: "on_duty" }),
+      () => caller.fieldRoute.jobs.create(gateProbe()),
+      () => caller.fieldRoute.trips.create(gateProbe()),
+      () => caller.fieldRoute.compliance.loads.create(gateProbe()),
+      () => caller.fieldRoute.manifests.create(gateProbe()),
+      () => caller.fieldRoute.identity.units.create(gateProbe()),
+      () => caller.fieldRoute.evidence.verify(gateProbe()),
+      () => caller.fieldRoute.dutyRecords.create(gateProbe()),
     ]) {
       expect(await attempt(call)).toBe("forbidden");
     }
@@ -396,9 +438,9 @@ d("B20.6 — the acts that create fact, not just report it", () => {
   it("lets an auditor read the operational surface", async () => {
     const caller = callerFor(await userWithRoles(["auditor"]));
     for (const call of [
-      () => caller.fieldRoute.jobs.list({}),
-      () => caller.fieldRoute.trips.list({}),
-      () => caller.fieldRoute.manifests.list({}),
+      () => caller.fieldRoute.jobs.list(gateProbe()),
+      () => caller.fieldRoute.trips.list(gateProbe()),
+      () => caller.fieldRoute.manifests.list(gateProbe()),
       () => caller.fieldRoute.dutyRecords.list({}),
     ]) {
       expect(await attempt(call)).toBe("passed_gate");
@@ -408,8 +450,8 @@ d("B20.6 — the acts that create fact, not just report it", () => {
   it("gives HR duty records for payroll and nothing else operational", async () => {
     const caller = callerFor(await userWithRoles(["hr"]));
     expect(await attempt(() => caller.fieldRoute.dutyRecords.list({}))).toBe("passed_gate");
-    expect(await attempt(() => caller.fieldRoute.trips.list({}))).toBe("forbidden");
-    expect(await attempt(() => caller.fieldRoute.jobs.list({}))).toBe("forbidden");
+    expect(await attempt(() => caller.fieldRoute.trips.list(gateProbe()))).toBe("forbidden");
+    expect(await attempt(() => caller.fieldRoute.jobs.list(gateProbe()))).toBe("forbidden");
   });
 
   it("lets office correct a duty record the driver recorded", async () => {
@@ -417,15 +459,15 @@ d("B20.6 — the acts that create fact, not just report it", () => {
     // this only the driver could ever fix their own duty record.
     const caller = callerFor(await userWithRoles(["office"]));
     expect(
-      await attempt(() => caller.fieldRoute.dutyRecords.create({ operatorId: 1, status: "on_duty" }))
+      await attempt(() => caller.fieldRoute.dutyRecords.create(gateProbe()))
     ).toBe("passed_gate");
   });
 
   it("refuses a role-less caller everywhere on the new surface", async () => {
     const caller = callerFor(newUserId());
     for (const call of [
-      () => caller.fieldRoute.jobs.list({}),
-      () => caller.fieldRoute.gps.breadcrumbs({}),
+      () => caller.fieldRoute.jobs.list(gateProbe()),
+      () => caller.fieldRoute.gps.breadcrumbs(gateProbe()),
       () => caller.fieldRoute.assistant.forms(),
       () => caller.fieldRoute.identity.units.list(),
     ]) {
