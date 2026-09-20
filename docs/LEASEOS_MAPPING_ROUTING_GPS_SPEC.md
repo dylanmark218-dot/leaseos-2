@@ -603,3 +603,48 @@ junctions nobody can drive.
 The second is the dangerous one, and it is worth being explicit about why: a fragmented graph
 refuses to route and somebody notices within the hour. An invented junction routes beautifully until
 a driver is standing at a fence.
+
+### M2 — the loader's input format (BUILT, v23.24)
+
+`server/_core/osmLoadPlan.ts`. **PBF parsing stays outside the product.** A `.osm.pbf` is
+protocol-buffer blobs with a string table and delta-encoded coordinates; parsing it well is a
+library's job, and doing it in the server would pull a heavy native dependency in to be exercised
+once per import — and would make every test of the loader need a 350 MB fixture.
+
+So extraction is a separate tool emitting one JSON object per line, and the format is the contract:
+
+```json
+{"format":"leaseos.osm.intermediate","version":1,"sourceKey":"geofabrik_osm_ab",
+ "extractFile":"alberta-260910.osm.pbf","extractSha256":"0002c41e…","extractPublishedAt":"2026-09-10"}
+{"id":4734665,"tags":{…},"nodeIds":[…],"geometry":[[…]]}
+```
+
+`extractSha256` is the point of the header. *"Which roads are in this graph"* is answerable only if
+the build records which file it read, and a filename is not an answer — Geofabrik republishes the
+same name daily.
+
+**What it refuses, and why each refusal is loud:**
+
+| Refusal | Because |
+|---|---|
+| wrong format version | guessing which half of a changed contract still applies produces roads that are subtly wrong |
+| bad header → stop reading | thousands of identical rejections is not a report |
+| unparseable line | reported by line number, and reading continues |
+| node ids ≠ coordinates | topology cuts by node index and takes geometry at that index; disagreement gives an edge somebody else's shape, and it still draws and still routes |
+| unregistered source | `standingFor` hands out a prefix to anything, so identity alone would let a load proceed with no rule for joining — and the join is the graph |
+
+**Run end to end** on a real Edmonton slice, plan → import → topology:
+
+| | |
+|---|---|
+| ways read / rejected | 13,441 / **0** |
+| imported / refused `access=no` | 13,341 / 100 |
+| junctions / edges | 18,001 / **29,369** |
+| ways meeting nothing | 27 (0.2%) |
+
+A real edge from it: `OSM-AB-way/4734665#1`, 104 Street NW.
+
+The advisories are the part to read. Across 13,341 **city** streets: 2,625 truck-route designations,
+144 `access=private`, 73 overhead clearances, 72 bridges, 69 dangerous-goods routes — and **one**
+weight restriction. On paved municipal roads, in a city. Whatever else this graph is good for, it
+does not know what a road will carry.
