@@ -582,3 +582,24 @@ A node one way uses twice is **not** a junction — a loop or a turning circle j
 membership is counted per way rather than per occurrence. And `edgesLeaving` honours direction: a
 `forward` edge can be left only from its start, or a router plans a route the wrong way up a
 divided highway.
+
+### M2 — two joining rules, and which source gets which (v23.23)
+
+Building the topology surfaced an existing feature that looked like a contradiction and is not.
+`roadGraph.buildGraph` joins roads by coordinate with a **5 m snap tolerance**; `osmTopology`
+refuses to snap at all. Both are right, for different inputs, and the rule is now recorded on the
+source itself rather than left to whoever writes the next loader:
+
+| Source | Strategy | Because |
+|---|---|---|
+| `ats_road_allowance` | `coordinate_snap` | surveyed coordinates, no vertex identity — two surveys of one intersection disagree by a metre or two, and without a tolerance every near-miss is a dead end |
+| `geofabrik_osm_ab` / `_bc` / `_sk` | `shared_node_ids` | OSM gives every vertex an id; ways connect exactly when they share one |
+| anything unregistered | **`null`** | both defaults are wrong half the time |
+
+**Running a source through the wrong rule fails quietly in both directions.** A coordinate source
+through exact matching becomes disconnected fragments. An id-bearing source through snapping gains
+junctions nobody can drive.
+
+The second is the dangerous one, and it is worth being explicit about why: a fragmented graph
+refuses to route and somebody notices within the hour. An invented junction routes beautifully until
+a driver is standing at a fence.

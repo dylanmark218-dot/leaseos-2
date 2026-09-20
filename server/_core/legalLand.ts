@@ -129,9 +129,29 @@ const SURFACE_SUITABILITY: Record<SurfaceKind, { textValue: string; operational:
  *
  * So the standing lives with the source, not with the function that formats it.
  */
+/**
+ * How a source's roads are joined into a graph — a property of the data, not a preference.
+ *
+ * `shared_node_ids`: the source gives every vertex an id, so two ways connect exactly when they
+ * share one. Snapping such a source would be worse than pointless: a highway and the overpass above
+ * it cross at identical coordinates, and joining them invents a turn that does not exist on the
+ * ground. Alberta's extract leaves only 0.1% of ways meeting nothing, so there is nothing to close.
+ *
+ * `coordinate_snap`: the source gives coordinates and no vertex identity, so a junction can only be
+ * recognised by position. Two surveys of the same intersection disagree by a metre or two, and
+ * without a tolerance every one of those becomes a false dead end.
+ *
+ * Getting this backwards fails in both directions and neither is loud. A coordinate source through
+ * exact matching produces a graph of disconnected fragments; an id-bearing source through snapping
+ * produces a graph with junctions nobody can drive.
+ */
+export type RoadTopologyStrategy = "shared_node_ids" | "coordinate_snap";
+
 export type RoadSourceStanding = {
   /** Namespace for segment identity. Two sources must never mint the same segment id. */
   idPrefix: string;
+  /** How this source's roads join. Null where the source is unknown — see `standingFor`. */
+  topology: RoadTopologyStrategy | null;
   /**
    * What this source's claims are worth. `unverified` is the honest default for open map data: it
    * may be perfectly accurate and it is still nobody's legal statement.
@@ -151,9 +171,9 @@ export const ROAD_SOURCE_STANDING: Record<string, RoadSourceStanding> = {
    * orphan every route already approved against them, to fix an identity that was never ambiguous
    * while this was the only source.
    */
-  ats_road_allowance: { idPrefix: "AB-ACCESS-", confidence: "authority_confirmed", jurisdiction: "CA-AB" },
+  ats_road_allowance: { idPrefix: "AB-ACCESS-", confidence: "authority_confirmed", jurisdiction: "CA-AB", topology: "coordinate_snap" },
   /** Geofabrik's Alberta extract: excellent topology, and not an authority on anything. */
-  geofabrik_osm_ab: { idPrefix: "OSM-AB-", confidence: "unverified", jurisdiction: "CA-AB" },
+  geofabrik_osm_ab: { idPrefix: "OSM-AB-", confidence: "unverified", jurisdiction: "CA-AB", topology: "shared_node_ids" },
   /**
    * Geofabrik's British Columbia extract. Same standing, different province — and the jurisdiction
    * is the whole reason this registry exists rather than a constant: a BC road is governed by BC,
@@ -164,7 +184,7 @@ export const ROAD_SOURCE_STANDING: Record<string, RoadSourceStanding> = {
    * whose Forest Service Roads are exactly where a wide load gets stopped. 10,157 bridges are
    * mapped and about one percent of them state a capacity.
    */
-  geofabrik_osm_bc: { idPrefix: "OSM-BC-", confidence: "unverified", jurisdiction: "CA-BC" },
+  geofabrik_osm_bc: { idPrefix: "OSM-BC-", confidence: "unverified", jurisdiction: "CA-BC", topology: "shared_node_ids" },
 
   /**
    * Geofabrik's Saskatchewan extract — the sparsest of the three, and the one that settles the
@@ -175,7 +195,7 @@ export const ROAD_SOURCE_STANDING: Record<string, RoadSourceStanding> = {
    * Surface is the opposite story at 83% coverage, which is the shape of all three: OSM is good at
    * what a road IS and silent on what may use it.
    */
-  geofabrik_osm_sk: { idPrefix: "OSM-SK-", confidence: "unverified", jurisdiction: "CA-SK" },
+  geofabrik_osm_sk: { idPrefix: "OSM-SK-", confidence: "unverified", jurisdiction: "CA-SK", topology: "shared_node_ids" },
 };
 
 /**
@@ -194,7 +214,9 @@ export const UNREGISTERED_SOURCE = "unregistered_road_source";
 
 export function standingFor(sourceKey: string): RoadSourceStanding {
   return ROAD_SOURCE_STANDING[sourceKey]
-    ?? { idPrefix: `${sourceKey}:`, confidence: "unverified", jurisdiction: null };
+    // `topology: null` rather than a default. Both strategies are wrong half the time, so an
+    // unregistered source has to be answered for rather than assumed into one of them.
+    ?? { idPrefix: `${sourceKey}:`, confidence: "unverified", jurisdiction: null, topology: null };
 }
 
 export function roadAsSegment(road: ImportedRoad): { segmentId: string; label: string; lengthKm: number; attributes: SegmentAttribute[]; silentChecks: RequiredCheck[] } {
