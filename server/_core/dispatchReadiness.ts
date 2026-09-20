@@ -106,7 +106,12 @@ export type ReadinessInput = {
     dangerousGoods: boolean;
     tdgDocumentPrepared: boolean | null;
     requiredDocumentsPresent: boolean;
-    permitRequired: boolean;
+    /**
+     * null means nobody has determined whether this movement needs a permit. It is a distinct state
+     * from false, and the composer used to supply false for every job — which meant the branch below
+     * never ran and an oversize movement passed the permit check in silence.
+     */
+    permitRequired: boolean | null;
     permitOnFile: boolean | null;
     destinationAcceptanceVerified: boolean | null;
     /** The loads' latest facility assessments (loadFacilityAssessments), when some exist: the blocker names the facility and the reasons. */
@@ -382,7 +387,15 @@ export function evaluateDispatchReadiness(
       overrideAuthority: "manager",
     });
   }
-  if (input.job.permitRequired) {
+  if (input.job.permitRequired === null) {
+    blockers.push({
+      code: "permit_requirement_unknown",
+      label: "Nobody has determined whether this movement needs a permit",
+      severity: "unknown",
+      subject: "job",
+      overridable: false,
+    });
+  } else if (input.job.permitRequired) {
     if (input.job.permitOnFile === false) {
       blockers.push({
         code: "permit_missing",

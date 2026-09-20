@@ -8785,3 +8785,47 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
+
+// v23.26 — 0168: a permit becomes a record, so the gate that checks it has something to read.
+export const movementPermits = mysqlTable("movementPermits", {
+  id: int("id").autoincrement().primaryKey(),
+  organizationId: int("organizationId").notNull(),
+  permitRef: varchar("permitRef", { length: 64 }).notNull().unique(),
+  jobId: int("jobId"),
+  tripId: int("tripId"),
+  unitId: int("unitId"),
+  authority: varchar("authority", { length: 160 }).notNull(),
+  jurisdiction: varchar("jurisdiction", { length: 32 }).notNull(),
+  permitNumber: varchar("permitNumber", { length: 120 }).notNull(),
+  permitType: mysqlEnum("permitType", ["oversize", "overweight", "oversize_overweight", "dangerous_goods", "seasonal", "municipal", "other"]).notNull(),
+  // Both nullable: a permit whose window nobody recorded is not a permit that runs forever.
+  effectiveFrom: timestamp("effectiveFrom"),
+  effectiveTo: timestamp("effectiveTo"),
+  conditionsText: text("conditionsText"),
+  routeRef: varchar("routeRef", { length: 120 }),
+  routeVersion: varchar("routeVersion", { length: 64 }),
+  documentId: int("documentId"),
+  source: mysqlEnum("source", ["dispatcher_entered", "authority_portal", "document_extraction", "imported", "customer_supplied"]).notNull(),
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "rejected", "superseded"]).default("unverified").notNull(),
+  verifiedAt: timestamp("verifiedAt"),
+  verifiedBy: int("verifiedBy"),
+  supersededBy: int("supersededBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  createdBy: int("createdBy"),
+});
+
+// Whether a movement needs a permit is a determination a person makes, not a value this derives:
+// the thresholds are regulatory data nobody has loaded. A job with no row here reads as UNKNOWN.
+export const movementPermitDeterminations = mysqlTable("movementPermitDeterminations", {
+  id: int("id").autoincrement().primaryKey(),
+  organizationId: int("organizationId").notNull(),
+  jobId: int("jobId").notNull(),
+  permitRequired: boolean("permitRequired").notNull(),
+  basis: mysqlEnum("basis", ["within_legal_limits", "dimensions_exceed_limit", "weight_exceeds_limit", "dangerous_goods_route", "municipal_restriction", "authority_advised", "other"]).notNull(),
+  basisNote: text("basisNote"),
+  ruleSourceKey: varchar("ruleSourceKey", { length: 120 }),
+  ruleSourceVersion: varchar("ruleSourceVersion", { length: 64 }),
+  determinedBy: int("determinedBy").notNull(),
+  determinedAt: timestamp("determinedAt").defaultNow().notNull(),
+  supersededAt: timestamp("supersededAt"),
+});

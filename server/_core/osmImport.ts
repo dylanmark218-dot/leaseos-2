@@ -28,7 +28,17 @@
  * refused, access=no      2,240     refused, unrecognised      219
  * ```
  *
-/*
+ * The 219 it did not recognise were `rest_area` (105), `busway` (58), `services` (41), `future`,
+ * `escape`, `no` — so the class list is effectively complete for Alberta, and the six it misses are
+ * refused **by name** rather than guessed at. `rest_area` and `services` are places a truck does go
+ * and are worth reconsidering as destinations; they are not through-routes, which is why they are
+ * out for now and visible in the skipped report rather than silently absent.
+ *
+ * The advisory volume it would raise: 14,768 `hgv`, **13,511 `access=private`**, 7,775 bridges,
+ * 1,904 `hazmat`, 928 `maxheight`, 26 fords, 23 `maxweight`, 4 `maxaxleload`. That private-access
+ * count is the one to plan for — 2.7% of Alberta's imported roads are somebody's to grant, which in
+ * oilfield work is the lease approach itself.
+ *
  * Saskatchewan (`saskatchewan-260918_osm.pbf`, sha256 721c07b9…) run through the same conversion:
  * 304,797 highway ways, **263,421 imported**, 41,222 refused as non-vehicle, 139 refused for access
  * and 15 for an unrecognised class (`services` 7, `rest_area` 7, and one `highway=wa`, which is a
@@ -41,17 +51,6 @@
  *
  * None of which changes what the importer concludes. Nine stated weights across a province is not
  * weight coverage; it is nine advisories.
- */
- * The 219 it did not recognise were `rest_area` (105), `busway` (58), `services` (41), `future`,
- * `escape`, `no` — so the class list is effectively complete for Alberta, and the six it misses are
- * refused **by name** rather than guessed at. `rest_area` and `services` are places a truck does go
- * and are worth reconsidering as destinations; they are not through-routes, which is why they are
- * out for now and visible in the skipped report rather than silently absent.
- *
- * The advisory volume it would raise: 14,768 `hgv`, **13,511 `access=private`**, 7,775 bridges,
- * 1,904 `hazmat`, 928 `maxheight`, 26 fords, 23 `maxweight`, 4 `maxaxleload`. That private-access
- * count is the one to plan for — 2.7% of Alberta's imported roads are somebody's to grant, which in
- * oilfield work is the lease approach itself.
  */
 
 import type { LngLat, SurfaceKind } from "./geoImport";

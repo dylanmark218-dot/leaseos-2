@@ -22,6 +22,7 @@ import { CAPABILITY, dispatchContractFor, pictureFor, type EvaluationMap } from 
 import { entitlementToEvaluation, snapshotOf, type PolicySnapshot } from "./_core/automationPolicy";
 import { resolveCapabilities } from "./_core/automationPolicyStore";
 import { destinationAcceptanceForJob } from "./_core/destinationAcceptance";
+import { permitStatusForJob } from "./_core/movementPermits";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { hosAttestations } from "../drizzle/schema";
 import { faultDispatchEffect } from "./_core/telematics";
@@ -393,13 +394,16 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   // Destination acceptance comes from the facility directory: the latest loadFacilityAssessment per load on this job.
   // No loads or no assessments → null (review); any load whose latest assessment blocks → false; every load non-blocking → true.
   const destination = await destinationAcceptanceForJob(db, job?.id ?? null);
+  // v23.26 — was a hardcoded false; now the determination and the permits on file, or unknown.
+  const permits = await permitStatusForJob(db, job?.id ?? null);
   const jobInput: ReadinessInput["job"] = {
     classificationComplete: job ? Boolean(job.type && job.mode) : false,
     dangerousGoods,
     tdgDocumentPrepared: dangerousGoods ? null : true,
     requiredDocumentsPresent: job ? true : false,
-    permitRequired: false,
-    permitOnFile: null,
+    // Was a hardcoded `false` until v23.25, which asserted on every job that no permit was needed.
+    permitRequired: permits.permitRequired,
+    permitOnFile: permits.permitOnFile,
     destinationAcceptanceVerified: destination.verified,
     destinationAssessments: destination.assessments,
     emergencyPlanOnFile: dangerousGoods ? null : true,
