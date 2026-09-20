@@ -201,6 +201,14 @@ export type Permission =
   // 0162 (P3.1): accepting a manifest reference-versus-print contradiction. Held by the same two
   // roles that hold dispatch.override.grant, because it is the same kind of act: a named person
   // taking responsibility for proceeding past a refusal.
+  /*
+   * v23.26: permits. Three permissions rather than one, because they are three different acts.
+   * Recording a permit is ordinary dispatch work — a number off a fax. Determining that a movement
+   * needs none is a claim about the law that releases a job through the gate, and it is what the
+   * composer used to assert on every job for free. Verifying a permit with the issuing authority is
+   * a third act, kept apart so whoever typed the number cannot also vouch for it.
+   */
+  | "permit.read" | "permit.record" | "permit.determine" | "permit.verify"
   | "manifest.override.grant"
   /*
    * 0163 (P4.2): running a calibration sweep. Deliberately NOT given to the ordinary office role —
@@ -348,6 +356,8 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    // v23.26 — a driver may read the permit position on their own load and nothing more.
+    "permit.read",
     "automation.override.operational",
     "facility.directory.report",
     "facility.directory.read",
@@ -431,6 +441,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    // v23.26 — permits: a dispatcher decides whether a load is oversize; that is the job. They do
+    // not verify their own entries, which is the one separation worth keeping here.
+    "permit.read",
+    "permit.record",
+    "permit.determine",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -816,6 +831,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    // v23.26 — permits: office records and verifies with the authority, but does not determine
+    // whether a movement needs one — that is a call about the load, made where the load is known.
+    "permit.read",
+    "permit.record",
+    "permit.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -978,6 +998,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    // v23.26 — permits: management holds all four.
+    "permit.read",
+    "permit.record",
+    "permit.determine",
+    "permit.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -2541,6 +2566,14 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "automationPolicy.set": "automation.policy.manage",
   "automationPolicy.setEntitlement": "automation.policy.manage",
   "automationPolicy.operationalOverride": "automation.override.operational",
+  // v23.26 — permits. Recording one is ordinary dispatch work; deciding a movement needs none is a
+  // claim about the law that releases a job through the gate, and vouching for a permit with the
+  // issuing authority is a third thing again. One permission would have collapsed all three.
+  "movementPermit.statusFor": "permit.read",
+  "movementPermit.listForJob": "permit.read",
+  "movementPermit.record": "permit.record",
+  "movementPermit.determine": "permit.determine",
+  "movementPermit.verify": "permit.verify",
   "dispatch.award": "dispatch.award",
   "dispatch.overrideRequest": "dispatch.override.request",
   "dispatch.overrideGrant": "dispatch.override.grant",

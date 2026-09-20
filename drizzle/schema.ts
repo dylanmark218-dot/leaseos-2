@@ -8789,7 +8789,7 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
 // v23.26 — 0168: a permit becomes a record, so the gate that checks it has something to read.
 export const movementPermits = mysqlTable("movementPermits", {
   id: int("id").autoincrement().primaryKey(),
-  organizationId: int("organizationId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
   permitRef: varchar("permitRef", { length: 64 }).notNull().unique(),
   jobId: int("jobId"),
   tripId: int("tripId"),
@@ -8818,7 +8818,7 @@ export const movementPermits = mysqlTable("movementPermits", {
 // the thresholds are regulatory data nobody has loaded. A job with no row here reads as UNKNOWN.
 export const movementPermitDeterminations = mysqlTable("movementPermitDeterminations", {
   id: int("id").autoincrement().primaryKey(),
-  organizationId: int("organizationId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
   jobId: int("jobId").notNull(),
   permitRequired: boolean("permitRequired").notNull(),
   basis: mysqlEnum("basis", ["within_legal_limits", "dimensions_exceed_limit", "weight_exceeds_limit", "dangerous_goods_route", "municipal_restriction", "authority_advised", "other"]).notNull(),

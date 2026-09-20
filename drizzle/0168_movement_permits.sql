@@ -25,7 +25,8 @@
 -- and the difference has to survive into the gate.
 CREATE TABLE `movementPermits` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `organizationId` bigint unsigned NOT NULL,
+  -- NULL is the single-tenant default, matching the 36 other tables that scope this way.
+  `orgRef` varchar(64) NULL,
   `permitRef` varchar(64) NOT NULL,
 
   -- what it authorizes
@@ -66,11 +67,11 @@ CREATE TABLE `movementPermits` (
   UNIQUE KEY `mp_ref` (`permitRef`)
 );
 --> statement-breakpoint
-CREATE INDEX `mp_job` ON `movementPermits` (`organizationId`, `jobId`);
+CREATE INDEX `mp_job` ON `movementPermits` (`orgRef`, `jobId`);
 --> statement-breakpoint
-CREATE INDEX `mp_trip` ON `movementPermits` (`organizationId`, `tripId`);
+CREATE INDEX `mp_trip` ON `movementPermits` (`orgRef`, `tripId`);
 --> statement-breakpoint
-CREATE INDEX `mp_window` ON `movementPermits` (`organizationId`, `effectiveTo`);
+CREATE INDEX `mp_window` ON `movementPermits` (`orgRef`, `effectiveTo`);
 --> statement-breakpoint
 -- Whether a movement needs a permit at all is a separate determination from whether one is on file,
 -- and it is the one the composer was faking. It cannot be derived here: the thresholds are
@@ -81,7 +82,8 @@ CREATE INDEX `mp_window` ON `movementPermits` (`organizationId`, `effectiveTo`);
 -- unknown until somebody does. A job with no row here reads as UNKNOWN, not as exempt.
 CREATE TABLE `movementPermitDeterminations` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `organizationId` bigint unsigned NOT NULL,
+  -- NULL is the single-tenant default, matching the 36 other tables that scope this way.
+  `orgRef` varchar(64) NULL,
   `jobId` bigint unsigned NOT NULL,
   `permitRequired` tinyint(1) NOT NULL,
   -- why. A determination with no stated basis is an opinion, and the audit asks for the basis first.
@@ -95,4 +97,4 @@ CREATE TABLE `movementPermitDeterminations` (
   PRIMARY KEY (`id`)
 );
 --> statement-breakpoint
-CREATE INDEX `mpd_job` ON `movementPermitDeterminations` (`organizationId`, `jobId`, `supersededAt`);
+CREATE INDEX `mpd_job` ON `movementPermitDeterminations` (`orgRef`, `jobId`, `supersededAt`);
