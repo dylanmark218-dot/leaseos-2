@@ -1,0 +1,24 @@
+LeaseOS Chat1–Chat5 unified audit summary — 2026-09-14
+
+Canonical main: 74d99de54387894f42daa54c802e4a536eab9313
+Previous B28H main: c27b8acfb4e2da230cee6349c9fae6bb7098ffc3
+Incoming branch heads: 125 (115 identical existing, 9 new, main advanced)
+Incoming tags: 24/24 already identical
+Canonical app-path change from prior B28H main: 0
+Tracked files on main: 776
+Tables / CREATE TABLE: 309 / 309
+Migration files / max slot: 102 / 0106
+Role-authorized procedures: 483
+Permissions / sensitive: 328 / 112
+Server test files / literal it(: 161 / 2653
+Non-empty duplicate groups: 0
+Implementation duplicate groups: 0
+Case collisions: 0
+Conflict-marker files: 0
+Obvious secret-token pattern hits on main: 0
+Gap matrix rows: 63
+
+New candidate line: Driver Academy 0087→0089, not production-integrated.
+Critical Academy blockers: missing SQL/retention trigger, occupied migration numbers, production DB/readiness wiring.
+Restricted assessor answer key remains isolated on restricted/chat5-assessor-key.
+Prepared root fixes: integration/chat1-5-recommended-fixes (pnpm alignment, release source, fail-closed permissions).

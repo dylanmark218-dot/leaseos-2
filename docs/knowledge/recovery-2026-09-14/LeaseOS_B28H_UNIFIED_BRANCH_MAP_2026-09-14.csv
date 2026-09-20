@@ -1,0 +1,325 @@
+branch,commit,subject,family,note
+archive/pre-b28-unified-main,50a17103ea439fbb12a4f2bb9cbdef0f9b5f2118,merge: reconcile CAL05a source with unified LeaseOS history,archive,
+archive/unified-v22.16-main,888482953dd8aaaa0e9e745dbba3cb7f047e813b,repo: record generated branch and tag counts,archive,
+baseline/v20.2,937e2575d897836671aa2b6506d5589e15fc5f93,history: exact v20.2 baseline reconstructed from supplied cumulative patch,source-anchor,
+candidate/b28h-widget-engine,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,candidate,Exact staged B28h widget candidate; not production-integrated.
+fix/b28h-ci-pnpm-alignment,c03030ee13051a4775eed0fd3d242896542b6a3d,fix(ci): align CAL05a pnpm with packageManager 10.4.1,fix,
+fix/b28h-fail-closed-permission-drift,b8b3f12038a48c2f0f46f8934404ea3b8402f547,fix(auth): restore seven fail-closed permissions on CAL05a,fix,
+fix/b28h-release-source-of-truth,ca7209f2d60b415543b609c24942a869469268ca,fix(repo): make CAL05a release version an explicit source of truth,fix,
+fix/cal05a-ci-pnpm-alignment,b06c5b8870a591dd0208c7c11ce86920faa58ef2,fix(ci): align CAL05a pnpm with packageManager 10.4.1,fix,
+fix/cal05a-fail-closed-permission-drift,653288ccb67d496f1a47bb327b4cb2a373b9037e,fix(auth): restore seven fail-closed permissions on CAL05a,fix,
+fix/cal05a-release-source-of-truth,002903595e3110c1d7c6a02beba2e2a98d056cdf,fix(repo): make CAL05a release version an explicit source of truth,fix,
+fix/ci-pnpm-alignment,471504b1b8e60a4e1971c83f0f185fc893207052,ci: align pnpm action with packageManager 10.4.1,fix,
+fix/current-state-release-autodetect,9d083984c1832fbe7bc4715bd1f4012bbdb0431c,fix(repo): correctly autodetect release in current-state generator,fix,
+fix/fail-closed-permission-drift,b4a7c1387eeceb619164e0146b8f8ff77632ddb2,fix(auth): restore seven documented fail-closed permissions,fix,
+incoming-b28/archive/deduped-artifacts,254f06dfa73145bfc68fb5c5b830fa37ef6e508f,archive: add deduplicated top-level artifacts from all four archive sets,incoming-b28-preserved,
+incoming-b28/archive/raw-inputs,87c8aae60870dbb7cf9c63b425d8de218b1d3939,archive: preserve four original LeaseOS input archives byte-for-byte,incoming-b28-preserved,
+incoming-b28/candidate/b28h-widget-engine,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/candidate/unreleased-0079-cdef,845bd782fac58ffa16b5758833a610635ee8816f,snapshot: reconstruct newest complete LeaseOS source from Chat3 CAL05a archive,incoming-b28-preserved,
+incoming-b28/main,f4acba4d5774d8d18a631c38e7183943aace2624,docs: record complete reconstructed branch and history index,incoming-b28-preserved,
+incoming-b28/snapshot/cal05a-v22.20,845bd782fac58ffa16b5758833a610635ee8816f,snapshot: reconstruct newest complete LeaseOS source from Chat3 CAL05a archive,incoming-b28-preserved,
+incoming-b28/snapshot/v20,4186617a6a4cb599e47258c8723415c78ac00fef,snapshot: reconstruct LeaseOS v20 source from Chat1 archive,incoming-b28-preserved,
+incoming-b28/snapshot/v22.16,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b12-routing-evidence,4186617a6a4cb599e47258c8723415c78ac00fef,snapshot: reconstruct LeaseOS v20 source from Chat1 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b13-data-governance,4186617a6a4cb599e47258c8723415c78ac00fef,snapshot: reconstruct LeaseOS v20 source from Chat1 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b14-dispatch,4186617a6a4cb599e47258c8723415c78ac00fef,snapshot: reconstruct LeaseOS v20 source from Chat1 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b15-transactional-dispatch,4186617a6a4cb599e47258c8723415c78ac00fef,snapshot: reconstruct LeaseOS v20 source from Chat1 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b16-ci-database,4186617a6a4cb599e47258c8723415c78ac00fef,snapshot: reconstruct LeaseOS v20 source from Chat1 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b17-1-production-wiring,4186617a6a4cb599e47258c8723415c78ac00fef,snapshot: reconstruct LeaseOS v20 source from Chat1 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b17-workflow-core,4186617a6a4cb599e47258c8723415c78ac00fef,snapshot: reconstruct LeaseOS v20 source from Chat1 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b18-billing-adjustments,4186617a6a4cb599e47258c8723415c78ac00fef,snapshot: reconstruct LeaseOS v20 source from Chat1 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b19-end-to-end,4186617a6a4cb599e47258c8723415c78ac00fef,snapshot: reconstruct LeaseOS v20 source from Chat1 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-1-workflow-wiring,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-10-verified-source-registry,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-11-p3-typed-commit,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-12-v20-13-promotion,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-13-portals-funding,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-14-v20-15-extraction-queue,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-15-v20-16-fingerprint-disposal,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-16-v20-17-integrity-closure,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-17-v20-18-fuel-ledger,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-18-v20-19-roadside-ap,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-19-v20-20-secure-field-runtime,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-2-authorization,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-20-v20-21-compliance-registry,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-21-v20-22-requirement-engine,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-22-v20-23-insurance-risk,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-3-authorization-enforcement,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-4-api-migration,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-5-payroll-finance-tax,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-6-authorization-complete,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-7-payroll-finance-api,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-8-external-data-routing,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-9-universal-permissions,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-measurement-ladder,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b20-records-vault,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-0-universal-surfaces,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-1-dispatch-gate,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-10-commercial-portals,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-11-site-signoff-chain,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-12-portal-hardening,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-13-customer-live-view,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-14-customer-transaction,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-15-fleet-shop,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-16-capital-assets,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-17-commercial-projects,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-18-integration-gateway,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-19-telematics,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-2-dispatch-enforcement,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-20-workforce,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-21-audit-packages,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-3-ifta,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-4-bulk-fuel-statements,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-5-period-close,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-6-field-runtime,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-7-portal-experience,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-8-gst-hst,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-9-1-integrity-hotfix,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b21-9-bank-and-ar,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-0-spatial-foundation,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-1-contract-terms,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-10-invoice-to-customer,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-11-credits-voids,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-12-setup-wizard,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-13-mapping-foundation,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-14-legal-land,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-15-structures-staleness,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-16-routing-graph,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-17-communications,845bd782fac58ffa16b5758833a610635ee8816f,snapshot: reconstruct newest complete LeaseOS source from Chat3 CAL05a archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-18-comms-dispatch,845bd782fac58ffa16b5758833a610635ee8816f,snapshot: reconstruct newest complete LeaseOS source from Chat3 CAL05a archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-19-offline-package,845bd782fac58ffa16b5758833a610635ee8816f,snapshot: reconstruct newest complete LeaseOS source from Chat3 CAL05a archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-2-terms-complete,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-3-money-precision,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-4-shadows-everywhere,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-5-1-operational-truth,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-5-first-ledger-retired,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-6-fuel-retired,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-7-commercial-setup,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-8-lines-priced,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b22-9-invoice-path,af9adf5ce52fce7c793075a38cce63ab58db4aa8,snapshot: reconstruct LeaseOS v22.16 routing-graph source from Chat2 archive,incoming-b28-preserved,
+incoming-b28/upgrade/b23-widget-engine,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b24-widget-runtime-integration,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b25-widget-client-runtime,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b26-widget-board-ux,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b27-production-widget-catalogue,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b28-real-branch-widget-integration,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b28a-branchless-reconciliation,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b28b-source-contracts,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b28c-composition-semantics,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b28d-semantic-contracts,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b28e-registry-v2-migration,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b28f-guard-integrity,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b28g-guard-hardening,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+incoming-b28/upgrade/b28h-branch-arrival-rc,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,incoming-b28-preserved,
+integration/b28h-recommended-fixes,b230947fddb152abb5badacab5e6213f10053d11,audit: regenerate current state after CAL05a fix stack,integration,CAL05a repository fixes rebuilt on top of B28h unified history.
+integration/cal05a-recommended-fixes,f3186a54bdc6a9bd7e7b66e0cdb54d20ba225618,audit: regenerate current state after CAL05a fix stack,integration,
+integration/recommended-fixes,5bcfdc26c40f8b92121ffd7e6c81f4c2c0b12c3d,audit: synchronize final unified audit documents,integration,
+integration/unified-b28h-audit,ff71a1dc5894e6fbd2e41705346808fe5cd57493,audit: record unified B28h merge findings and gap matrix,integration,
+integration/unified-cal05a-audit,ae3c0ae1d3eae73da2014d140d2434466563a913,docs: add CAL05a unified GitHub import guide,integration,
+integration/unified-repository-audit,9856c1f85791e05f5768248ceabe2ced8a546a36,audit: keep live integration refs symbolic,integration,
+legacy/v20/archive/original-v20,291a9d25f2241a3cdd79268b5089c3c976bfa053,archive: preserve untouched nested FieldRoute v20 source,legacy,
+legacy/v20/fix/ci-pnpm-alignment,5f779b7abd5e06ca79dd249c64e712699064ec45,ci: align pnpm action with packageManager 10.4.1,legacy,
+legacy/v20/fix/tenant-isolation-rbac,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/fix/workflow-runtime-wiring,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/main,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/assistant-engine,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/assistant-wiring,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/b12-routing-evidence,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/b13-data-governance,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/b14-dispatch,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/b15-transactional-dispatch,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/b16-ci-database,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/b17-1-production-wiring,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/b17-workflow-core,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/b18-billing-adjustments,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/b19-end-to-end,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/billing-records-chain,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/branch-reconciliation,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/build-plan,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/build-spec,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/design-system,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/integrated-operations,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/spatial-loadsense,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/merge/taxonomy-routing,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+legacy/v20/research/licensing-landscape,47179b0772052c257383812189930535be6c1f21,docs: expand merge lanes for build and research checkpoints,legacy,
+main,c27b8acfb4e2da230cee6349c9fae6bb7098ffc3,audit: preserve B28h reconciliation evidence and uploaded verification records,canonical,
+reconciled/candidate/v20-to-v22.16,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/candidate/v22.16-to-cal05a,bcfe993d54c08e7c45da254312d5e0643e2e08c6,Import exact LeaseOS CAL05a gate-verified snapshot,prior-reconciled-preserved,
+reconciled/main,80b995fabfe149e6f17178a63bfce71eb0d1f715,"Add reconciliation audit, branch map, and unique recovered artifacts",prior-reconciled-preserved,
+reconciled/milestone/cal05a,bcfe993d54c08e7c45da254312d5e0643e2e08c6,Import exact LeaseOS CAL05a gate-verified snapshot,prior-reconciled-preserved,
+reconciled/milestone/v20,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,prior-reconciled-preserved,
+reconciled/milestone/v22.16,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/release/reconciled-2026-09-14,80b995fabfe149e6f17178a63bfce71eb0d1f715,"Add reconciliation audit, branch map, and unique recovered artifacts",prior-reconciled-preserved,
+reconciled/upgrade/b12-routing-evidence,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b13-data-governance,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b14-dispatch,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b15-transactional-dispatch,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b16-ci-database,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b17-workflow-core,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b17.1-production-wiring,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b18-billing-adjustments,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b19-end-to-end,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20-measurement-ladder,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20-records-vault,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.1-workflow-wiring,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.10-verified-source-registry,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.11-p3-typed-commit,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.12-v20-13-promotion,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.13-portals-funding,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.14-v20-15-extraction-queue,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.15-v20-16-fingerprint-disposal,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.16-v20-17-integrity-closure,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.17-v20-18-fuel-ledger,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.18-v20-19-roadside-ap,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.19-v20-20-secure-field-runtime,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.2-authorization,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.20-v20-21-compliance-registry,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.21-v20-22-requirement-engine,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.22-v20-23-insurance-risk,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.3-authorization-enforcement,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.4-api-migration,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.5-payroll-finance-tax,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.6-authorization-complete,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.7-payroll-finance-api,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.8-external-data-routing,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b20.9-universal-permissions,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.0-universal-surfaces,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.1-dispatch-gate,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.10-commercial-portals,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.11-site-signoff-chain,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.12-portal-hardening,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.13-customer-live-view,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.14-customer-transaction,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.15-fleet-shop,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.16-capital-assets,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.17-commercial-projects,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.18-integration-gateway,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.19-telematics,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.2-dispatch-enforcement,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.20-workforce,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.21-audit-packages,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.3-ifta,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.4-bulk-fuel-statements,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.5-period-close,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.6-field-runtime,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.7-portal-experience,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.8-gst-hst,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.9-bank-and-ar,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b21.9.1-integrity-hotfix,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.0-spatial-foundation,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.1-contract-terms,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.10-invoice-to-customer,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.11-credits-voids,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.12-setup-wizard,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.13-mapping-foundation,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.14-legal-land,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.15-structures-staleness,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.16-routing-graph,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.17-communications,bcfe993d54c08e7c45da254312d5e0643e2e08c6,Import exact LeaseOS CAL05a gate-verified snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.18-comms-dispatch,bcfe993d54c08e7c45da254312d5e0643e2e08c6,Import exact LeaseOS CAL05a gate-verified snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.19-offline-package,bcfe993d54c08e7c45da254312d5e0643e2e08c6,Import exact LeaseOS CAL05a gate-verified snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.2-terms-complete,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.3-money-precision,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.4-shadows-everywhere,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.5-first-ledger-retired,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.5.1-operational-truth,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.6-fuel-retired,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.7-commercial-setup,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.8-lines-priced,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+reconciled/upgrade/b22.9-invoice-path,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,prior-reconciled-preserved,
+source/cal05a-original,bcfe993d54c08e7c45da254312d5e0643e2e08c6,Import exact LeaseOS CAL05a gate-verified snapshot,source-anchor,
+source/reconciled-b28-main,f4acba4d5774d8d18a631c38e7183943aace2624,docs: record complete reconstructed branch and history index,source-anchor,
+source/v20-reconciled,015bfb49aa6a69f7ca23944eeb6295107e8bf1fd,Import exact LeaseOS v20 source snapshot,source-anchor,
+source/v22.16-original,cbb9d18ca871870cef949555a8d460bc59b09396,history: import exact supplied LeaseOS v22.16 source snapshot,source-anchor,
+source/v22.16-reconciled,f1b9e283c04f99ae55032a881b1668d661d56033,Import exact LeaseOS v22.16 routing-graph snapshot,source-anchor,
+upgrade/b12-routing-evidence,c507d8208adefb15d2c2e3eed829e513d44f2556,trace: LeaseOS — B12: Routing Constraint Compiler + Evidence Ledger,upgrade-traceability,
+upgrade/b13-data-governance,2a9c0cc559bfbdea2b4d51e8ee6fe9a8eef94265,trace: LeaseOS — B13: Data Governance & Road Graph,upgrade-traceability,
+upgrade/b14-dispatch,d0284db1dff54e6b6d4a8bcaacf0b951b743ba87,trace: LeaseOS — B14: Dispatch Operations Centre,upgrade-traceability,
+upgrade/b15-transactional-dispatch,bb0e5b40aef2bfe014762517acdffe4d4f0005da,trace: LeaseOS — B15: Transactional Dispatch Backend,upgrade-traceability,
+upgrade/b16-ci-database,b7b9534d89081906b4b799514291a3e1248b8dea,"trace: LeaseOS — B16: Disposable database, and what it revealed",upgrade-traceability,
+upgrade/b17-1-production-wiring,c923278d56d4fc0e905d344fa845a1b419a11c54,trace: LeaseOS — B17.1: Production Workflow Wiring,upgrade-traceability,
+upgrade/b17-workflow-core,94af1060db4309557cf0ea83dfcfc9be43981baa,trace: LeaseOS — B17: Workflow Orchestration Core,upgrade-traceability,
+upgrade/b18-billing-adjustments,75ebceb920b0ecaf44ef9644cef813f78f244806,"trace: LeaseOS — B18: Billing Adjustments, Disputes & Third-Party Work",upgrade-traceability,
+upgrade/b19-end-to-end,53fa5986c970871f745a843d89b510cd65631b7d,"trace: LeaseOS — B19: The Chain, Joined",upgrade-traceability,
+upgrade/b20-1-workflow-wiring,832c92b97ea73824026ee117957cc0e690c54e67,trace: LeaseOS — B20.1 Checkpoint: Records & Safety Wired Into the Workflow Engine,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-10-verified-source-registry,90a03441c480a440a20b9497808fd5a21a2fb9e3,trace: LeaseOS — v20.12.2 Checkpoint: Verified Source Registry,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-11-p3-typed-commit,35d1d353294014f37e6771b2301694eae23dee77,trace: LeaseOS — v20.13-dev1 Checkpoint: P3 Typed Assistant Commit Boundary,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-12-v20-13-promotion,c37a099dc5896aef01e24924d763ad1372fed331,trace: LeaseOS — v20.13 Checkpoint: P3 Typed Commit Boundary (candidate promoted),upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-13-portals-funding,14dce420d80cdd38792f8dcb689c7801e5faf291,trace: LeaseOS — v20.14 Checkpoint: Portal Composition + Funding Knowledge Panel,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-14-v20-15-extraction-queue,e81f70b22baf8db8ba9538b0e937fe09ffaf1417,trace: LeaseOS — v20.15 Checkpoint: Document Extraction + Question Queue + Funding Persistence,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-15-v20-16-fingerprint-disposal,dfd161a2112248e44fec6dbd0bee3862545f4eaf,trace: LeaseOS — v20.16 Checkpoint: Fingerprinting + Disposal Tickets + Merchant Memory,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-16-v20-17-integrity-closure,5e1f0ed00da792f5025cd178d93cbd8f21fb5671,trace: LeaseOS — v20.17 Checkpoint: P3 Integrity Closure,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-17-v20-18-fuel-ledger,31e546497a7a02b35ebe48a50d0710f639af51e9,trace: LeaseOS — v20.18 Checkpoint: Fuel & Energy Ledger,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-18-v20-19-roadside-ap,30eac5d01d08967e116180495c76fe7f7e8b9001,trace: LeaseOS — v20.19 Checkpoint: Roadside Events + Purchasing + Accounts Payable Spine,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-19-v20-20-secure-field-runtime,23b6b8f5531ca480fa068a3b4f9e6e012e66572a,trace: LeaseOS — v20.20 Checkpoint: P4 Secure Field Runtime (server half),upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-2-authorization,16ed85d8bd040d23851ef28fb728c53b69b5652b,trace: LeaseOS — B20.2 Checkpoint: Server-Enforced Domain Authorization,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-20-v20-21-compliance-registry,5aedd295d3a2196aad70a85ed98d0adc4ed367bd,trace: LeaseOS — v20.21 Checkpoint: Compliance Master Registry,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-21-v20-22-requirement-engine,025c1c6ee8acf43cd6757f730223301eb12daaf9,trace: LeaseOS — v20.22 Checkpoint: Generalized Requirement Engine + Packs + Calibration,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-22-v20-23-insurance-risk,bc287564959d4744d36adb3a503333d4b918fd1f,trace: LeaseOS — v20.23 Checkpoint: Insurance & Risk,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-3-authorization-enforcement,59706be19aa1cdc6d875808cd0619aeb4d54be50,trace: LeaseOS — B20.3 Checkpoint: Authorization Enforcement + Records API,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-4-api-migration,ed8691591d4e47d8c6a4a49b89c3d58b95031e5d,trace: LeaseOS — B20.4 Checkpoint: Operational API Migration (Tranche 1),upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-5-payroll-finance-tax,20ec3fb5b22305ae91623b0cecb916d4a4d043c5,"trace: LeaseOS — B20.5 Checkpoint: Payroll, Finance & Tax Foundation",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-6-authorization-complete,700622577edc5a4335d2159acdb75a6b89d8efec,trace: LeaseOS — B20.6 Checkpoint: Authorization Migration Complete (P1),upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-7-payroll-finance-api,a95c2e961624765def8e41e40d8d20d6b8387dcb,"trace: LeaseOS — B20.7 Checkpoint: Payroll, Finance & Tax API (P2)",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-8-external-data-routing,3ef4027e75f9aef63f40678913a6cc7ed7ba999d,trace: LeaseOS — B20.8 Checkpoint: External Data Foundation + Routing Adapter,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-9-universal-permissions,0fc28d5a417f424c043c5c3b016155f4a4d995b9,trace: LeaseOS — v20.12.1 Checkpoint: Universal Permissions,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-measurement-ladder,cd22f9078f23f375f865e8e0f25d5b03b25d7f80,trace: LeaseOS — B20 Checkpoint: Verified Baseline + Measurement Quality Ladder,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b20-records-vault,07b3d402d8aec56ab4bbfb85cbf9c3694955096c,"trace: LeaseOS — B20 Checkpoint: Records, Evidence & Compliance Vault",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-0-universal-surfaces,5f178f97f2ffbeaccf89199dce4c1163008b1716,"trace: LeaseOS — v21.0 Checkpoint: Universal Surfaces (Exception Centre, Inbox, My Day, Search, Timeline)",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-1-dispatch-gate,7c45cb49b62b2ad0881f589d57c98b8f4acf141c,"trace: LeaseOS — v21.1 Checkpoint: The Dispatch Gate, Reachable",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-10-commercial-portals,26cda2baf9393790ad48c76aa9e3e31d6d803223,"trace: LeaseOS — v21.10 Checkpoint: Commercial Core + External Portals (vendor, customer, facility)",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-11-site-signoff-chain,d4120139448f1255de1e39d345ea682150144c25,trace: LeaseOS — v21.11 Checkpoint: Site Sign-Off & Post-Site Billing Chain (promotion of an unauthored arr,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-12-portal-hardening,adaedcb90e9c567afc90842cc25fd3405b307a4b,trace: LeaseOS — v21.12 Checkpoint: Portal Identity Hardening + Billing Closeout Completion,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-13-customer-live-view,a042d893fbe955b245517dc0cc09a02373e175f4,trace: LeaseOS — v21.13 Checkpoint: Customer Live View + Portal Client Shell,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-14-customer-transaction,6bb424c894ab0fbc59df221500d8992232dc8ff1,trace: LeaseOS — v21.14 Checkpoint: Customer Transaction & Field Closeout Completion (with v21.13.1 Documen,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-15-fleet-shop,1f41b3d39de990512cc4d01076fe87acd43a348a,trace: LeaseOS — v21.15 Checkpoint: Fleet Shop OS,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-16-capital-assets,5c943441f74aedf25b5e61c92ef3aa27f45af505,trace: LeaseOS — v21.16 Checkpoint: Capital Assets + CCA + Asset Twin,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-17-commercial-projects,6617654c083c5c3f5dae12de66ce73998630d0e2,trace: LeaseOS — v21.17 Checkpoint: Commercial Project Management,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-18-integration-gateway,4c97605ceb907ade57bde1afb90ec6f7a40feee6,trace: LeaseOS — v21.18 Checkpoint: Integration Gateway,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-19-telematics,48aa3fda8193aeffe934573227ddfb710633e71d,trace: LeaseOS — v21.19 Checkpoint: Telematics & Video Safety,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-2-dispatch-enforcement,4169e3a1b7f047d4d1661e076372ad2a0e59069e,trace: LeaseOS — v21.2 Checkpoint: Dispatch Enforcement on the Legacy Path,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-20-workforce,2ebff64c425182d4e7bc6b5e15512abde40e1b23,trace: LeaseOS — v21.20 Checkpoint: Workforce Lifecycle,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-21-audit-packages,8950db96eab09f70f11c8818bd9d2e60bd237bc8,trace: LeaseOS — v21.21 Checkpoint: Audit Package Builder,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-3-ifta,77bde23cbdae15543dd276f3d6ceb4bb7d474baa,trace: LeaseOS — v21.3 Checkpoint: IFTA on the Fuel Ledger,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-4-bulk-fuel-statements,4b281ac912ead5dfd4c3997c36789361b86a4d89,"trace: LeaseOS — v21.4 Checkpoint: Bulk Fuel, Statement Import, Anomalies",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-5-period-close,f90c43da8ecfec553673e33d38246679e5f224a0,trace: LeaseOS — v21.5 Checkpoint: Period Close + Fuel-Line Exceptions,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-6-field-runtime,44cfe40b3a8e3a43c90277babb0ddf0ea94a9b2b,trace: LeaseOS — v21.6 Checkpoint: Secure Field Runtime — the client half that can be proven here,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-7-portal-experience,4d48772f1e2c4ef248736f0d2bb97b59ac8f218d,trace: LeaseOS — v21.7 Checkpoint: Portal Experience,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-8-gst-hst,f3e0e0d4f911af5507d1b6c1d88c4e45031a1f44,trace: LeaseOS — v21.8 Checkpoint: GST/HST Return Assembly + Close Expansion,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-9-1-integrity-hotfix,83b45967a7200d8445f49bc6bd1f9b29ec59b129,trace: LeaseOS — v21.9.1 Checkpoint: Authorization & Financial Integrity Hotfix,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b21-9-bank-and-ar,b5dacbd2ea25f8361faa039632b76d1be43cb91c,trace: LeaseOS — v21.9 Checkpoint: Bank Reconciliation + Accounts Receivable,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-0-spatial-foundation,43c5743dedf9516761a2e5d6973af6238af43ee5,trace: LeaseOS — v22.0 Checkpoint: Spatial Foundation (routing source not loaded),upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-1-contract-terms,6381f67cdc57518d51dbf49fd1e13a59ceaddf90,trace: LeaseOS — v22.1 Checkpoint: Contract Terms Decide; the Worker Delivers,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-10-invoice-to-customer,29540d136f7fa4e2905547c849d05cb3c84a3867,trace: LeaseOS — v22.10 Checkpoint: An Approved Invoice Reaches the Customer,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-11-credits-voids,a15206a0648b786fea2d7fc0961a21c5c392d458,"trace: LeaseOS — v22.11 Checkpoint: Credits, Voids and Supplemental Drafts",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-12-setup-wizard,30980a486b46f52e9516cb29f29007b638fb93f3,trace: LeaseOS — v22.12 Checkpoint: The First-Run Setup Wizard,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-13-mapping-foundation,31da4106af08a24d537c269be576b6154019f9f5,"trace: LeaseOS — v22.13 Checkpoint: The Mapping Foundation, From Open Data",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-14-legal-land,fe10af76f2827c845ecf9de85c3662a1e7766338,"trace: LeaseOS — v22.14 Checkpoint: Legal Land Both Ways, Entrances as Records",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-15-structures-staleness,33f11d38992b624dd39822d9a5a6fc3cbe1006ae,"trace: LeaseOS — v22.15 Checkpoint: Structures, Effective Dates, and Route Staleness",upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-16-routing-graph,bd4b3bff10f26dddb23987388518bf9be61cb56e,trace: LeaseOS — v22.16 Checkpoint: The First Routing Graph,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-17-communications,bcfe993d54c08e7c45da254312d5e0643e2e08c6,Import exact LeaseOS CAL05a gate-verified snapshot,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-18-comms-dispatch,bcfe993d54c08e7c45da254312d5e0643e2e08c6,Import exact LeaseOS CAL05a gate-verified snapshot,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-19-offline-package,bcfe993d54c08e7c45da254312d5e0643e2e08c6,Import exact LeaseOS CAL05a gate-verified snapshot,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-2-terms-complete,f2c50601448406f51284ce7a1a1d659514c4c4ec,trace: LeaseOS — v22.2 Checkpoint: Terms Complete the Closeout; COR and Insurance Packages,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-3-money-precision,64bb683ff4a0bb33b73f91590633062afae3fcbf,trace: LeaseOS — v22.3 Checkpoint: Money Precision,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-4-shadows-everywhere,4c197f463156107b1c5dd338f3c852e3bef6d3f4,trace: LeaseOS — v22.4 Checkpoint: Integer Shadows Everywhere,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-5-1-operational-truth,6d1a9684712a09f800d798b4eca93a1e71fb5343,trace: LeaseOS — v22.5.1 Checkpoint: Operational Truth Boundary + Legacy Surface Closure,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-5-first-ledger-retired,d0fb42d6eb86925d8d16d5bddb00cd22bb2191d0,trace: LeaseOS — v22.5 Checkpoint: The First Ledger Retires Its Doubles,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-6-fuel-retired,6aed9ba0466858ec5b89789b27d4c21f35bce4f7,trace: LeaseOS — v22.6 Checkpoint: The Fuel Ledger Retires Its Doubles,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-7-commercial-setup,d9ebcfa8ee742766f9d8e69b0f665c30d05ca915,trace: LeaseOS — v22.7 Checkpoint: Commercial Setup & Rate Resolution,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-8-lines-priced,bdb97c60aa8d9d4c5c57d3d197d062a8bc4b10bb,trace: LeaseOS — v22.8 Checkpoint: The Paths That Bill Write the Decision,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b22-9-invoice-path,37c7e2406c69c9b24eadec780dc86ab27f7c3edc,trace: LeaseOS — v22.9 Checkpoint: The Invoice Path,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b23-widget-engine,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b24-widget-runtime-integration,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b25-widget-client-runtime,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b26-widget-board-ux,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b27-production-widget-catalogue,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b28-real-branch-widget-integration,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b28a-branchless-reconciliation,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b28b-source-contracts,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b28c-composition-semantics,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b28d-semantic-contracts,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b28e-registry-v2-migration,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b28f-guard-integrity,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b28g-guard-hardening,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.
+upgrade/b28h-branch-arrival-rc,bc91356912eb0e24d655c451fe7c96b35da8aa9b,candidate: stage B28H widget engine for real-branch reconciliation,upgrade-traceability,Traceability/containment branch; do not assume exact per-upgrade source history unless separately anchored.

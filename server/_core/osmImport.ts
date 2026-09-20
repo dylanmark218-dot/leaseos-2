@@ -28,6 +28,20 @@
  * refused, access=no      2,240     refused, unrecognised      219
  * ```
  *
+/*
+ * Saskatchewan (`saskatchewan-260918_osm.pbf`, sha256 721c07b9…) run through the same conversion:
+ * 304,797 highway ways, **263,421 imported**, 41,222 refused as non-vehicle, 139 refused for access
+ * and 15 for an unrecognised class (`services` 7, `rest_area` 7, and one `highway=wa`, which is a
+ * typo somebody made in OSM and the importer is right to refuse rather than guess at).
+ *
+ * The census is worth reading beside Alberta's, because the provinces do not resemble each other.
+ * Saskatchewan states **9 weight limits across 263,421 roads** — Alberta manages 24 and British
+ * Columbia 108. It also carries 139,113 maxspeed tags where Alberta is sparse, and 115,608
+ * `unclassified` ways, which is the grid road network showing up as the dominant class.
+ *
+ * None of which changes what the importer concludes. Nine stated weights across a province is not
+ * weight coverage; it is nine advisories.
+ */
  * The 219 it did not recognise were `rest_area` (105), `busway` (58), `services` (41), `future`,
  * `escape`, `no` — so the class list is effectively complete for Alberta, and the six it misses are
  * refused **by name** rather than guessed at. `rest_area` and `services` are places a truck does go
@@ -120,12 +134,22 @@ const DRY_WEATHER = new Set(["dirt", "earth", "ground", "mud", "sand", "grass", 
  * would be wrong most of the time and wrong in the expensive direction, so an untagged road is
  * `dry_weather`, which the suitability table already reads as `review`.
  */
+/**
+ * A road that is only there when the ground is frozen.
+ *
+ * `ice_road` is in here because Alberta carries 13 of them and Saskatchewan 6, and leaving it out
+ * meant an ice road imported as an ordinary gravel track.
+ */
+export function isSeasonalCrossing(tags: Readonly<Record<string, string>>): boolean {
+  return tags.winter_road === "yes" || tags.ice_road === "yes" || tags.seasonal === "winter";
+}
+
 export function surfaceFor(tags: Readonly<Record<string, string>>): SurfaceKind {
   if (tags.ford && tags.ford !== "no") return "ford";
   if (tags.highway === "ferry" || tags.route === "ferry") return "ferry";
   if (/_link$/.test(tags.highway ?? "")) return "ramp";
   if (tags.highway === "driveway" || tags.service === "driveway") return "driveway";
-  if (tags.winter_road === "yes" || tags.seasonal === "winter") return "winter";
+  if (isSeasonalCrossing(tags)) return "winter";
 
   const s = (tags.surface ?? "").toLowerCase();
   if (PAVED.has(s)) return "paved";
@@ -180,6 +204,20 @@ function advisoriesFrom(tags: Readonly<Record<string, string>>): string[] {
     if (osmTag && tags[osmTag]) {
       out.push(`${check}: OpenStreetMap states ${osmTag}=${tags[osmTag]} — unverified, treat as a reason to check rather than a limit to rely on`);
     }
+  }
+  /*
+   * `surface: winter` says what the road is made of. It does not say that for most of the year the
+   * road is not there — and those are different facts, which is why this is an advisory rather than
+   * something the surface value is asked to carry on its own. A route costed on surface alone reads
+   * "winter" as rough going and sends a unit down it in July.
+   *
+   * What OSM never states is the date it opens or closes, so this stays advisory: it is a reason to
+   * ask, not a season anyone can compute from.
+   */
+  if (isSeasonalCrossing(tags)) {
+    out.push(
+      "seasonal_road_ban: OpenStreetMap marks this a winter or ice road — it exists only while the ground is frozen, and no opening or closing date is stated",
+    );
   }
   if (tags.ford && tags.ford !== "no") out.push("ford: this way crosses water at grade; depth and season are not stated");
   if (tags.bridge && tags.bridge !== "no") out.push("bridge: a structure is here; OpenStreetMap states no capacity for it");

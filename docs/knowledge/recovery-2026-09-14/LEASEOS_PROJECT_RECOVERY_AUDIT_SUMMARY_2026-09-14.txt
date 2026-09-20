@@ -1,0 +1,50 @@
+LeaseOS Project Recovery RC — 2026-09-14
+========================================
+RC branch: candidate/project-recovery-rc
+RC commit: 5d3e42bc1b06eb32ab65698eeb5ca6beb5406983
+Implementation commit: 18444d4c9622e61e75ae595380161990ff885142
+Canonical main preserved: 74d99de54387894f42daa54c802e4a536eab9313
+Branch heads: 346
+Tags: 33
+
+Recovered/integrated in RC:
+- Training Academy forward-ported on migrations 0107/0108.
+- Academy retention trigger and migration gate restored.
+- Academy explicit bindings integrated into central readiness/fingerprint logic.
+- Production workflow/outbox worker lifecycle wired, including standalone worker entrypoint.
+- LoadSense engines recovered and modernized on canonical measurement authority model.
+- LoadSense persistence added as migration 0109 without restoring obsolete parallel device registry.
+- Historical 0088 gate, Academy, v17 Spatial, v18 LoadSense, v21 reconciled, and B23 widget sources preserved as Git provenance refs.
+- Prior pnpm/release-source/fail-closed authorization fixes retained.
+
+Current static measurements:
+- 337 Drizzle tables / 337 SQL CREATE TABLE definitions.
+- 105 SQL migrations, highest 0109_loadsense_material_movement.sql.
+- 507 role-authorized procedure call sites.
+- 36 external portal procedures.
+- 2 integration/machine procedures.
+- 0 bare protectedProcedure call sites.
+- 340 permissions; 124 sensitive/fail-closed; 13 universal self-scoped.
+- 170 server test files / 2728 literal it( occurrences in source.
+- Project gap matrix: 68 rows.
+- Project conversation coverage matrix: 20 rows.
+
+Verification performed:
+- git fsck --full --no-dangling: PASS.
+- regenerated current-state file: zero diff.
+- git diff --check: PASS.
+- schema/migration table parity: 337/337.
+- focused Academy executable gate: PASS.
+- focused LoadSense executable checks: PASS.
+- 513 TS/TSX source files parsed/transpiled with zero syntax diagnostics during stabilization.
+- core reachability inventory internally reconciled (129 production-reachable / 33 explicitly unwired / no undeclared surprises at stabilization).
+- obvious high-confidence private-key/GitHub/OpenAI/AWS token scan on RC worktree: zero hits.
+
+Not claimed:
+- Full pnpm/Vitest/MySQL/build/browser/native-device release gate was not rerun in this environment.
+- Authenticated LoadSense gateway/native hardware ingestion remains incomplete.
+- Native Capacitor/SQLite/keystore/camera/GPS/biometric/local-notification runtime remains incomplete.
+- LeaseOS legal/privacy/licensing package, remote camp/accommodation operations, unified company-policy governance, and stronger internal/native auth remain product gaps.
+- Some regulator/external-data licensing remains blocked or requires authority confirmation.
+
+SECURITY: Full-history artifacts include restricted/chat5-assessor-key. Keep them private.

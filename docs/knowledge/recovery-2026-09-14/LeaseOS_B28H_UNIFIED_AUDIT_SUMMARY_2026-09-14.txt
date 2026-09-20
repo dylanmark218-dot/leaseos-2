@@ -1,0 +1,19 @@
+LeaseOS B28h unified audit checkpoint — 2026-09-14
+Canonical main: c27b8acfb4e2da230cee6349c9fae6bb7098ffc3
+Previous CAL05a main: 50a17103ea439fbb12a4f2bb9cbdef0f9b5f2118
+Incoming reconciled main: f4acba4d5774d8d18a631c38e7183943aace2624
+Exact B28h candidate: bc91356912eb0e24d655c451fe7c96b35da8aa9b
+Recommended fixes: b230947fddb152abb5badacab5e6213f10053d11
+Final branches: 324
+Final tags after audit tag: 24
+Canonical tables / CREATE TABLE: 309 / 309
+Migrations: 102 (head 0106)
+Role-authorized procedures: 483
+Server test files / source it() cases: 161 / 2653
+Canonical non-empty duplicate groups: 0
+Canonical case collisions: 0
+Canonical conflict-marker files: 0
+Canonical obvious secret-pattern hits: 0
+B28h state: staged candidate, not production-integrated
+B28h migration collision: 0089/0090; canonical slots already occupied; current next slot 0107+
+Gap matrix rows: 54

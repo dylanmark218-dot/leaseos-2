@@ -1,0 +1,11 @@
+LeaseOS CAL05a unified audit — 2026-09-14
+
+Canonical merged main before audit docs: 50a17103ea439fbb12a4f2bb9cbdef0f9b5f2118
+Exact CAL05a source: bcfe993d54c08e7c45da254312d5e0643e2e08c6
+Combined fix candidate: f3186a54bdc6a9bd7e7b66e0cdb54d20ba225618
+Branches after audit branch creation: 203
+Final tags after audit tag: 11
+CAL05a: 309 tables / 102 migrations / 483 role procedures / 161 test files / 2,653 source test cases
+Recommended fix candidate: 119 sensitive permissions / 2,654 source test cases
+Static integrity: git fsck clean; 0 non-empty duplicate files; 0 case collisions; 0 conflict markers; 0 obvious secret-pattern hits.
+Full dependency/Vitest/MySQL/build/browser/device gate not independently rerun in this container.

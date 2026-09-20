@@ -146,3 +146,38 @@ describe("identity and direction", () => {
     expect(dir()).toBe("both");
   });
 });
+
+describe("a road that is only there when the ground is frozen", () => {
+  const imp = (tags: Record<string, string>) =>
+    importOsmWay({ id: 1, tags, geometry: [[-114, 53], [-113.9, 53.1]] },
+      { sourceKey: "geofabrik_osm_ab", idPrefix: "OSM-AB-" });
+
+  it("recognises an ice road, not just a winter road", () => {
+    // Alberta carries 13 and Saskatchewan 6; leaving ice_road out imported them as gravel track.
+    for (const tags of [{ winter_road: "yes" }, { ice_road: "yes" }, { seasonal: "winter" }]) {
+      const r = imp({ highway: "track", ...tags });
+      expect(r.imported && r.surfaceKind).toBe("winter");
+    }
+  });
+
+  it("advises that the road is seasonal, separately from what it is made of", () => {
+    /*
+     * surface says what it is made of; it does not say that for most of the year it is not there.
+     * A route costed on surface alone reads "winter" as rough going and sends a unit down it in July.
+     */
+    const r = imp({ highway: "track", winter_road: "yes" });
+    expect(r.imported && r.advisories.some(a => a.startsWith("seasonal_road_ban:"))).toBe(true);
+  });
+
+  it("states no opening date, because OpenStreetMap does not carry one", () => {
+    const r = imp({ highway: "track", ice_road: "yes" });
+    const a = (r.imported ? r.advisories : []).find(x => x.startsWith("seasonal_road_ban"))!;
+    expect(a).toMatch(/no opening or closing date is stated/);
+  });
+
+  it("leaves seasonal_road_ban silent on an ordinary road", () => {
+    const r = imp({ highway: "unclassified", surface: "gravel" });
+    expect(r.imported && r.advisories.some(a => a.startsWith("seasonal_road_ban"))).toBe(false);
+    expect(r.imported && r.silentChecks).toContain("seasonal_road_ban");
+  });
+});
