@@ -1,0 +1,225 @@
+# LeaseOS_Specialized_Freight_Compliance_Build_Plan_v1
+
+_Text extracted from LeaseOS_Specialized_Freight_Compliance_Build_Plan_v1.pdf (6 pages). The PDF beside it is the original._
+
+LeaseOS Specialized Freight & Movement
+ Compliance
+ Build Plan v1 - highway, specialty freight, over-dimensional movement, escort-provider integration, secure custody
+ and evidence workflows
+Design principle: LeaseOS should determine the applicable rule packs from the vehicle, cargo, route, jurisdiction and job
+- then fail closed when a legally or operationally required condition is unknown, expired, missing or contradicted.
+Third-party service providers remain interchangeable and are not hard-coded to any named company.
+1. Core Architecture
+Component
+Build requirement
+Specialty profile registry
+Versioned rule packs activated by cargo, vehicle, movement type, jurisdiction and permit conditions.
+Stackable classifications
+A trip can simultaneously be TDG + tanker + overweight + overheight + secure-custody, rather than forcing one category.
+Pre-departure gate
+Evaluate driver, unit, trailer, cargo, documents, permits, route, weather/road restrictions, securement and required support services.
+Authority hierarchy
+Permit-specific conditions and current authoritative rules override generic LeaseOS guidance. Store source, effective dates and verification status.
+Evidence ledger
+Timestamped actor, GPS, document/version, photos where appropriate, signatures, inspection events, corrections and reason codes.
+Exception engine
+Missing/expired/unknown/contradictory items become visible exceptions; safety-critical exceptions block dispatch.
+2. Specialty Freight Rule Packs
+Fuel / petroleum tanker
+TDG classification and shipping document linkage; tank/trailer identity and inspection status; placard validation;
+loading/unloading checklist; grounding/bonding or site-required controls; compartment/load record; spill/emergency workflow;
+seal and custody events where used.
+Propane, compressed gas and cryogenic
+Pressure-vessel/trailer documentation; commodity-specific TDG controls; fill/load records; unloading connection checklist;
+emergency information; temperature/pressure telemetry interfaces where equipment supports them.
+Refrigerated / temperature-controlled
+Cargo-specific setpoint; pre-cool; continuous temperature history; door events; defrost events; sensor calibration status;
+sanitation records; temperature excursion workflow; receiver acceptance/rejection and cold-chain evidence report.
+Dangerous goods general
+UN number, shipping name, class/division, subsidiary class, packing group where applicable, quantity/container type, shipping
+document, placards/marks, training credential status, emergency-assistance requirements and jurisdictional validation.
+Explosives / Class 1
+Dedicated high-security compliance profile. Validate applicable authorization, classification/compatibility information,
+documentation, custody, authorized receiver and other legally required movement conditions. Keep sensitive operational
+information role-restricted.
+
+
+Firearms / controlled or high-value freight
+Commercial freight custody profile: authorized parties, package/pallet counts, seal/tamper events where used, receiver
+verification, proof of delivery and strict role-based visibility. Ammunition is separately evaluated for applicable TDG
+requirements.
+Radioactive / regulated sources
+Dedicated regulated-material rule pack with authority-specific documentation, package/category fields, trained personnel
+validation, custody and emergency-response information. No generic rule should substitute for the applicable regulator.
+Lithium batteries / EV battery packs
+Battery chemistry/type and condition, packaging status, damaged/defective exception, TDG classification where applicable,
+temperature/fire exception workflow and carrier documentation.
+Waste / vacuum / oilfield fluids
+Waste stream classification, generator, origin, quantity, manifest/ticket, approved destination, load/unload custody, partial
+acceptance, rejection, disposal receipt and complete generator-to-facility chain of custody.
+Livestock
+Species/load data, welfare/rest/water/ventilation requirements by jurisdiction, condition checks, delays, transfer-of-care records
+and exception escalation.
+Logging / pipe / coils / precast / machinery
+Commodity-specific securement templates, geometry/weight, blocking/bracing, tiedown/WLL evidence, edge protection,
+load-shift inspections and route constraints.
+High-value / sensitive cargo
+Need-to-know manifest visibility, custody scans, tamper exceptions, authorized receiver, proof of delivery and audit trail without
+exposing sensitive detail on ordinary dispatch/map views.
+
+
+3. Heavy & Over-Dimensional Movement Engine
+Movement dimension
+LeaseOS planning fields / gates
+Overwidth
+Loaded width, permit thresholds/conditions, lane/route constraints, escort requirements, signs/lights/flags as required by authority.
+Overheight / high load
+Loaded height, verified clearance data, unknown-clearance block, overhead utility/signal/structure conflicts, high-load support workflow.
+Overlength / overhang
+Overall combination length, load length, front/rear projection, turning constraints, permit/escort conditions.
+Overweight
+GVW plus individual axle and axle-group loads; permit limits; road/bridge/seasonal restrictions; route-specific evaluation.
+Special configurations
+Mobile cranes, service rigs, long combination vehicles, multi-axle heavy haul, steering dollies/boosters/jeeps and other configurable axle groups.
+Travel restrictions
+Permit time windows, daylight/night restrictions, weather/visibility conditions, road bans, construction, municipal restrictions and jurisdiction boundaries.
+4. Cargo Securement Engine
+Securement should be a reusable calculation-and-evidence subsystem, not a generic checkbox. Capture cargo type, pieces,
+mass, dimensions, center-of-gravity information when known, anchor points, tiedown type/count, working load limits,
+blocking/bracing, dunnage, friction/anti-slip material and edge protection. Commodity-specific rules remain authoritative.
+Workflow
+Implementation
+Plan
+Generate a securement plan from cargo + vehicle + applicable commodity rule pack.
+Verify
+Driver confirms actual tiedowns/anchors and records exceptions; required evidence can be attached.
+Reinspect
+Rule engine schedules required en-route inspections based on the applicable jurisdiction/rules rather than a hard-coded universal distance.
+Exception
+Shift, damaged tiedown, broken seal, compromised packaging or changed load geometry opens a corrective workflow.
+Audit
+Preserve original plan, inspection events, corrections, actor and reason instead of silently overwriting.
+5. Pilot / Escort Vehicle Program
+LeaseOS does not need to supply escort services. Build the operational parameters and an open third-party provider interface.
+No provider name is assumed or embedded.
+ Determine escort requirement from permit conditions, movement dimensions, route and jurisdiction; store front/rear positioning
+and any additional authority-directed support.
+ Provider qualification object: service region, credentials/qualifications where applicable, insurance, equipment capabilities,
+availability and verification dates.
+ Assignment package: permit, route/version, dimensions, movement window, communication plan, meeting point and
+authorized operational contacts - only the information the provider needs.
+ Trip state: requested -> accepted -> mobilizing -> staged -> active -> complete -> disputed/cancelled, with timestamps and
+evidence.
+ Communication check before movement and event reporting for route blockage, clearance concern, breakdown, weather
+deterioration or permit-condition conflict.
+ Provider cannot edit LeaseOS regulatory rules. Field feedback becomes a review request handled through the
+compliance-content change process.
+ Service-provider billing remains separate from LeaseOS subscription/platform billing; support configurable
+referral/platform/service-management fee models later.
+6. Third-Party Compliance / Field Validation Partner
+Create an unnamed, non-exclusive Service Partner role. A future trucking-safety, pilot/escort or compliance company can audit
+workflows, perform field validation or deliver contracted services without becoming the authority that writes LeaseOS rules.
+
+
+Government/permit sources remain the compliance authority; partner findings enter a controlled review and approval workflow.
+
+
+7. Suggested Data Model
+Table / object
+Purpose
+specialty_profiles
+profile_id, code, name, version, jurisdictions, effective_from/to, status
+trip_specialty_profiles
+trip_id, profile_id, activation_reason, evaluated_at
+cargo_items
+trip/load, category, description, quantity, mass, dimensions, regulated identifiers, sensitivity level
+securement_plans
+load, rule_version, anchors, tiedowns, WLL data, blocking/bracing, verification status
+securement_inspections
+plan, timestamp, location, result, exceptions, actor, evidence
+movement_dimensions
+width, height, length, projections, GVW, axle/axle-group configuration
+movement_permits
+authority, permit number, effective period, conditions, route/version, document
+clearance_checks
+route segment/object, required clearance, known clearance, provenance, status
+escort_requirements
+movement, requirement source, count, positioning, police/utility/support flags
+service_providers
+tenant-independent provider record, regions, capabilities, qualification state
+provider_assignments
+job/trip, provider, scope, status, SLA, acceptance and completion evidence
+custody_events
+cargo/load, from/to party, timestamp, location, seal/tamper state, proof
+telemetry_streams
+temperature/pressure/door/etc. sensor identity, calibration and observations
+compliance_exceptions
+severity, gate impact, source, affected object, remediation, resolution
+rule_sources
+authority, URL/document identifier, jurisdiction, version/effective date, verification/review dates
+8. Dispatch Gate Sequence
+1. Resolve tenant, job, driver, unit, trailers and actual cargo.
+2. Classify applicable specialty profiles; allow multiple simultaneous profiles.
+3. Resolve jurisdiction(s), route, permit conditions and current versioned rule sources.
+4. Validate driver/unit/trailer credentials and inspections.
+5. Validate cargo documentation, TDG/regulated-material requirements and custody requirements where applicable.
+6. Evaluate dimensions, axle groups, road/bridge/clearance constraints and permit conditions.
+7. Validate securement plan and required inspection schedule.
+8. Determine required escort/pilot/utility/police or other support from authoritative conditions.
+9. Evaluate road/weather/time-window restrictions and offline-data freshness.
+10. Return READY, READY_WITH_ACKNOWLEDGED_NONSAFETY_EXCEPTIONS, or BLOCKED. Safety-critical unknowns
+are never treated as safe.
+11. At departure, freeze a dependency fingerprint of the rule versions, permit, route and evidence used for the decision.
+9. Implementation Checkpoints
+Checkpoint
+Deliverable
+Gate
+S1
+Specialty profile registry + stackable classification
+Pure tests for deterministic profile activation.
+S2
+Heavy/over-dimensional schema + permit-condition parser
+Unknown bridge/clearance must fail closed.
+S3
+Securement plan + inspection ledger
+No silent overwrite; correction/audit tests.
+S4
+Fuel/TDG + reefer rule packs
+Versioned authority source attached to every compliance decision.
+S5
+Waste/custody + sensitive/high-value profiles
+RBAC and tenant isolation tests.
+S6
+Escort requirement + open provider interface
+No named/provider-specific coupling; provider cannot alter rules.
+
+
+Checkpoint
+Deliverable
+Gate
+S7
+Telemetry adapters + offline queue
+Loss of network does not lose observations/events.
+S8
+Dispatch-gate integration
+Regression suite proves ordinary freight is not unnecessarily blocked.
+S9
+Field validation sandbox
+Partner feedback creates review requests, never production rule edits.
+S10
+Production readiness
+Legal/regulatory review, security review, real-device/offline tests, source freshness monitoring.
+10. Important Product Boundaries
+ LeaseOS should not claim that a calculated route, securement plan or permit interpretation is itself legal authorization. The
+applicable authority and issued permit remain controlling.
+ Do not hard-code example temperatures, escort thresholds, securement distances, dimensions or weights as universal legal
+rules. They vary by cargo, equipment, jurisdiction, permit and rule version.
+ Sensitive cargo information should use least-privilege access, encrypted storage/transport, immutable audit events and
+minimized map/dispatch display.
+ Regulatory data needs source provenance, effective dates, review dates and a stale-data state. Unknown or stale
+safety-critical data cannot silently become 'clear'.
+ Third-party validation is valuable but does not replace required regulatory, legal, engineering or authority approval.
+11. Relationship to Existing LeaseOS Plan
+This package extends the existing LeaseOS mapping/routing, provenance, confirmation, audit, offline-first and dispatch-gate
+architecture. It should be implemented after the core stabilization and tenant-scoping work, then integrated into the same
+canonical gateway rather than built as a parallel application.

@@ -1,0 +1,520 @@
+Worked for 15s
+
+Yes. I’d include all of that, but I’d tighten one part of the design: Google should never be allowed to become the legal truck-routing authority. The safest LeaseOS architecture is for our engine to own the approved route from beginning to end.
+
+The combined architecture should look like this:
+
+LEASEOS ROUTING STACK
+
+                 ┌──────────────────────┐
+                 │   TRUCK / LOAD       │
+                 │ height / width       │
+                 │ weight / axles       │
+                 │ trailers / TDG       │
+                 │ permits / load state │
+                 └──────────┬───────────┘
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────┐
+│                  LEASEOS ROUTE AUTHORITY                  │
+│                                                           │
+│   Hard legal constraints                                  │
+│   Physical restrictions                                   │
+│   Company routing rules                                   │
+│   Oilfield/back-road rules                                │
+│   Loaded vs empty configuration                           │
+└───────┬─────────────────────┬─────────────────────┬───────┘
+        │                     │                     │
+        ▼                     ▼                     ▼
+ Offline Alberta        Live road state       Commercial
+ road graph             / restrictions        truck routing
+        │                     │                     │
+ OSM PBF/GPKG          Alberta 511             HERE API
+        │              Road bans                   │
+        │              Municipal rules             │
+        └─────────────────────┬─────────────────────┘
+                              │
+                              ▼
+                     ROUTE VALIDATION
+                              │
+                  ┌───────────┴──────────┐
+                  │                      │
+             Route approved         Conflict found
+                  │                      │
+                  ▼                      ▼
+              NAVIGATE             HOLD / REROUTE
+                  │
+       ┌──────────┼───────────┐
+       ▼          ▼           ▼
+ LeaseOS map   Google map   Satellite/
+ navigation   presentation imagery
+
+HERE fits very well as an extra truck-intelligence layer
+
+HERE currently supports truck routing using parameters such as gross/current weight, height, width, length, axle weight, axle groups, trailers and hazardous goods, and applies legal, physical and time-dependent truck restrictions. 
+
+It even supports axle-group information such as:
+
+single
+tandem
+triple
+quad
+quint
+
+which is much closer to the kind of Alberta heavy-haul logic LeaseOS needs than ordinary consumer navigation. 
+
+So we could use HERE in two ways:
+
+MODE A — VALIDATOR
+
+LeaseOS calculates route
+        ↓
+HERE independently calculates truck route
+        ↓
+Compare
+        ↓
+Investigate disagreements
+
+or:
+
+MODE B — ROUTE PROVIDER
+
+LeaseOS sends:
+truck + trailer + load configuration
+        ↓
+HERE generates commercial-truck route
+        ↓
+LeaseOS adds:
+511
+road bans
+municipal rules
+oilfield roads
+company rules
+        ↓
+LeaseOS validates final route
+
+I actually prefer supporting both.
+
+
+---
+
+The Google part needs one correction
+
+The concept you pasted is close, but I would not make this assumption:
+
+> Calculate any arbitrary route ourselves and tell Google Maps to follow that exact polyline turn-for-turn.
+
+
+
+Google's Navigation SDK can use Google-generated route tokens from Google's Routes APIs. Those let Navigation SDK try to preserve the planned route objectives, although Google says the navigation route can still vary because of changing road conditions. 
+
+That's different from handing Google an arbitrary GraphHopper/HERE/LeaseOS polyline and saying:
+
+FOLLOW THIS EXACTLY.
+DO NOT RECALCULATE.
+
+I would not depend on Google for that safety-critical guarantee.
+
+Instead, separate rendering from routing
+
+We absolutely can take our approved route geometry:
+
+lat/lon
+lat/lon
+lat/lon
+lat/lon
+...
+
+and draw that polyline over a Google map.
+
+Google is then the visual basemap.
+
+LeaseOS remains responsible for:
+
+Turn instructions
+Route adherence
+Off-route detection
+Truck restrictions
+Rerouting
+Warnings
+511 state
+Compliance
+
+That's much safer.
+
+
+---
+
+Therefore I'd give LeaseOS three navigation modes
+
+1. LeaseOS Truck Navigation — primary
+
+LEASEOS APPROVED ROUTE
+
+OSM
++
+GraphHopper/internal engine
++
+511
++
+Alberta restrictions
++
+HERE validation
++
+company/back-road intelligence
+
+LeaseOS provides turn-by-turn navigation itself.
+
+This should eventually become the default commercial mode.
+
+
+---
+
+2. Google enhanced-map mode
+
+Same LeaseOS route:
+
+LeaseOS route
+      ↓
+Google Maps basemap
+      ↓
+LeaseOS route polyline
+      ↓
+LeaseOS instructions
+
+That gives the driver Google's familiar map appearance while retaining our routing brain.
+
+And when satellite imagery helps identify:
+
+lease entrances
+
+well pads
+
+staging areas
+
+access roads
+
+turnaround areas
+
+yards
+
+plants
+
+
+we can expose a satellite view.
+
+But we should respect Google's licensing/caching rules rather than treating its imagery as our permanent offline dataset.
+
+
+---
+
+3. External Google handoff
+
+There can still be a button:
+
+OPEN IN GOOGLE MAPS
+
+But I'd label it something like:
+
+External navigation
+⚠ Not LeaseOS truck-validated navigation
+
+for heavy/commercial configurations.
+
+For a pickup truck driving back to town, that's fine.
+
+For:
+
+52,000 kg
+4.6 m high
+oversize permit
+TDG
+tridem trailer
+
+we should not silently give control of the route to a consumer navigation system.
+
+
+---
+
+Your tiered-cost idea also stays
+
+This part of what you pasted is very good.
+
+We don't need to call expensive commercial APIs constantly.
+
+I'd define the hierarchy like this:
+
+LEVEL 0
+OFFLINE ONLY
+
+OSM road graph
+cached restrictions
+cached 511
+company roads
+
+Cost:
+essentially infrastructure cost only
+
+LEVEL 1
+LEASEOS ONLINE
+
+Offline road graph
++
+fresh Alberta 511
++
+fresh road-ban/restriction feeds
+
+Use for:
+normal Alberta routing
+
+LEVEL 2
+COMMERCIAL VALIDATION
+
+LeaseOS
++
+HERE truck routing
+
+Use when:
+heavy configuration
+oversize
+TDG
+unknown road
+complex bridge restriction
+cross-jurisdiction haul
+routing uncertainty
+
+LEVEL 3
+PREMIUM VISUAL DATA
+
+Google satellite / mapping services
+
+Use when:
+driver requests it
+dispatcher needs imagery
+final lease access inspection
+yard/well-pad identification
+
+So you're not paying Google or HERE for every map movement.
+
+
+---
+
+I would add a Routing Confidence system
+
+This could become a major LeaseOS feature.
+
+Every calculated route gets a confidence state:
+
+GREEN
+LEASEOS VERIFIED
+
+Truck geometry verified
+Weight verified
+511 fresh
+Road restrictions verified
+No unresolved conflicts
+
+YELLOW
+LIMITED VERIFICATION
+
+Example:
+municipal ban data unavailable
+511 42 minutes old
+private road status unknown
+
+RED
+ROUTE NOT VERIFIED
+
+Known conflict
+bridge problem
+closure
+weight issue
+missing required permit
+unknown road authority
+
+And possibly:
+
+GREY
+OFFLINE / STALE DATA
+
+Routing possible
+live conditions unavailable
+
+That's far more useful than merely drawing a blue navigation line.
+
+
+---
+
+Loaded and empty routing should be separate too
+
+This is especially useful for LeaseOS.
+
+A fluid hauler could start with:
+
+UNIT
+22 m³ water truck
+
+OUTBOUND
+Loaded
+
+GVW
+43,800 kg
+
+After unloading:
+
+RETURN
+Empty
+
+GVW
+21,500 kg
+
+The legal route might change.
+
+HERE actually supports vehicle properties affecting routing, and its route-matching documentation even accounts for vehicle measures changing around waypoints. 
+
+LeaseOS could therefore know:
+
+LOAD SITE
+↓
+Loaded truck route
+↓
+DISPOSAL / LEASE
+↓
+Unload confirmed
+↓
+Vehicle state changes
+↓
+Recalculate empty return route
+
+That also ties directly into your:
+
+manifest
+billing
+load tickets
+GPS proof
+disposal tickets
+HOS
+dispatch
+
+systems.
+
+
+---
+
+And I would connect the AI secretary to this
+
+Then the route system becomes evidence rather than only navigation.
+
+The AI secretary can automatically record:
+
+08:41
+Unit departed Hinton.
+
+09:17
+Entered Hwy 40.
+
+09:52
+511 condition changed:
+snow-covered section ahead.
+
+09:53
+LeaseOS recalculated route.
+
+10:38
+Entered radio-controlled road.
+
+Radio:
+LADD 2
+
+10:39
+Driver prompted:
+"Call kilometres."
+
+11:12
+Arrived lease.
+
+11:14
+GPS geofence confirmed.
+
+11:18
+Load transfer started.
+
+That starts feeding your paperwork automation.
+
+
+---
+
+So the complete LeaseOS stack becomes
+
+LEASEOS MAP + ROUTING
+
+DATA
+├── OSM PBF
+├── GeoPackage
+├── Alberta 511
+├── Alberta road restrictions
+├── Municipal road bans
+├── Bridges
+├── Seasonal roads
+├── Resource roads
+├── Lease roads
+├── Road authorities
+├── Radio roads
+├── LSD coordinates
+├── Rigs
+├── Wells
+├── Disposals
+└── company/private routes
+
+ROUTING
+├── LeaseOS routing graph
+├── GraphHopper/custom engine
+├── HERE truck intelligence
+└── Route validation engine
+
+VEHICLE
+├── height
+├── width
+├── length
+├── empty weight
+├── loaded weight
+├── GVW
+├── axle groups
+├── trailer configuration
+├── TDG
+├── permits
+└── load state
+
+LIVE
+├── Alberta 511
+├── closures
+├── construction
+├── road conditions
+├── weather
+├── bridge restrictions
+├── incidents
+└── current restriction changes
+
+NAVIGATION
+├── LeaseOS offline navigation
+├── LeaseOS turn-by-turn
+├── Google visual basemap
+├── satellite imagery
+└── optional Google external handoff
+
+OPERATIONS
+├── dispatch
+├── HOS
+├── billing
+├── manifests
+├── load tickets
+├── disposal tickets
+├── GPS evidence
+├── geofences
+└── AI secretary
+
+That is the architecture I'd put into the LeaseOS master build specification.
+
+And yes, I'd preserve the original idea you're describing: free/offline data carries as much of the workload as possible, 511 supplies live Alberta intelligence, HERE adds commercial truck knowledge when required, and Google is used selectively for high-quality mapping/satellite/navigation presentation rather than being allowed to decide whether a truck can legally travel a road. 
+
+One remaining file issue hasn't changed: to inspect the actual GeoPackage you've split across .z01–.z10, I still need the companion Offline maps.zip final volume. Once you add that, we can inventory the actual Alberta map schema and map each available field directly into this architecture.

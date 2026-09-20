@@ -1,0 +1,680 @@
+Worked for 4m 41s
+
+Yes. I treated 515ce64 on integration/reconciled-2026-09-16 as “what is here now” and compared it against the LeaseOS material already in the project portfolio and our LeaseOS discussions. I did not add new product ideas.
+
+The important distinction is that LeaseOS now has a genuinely green engineering baseline—118 migrations apply, typecheck passes, 191/191 test files pass with 3,035 tests, and the build gates pass—but that does not mean the project portfolio is feature-complete or production-ready. 
+
+LeaseOS full outstanding-project audit
+
+I would use these status meanings:
+
+Status	Meaning
+
+MISSING	We discussed it as LeaseOS functionality, but it is not materially implemented
+PARTIAL	A substantial foundation exists but the requested feature is incomplete
+UNWIRED	Code exists but production routes/workflows do not actually use it
+UI GAP	Backend exists, but the operator/driver/customer interface we discussed does not
+DATA BLOCKED	Engine exists, but authoritative/licensed data or human verification is still missing
+READY TO MERGE	Work exists on another branch but is absent from the reconciled branch
+
+
+1. Immediate reconciliation work still outside the current branch
+
+Portfolio item	Status	What is still missing
+
+B28 widget system	READY TO MERGE / PARTIAL	boardSemantics, widgetService, widgetRegistry, /widgets, three integration tests, accessibility spec, licence gate and template adoption still need integration. The underlying engine is preserved on candidate/b28h-widget-engine.
+Academy readiness bridge	READY TO MERGE	academyReadinessBridge, sheetSerial, sheetSerialAllocator, the import-path fix and numbered assessment-sheet work remain on fix/chat5-module-paths-and-vitest.
+TDG certificate content enforcement	UNWIRED	tdgCertificateContents exists and is tested but is not yet invoked by the issuance router.
+TDG topic coverage reconciliation	UNWIRED	tdgTopicCoverage exists but is not yet wired into Academy issuance/review.
+Inspector-request workflow	UNWIRED	inspectorRequest exists and its table exists, but there is no finished router workflow consuming it.
+Academy assessment-sheet integrity	PARTIAL	PENDING-2/3 assessment-sheet registry/integrity triggers and PENDING-4 topic-review hashes depend on the sheet-serial work.
+
+
+Those Academy and widget items are explicitly the first two remaining gaps in the reconciliation audit. 
+
+The Academy itself is much further along than it used to be. The portfolio already contains the server-owned TDG expiry model, two-party signature lifecycle, reasonable-grounds attestation, retention, statements of experience, source tiers and foreign-road credential recognition. 
+
+
+---
+
+2. Native LeaseOS Field app is still the biggest product gap
+
+This remains one of the clearest differences between the server system we have and the actual truck/field product we planned.
+
+Capability discussed	Current state
+
+Android/native LeaseOS Field shell	MISSING/PARTIAL — no finished Capacitor/native production shell
+Encrypted SQLite field database	MISSING
+Hardware-backed keystore	MISSING
+Native encrypted document/evidence vault	MISSING
+Camera evidence capture	MISSING NATIVE IMPLEMENTATION
+Continuous/controlled GPS collection	MISSING NATIVE IMPLEMENTATION
+Biometric signing	MISSING NATIVE IMPLEMENTATION
+Local notifications	MISSING
+Reliable dead-zone sync on actual tablets	PARTIAL — protocol/outbox exists, device implementation remains
+Device clock-skew handling	PARTIAL — signed packages allow ±10 minutes, but field UX for a wrong tablet clock is still missing
+Real-device offline testing	MISSING
+Android browser/native E2E tests	MISSING
+
+
+The reconciliation audit independently identifies the native runtime—Capacitor, SQLite, keystore, camera, GPS and biometric—as unfinished. 
+
+This is important because a lot of LeaseOS's server-side offline infrastructure is already there. What is missing is the last mile onto the actual tablet/phone in the truck.
+
+
+---
+
+3. Mapping, trucking navigation and back-road intelligence are not finished
+
+This remains a major part of the portfolio because LeaseOS was explicitly repositioned as trucking/back-road mapping software.
+
+Requirement we discussed	Audit result
+
+Alberta 511 integration	PARTIAL / licensing-sensitive
+Truck-aware municipal routing	PARTIAL
+Complete Alberta back-road graph	MISSING COMPLETE COVERAGE
+Road weight restrictions	PARTIAL/DATA BLOCKED
+Bridge restrictions	PARTIAL/DATA BLOCKED
+Seasonal restrictions	PARTIAL/DATA BLOCKED
+Road closures/incidents/construction	PARTIAL
+Commercial truck restrictions	PARTIAL
+Weigh/inspection stations	PARTIAL to IMPLEMENTED
+LSD finder	PARTIAL
+Surface + downhole location handling	PARTIAL
+Rig/lease finding	PARTIAL/DATA SOURCE DEPENDENT
+Disposal-site mapping	PARTIAL
+Water-fill sites	not complete as province-wide authoritative dataset
+Company/private roads	foundation exists; comprehensive ingestion missing
+Route alternatives	PARTIAL
+Offline maps	server/data foundation exists; native client incomplete
+Satellite/aerial imagery	not a completed production mapping layer
+Posted speed limits	DATA BLOCKED — no verified complete source
+Province/territory boundary-aware routing	PARTIAL
+PostGIS/Valhalla/Martin/MapLibre production deployment	MISSING
+
+
+The current source can route where imported road data exists, but it still does not have a complete authoritative Alberta-wide commercial routing source. The latest audit therefore still lists the provincial routing runtime as unfinished. 
+
+So I would not yet advertise LeaseOS as having complete Alberta truck routing. The architecture is becoming one; the authoritative coverage is not complete.
+
+
+---
+
+4. Back-road radio and communications package is strong on the server, but unfinished in the truck
+
+This is an area where a lot has actually been built.
+
+The route communications engine already understands radio channels, unit radio capabilities, coverage states, satellite/cellular/radio communications, transmit authorization and offline communication packages.
+
+The outstanding parts are:
+
+Remaining communications work	Status
+
+ISED radio data importer	MISSING
+BC radio-road importer	MISSING
+CRTC coverage importer	MISSING
+Automated refresh when source information changes	MISSING
+Notify driver that tomorrow's package changed	MISSING
+Persist sealed communication package to native encrypted vault	MISSING NATIVE HALF
+Fully offline driver consumption	PARTIAL
+Driver radio screen	PARTIAL / production UX unfinished
+Radio-call reminder	MISSING
+Separate promptDelivered from driverConfirmed	MISSING
+Machine-verifiable transmissionVerified	MISSING HARDWARE INTERFACE
+Approved company communications policy	HUMAN CONFIGURATION REQUIRED
+
+
+The older project checkpoint was very explicit about these exact gaps: no automatic rebuild notification, server package not yet persisted natively, no ISED/BC/CRTC importers and no verified radio-transmission interface. 
+
+
+---
+
+5. HOS/logbook is an engine, but it is not yet a finished regulatory product
+
+This one needs careful wording because a lot of HOS software is present.
+
+HOS area	Status
+
+Versioned rules engine	IMPLEMENTED
+Rolling clocks	IMPLEMENTED/PARTIAL
+Dispatch-readiness integration	IMPLEMENTED
+Rule provenance	IMPLEMENTED
+Promotion ledger	IMPLEMENTED
+Verification console	IMPLEMENTED
+One-door verification model	IMPLEMENTED
+Verified production HOS figures	DATA BLOCKED
+North-of-60 rule values	NOT FINISHED
+BC oil-well schedule/profile	INCOMPLETE
+Territorial schedules	INCOMPLETE
+Short-haul profiles	INCOMPLETE
+Complete RODS/ELD workflow	PARTIAL
+Native duty-status capture	MISSING NATIVE IMPLEMENTATION
+Cross-border US profile	not a completed production ELD implementation
+
+
+One specific unresolved rule should stay blocked: the northern federal on-duty value is still flagged as contested. The current audit also identifies a governance defect: limitPromote does not yet enforce the same second-person separation of duties as the other verification workflow. 
+
+So the correct production statement remains:
+
+LeaseOS contains an HOS engine, but its regulatory ruleset has not yet been approved as a complete verified HOS product.
+
+That protects the fail-closed model we designed.
+
+
+---
+
+6. Multi-company architecture is not yet strong enough for SaaS production
+
+We discussed LeaseOS serving multiple carriers/companies.
+
+The organization/member foundations exist, but tenant isolation is not yet a proven system-wide property.
+
+Requirement	Status
+
+Company/organization records	IMPLEMENTED
+User/company membership	IMPLEMENTED
+RBAC	IMPLEMENTED/PARTIAL
+Branch-level authorization	PARTIAL
+All operational rows tenant-scoped	NOT YET PROVEN
+Cross-tenant isolation tests across every router	INCOMPLETE
+Multi-company tenant isolation as a production guarantee	PARTIAL
+
+
+The reconciliation audit explicitly keeps multi-company tenant isolation on the open list. 
+
+This is a release blocker if LeaseOS is going to host unrelated trucking companies in the same production environment.
+
+
+---
+
+7. Client portal exists — but the real live truck tracking we discussed does not
+
+This is an important distinction.
+
+The customer portal already handles much of the commercial workflow: jobs, ticket/job identifiers, assigned unit information, load counts, status, timeline, closeout, disputes/adjustments, documents and customer actions.
+
+But the client shell we discussed went further: when a trackable open job ticket is active, the customer should be able to see the unit they are paying for and understand where it is during the billable job.
+
+That exact part remains incomplete.
+
+Client feature	State
+
+Secure customer portal	IMPLEMENTED
+Customer job board	IMPLEMENTED
+Trackable ticket/job number	PARTIAL/IMPLEMENTED
+Assigned unit display	IMPLEMENTED
+Load progress	IMPLEMENTED
+Job timeline	IMPLEMENTED
+Disputes/adjustments	IMPLEMENTED
+Documents/notices	IMPLEMENTED
+Real-time vehicle GPS position	MISSING
+Customer live map	MISSING
+Billable-hours live movement view	MISSING/PARTIAL
+Incident/stuck/rollover live context	PARTIAL
+Automatically hide location outside authorized billable window	not finished as a complete GPS privacy workflow
+
+
+So we should not rebuild the portal. We need to finish its live telemetry layer.
+
+
+---
+
+8. Company message board: backend yes, actual employee product screen no
+
+We discussed adding the company message board directly.
+
+The source now contains the message-board core, router, lifecycle rules, attachments and receipt/acknowledgement logic.
+
+What I do not find as a finished production operator interface is the actual message-board application experience.
+
+Message board component	State
+
+Channels	backend exists
+Messages	backend exists
+Attachments	backend exists
+Read receipts	backend exists
+Acknowledgement distinction	backend exists
+Internal/client separation	backend exists
+Priority acknowledgement	backend exists
+Employee message-board page	UI GAP
+Channel/inbox navigation	UI GAP
+Mobile employee board	UI GAP
+
+
+That is a good example of something that is coded but still does not feel like a completed LeaseOS feature to the user.
+
+
+---
+
+9. A large portion of the operations frontend is still showcase/demo rather than production workflow
+
+This is probably the biggest thing to address before saying “front end done.”
+
+The reconciled client has real production routes, but several of the richer experiences we designed remain showcase-oriented rather than connected end-to-end to authoritative production mutations.
+
+Interface	Current audit
+
+Training Academy	real production-facing page exists
+Customer portal	real substantial page exists
+Vendor portal	exists
+Facility portal	exists
+Communications package/status	exists
+Disposal directory	exists
+HOS verification console	exists
+Document assistant	exists
+Jobs	thin compared with intended operations workspace
+Mapping	partial production integration
+Evidence	thin operational surface
+Safety	thin operational surface
+Fleet operations	major UX still showcase-oriented
+Trip operations	major UX still showcase-oriented
+Route-safety workspace	showcase-oriented
+Billing/safety workspace	showcase-oriented
+Compliance engine workspace	showcase-oriented
+Offline vault	showcase/native gap
+Full dispatcher command centre	not yet at the final portfolio design
+
+
+So your next frontend phase should promote existing showcase concepts into real production screens, rather than redesigning the product from scratch.
+
+
+---
+
+10. LoadSense is not finished at the actual machine
+
+The mathematical/calibration/protocol/persistence portions are real.
+
+What remains is the physical edge:
+
+LoadSense work	Status
+
+Calibration engine	implemented
+Stability logic	implemented
+Material movement logic	implemented
+Persistence model	implemented
+Gateway model	partial
+Authenticated hardware gateway	MISSING
+BLE/native equipment service	MISSING
+Physical sensor integration	MISSING
+Production hardware validation	MISSING
+Real equipment deployment	MISSING
+
+
+This is another item specifically retained by the reconciliation audit as unfinished. 
+
+
+---
+
+11. AI Secretary is substantial, but the actual production agent is incomplete
+
+We have already talked about the Secretary being more than a chatbot.
+
+Much of the architecture exists: grounding, source admission, document assistant, typed commits, agent routing, compliance helpers and knowledge ingestion.
+
+The remaining portfolio work is:
+
+AI Secretary requirement	State
+
+Document question answering	implemented
+Source-backed RAG	implemented/partial
+Compliance assistance	implemented/partial
+Typed proposed actions	implemented
+Production model provider	not fully configured/wired
+Local/offline model path	partial/not production-ready
+Voice input	partial
+Natural voice response/read documents aloud	incomplete
+Dedicated Secretary/agent workspace	not a completed production interface
+Tool/action observability	partial
+Native microphone/device integration	missing
+Offline field AI on tablet	missing/partial
+Automatic governed knowledge refresh	partial
+
+
+There is also remaining engine-reachability debt around model gateway, voice transcription and several automated engines. I would not create another AI architecture; I would wire the one already present.
+
+
+---
+
+12. Disposal/facility intelligence is only partially complete
+
+The directory exists, and disposal is present throughout trips/billing/tickets.
+
+Still outstanding from what we discussed:
+
+Disposal capability	State
+
+Facility directory	implemented
+Disposal tickets	implemented
+Multiple loads	implemented
+Partial acceptance	implemented/partial
+Chain of custody	implemented
+Location coordinates	partial
+Facility restrictions/material acceptance	partial
+Authority/source provenance for facility data	partial
+Province-wide verified facility data	missing
+Disposal-aware routing	partial
+Automatic facility/API ingestion	missing/partial
+Machine inbound facility tickets	missing
+
+
+
+---
+
+13. Billing is strong, but the automatic trip-to-money chain is not completely closed
+
+The commercial backend is much further along than earlier versions.
+
+Still outstanding are the last automation steps:
+
+Commercial item	Status
+
+Jobs → trips → loads	implemented substantially
+Tickets/signatures	implemented
+Rate resolution	implemented
+Adjustments/disputes	implemented
+Invoice workflows	implemented substantially
+Customer approval	implemented
+Deterministic automatic billing proposal from verified trip data	PARTIAL
+Automatic post-trip package generation	PARTIAL
+Complete downloadable job archive	PARTIAL
+Machine-generated vendor bill ingestion	MISSING
+Machine facility-ticket ingestion	MISSING
+AI rate-sheet extraction from uploaded agreements	PARTIAL
+
+
+
+---
+
+14. Commercial contracts still need to become first-class operational records
+
+We discussed LeaseOS carrying the actual company/customer commercial relationship rather than only producing an invoice.
+
+There is contract/rate infrastructure, but these areas remain incomplete:
+
+Item	Status
+
+Contract terms foundation	exists
+Rate sheets	exists/partial
+MSAs as complete first-class records	partial
+Scope/change-order depth	partial
+Contract-linked operational restrictions	partial
+WBS below cost code	incomplete
+Earned-value/project scheduling depth	incomplete
+
+
+This is more relevant to the construction/commercial side of the portfolio than the first trucking release, so I would place it behind native field/routing/security work.
+
+
+---
+
+15. Fleet, CVIP, inspection and maintenance are mostly present — but not finished
+
+Do not rebuild this area. The project already has fleet shop, defects, work orders, mechanic release, roadside/enforcement concepts and dispatch-readiness linkage.
+
+Still worth finishing:
+
+Remaining item	State
+
+Preventive-maintenance scheduling depth	PARTIAL
+Complete verified regulatory inspection-rule sources	DATA BLOCKED/PARTIAL
+Full credential/document-expiry integration	MOSTLY DONE
+Mechanic/shop mobile UX	PARTIAL
+Maintenance scheduling notifications	PARTIAL
+Production native pre-trip/post-trip capture	NATIVE GAP
+
+
+
+---
+
+16. Digital Safety Binder is still missing as the unified product we discussed
+
+Individual safety components exist, but the single digital company/unit safety binder does not appear to be fully assembled as a first-class interface.
+
+It should eventually surface the already-existing portfolio material such as inspections, unit documents, insurance, permits, training, emergency plans, defect history and required evidence.
+
+This is primarily a composition/UI gap, not a need for another new data architecture.
+
+
+---
+
+17. Company policy portfolio is only partially implemented
+
+We discussed building a policy portfolio for commercial trucking, oilfield, construction and logging operations.
+
+LeaseOS has domain policies and compliance engines scattered throughout the system, but it does not yet have the unified company policy portfolio we discussed.
+
+Outstanding:
+
+Policy capability	State
+
+Domain rules/policies	many exist
+Policy versioning foundation	partial
+Employee policy assignment	partial
+Employee acknowledgement	not unified
+Tie policy to training	partial
+Superseded policy history	not unified
+Company-policy library UI	MISSING/PARTIAL
+Audit export of policy acknowledgement	not unified
+
+
+
+---
+
+18. Remote camp / lease-location living module is still missing
+
+We specifically discussed workers living remotely:
+
+on the lease, in camp, or in temporary camp/accommodation.
+
+I do not find a production LeaseOS module that completes that portfolio item.
+
+This remains MISSING, including the discussed operational concepts around worker accommodation/site assignment, who is staying where, camp/site presence and its relationship to work/rest/safety.
+
+I would keep this behind the first production trucking release, but it definitely belongs on the LeaseOS backlog because it is already part of the project portfolio.
+
+
+---
+
+19. Authentication/security is not finished at the internal/native boundary
+
+A lot of security work exists already—RBAC, external portal hardening, TOTP/lockout/rotation, auditability, authorization boundaries.
+
+The unfinished portfolio pieces are mainly internal/mobile:
+
+Security item	State
+
+RBAC	implemented
+Portal authentication	implemented substantially
+External TOTP	implemented
+Internal password/session security	exists/partial
+Passkey/WebAuthn	not completed
+Native biometric authentication	missing
+Device-bound sessions	partial/missing
+Device attestation enforcement	partial
+Secure native token storage	native gap
+Full tenant-isolation proof	partial
+Full security E2E testing	incomplete
+
+
+
+---
+
+20. Training portfolio: do not duplicate what is already built
+
+One thing I would remove from the “build from scratch” list is the Academy itself.
+
+The portfolio already correctly separates credentials:
+
+Government licensing such as Class 1, Class 2, Class 3 and Air Brake Q is treated as externally issued/tracked, H2S/First Aid are third-party credentials, while the employer-controlled tracks include things such as WHMIS and TDG where the employer's lawful training/certification role applies. 
+
+So the remaining training job is content completion + wiring + frontend polish + company governance, not creating another training engine.
+
+That includes the company-specific oilfield/commercial driving material we discussed.
+
+
+---
+
+21. Legal/product paperwork is still a major missing portfolio
+
+You previously asked us to get LeaseOS's legal side completed. That work is not represented as a finished LeaseOS product legal suite in the reconciled repository.
+
+The current audit separately confirms even the basic repository LICENSE decision remains outstanding. 
+
+From the LeaseOS legal portfolio we already discussed, these still need final LeaseOS-specific drafts/review:
+
+Paperwork	Audit state
+
+Software licence / repository LICENSE	MISSING DECISION
+Terms of Service	MISSING FINAL SUITE
+Privacy policy	MISSING FINAL SUITE
+End-user/company terms	MISSING FINAL SUITE
+Data processing/privacy terms	MISSING FINAL SUITE
+GPS/location monitoring notice/consent	MISSING FINAL SUITE
+AI/OCR/voice disclosures	MISSING FINAL SUITE
+Electronic signature/evidence terms	MISSING FINAL SUITE
+Retention/legal-hold policy	MISSING/PARTIAL
+Acceptable-use terms	MISSING FINAL SUITE
+SLA/support terms	MISSING FINAL SUITE
+Third-party/open-source notices	PARTIAL / needs final production inventory
+Subprocessor/vendor disclosure	MISSING FINAL SUITE
+Client-portal terms	MISSING FINAL SUITE
+
+
+This is one of the areas where we should now start drafting in parallel with the remaining engineering.
+
+
+---
+
+22. Notification layer is incomplete
+
+A recurring portfolio requirement exists across dispatch, safety, training, communications and customer operations.
+
+The internal alerting architecture exists, but the full delivery layer does not.
+
+Notification	Status
+
+In-app alerts	implemented substantially
+Customer notices in portal	implemented
+Email delivery	partial/missing general production integration
+SMS delivery	missing/partial
+Native push/local notifications	missing
+Communication-package changed alert	missing
+Expiring qualification alert delivery	partial
+Maintenance alert delivery	partial
+Dispatch-critical device alerting	native gap
+
+
+
+---
+
+23. Evidence/video still needs the actual media side
+
+Evidence records, hashes, pointers and audit models exist.
+
+But the portfolio envisioned actual field evidence.
+
+The biggest remaining part is storing/handling the actual camera/video evidence, not merely its pointer/hash metadata, plus doing it in the native encrypted field runtime.
+
+
+---
+
+24. Workforce is mostly built, but payroll offboarding is incomplete
+
+Screening, hiring, onboarding, competency, qualifications, probation and offboarding are substantially present.
+
+The specific open financial edge is the final-pay/offboarding calculation. That remains unfinished rather than needing a new workforce system.
+
+
+---
+
+25. Fluids/material inventory is not complete
+
+LoadSense/material movement is one side of this.
+
+The other portfolio item—measured fluids/inventory—does not yet exist as the full inventory system discussed. There are parts/material ledgers, but not a complete measured fluid inventory workflow.
+
+
+---
+
+26. Production database upgrading needs a real deployment strategy
+
+The clean-database migration gate is now excellent for proving the schema can be built.
+
+That is different from production upgrades.
+
+A production deployment still needs a safe applied-migration ledger/version strategy so a live customer's database is advanced, rather than effectively treating migration execution as a clean-CI database operation.
+
+This isn't a new LeaseOS feature; it is unfinished production-readiness work.
+
+
+---
+
+27. Some field-security design issues surfaced during reconciliation and should be closed
+
+These aren't new features, but I would put them on the release blocker board.
+
+The audit found that signed field packages are currently verified against parsed/defaulted input rather than necessarily the exact wire payload the device signed; unknown-key refusals changed from persisted refusal records to exceptions; and a ±10-minute signature freshness rule needs explicit tablet clock-skew handling. 
+
+Those are exactly the sort of issues worth fixing before hundreds of tablets are in dead zones.
+
+
+---
+
+What I would NOT put back on the “missing” list
+
+A lot of things we discussed are already materially represented and should now be finished rather than redesigned.
+
+Area	Audit conclusion
+
+Dispatch/readiness	present
+Workflow orchestration	present
+Jobs/trips/loads core	present
+Billing/adjustments/disputes	present
+Customer portal foundation	present
+Vendor/facility portals	present
+Records/evidence vault backend	present
+Fleet shop/work orders	present
+Workforce	present
+Training Academy	present
+WHMIS/TDG architecture	present
+CVIP/defect/maintenance foundation	present
+Message-board backend	present
+AI Secretary/RAG foundation	present
+Legal-land/LSD foundation	present
+Route graph	present
+Communications/radio planning engine	present
+HOS engine	present but regulatory data incomplete
+LoadSense engine	present but hardware edge incomplete
+IFTA/tax/accounting foundations	present
+Telematics foundation	present
+Audit packages	present/partial export depth
+Disposal workflow	present/partial data depth
+
+
+The source recovery confirms Chats 1–3's workflow, dispatch, billing, records, fleet, integration, telematics, spatial, communications, offline and AI work is in the reconciled line; the principal source losses now concern the widget integration and remaining Academy branch pieces. 
+
+Recommended LeaseOS build order from this checkpoint
+
+I would now freeze new feature invention temporarily and clear the existing portfolio in this order:
+
+P0 — reconcile the code: B28 → Academy sheet-serial/readiness bridge → wire the three Academy modules → HOS separation-of-duties → field-signature issues.
+
+P0 — make Field real: native Android/Capacitor shell → encrypted SQLite/vault → keystore → GPS → camera → biometric → offline package storage/sync → native notifications.
+
+P0 — production safety: full tenant isolation → internal/native authentication → live-database migration strategy → browser/mobile/native E2E.
+
+P1 — make mapping real: complete Alberta road ingestion → commercial restrictions/weights/bridges/seasonal data → jurisdiction boundaries → 511-approved integration → radio importers → LSD/lease/rig/disposal data → offline truck routing.
+
+P1 — finish the actual screens: dispatcher operations → fleet → trip operations → map/routing → safety/evidence → message board → offline vault → client live map.
+
+P1 — close business automation: GPS-based trip record → verified trip billing proposal → disposal reconciliation → job closeout package → invoice → client review.
+
+P2 — finish the rest of the existing portfolio: company policy portfolio → digital safety binder → remote camp/accommodation → commercial contract depth → fluid inventory → AI Secretary production provider/voice/agent workspace.
+
+In parallel: finish the LeaseOS legal/paperwork suite and finish the existing training-course content. No need to wait for every backend item before drafting those.
+
+So the short version is: LeaseOS no longer has a “missing backend architecture” problem. It has an integration, native-device, authoritative-data, frontend-completion and production-hardening problem.
+
+And I would preserve 515ce64 as the current known-good checkpoint before touching any of this. The bundle and source package are checksum-recorded, and the audit identifies this integration branch as the gate-passing line. 
+
+The next useful artifact is a canonical “LeaseOS Remaining Build Register” that turns everything above into exact checkpoints—P0/P1/P2, branch name, migrations, backend work, frontend screen, tests and definition-of-done—so we can work down it without adding or forgetting anything.

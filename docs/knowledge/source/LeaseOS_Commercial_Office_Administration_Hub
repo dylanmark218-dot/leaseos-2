@@ -1,0 +1,1087 @@
+Yes. I would make this a dedicated LeaseOS Commercial Office Administration Hub rather than scattering client, vendor, disposal, accounting, tax and document records across unrelated modules.
+
+The goal should be simple: every dollar, load, document, signature, vendor, client, disposal movement and adjustment should be traceable back to its source record and auditable without the office having to reconstruct the job afterward.
+
+1. Master Client Registry
+
+Every customer should have one canonical account record, with multiple divisions, contacts, sites and billing arrangements underneath it.
+
+Client data	What LeaseOS should track
+
+Client ID	Permanent internal ID such as CLI-000184
+Legal name	Contract/invoice entity
+Operating/trade name	Field-facing company name
+Business number	Tax/accounting reference where applicable
+Tax status	GST/HST/PST rules, exemptions, certificates
+Billing addresses	Separate AP/remittance/project addresses
+Contacts	Dispatch, field, AP, safety, management
+Sites/projects	Rigs, leases, plants, construction sites, yards
+Client PO requirements	Required before dispatch/invoice
+Cost codes	Client-specific codes
+Rate agreements	Effective dates and version history
+Payment terms	Net 15/30/45 etc.
+Credit limit	Optional
+Insurance requirements	COI/endorsement requirements
+Contract/MSA	Linked current and historical versions
+Special billing rules	Minimums, standby, travel, OT, fuel surcharge
+Job-number rules	Client numbering + LeaseOS numbering
+Invoice delivery	Email/API/portal/export
+Client portal access	Authorized client users
+Status	prospect/active/on-hold/suspended/archived
+Risk flags	overdue, contract expired, insurance issue, dispute
+
+
+A client should never be deleted once referenced financially. It becomes archived/inactive so historical invoices and job records remain valid.
+
+
+---
+
+2. Vendor and Supplier Registry
+
+The vendor side should use the same level of discipline.
+
+That includes subcontractors, mechanics, fuel suppliers, tire shops, parts vendors, equipment rental, waste facilities, water sources, towing/recovery, lodging, labs, training providers and any other company LeaseOS pays or relies upon.
+
+Vendor record	Examples
+
+Vendor ID	VEN-000392
+Legal/payee name	Who receives payment
+Operating name	Public/company name
+Vendor class	disposal, fuel, mechanic, subcontractor, parts, training etc.
+Tax information	GST/HST/PST registration where applicable
+Banking/payment profile	Protected accounting fields
+Remittance address	AP
+Primary contacts	Accounting/operations/emergency
+Insurance	certificates + expiration
+WCB/workers-comp documentation	where applicable
+Licence/permit documents	relevant vendor qualifications
+Rate sheets	current/historical
+Purchase-order requirements	yes/no + rules
+Approved-vendor status	pending/approved/suspended/blocked
+Safety status	orientation/prequalification
+Contract	MSA/service agreement
+Service areas	geographic coverage
+Vendor scorecard	service, pricing, incidents, late paperwork
+Documents	invoices, tickets, statements, contracts
+
+
+Vendor approval should be separate from simply creating the vendor.
+
+That gives you:
+
+created → pending verification → approved → suspended → archived
+
+and makes it impossible for a clerk accidentally to pay an unapproved entity without an authorized override.
+
+
+---
+
+3. Unified Client–Vendor Relationship Model
+
+Some companies can be both.
+
+A disposal company might purchase transportation services from you while also charging you disposal fees. Another trucking company might subcontract work to you while performing subcontract work for you.
+
+So don't make the database assume:
+
+> company = customer OR vendor
+
+
+
+Instead:
+
+> organization
+→ client relationship
+→ vendor relationship
+→ facility relationship
+→ subcontractor relationship
+
+
+
+That keeps one legal organization record while allowing multiple commercial roles.
+
+This will prevent duplicate records like:
+
+ABC Oil Ltd.
+ABC OIL
+ABC Oilfield
+A.B.C. Oil Ltd
+
+from becoming four accounting entities.
+
+LeaseOS should have duplicate detection using business number, normalized company name, address, phone and email domain.
+
+
+---
+
+4. Accounts Receivable — Client Money
+
+Every billable job should eventually produce an auditable AR chain:
+
+Client → Contract → Rate Sheet → PO → Job → Dispatch → Trip → Load → Ticket → Signed Evidence → Charge Calculation → Invoice → Payment → Reconciliation
+
+Each invoice line should preserve the source used to calculate it.
+
+Example:
+
+Invoice 10482
+
+Line:
+
+> Unit 216 — hydrovac transportation — Sept 16 — 11.5 hours — $185/hr
+
+
+
+should link directly to:
+
+job
+
+driver
+
+unit
+
+client
+
+approved rate
+
+time events
+
+signed field ticket
+
+client signoff
+
+GPS evidence if permitted
+
+adjustments
+
+tax treatment
+
+invoice
+
+
+Then the office doesn't have to explain later how $2,127.50 appeared.
+
+LeaseOS should be able to show:
+
+CALCULATION RECEIPT
+
+11.50 h × $185.00 = $2,127.50
+
+with the rate version and evidence used.
+
+
+---
+
+5. Accounts Payable — Vendor Money
+
+The mirror workflow should exist for vendors:
+
+Vendor → PO → Service/Material Received → Vendor Ticket → Vendor Invoice → Match → Approval → Payment → Remittance
+
+This should support:
+
+fuel bills
+
+disposal fees
+
+subcontractor invoices
+
+parts
+
+repairs
+
+tire bills
+
+equipment rental
+
+lodging
+
+towing
+
+permits
+
+training
+
+office expenses
+
+communications
+
+software subscriptions
+
+
+The critical feature is three-way matching when appropriate:
+
+Purchase order vs. goods/services actually received vs. vendor invoice
+
+Example:
+
+Disposal site invoice says:
+
+> 184.2 tonnes × $72.00
+
+
+
+LeaseOS can compare that against the load manifests and disposal tickets already captured by the driver.
+
+Mismatch?
+
+Flag:
+
+> AP-MATCH-QUANTITY-DIFFERENCE
+
+
+
+instead of silently paying it.
+
+
+---
+
+6. Disposal/Waste Facility Master
+
+Disposal should become a specific subtype of vendor/facility.
+
+Each disposal facility should carry:
+
+Facility information	Purpose
+
+Facility ID	permanent identity
+Legal operator	vendor relationship
+Facility name	driver-facing
+Coordinates	routing
+Address	records
+Hours	dispatch
+Emergency contact	operations
+Accepted waste	prevent wrong destination
+Restricted materials	safety
+Approval requirements	client/facility
+Fees	accounting
+Rate history	billing verification
+Permit/licence reference	compliance
+Disposal ticket numbering	reconciliation
+Manifest requirements	waste tracking
+Scale availability	weight reconciliation
+Tare rules	audit
+Documents	approvals, permits, contracts
+Data source/provenance	who verified information
+Last verification date	stale-data control
+
+
+That fits directly into your existing disposal directory and turns it into an accounting/compliance record too.
+
+
+---
+
+7. Waste Manifest / Load Manifest System
+
+This should be a major LeaseOS record.
+
+Every material movement should have a unique Load Manifest ID.
+
+Example:
+
+LM-2026-0916-001842
+
+The manifest should tie together:
+
+Client → job → origin → destination → material → driver → truck → trailer → departure → arrival → quantity → ticket → disposal acceptance → billing
+
+Manifest fields should support solids, liquids and mixed measurement systems:
+
+tonnes
+
+kilograms
+
+cubic metres
+
+litres
+
+barrels
+
+yards
+
+loads
+
+hours where quantity is operational rather than physical
+
+
+It should preserve original measured value + normalized value.
+
+Never overwrite:
+
+22.3 m³
+
+with:
+
+140.3 bbl
+
+Instead keep both:
+
+reported_quantity = 22.3 m³
+
+and
+
+normalized_quantity = 140.27 bbl
+
+plus the conversion rule/version.
+
+That gives you reproducible audits.
+
+
+---
+
+8. Chain of Custody
+
+For regulated, contaminated or otherwise tracked material, LeaseOS should be able to answer:
+
+Who had custody? Where? When? What changed?
+
+A chain might look like:
+
+08:14 — Operator releases load 08:17 — Driver accepts 08:18 — Manifest locked 08:21 — Truck departs 09:46 — Disposal site arrival 09:58 — Scale recorded 10:07 — Facility accepts 10:08 — Ticket 928441 attached 10:09 — Manifest closed
+
+Corrections should not change old rows.
+
+Instead:
+
+ORIGINAL → CORRECTION EVENT → REASON → AUTHORIZED BY
+
+which follows the append-only principle already used elsewhere in LeaseOS.
+
+
+---
+
+9. Scale Ticket Reconciliation
+
+Scale tickets are valuable because they can validate both operations and accounting.
+
+Store:
+
+inbound gross
+
+tare
+
+net
+
+outbound gross if applicable
+
+scale identification
+
+ticket number
+
+date/time
+
+facility
+
+units
+
+photo/PDF
+
+OCR result
+
+manually verified values
+
+who verified it
+
+
+Then LeaseOS can compare:
+
+manifest quantity vs. scale quantity vs. vendor invoice quantity vs. client invoice quantity
+
+and produce discrepancy alerts.
+
+
+---
+
+10. Purchase Orders
+
+LeaseOS needs a complete PO registry for both directions.
+
+Client PO
+
+A customer's authorization for LeaseOS/company work.
+
+Track:
+
+Client PO → authorized amount → project → dates → cost codes → remaining value → invoice consumption
+
+Warning:
+
+> PO is 92% consumed.
+
+
+
+Block or require approval once exceeded.
+
+Company Purchase Order
+
+Your authorization for a vendor expenditure.
+
+Track:
+
+PO-2026-00192 → vendor → requester → approver → amount → cost code → project → goods/services → receipts → invoices → remaining balance.
+
+
+---
+
+11. Rate Sheet Registry
+
+Rate sheets should be immutable versioned records.
+
+Never edit last year's rates.
+
+Use:
+
+RATE-CLIENT-018-V1 RATE-CLIENT-018-V2
+
+with:
+
+effective date
+
+expiry date
+
+service
+
+unit/equipment class
+
+hourly rate
+
+kilometre rate
+
+load rate
+
+standby
+
+overtime
+
+subsistence
+
+call-out minimum
+
+travel
+
+fuel surcharge
+
+disposal markup
+
+emergency rate
+
+weekend/holiday rules
+
+
+Every calculated charge references the exact version used.
+
+
+---
+
+12. Expenses and Receipts
+
+Drivers and employees should be able to submit expenses from the field.
+
+Capture:
+
+receipt photo
+
+vendor
+
+amount
+
+tax
+
+currency
+
+date/time
+
+category
+
+project/job
+
+vehicle/unit
+
+employee
+
+payment method
+
+reimbursement required
+
+notes
+
+approval
+
+duplicate detection
+
+
+OCR can propose fields, but a human/validated workflow should confirm accounting-sensitive entries.
+
+
+---
+
+13. Fuel Accounting
+
+Fuel should become its own accounting dataset.
+
+Track:
+
+unit driver vendor location litres price/L tax odometer engine hours jurisdiction fuel type card receipt
+
+That can feed:
+
+operating cost
+
+unit profitability
+
+fuel theft/anomaly detection
+
+IFTA
+
+client fuel surcharge calculations
+
+fleet maintenance analytics
+
+
+and reconcile against fuel-card imports later.
+
+
+---
+
+14. Tax Ledger
+
+Don't hard-code one tax system into invoice code.
+
+Create a proper tax engine + tax ledger.
+
+A transaction should preserve:
+
+tax jurisdiction tax type rate taxable base exemption tax amount calculation version
+
+Examples can include Canadian GST/HST/PST configurations where applicable, but the jurisdiction/rate needs to be configured and sourced rather than assumed forever.
+
+The accounting office should be able to produce period reports for:
+
+taxable sales
+
+tax collected
+
+input tax/eligible tax on purchases
+
+exemptions
+
+adjustments
+
+bad debts/credit adjustments
+
+jurisdiction totals
+
+
+without recalculating old invoices using today's tax rate.
+
+
+---
+
+15. General Ledger Coding
+
+Even if LeaseOS eventually integrates with QuickBooks, Sage, Xero or another accounting platform, it should maintain the operational accounting dimensions internally.
+
+Each financial line should optionally carry:
+
+GL account company branch client vendor project job unit driver department cost centre cost code tax code
+
+That means you can answer questions such as:
+
+> How much did Unit 216 earn on cement work for Client X versus what Unit 216 cost us in fuel, repairs and driver wages?
+
+
+
+
+---
+
+16. Cost Centres and Job Profitability
+
+LeaseOS should calculate job economics.
+
+Example:
+
+Revenue
+
+$18,420
+
+Direct costs
+
+Driver: $3,840
+
+Fuel: $2,115
+
+Disposal: $4,330
+
+Subcontractors: $1,100
+
+Other: $315
+
+Gross contribution
+
+$6,720
+
+Then break that down by:
+
+customer
+
+job
+
+project
+
+truck
+
+trailer
+
+driver
+
+branch
+
+service type
+
+region
+
+
+This is extremely useful for owner/operator and fleet management.
+
+
+---
+
+17. Credit Notes and Adjustments
+
+Never edit a posted invoice silently.
+
+Use accounting events:
+
+invoice → credit note → debit adjustment → write-off → payment → refund
+
+Every event should explain:
+
+reason
+
+amount
+
+user
+
+approval
+
+timestamp
+
+supporting document
+
+
+Same concept for vendor bills.
+
+
+---
+
+18. File Management System
+
+Instead of attaching random files everywhere, LeaseOS should maintain a centralized document index.
+
+Every document gets something like:
+
+DOC-2026-00084942
+
+and metadata:
+
+Metadata	Example
+
+Document type	disposal ticket
+Owner organization	ABC Oil
+Related job	J-2026-1842
+Related load	LM-1842-06
+Related unit	216
+Related employee	Driver 092
+Effective date	Sep 16
+Expiry	optional
+Confidentiality	internal/client/restricted
+Hash	SHA-256
+Original filename	ticket9284.pdf
+Uploaded by	user/device
+Captured time	timestamp
+Source	camera/email/API/upload
+Version	immutable revision
+Retention class	accounting/safety/training/etc.
+
+
+Then one document can legitimately relate to multiple records without making multiple uncontrolled copies.
+
+
+---
+
+19. Document Classes
+
+The file system should recognize major commercial-office categories such as accounting, operations, compliance, fleet, HR/training, legal/contracts and waste/environmental records.
+
+Within those, LeaseOS can classify things like invoices, vendor bills, purchase orders, receipts, rate sheets, contracts/MSAs, insurance certificates, disposal tickets, waste manifests, scale tickets, fuel receipts, timesheets, driver logs, inspection reports, repair invoices, licences, permits, training certificates, statements and tax documents.
+
+
+---
+
+20. Email-to-Record
+
+Office employees receive half their paperwork through email.
+
+LeaseOS should eventually let an authorized mailbox ingest an attachment and propose:
+
+> Invoice from ABC Disposal
+probable Vendor: VEN-000092
+probable Job: J-2026-01832
+probable Manifest: LM-2026-01832-04
+
+
+
+The user approves the match.
+
+Same for:
+
+client PO
+
+rate sheet
+
+vendor bill
+
+disposal ticket
+
+signed contract
+
+insurance certificate
+
+
+That would eliminate a huge amount of office filing work.
+
+
+---
+
+21. OCR With Verification
+
+OCR should never silently turn an image into an accounting fact.
+
+Use:
+
+ORIGINAL DOCUMENT → OCR PROPOSAL → HUMAN/VALIDATED ACCEPTANCE → ACCOUNTING RECORD
+
+Keep both OCR raw text and corrected values.
+
+That gives you evidence when someone later asks:
+
+> Why does LeaseOS say this invoice was $8,147?
+
+
+
+
+---
+
+22. Accounting Period Controls
+
+Once an accounting period is closed, normal users should not be able to rewrite it.
+
+Support:
+
+OPEN REVIEW CLOSED LOCKED
+
+Corrections to closed periods create adjustment events in an allowed period, not historical edits.
+
+
+---
+
+23. Approval Workflows
+
+Use dollar/role thresholds.
+
+For example:
+
+< $500 Supervisor
+
+$500–$5,000 Manager
+
+$5,000–$25,000 Administrator/controller
+
+> $25,000 Executive/owner approval
+
+The actual amounts should be company-configurable.
+
+Similar approval policies should exist for:
+
+vendor creation
+
+bank-detail changes
+
+credit notes
+
+PO overages
+
+invoice write-offs
+
+rate changes
+
+manual tax adjustments
+
+
+
+---
+
+24. Anti-Fraud Controls
+
+LeaseOS should detect things like:
+
+duplicate invoice number from same vendor,
+
+same receipt uploaded twice,
+
+vendor bank details changed immediately before payment,
+
+invoice total altered after approval,
+
+PO exceeded,
+
+invoice quantity doesn't equal accepted quantity,
+
+driver submits receipt while GPS/unit records show incompatible location,
+
+same disposal ticket attached to multiple loads,
+
+same manifest invoiced twice,
+
+same client ticket billed twice,
+
+round-dollar anomalies,
+
+unusually high disposal fees,
+
+unexpected vendor price change.
+
+These should usually be flags, not automatic accusations.
+
+
+---
+
+25. Audit Ledger
+
+This should be universal across the Commercial Office Hub.
+
+Every meaningful change records:
+
+event_id record_type record_id tenant actor role device timestamp previous state/hash new state/hash reason approval source correlation/job ID
+
+For sensitive records, you can chain hashes:
+
+event 100 hash → included in event 101 → included in event 102
+
+That makes unauthorized historical alteration much easier to detect.
+
+
+---
+
+26. Auditor / Accountant Read-Only Portal
+
+This would be valuable.
+
+Instead of handing an accountant thousands of files, give a scoped read-only portal.
+
+Examples:
+
+> Show all vendor invoices Jan 1–Dec 31.
+
+
+
+> Show all disposal tickets associated with Client ABC.
+
+
+
+> Show every adjustment to Invoice 10829.
+
+
+
+> Show all manifests billed to Job 22019.
+
+
+
+> Show GST/tax calculation evidence.
+
+
+
+> Show documents supporting Vendor Payment 92042.
+
+
+
+The accountant/auditor should not have dispatch mutation rights.
+
+
+---
+
+27. Audit Package Generator
+
+LeaseOS should be able to build a ZIP/PDF/index package such as:
+
+Job Audit Package
+
+01 Job Summary 02 Client PO 03 Rate Agreement 04 Dispatch 05 Driver Records 06 Manifests 07 Disposal Tickets 08 Scale Tickets 09 Signed Field Tickets 10 GPS/Operational Evidence 11 Invoice 12 Adjustments 13 Payment 14 Audit Ledger
+
+and produce a manifest containing hashes for every document.
+
+That would be extremely strong for disputes, tax review, insurance claims and client audits.
+
+
+---
+
+28. Record Retention Engine
+
+Different files need different retention rules.
+
+LeaseOS shouldn't simply have a Delete button.
+
+Each record gets a retention classification and:
+
+createdAt retentionUntil legalHold eligibleForDeletion
+
+If a legal hold exists:
+
+> deletion refused.
+
+
+
+If another record depends on it:
+
+> deletion refused.
+
+
+
+This aligns well with the retention-chain design already being built into your Academy.
+
+
+---
+
+29. Search and Office Command Centre
+
+Office staff should be able to search across everything with one search bar.
+
+For example:
+
+> 928441
+
+
+
+could return:
+
+Scale Ticket 928441
+Manifest LM-2026-00428
+Job J-2026-1902
+Invoice INV-10292
+Vendor ABC Disposal
+Truck 216
+Driver 092
+
+rather than requiring the user to know which module contains it.
+
+
+---
+
+30. Commercial Administrative Dashboard
+
+I would give the office one main dashboard showing things like:
+
+Area	Examples
+
+Receivables	invoices due/overdue
+Payables	bills awaiting approval
+Jobs	open/unbilled
+Tickets	missing signatures
+Manifests	open/unreconciled
+Disposal	unmatched facility tickets
+Client PO	nearing limit
+Vendors	documents expiring
+Fleet	maintenance costs
+Taxes	current period totals
+Documents	missing/expired
+Exceptions	duplicate/mismatch alerts
+Closing	records preventing month close
+
+
+This becomes the actual LeaseOS office desk.
+
+
+---
+
+Core database architecture I would use
+
+I would not make dozens of completely independent company tables. I would extend the existing organization, records, jobs, billing and audit architecture around a canonical hierarchy like:
+
+organization
+ ├── organizationRole
+ │    ├── CLIENT
+ │    ├── VENDOR
+ │    ├── FACILITY
+ │    ├── SUBCONTRACTOR
+ │    └── SUPPLIER
+ │
+ ├── contacts
+ ├── addresses
+ ├── taxProfiles
+ ├── contracts
+ ├── rateSheets
+ ├── purchaseOrders
+ └── documents
+
+job
+ ├── dispatch
+ ├── trip
+ │    └── loadManifest
+ │         ├── custodyEvents
+ │         ├── scaleTickets
+ │         ├── disposalTicket
+ │         └── evidence
+ │
+ ├── timeEntries
+ ├── expenses
+ ├── billableEvents
+ └── clientSignoff
+
+accountsReceivable
+ ├── invoice
+ ├── invoiceLine
+ ├── creditNote
+ ├── payment
+ └── reconciliation
+
+accountsPayable
+ ├── vendorBill
+ ├── vendorBillLine
+ ├── receipt
+ ├── payment
+ └── reconciliation
+
+taxLedger
+generalLedgerExport
+auditLedger
+documentRegistry
+retentionPolicy
+
+The most important design rule
+
+I would make LeaseOS use source-linked accounting, not traditional free-form office bookkeeping alone.
+
+A clerk should not normally type:
+
+> $4,330 disposal expense
+
+
+
+and walk away.
+
+LeaseOS should know:
+
+> $4,330 disposal expense
+came from Vendor VEN-0092
+Invoice D-39828
+for five accepted manifests
+under Job J-2026-1842
+matching scale tickets A–E
+approved by Manager 014
+paid under transaction PAY-9284.
+
+
+
+That is the difference between an ordinary trucking office program and the kind of auditable operating system LeaseOS is becoming.
+
+I would make this a formal new LeaseOS tranche called something like Commercial Office / Accounting Records Chain, and build it in phases: organization registry → client/vendor records → PO/rates → manifests/disposal → AR/AP → tax ledger → document registry → audit packages → office dashboard.
