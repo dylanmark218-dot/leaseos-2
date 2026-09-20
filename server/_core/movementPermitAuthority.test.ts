@@ -19,7 +19,8 @@ const holders = (perm: string) =>
 describe("the permit permissions are three acts, not one", () => {
   it("gates all five procedures", () => {
     for (const p of ["statusFor", "listForJob", "record", "determine", "verify"]) {
-      expect(OPERATIONAL_PROCEDURE_PERMISSIONS[`movementPermit.${p}`]).toBeDefined();
+      const map = OPERATIONAL_PROCEDURE_PERMISSIONS as Record<string, string>;
+      expect(map[`movementPermit.${p}`]).toBeDefined();
     }
   });
 
