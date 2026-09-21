@@ -98,3 +98,98 @@ The limitation is visible rather than worked around:
 - No composed portal → `NoPortalAvailable`, naming how many exist that the session does not reach.
 
 None of these is solved by granting something.
+
+---
+
+## 7. `claude/leaseos-auth-workspace-system-t008ad` — SUPERSEDED, do not merge
+
+**SUPERSEDED — do not merge with the canonical portal implementation.**
+
+A second branch implemented the same login/workspace feature more broadly. The owner's decision is that
+the narrow implementation on `claude/login-portal-chooser` is canonical, because the broader branch
+crosses architectural boundaries that were explicitly deferred.
+
+It has **no pull request open**, so nothing was closed; this entry is the record. **Its history is not
+deleted** — the research below is worth keeping, and one of its findings is real.
+
+What it introduced that this checkpoint deliberately does not:
+
+| Its change | Why it is not adopted here |
+|---|---|
+| A new `sessionProcedure` gate | A second session gate beside `roleProcedure` is a second authorization path. |
+| The acting organization in a **cookie**, re-verified per request | A new authority-bearing channel. Even re-verified, establishing it incidentally through a login PR settles a tenancy design nobody reviewed. |
+| **Capability-gated** portal composition | It changes what a portal *means*: today a role composes one, and requiring a capability as well is a product decision about visibility, not a wiring fix. |
+| `AmbiguousOrganization` → an organization chooser | Offering a choice implies choosing is safe. It is not, while role grants carry no organization scope (§2). |
+
+**We agree on the diagnosis.** That branch reached the same conclusion recorded in §2 — role grants
+carry no organization scope — and also recommended that migration as the next checkpoint. The
+disagreement is only about what may be built before it.
+
+### Ideas preserved for later checkpoints
+
+- **Membership expiry** — a real finding, investigated and recorded in §8 below.
+- **An organization chooser** — belongs with the organization-aware authorization design in §4, not
+  before it.
+- **A safe post-login return destination** — already implemented here, by allowing one shape rather
+  than stripping bad ones: `entryModel.safeReturnPath`. It is stored in session storage rather than
+  carried in the URL, and re-sanitised on the way out. Carrying it in the OAuth `state`, as that
+  branch does, is a reasonable alternative and not a gap.
+- **Capability-aware portal composition** — needs its own design decision first, per the table above.
+
+---
+
+## 8. Does an ended membership lose access? — investigated, with evidence
+
+Asked directly, traced through the canonical path, and answered with tests rather than assumption:
+`server/actingScopeMembership.test.ts` (13 cases, the effective-date window against a fake database)
+and `server/actingScopeMembership.db.test.ts` (10 cases, the `status` filter and the whole path through
+`appRouter.createCaller` → `portals.mine`, against real MariaDB).
+
+### Every invalid membership state IS excluded
+
+`resolveActingScope` filters two ways — `status = 'active'` in SQL, and the effective-date window in
+JavaScript. Both work. Proven for: a suspended membership, an ended one, one that has not started, one
+whose end date has passed, and the half-open boundary (a membership ending exactly now is already out,
+so there is no extra day of access). Two live memberships are still refused rather than resolved.
+
+**Their former organization's records are gone**, because those rows carry its `orgRef` and the caller
+no longer resolves to it. The cross-tenant boundary holds.
+
+### What does NOT happen: they are not locked out
+
+A caller with no surviving membership is not refused. They fall through to `single_tenant_fallback`
+and act as the deployment's default tenant — **indistinguishable from a user who never had a
+membership at all**, which is asserted directly in both suites.
+
+And their authority survives, because ending a membership writes nothing to `userRoleAssignments`:
+that table is queried on `revokedAt IS NULL` only. So the grants stand, `roleProcedure` still passes,
+and portals still compose. `portals.mine` returns a working session for an ex-employee.
+
+### Is this a security defect?
+
+**It is a real gap, and its severity depends on the deployment.** What survives is reach over rows
+that belong to *nobody* — unowned legacy rows from before organizations existed, which the `default`
+scope matches. In a deployment with no such rows the practical exposure is small; in one migrated from
+the single-tenant era it is not.
+
+The operational rule it implies is worth stating plainly: **offboarding must revoke role grants.
+Ending the membership alone does not end access.**
+
+### Why it was not fixed here
+
+The obvious correction is small — distinguish "has no membership row at all" (the legitimate fallback,
+for deployments predating organizations) from "has membership rows, none currently live" (refuse). A
+few lines inside `resolveActingScope`.
+
+It was not made in this checkpoint because the change is not as small as it looks:
+
+- `resolveActingScope` is read by roughly a hundred tenant-scoped callers. A new refusal reaches every
+  one of them, and it would need to be a state the routers can render — as `AmbiguousOrganization`
+  now is — rather than a 500.
+- It changes who can log in, which is a behavioural change to an authorization boundary and deserves
+  its own review rather than riding along inside a login-screen PR.
+- The complete answer probably is not in this resolver at all: if ending a membership should end
+  access, the grants should end with it, and that is the organization-scoped-role work in §2.
+
+**Recorded as a security finding for a dedicated authorization checkpoint**, not worked around, and
+not hidden: the tests above assert the current behaviour, so the day it changes, they say so.
