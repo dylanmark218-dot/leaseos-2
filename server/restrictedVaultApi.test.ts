@@ -26,13 +26,15 @@ async function withRole(role: DomainRole) {
 }
 async function incident(over: Record<string, unknown> = {}) {
   const cols = { incidentNumber: `INC-${rnd().toUpperCase()}`, incidentType: "incident", severity: "moderate", originalStatement: "Fixture statement for the vault tests.", originalStatementSource: "typed", occurredAt: new Date(), reportedAt: new Date(), injuryReported: 0, status: "open", ...over };
-  const keys = Object.keys(cols);
+  // An override set to `undefined` means "leave this column alone", so the column
+  // is omitted from the statement rather than bound. Binding it would not do that:
+  // mysql2 rejects `undefined` outright, and binding `null` would be a different
+  // instruction — write SQL NULL over whatever default the column has.
+  const entries = Object.entries(cols).filter(e => e[1] !== undefined);
+  const keys = entries.map(([k]) => k);
   const [r] = await pool.execute<mysql.ResultSetHeader>(
     `INSERT INTO incidentReports (${keys.map(k => `\`${k}\``).join(",")}) VALUES (${keys.map(() => "?").join(",")})`,
-    // Bind values are typed as what a driver can actually serialise. `unknown`
-    // compiled only because nothing checked: mysql2 rejects an undefined or a
-    // function at runtime, so a fixture that grew one would fail in the insert.
-    keys.map(k => (cols as Record<string, mysql.ExecuteValues>)[k]!));
+    entries.map(([, v]) => v));
   return Number(r.insertId);
 }
 
