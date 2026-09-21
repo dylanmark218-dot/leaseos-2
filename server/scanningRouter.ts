@@ -47,7 +47,7 @@ import { assessPrintability } from "@shared/printability";
 import { computeEffectiveRetention } from "./_core/retentionPolicy";
 import { retentionPolicyFor } from "./_core/paperworkRetention";
 import { reviewScan, type ScannedPageSummary } from "./_core/scanReview";
-import type { ExistingLink, LinkTargetKind, TrackingBinding } from "./_core/scanAutoLink";
+import type { ExistingLinkState, LinkTargetKind, TrackingBinding } from "./_core/scanAutoLink";
 
 const KIND = z.enum([
   "expense_receipt", "fuel_receipt", "disposal_ticket", "load_ticket", "scale_ticket",
@@ -141,28 +141,35 @@ async function configuredBindings(db: Awaited<ReturnType<typeof getDb>>): Promis
 }
 
 /**
- * Whether any number on this page is already attached to a record.
+ * Whether any number on this page is already attached to a record — and, crucially, whether we
+ * can say WHOSE record it is.
  *
  * Established SERVER-side and never accepted from the request. The unsafe direction is a client
  * omitting a link that exists — that would let a second scan quietly re-attach evidence — so the
  * server looks it up itself and a caller has no field with which to say "not linked".
  *
- * `trackingReferences` is schema-reserved in this build: the table exists, is unique on
- * `trackingNumber`, and no production path writes it yet. So this lookup is structurally correct
- * and in practice finds nothing. It is wired anyway because it is a read that only ever makes the
- * answer stricter, and the day something populates that table the check is already in place.
+ * The tenant boundary this schema cannot prove. `trackingReferences` is unique on
+ * `trackingNumber` and carries NO organization column; neither does `trackingSequences`. So a row
+ * bearing this number cannot be attributed to an organization at all. Returning it would tell a
+ * caller in organization B that organization A has a disposal record under the number printed on
+ * the paper in their hand — a cross-tenant answer built out of a guess.
+ *
+ * So ownership is reported as UNVERIFIABLE and nothing else: not the target, not the entity, not
+ * even that a row was found. `proposeLinks` turns that into `requires_review` with no proposal.
+ * The lookup still runs, because it only ever makes the answer stricter, and the day these tables
+ * gain an organization column this function can return `owned` for the caller's own records and
+ * keep withholding everybody else's.
  */
 async function existingLinkFor(
   db: Awaited<ReturnType<typeof getDb>>,
   numbers: readonly string[],
-): Promise<ExistingLink | null> {
-  if (!db || numbers.length === 0) return null;
+): Promise<ExistingLinkState> {
+  if (!db || numbers.length === 0) return { kind: "none" };
   for (const n of numbers) {
     const rows = await db.select().from(trackingReferences).where(eq(trackingReferences.trackingNumber, n)).limit(1);
-    const row = rows[0];
-    if (row) return { target: (SEQUENCE_TARGETS[row.entityType] ?? "job") as LinkTargetKind, trackingNumber: row.trackingNumber };
+    if (rows[0]) return { kind: "ownership_unverifiable" };
   }
-  return null;
+  return { kind: "none" };
 }
 
 /** Every bare token on the page that could be a tracking number, for the already-linked lookup. */
@@ -225,14 +232,14 @@ export const scanningRouter = router({
       const { db } = await scopeFor(ctx.user.id);
       const pages = input.pages as ScannedPageSummary[];
       const bindings = await configuredBindings(db);
-      const existingLink = await existingLinkFor(db, candidateNumbers(pages));
+      const existing = await existingLinkFor(db, candidateNumbers(pages));
       return reviewScan({
         kind: input.kind as PaperworkKind,
         pages,
         observations: input.observations,
         context: input.context ?? {},
         trackingBindings: bindings,
-        existingLink,
+        existing,
         textRecognitionRan: input.textRecognitionRan,
       });
     }),

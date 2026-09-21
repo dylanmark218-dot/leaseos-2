@@ -658,16 +658,76 @@ describe("proposing which record a scan belongs to", () => {
     expect(p.best).toBeNull();
   });
 
-  it("requires review for a document that is already linked, whatever it finds", () => {
-    const p = proposeLinks({
-      bindings: BINDINGS, barcodes: [{ format: "CODE_128", value: DSP }],
-      existingLink: { target: "disposal", trackingNumber: DSP },
+  describe("what is known about an existing link", () => {
+    const withState = (existing: Parameters<typeof proposeLinks>[0]["existing"]) =>
+      proposeLinks({ bindings: BINDINGS, barcodes: [{ format: "CODE_128", value: DSP }], existing });
+
+    it("1. proposes normally when nothing matches an existing record", () => {
+      const p = withState({ kind: "none" });
+      expect(p.disposition).toBe("propose_single");
+      expect(p.alreadyLinked).toBeNull();
+      expect(p.ownershipUnverifiable).toBe(false);
     });
-    expect(p.disposition).toBe("requires_review");
-    expect(p.best).toBeNull();
-    expect(p.alreadyLinked).toEqual({ target: "disposal", trackingNumber: DSP });
-    expect(p.reasons.join(" ")).toContain("already linked");
-    expect(p.reasons.join(" ")).toContain("not a re-scan's");
+
+    it("2. names the record only when ownership is established as the caller's own", () => {
+      const p = withState({ kind: "owned", link: { target: "disposal", trackingNumber: DSP } });
+      expect(p.disposition).toBe("requires_review");
+      expect(p.best).toBeNull();
+      expect(p.alreadyLinked).toEqual({ target: "disposal", trackingNumber: DSP });
+      expect(p.reasons.join(" ")).toContain("already linked");
+      expect(p.reasons.join(" ")).toContain("not a re-scan's");
+    });
+
+    it("3. fails closed and discloses nothing when ownership cannot be established", () => {
+      const p = withState({ kind: "ownership_unverifiable" });
+      expect(p.disposition).toBe("requires_review");
+      expect(p.best).toBeNull();
+      // The whole point: no target, no number, no confirmation a record exists.
+      expect(p.alreadyLinked).toBeNull();
+      expect(p.ownershipUnverifiable).toBe(true);
+      expect(p.reasons.join(" ")).toContain("cannot establish which organization owns");
+      expect(p.reasons.join(" ")).not.toContain("already linked");
+    });
+
+    it("3b. lets the unverifiable verdict outrank a confident single candidate", () => {
+      // A high-confidence barcode must not talk the proposer out of failing closed.
+      const p = withState({ kind: "ownership_unverifiable" });
+      expect(p.candidates.length).toBeGreaterThan(0);
+      expect(p.best).toBeNull();
+    });
+
+    it("4-5. treats a malformed or dangling reference as unverifiable rather than as absent", () => {
+      // The router cannot tell a stale row from a live one, or a row whose target has gone, from
+      // a row belonging to somebody else — all three are "we cannot say", and all three fail closed.
+      for (const state of [{ kind: "ownership_unverifiable" as const }]) {
+        const p = withState(state);
+        expect(p.disposition).toBe("requires_review");
+        expect(p.alreadyLinked).toBeNull();
+      }
+    });
+
+    it("6. keeps failing closed when the page is ALSO ambiguous", () => {
+      const p = proposeLinks({
+        bindings: BINDINGS, ocrText: `${DSP} and ${JOB}`, existing: { kind: "ownership_unverifiable" },
+      });
+      expect(p.disposition).toBe("requires_review");
+      expect(p.best).toBeNull();
+      expect(p.alreadyLinked).toBeNull();
+    });
+
+    it("7. gives a replayed scan the same verdict, never a weaker one", () => {
+      const a = withState({ kind: "ownership_unverifiable" });
+      const b = withState({ kind: "ownership_unverifiable" });
+      expect(b.disposition).toBe(a.disposition);
+      expect(b.alreadyLinked).toBe(a.alreadyLinked);
+      expect(b.ownershipUnverifiable).toBe(a.ownershipUnverifiable);
+    });
+
+    it("leaks no foreign identifier anywhere in the serialized proposal", () => {
+      const body = JSON.stringify(withState({ kind: "ownership_unverifiable" }));
+      expect(body).not.toContain("owned");
+      expect(body).not.toMatch(/"alreadyLinked":\s*\{/);
+    });
   });
 
   it("corrects the characters OCR confuses, and says which ones it corrected", () => {
@@ -1189,7 +1249,7 @@ describe("the scan review", () => {
       kind: "disposal_ticket",
       pages: [summary({ barcodes: [{ format: "CODE_128", value: DSP }] })],
       observations: [], trackingBindings: BINDINGS,
-      existingLink: { target: "disposal", trackingNumber: DSP },
+      existing: { kind: "owned", link: { target: "disposal", trackingNumber: DSP } },
     });
     expect(r.links.disposition).toBe("requires_review");
     expect(r.links.best).toBeNull();

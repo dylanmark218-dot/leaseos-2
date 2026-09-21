@@ -176,3 +176,68 @@ d("the surface decides nothing it is not allowed to decide", () => {
     expect(r.links.best).toBeNull();
   });
 });
+
+d("a tracking token cannot carry a record across a tenant boundary", () => {
+  /*
+   * The boundary this schema cannot prove, and the honest response to that.
+   *
+   * `trackingReferences` is unique on trackingNumber and carries NO organization column, and
+   * `trackingSequences` carries none either. So when tenant B scans a page bearing a number that
+   * tenant A's record is registered under, LeaseOS genuinely cannot say whose it is. Naming it —
+   * "already linked to disposal DSP-2026-000123" — would answer a cross-tenant question with a
+   * guess, and it is exactly the association the scanner must refuse to make.
+   *
+   * The verdict is therefore REVIEW with nothing disclosed: no target, no number, and no
+   * confirmation that any record exists. If the tracking tables ever gain an organization column,
+   * `existingLinkFor` can establish ownership and these tests should be tightened, not relaxed.
+   */
+  it("refuses to associate tenant B's scan with tenant A's registered token, and names nothing", async () => {
+    const tenantA = await withRole("office");
+    await membership(tenantA, await organization(`A ${rnd()}`));
+    const tenantB = await withRole("office");
+    await membership(tenantB, await organization(`B ${rnd()}`));
+
+    const prefix = `X${rnd().slice(0, 3)}`;
+    await sequenceRow("DSP", prefix);
+    const token = formatTrackingNumber({ ...DEFAULT_FORMAT, prefix }, new Date("2026-09-21T00:00:00Z"), 42);
+
+    // Tenant A's authoritative record, registered under that exact token.
+    await pool.execute(
+      "INSERT INTO trackingReferences (trackingNumber, entityType, entityId, issuedAt) VALUES (?,?,?,NOW())",
+      [token, "DSP", 987654],
+    );
+
+    // Tenant B scans a page carrying the identical raw text.
+    const r = await caller(tenantB).scanning.reviewScan({
+      kind: "disposal_ticket",
+      pages: [{ ...PAGE, ocrText: `Facility ticket ${token}` }],
+      observations: [],
+    });
+
+    expect(r.links.disposition).toBe("requires_review");
+    expect(r.links.best).toBeNull();
+    // Nothing about tenant A's record is revealed — not the target, not the entity, not even
+    // that a reference exists.
+    expect(r.links.alreadyLinked).toBeNull();
+    expect(r.links.ownershipUnverifiable).toBe(true);
+    const body = JSON.stringify(r);
+    expect(body).not.toContain("987654");
+    expect(body).not.toContain("already linked");
+    expect(r.links.reasons.join(" ")).toContain("cannot establish which organization owns");
+  });
+
+  it("proposes normally for a token no record is registered under, since nothing can be crossed", async () => {
+    const office = await withRole("office");
+    const prefix = `Y${rnd().slice(0, 3)}`;
+    await sequenceRow("DSP", prefix);
+    const token = formatTrackingNumber({ ...DEFAULT_FORMAT, prefix }, new Date("2026-09-21T00:00:00Z"), 7);
+
+    const r = await caller(office).scanning.reviewScan({
+      kind: "disposal_ticket", pages: [{ ...PAGE, ocrText: `ticket ${token}` }], observations: [],
+    });
+    // The number is on the paper in front of them; matching its FORMAT reveals nobody's record.
+    expect(r.links.disposition).toBe("propose_single");
+    expect(r.links.ownershipUnverifiable).toBe(false);
+    expect(r.links.best?.trackingNumber).toBe(token);
+  });
+});

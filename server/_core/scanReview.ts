@@ -34,7 +34,7 @@ import {
   guidanceFor, toPrintFields,
   type FieldObservation, type GuidanceContext, type PaperworkGuidance, type PaperworkKind,
 } from "@shared/paperworkGuidance";
-import { proposeLinks, type AutoLinkProposal, type ExistingLink, type TrackingBinding } from "./scanAutoLink";
+import { proposeLinks, type AutoLinkProposal, type ExistingLinkState, type TrackingBinding } from "./scanAutoLink";
 
 /** What the device reported about one page, as it survives in the capture. */
 export type ScannedPageSummary = {
@@ -103,7 +103,7 @@ export function reviewScan(args: {
   observations?: readonly FieldObservation[];
   context?: GuidanceContext;
   trackingBindings?: readonly TrackingBinding[];
-  existingLink?: ExistingLink | null;
+  existing?: ExistingLinkState;
   /** False when the device had no recognizer at all. */
   textRecognitionRan?: boolean;
 }): ScanReview {
@@ -121,7 +121,7 @@ export function reviewScan(args: {
     bindings: args.trackingBindings ?? [],
     barcodes,
     ocrText: combinedText.length > 0 ? combinedText : null,
-    existingLink: args.existingLink ?? null,
+    existing: args.existing ?? { kind: "none" },
   });
 
   const actions: ScanAction[] = [];

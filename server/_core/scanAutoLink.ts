@@ -76,8 +76,23 @@ export type AutoLinkCandidate = {
 /** A configured binding that cannot be used, and why. */
 export type UnusableBinding = { target: LinkTargetKind; prefix: string; problem: string };
 
-/** A link this document already carries. */
+/** A link this document already carries, whose owner is established as the caller's. */
 export type ExistingLink = { target: LinkTargetKind; trackingNumber: string };
+
+/**
+ * What the caller was able to establish about an existing link.
+ *
+ * The three cases are deliberately distinct because the schema can only support two of them
+ * today. `trackingReferences` carries no organization column, so a row bearing this number
+ * cannot be attributed to an organization at all — and reporting another tenant's record as
+ * "already linked to disposal DSP-2026-000123" would answer, across a tenant boundary, a
+ * question the caller is not entitled to ask. `ownership_unverifiable` is that case, and it
+ * discloses nothing: no target, no number, no confirmation that a row exists.
+ */
+export type ExistingLinkState =
+  | { kind: "none" }
+  | { kind: "owned"; link: ExistingLink }
+  | { kind: "ownership_unverifiable" };
 
 /**
  * What a person must do about this scan.
@@ -106,8 +121,16 @@ export type AutoLinkProposal = {
   disposition: AutoLinkDisposition;
   /** The page names more than one record, or two reads disagree. */
   ambiguous: boolean;
-  /** Present when the document already carries a link; re-linking is a person's decision. */
+  /**
+   * Present ONLY when the existing link is established as the caller's own. Null when ownership
+   * could not be established — naming somebody else's record is the disclosure this withholds.
+   */
   alreadyLinked: ExistingLink | null;
+  /**
+   * True when a link may exist but the schema cannot say whose. Nothing is proposed, and nothing
+   * about the other record is revealed. Unknown counts against you.
+   */
+  ownershipUnverifiable: boolean;
   /** Configured bindings that were refused, each with its reason. Never silently dropped. */
   unusableBindings: UnusableBinding[];
   reasons: string[];
@@ -328,7 +351,7 @@ export function proposeLinks(args: {
   bindings: readonly TrackingBinding[];
   barcodes?: readonly { format: string; value: string }[];
   ocrText?: string | null;
-  existingLink?: ExistingLink | null;
+  existing?: ExistingLinkState;
 }): AutoLinkProposal {
   const unusableBindings: UnusableBinding[] = [];
   const usable: TrackingBinding[] = [];
@@ -365,7 +388,9 @@ export function proposeLinks(args: {
 
   const distinct = Object.keys(byKey).length;
   const ambiguous = distinct > 1;
-  const alreadyLinked = args.existingLink ?? null;
+  const existing: ExistingLinkState = args.existing ?? { kind: "none" };
+  const alreadyLinked = existing.kind === "owned" ? existing.link : null;
+  const ownershipUnverifiable = existing.kind === "ownership_unverifiable";
   const reasons: string[] = [];
 
   for (const u of unusableBindings) {
@@ -378,6 +403,18 @@ export function proposeLinks(args: {
     reasons.push(
       `This document is already linked to ${alreadyLinked.trackingNumber} (${alreadyLinked.target}). ` +
       `Re-linking is a person's decision, not a re-scan's.`,
+    );
+  } else if (ownershipUnverifiable) {
+    /*
+     * The tenant boundary this system cannot currently prove. Say that, propose nothing, and name
+     * nothing — including whether any record exists. Attaching by hand, to a record the person can
+     * actually see, is the safe path and the only honest one.
+     */
+    disposition = "requires_review";
+    reasons.push(
+      "LeaseOS cannot establish which organization owns a tracking reference for this number, " +
+      "because the tracking tables carry no organization column. No link is proposed from this " +
+      "scan; attach it by hand to a record you can see.",
     );
   } else if (usable.length === 0) {
     disposition = "not_configured";
@@ -403,6 +440,7 @@ export function proposeLinks(args: {
     disposition,
     ambiguous,
     alreadyLinked,
+    ownershipUnverifiable,
     unusableBindings,
     reasons,
   };
