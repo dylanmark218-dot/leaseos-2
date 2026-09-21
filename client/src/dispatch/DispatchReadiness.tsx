@@ -14,7 +14,7 @@
 import { trpc } from "@/lib/trpc";
 import { DispatchReadinessView, type ReadinessPanelState } from "./DispatchReadinessView";
 
-export default function DispatchReadiness({ jobId }: { jobId: number }) {
+export default function DispatchReadiness({ jobId, as }: { jobId: number; as?: "page" | "panel" }) {
   const validJob = Number.isInteger(jobId) && jobId > 0;
 
   /*
@@ -60,6 +60,7 @@ export default function DispatchReadiness({ jobId }: { jobId: number }) {
       state={state}
       capabilities={readiness.data?.capabilities ?? null}
       capabilityVerdict={readiness.data?.capabilityVerdict ?? null}
+      as={as}
       onRefresh={refresh}
       refreshing={assignments.isFetching || readiness.isFetching}
     />
