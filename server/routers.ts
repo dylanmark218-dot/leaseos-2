@@ -70,6 +70,7 @@ import { createJobUnitGated } from "./dispatchEnforcementService";
 import { iftaRouter } from "./iftaRouter";
 import { fuelOpsRouter } from "./fuelOpsRouter";
 import { periodRouter } from "./periodRouter";
+import { paperworkRouter } from "./paperworkRouter";
 import { gstRouter } from "./gstRouter";
 import { arRouter, bankRouter } from "./cashRouter";
 import { commercialRouter, portalAdminRouter } from "./commercialRouter";
@@ -327,6 +328,7 @@ export const appRouter = router({
   facilityDirectory: facilityDirectoryRouter,
   system: systemRouter,
   comms: commsRouter,
+  paperwork: paperworkRouter,
   enforcement: enforcementRouter,
   timeOff: timeOffRouter,
   shifts: openShiftsRouter,
