@@ -22,6 +22,14 @@
  * the request or job already established. A helper here that assembled one
  * would be a helper that could assemble a better one.
  *
+ * **It does not import `appRouter`.** `createCaller` is a required dependency,
+ * supplied by whatever wires this up. An earlier version imported the router
+ * directly, which reads as convenience and is a layering inversion: the router
+ * layer imports the engine layer, so an engine importing the router closes a
+ * cycle. `server/engineReachability.test.ts` treats `_core/index.ts` and
+ * `_core/worker.ts` as the only sanctioned places that may reach for
+ * `appRouter`; everything else declares what it needs and is handed it.
+ *
  * **It does not let a caller name a procedure.** `invokeTool` takes a tool key
  * and an allowlist; the procedure comes from the registry. A function that took
  * a procedure name would have the authority of whoever called it.
@@ -32,8 +40,7 @@
  * list.
  */
 
-import type { TrpcContext } from "../../_core/context";
-import { appRouter } from "../../routers";
+import type { TrpcContext } from "../../context";
 import {
   idempotencyKeyFor,
   resolveTool,
@@ -130,8 +137,13 @@ export async function invokeTool(args: {
   ctx: TrpcContext;
   state: ToolRunState;
   invocation: ToolInvocation;
-  /** Injected in tests. Production passes nothing and gets the real router. */
-  createCaller?: (ctx: TrpcContext) => unknown;
+  /**
+   * Builds a tRPC server-side caller for this context. Required, and supplied
+   * by the composition root — never defaulted to `appRouter` here, so this
+   * module has no opinion about which router it is talking to and no import
+   * back into the router layer.
+   */
+  createCaller: (ctx: TrpcContext) => unknown;
 }): Promise<ToolResult> {
   const { ctx, state, invocation } = args;
 
@@ -144,7 +156,7 @@ export async function invokeTool(args: {
     clientCaptureId: invocation.clientCaptureId,
   });
 
-  const caller = (args.createCaller ?? ((c: TrpcContext) => appRouter.createCaller(c)))(ctx);
+  const caller = args.createCaller(ctx);
   const procedure = resolveOnCaller(caller, plan.path);
 
   // No try/catch. A FORBIDDEN from roleProcedure is the boundary working, and

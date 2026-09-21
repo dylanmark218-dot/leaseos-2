@@ -4,8 +4,8 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { FORMS } from "../_core/aiProposal";
-import { permissionForProcedure } from "../_core/recordsAuthorization";
+import { FORMS } from "../aiProposal";
+import { permissionForProcedure } from "../recordsAuthorization";
 import {
   BILL_SCAN,
   FORBIDDEN_CATEGORIES,
@@ -109,7 +109,7 @@ describe("the registry", () => {
       readFileSync(path, "utf8")
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/^\s*\/\/.*$/gm, "");
-    for (const path of ["server/ai/tools/registry.ts", "server/ai/tools/caller.ts"]) {
+    for (const path of ["server/_core/ai/tools/registry.ts", "server/_core/ai/tools/caller.ts"]) {
       expect(strip(path), path).not.toMatch(/service[_ ]?account|systemUser|asSystem|impersonate/i);
     }
   });

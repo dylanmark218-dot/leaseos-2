@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildContextPack, contextRefs, renderContextPack } from "./context/contextPack";
 
-const SOURCE = readFileSync("server/ai/context/contextPack.ts", "utf8");
+const SOURCE = readFileSync("server/_core/ai/context/contextPack.ts", "utf8");
 
 /**
  * Tables and modules that hold records outside the operations perimeter.

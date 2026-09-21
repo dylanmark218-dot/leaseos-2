@@ -4,7 +4,7 @@ The extraction contract, the deterministic validator, the dialogue loop, the age
 injection guard, for one form: the load/unload event. HYBRID only.
 
 Both checkpoints in one branch, because the survey found that checkpoint 1 was **not merged**:
-there was no `server/ai/` in either repository. Checkpoint 2's prerequisite said to stop and report
+there was no `server/_core/ai/` in either repository. Checkpoint 2's prerequisite said to stop and report
 if so. What follows is that report, then what was built on top of it.
 
 ---
@@ -22,12 +22,12 @@ if so. What follows is that report, then what was built on top of it.
 
 ### Eleven things that contradict the plan as written
 
-**1. Checkpoint 1 was not merged.** No `server/ai/` anywhere. Both checkpoints are in this branch.
+**1. Checkpoint 1 was not merged.** No `server/_core/ai/` anywhere. Both checkpoints are in this branch.
 
 **2. `server/_core/llm.ts` is not model-agnostic.** Its base URL defaults to a hard-coded vendor
 host and its key comes from `BUILT_IN_FORGE_API_KEY`. The plan's "no keys or model names
 hard-coded" is already violated there. It was **left untouched** — surfaces are built on it — and
-`server/ai/llm/` is a second, narrower door with no default endpoint at all.
+`server/_core/ai/llm/` is a second, narrower door with no default endpoint at all.
 
 **3. There are no zod validators for this form to generate a JSON Schema from.** The plan said to
 generate from "the existing zod validators". The form's shape lives in `FORMS.unload_stop` as a
@@ -40,7 +40,7 @@ forbids. The derivation therefore runs **the other way** and keeps the single so
 **4. The extraction contract already existed in a different shape.**
 `assistantExtraction.ts` asks for `{ value, sourceUtterance, speakerHedged, confidence }`.
 `ExtractedField` is `{ value, status, evidenceQuote, evidenceRef, alternatives }`. It is a **wire**
-shape, not a second stored one: `server/ai/proposal/bridge.ts` maps every field of it onto
+shape, not a second stored one: `server/_core/ai/proposal/bridge.ts` maps every field of it onto
 `ProposedField`, so there is still one persisted shape and one provenance chain.
 
 **5. There is no `load_stop` form.** Only `unload_stop`. That is the one form.
@@ -66,7 +66,7 @@ derived, never stored, per the checkpoint.
 **10. `assistant.draft` calls `invokeLLM` inside a tRPC mutation.**
 `server/routers.ts:691`. That is a model call inside a request handler — the thing the house rules
 forbid — and it is **pre-existing, in the live path**, written before this layer existed. It is
-**pinned, not fixed**: `server/ai/workerBoundary.test.ts` asserts the count is exactly one, so a
+**pinned, not fixed**: `server/_core/ai/workerBoundary.test.ts` asserts the count is exactly one, so a
 second call site fails the suite and removing the first one fails it too, at which point the test
 tells whoever fixed it to delete the pin. Fixing it properly means `assistant.draft` stops
 answering synchronously and starts returning a queued job, which changes what a driver sees. That
@@ -87,7 +87,7 @@ wired"* — and places 55 declared-unwired engines against the one-driver-one-jo
 checkpoint adds a new engine. That is a direct conflict and it is the owner's call, not this
 branch's. Two things were done to keep the conflict small rather than to argue it away:
 
-- **Nothing is wired into a live path.** `server/ai/workerBoundary.test.ts` proves no router
+- **Nothing is wired into a live path.** `server/_core/ai/workerBoundary.test.ts` proves no router
   imports the model layer, and its last test asserts that `productionWorker.ts` does **not** yet
   dispatch the extraction event. The gap is recorded rather than implied.
 - **Nothing was reimplemented.** The verdicts reuse `actionGateway`'s vocabulary, the hedge
@@ -102,7 +102,7 @@ wired. It is a branch, and it does not merge itself.
 ## 2. What was built
 
 ```
-server/ai/
+server/_core/ai/
   llm/           provider.ts  config.ts  mockProvider.ts  openAiCompatibleProvider.ts
   prompts/       secretary-extract.v1.md  index.ts
   extraction/    contract.ts  formSchema.ts  runExtraction.ts
@@ -171,7 +171,7 @@ third leg is simply absent, so the worst an injection achieves is a proposal a h
 
 ### Agent tools
 
-`server/ai/tools/caller.ts` builds one `appRouter.createCaller(ctx)` with the **driver's** context,
+`server/_core/ai/tools/caller.ts` builds one `appRouter.createCaller(ctx)` with the **driver's** context,
 so `roleProcedure` runs its real middleware: permission lookup, active roles, an authorization
 decision row, refusal if they do not hold it. The agent inherits exactly what the driver has,
 checked by the same gate and audited in the same table. No service account, so there is no powerful

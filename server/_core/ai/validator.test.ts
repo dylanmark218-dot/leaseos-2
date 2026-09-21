@@ -2,7 +2,7 @@
  * The judge: the quote tripwire, and the rule that a missing term never passes.
  */
 import { describe, expect, it } from "vitest";
-import { FORMS } from "../_core/aiProposal";
+import { FORMS } from "../aiProposal";
 import { buildContextPack } from "./context/contextPack";
 import { parseExtractionEnvelope } from "./extraction/contract";
 import { declaredKeys } from "./extraction/formSchema";

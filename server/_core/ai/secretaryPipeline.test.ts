@@ -7,7 +7,7 @@
  * writing.
  */
 import { describe, expect, it } from "vitest";
-import { FORMS } from "../_core/aiProposal";
+import { FORMS } from "../aiProposal";
 import { MockLlmProvider } from "./llm/mockProvider";
 import { buildContextPack } from "./context/contextPack";
 import { runExtraction } from "./extraction/runExtraction";

@@ -49,9 +49,9 @@ describe("configuration", () => {
     // The point of this layer is that swapping models is configuration. A host
     // in the source is a host somebody has to find and edit.
     const sources = [
-      "server/ai/llm/config.ts",
-      "server/ai/llm/provider.ts",
-      "server/ai/llm/openAiCompatibleProvider.ts",
+      "server/_core/ai/llm/config.ts",
+      "server/_core/ai/llm/provider.ts",
+      "server/_core/ai/llm/openAiCompatibleProvider.ts",
     ];
     for (const path of sources) {
       const text = readFileSync(path, "utf8");

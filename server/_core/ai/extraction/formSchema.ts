@@ -31,7 +31,7 @@ import {
   EXTRACTED_FIELD_STATUSES,
   type ExtractedFieldStatus,
 } from "./contract";
-import type { FormDefinition, FormFieldDef } from "../../_core/aiProposal";
+import type { FormDefinition, FormFieldDef } from "../../aiProposal";
 
 /**
  * The zod type for one slot's VALUE, from its form definition.

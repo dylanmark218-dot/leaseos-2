@@ -10,7 +10,7 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "eval:secretary": "tsx server/ai/eval/runEval.ts",
+    "eval:secretary": "tsx server/_core/ai/eval/runEval.ts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "worker": "NODE_ENV=production node dist/worker.js"
   },

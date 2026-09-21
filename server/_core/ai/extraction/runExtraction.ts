@@ -21,8 +21,8 @@ import {
   type ExtractionEnvelope,
 } from "./contract";
 import { buildFormJsonSchema, declaredKeys } from "./formSchema";
-import { parseModelJson } from "../../_core/assistantExtraction";
-import type { FormDefinition } from "../../_core/aiProposal";
+import { parseModelJson } from "../../assistantExtraction";
+import type { FormDefinition } from "../../aiProposal";
 import type { LlmProvider } from "../llm/provider";
 import {
   CURRENT_EXTRACT_PROMPT,

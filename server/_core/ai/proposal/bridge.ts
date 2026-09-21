@@ -45,8 +45,8 @@ import {
   type Precision,
   type Proposal,
   type ProposedField,
-} from "../../_core/aiProposal";
-import { looksHedged } from "../../_core/assistantExtraction";
+} from "../../aiProposal";
+import { looksHedged } from "../../assistantExtraction";
 import type { ExtractionEnvelope, ExtractedField } from "../extraction/contract";
 import type { FieldVerdict, ValidationResult } from "../validate/validator";
 import type { RunProvenance } from "../prompts";

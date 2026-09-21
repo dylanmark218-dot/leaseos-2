@@ -24,7 +24,7 @@
  */
 
 import type { LlmProvider } from "../llm/provider";
-import type { FormDefinition } from "../../_core/aiProposal";
+import type { FormDefinition } from "../../aiProposal";
 import type { ContextPack } from "../context/contextPack";
 import type { SttConfidence } from "../validate/validator";
 import { runExtraction } from "../extraction/runExtraction";

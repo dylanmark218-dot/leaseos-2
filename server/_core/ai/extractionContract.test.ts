@@ -3,7 +3,7 @@
  * "I don't know".
  */
 import { describe, expect, it } from "vitest";
-import { FORMS } from "../_core/aiProposal";
+import { FORMS } from "../aiProposal";
 import {
   EXTRACTED_FIELD_STATUSES,
   ExtractionUnparseable,

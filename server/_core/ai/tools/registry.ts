@@ -44,9 +44,9 @@
  * binding and target revisions.
  */
 
-import { NEVER_AUTONOMOUS } from "../../_core/actionGateway";
-import type { ProcedureName } from "../../_core/recordsAuthorization";
-import { FORMS } from "../../_core/aiProposal";
+import { NEVER_AUTONOMOUS } from "../../actionGateway";
+import type { ProcedureName } from "../../recordsAuthorization";
+import { FORMS } from "../../aiProposal";
 
 export type ToolCategory = "read" | "propose" | "human_step";
 

@@ -52,12 +52,12 @@ describe("no request handler reaches the model layer", () => {
 
 describe("the job body", () => {
   it("opens no socket of its own — the provider is injected", () => {
-    const source = readFileSync("server/ai/worker/secretaryExtractionJob.ts", "utf8");
+    const source = readFileSync("server/_core/ai/worker/secretaryExtractionJob.ts", "utf8");
     expect(source).not.toMatch(/\bfetch\s*\(|new OpenAiCompatibleProvider|fromEnv\(/);
   });
 
   it("writes nothing — the worker that owns the transaction does that", () => {
-    const source = readFileSync("server/ai/worker/secretaryExtractionJob.ts", "utf8");
+    const source = readFileSync("server/_core/ai/worker/secretaryExtractionJob.ts", "utf8");
     expect(source).not.toMatch(/getDb|drizzle\/schema|\.insert\(|\.update\(/);
   });
 
@@ -109,7 +109,7 @@ describe("the rule is already broken next door, and this says so", () => {
     // Imports, not prose. Several files here name `server/_core/llm.ts` in a
     // doc comment explaining why they are a separate door, and a guard that
     // cannot tell a citation from an import fails on its own documentation.
-    const offenders = walk("server/ai").filter(p => {
+    const offenders = walk("server/_core/ai").filter(p => {
       const code = readFileSync(p, "utf8")
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/^\s*\/\/.*$/gm, "");

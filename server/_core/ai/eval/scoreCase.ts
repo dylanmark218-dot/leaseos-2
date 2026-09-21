@@ -11,7 +11,7 @@
 
 import { runExtraction } from "../extraction/runExtraction";
 import { buildContextPack } from "../context/contextPack";
-import { FORMS } from "../../_core/aiProposal";
+import { FORMS } from "../../aiProposal";
 import { toProposal, advanceBlockedBecause } from "../proposal/bridge";
 import { questionFor } from "../validate/questions";
 import type { LlmProvider } from "../llm/provider";

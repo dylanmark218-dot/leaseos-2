@@ -31,7 +31,7 @@
  */
 
 import type { ExtractedField, ExtractionEnvelope } from "../extraction/contract";
-import type { FormDefinition, FormFieldDef } from "../../_core/aiProposal";
+import type { FormDefinition, FormFieldDef } from "../../aiProposal";
 import {
   geofenceArrival,
   openTicketNumbers,

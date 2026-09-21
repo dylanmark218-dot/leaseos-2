@@ -13,7 +13,7 @@
  * and the driver is the only one who knows which.
  */
 
-import { approximateFromLegalLocation } from "../../_core/legalLocation";
+import { approximateFromLegalLocation } from "../../legalLocation";
 
 /* ------------------------------------------------------------------ */
 /* Verdicts                                                            */
