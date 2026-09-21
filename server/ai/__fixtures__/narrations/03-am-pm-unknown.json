@@ -1,0 +1,35 @@
+{
+  "id": "03-am-pm-unknown",
+  "note": "\"Around seven\" with no geofence. Never guessed; the driver is asked.",
+  "transcript": "Got there around seven. Unloaded from 07:30 to 08:15, eight thousand litres on the meter. Left right after.",
+  "context": {
+    "formKey": "unload_stop",
+    "formVersion": 1,
+    "tripRef": "TRIP-2026-004821",
+    "unitNumber": "T-118",
+    "unitTankCapacityLitres": 16000,
+    "vehicleMoving": false
+  },
+  "modelResponse": {
+    "fields": {
+      "arrivedAt": { "value": "seven", "status": "ambiguous", "evidenceQuote": "Got there around seven", "evidenceRef": null, "alternatives": ["07:00", "19:00"] },
+      "waitMinutes": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "delayReason": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "operationStartedAt": { "value": "07:30", "status": "stated", "evidenceQuote": "Unloaded from 07:30", "evidenceRef": null },
+      "operationCompletedAt": { "value": "08:15", "status": "stated", "evidenceQuote": "to 08:15", "evidenceRef": null },
+      "quantity": { "value": 8000, "status": "stated", "evidenceQuote": "eight thousand litres on the meter", "evidenceRef": null },
+      "measurementMethod": { "value": "Meter", "status": "stated", "evidenceQuote": "on the meter", "evidenceRef": null },
+      "departedAt": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null }
+    },
+    "notes": null,
+    "outOfScope": false,
+    "injectionSuspected": false
+  },
+  "expect": {
+    "verdicts": { "arrivedAt": "REVIEW", "quantity": "PASS" },
+    "reasonCodes": { "arrivedAt": ["ambiguous_reading"] },
+    "silentGuesses": 0,
+    "outOfScope": false,
+    "injectionSuspected": false
+  }
+}
