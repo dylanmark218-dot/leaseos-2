@@ -240,8 +240,53 @@ same way).
 | `createdByUserId` | `int NOT NULL` | |
 | `createdAt` | `timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP` | |
 
-Unique on `(orgRef, roleCode)`, so a tenant may define `LEAD` without colliding with the global
-`LEAD`. Resolution is tenant-first, then global.
+| `roleTypeKey` | `varchar(140)` PERSISTENT generated | `CONCAT(COALESCE(orgRef,'*'), ':', roleCode)` — the uniqueness key. Never written by the application. |
+
+**Uniqueness — corrected.** `UNIQUE(orgRef, roleCode)` would **not** protect the global catalog.
+MariaDB permits unlimited NULLs in a unique index, including a composite one, so three global `LEAD`
+rows coexist happily. Verified by execution before this was written:
+
+```sql
+CREATE TABLE t (… orgRef varchar(64) NULL, roleCode varchar(60) NOT NULL, UNIQUE KEY u (orgRef, roleCode));
+INSERT INTO t VALUES (NULL,'LEAD'), (NULL,'LEAD'), (NULL,'LEAD');   -- all three accepted
+```
+
+The repository already hit this exact bug and already fixed it, in
+`drizzle/0021_active_role_uniqueness.sql`: a **PERSISTENT generated column** carrying a collision key
+with `COALESCE(scopeRef, '*')`, with uniqueness on the key rather than on a tuple containing a NULL.
+Its comment is worth repeating — *"Application-level duplicate checks are not a substitute — two
+concurrent grants would both pass a read-then-write check."*
+
+So:
+
+```sql
+ALTER TABLE dispatchRoleTypes
+  ADD COLUMN roleTypeKey varchar(140)
+    AS (CONCAT(COALESCE(orgRef, '*'), ':', roleCode)) PERSISTENT;
+CREATE UNIQUE INDEX dispatchRoleTypes_roleTypeKey_unique ON dispatchRoleTypes (roleTypeKey);
+```
+
+which gives all four required properties: two global `LEAD` refused (`*:LEAD` twice), two `ORG-A`
+`LEAD` refused, `ORG-A` and `ORG-B` `LEAD` allowed, and global `LEAD` beside `ORG-A` `LEAD` allowed —
+so tenant-first resolution stays possible. In `schema.ts` it is declared as a plain `varchar` with a
+comment saying the database derives it, exactly as `userRoleAssignments.activeGrantKey`
+(`drizzle/schema.ts:3003`) is.
+
+**A second correction, larger than the first, found while fixing it.** `orgRef IS NULL` in LeaseOS
+does **not** mean "global". It means "the historical single tenant's row"
+(`server/db.ts:154-164`), and `orgScopeWhere` for a real tenant emits `eq(orgRef, tenantId)` — which
+**excludes NULL rows entirely**. Reading this catalog with the house helper would show a member of
+`ORG-A` an empty catalog and hand them a validation error for every seeded code.
+
+A catalog is shared vocabulary, not an owned record, so it does not use `orgScopeWhere`. Its read is:
+
+```sql
+WHERE orgRef IS NULL OR orgRef = :tenantId      -- global rows are visible to everyone
+```
+
+then `resolveRoleType` prefers the tenant row over the global one. This is called out in the
+implementation plan as a checkpoint-A test, because the failure mode is silent and a future
+developer reaching for the familiar helper would reintroduce it.
 
 **Seed — evidenced only.** From the rig-move sentence in `drizzle/schema.ts:1864-1865`:
 `LEAD`, `WINCH_TRACTOR`, `BED_TRUCK`, `PICKER`, `PILOT_VEHICLE`. From the shipped showcase crew
@@ -686,7 +731,9 @@ Schema changes required, in **two** migrations, all additive. `main` ends at `01
 `0169`, so these are `0170` and `0171`:
 
 **`0170_dispatch_role_types.sql`**
-1. `CREATE TABLE dispatchRoleTypes (…)` per §5.2, unique on `(orgRef, roleCode)`.
+1. `CREATE TABLE dispatchRoleTypes (…)` per §5.2, with the `roleTypeKey` PERSISTENT generated column
+   and `UNIQUE INDEX dispatchRoleTypes_roleTypeKey_unique (roleTypeKey)`. **Not** a nullable
+   composite unique — see §5.2 for why that would not protect global rows.
 2. `ALTER TABLE dispatchRoles ADD COLUMN required boolean NOT NULL DEFAULT true` — expresses the
    optional-role semantics `assessStaffing` already implements.
 3. Seed the eight evidenced global role types (`orgRef` NULL).

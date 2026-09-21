@@ -59,10 +59,42 @@ last, after both `#6` and `backend` have landed.
 
 | | |
 |---|---|
-| **Migration** | `drizzle/0170_dispatch_role_types.sql` — `CREATE TABLE dispatchRoleTypes`, `ALTER TABLE dispatchRoles ADD COLUMN required boolean NOT NULL DEFAULT true`, seed 8 global rows |
+| **Migration** | `drizzle/0170_dispatch_role_types.sql` — `CREATE TABLE dispatchRoleTypes`, the `roleTypeKey` PERSISTENT generated column + its UNIQUE index, `ALTER TABLE dispatchRoles ADD COLUMN required boolean NOT NULL DEFAULT true`, seed 8 global rows |
 | **Schema** | `drizzle/schema.ts` — `dispatchRoleTypes` table, `required` on `dispatchRoles` |
 | **Core** | `server/_core/dispatchRoleCatalog.ts` — `resolveRoleType(code, orgRef, rows)`: tenant row first, then global, `active` only; pure, no database |
-| **Tests** | `server/_core/dispatchRoleCatalog.test.ts` (pure) · `server/dispatchRoleCatalog.db.test.ts` (seed present; `(orgRef, roleCode)` uniqueness; tenant row shadows global; inactive not resolvable) |
+| **Tests** | `server/_core/dispatchRoleCatalog.test.ts` (pure) · `server/dispatchRoleCatalog.db.test.ts` (below) |
+
+**Correction 1 — uniqueness is DB-enforced through a generated key, not a nullable tuple.**
+`UNIQUE(orgRef, roleCode)` does not protect global rows: MariaDB permits unlimited NULLs in a unique
+index, proven by execution (three global `LEAD` rows coexisted). The repository already solved this
+in `drizzle/0021_active_role_uniqueness.sql` with a PERSISTENT generated collision key using
+`COALESCE(scopeRef, '*')`; this follows it exactly:
+
+```sql
+roleTypeKey varchar(140) AS (CONCAT(COALESCE(orgRef, '*'), ':', roleCode)) PERSISTENT
+UNIQUE INDEX dispatchRoleTypes_roleTypeKey_unique (roleTypeKey)
+```
+
+**Six DB tests, RED before the migration exists** — each asserting the *database* refuses, not the
+application:
+1. global `LEAD` + global `LEAD` → refused
+2. `ORG-A` `LEAD` + `ORG-A` `LEAD` → refused
+3. `ORG-A` `LEAD` + `ORG-B` `LEAD` → allowed
+4. global `LEAD` + `ORG-A` `LEAD` → allowed
+5. tenant lookup resolves `ORG-A`'s row before the global one
+6. global fallback resolves when the tenant has no override
+
+**Correction 1b — the catalog must NOT be read with `orgScopeWhere`.** `orgRef IS NULL` means "the
+historical single tenant" in this repo, not "global", and `orgScopeWhere` for a real tenant emits
+`eq(orgRef, tenantId)`, excluding NULL rows. Using the house helper would show an `ORG-A` member an
+empty catalog. The catalog read is `orgRef IS NULL OR orgRef = :tenantId`, with tenant-first
+resolution. **Test 7:** a member of `ORG-A` sees all eight seeded global types.
+
+**Correction 1c — catalog defaults are snapshots, not live pointers.**
+**Test 8:** create a role from a type, then edit the type's `defaultEquipmentClass`; the existing
+role's `requiredEquipmentClass` is unchanged.
+**Test 9:** deactivating a type refuses *new* role creation and leaves existing roles readable and
+assignable.
 
 **Seed (evidenced only):** `LEAD`, `WINCH_TRACTOR`, `BED_TRUCK`, `PICKER`, `PILOT_VEHICLE` from
 `drizzle/schema.ts:1864-1865`; `PRIMARY_UNIT`, `SUPPORT_UNIT`, `STANDBY` from
@@ -71,8 +103,10 @@ last, after both `#6` and `backend` have landed.
 **RED first:** the pure resolver tests, then the db tests, all failing on a missing module and a
 missing table.
 
-**Mutation checks:** resolve ignoring `active` → the inactive test fails · resolve global before
-tenant → the shadowing test fails · drop the unique index → the uniqueness test fails.
+**Mutation checks:** resolve ignoring `active` → 9 fails · resolve global before tenant → 5 fails ·
+replace the generated key with `UNIQUE(orgRef, roleCode)` → 1 fails while 2 still passes, which is
+the precise shape of the original bug · read the catalog with `orgScopeWhere` → 7 fails · read the
+type's defaults live instead of snapshotting → 8 fails.
 
 **Verification:** `pnpm exec tsc --noEmit`, gate 3 table parity (408 → 409), targeted suites.
 
@@ -98,31 +132,82 @@ fails · return the lowest id as head → the head test fails.
 
 ---
 
-## Checkpoint C — `dispatch.listRoles`
+## Checkpoint C — the creation door, and the read
 
-**Depends on:** A, B.
+**Depends on:** A, B. **Correction 2: this checkpoint exists because without it the whole design is
+unreachable.**
+
+The survey found **zero production INSERT paths** for `dispatchPostings` and `dispatchRoles`. An
+assignment system that can only fill slots created by test fixtures is not operational. The design
+named `createPosting` and `addRole` as missing doors and the first plan draft dropped them; they are
+restored here, before any assignment mutation work.
 
 | | |
 |---|---|
-| **Files** | `server/dispatchRouter.ts` (+1 query), `server/_core/recordsAuthorization.ts` (+1 mapping → `dispatch.read`) |
-| **Input** | `{ jobId }` or `{ postingId }`, `includeHistory?: boolean` |
-| **Output** | roles with binding, status, requirement, resolved `displayName`, `lastEventId`, plus `assessStaffing()`'s `{ state, filled, requiredTotal, unfilledRoles }` |
-| **Tests** | `server/dispatchRoleRead.db.test.ts` — job-filtered (not the tenant-wide window `jobUnits.list` has); cross-tenant job → `NOT_FOUND`; `dispatch.read` required; history returned only when asked and ordered; `lastEventId` matches the head |
+| **Files** | `server/dispatchRouter.ts` (+3 procedures), `server/dispatchPostingService.ts` (new), `server/_core/recordsAuthorization.ts` (+3 mappings) |
 
-**Note:** `crossLayerIntegrity.test.ts:39` pins the procedure count. Each checkpoint that adds a
-procedure updates that pin **in the same commit**, with the reason appended in the house comment
-style.
+### `dispatch.createPosting` — permission `dispatch.assign`
 
-**Mutation checks:** drop the `jobId` filter → the job-filtered test fails · drop `jobInScope` → the
-cross-tenant test fails.
+Input `{ jobId, distribution?, roles?: [{ roleCode, roleLabel?, required?, requiredEquipmentClass?, requiredTrailerClass? }] }`.
+`distribution` defaults to `direct_assignment`; `planningState` starts at `direct` for that
+distribution and `planning` otherwise — both existing enum values
+(`drizzle/schema.ts:1804`, `_core/dispatchLifecycle.ts:26`).
 
-**Commit boundary:** roles are readable. Nothing can be assigned yet.
+Guards `jobInScope`. Mints a `postingNumber`. Optionally creates roles in the same transaction, so
+the common case — "this job needs three vac trucks" — is one call.
 
----
+**Does not** award, evaluate readiness, create a booking, or touch an eligibility check. Creating a
+posting is an act of planning.
+
+### `dispatch.addRole` — permission `dispatch.assign`
+
+Input `{ postingId, roleCode, roleLabel?, required?, requiredEquipmentClass?, requiredTrailerClass? }`.
+
+Resolves `roleCode` through the catalog (tenant-first, active only), **snapshots** the type's
+`defaultEquipmentClass` / `defaultTrailerClass` into the role's requirement fields unless explicitly
+overridden, sets `required` (default `true`), and creates the slot at `status: "open"` with a null
+binding. Never assigns implicitly.
+
+### `dispatch.listRoles` — permission `dispatch.read`
+
+Input `{ jobId }` or `{ postingId }`, `includeHistory?`. Returns each slot's binding, status,
+requirement, resolved `displayName` and `lastEventId`, plus the **precise** staffing picture from
+`assessStaffing`: `{ state, filled, requiredTotal, unfilledRoles }` and the optional roles
+separately.
+
+**The persisted `planningState` is not the staffing answer.** It cannot express zero-of-N (design
+§8.1). The API's `assessStaffing` result is authoritative for presentation, and the response carries
+both so a reader can see the coarse lifecycle value *and* the precise truth without either being
+mistaken for the other.
+
+**RED tests** (`server/dispatchPostingCreate.db.test.ts`, `server/dispatchRoleRead.db.test.ts`):
+- posting created for an in-scope job; cross-tenant job → `NOT_FOUND`; `dispatch.assign` required
+- `direct_assignment` posting lands on a legal `planningState`
+- creating a posting writes no booking, no audit event, no eligibility check
+- role created `open` with a null binding; unknown `roleCode` → refused; inactive type → refused
+- requirement defaults snapshotted from the type, and an explicit override wins
+- `listRoles` is job-filtered; cross-tenant → `NOT_FOUND`; `dispatch.read` required
+- staffing counts: **0 of 3**, 1 of 3, 3 of 3, and an optional slot left unfilled after all required
+  are filled → still `staffed`
+
+**Mutation checks:** drop `jobInScope` on create → the cross-tenant test fails · create the role
+`assigned` rather than `open` → the open-slot test fails · read the type's defaults live → the
+snapshot test fails · report `planningState` as the staffing answer → the 0-of-3 test fails.
+
+**Note:** `crossLayerIntegrity.test.ts:39` pins the procedure count; each checkpoint adding
+procedures updates the pin in the same commit, in the house comment style.
+
+**Commit boundary:** production can now create and read the canonical model. Nothing can be assigned.
 
 ## Checkpoint D — `dispatch.setRoleAssignment`
 
-**Depends on:** A, B, C. **The core of the work.**
+**Depends on:** A, B, C. **The core of the work, and it stays one checkpoint.**
+
+OD-1's duplicate-resource protections apply to the *first* assignment exactly as much as to a
+reassignment — a dispatcher filling role 2 with the driver already on role 1 is the same error
+whether role 2 was open or occupied. Splitting initial assignment from reassignment would ship the
+first without the invariant that makes it safe. Small RED/GREEN commits inside the checkpoint are
+fine; the contract is not complete until both paths satisfy every invariant.
 
 | | |
 |---|---|
@@ -227,7 +312,10 @@ inventory invariants, and buys nothing while it has zero callers. **No `jobUnits
 
 ---
 
-## Checkpoint I — PR #6 UI activation
+## Checkpoint I — PR #6 UI activation · **OUT OF SCOPE for this branch**
+
+**Not implemented here.** Recorded so the shape is agreed, and built later on a separate branch
+combining the backend with PR #6. Nothing in checkpoints A–H depends on it.
 
 **Depends on:** the backend branch **and** PR #6, both merged. Separate branch:
 `feature/dispatch-assignment-ui`.
