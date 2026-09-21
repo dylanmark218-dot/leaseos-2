@@ -1,0 +1,36 @@
+{
+  "assessment_id": "LIC-AB-511-2026-09-13",
+  "source_id": "gov-ab-511",
+  "source_name": "511 Alberta / Alberta Carrier Training",
+  "jurisdiction": "CA-AB",
+  "owner": "Government of Alberta - Alberta Transportation and Economic Corridors",
+  "assessed_at": "2026-09-13",
+  "commercial_product": true,
+  "status": "blocked_pending_written_permission",
+  "commercial_reuse_authorized": false,
+  "api_production_authorized": false,
+  "rag_ingestion_authorized": false,
+  "model_training_authorized": false,
+  "linking_authorized": true,
+  "metadata_only_authorized": true,
+  "reasons": [
+    "511 Alberta public terms permit non-commercial/educational reproduction but require written permission for commercial reproduction/distribution.",
+    "Public API documentation supports developer access but does not clearly provide a separate commercial licence overriding the general commercial-reproduction restriction.",
+    "Alberta Carrier Training shows Government of Alberta copyright and no separate commercial reuse licence was located.",
+    "Commercial Vehicle Safety Compliance in Alberta manual states it is not intended to be reproduced or sold for commercial purposes or financial gain."
+  ],
+  "conditions_to_unblock": [
+    "Store written permission or explicit licence covering LeaseOS commercial use.",
+    "Confirm API caching, offline, historical storage, redisplay, derivative-use and attribution conditions.",
+    "Confirm camera-image and third-party data rights.",
+    "Confirm whether AI/RAG indexing is permitted.",
+    "Confirm whether course content may be commercially reproduced."
+  ],
+  "sources": [
+    "https://511.alberta.ca/about/about",
+    "https://511.alberta.ca/developers/doc",
+    "https://commercial-driver-training.511.alberta.ca/",
+    "https://www.alberta.ca/education-manual-for-commercial-carriers",
+    "https://www.alberta.ca/open-government-program"
+  ]
+}

@@ -1,0 +1,59 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Disposable database. Everything below now runs — including the 15 DB
+    # tests and the award concurrency suite, neither of which could execute
+    # before this existed.
+    #
+    # MariaDB, not MySQL. This service used to be mysql:8.0, under which the
+    # migration step could never have succeeded: 0021_active_role_uniqueness.sql
+    # declares a generated column with the PERSISTENT keyword, which is MariaDB's
+    # spelling — MySQL 8.0 accepts only VIRTUAL and STORED and rejects the
+    # statement outright. server/reservedWordColumns.test.ts points the same way:
+    # it derives its reserved set from the live server and pins the answer
+    # MariaDB 10.11 gives. 10.11 is the version the reconciliation gate was
+    # verified against.
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+          MARIADB_DATABASE: leaseos
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    # root, not a scoped user: scripts/ci-gate.sh starts from an empty database
+    # by issuing DROP DATABASE / CREATE DATABASE, which a scoped user cannot do.
+    env:
+      DATABASE_URL: mysql://root@127.0.0.1:3306/leaseos
+
+    steps:
+      # Full history, not the default depth of 1. registerClaims.test.ts checks
+      # every commit hash the register claims with `git cat-file -e`, which can
+      # only see what was fetched.
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      # No `version` input: package.json pins packageManager (pnpm@10.4.1+sha512)
+      # and pnpm/action-setup@v4 refuses to run when both are given.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+
+      # ubuntu-latest (24.04) ships no `mysql` client; the gate scripts need one.
+      - name: Install MariaDB client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mariadb-client
+
+      - run: pnpm install --frozen-lockfile
+
+      # The whole gate, not a hand-rolled subset of it. The previous inline
+      # steps skipped gates 0, 5, 7b, 7c and 8.
+      - name: CI gate
+        run: bash scripts/ci-gate.sh

@@ -1,0 +1,1514 @@
+# LeaseOS_Live_Assist_Unified_AI_Build_Plan_v2_0
+
+_Text extracted from LeaseOS_Live_Assist_Unified_AI_Build_Plan_v2_0.pdf (34 pages). The PDF beside it is the original._
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 1
+LEASEOS
+Live Assist + Unified AI Assistant
+Architecture and Build Plan
+Version 2.0
+19 September 2026
+LeaseOS trucking / field operations platform
+Purpose
+Build one LeaseOS Assistant that can understand voice, LeaseOS context and explicitly shared Android screen 
+content; help with paperwork, trucking, dispatch, mechanics, training and company operations; and carry out only 
+authorized, typed actions through a default-deny authority gateway.
+DESIGN STATUS: CURRENT PLANNING TRANCHE COMPLETE - BUILD PLAN READY
+This plan extends the existing LeaseOS AI Secretary, provenance, offline-first, role/permission and human-confirmation patterns. 
+It does not authorize autonomous bypass of compliance, safety, security, device or platform controls.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 2
+Contents
+ 1. Executive build brief
+ 2. Locked design decisions
+ 3. Non-negotiable safety and authority rules
+ 4. Target architecture
+ 5. Capability model and user experience
+ 6. Android Live Assist architecture
+ 7. Knowledge, memory, provenance and offline behavior
+ 8. Data model and service contracts
+ 9. Implementation phases and checkpoints
+ 10. Test strategy and production gates
+ 11. Security, privacy and platform compliance
+ 12. Pilot and rollout
+ 13. Recommended backlog
+ 14. Source alignment and reference notes
+ 15. Assistant Brain / Orchestrator build plan
+ 16. Knowledge / RAG Gateway build plan
+ 17. Multimodal Evidence Fabric build plan
+ 18. Integrated implementation sequence and checkpoint gates
+ 19. Current planning boundary and next subsystem
+Recommended delivery strategy
+Do not start with whole-device control. First build the authority gateway, typed action registry and unified AI 
+Secretary. Then add read-only Live Assist. Only after the evidence, confirmation and policy gates are proven should 
+LeaseOS enable deterministic cross-app actions.
+1. Executive build brief
+LeaseOS Live Assist is not a separate chatbot and not a generic remote-control bot. It is the visual/voice 
+interaction layer for one unified LeaseOS Assistant. The user talks to one assistant; behind the scenes, an 
+orchestrator routes work to approved capabilities for paperwork, driving, routing, dispatch, compliance, billing, 
+training, mechanics and company operations.
+The build must preserve a hard separation between AI reasoning and authoritative system writes. AI can 
+observe, explain, extract, recommend and prepare. Actual business changes pass through a typed Action 
+Gateway that checks tenant, identity, role, device trust, job context, vehicle state, risk, evidence and 
+confirmation requirements before executing.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 3
+Primary outcome
+A driver, mechanic, dispatcher or office user should be able to say what they need in ordinary language, optionally 
+share the Android screen, and receive help that is grounded in LeaseOS records and approved sources - without 
+giving an LLM direct database write access or unrestricted device control.
+Success criteria
+ One visible LeaseOS Assistant; specialist routing is internal.
+ Works on personal/BYOD Android and company-managed fleet Android devices.
+ Hybrid local-first processing: wake phrase, basic OCR/UI understanding and simple commands stay local 
+when practical; cloud models are used only when needed.
+ Parked / moving / emergency modes materially change allowed actions, not merely the UI.
+ Important answers show source, freshness, confidence and whether content is measured, observed, 
+historical, inferred or confirmed.
+ No consequential action is committed without the required authority and confirmation.
+ Offline operation degrades safely: cached data remains usable, stale/live dependencies are labeled, writes 
+queue for synchronization.
+ Raw screen/audio is transient by default; durable business facts are stored as structured records with 
+provenance.
+ Mechanics assistance can diagnose and prepare work, but cannot autonomously declare a vehicle safe or 
+release it to service.
+2. Locked design decisions
+Decision Approved direction
+Screen scope Both: LeaseOS-native context plus explicit whole-screen 
+sharing sessions.
+Action level See + understand + operate, but only through 
+typed/approved actions and confirmation gates.
+Device deployment Both BYOD/personal devices and company-managed fleet 
+devices.
+AI topology Hybrid local-first with cloud escalation when required.
+Driving safety Parked / moving / emergency state model.
+Assistant UX One LeaseOS Assistant with automatic specialist routing.
+Knowledge Approved company knowledge + approved external/live 
+sources with provenance.
+Permissions Secure LeaseOS defaults + company-customizable roles; 
+non-bypassable safety floor.
+Proactivity Mixed proactive mode with policy-controlled interruptions 
+and task inbox.
+Invocation Button + voice + optional local wake phrase such as “Hey 
+LeaseOS”.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 4
+Decision Approved direction
+Memory Layered memory/retention: session, job, user, equipment, 
+company and audit.
+Offline Graceful degradation with local/cached capabilities and 
+queued synchronization.
+Android control
+Native APIs/intents first; deterministic accessibility 
+automation only where policy-permitted; no unrestricted 
+autonomous LLM tap loop.
+3. Non-negotiable safety and authority rules
+Rule Implementation meaning
+AI does not write directly to authoritative tables All writes go through typed service/action contracts.
+Unknown is not safe Missing or stale evidence produces UNKNOWN/REVIEW, never 
+a fabricated pass.
+Proposal before commitment
+OCR, voice extraction, predicted maintenance, billing lines and 
+compliance changes remain proposed until required 
+confirmation occurs.
+User authority caps AI authority The assistant cannot obtain more authority than the 
+authenticated user and current delegated role.
+Consequential actions step up
+HOS corrections, signatures, billing submission, vehicle release, 
+dispatch acceptance, deletions, external communications and 
+permission changes require explicit policy checks and usually 
+human confirmation.
+Driving state is a control input Moving state disables distracting and nonessential interaction 
+pathways.
+Protected content stays protected LeaseOS does not attempt to bypass Android secure-screen, 
+enterprise, biometric, privacy or app restrictions.
+Evidence remains explainable A user can ask “Why?” and see the records/sources, timestamps, 
+confidence and inference boundary.
+Tenant isolation is absolute No cross-company data leakage through retrieval, chat history, 
+screen observations, embeddings, logs or model context.
+Raw capture is temporary by default
+Store structured facts and evidence references rather than 
+continuous recordings unless a defined evidence policy requires 
+retention.
+Action risk ladder
+Level Examples Human confirmation
+L0 - Observe Read screen/context; explain; search 
+approved knowledge. No
+L1 - Assist Highlight, calculate, guide, draft. No
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 5
+Level Examples Human confirmation
+L2 - Prepare Populate forms, work-order drafts, 
+dispatch/invoice drafts. Usually no to save draft
+L3 - Routine execute
+Reversible, approved actions such as 
+navigation handoff, filters, draft save, 
+attach evidence.
+Policy dependent
+L4 - Consequential
+HOS correction, billing submit, dispatch 
+acceptance, safety declaration, vehicle 
+release, signature, delete, external send.
+Yes
+L5 - Restricted
+Bypass compliance/safety/security, 
+fabricate evidence, impersonate 
+signature, weaken controls, mark 
+unknown as verified.
+Never
+4. Target architecture
+USER / DRIVER / MECHANIC / OFFICE / DISPATCH
+        |  voice / text / screen / camera / job context
+        v
++-------------------- LEASEOS ASSISTANT --------------------+
+| Session + Context Normalizer                               |
+| Intent / Context Router                                    |
+| Specialist capability selection                           |
++---------------------------+--------------------------------+
+                            |
+           +----------------+----------------+
+           |                |                |
+           v                v                v
+     Knowledge/RAG    Deterministic      Model Router
+   company + live      LeaseOS engines    local/cloud
+           |                |                |
+           +----------------+----------------+
+                            v
+                    PROPOSED ACTION
+                            v
+                  AUTHORITY GATEWAY
+ identity / tenant / role / vehicle state / device trust / risk
+                            |
+                 +----------+----------+
+                 |                     |
+                 v                     v
+           EXECUTE TYPED          REQUEST HUMAN
+              ACTION              CONFIRMATION
+                 |                     |
+                 +----------+----------+
+                            v
+                    AUDIT + PROVENANCE
+Core logical modules
+Module Responsibility
+Assistant Session Manager Starts/ends assistant sessions; tracks user, device, job/unit, 
+vehicle state, connectivity and allowed scopes.
+Intent/Context Router
+Routes a request to paperwork, routing, HOS, mechanics, 
+training, dispatch, billing, company operations or a 
+combination.
+Capability Registry Declares what each capability can read, prepare or execute; 
+inputs, outputs, risk level, confirmation, offline availability.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 6
+Module Responsibility
+Authority Gateway Default-deny enforcement point for every assistant-initiated 
+action.
+Action Registry
+Typed action vocabulary such as OPEN_JOB, NAVIGATE_TO, 
+CREATE_DEFECT, PREPARE_FIELD_TICKET, CHECK_HOS and 
+CREATE_WORK_ORDER.
+Knowledge Gateway
+Retrieves approved company knowledge, LeaseOS records, 
+authoritative regulatory/OEM material and live external data 
+with source metadata.
+Model Router Chooses local rules/model vs cloud model based on task 
+complexity, privacy, connectivity and policy.
+Live Assist Capture Engine Explicit Android MediaProjection session, frame-change 
+detection, local OCR/UI parsing and redaction.
+Platform Adapters Android intents/deep links, 511/map integrations, 
+email/messaging, OEM/telematics and other official APIs.
+Task Inbox Turns unresolved assistant work into durable operational tasks.
+Audit/Provenance Ledger Records source, confidence, actor, approver, action, 
+before/after, device/session and result.
+5. Capability model and user experience
+5.1 One assistant, specialist capabilities
+Capability Scope
+Paperwork
+Voice/screen/camera extraction, gap detection, read-back, 
+proposed forms, tickets, manifests, inspections and billing 
+evidence.
+Driver/Trucking Job instructions, routes, offline maps, HOS assistance, 
+inspections, load/stop context, road restrictions and contacts.
+Dispatch Assignment context, readiness, route/status explanation, job 
+contacts, exceptions and queued decisions.
+Mechanics Defects, diagnostic context, work orders, unit history, sensor 
+readings, parts/labor/evidence and guided troubleshooting.
+Safety/Compliance Explains blocks, missing evidence and rule state; never invents 
+compliance or bypasses hard gates.
+Billing/Office Prepared invoices, evidence completeness, rejected/missing 
+ticket detection, customer requirements and review queues.
+Training/How-to LeaseOS usage, company SOPs, approved training, equipment 
+procedures and escalation to authoritative manuals.
+Company Operations Employee/unit/document status, task queues, expiries, client 
+requirements, summaries and authorized administration.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 7
+5.2 Context-sensitive behavior
+State Allowed behavior
+Parked Full voice and visual assistance; prepare/review forms; 
+routine approved actions; L4 confirmation as required.
+Moving
+Voice-first; navigation, route/HOS/safety information, read-
+aloud, alerts and task queuing. Complex typing/review and 
+nonessential cross-app interaction disabled.
+Emergency/Critical
+Surface coordinates, emergency contacts/ERP/ERAP, critical 
+instructions and approved communication shortcuts. 
+Emergency mode does not bypass compliance/security 
+controls.
+Offline
+Use cached map/company/manual/job data; local 
+extraction/rules where available; label stale dependencies; 
+queue sync/actions requiring connectivity.
+5.3 Explainability
+Operationally meaningful answers should support a “Why?” view. The answer payload should carry source 
+class, source identifier, observed/verified time, freshness, confidence and the boundary between evidence and 
+model inference.
+Example diagnostic statement
+MEASURED   coolant_temp = 112 C      source: ECU sensor
+OBSERVED   residue near upper hose   source: mechanic photo
+HISTORICAL similar loss 18 days ago  source: WO-1842
+INFERRED   probable cooling leak      source: assistant reasoning
+CONFIRMED  upper radiator hose leak   verified_by: mechanic
+6. Android Live Assist architecture
+6.1 BYOD/personal devices
+ Use Android MediaProjection for explicit whole-screen capture sessions. User consent is requested for each 
+capture session where required by Android behavior.
+ Show a persistent LeaseOS “LIVE ASSIST ACTIVE” control plus Android/system capture indication. Either 
+stop path terminates capture and releases resources.
+ Process frame fingerprints, UI semantics and OCR locally first; do not continuously stream video to the 
+cloud.
+ Redact sensitive regions when possible before cloud escalation. Treat password/PIN/biometric/secure 
+screens as user-only steps.
+ Use official APIs, LeaseOS APIs, Android intents and deep links before any accessibility-based automation.
+ If AccessibilityService is used for automation, constrain it to declared, narrow, deterministic workflows. Do 
+not give an LLM an unrestricted plan-and-tap loop.
+6.2 Company-managed fleet devices
+ Use Android Enterprise/MDM policy to standardize allowed apps, security posture, data-sharing policy and 
+Live Assist availability.
+ Respect device-owner/profile-owner restrictions that disable content capture or AI/agent automation.
+ Keep company policy separate from the non-bypassable LeaseOS safety floor: MDM may reduce capability, 
+never silently expand assistant authority.
+ Support separate profiles/policies for driver tablets, shop/mechanic devices and office/dispatch devices.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 8
+6.3 Capture pipeline
+MediaProjection frame
+      |
+      v
+local fingerprint / change detector
+      |---- no meaningful change ---> discard
+      v
+semantic UI extraction + OCR + local classifier
+      |
+      +---- enough context ----------> structured observation
+      |
+      v
+redaction + minimum-context package
+      |
+      v
+cloud vision/reasoning only when needed
+      |
+      v
+proposed fact/action -> Authority Gateway
+6.4 Android/Google Play implementation constraints
+Current platform constraint - re-verify before store submission
+Google Play policy permits narrow, clearly understood deterministic accessibility automation, but prohibits using 
+AccessibilityService so an app autonomously initiates, plans and executes actions or decisions. Build LeaseOS 
+around typed actions, intents/APIs and deterministic adapters - not unrestricted AI UI control.
+Area Build requirement
+MediaProjection
+Request user consent for capture; use required foreground 
+service type/permission; handle projection stop callback and 
+release surfaces/resources.
+AccessibilityService
+Prominent disclosure/consent and Play declaration if used; 
+narrowly scoped deterministic workflows; prefer narrower 
+APIs whenever possible.
+Secure/protected screens Honor platform/app capture restrictions. Do not attempt 
+bypasses.
+Enterprise restrictions Detect and honor device policy restrictions such as content-
+capture or AI automation controls.
+Third-party AI Data-safety/user-data responsibilities remain with LeaseOS; 
+minimize data and disclose processing appropriately.
+7. Knowledge, memory, provenance and offline behavior
+7.1 Source classes
+Source class Use
+AUTHORITATIVE_REGULATORY Government/regulator rule or dataset.
+OEM_TECHNICAL Manufacturer/service documentation.
+COMPANY_POLICY Approved employer SOP, customer requirement or internal 
+policy.
+LEASEOS_RECORD Operational record already in LeaseOS.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 9
+Source class Use
+LIVE_EXTERNAL Current road/511/weather/partner API response.
+AI_GENERAL_KNOWLEDGE Explanation only; never sufficient evidence for a consequential 
+operational fact.
+7.2 Layered memory
+Layer Retention/use
+Session Temporary conversation/Live Assist context; short TTL by 
+default.
+Job Current assignment, customer, route, unit/trailer, forms, 
+contacts, evidence and unresolved tasks.
+User Approved role, accessibility, units/preferences and non-
+sensitive workflow preferences.
+Equipment Defects, maintenance, sensor events, inspections, parts and 
+recurring issues.
+Company Approved SOPs, forms, training, customer rules, rates and 
+knowledge.
+Audit Immutable evidence of consequential actions, approvals 
+and outcomes; not ordinary chatbot memory.
+7.3 Offline-first behavior
+Connectivity state Behavior
+FULL Local + cloud AI, live sources, online LeaseOS services.
+LIMITED Local AI/rules + cached LeaseOS data; cloud/live work 
+queued or selectively retried.
+OFFLINE
+Local voice commands where supported, cached 
+knowledge/maps/manuals, paperwork drafting, photo/note 
+evidence, queued sync.
+STALE/UNKNOWN Anything requiring fresh external verification is clearly 
+marked and cannot silently satisfy a compliance/safety gate.
+8. Data model and service contracts
+Names below are recommended logical contracts. Adapt them to the existing LeaseOS schema and naming 
+conventions instead of creating parallel concepts.
+8.1 Recommended tables/entities
+Entity Key content
+assistantSessions tenantId, userId, deviceId, jobId/unitId, startedAt, endedAt, 
+mode, drivingState, scopes, connectivityState
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 10
+Entity Key content
+assistantTasks type, context refs, owner/role, priority, status, dueAt, 
+sourceSessionId, blockingReason
+assistantActions actionType, argsHash, actor, actingRole, riskLevel, state, result, 
+reversible, timestamps
+assistantApprovals actionId, requiredRole, approver, method, decision, reason, 
+timestamp
+assistantEvidenceRefs action/task/message ref -> source class/id/version, observedAt, 
+confidence, freshness, excerpt/hash
+liveAssistSessions projection/session state, allowed capture scopes, retention 
+policy, start/stop reason, policy snapshot
+screenObservations ephemeral/short-lived structured observation; sourceApp, UI 
+element/text, confidence, frame hash, redaction state
+capabilityDefinitions capability/action metadata: input schema, output schema, risk, 
+offline support, required scopes, confirmation
+assistantPolicies tenant overrides within LeaseOS hard limits: proactivity, 
+retention, allowed adapters, cloud escalation, role mappings
+knowledgeSources
+source identity, authority class, version, 
+jurisdiction/customer/OEM scope, verifiedAt, license/usage 
+constraints
+assistantAuditEvents append-only assistant lifecycle/action/approval/security events 
+linked to existing audit ledger
+8.2 Provenance type
+Provenance {
+  sourceClass, sourceId, sourceVersion,
+  observedAt, verifiedAt, verifiedBy,
+  confidence, freshness, status,
+  precision?, evidenceHash?
+}
+status: pending | confirmed | rejected | unknown | stale
+8.3 Typed action contract
+ActionDefinition {
+  id: "CREATE_WORK_ORDER",
+  inputSchema,
+  allowedRoles,
+  allowedDrivingStates,
+  riskLevel: "L2",
+  confirmationPolicy,
+  requiredEvidence,
+  reversible,
+  offlinePolicy,
+  executorAdapter
+}
+8.4 Initial action vocabulary
+ OPEN_JOB, OPEN_ROUTE, OPEN_UNIT, SHOW_DOCUMENT, CALL_JOB_CONTACT
+ NAVIGATE_TO, CHECK_ROUTE, CHECK_HOS, CHECK_DISPATCH_READINESS
+ CREATE_DEFECT, CREATE_WORK_ORDER, ADD_WORK_ORDER_EVIDENCE, PREPARE_UNIT_RELEASE
+ ADD_LOAD, ADD_UNLOAD, ADD_DISPOSAL_TICKET, ATTACH_PHOTO, ATTACH_DOCUMENT
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 11
+ PREPARE_FIELD_TICKET, PREPARE_MANIFEST, PREPARE_BILLING, REQUEST_SIGNATURE
+ OPEN_ERP, SHOW_EMERGENCY_CONTACTS, QUEUE_TASK, EXPLAIN_BLOCK, SHOW_WHY
+9. Implementation phases and checkpoints
+Sequencing rule
+Build authority, provenance and typed actions before adding screen control. Build read-only screen understanding 
+before cross-app automation. Treat every checkpoint as a shippable safety boundary.
+P0 - Baseline and contracts
+Scope Deliverables Exit gate
+Inventory existing AI Secretary, audit, 
+role, offline, mobile and routing 
+contracts; freeze duplicate concepts; 
+define module ownership and feature 
+flags.
+Architecture map; ADRs; dependency 
+map; feature flags; policy snapshot tests. No new AI write path is allowed until P1.
+P1 - Authority Gateway + Action Registry
+Scope Deliverables Exit gate
+Implement default-deny action 
+evaluation, L0-L5 risk, 
+role/tenant/device/job/driving-state 
+checks, approvals and audit receipt.
+Typed action registry; authorization 
+evaluator; approval workflow; audit 
+schema.
+Every assistant write must fail closed 
+when policy context is missing.
+P2 - Unified AI Secretary / Orchestrator
+Scope Deliverables Exit gate
+Unify paperwork and specialist routing 
+behind one session/orchestrator; schema-
+constrained extraction; minimum-
+question gap detection; read-back.
+Session API; intent router; capability 
+registry; structured proposals.
+No direct model-to-DB mutation; all 
+proposed fields carry provenance.
+P3 - Knowledge + Provenance Gateway
+Scope Deliverables Exit gate
+Build source classes, retrieval filters, 
+freshness/authority metadata, “Why?” 
+payloads and tenant isolation.
+KnowledgeSource registry; provenance 
+adapter; source/freshness UI contract.
+Important answer can enumerate 
+evidence and inference boundary.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 12
+P4 - Voice + driving-state shell
+Scope Deliverables Exit gate
+Button/mic flows, optional local wake 
+phrase, parked/moving/emergency 
+behavior, visible mic/session controls.
+Voice session manager; driving-state 
+policy hook; command queue.
+Moving-mode test suite proves distracting 
+actions are unavailable.
+P5 - In-app Live Assist
+Scope Deliverables Exit gate
+Assistant understands LeaseOS UI state 
+directly without whole-screen capture; 
+highlights and guides users; opens typed 
+LeaseOS actions.
+Screen/context contract inside LeaseOS; 
+help overlays; how-to routing.
+Can complete top LeaseOS help 
+workflows without MediaProjection.
+P6 - Whole-screen read-only Live Assist
+Scope Deliverables Exit gate
+Add MediaProjection session, local frame-
+change detection, OCR/UI parsing, 
+redaction and cloud escalation. No cross-
+app execution yet.
+Android capture service; observation 
+pipeline; session permission UI; stop 
+lifecycle.
+Capture always explicit/visible; 
+revocation instantly stops processing; 
+raw frames obey retention.
+P7 - Deterministic external action adapters
+Scope Deliverables Exit gate
+Add native intents/deep links/APIs and 
+tightly scoped deterministic accessibility 
+actions only where needed.
+Adapter SDK; Maps/navigation adapter; 
+approved messaging/email handoff; 
+selected app workflows.
+No arbitrary tap loop; each action maps 
+to a reviewed ActionDefinition.
+P8 - Hybrid model router + offline assistant
+Scope Deliverables Exit gate
+Local/simple task routing, cloud 
+escalation policy, cached 
+knowledge/manuals, queued assistant 
+work and sync conflict handling.
+Model router; offline capability manifest; 
+encrypted queue; stale-state UX.
+Loss of network does not convert 
+unknown data into verified results.
+P9 - Managed fleet mode
+Scope Deliverables Exit gate
+Android Enterprise/MDM policy 
+integration, device posture and managed 
+restrictions.
+Managed policy reader; fleet admin 
+settings; device compliance indicators.
+Enterprise restrictions always 
+reduce/disable capability safely.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 13
+P10 - Mechanic + company operations expansion
+Scope Deliverables Exit gate
+Mechanic diagnostics/work orders plus 
+office/dispatch/billing/training 
+capabilities using the same contracts.
+Mechanic context resolver; equipment 
+evidence; operations capability modules.
+Mechanic assistant never independently 
+closes safety-critical release decision.
+P11 - Proactive assistant + task inbox
+Scope Deliverables Exit gate
+Policy-controlled alerts, missing-evidence 
+detection, billing-ready queue, expiring 
+docs, defects and unresolved assistant 
+tasks.
+Task rules; notification policy; task inbox 
+UI; escalation.
+No alert can auto-escalate authority or 
+auto-commit L4 actions.
+P12 - Security/privacy/policy hardening
+Scope Deliverables Exit gate
+Threat model, Play declarations, 
+disclosure/consent, data minimization, 
+log redaction, abuse tests, retention 
+controls.
+Policy documentation; privacy UX; pen-
+test findings; store submission checklist.
+Zero known critical security/privacy 
+issues; declarations match actual 
+behavior.
+P13 - Field pilot and production gate
+Scope Deliverables Exit gate
+Real-device testing across supported 
+Android versions, weak/offline networks, 
+personal and managed devices, 
+driver/shop/office pilots.
+Pilot report; telemetry; defect burn-down; 
+rollback plan; release runbook. Production gates in Section 10 all green.
+Recommended release checkpoints
+Checkpoint Phases Capability
+Checkpoint A - Assistant Core P0-P3 One assistant, provenance, typed actions, 
+no screen sharing.
+Checkpoint B - Voice/In-app P4-P5 Voice + in-app guided assistance, driving-
+state controls.
+Checkpoint C - Live Assist Observe P6 Whole-screen understanding only; no 
+autonomous cross-app execution.
+Checkpoint D - Controlled Actions P7-P9 Approved adapters, offline/hybrid 
+behavior and managed fleet mode.
+Checkpoint E - Operational Suite P10-P11 Mechanics/company operations/proactive 
+tasks.
+Production Candidate P12-P13 Security/policy/device/pilot gates 
+complete.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 14
+10. Test strategy and production gates
+10.1 Required automated test families
+ Authorization matrix: every action x role x tenant x driving state x risk level.
+ Tenant isolation: retrieval, embeddings, screen observations, task queues and audit refs.
+ Proposal/confirmation: uncertain OCR/voice values never silently become confirmed records.
+ Capture lifecycle: deny, start, rotate, app switch, protected content, revoke, process death, reboot.
+ Moving-mode enforcement: prohibited UI/action pathways remain unavailable even if requested by model 
+output.
+ Offline/stale handling: cached data labels, queued writes, retries, conflict resolution and no false 
+verification.
+ Action idempotency/replay: duplicate model/tool calls cannot duplicate invoices, tickets, messages or work 
+orders.
+ Model failure/hallucination: invalid/unknown action or argument is rejected before executor.
+ Approval step-up: L4 action cannot execute with missing/expired/wrong-role approval.
+ Managed policy: content-capture/AI restrictions are detected and honored.
+ Retention/redaction: transient screen frames/audio are removed according to policy and sensitive values 
+are not leaked to logs.
+ Accessibility and one-handed/mobile: large text, screen reader, gloves/large touch targets where supported, 
+voice fallback.
+10.2 Production gates
+Gate Production requirement
+G1 0 direct LLM writes to authoritative LeaseOS business tables.
+G2 100% assistant actions map to registered typed 
+ActionDefinitions.
+G3 100% L4 actions show required confirmation and audit receipt.
+G4 Unknown/stale evidence cannot produce PASS/SAFE/VERIFIED.
+G5 All important operational answers expose source + 
+time/freshness + confidence/inference status.
+G6 Capture sessions require explicit current consent/visibility and 
+stop cleanly on revocation.
+G7 No unrestricted autonomous AccessibilityService 
+planning/execution path exists in Play-distributed build.
+G8 Tenant isolation and authorization tests pass for every assistant 
+data path.
+G9 Offline behavior is safe and understandable; queued records 
+are durable and encrypted.
+G10 Security/privacy review has no unresolved critical/high issues 
+affecting production use.
+G11 Field pilot covers personal + managed Android, moving/parked 
+states, weak network and real paperwork/mechanic workflows.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 15
+Gate Production requirement
+G12 Rollback/kill switch can disable Live Assist or specific adapters 
+without disabling core LeaseOS.
+11. Security, privacy and platform compliance
+11.1 Threat model priorities
+Threat Mitigation
+Prompt injection from screen/doc Treat external content as untrusted data. It cannot redefine 
+assistant policy or authorize actions.
+Cross-tenant retrieval Tenant-scoped indexes/queries and policy-enforced joins; tests 
+for every retrieval path.
+Credential capture
+Detect/redact sensitive UI where possible; never persist 
+passwords/PINs/tokens from capture; secure screens remain 
+user-only.
+Over-broad screen retention Frame TTL and structured-observation model; evidence 
+retention must be explicit and job/policy linked.
+Unauthorized external action Typed allowlist + risk/role/context checks + idempotency + 
+confirmation.
+Model tool abuse Model can request only known capabilities; gateway validates 
+all arguments server-side.
+Lost/stolen device Device binding, secure local storage, session timeout, 
+revocation, managed wipe where applicable.
+Audit tampering Append-only audit trail with integrity controls and durable 
+references to evidence/action receipts.
+Proactive distraction Moving-mode suppression and policy-controlled interrupt 
+classes.
+Stale regulatory/live data Freshness thresholds and explicit UNKNOWN/STALE state; no 
+silent fallback to general model knowledge.
+11.2 Privacy defaults
+ Whole-screen sharing is opt-in, session-scoped and visibly active.
+ Raw screen/video/audio is not a general historical archive.
+ Cloud escalation transmits the minimum context needed for the task and records source/processing policy.
+ Company administrators can shorten optional AI-memory retention but cannot erase legally/operationally 
+required audit records through the conversational assistant.
+ User-facing permission dashboard shows current screen, mic, location, cloud and external-action access.
+ Assistant logs must avoid secrets and unnecessary personal content.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 16
+12. Pilot and rollout
+12.1 Recommended pilot cohorts
+Cohort Size Focus
+Driver pilot 5-10 drivers
+Voice, parked/moving controls, 
+paperwork preparation, in-app help, 
+read-only Live Assist, route handoff.
+Shop pilot 2-5 mechanics
+Defect/work-order flows, photos, unit 
+history, OEM/company knowledge, 
+diagnostic explanations.
+Office/dispatch pilot 3-5 users
+Billing readiness, missing evidence, 
+dispatch exceptions, task inbox, 
+role/approval behavior.
+Managed-device pilot Small fleet subset MDM policy, capture restrictions, device 
+trust, remote policy change and rollback.
+12.2 Pilot metrics
+ Paperwork completion time and number of fields/questions eliminated.
+ Assistant proposal acceptance/rejection rate by field and workflow.
+ False-positive/false-confidence incidents, especially safety/compliance/mechanics.
+ Number of times moving-mode correctly deferred a distracting/consequential task.
+ Cloud calls, bandwidth, battery impact and local-vs-cloud routing ratio.
+ Capture-session abandon/revoke rate and privacy complaints.
+ Missing-evidence reduction before billing/dispatch.
+ Mechanic diagnostic usefulness without increasing unsafe release behavior.
+ Offline queue success, sync conflict rate and time-to-recovery.
+ Support requests resolved by LeaseOS How-To without human escalation.
+13. Recommended backlog
+ID Area Task Phase
+LA-001 Architecture
+Map existing 
+AI/role/audit/offline modules; 
+identify reuse and duplicates.
+P0
+LA-002 Contracts Create shared Provenance 
+contract and status vocabulary. P0
+LA-003 Security Create AssistantAction + 
+Approval receipt contract. P1
+LA-004 Security Implement default-deny 
+Authority Gateway. P1
+LA-005 Actions Build Action Registry with first 
+15 LeaseOS actions. P1
+LA-006 AI Create unified assistant 
+session/orchestrator. P2
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 17
+ID Area Task Phase
+LA-007 AI
+Connect schema-driven 
+paperwork engine and read-
+back.
+P2
+LA-008 Knowledge
+Implement 
+source-class/freshness/provenan
+ce retrieval.
+P3
+LA-009 UX Build “Why?” evidence panel 
+contract. P3
+LA-010 Voice Add push-to-talk + optional local 
+wake phrase. P4
+LA-011 Safety Implement driving-state action 
+matrix. P4
+LA-012 UX Build in-app Assist overlay/help 
+mode. P5
+LA-013 Android
+Implement MediaProjection 
+service + explicit consent 
+lifecycle.
+P6
+LA-014 Android
+Implement frame 
+fingerprint/OCR/redaction 
+pipeline.
+P6
+LA-015 Android Build Live Assist 
+permission/session dashboard. P6
+LA-016 Adapters Create adapter SDK and 
+navigation intent adapter. P7
+LA-017 Adapters
+Add deterministic accessibility 
+runner only for reviewed 
+narrow workflows.
+P7
+LA-018 Offline
+Build model router, local 
+capability manifest and queued 
+assistant actions.
+P8
+LA-019 Enterprise
+Read/enforce Android 
+Enterprise restrictions and 
+device policy.
+P9
+LA-020 Mechanics Build unit/defect/work-order 
+mechanic context resolver. P10
+LA-021 Ops
+Add 
+billing/dispatch/training/compan
+y-operation capability 
+definitions.
+P10
+LA-022 Tasks Build assistant task inbox + 
+proactive rule engine. P11
+LA-023 Privacy Implement retention/redaction 
+policy tests and disclosure UX. P12
+LA-024 Compliance
+Prepare Play 
+Accessibility/MediaProjection/Da
+ta Safety submission evidence as 
+applicable.
+P12
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 18
+ID Area Task Phase
+LA-025 QA Real-device matrix + pilot 
+runbook + rollback/kill switch. P13
+14. Source alignment and reference notes
+14.1 Existing LeaseOS alignment
+This plan intentionally extends, rather than replaces, existing LeaseOS patterns found in the project material:
+ LEASEOS_BUILD_PLAN-3: a single schema-driven conversational form engine; per-field 
+value/precision/source/confidence; minimum missing questions; mandatory read-back; commit with 
+provenance; automation proposes and humans confirm before authoritative commitment.
+ LeaseOS prototype role model: Driver, Dispatcher, Mechanic, Office, Manager and Administrator with 
+distinct visibility/change rights.
+ LeaseOS offline prototype: encrypted local storage, queued events/photos and explicit last-sync/offline 
+status.
+ LeaseOS routing evidence design: unknown is not treated as clear; decisions retain evidence sufficient to 
+reproduce/explain the verdict.
+14.2 Android / Google Play references checked for this plan
+Reference URL
+Google Play - Use of the AccessibilityService API https://support.google.com/googleplay/android-developer/answer/
+10964491?hl=en
+Android Developers - Foreground service types / mediaProjection https://developer.android.com/develop/background-work/services/
+fgs/service-types
+Android 14 behavior - user consent for each MediaProjection 
+capture session
+https://developer.android.com/about/versions/14/behavior-
+changes-14
+Android media capture / MediaProjection https://developer.android.com/media/platform/av-capture
+Android UserManager - DISALLOW_CONTENT_CAPTURE https://developer.android.com/reference/android/os/
+UserManager#DISALLOW_CONTENT_CAPTURE
+Android Enterprise - What is new in Android 17 / agentic 
+automation controls https://developer.android.com/work/versions/android-17
+Google Play - July 15, 2026 policy announcement / third-party AI 
+data responsibility
+https://support.google.com/googleplay/android-developer/answer/
+17134731?hl=en
+Revalidation note
+Android APIs, Google Play policy and enterprise controls change. Re-check current official documentation at the 
+start of P6, again at P12, and immediately before Play Store/enterprise distribution submission.
+Current planning handoff
+The Live Assist shell, unified Assistant, Orchestrator, Knowledge Gateway and Evidence Fabric are now planned 
+at architecture/build-plan level. The next subsystem recommended after this document is Communications + 
+Contact Intelligence. Implementation should begin only through the typed contracts and safety gates defined 
+here, not through direct model-to-database or model-to-device control.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 19
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 20
+15. Assistant Brain / Orchestrator build plan
+The LeaseOS Assistant should be one user-facing assistant backed by a typed hub-and-spoke orchestrator. 
+Specialist capabilities do not receive independent authority. They expose bounded read/prepare/execute 
+functions to the orchestrator, while deterministic LeaseOS engines remain authoritative for dispatch readiness, 
+HOS evaluation, routing constraints, maintenance release and other domains that already have rule engines.
+15.1 Target subsystem
+AssistantOrchestrator
+ ContextResolver├──
+ IntentRouter├──
+ CapabilityRegistry├──
+ WorkflowCompiler├──
+ TaskGraphEngine├──
+ EvidenceResolver├──
+ ConflictResolver├──
+ ModelRouter├──
+ AuthorityGateway├──
+ ConfirmationEngine├──
+ TaskInbox├──
+ AuditReceiptWriter└──
+Design rule: the model may propose a workflow, but only registered typed capabilities and actions may survive 
+compilation and reach an executor.
+15.2 Canonical context envelope
+AssistantContext {
+  tenantId, userId, authenticatedRoles[], temporaryDelegations[],
+  deviceId, deviceTrust, managedDevice,
+  operatingState: PARKED | MOVING | EMERGENCY,
+  connectivity: ONLINE | DEGRADED | OFFLINE,
+  activeJobId?, activeTripId?, activeLoadId?,
+  unitId?, trailerId?, customerId?, location?,
+  liveAssistSessionId?,
+  availableCapabilities[], restrictedCapabilities[],
+  observedAt
+}
+ Unknown context is represented explicitly as unknown; the model must not infer a unit, customer, job or 
+jurisdiction simply because one is likely.
+ The context snapshot is attached to each workflow and receipt so later review can reproduce the authority 
+and state that existed when the request ran.
+ Vehicle motion state and device management state are first-class policy inputs, not UI-only flags.
+15.3 Multi-label intent and capability routing
+Intent routing must allow one request to invoke several bounded capabilities. Example: "I unloaded at the 
+disposal site, attach this ticket, finish the paperwork and tell me if I can go home" can require disposal, 
+document capture, paperwork, HOS and routing capabilities in one task graph.
+Layer Responsibility Must not do
+IntentRouter Classify primary intent plus required 
+secondary capabilities.
+Execute operational writes.
+CapabilityRegistry Declare inputs, outputs, scopes, risk, 
+offline support, confirmation and 
+Grant authority not held by the current 
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 21
+evidence requirements. user.
+WorkflowCompiler Convert model plan into allowlisted typed 
+steps.
+Pass arbitrary model-generated 
+commands to executors.
+TaskGraphEngine Track dependencies, resumability, 
+waiting states and cross-role handoffs.
+Hide blocked or incomplete steps.
+AuthorityGateway Evaluate tenant, role, job/unit scope, 
+driving state, evidence and confirmation.
+Accept model confidence as 
+authorization.
+15.4 Capability manifest contract
+CapabilityManifest {
+  capabilityId, version,
+  inputSchema, outputSchema,
+  readScopes[], writeScopes[],
+  allowedRoles[], allowedDrivingStates[],
+  riskLevel, confirmationPolicy,
+  requiredEvidence[], authoritativeEngines[],
+  offlinePolicy, reversibility,
+  auditEvents[]
+}
+ Capabilities are functions, not personas. Examples: paperwork.complete, hos.evaluate, route.calculate, 
+maintenance.create_work_order, billing.reconcile_job, knowledge.search_regulatory.
+ Deterministic engines outrank general model opinion. The model gathers inputs, invokes the engine, 
+explains the result and helps resolve deficiencies.
+ A capability can be disabled by tenant policy or managed-device policy, but tenant policy cannot weaken 
+the LeaseOS non-bypassable safety floor.
+15.5 Workflow plan and task graph
+WorkflowPlan {
+  workflowId, requestId, contextSnapshotHash,
+  steps: [{ actionId, inputs, dependsOn[], riskLevel, status }],
+  requiredConfirmations[],
+  unresolvedQuestions[],
+  createdAt, expiresAt?
+}
+ Every step is idempotent where possible and includes an idempotency key for external writes.
+ Long-running workflows persist as tasks so they can resume after loss of connectivity, a shift change, a 
+mechanic handoff or a delayed signature.
+ Cross-role handoffs become explicit tasks: driver defect -> mechanic work order -> authenticated release -> 
+dispatch readiness re-evaluation.
+15.6 Conflict resolution and evidence precedence
+ Authority precedence is domain-specific. A current road closure may outrank a company preferred route; 
+an OEM service specification may outrank generic mechanic notes; approved customer billing rules may 
+govern customer-specific paperwork.
+ When authoritative sources genuinely conflict, return CONFLICT and create a review task. Never average, 
+vote or let the language model silently pick one.
+ Each answer separates FACT, CALCULATION, DETERMINISTIC VERDICT, INFERENCE and 
+RECOMMENDATION so the user can see what LeaseOS knows versus what it is reasoning about.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 22
+15.7 Assistant task inbox
+ASSISTANT TASKS
+READY       Job 2817 billing package ready for review
+NEEDS INPUT Job 2821 disposal ticket missing
+BLOCKED     Unit 214 unresolved brake defect
+WAITING     Permit verification waiting for connectivity
+ Tasks can be assigned to driver, dispatcher, mechanic, office, safety, manager or a specific employee.
+ Task state must be queryable independently of chat history; chats are an interface, not the workflow 
+database.
+15.8 Failure containment and concurrency
+ Failure of one capability does not invalidate unrelated LeaseOS functions. Cloud-model failure must leave 
+deterministic/offline functions available.
+ Use recordVersion/expectedVersion and transactional checks on consequential updates. If a record changes 
+during review, refresh rather than overwrite.
+ External writes use idempotency keys and replay protection so duplicate model/tool calls cannot create 
+duplicate invoices, work orders, tickets or communications.
+15.9 Assistant audit receipt
+AssistantReceipt {
+  receiptId, requestSummary, requestedBy, actingRole,
+  workflowId, capabilitiesUsed[], evidenceRefs[],
+  deterministicVerdicts[], aiInferences[],
+  confirmations[], actions[], failures[],
+  finalState, contextSnapshotHash,
+  startedAt, completedAt
+}
+ Receipts are designed for debugging, dispute review, compliance review and support; they do not need to 
+retain raw chain-of-thought or transient screenshots.
+15.10 Orchestrator implementation checkpoints
+Checkpoint Build Pass condition
+AO-1 AssistantContext + context snapshot 
+persistence
+Every request receives 
+tenant/user/device/role/driving/connectivi
+ty/job context with explicit unknowns.
+AO-2 CapabilityRegistry + schema validation Unregistered capability IDs and invalid 
+arguments fail closed.
+AO-3 WorkflowCompiler Model-generated plan can only compile to 
+allowlisted typed actions.
+AO-4 AuthorityGateway integration Role/tenant/driving-state/risk/
+confirmation matrix covered by 
+automated tests.
+AO-5 TaskGraphEngine + TaskInbox Workflow can pause, persist, resume and 
+hand off across roles without chat state.
+AO-6 Deterministic engine adapters HOS/dispatch/routing/maintenance 
+boundaries are invoked rather than 
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 23
+duplicated in prompts.
+AO-7 ConflictResolver + explainability payload Conflicts are surfaced; Why-view can 
+reproduce evidence and engine verdict.
+AO-8 AuditReceiptWriter + replay/idempotency Every consequential workflow yields a 
+receipt and duplicate execution is 
+prevented.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 24
+16. Knowledge / RAG Gateway build plan
+Retrieval-augmented generation helps LeaseOS locate relevant knowledge, but the search index is not itself the 
+source of truth. Original source records, verified operational data and deterministic rule engines remain 
+authoritative. Search chunks and embeddings are replaceable indexes that point back to registered sources.
+16.1 Knowledge Gateway architecture
+LEASEOS ASSISTANT
+      |
+      v
+KnowledgeGateway
+   OperationalStore adapter├──
+   SourceVault adapter├──
+   FullText/Vector index├──
+   EntityGraph resolver├──
+   LiveSource adapters├──
+   AccessScope filter├──
+   Freshness evaluator├──
+   EvidenceResolver└──
+16.2 Source authority classes
+Class Meaning Examples / use
+A0 LeaseOS deterministic result HOS engine, dispatch readiness, route 
+constraint verdict, billing reconciliation.
+A1 Authoritative regulatory Government/regulator/legal publication; 
+jurisdiction and effective date required.
+A2 OEM / technical authority Manufacturer manual, service bulletin, 
+approved technical specification.
+A3 Approved company/customer policy SOP, customer procedure, 
+rate/billing/document rule.
+A4 Verified LeaseOS business record Inspection, signed field ticket, work 
+order, GPS event, unit record.
+A5 Live operational source 511, weather, facility, telematics; 
+freshness-sensitive.
+A6 Historical/user-generated Notes, prior jobs, driver/mechanic 
+observations; useful but not 
+automatically current.
+A7 General AI knowledge Explanation only; never authoritative 
+operational evidence.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 25
+16.3 Knowledge source registry
+KnowledgeSource {
+  sourceId, tenantId?, sourceType, title, publisher, authority,
+  jurisdiction?, customerId?, equipmentMake?, equipmentModel?,
+  sourceUrl?, originalFileId?, apiConnectorId?,
+  version, revision?, publishedAt?, effectiveFrom?, effectiveUntil?,
+  retrievedAt, verifiedAt?, verifiedBy?,
+  verificationStatus: UNVERIFIED | REVIEWED | VERIFIED | SUPERSEDED | REVOKED,
+  confidentiality: PUBLIC | COMPANY | CUSTOMER | RESTRICTED,
+  licenseClass, redistributionAllowed, refreshPolicy, contentHash
+}
+ A same-name file with a different content hash is a new source revision, not a silent replacement.
+ Regulatory sources require jurisdiction, version/effective dates and explicit verification before 
+consequential use.
+ Historical job facts stay historical until the current job explicitly confirms them.
+16.4 Ingestion and indexing pipeline
+Upload / API / approved website
+        |
+source registration + integrity hash
+        |
+file validation / licence-use check
+        |
+text/table/section extraction
+        |
+classification + entity linking
+        |
+review if required
+        |
+publish source revision
+         full-text index├──
+         embeddings├──
+         structured facts└──
+ Original documents remain in the Source Vault. Embeddings and chunks may be rebuilt without changing 
+source identity.
+ Retrieved document content is untrusted data. It cannot change system policy, permissions, tool scopes or 
+action contracts; this is the core prompt-injection boundary.
+16.5 Hybrid retrieval and entity scoping
+ Combine full-text/keyword, semantic retrieval, structured database queries, entity relationships, authority, 
+jurisdiction, customer, equipment and effective-date filters.
+ Equipment queries resolve unit -> VIN/configuration/components -> applicable documents before retrieval. 
+Do not retrieve a generic manual first and guess applicability afterward.
+ Customer queries are tenant/customer scoped before retrieval so one customer's procedures, contacts or 
+rates cannot leak into another customer's context.
+ Authorization is applied before search. The system never retrieves across unauthorized corpora and then 
+tries to hide the result afterward.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 26
+16.6 Knowledge answer contract
+KnowledgeAnswer {
+  answer, statements[], evidence[],
+  authorityLevel, confidence, freshAsOf, staleSources[],
+  conflicts[], unknowns[], inferenceUsed,
+  applicableJurisdiction?, applicableEquipment?, applicableCustomer?
+}
+ Consequential answers support a Why view with source, revision, effective date, freshness, evidence and 
+any inference used.
+ If live data is stale or unavailable, show UNKNOWN/STALE rather than presenting cached information as 
+current.
+16.7 Offline knowledge packs
+KnowledgePack {
+  packId, tenantId, userId/deviceId,
+  sourceRevisionIds[],
+  createdAt, expiresAt,
+  hash, signature
+}
+ Preload only job-relevant customer procedures, ERP/ERAP information, emergency contacts, permits, unit 
+manuals, offline map/routing data and applicable rules.
+ Signed pack metadata lets LeaseOS later show exactly which source revisions were present on a field device 
+at a given time.
+16.8 Governance and refresh center
+KNOWLEDGE GOVERNANCE
+NEEDS REVIEW   source requires human review
+EXPIRING       policy/source nearing review/effective end
+SOURCE CHANGED upstream authoritative source changed
+CONFLICTS      two active sources disagree
+UNVERIFIED     imported but not verified
+SUPERSEDED     retained for historical reproducibility
+ Live adapters declare authority, authentication, refresh interval, fields, retention, failure state and rate 
+limits.
+ Arbitrary web pages may assist research but cannot automatically become authoritative operational 
+evidence.
+16.9 Recommended logical stores
+Store Contains Rule
+Operational Store Jobs, trips, units, HOS, tickets, billing, 
+maintenance, users.
+Transactional source for current LeaseOS 
+business state.
+Source Vault Original PDFs/manuals/SOPs/regulatory 
+snapshots.
+Immutable/versioned originals with 
+hashes and retention.
+Search Index Full-text, embeddings, entity index. Rebuildable; never authoritative on its 
+own.
+Knowledge Governance Source metadata, licence, authority, 
+verification, effective dates, reviews.
+Controls whether/where a source may be 
+used.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 27
+16.10 Knowledge implementation checkpoints
+Checkpoint Build Pass condition
+KG-1 KnowledgeSource registry + revisions Every source has authority, 
+revision/hash, scope, verification and 
+retention metadata.
+KG-2 Source Vault + extraction pipeline Originals preserved; searchable 
+derivatives link back to exact source 
+revision.
+KG-3 AccessScope filter Tenant/role/customer restrictions apply 
+before retrieval; cross-tenant tests pass.
+KG-4 Hybrid retriever Structured + keyword + semantic + 
+entity/date/jurisdiction filtering works 
+together.
+KG-5 Prompt-injection boundary Retrieved content cannot request tools, 
+alter permissions or override 
+system/action policy.
+KG-6 Freshness/conflict engine Stale/changed/conflicting sources are 
+labeled and consequential answers fail 
+closed where required.
+KG-7 KnowledgeAnswer + Why view Every important statement can be traced 
+to evidence/source or labeled inference.
+KG-8 Offline signed knowledge packs Pack is scoped, encrypted/signed, expires 
+correctly and supports source-revision 
+audit.
+KG-9 Governance review center Admins can review, supersede, revoke 
+and resolve source conflicts without 
+deleting history.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 28
+17. Multimodal Evidence Fabric build plan
+The Evidence Fabric is the common ingestion, integrity and claim-resolution service for camera images, paper 
+tickets, PDFs, screen observations, voice, GPS, signatures, sensors, telematics and external API records. Evidence 
+may propose a fact; it does not silently become an authoritative job, billing, HOS, safety or maintenance record.
+17.1 Evidence architecture
+Camera / Voice / Screen / PDF / GPS / Signature / Sensors / APIs
+                         |
+                         v
+                  CaptureGateway
+                         |
+        +----------------+----------------+
+        v                v                v
+   ArtifactStore     ClaimExtractor   IntegrityLedger
+        |                |                |
+        +----------------+----------------+
+                         v
+                  EvidenceResolver
+              / duplicate / conflict / completeness
+                         |
+               proposed structured facts
+                         |
+              human/engine verification
+                         |
+               authoritative LeaseOS record
+17.2 Canonical evidence contracts
+EvidenceArtifact {
+  evidenceId, tenantId, capturedBy, deviceId,
+  evidenceType, mimeType?, capturedAt, receivedAt,
+  latitude?, longitude?, accuracyMeters?,
+  jobId?, tripId?, loadId?, unitId?, trailerId?, employeeId?, customerId?, facilityId?,
+  originalHash, storageReference, sourceApp?, captureMethod,
+  integrityStatus, retentionClass, parentEvidenceId?
+}
+EvidenceClaim {
+  claimId, evidenceId, field, proposedValue, unit?,
+  extractionMethod, precision?, confidence, status,
+  corroboratingEvidenceIds[], contradictoryEvidenceIds[]
+}
+ Artifact identity and claim identity are separate. One ticket image may support several field-level claims 
+with different confidence.
+ Corrections never overwrite extraction history; store original proposal, correction, actor, reason and 
+original evidence reference.
+17.3 Evidence classes and quality gates
+Class Examples Quality / trust checks
+DOCUMENT Field ticket, disposal ticket, scale ticket, 
+permit, inspection, receipt.
+Readability, page/corner completeness, 
+identifiers, signatures, duplicate 
+detection.
+PHOTO Defect, load, equipment, site condition, Blur/glare, timestamp, contextual linkage, 
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 29
+meter. optional annotation.
+VOICE Driver statement, mechanic note. Transcription confidence, precision such 
+as approximate vs exact, speaker/session 
+context.
+SCREEN_CAPTURE Live Assist observation. Source app, session consent, transient 
+frame handling, prefer official API if 
+available.
+GPS Arrival/departure/location. Accuracy radius, provider, timestamp; 
+uncertain geofence -> pending.
+SENSOR/TELEMATICS Temperature, pressure, tank level, axle 
+weight, fault code.
+Sensor identity, unit, calibration/health, 
+sample time, derived vs measured.
+SIGNATURE Customer/company/driver signoff. Payload hash, signer identity/role, 
+consent text version, time/device.
+API_RECORD Facility/scale/telematics/511. Connector authority, freshness, source 
+identity, failure state.
+17.4 Field-level extraction and corroboration
+ Confidence is per field, not one document-wide score. Ticket number may be 99% while signature presence 
+is 61%; only uncertain fields should require review.
+ Corroboration increases support but does not justify averaging unlike measurements into a fabricated 
+value. Domain rules choose the canonical evidence source.
+ Billing-sensitive conflicts create exceptions instead of silent selection. Example: driver says 18.4 m3 while 
+ticket/API show about 16.8 m3 -> review required.
+17.5 Camera / OCR workflow
+Capture document
+  -> document edge/orientation/quality check
+  -> OCR/barcode/QR extraction
+  -> field-level claims + confidence
+  -> job/load/facility matching
+  -> duplicate + wrong-job checks
+  -> targeted human review
+  -> attach evidence + confirmed fields
+ If required fields are unreadable or a required signature area is cut off, recommend/require a retake 
+according to workflow policy before billing closeout.
+ Use perceptual hash plus extracted identifiers and date/facility/quantity combinations to detect duplicate 
+ticket photos.
+17.6 Mechanic evidence workflow
+DEFECT
+  BEFORE photo/measurement
+      -> work order / parts / technician notes
+      -> AFTER photo / test result
+      -> authorized return-to-service release
+ AI visual observations remain observations/inferences until a mechanic verifies them.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 30
+ Return-to-service is an authenticated authority boundary and cannot be replaced by AI confidence or a 
+clean-looking photo.
+17.7 Sensor and derived-measurement rules
+ Store sensor identity, engineering unit, timestamp, calibration status and health state with every material 
+measurement used operationally.
+ Derived values retain their formula/input chain. Example: tank level + geometry -> estimated volume must 
+remain CALCULATED, not MEASURED.
+ Low-health or overdue-calibration sensors can remain supporting evidence but should not silently become 
+billing or safety authority.
+17.8 GPS, temporal and location reasoning
+ GPS claims include accuracy; poor accuracy yields suggested/pending arrival rather than confirmed arrival.
+ Temporal checks flag impossible or suspicious ordering, such as a customer signature predating job start, 
+without making accusations.
+ Capture location is not proof of event location when evidence may have been photographed later; the 
+system records both and explains the distinction.
+17.9 Signature and evidence bundle integrity
+SignatureRecord {
+  signer, signerRole, signedObjectType, signedObjectId,
+  payloadHash, signedAt, deviceId, signatureMethod,
+  location?, consentTextVersion
+}
+ A signature binds to an exact payload hash. Post-signature changes require an amendment/new signature 
+path rather than mutating the signed record.
+ Important job, maintenance and billing packets expose an evidence bundle containing source artifacts, 
+confirmations, signatures, engine results and audit receipts.
+ Hash/integrity mismatch is an explicit failure state; originals are never silently replaced.
+17.10 Completeness engine
+EvidenceRequirementSet
+  workflowType: DISPOSAL_CLOSEOUT
+  required: tracking, facility, quantity, ticket, timestamps, operator, material, acknowledgment
+Result
+  SATISFIED: 6/7
+  MISSING: facility acknowledgment
+ The AI Secretary asks only for the minimum missing evidence because completeness is deterministic, not 
+prompt-dependent.
+ The Assistant cannot manufacture a missing signature, facility acknowledgment or measurement; it can 
+request it, create a task or route an authorized exception process.
+17.11 Privacy and retention
+ Whole-screen frames and OCR intermediates are transient by default; only scoped evidence required for the 
+workflow becomes a durable business artifact.
+ Unrelated personal content observed during a Live Assist session is not automatically persisted or indexed.
+ Business documents, signed tickets and repair evidence follow the applicable business/compliance retention 
+class; intermediate model reasoning is minimized.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 31
+17.12 Evidence Fabric implementation checkpoints
+Checkpoint Build Pass condition
+EF-1 EvidenceArtifact + immutable storage 
+refs/hash
+Every artifact has identity, scope, source, 
+time and integrity metadata.
+EF-2 EvidenceClaim + field-level 
+provenance/confidence
+Extracted facts remain proposals until 
+confirmation/engine verification.
+EF-3 Document quality + OCR pipeline Poor/partial evidence is detected; field-
+level review works.
+EF-4 Duplicate/wrong-job detector Duplicate evidence and mismatched 
+job/load identifiers create review, not 
+duplicate writes.
+EF-5 Voice/GPS/screen adapters Approximate voice and uncertain GPS 
+preserve precision/accuracy; screen 
+frames remain scoped/transient.
+EF-6 Sensor/telematics adapter Measurements preserve 
+calibration/health and derived-vs-
+measured distinction.
+EF-7 Signature payload binding Signature verifies against exact payload; 
+altered payload cannot pass verification.
+EF-8 Conflict/completeness engines Contradictions create exceptions and 
+missing evidence produces minimum-
+question tasks.
+EF-9 Evidence bundles + integrity ledger Consequential record can enumerate 
+evidence/confirmations/receipts and 
+detect tampering.
+EF-10 Retention/privacy enforcement Transient frames/intermediates expire; 
+durable evidence follows declared 
+retention class.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 32
+18. Integrated implementation sequence and checkpoint gates
+Version 2.0 does not replace the phases in Sections 9-13. It makes the Assistant, knowledge and evidence work 
+explicit and orders them so authority, provenance and testability exist before more powerful AI or screen-
+control behavior is enabled.
+Order Work package Key dependencies Exit gate
+1 Core contracts: Provenance, 
+AssistantContext, 
+EvidenceArtifact/Claim, 
+CapabilityManifest, 
+ActionDefinition
+Existing tenant/roles/audit 
+schema
+Schema + type tests green; no 
+duplicate parallel provenance 
+concepts.
+2 AuthorityGateway + 
+ConfirmationEngine + action 
+registry
+Core contracts Fail-closed authorization 
+matrix and L4 confirmation 
+tests green.
+3 Evidence Fabric foundation Object storage/local encrypted 
+store, provenance
+Capture -> claim -> confirm 
+pipeline works offline and 
+online.
+4 Knowledge source registry + 
+Source Vault + scoped 
+retriever
+Tenant/customer/equipment 
+model
+Source revision, verification, 
+ACL and prompt-injection tests 
+green.
+5 Orchestrator AO-1..AO-4 Authority + 
+knowledge/evidence read APIs
+Typed workflows compile; 
+invalid model actions cannot 
+execute.
+6 AI Secretary form engine 
+integration
+Orchestrator + Evidence 
+Fabric
+Voice/OCR fields preserve 
+precision/source/confidence 
+and require read-back as 
+configured.
+7 TaskGraph + Assistant Task 
+Inbox
+Orchestrator Pause/resume/handoff works 
+across driver/mechanic/office 
+roles.
+8 Live Assist in-app, then whole-
+screen read-only
+Android permission shell + 
+evidence adapters
+Consent/revoke/protected-
+screen/transient-retention 
+tests green.
+9 Deterministic Android/third-
+party action adapters
+AuthorityGateway + registered 
+action vocabulary
+No unrestricted model tap 
+loop; idempotency and 
+rollback policy tested.
+10 Model router + offline packs Knowledge/Evidence/
+Orchestrator
+Offline degradation labels 
+stale/unknown and queues 
+safe work.
+11 Mechanic, billing, dispatch, 
+HOS, routing capability 
+expansion
+Existing deterministic engines Each capability proves engine 
+precedence and role isolation.
+12 Managed fleet/MDM policy Android enterprise Managed restrictions can 
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 33
+mode deployment reduce capability but never 
+expand user/AI authority.
+13 Proactive tasking + 
+notifications
+TaskGraph and evidence 
+completeness
+Interruptions obey driving 
+state and company policy.
+14 Pilot + production gates All above Cross-tenant, replay, offline, 
+privacy, authority and human-
+release gates green.
+18.1 Mandatory cross-cutting tests
+ Tenant isolation across operational records, search indexes, evidence artifacts, task queues and audit 
+receipts.
+ Role/temporary-delegation matrix for every typed action and capability.
+ Parked/moving/emergency state enforcement at gateway level even when a model requests a prohibited 
+action.
+ Unknown/stale/conflicting source behavior; unknown is never converted to safe/clear/verified.
+ Field-level precision and provenance for voice/OCR; approximate values stay approximate until confirmed.
+ Mechanic release and dispatch readiness cannot be bypassed by AI recommendations.
+ Idempotency/replay protection for work orders, invoices, ticket submission, messages and external actions.
+ Optimistic concurrency and transactional conflict handling for simultaneous office/field updates.
+ Prompt-injection tests against uploaded manuals, PDFs, web snapshots and OCR text.
+ Live Assist capture lifecycle: denied, started, backgrounded, rotated, revoked, protected screen, process 
+death and reboot.
+ Retention and redaction: transient screen/audio/OCR intermediates expire and secrets are absent from audit 
+logs.
+ Source/version reproducibility: important verdicts can show which source revision and evidence were used.
+18.2 Production-ready definition for this subsystem set
+ The Assistant can explain and prepare work without bypassing existing dispatch, HOS, routing, billing, 
+signature or mechanic-release authority boundaries.
+ Every consequential workflow has a typed plan, explicit evidence, confirmation record where required, and 
+an AssistantReceipt.
+ Knowledge retrieval is tenant/role/customer/equipment scoped before search and can identify stale, 
+superseded, conflicting or unverified sources.
+ Evidence ingestion preserves originals, field-level claims and amendment history; 
+duplicate/wrong-job/conflicting evidence is surfaced instead of silently merged.
+ Offline behavior degrades safely and synchronizes without duplicating or overwriting newer authoritative 
+state.
+ Live Assist is visibly active, revocable, transient by default, and incapable of turning general AI reasoning 
+into unrestricted device control.
+19. Current planning boundary and next subsystem
+The current planning tranche is complete through the Live Assist interaction layer, unified AI Secretary, 
+Assistant Orchestrator, Knowledge/RAG Gateway and Multimodal Evidence Fabric. This is enough architecture 
+to begin a disciplined implementation plan and checkpoint build without inventing authority, storage or 
+evidence behavior during coding.
+
+LEASEOS  /  LIVE ASSIST + UNIFIED AI ASSISTANT  /  BUILD PLAN v2.0
+Architecture and implementation planning - 19 September 2026    |    Page 34
+The next recommended design subsystem is Communications + Contact Intelligence: company personnel, 
+drivers, dispatchers, consultants, clients, disposal facilities, medics, mechanics, ERAP/emergency contacts and 
+historical job contacts, with role resolution, freshness, consent, escalation chains and audited communications.
+This document intentionally stops before designing that communications/contact subsystem so the current build 
+plan remains a coherent checkpoint rather than silently expanding scope.
+19.1 Project grounding used for Version 2.0
+ LEASEOS_BUILD_PLAN-3.md: one schema-driven AI Secretary engine; schema-constrained extraction; per-
+field value/precision/source/confidence; minimum missing questions; mandatory read-back; commit with 
+provenance; confirmation as a core safety property.
+ leaseos-integrated-ops.diff: authenticated mechanic return-to-service boundary; unified dispatch readiness 
+engine; source-versioned HOS boundary; evidence-linked billing; immutable amendment history; 
+provenance-aware map/regulatory sources; AI Secretary uncertainty + human confirmation; production 
+tests for role authorization, dispatch rejection, sync conflicts and cross-customer isolation.
+ Existing Version 1.0 Live Assist plan: BYOD + managed Android modes, hybrid local-first processing, 
+parked/moving/emergency action policies, typed action vocabulary, offline behavior, privacy and audit 
+foundations.

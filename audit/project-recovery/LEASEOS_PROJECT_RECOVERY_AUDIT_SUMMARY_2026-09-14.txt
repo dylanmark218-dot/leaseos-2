@@ -1,0 +1,29 @@
+LeaseOS Project Recovery — 2026-09-14
+
+Implementation commit: 18444d4c9622e61e75ae595380161990ff885142
+Recovery branch: integration/project-recovery-2026-09-14
+Canonical main preserved: 74d99de54387894f42daa54c802e4a536eab9313
+
+Recovered/integrated:
+- Training Academy exact historical source -> modern 0107/0108 + root app/readiness
+- Production workflow worker entrypoint/single claimer/graceful shutdown
+- Historical v17/v18/v21 source provenance
+- LoadSense pure engines -> modern measurement model + migration 0109
+
+Current static state:
+- 337 tables / 337 CREATE TABLE / 105 migrations
+- 507 role procedures / 36 external / 2 integration / 0 bare protectedProcedure
+- 340 permissions / 124 sensitive / 13 universal
+- 170 test files / 2728 source-counted it( cases
+- 513 TS/TSX source files parse/transpile cleanly
+- 162 core modules / 129 reachable / 33 declared unwired / 0 surprises / 0 stale declarations
+- exact duplicate groups 0 / case collisions 0 / common secret-pattern hits 0 / conflict-marker files 0
+- git diff --check PASS / git fsck PASS
+
+Not independently rerun here:
+- full dependency-backed Vitest/typecheck/build/CI
+- clean/upgrade MySQL migration application
+- browser/mobile/native E2E
+- real LoadSense gateway/hardware path
+
+Release posture: RC only; keep main unchanged until full gate passes.

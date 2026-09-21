@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeaseOS Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ═══════════ INDUSTRIAL PRECISION TOKENS ═══════════ */
+:root{
+  --bg:#F6F8FA; --surface:#FFFFFF; --surface-2:#F0F3F6;
+  --text:#17212B; --text-2:#667481; --border:#D9E0E7; --border-2:#C3CDD6;
+  --navy:#17324D; --action:#2F6FEB;
+  --ready:#2F8F6B; --review:#D99026; --blocked:#C94E42; --unknown:#718096;
+  --ready-bg:#2F8F6B14; --review-bg:#D9902614; --blocked-bg:#C94E4214;
+  --unknown-bg:#71809614; --action-bg:#2F6FEB12;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s6:24px; --s8:32px;
+  --r-card:9px; --r-btn:7px; --r-pill:999px;
+  --shadow:0 1px 2px rgba(23,33,43,.04);
+  --lift:0 4px 16px rgba(23,33,43,.09);
+  --font:'Manrope',system-ui,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+[data-theme="dark"]{
+  --bg:#0D151D; --surface:#151F29; --surface-2:#1C2834;
+  --text:#EDF2F6; --text-2:#96A6B5; --border:#2A3947; --border-2:#3A4A5A;
+  --navy:#DCE6F0; --action:#5B92F5;
+  --ready:#4FB286; --review:#E5A648; --blocked:#E0685B; --unknown:#8C9BAA;
+  --ready-bg:#4FB2861F; --review-bg:#E5A6481F; --blocked-bg:#E0685B1F;
+  --unknown-bg:#8C9BAA1F; --action-bg:#5B92F51A;
+  --shadow:0 1px 2px rgba(0,0,0,.3); --lift:0 6px 24px rgba(0,0,0,.42);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+button{cursor:pointer;font-family:inherit}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:15px;
+  line-height:1.5;-webkit-font-smoothing:antialiased;transition:background .18s,color .18s}
+.mono{font-family:var(--mono);font-size:.9em;letter-spacing:-.01em}
+:focus-visible{outline:2px solid var(--action);outline-offset:2px}
+
+/* ═══ StatusBadge — icon + word, never colour alone ═══ */
+.st{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
+  padding:3px 9px;border-radius:var(--r-pill);white-space:nowrap;line-height:1.45}
+.st i{font-style:normal;font-size:11px}
+.st.ready{background:var(--ready-bg);color:var(--ready)}
+.st.review{background:var(--review-bg);color:var(--review)}
+.st.blocked{background:var(--blocked-bg);color:var(--blocked)}
+.st.unknown{background:var(--unknown-bg);color:var(--unknown)}
+.st.pending{background:var(--unknown-bg);color:var(--text-2)}
+.st.syncing{background:var(--action-bg);color:var(--action)}
+
+/* ═══ Shell ═══ */
+.app{min-height:100vh;display:grid;grid-template-rows:60px auto 1fr}
+.cmdbar{display:flex;align-items:center;gap:var(--s3);padding:0 var(--s4);
+  background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:40}
+.brand{display:flex;align-items:baseline;gap:7px;white-space:nowrap}
+.brand b{font-size:16.5px;letter-spacing:-.03em}
+.brand span{color:var(--text-2);font-size:12px;font-weight:600}
+.gsearch{flex:1;max-width:460px;display:flex;align-items:center;gap:var(--s2);height:36px;
+  padding:0 var(--s3);background:var(--bg);border:1px solid var(--border);border-radius:var(--r-btn)}
+.gsearch input{flex:1;background:none;border:0;outline:0;font-family:inherit;font-size:13.5px;color:var(--text)}
+.gsearch input::placeholder{color:var(--text-2)}
+.gsearch:focus-within{border-color:var(--action);box-shadow:0 0 0 3px var(--action-bg)}
+.spacer{flex:1}
+.iconbtn{width:36px;height:36px;border:1px solid var(--border);border-radius:var(--r-btn);
+  background:var(--surface);color:var(--text-2);font-size:14px;display:grid;place-items:center}
+.iconbtn:hover{color:var(--text);border-color:var(--border-2)}
+
+/* ═══ 9-module global nav ═══ */
+.modules{display:flex;gap:2px;padding:0 var(--s4);background:var(--surface);
+  border-bottom:1px solid var(--border);overflow-x:auto;position:sticky;top:60px;z-index:39}
+.modules button{padding:11px var(--s3);border:0;background:none;color:var(--text-2);
+  font-size:13.5px;font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}
+.modules button.on{color:var(--action);border-bottom-color:var(--action)}
+.modules button:hover{color:var(--text)}
+.modules .n{margin-left:6px;font-size:11px;background:var(--review-bg);color:var(--review);
+  padding:1px 6px;border-radius:var(--r-pill)}
+
+/* ═══ Job Workspace sub-nav ═══ */
+.subnav{display:flex;gap:var(--s3);padding:0 var(--s4);background:var(--bg);
+  border-bottom:1px solid var(--border);overflow-x:auto}
+.subnav button{padding:9px 0;border:0;background:none;color:var(--text-2);font-size:13px;
+  font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}
+.subnav button.on{color:var(--text);border-bottom-color:var(--text)}
+
+.workspace{display:grid;grid-template-columns:236px minmax(0,1fr) 336px;min-height:0}
+
+/* ═══ Left rail ═══ */
+.rail{border-right:1px solid var(--border);background:var(--surface);padding:var(--s4) var(--s3);
+  overflow:auto}
+.rail h3{font-size:12px;font-weight:600;color:var(--text-2);margin:0 0 var(--s2) 4px}
+.rail h3 + h3{margin-top:var(--s6)}
+
+/* AssistantContextBar */
+.ctxcard{border:1px solid var(--border);border-radius:var(--r-card);background:var(--bg);
+  padding:var(--s3);margin-bottom:var(--s2);width:100%;text-align:left;display:block}
+.ctxcard:hover{border-color:var(--action)}
+.ctxcard.on{border-color:var(--action);background:var(--action-bg)}
+.ctxcard .k{font-size:11.5px;color:var(--text-2)}
+.ctxcard .v{font-weight:700;font-size:14px;margin-top:1px}
+.ctxcard .sub{font-size:12px;color:var(--text-2);margin-top:2px}
+
+.navbtn{width:100%;display:flex;align-items:center;gap:9px;border:0;background:none;
+  color:var(--text-2);padding:9px 10px;border-radius:var(--r-btn);text-align:left;
+  font-size:13.5px;font-weight:600}
+.navbtn:hover{background:var(--surface-2);color:var(--text)}
+.navbtn.on{background:var(--action-bg);color:var(--action)}
+.navbtn .n{margin-left:auto;font-size:11px;background:var(--review-bg);color:var(--review);
+  padding:1px 6px;border-radius:var(--r-pill)}
+.railnote{margin-top:var(--s6);padding:var(--s3);border-left:2px solid var(--ready);
+  background:var(--ready-bg);border-radius:0 var(--r-btn) var(--r-btn) 0;font-size:12px;
+  color:var(--text-2)}
+.railnote b{color:var(--text);display:block;margin-bottom:2px}
+
+/* ═══ Conversation ═══ */
+.main{min-width:0;display:grid;grid-template-rows:auto 1fr auto;background:var(--bg)}
+.mhead{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4);
+  background:var(--surface);border-bottom:1px solid var(--border)}
+.mark{width:34px;height:34px;flex:0 0 34px;border:1px solid var(--border);border-radius:var(--r-btn);
+  display:grid;place-items:center;color:var(--action);font-size:15px;background:var(--bg)}
+.mhead h1{font-size:15.5px;letter-spacing:-.02em}
+.mhead p{color:var(--text-2);font-size:12.5px;margin-top:1px}
+.convo{overflow:auto;padding:var(--s6) var(--s4)}
+.inner{max-width:760px;margin:0 auto}
+
+.welcome{padding-bottom:var(--s4)}
+.welcome h2{font-size:24px;letter-spacing:-.035em;line-height:1.22;margin-bottom:var(--s2)}
+.welcome p{color:var(--text-2);font-size:14px;max-width:60ch}
+.quick{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2);margin-top:var(--s4)}
+.quick button{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);
+  padding:13px var(--s3);border:1px solid var(--border);border-radius:var(--r-card);
+  background:var(--surface);color:var(--text);font-weight:600;font-size:14px;text-align:left}
+.quick button:hover{border-color:var(--action);color:var(--action)}
+.quick small{color:var(--text-2);font-weight:500;font-size:12px}
+.quick button:hover small{color:var(--action)}
+
+.msg{display:flex;gap:var(--s2);margin:var(--s4) 0}
+.msg.user{justify-content:flex-end}
+.av{width:28px;height:28px;flex:0 0 28px;border:1px solid var(--border);border-radius:var(--r-btn);
+  background:var(--surface);display:grid;place-items:center;color:var(--action);font-size:12px;
+  margin-top:2px}
+.bubble{max-width:78%;padding:11px 13px;border:1px solid var(--border);background:var(--surface);
+  border-radius:4px var(--r-card) var(--r-card) var(--r-card)}
+.user .bubble{background:var(--navy);border-color:var(--navy);border-radius:var(--r-card) var(--r-card) 4px var(--r-card)}
+[data-theme="light"] .user .bubble{color:#fff}
+[data-theme="dark"] .user .bubble{color:#0D151D}
+.bubble .who{font-size:11px;color:var(--text-2);font-weight:600;margin-bottom:3px}
+[data-theme="light"] .user .bubble .who{color:#B9CBDD}
+[data-theme="dark"] .user .bubble .who{color:#3E5468}
+
+/* ═══ AssistantActionCard ═══ */
+.action{margin-top:var(--s3);border:1px solid var(--border);border-radius:var(--r-card);
+  background:var(--bg);overflow:hidden}
+.action .cap{display:flex;align-items:center;gap:var(--s2);padding:10px var(--s3);
+  border-bottom:1px solid var(--border);font-size:13px;font-weight:700}
+.action .cap .to{margin-left:auto;font-weight:500;font-size:11.5px;color:var(--text-2);
+  font-family:var(--mono)}
+.frow{display:grid;grid-template-columns:112px 1fr auto;gap:var(--s3);align-items:center;
+  padding:9px var(--s3);border-bottom:1px solid var(--border);font-size:13px}
+.frow:last-of-type{border-bottom:0}
+.frow .k{color:var(--text-2);font-size:12.5px}
+.frow .v{font-weight:600}
+.frow .v em{font-style:normal;color:var(--review);font-weight:500;font-size:11.5px}
+.frow.needs{background:var(--review-bg)}
+.gatebox{padding:10px var(--s3);border-top:1px solid var(--border);background:var(--surface-2)}
+.gatebox b{font-size:12.5px}
+.gatebox li{list-style:none;font-size:12.5px;color:var(--text-2);padding:2px 0}
+.gatebox li::before{content:"× ";color:var(--blocked);font-weight:700}
+
+/* ═══ AssistantSourceDrawer — progressive disclosure ═══ */
+details.src{border-top:1px solid var(--border);padding:9px var(--s3)}
+details.src summary{cursor:pointer;list-style:none;font-size:12.5px;font-weight:600;color:var(--action)}
+details.src summary::-webkit-details-marker{display:none}
+details.src summary::before{content:"▸ "}
+details.src[open] summary::before{content:"▾ "}
+.kv{display:grid;grid-template-columns:104px 1fr;gap:4px var(--s3);font-size:12.5px;margin-top:var(--s2)}
+.kv span:nth-child(odd){color:var(--text-2)}
+
+/* ═══ AssistantHandoff ═══ */
+.handoff{margin-top:var(--s3);border:1px solid var(--border);border-left:3px solid var(--unknown);
+  border-radius:var(--r-card);background:var(--surface);padding:var(--s3)}
+.handoff b{font-size:13.5px;display:block;margin-bottom:2px}
+.handoff p{font-size:12.5px;color:var(--text-2);margin-bottom:var(--s3)}
+.handoff .row{display:flex;gap:var(--s2);flex-wrap:wrap}
+
+/* ═══ VoiceCaptureSheet ═══ */
+.voice{display:none;margin-bottom:var(--s4);border:1px solid var(--action);
+  background:var(--action-bg);border-radius:var(--r-card);padding:var(--s3) var(--s4);
+  align-items:center;gap:var(--s3)}
+.voice.on{display:flex}
+.pulse{width:10px;height:10px;flex:0 0 10px;border-radius:50%;background:var(--action)}
+@media(prefers-reduced-motion:no-preference){
+  .pulse{animation:pl 1.3s ease-out infinite}
+  @keyframes pl{0%{box-shadow:0 0 0 0 var(--action)}70%{box-shadow:0 0 0 9px transparent}}
+}
+.voice b{font-size:13.5px}
+.voice span{font-size:12.5px;color:var(--text-2);display:block}
+.voice .live{font-size:13px;margin-top:var(--s2);color:var(--text)}
+.voice button{margin-left:auto;border:1px solid var(--border);background:var(--surface);
+  color:var(--text);border-radius:var(--r-btn);padding:8px 13px;font-weight:600;font-size:13px}
+
+/* ═══ Composer ═══ */
+.composer{border-top:1px solid var(--border);background:var(--surface);padding:var(--s3) var(--s4)}
+.cbox{max-width:820px;margin:0 auto;display:flex;align-items:flex-end;gap:6px;
+  border:1px solid var(--border-2);border-radius:10px;background:var(--surface);padding:6px;
+  box-shadow:var(--lift)}
+.cbox:focus-within{border-color:var(--action)}
+.cbox .att{width:38px;height:38px;border:0;border-radius:var(--r-btn);background:none;
+  color:var(--text-2);font-size:15px}
+.cbox .att:hover{background:var(--surface-2);color:var(--text)}
+.cbox textarea{flex:1;min-height:38px;max-height:120px;resize:none;border:0;outline:0;
+  background:none;color:var(--text);padding:9px 6px;font-family:inherit;font-size:14.5px}
+.cbox textarea::placeholder{color:var(--text-2)}
+.mic{width:44px;height:44px;flex:0 0 44px;border:0;border-radius:var(--r-btn);
+  background:var(--navy);font-size:16px;display:grid;place-items:center}
+[data-theme="light"] .mic{color:#fff}
+[data-theme="dark"] .mic{color:#0D151D}
+.mic.live{background:var(--action);color:#fff}
+.send{width:44px;height:44px;flex:0 0 44px;border:0;border-radius:var(--r-btn);
+  background:var(--action);color:#fff;font-size:15px}
+.hint{max-width:820px;margin:7px auto 0;display:flex;justify-content:space-between;gap:var(--s3);
+  font-size:11.5px;color:var(--text-2)}
+
+/* ═══ AssistantReviewSheet — panel on desktop, sheet on mobile ═══ */
+.review{border-left:1px solid var(--border);background:var(--surface);padding:var(--s4) var(--s3);
+  overflow:auto}
+.rtop{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--s3)}
+.rtop h3{font-size:14px}
+.rcard{border:1px solid var(--border);border-radius:var(--r-card);background:var(--bg);
+  padding:var(--s3);margin-bottom:var(--s2)}
+.rcard.done{opacity:.55}
+.rcard .title{font-weight:700;font-size:13.5px;display:flex;justify-content:space-between;gap:var(--s2)}
+.rcard p{color:var(--text-2);font-size:12.5px;margin:4px 0 var(--s2)}
+.racts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:var(--s3)}
+.racts button{border:1px solid var(--border);background:var(--surface);color:var(--text);
+  border-radius:var(--r-btn);padding:8px;font-weight:600;font-size:12.5px}
+.racts .accept{border-color:#2F8F6B55;color:var(--ready);background:var(--ready-bg)}
+.racts .reject{border-color:#C94E4240;color:var(--blocked)}
+.saveall{width:100%;margin-top:var(--s2);background:var(--action);color:#fff;border:0;
+  border-radius:var(--r-btn);padding:12px;font-weight:700;font-size:13.5px}
+.saveall:disabled{background:var(--surface-2);color:var(--text-2);cursor:not-allowed}
+.smallnote{font-size:11.5px;color:var(--text-2);margin-top:var(--s2)}
+
+/* ═══ Mobile ═══ */
+.mobilebar{display:none}
+.shade{position:fixed;inset:0;background:#0009;z-index:59}
+.sheet{position:fixed;inset:auto 0 0;z-index:60;max-height:82vh;overflow:auto;
+  background:var(--surface);border-top:1px solid var(--border);border-radius:16px 16px 0 0;
+  padding:var(--s4) var(--s3) 84px;box-shadow:0 -18px 44px rgba(0,0,0,.4)}
+.hidden{display:none!important}
+
+@media(max-width:1160px){
+  .workspace{grid-template-columns:220px minmax(0,1fr)}
+  .review{display:none}
+}
+@media(max-width:820px){
+  .app{grid-template-rows:56px auto 1fr}
+  .gsearch{display:none}
+  .subnav{display:none}
+  .workspace{display:block}
+  .rail{display:none}
+  .convo{padding:var(--s4) var(--s3) 120px}
+  .welcome h2{font-size:21px}
+  .quick{grid-template-columns:1fr}
+  .bubble{max-width:88%}
+  .composer{position:fixed;bottom:56px;left:0;right:0;z-index:30;padding:var(--s2)}
+  .cbox .att{display:none}
+  .hint{display:none}
+  .mobilebar{display:flex;position:fixed;left:0;right:0;bottom:0;height:56px;z-index:31;
+    background:var(--surface);border-top:1px solid var(--border)}
+  .mobilebar button{flex:1;border:0;background:none;color:var(--text-2);font-size:11px;
+    font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  .mobilebar button.on{color:var(--action)}
+  .mobilebar .ico{font-size:15px}
+  .frow{grid-template-columns:96px 1fr;gap:var(--s2)}
+  .frow .st{grid-column:2}
+}
+
+/* ═══ Mobile preview frame (prototype affordance) ═══ */
+body.preview{background:#080d12;padding:var(--s6) 0}
+body.preview .app{max-width:412px;margin:0 auto;min-height:820px;height:820px;overflow:hidden;
+  border:10px solid #1c2732;border-radius:34px;box-shadow:0 24px 70px rgba(0,0,0,.6);position:relative}
+body.preview .composer,body.preview .mobilebar,body.preview .shade,body.preview .sheet{position:absolute}
+body.preview .gsearch,body.preview .subnav,body.preview .rail,body.preview .review{display:none}
+body.preview .workspace{display:block}
+body.preview .convo{padding:var(--s4) var(--s3) 124px}
+body.preview .quick{grid-template-columns:1fr}
+body.preview .cbox .att{display:none}
+body.preview .hint{display:none}
+body.preview .mobilebar{display:flex;height:56px;bottom:0;left:0;right:0}
+body.preview .composer{bottom:56px;left:0;right:0;padding:var(--s2)}
+.previewtoggle{position:fixed;right:var(--s4);bottom:var(--s4);z-index:80;background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--r-pill);padding:9px 15px;font-size:12.5px;
+  font-weight:600;color:var(--text);box-shadow:var(--lift)}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ═══ Command bar with global search ═══ -->
+  <header class="cmdbar">
+    <div class="brand"><b>LeaseOS</b><span>Assistant</span></div>
+    <label class="gsearch">
+      <span aria-hidden="true">⌕</span>
+      <input id="gsearch" placeholder="Search jobs, trips, units, tickets, LSD, invoices…" aria-label="Search LeaseOS">
+    </label>
+    <div class="spacer"></div>
+    <span class="st ready" id="syncBadge"><i>✓</i>Synced</span>
+    <button class="iconbtn" id="theme" title="Switch theme" aria-label="Switch theme">◐</button>
+  </header>
+
+  <!-- ═══ 9-module global nav ═══ -->
+  <nav class="modules" aria-label="Modules">
+    <button>Home</button>
+    <button class="on">Jobs</button>
+    <button>Dispatch<span class="n">4</span></button>
+    <button>Fleet</button>
+    <button>People</button>
+    <button>Documents<span class="n">6</span></button>
+    <button>Billing</button>
+    <button>Map</button>
+    <button>More</button>
+  </nav>
+
+  <!-- ═══ Job Workspace sub-nav ═══ -->
+  <nav class="subnav" aria-label="Job workspace">
+    <button>Overview</button><button>Dispatch</button><button class="on">Trips</button>
+    <button>Loads</button><button>Safety</button><button>Documents</button>
+    <button>Billing</button><button>History</button>
+  </nav>
+
+  <div class="workspace">
+
+    <!-- ═══ AssistantContextBar + quick actions ═══ -->
+    <aside class="rail">
+      <h3>Working on</h3>
+      <button class="ctxcard on">
+        <div class="k">Job</div><div class="v">JOB-2026-008841</div>
+        <div class="sub">Northridge Energy · vacuum haul</div>
+      </button>
+      <button class="ctxcard">
+        <div class="k">Trip and unit</div><div class="v mono">TRIP-004821</div>
+        <div class="sub">VAC-27 · unload stop · Clearwater #3</div>
+      </button>
+
+      <h3>Assistant</h3>
+      <button class="navbtn on">Conversation</button>
+      <button class="navbtn" id="railReview">Review changes<span class="n" id="railCount">2</span></button>
+      <button class="navbtn">Recent records</button>
+      <button class="navbtn">Find documents</button>
+
+      <div class="railnote">
+        <b>Drafts only</b>
+        The assistant prepares changes. Nothing reaches an operational record until you approve it.
+      </div>
+    </aside>
+
+    <!-- ═══ Conversation ═══ -->
+    <main class="main">
+      <div class="mhead">
+        <div class="mark" aria-hidden="true">◆</div>
+        <div>
+          <h1>LeaseOS Assistant</h1>
+          <p>Voice, photo, document or text · working on TRIP-004821</p>
+        </div>
+        <div class="spacer"></div>
+        <span class="st review" id="headCount"><i>!</i>2 need you</span>
+      </div>
+
+      <div class="convo" id="convo">
+        <div class="inner" id="inner">
+
+          <!-- ═══ VoiceCaptureSheet ═══ -->
+          <div class="voice" id="voice" role="status">
+            <div class="pulse"></div>
+            <div style="flex:1">
+              <b>Listening</b>
+              <span>Speak normally. Tap Done when you're finished.</span>
+              <div class="live mono" id="voiceLive">…</div>
+            </div>
+            <button id="voiceDone">Done</button>
+          </div>
+
+          <section class="welcome" id="welcome">
+            <h2>What do you need to get done?</h2>
+            <p>Tell me what happened and I'll draft the paperwork. I'll flag anything I'm unsure
+              about and show you every change before it's saved.</p>
+            <div class="quick">
+              <button data-prompt="Log this stop">Log this stop <small>unload</small></button>
+              <button data-prompt="Report a defect">Report a defect <small>VAC-27</small></button>
+              <button data-prompt="Find my disposal ticket">Find a document <small>this trip</small></button>
+              <button data-prompt="What's still missing before I can finish this trip?">What's still missing <small>2 items</small></button>
+            </div>
+          </section>
+
+          <div class="msg user">
+            <div class="bubble"><div class="who">You</div>
+              <p>Got here around ten, waited about eight minutes because the scale was backed up,
+              started unloading quarter after and finished about twenty to eleven. Pump made that
+              grinding noise again.</p></div>
+          </div>
+
+          <div class="msg">
+            <div class="av" aria-hidden="true">◆</div>
+            <div class="bubble">
+              <div class="who">LeaseOS Assistant</div>
+              <p>I've drafted the stop. Two things need you before I can save it.</p>
+
+              <!-- ═══ AssistantActionCard ═══ -->
+              <div class="action">
+                <div class="cap">Unload stop
+                  <span class="to">would update TRIP-2026-004821</span></div>
+
+                <div class="frow"><span class="k">Arrived</span>
+                  <span class="v mono">10:00 <em>approximate</em></span>
+                  <span class="st review"><i>!</i>Review</span></div>
+
+                <div class="frow"><span class="k">Wait</span>
+                  <span class="v mono">8 min · scale delay</span>
+                  <span class="st ready"><i>✓</i>Captured</span></div>
+
+                <div class="frow"><span class="k">Unloading</span>
+                  <span class="v mono">10:15 → 10:40 <em>approximate</em></span>
+                  <span class="st review"><i>!</i>Review</span></div>
+
+                <div class="frow needs"><span class="k">Quantity</span>
+                  <span class="v" style="color:var(--text-2);font-weight:500">Not mentioned</span>
+                  <span class="st blocked"><i>×</i>Required</span></div>
+
+                <div class="frow"><span class="k">Defect</span>
+                  <span class="v">Grinding on start-up</span>
+                  <span class="st ready"><i>✓</i>Drafted</span></div>
+
+                <!-- ═══ AssistantSourceDrawer ═══ -->
+                <details class="src">
+                  <summary>Where these came from</summary>
+                  <div class="kv">
+                    <span>Arrived</span><b>from "around ten" · driver voice</b>
+                    <span>Wait</span><b>from "about eight minutes"</b>
+                    <span>Delay reason</span><b>inferred from "the scale was backed up"</b>
+                    <span>Unloading</span><b>from "quarter after" and "twenty to"</b>
+                    <span>Defect</span><b>your words, kept verbatim</b>
+                  </div>
+                </details>
+
+                <div class="gatebox">
+                  <b>Can't save yet</b>
+                  <ul>
+                    <li>Quantity is required and has no value</li>
+                    <li>Arrived and unloading are still marked approximate</li>
+                    <li>Read-back hasn't been confirmed</li>
+                  </ul>
+                </div>
+              </div>
+
+              <p style="margin-top:var(--s3);font-size:13.5px;color:var(--text-2)">
+                I recorded the grinding as you described it. I haven't decided what's wrong with the
+                pump — that's a mechanic's call.</p>
+
+              <!-- ═══ AssistantHandoff ═══ -->
+              <div class="handoff">
+                <b>Send to the shop?</b>
+                <p>This is the third grinding report on VAC-27 in nine days. A mechanic can look at
+                  it before the next dispatch.</p>
+                <div class="row">
+                  <button class="racts-btn navbtn" style="width:auto;border:1px solid var(--border);padding:7px 12px">Send to shop</button>
+                  <button class="navbtn" style="width:auto;padding:7px 12px">Keep as a note</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ═══ Composer ═══ -->
+      <div class="composer">
+        <div class="cbox">
+          <button class="att" title="Add photo" aria-label="Add photo">▧</button>
+          <button class="att" title="Attach document" aria-label="Attach document">▤</button>
+          <textarea id="input" rows="1" placeholder="Tell LeaseOS what happened…" aria-label="Message"></textarea>
+          <button class="mic" id="mic" title="Talk to LeaseOS" aria-label="Talk to LeaseOS">●</button>
+          <button class="send" id="send" title="Send" aria-label="Send">▲</button>
+        </div>
+        <div class="hint">
+          <span id="offlineHint">Offline — drafts are saved on this device until you're back in range.</span>
+          <span>You approve before any record changes</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- ═══ AssistantReviewSheet (desktop panel) ═══ -->
+    <aside class="review" id="reviewPanel">
+      <div class="rtop"><h3>Review changes</h3>
+        <span class="st review" id="panelCount"><i>!</i>2</span></div>
+      <div id="reviewList"></div>
+      <button class="saveall" id="saveAll" disabled>Accept something first</button>
+      <div class="smallnote">Only accepted items are written. Rejections are kept in the audit
+        trail with your name and the time.</div>
+    </aside>
+  </div>
+</div>
+
+<!-- ═══ Mobile ═══ -->
+<nav class="mobilebar" aria-label="Sections">
+  <button class="on"><span class="ico" aria-hidden="true">◆</span>Assistant</button>
+  <button id="mobileReview"><span class="ico" aria-hidden="true">!</span>Review 2</button>
+  <button><span class="ico" aria-hidden="true">▤</span>Records</button>
+</nav>
+<div class="shade hidden" id="shade"></div>
+<div class="sheet hidden" id="sheet" role="dialog" aria-label="Review changes">
+  <div class="rtop"><h3>Review changes</h3>
+    <button class="iconbtn" id="closeSheet" aria-label="Close">✕</button></div>
+  <div id="sheetList"></div>
+  <button class="saveall" id="saveAllSheet" disabled>Accept something first</button>
+  <div class="smallnote">Only accepted items are written.</div>
+</div>
+
+<button class="previewtoggle" id="previewBtn">Phone preview</button>
+
+<script>
+/* ═══════════ status vocabulary — one definition ═══════════ */
+const S = {ready:"✓ Ready", review:"! Review", blocked:"× Blocked",
+           unknown:"? Unknown", pending:"○ Pending", syncing:"↻ Syncing"};
+const badge = (k, label) => {
+  const [i, w] = S[k].split(" ");
+  return `<span class="st ${k}"><i>${i}</i>${label ?? w}</span>`;
+};
+
+/* ═══════════ review items ═══════════ */
+const items = [
+  { id:"times", title:"Unload stop times",
+    why:"You hedged, so these stayed approximate. Confirm or correct them.",
+    kv:[["Arrived","10:00 approximate"],["Unload end","10:40 approximate"],
+        ["Source","Driver voice"],["Affects","Billable time, HOS"]],
+    state:"open" },
+  { id:"defect", title:"Pump defect note",
+    why:"Linked to the existing recurring VAC-27 issue instead of opening a duplicate.",
+    kv:[["Unit","VAC-27"],["You said","\"Grinding when I first started it\""],
+        ["New","No — same as yesterday"],["Diagnosis","Not the assistant's call"]],
+    state:"open" },
+];
+
+const card = (it) => `
+  <div class="rcard ${it.state !== "open" ? "done" : ""}" data-id="${it.id}">
+    <div class="title">${it.title}
+      ${it.state === "accepted" ? badge("ready","Accepted")
+        : it.state === "rejected" ? badge("blocked","Rejected") : badge("review")}</div>
+    <p>${it.why}</p>
+    <div class="kv">${it.kv.map(([k,v]) => `<span>${k}</span><b>${v}</b>`).join("")}</div>
+    ${it.state === "open" ? `<div class="racts">
+        <button class="reject" data-act="reject">Reject</button>
+        <button class="accept" data-act="accept">Accept</button>
+      </div>` : ""}
+  </div>`;
+
+function paint(){
+  const html = items.map(card).join("");
+  reviewList.innerHTML = html;
+  sheetList.innerHTML = html;
+
+  const open = items.filter(i => i.state === "open").length;
+  const accepted = items.filter(i => i.state === "accepted").length;
+
+  railCount.textContent = open;
+  railCount.style.display = open ? "" : "none";
+  panelCount.innerHTML = `<i>!</i>${open}`;
+  headCount.innerHTML = open ? `<i>!</i>${open} need you` : `<i>✓</i>Nothing outstanding`;
+  headCount.className = open ? "st review" : "st ready";
+  mobileReview.querySelector(".ico").nextSibling.textContent = `Review ${open}`;
+
+  for (const b of [saveAll, saveAllSheet]) {
+    b.disabled = accepted === 0;
+    b.textContent = accepted === 0
+      ? "Accept something first"
+      : `Confirm and save ${accepted} change${accepted > 1 ? "s" : ""}`;
+  }
+
+  document.querySelectorAll("[data-act]").forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.closest(".rcard").dataset.id;
+      const it = items.find(x => x.id === id);
+      it.state = btn.dataset.act === "accept" ? "accepted" : "rejected";
+      paint();
+    };
+  });
+}
+
+/* ═══════════ conversation ═══════════ */
+const esc = (s) => s.replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+
+function say(text){
+  if (!text.trim()) return;
+  welcome.classList.add("hidden");
+  inner.insertAdjacentHTML("beforeend",
+    `<div class="msg user"><div class="bubble"><div class="who">You</div>
+     <p>${esc(text)}</p></div></div>`);
+  input.value = "";
+  convo.scrollTop = convo.scrollHeight;
+
+  setTimeout(() => {
+    inner.insertAdjacentHTML("beforeend",
+      `<div class="msg"><div class="av" aria-hidden="true">◆</div><div class="bubble">
+        <div class="who">LeaseOS Assistant</div>
+        <p>Noted. I've kept that as a draft — it'll show in Review changes before anything is
+        written to the trip.</p></div></div>`);
+    convo.scrollTop = convo.scrollHeight;
+  }, 380);
+}
+
+send.onclick = () => say(input.value);
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); say(input.value); }
+});
+input.addEventListener("input", () => {
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 120) + "px";
+});
+document.querySelectorAll("[data-prompt]").forEach(b => b.onclick = () => say(b.dataset.prompt));
+
+/* ═══════════ VoiceCaptureSheet ═══════════ */
+const heard = ["Got here around ten…", "waited about eight minutes…",
+               "scale was backed up…", "started unloading quarter after…"];
+let voiceTimer = null, hi = 0;
+
+mic.onclick = () => {
+  if (voice.classList.contains("on")) return stopVoice();
+  voice.classList.add("on");
+  mic.classList.add("live");
+  hi = 0; voiceLive.textContent = heard[0];
+  voiceTimer = setInterval(() => {
+    hi = (hi + 1) % heard.length;
+    voiceLive.textContent = heard[hi];
+  }, 1400);
+  convo.scrollTop = 0;
+};
+function stopVoice(){
+  voice.classList.remove("on");
+  mic.classList.remove("live");
+  clearInterval(voiceTimer);
+}
+voiceDone.onclick = stopVoice;
+
+/* ═══════════ review sheet ═══════════ */
+const openSheet = () => { sheet.classList.remove("hidden"); shade.classList.remove("hidden"); };
+const closeSheetFn = () => { sheet.classList.add("hidden"); shade.classList.add("hidden"); };
+mobileReview.onclick = openSheet;
+railReview.onclick = () => (window.innerWidth <= 1160 || document.body.classList.contains("preview"))
+  ? openSheet() : reviewPanel.scrollIntoView({behavior:"smooth"});
+closeSheet.onclick = closeSheetFn;
+shade.onclick = closeSheetFn;
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheetFn(); });
+
+for (const b of [saveAll, saveAllSheet]) {
+  b.onclick = () => {
+    const n = items.filter(i => i.state === "accepted").length;
+    items.forEach(i => { if (i.state === "accepted") i.state = "saved"; });
+    paint(); closeSheetFn();
+    inner.insertAdjacentHTML("beforeend",
+      `<div class="msg"><div class="av" aria-hidden="true">◆</div><div class="bubble">
+        <div class="who">LeaseOS Assistant</div>
+        <p>Saved ${n} change${n > 1 ? "s" : ""} to TRIP-2026-004821. Anything you rejected is
+        recorded too, with your name and the time.</p></div></div>`);
+    convo.scrollTop = convo.scrollHeight;
+  };
+}
+
+/* ═══════════ theme ═══════════ */
+theme.onclick = () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+};
+
+/* ═══════════ offline / sync demo ═══════════ */
+let online = false;
+function paintSync(){
+  syncBadge.className = online ? "st ready" : "st syncing";
+  syncBadge.innerHTML = online ? `<i>✓</i>Synced` : `<i>↻</i>Offline · 2 queued`;
+  offlineHint.textContent = online
+    ? "Connected. Drafts sync as you approve them."
+    : "Offline — drafts are saved on this device until you're back in range.";
+}
+syncBadge.onclick = () => { online = !online; paintSync(); };
+syncBadge.style.cursor = "pointer";
+syncBadge.title = "Toggle connection (demo)";
+
+/* ═══════════ phone preview ═══════════ */
+previewBtn.onclick = () => {
+  const on = document.body.classList.toggle("preview");
+  previewBtn.textContent = on ? "Exit preview" : "Phone preview";
+};
+
+/* ═══════════ boot ═══════════ */
+paint();
+paintSync();
+</script>
+</body>
+</html>

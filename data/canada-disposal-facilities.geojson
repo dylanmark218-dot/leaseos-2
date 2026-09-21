@@ -1,0 +1,3516 @@
+{
+ "type": "FeatureCollection",
+ "attribution": "Contains information licensed under the Open Government Licence – Alberta (hydrovac list rows)",
+ "features": [
+  {
+   "type": "Feature",
+   "id": "secure-fox-creek-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.802,
+     54.395
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-fox-creek-lead",
+    "name": "SECURE Fox Creek facility lead",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Fox Creek",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "1-877-518-4321",
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-edson-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-edson-lead",
+    "name": "SECURE Edson facility lead",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "1-877-518-4321",
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-whitecourt-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.685,
+     54.142
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-whitecourt-lead",
+    "name": "SECURE Whitecourt facility lead",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Whitecourt",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "1-877-518-4321",
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-grande-prairie-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.795,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-grande-prairie-lead",
+    "name": "SECURE Grande Prairie facility lead",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "1-877-518-4321",
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-fort-st-john-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -120.847,
+     56.246
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-fort-st-john-lead",
+    "name": "SECURE Fort St. John facility lead",
+    "operator": "secure",
+    "province": "BC",
+    "municipality": "Fort St. John",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "1-877-518-4321",
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-rycroft-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.711,
+     55.759
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-rycroft-lead",
+    "name": "SECURE Rycroft facility lead",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Rycroft",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "1-877-518-4321",
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-willingdon-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.119,
+     53.828
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-willingdon-lead",
+    "name": "SECURE Willingdon facility lead",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Willingdon",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "1-877-518-4321",
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-kindersley-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.157,
+     51.467
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-kindersley-lead",
+    "name": "SECURE Kindersley facility lead",
+    "operator": "secure",
+    "province": "SK",
+    "municipality": "Kindersley",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "1-877-518-4321",
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-atmore-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.54,
+     54.8
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-atmore-lead",
+    "name": "R360 Atmore cavern/SWD lead",
+    "operator": "waste-connections-r360",
+    "province": "AB",
+    "municipality": "Atmore",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-brazeau-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.13,
+     53.22
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-brazeau-lead",
+    "name": "R360 Brazeau TRD lead",
+    "operator": "waste-connections-r360",
+    "province": "AB",
+    "municipality": "Brazeau County",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-buck-creek-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.59,
+     53.23
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-buck-creek-lead",
+    "name": "R360 Buck Creek TRD lead",
+    "operator": "waste-connections-r360",
+    "province": "AB",
+    "municipality": "Buck Creek",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-west-edson-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-west-edson-lead",
+    "name": "R360 West Edson TRD lead",
+    "operator": "waste-connections-r360",
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-elk-point-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.9,
+     53.9
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-elk-point-lead",
+    "name": "R360 Elk Point landfill lead",
+    "operator": "waste-connections-r360",
+    "province": "AB",
+    "municipality": "Elk Point",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-willesden-green-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.47,
+     52.34
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-willesden-green-lead",
+    "name": "R360 Willesden Green landfill lead",
+    "operator": "waste-connections-r360",
+    "province": "AB",
+    "municipality": "Willesden Green",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-unity-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.168,
+     52.445
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-unity-lead",
+    "name": "R360 Unity cavern lead",
+    "operator": "waste-connections-r360",
+    "province": "SK",
+    "municipality": "Unity",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-ryley-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.428,
+     53.288
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-ryley-lead",
+    "name": "Clean Harbors Ryley Technical Services lead",
+    "operator": "clean-harbors",
+    "province": "AB",
+    "municipality": "Ryley",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "aquatera-gp-septage-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.795,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "aquatera-gp-septage-lead",
+    "name": "Aquatera Grande Prairie septage receiving lead",
+    "operator": "aquatera",
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "edson-septage-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "edson-septage-lead",
+    "name": "Edson wastewater/septage receiving lead",
+    "operator": "town-edson",
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "west-yellowhead-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.5857,
+     53.4001
+    ]
+   },
+   "properties": {
+    "facilityKey": "west-yellowhead-landfill-lead",
+    "name": "West Yellowhead Regional Landfill lead",
+    "operator": "yellowhead-region",
+    "province": "AB",
+    "municipality": "Hinton",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "peers-transfer-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.005,
+     53.658
+    ]
+   },
+   "properties": {
+    "facilityKey": "peers-transfer-lead",
+    "name": "Peers Transfer Station lead",
+    "operator": "yellowhead-county",
+    "province": "AB",
+    "municipality": "Peers",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clairmont-crwm-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.793,
+     55.261
+    ]
+   },
+   "properties": {
+    "facilityKey": "clairmont-crwm-lead",
+    "name": "Clairmont Centre for Recycling and Waste Management lead",
+    "operator": "county-grande-prairie",
+    "province": "AB",
+    "municipality": "Clairmont",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-edson-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4356,
+     53.5817
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-edson-service",
+    "name": "GFL Edson service location",
+    "operator": "gfl",
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "prairie-disposal-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.795,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "prairie-disposal-service",
+    "name": "Prairie Disposal service location lead",
+    "operator": "prairie-disposal",
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-nisku-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.55,
+     53.33
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-nisku-lead",
+    "name": "GFL Environmental Nisku industrial hub lead",
+    "operator": "gfl",
+    "province": "AB",
+    "municipality": "Nisku",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-calgary-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.07,
+     51.05
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-calgary-lead",
+    "name": "GFL Environmental Calgary industrial hub lead",
+    "operator": "gfl",
+    "province": "AB",
+    "municipality": "Calgary",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-nisku-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.55,
+     53.33
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-nisku-lead",
+    "name": "Clean Harbors Nisku lead",
+    "operator": "clean_harbors",
+    "province": "AB",
+    "municipality": "Nisku",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-fort-mcmurray-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.38,
+     56.73
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-fort-mcmurray-lead",
+    "name": "Clean Harbors Fort McMurray lead",
+    "operator": "clean_harbors",
+    "province": "AB",
+    "municipality": "Fort McMurray",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "wm-thorhild-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.12,
+     54.16
+    ]
+   },
+   "properties": {
+    "facilityKey": "wm-thorhild-landfill-lead",
+    "name": "WM Thorhild Landfill lead",
+    "operator": "waste_management",
+    "province": "AB",
+    "municipality": "Thorhild",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "wm-pembina-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.98,
+     53.22
+    ]
+   },
+   "properties": {
+    "facilityKey": "wm-pembina-landfill-lead",
+    "name": "WM Pembina Landfill lead",
+    "operator": "waste_management",
+    "province": "AB",
+    "municipality": "Drayton Valley",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "aquatera-grande-prairie-landfill-lead",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.8,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "aquatera-grande-prairie-landfill-lead",
+    "name": "Aquatera Utilities landfill lead",
+    "operator": "aquatera",
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "heartland-disposal-edson-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.44,
+     53.58
+    ]
+   },
+   "properties": {
+    "facilityKey": "heartland-disposal-edson-service",
+    "name": "Heartland Disposal & Recycling (service — Edson & Central AB)",
+    "operator": "heartland_disposal",
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "elite-vac-steam-grande-prairie-service",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.8,
+     55.17
+    ]
+   },
+   "properties": {
+    "facilityKey": "elite-vac-steam-grande-prairie-service",
+    "name": "Elite Vac & Steam (hauler — Grande Prairie & Peace Region)",
+    "operator": "elite_vac_steam",
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "v7"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-atmore-east-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.4982,
+     54.794
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-atmore-east-swd",
+    "name": "R360 Atmore East SWD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "11-21-067-17 W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-404-4209",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-atmore-west-cavern",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.5985,
+     54.794
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-atmore-west-cavern",
+    "name": "R360 Atmore West Cavern",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "11-23-067-18 W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-404-6799",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-berland-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.3806,
+     54.0981
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-berland-swd",
+    "name": "R360 Berland SWD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "09-19-059-23 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "825-606-9838",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-brazeau-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.5048,
+     53.0107
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-brazeau-trd",
+    "name": "R360 Brazeau TRD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "11-03-047-11 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-894-2291",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-buck-creek-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.838,
+     53.0107
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-buck-creek-trd",
+    "name": "R360 Buck Creek TRD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "12-05-047-06 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-542-6738",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-conklin-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.2391,
+     55.6385
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-conklin-trd",
+    "name": "R360 Conklin TRD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "15-12-077-09 W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-404-6499",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-elk-point-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.7973,
+     53.732
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-elk-point-landfill",
+    "name": "R360 Elk Point Landfill",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "06-15-055-06 W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-724-4333",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-fort-mcmurray-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.8938,
+     56.2221
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-fort-mcmurray-trd",
+    "name": "R360 Fort McMurray TRD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "02-05-084-06 W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-405-3607",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-fox-creek-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.6619,
+     54.3264
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-fox-creek-swd",
+    "name": "R360 Fox Creek SWD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "07-07-062-18 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "825-606-9840",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-fox-creek-terminal",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.8523,
+     54.3917
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-fox-creek-terminal",
+    "name": "R360 Fox Creek Terminal",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "13-36-062-20 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-622-3355",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-gordondale-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.4439,
+     55.8089
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-gordondale-trd",
+    "name": "R360 Gordondale TRD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "09-10-079-10 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-353-3770",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-kakwa-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.5479,
+     54.2793
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-kakwa-swd",
+    "name": "R360 Kakwa SWD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "01-29-061-04 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-783-3020",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-la-glace-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.19,
+     55.287
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-la-glace-trd",
+    "name": "R360 La Glace TRD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "12-08-073-08 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-766-3111",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-la-glace-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.2731,
+     55.3051
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-la-glace-landfill",
+    "name": "R360 La Glace Landfill",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "16-15-073-09 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-356-0007",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-lindbergh-cavern",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.6341,
+     53.848
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-lindbergh-cavern",
+    "name": "R360 Lindbergh Cavern",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "05-26-056-05 W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-724-3002",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-moose-creek-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.2965,
+     53.5508
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-moose-creek-swd",
+    "name": "R360 Moose Creek SWD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "15-08-053-16 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "587-792-1211",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-south-wapiti-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7648,
+     54.9571
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-south-wapiti-trd",
+    "name": "R360 South Wapiti TRD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "15-13-069-06 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-539-6917",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-south-wapiti-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7588,
+     54.9716
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-south-wapiti-landfill",
+    "name": "R360 South Wapiti Landfill",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "16-24-069-06 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-539-7677",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-spirit-river-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7663,
+     55.6929
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-spirit-river-trd",
+    "name": "R360 Spirit River TRD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "12-31-077-05 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-765-2395",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-spirit-river-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7661,
+     55.6857
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-spirit-river-landfill",
+    "name": "R360 Spirit River Landfill",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "04-31-077-05 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-765-3745",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-west-edson-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.6133,
+     53.558
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-west-edson-trd",
+    "name": "R360 West Edson TRD",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "07-18-053-18 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-723-1912",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-willesden-green-terminal",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.8495,
+     52.6808
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-willesden-green-terminal",
+    "name": "R360 Willesden Green Terminal",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "14-07-043-06 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "403-844-8641",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-willesden-green-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.8732,
+     52.6736
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-willesden-green-landfill",
+    "name": "R360 Willesden Green Landfill",
+    "operator": "r360",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "SW-12-043-07 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "403-845-2336",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-kindersley-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.1425,
+     51.5644
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-kindersley-trd",
+    "name": "R360 Kindersley TRD",
+    "operator": "r360",
+    "province": "SK",
+    "municipality": null,
+    "legalLocation": "16-16-030-23 W3M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "306-463-6220",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-unity-cavern",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.0658,
+     52.4054
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-unity-cavern",
+    "name": "R360 Unity Cavern",
+    "operator": "r360",
+    "province": "SK",
+    "municipality": null,
+    "legalLocation": "15-04-040-22 W3M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "306-228-3001",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-silverberry-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -121.1281,
+     56.5955
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-silverberry-trd",
+    "name": "R360 Silverberry TRD",
+    "operator": "r360",
+    "province": "BC",
+    "municipality": null,
+    "legalLocation": "16-07-088-20 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "250-827-6852",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-south-taylor-trd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -120.6169,
+     56.0373
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-south-taylor-trd",
+    "name": "R360 South Taylor TRD",
+    "operator": "r360",
+    "province": "BC",
+    "municipality": null,
+    "legalLocation": "08-31-081-17 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "250-789-3603",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "r360-tower-lake-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -120.5644,
+     56.0264
+    ]
+   },
+   "properties": {
+    "facilityKey": "r360-tower-lake-swd",
+    "name": "R360 Tower Lake SWD",
+    "operator": "r360",
+    "province": "BC",
+    "municipality": null,
+    "legalLocation": "09-28-081-17 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "250-262-6771",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-fox-creek-east-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.6607,
+     54.3083
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-fox-creek-east-landfill",
+    "name": "SECURE Fox Creek East Landfill",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Fox Creek",
+    "legalLocation": "02-06-062-18 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-622-2981",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-janvier-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.8491,
+     55.9611
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-janvier-landfill",
+    "name": "SECURE Janvier Landfill",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Janvier",
+    "legalLocation": "04-03-081-06 W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-808-4239",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-pembina-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.5752,
+     53.2934
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-pembina-landfill",
+    "name": "SECURE Pembina Landfill",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Drayton Valley",
+    "legalLocation": "01-18-050-11 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "780-542-4733",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-saddle-hills-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.6743,
+     55.7835
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-saddle-hills-landfill",
+    "name": "SECURE Saddle Hills Landfill",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Bonanza",
+    "legalLocation": "16-31-078-11 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "855-306-3486",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-south-grande-prairie-wpf",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7701,
+     54.9064
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-south-grande-prairie-wpf",
+    "name": "SECURE South Grande Prairie WPF",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Grovedale",
+    "legalLocation": "06-36-068-06 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "866-206-5395",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-tulliby-lake",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.3027,
+     53.7755
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-tulliby-lake",
+    "name": "SECURE Tulliby Lake",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Marwayne",
+    "legalLocation": "07-36-055-03 W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "855-306-1442",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-judy-creek-wpf",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.3967,
+     54.4823
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-judy-creek-wpf",
+    "name": "SECURE Judy Creek WPF",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Whitecourt",
+    "legalLocation": "01-03-064-10 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "855-391-9739 ext. 6180",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-obed-wpf",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.2361,
+     53.5073
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-obed-wpf",
+    "name": "SECURE Obed WPF",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Hinton",
+    "legalLocation": "16-26-052-23 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "866-765-0798",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-deerhill-edson-wpf",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4941,
+     53.703
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-deerhill-edson-wpf",
+    "name": "SECURE Deerhill / Edson WPF",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": "08-01-055-18 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "587-466-9831",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-nosehill-swd",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.8758,
+     53.7501
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-nosehill-swd",
+    "name": "SECURE Nosehill SWD",
+    "operator": "secure",
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": "11-21-055-20 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "587-466-9831",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "secure-marshall-landfill",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -109.6959,
+     53.1339
+    ]
+   },
+   "properties": {
+    "facilityKey": "secure-marshall-landfill",
+    "name": "SECURE Marshall Landfill",
+    "operator": "secure",
+    "province": "SK",
+    "municipality": null,
+    "legalLocation": "02-21-048-26 W3M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "306-387-6507",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "virden-facility-conflicting",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -100.93,
+     49.85
+    ]
+   },
+   "properties": {
+    "facilityKey": "virden-facility-conflicting",
+    "name": "Virden waste facility — status conflicting (SECURE: no longer in operation; Town of Virden: managed by LOCAL Industrial Partners)",
+    "operator": "unknown",
+    "province": "MB",
+    "municipality": "Virden",
+    "legalLocation": null,
+    "physicalAddress": null,
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": null,
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "pure-environmental-fort-kent",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.4753,
+     54.4315
+    ]
+   },
+   "properties": {
+    "facilityKey": "pure-environmental-fort-kent",
+    "name": "Pure Environmental Fort Kent (WM 212)",
+    "operator": "pure_environmental",
+    "province": "AB",
+    "municipality": "Fort Kent",
+    "legalLocation": "09-14-063-04 W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 212",
+    "acceptable": null,
+    "phone": "587-792-0855",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "voda-grande-cache",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7149,
+     53.9168
+    ]
+   },
+   "properties": {
+    "facilityKey": "voda-grande-cache",
+    "name": "Voda Grande Cache (WM 074)",
+    "operator": "voda_midstream",
+    "province": "AB",
+    "municipality": "Grande Cache",
+    "legalLocation": "01-19-057-05 W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 074",
+    "acceptable": null,
+    "phone": "403-827-4801 (Dan Humphries, dhumphries@vodamidstream.com)",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "voda-paddle-river",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.1554,
+     53.8697
+    ]
+   },
+   "properties": {
+    "facilityKey": "voda-paddle-river",
+    "name": "Voda Paddle River (WM 060)",
+    "operator": "voda_midstream",
+    "province": "AB",
+    "municipality": "Paddle River",
+    "legalLocation": "16-31-056-08 W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 060",
+    "acceptable": null,
+    "phone": "780-674-0654 (Bill Hughes, bhughes@vodamidstream.com)",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "recover-lodgepole",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.2362,
+     53.0723
+    ]
+   },
+   "properties": {
+    "facilityKey": "recover-lodgepole",
+    "name": "Recover Inc. Lodgepole (WM 189)",
+    "operator": "recover",
+    "province": "AB",
+    "municipality": "Brazeau County",
+    "legalLocation": "15-28-047-09 W5M",
+    "physicalAddress": "9309 Township Road 475, Brazeau County",
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 189",
+    "acceptable": null,
+    "phone": "780-514-5698",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "gfl-calgary-44-st",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.9108,
+     50.9628
+    ]
+   },
+   "properties": {
+    "facilityKey": "gfl-calgary-44-st",
+    "name": "GFL Calgary",
+    "operator": "gfl",
+    "province": "AB",
+    "municipality": "Calgary",
+    "legalLocation": "22-23-29-W4M",
+    "physicalAddress": "9611 44 St SE, Calgary",
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "403-215-6916 (Tom Kereluk)",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "enerstar-tide-lake",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.4081,
+     50.3683
+    ]
+   },
+   "properties": {
+    "facilityKey": "enerstar-tide-lake",
+    "name": "Enerstar Petroleum Tide Lake",
+    "operator": "enerstar",
+    "province": "AB",
+    "municipality": "Tide Lake",
+    "legalLocation": "08-27-016-11 W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "403-875-2721 (Lee Materi) / 403-317-3978 (Kyle James)",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "aqua-terra-fort-st-john",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -120.8262,
+     56.2439
+    ]
+   },
+   "properties": {
+    "facilityKey": "aqua-terra-fort-st-john",
+    "name": "Aqua Terra Fort St. John (produced water incl. sour and frac flowback; non-hazardous waste)",
+    "operator": "aqua_terra",
+    "province": "BC",
+    "municipality": "Fort St. John",
+    "legalLocation": "11-12-084-19 W6M",
+    "physicalAddress": "approx. 3.6 km north of Hwy 97 on 116 Street / West Bypass Road",
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "250-261-4311",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "miller-vaughn-bullough-environmental-centre",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -97.33,
+     49.26
+    ]
+   },
+   "properties": {
+    "facilityKey": "miller-vaughn-bullough-environmental-centre",
+    "name": "Miller Environmental — Vaughn Bullough Environmental Centre",
+    "operator": "miller_environmental",
+    "province": "MB",
+    "municipality": "Saint Jean Baptiste",
+    "legalLocation": null,
+    "physicalAddress": "Hwy 14 & Hwy 75, Saint Jean Baptiste, MB R0G 2B0",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "204-737-2045",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "clean-harbors-lambton",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -82.43,
+     42.88
+    ]
+   },
+   "properties": {
+    "facilityKey": "clean-harbors-lambton",
+    "name": "Clean Harbors Lambton / Sarnia (incineration, secure landfill, treatment)",
+    "operator": "clean_harbors",
+    "province": "ON",
+    "municipality": "Corunna",
+    "legalLocation": null,
+    "physicalAddress": "4090 Telfer Road, RR #1, Corunna, ON N0N 1G0",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "519-864-3970; 519-864-1021",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "stablex-blainville",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -73.88,
+     45.67
+    ]
+   },
+   "properties": {
+    "facilityKey": "stablex-blainville",
+    "name": "Stablex Canada Blainville (hazardous treatment / stabilization / secure placement)",
+    "operator": "stablex",
+    "province": "QC",
+    "municipality": "Blainville",
+    "legalLocation": null,
+    "physicalAddress": "760 Boulevard Industriel, Blainville, QC J7C 3V4",
+    "coordinatePrecision": "community_only",
+    "routable": false,
+    "regulatorRef": null,
+    "acceptable": null,
+    "phone": "450-430-9230",
+    "source": "brief"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:00411879:edmonton",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.6342,
+     53.5435
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:00411879:edmonton",
+    "name": "Clay Tech Services Inc. — Edmonton",
+    "operator": "Clay Tech Services Inc.",
+    "province": "AB",
+    "municipality": "Edmonton",
+    "legalLocation": "7-7-53-25-W4",
+    "physicalAddress": "21815-115 Avenue Edmonton",
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "EPEA 00411879",
+    "acceptable": "Contact facility directly",
+    "phone": "780-395-1188",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm212:fort-kent",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.4753,
+     54.4315
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm212:fort-kent",
+    "name": "Pure Environmental Waste Management — Fort Kent",
+    "operator": "Pure Environmental Waste Management",
+    "province": "AB",
+    "municipality": "Fort Kent",
+    "legalLocation": "9-14-063-04-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 212",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "587-792-0855",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm152-b:edson",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4941,
+     53.703
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm152-b:edson",
+    "name": "SECURE Energy Services Inc. Edson FST — Edson",
+    "operator": "SECURE Energy Services Inc. Edson FST",
+    "province": "AB",
+    "municipality": "Edson",
+    "legalLocation": "08-01-055-18W5",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 152-B",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "1-780-817-6237",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm126:fox-creek",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.8459,
+     54.388
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm126:fox-creek",
+    "name": "Secure Energy Services Inc. — Fox Creek",
+    "operator": "Secure Energy Services Inc.",
+    "province": "AB",
+    "municipality": "Fox Creek",
+    "legalLocation": "11-36-062-20W5",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 126",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "780-326-9194",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm117:la-glace",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.1963,
+     55.287
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm117:la-glace",
+    "name": "Secure Energy Services Inc. — La Glace",
+    "operator": "Secure Energy Services Inc.",
+    "province": "AB",
+    "municipality": "La Glace",
+    "legalLocation": "09-07-073-08W6",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 117",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "780-402-4114",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm122:south-grande-prairie",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7701,
+     54.9064
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm122:south-grande-prairie",
+    "name": "Secure Energy Services Inc. — South Grande Prairie",
+    "operator": "Secure Energy Services Inc.",
+    "province": "AB",
+    "municipality": "South Grande Prairie",
+    "legalLocation": "06-36-068-06W6",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 122",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "866-206-5395",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm147:judy-creek",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.3967,
+     54.4823
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm147:judy-creek",
+    "name": "Secure Energy Services Inc. — Judy Creek",
+    "operator": "Secure Energy Services Inc.",
+    "province": "AB",
+    "municipality": "Judy Creek",
+    "legalLocation": "01-03-064-10W5",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 147",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "1-855-391-9739 ext- 6181",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm128:obed",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.2361,
+     53.5073
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm128:obed",
+    "name": "Secure Energy Services Inc. — Obed",
+    "operator": "Secure Energy Services Inc.",
+    "province": "AB",
+    "municipality": "Obed",
+    "legalLocation": "16-26-052-23W5",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 128",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "780-817-1213",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:00203668:nw-1-4-15-53-23-w4m",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.2828,
+     53.5616
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:00203668:nw-1-4-15-53-23-w4m",
+    "name": "Tervita Corporation",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": null,
+    "legalLocation": "NW 1/4 15-53-23-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "EPEA 00203668",
+    "acceptable": "Contact facility directly",
+    "phone": null,
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm042:elk-point",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.7972,
+     53.7284
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm042:elk-point",
+    "name": "Tervita Corporation — Elk Point",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Elk Point",
+    "legalLocation": "03-15-055-06-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 042",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-724-4333",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm001:hughenden",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.9287,
+     52.4779
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm001:hughenden",
+    "name": "Tervita Corporation — Hughenden",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Hughenden",
+    "legalLocation": "16-33-040-07-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 001",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-856-2526",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm027:laglace",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.19,
+     55.287
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm027:laglace",
+    "name": "Tervita Corporation — LaGlace",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "LaGlace",
+    "legalLocation": "12-08-073-08-W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 027",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-766-3111",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm098:spirit-river",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7663,
+     55.6929
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm098:spirit-river",
+    "name": "Tervita Corporation — Spirit River",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Spirit River",
+    "legalLocation": "NW-31-077-05-W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 098",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-765-2395",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm104:peace-river",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.8413,
+     56.3599
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm104:peace-river",
+    "name": "Tervita Corporation — Peace River",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Peace River",
+    "legalLocation": "12-24-085-19-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 104",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-624-2836",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm057:rainbow-lake",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7797,
+     58.5673
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm057:rainbow-lake",
+    "name": "Tervita Corporation — Rainbow Lake",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Rainbow Lake",
+    "legalLocation": "16-32-110-05-W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 057",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-956-5650",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm102:south-wapiti",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7648,
+     54.9571
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm102:south-wapiti",
+    "name": "Tervita Corporation — South Wapiti",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "South Wapiti",
+    "legalLocation": "15-13-069-06-W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 102",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-539-6917",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm017:grande-prairie",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.799,
+     55.0949
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm017:grande-prairie",
+    "name": "Tervita Corporation — Grande Prairie",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Grande Prairie",
+    "legalLocation": "06-02-071-06-W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 017",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-539-1845",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm021:gordondale",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -119.4439,
+     55.8089
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm021:gordondale",
+    "name": "Tervita Corporation — Gordondale",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Gordondale",
+    "legalLocation": "09-10-079-10-W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 021",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-353-3770",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm040:fox-creek",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.9436,
+     54.3663
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm040:fox-creek",
+    "name": "Tervita Corporation — Fox Creek",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Fox Creek",
+    "legalLocation": "03-29-062-20-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 040",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-622-2981",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm156:fox-creek-east",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.8399,
+     54.3917
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm156:fox-creek-east",
+    "name": "Tervita Corporation — Fox Creek East",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Fox Creek East",
+    "legalLocation": "NE-36-062-20-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 156",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-844-0504",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm006:valleyview",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.2508,
+     54.9535
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm006:valleyview",
+    "name": "Tervita Corporation — Valleyview",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Valleyview",
+    "legalLocation": "09-16-069-22-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 006",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-524-3336",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm047:valleyview-west",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.2703,
+     54.9607
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm047:valleyview-west",
+    "name": "Tervita Corporation — Valleyview West",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Valleyview West",
+    "legalLocation": "04-21-069-22-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 047",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-524-4336",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm002:red-earth",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.2808,
+     56.5193
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm002:red-earth",
+    "name": "Tervita Corporation — Red Earth",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Red Earth",
+    "legalLocation": "12-13-087-09-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 002",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-649-3793",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm078:west-edson",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.6133,
+     53.558
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm078:west-edson",
+    "name": "Tervita Corporation — West Edson",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "West Edson",
+    "legalLocation": "07-18-053-18-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 078",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-723-1912",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm042:niton-junction",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.6963,
+     53.6015
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm042:niton-junction",
+    "name": "Tervita Corporation — Niton Junction",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Niton Junction",
+    "legalLocation": "06-33-053-12-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 042",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-795-2364",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm061:lindbergh",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.6341,
+     53.848
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm061:lindbergh",
+    "name": "Tervita Corporation — Lindbergh",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Lindbergh",
+    "legalLocation": "05-26-056-05-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 061",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-724-3002",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm112:high-prairie",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.4725,
+     55.2942
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm112:high-prairie",
+    "name": "Tervita Corporation — High Prairie",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "High Prairie",
+    "legalLocation": "SE-14-073-17-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 112",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-523-5890",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm009:judy-creek",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.611,
+     54.3953
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm009:judy-creek",
+    "name": "Tervita Corporation — Judy Creek",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Judy Creek",
+    "legalLocation": "04-05-063-11-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 009",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-268-8614",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm007:mitsue",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.58,
+     55.2362
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm007:mitsue",
+    "name": "Tervita Corporation — Mitsue",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Mitsue",
+    "legalLocation": "04-29-072-04-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 007",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-849-3319",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm106:greencourt",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.3013,
+     54.0256
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm106:greencourt",
+    "name": "Tervita Corporation — Greencourt",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Greencourt",
+    "legalLocation": "12-29-058-09-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 106",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-786-0150",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm074:grande-cache",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.7149,
+     53.9168
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm074:grande-cache",
+    "name": "Voda Inc — Grande Cache",
+    "operator": "Voda Inc",
+    "province": "AB",
+    "municipality": "Grande Cache",
+    "legalLocation": "01-19-057-05-W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 074",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "403-827-4801",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm060:paddle-river",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.1554,
+     53.8697
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm060:paddle-river",
+    "name": "Voda Inc — Paddle River",
+    "operator": "Voda Inc",
+    "province": "AB",
+    "municipality": "Paddle River",
+    "legalLocation": "16-31-056-08-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 060",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "780-674-0654",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:47785-01:westlock-county",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.7582,
+     54.1162
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:47785-01:westlock-county",
+    "name": "Westlock Regional Waste Management Commission — Westlock County",
+    "operator": "Westlock Regional Waste Management Commission",
+    "province": "AB",
+    "municipality": "Westlock County",
+    "legalLocation": "NE 27-59-26-W4M",
+    "physicalAddress": "59424 Range RD 262 Westlock County",
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "EPEA 47785-01",
+    "acceptable": "Non-hazardous waste only",
+    "phone": "780-307-2456",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm182:atmore",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.6048,
+     54.794
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm182:atmore",
+    "name": "White Swan Environmental LTD Atmore West Waste Management Facility — Atmore",
+    "operator": "White Swan Environmental LTD Atmore West Waste Management Facility",
+    "province": "AB",
+    "municipality": "Atmore",
+    "legalLocation": "NW 23-067-18-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 182",
+    "acceptable": "Contact facility directly",
+    "phone": "780-404-6799",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm197:conklin",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.2391,
+     55.6385
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm197:conklin",
+    "name": "White Swan Environmental LTD Conklin Waste Management Facility — Conklin",
+    "operator": "White Swan Environmental LTD Conklin Waste Management Facility",
+    "province": "AB",
+    "municipality": "Conklin",
+    "legalLocation": "15-12-077-09-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 197",
+    "acceptable": "Contact facility directly",
+    "phone": "780-404-6499",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:00473568:lethbridge",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.7625,
+     49.7847
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:00473568:lethbridge",
+    "name": "City of Lethbridge Lethbridge — Lethbridge",
+    "operator": "City of Lethbridge Lethbridge",
+    "province": "AB",
+    "municipality": "Lethbridge",
+    "legalLocation": "SE1/4 4-10-21-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "EPEA 00473568",
+    "acceptable": "Contact facility directly",
+    "phone": "403-320-3114",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:00001399:calgary",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.9108,
+     50.9628
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:00001399:calgary",
+    "name": "GFL Environmental Services — Calgary",
+    "operator": "GFL Environmental Services",
+    "province": "AB",
+    "municipality": "Calgary",
+    "legalLocation": "22-23-29-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "EPEA 00001399",
+    "acceptable": "Hazardous and non-hazardous waste",
+    "phone": "403-215-6916",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm189:brazeau-county",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.0918,
+     53.0723
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm189:brazeau-county",
+    "name": "Recover Inc. 15-28-047-08-W4M — Brazeau County",
+    "operator": "Recover Inc. 15-28-047-08-W4M",
+    "province": "AB",
+    "municipality": "Brazeau County",
+    "legalLocation": "15-28-047-08-W4M",
+    "physicalAddress": "9309 TWP Rd 475",
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 189",
+    "acceptable": "Oilfield and non-oilfield hydrovac slurries. Contact the facility for additional information",
+    "phone": "780-514-5698",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm146:rocky-mountain-house",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.0809,
+     52.3945
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm146:rocky-mountain-house",
+    "name": "Secure Energy Services Inc. — Rocky Mountain House",
+    "operator": "Secure Energy Services Inc.",
+    "province": "AB",
+    "municipality": "Rocky Mountain House",
+    "legalLocation": "03-04-040-08W5",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 146",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "780-234-5285",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm132:brazeau",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.4632,
+     53.0252
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm132:brazeau",
+    "name": "Secure Energy Services Inc. — Brazeau",
+    "operator": "Secure Energy Services Inc.",
+    "province": "AB",
+    "municipality": "Brazeau",
+    "legalLocation": "NW-12-047-11W5",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 132",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "780-514-8537",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm138:drayton-valley",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.8352,
+     53.1774
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm138:drayton-valley",
+    "name": "Secure Energy Services Inc. — Drayton Valley",
+    "operator": "Secure Energy Services Inc.",
+    "province": "AB",
+    "municipality": "Drayton Valley",
+    "legalLocation": "03-05-049-06W5",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 138",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "1-877-845-7111",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm181:tuilliby",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -110.3027,
+     53.7755
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm181:tuilliby",
+    "name": "Secure Energy Services Inc. — Tuilliby",
+    "operator": "Secure Energy Services Inc.",
+    "province": "AB",
+    "municipality": "Tuilliby",
+    "legalLocation": "07-36-055-03W4",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 181",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "1-855-306-1442 ext- 6701",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm048:brazeau",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -115.5048,
+     53.0107
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm048:brazeau",
+    "name": "Tervita Corporation — Brazeau",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Brazeau",
+    "legalLocation": "11-03-047-11-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 048",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-894-2291",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm003:eckville",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.3699,
+     52.3582
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm003:eckville",
+    "name": "Tervita Corporation — Eckville",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Eckville",
+    "legalLocation": "11-21-039-03-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 003",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "403-476-2092",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm005:big-valley",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.6881,
+     52.0393
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm005:big-valley",
+    "name": "Tervita Corporation — Big Valley",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Big Valley",
+    "legalLocation": "10-36-035-20-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 005",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "403-876-2636",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm004:coronation",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.2633,
+     51.9378
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm004:coronation",
+    "name": "Tervita Corporation — Coronation",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Coronation",
+    "legalLocation": "12-30-034-09-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 004",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "403-575-3911",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm088:drumheller",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.7249,
+     51.289
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm088:drumheller",
+    "name": "Tervita Corporation — Drumheller",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Drumheller",
+    "legalLocation": "13-09-027-20-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 088",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "403-823-2706",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm012:stauffer",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -114.5921,
+     52.1589
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm012:stauffer",
+    "name": "Tervita Corporation — Stauffer",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Stauffer",
+    "legalLocation": "16-11-037-05-W5M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 012",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "403-746-2266",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm127:buck-creek",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.838,
+     53.0107
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm127:buck-creek",
+    "name": "Tervita Corporation — Buck Creek",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Buck Creek",
+    "legalLocation": "12-05-047-06-W6M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 127",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "780-542-6738",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm097:brooks",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.7251,
+     50.5169
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm097:brooks",
+    "name": "Tervita Corporation — Brooks",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Brooks",
+    "legalLocation": "12-16-018-13-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 097",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "403-362-7439",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm013:brooks-west",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -111.7771,
+     50.5387
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm013:brooks-west",
+    "name": "Tervita Corporation — Brooks West",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Brooks West",
+    "legalLocation": "01-25-018-14-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 013",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "403-362-4266",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm022:taber",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -112.0926,
+     49.6977
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm022:taber",
+    "name": "Tervita Corporation — Taber",
+    "operator": "Tervita Corporation",
+    "province": "AB",
+    "municipality": "Taber",
+    "legalLocation": "03-04-009-16-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 022",
+    "acceptable": "Non-oilfield hazardous hydrovac must have a recoverable hydrocarbon component",
+    "phone": "403-223-2659",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "ab_hydrovac:wm113:claresholm",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -113.3669,
+     50.024
+    ]
+   },
+   "properties": {
+    "facilityKey": "ab_hydrovac:wm113:claresholm",
+    "name": "Voda Inc — Claresholm",
+    "operator": "Voda Inc",
+    "province": "AB",
+    "municipality": "Claresholm",
+    "legalLocation": "11-30-012-25-W4M",
+    "physicalAddress": null,
+    "coordinatePrecision": "approximate_site",
+    "routable": false,
+    "regulatorRef": "WM 113",
+    "acceptable": "A hazardous waste management facility",
+    "phone": "587-580-7617",
+    "source": "ab_hydrovac_2026-04-10"
+   }
+  }
+ ]
+}

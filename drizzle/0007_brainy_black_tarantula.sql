@@ -1,0 +1,20 @@
+CREATE TABLE `routeDecisions` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`tripId` varchar(40) NOT NULL,
+	`selectedRoute` varchar(180) NOT NULL,
+	`alternatives` text,
+	`vehicleType` varchar(100) NOT NULL,
+	`gvwTonnes` int NOT NULL,
+	`axleCount` int NOT NULL,
+	`heightMetres` int NOT NULL,
+	`widthMetres` int NOT NULL,
+	`lengthMetres` int NOT NULL,
+	`hazmatClass` varchar(40),
+	`quantity` varchar(80),
+	`riskLevel` enum('low','moderate','high','blocked') NOT NULL DEFAULT 'moderate',
+	`source` varchar(180),
+	`confidence` varchar(40),
+	`driverAcknowledged` int NOT NULL DEFAULT 0,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	CONSTRAINT `routeDecisions_id` PRIMARY KEY(`id`)
+);

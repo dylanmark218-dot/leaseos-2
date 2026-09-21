@@ -1,0 +1,2595 @@
+[
+ {
+  "facilityKey": "r360-atmore-east-swd",
+  "name": "R360 Atmore East SWD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "swd",
+  "facilityTypes": [
+   "swd"
+  ],
+  "legalLocation": "11-21-067-17 W4M",
+  "physicalAddress": null,
+  "phone": "780-404-4209",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "AtmoreSWD@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "White Swan"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Atmore East SWD"
+  ]
+ },
+ {
+  "facilityKey": "r360-atmore-west-cavern",
+  "name": "R360 Atmore West Cavern",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "cavern",
+  "facilityTypes": [
+   "cavern"
+  ],
+  "legalLocation": "11-23-067-18 W4M",
+  "physicalAddress": null,
+  "phone": "780-404-6799",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "AtmoreCavern@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "White Swan"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Atmore West Cavern"
+  ]
+ },
+ {
+  "facilityKey": "r360-berland-swd",
+  "name": "R360 Berland SWD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "swd",
+  "facilityTypes": [
+   "swd"
+  ],
+  "legalLocation": "09-19-059-23 W5M",
+  "physicalAddress": null,
+  "phone": "825-606-9838",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Catapult"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Berland SWD"
+  ]
+ },
+ {
+  "facilityKey": "r360-brazeau-trd",
+  "name": "R360 Brazeau TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "11-03-047-11 W5M",
+  "physicalAddress": null,
+  "phone": "780-894-2291",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE",
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Brazeau TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-buck-creek-trd",
+  "name": "R360 Buck Creek TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "12-05-047-06 W5M",
+  "physicalAddress": null,
+  "phone": "780-542-6738",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE",
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Buck Creek TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-conklin-trd",
+  "name": "R360 Conklin TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "15-12-077-09 W4M",
+  "physicalAddress": null,
+  "phone": "780-404-6499",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "Conklin@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "White Swan"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Conklin TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-elk-point-landfill",
+  "name": "R360 Elk Point Landfill",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "06-15-055-06 W4M",
+  "physicalAddress": null,
+  "phone": "780-724-4333",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE",
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Elk Point Landfill"
+  ]
+ },
+ {
+  "facilityKey": "r360-fort-mcmurray-trd",
+  "name": "R360 Fort McMurray TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "02-05-084-06 W4M",
+  "physicalAddress": null,
+  "phone": "780-405-3607",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Fort McMurray TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-fox-creek-swd",
+  "name": "R360 Fox Creek SWD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "swd",
+  "facilityTypes": [
+   "swd"
+  ],
+  "legalLocation": "07-07-062-18 W5M",
+  "physicalAddress": null,
+  "phone": "825-606-9840",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Catapult"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Fox Creek SWD"
+  ]
+ },
+ {
+  "facilityKey": "r360-fox-creek-terminal",
+  "name": "R360 Fox Creek Terminal",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "transfer",
+  "facilityTypes": [
+   "transfer"
+  ],
+  "legalLocation": "13-36-062-20 W5M",
+  "physicalAddress": null,
+  "phone": "780-622-3355",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Catapult"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Fox Creek Terminal"
+  ]
+ },
+ {
+  "facilityKey": "r360-gordondale-trd",
+  "name": "R360 Gordondale TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "09-10-079-10 W6M",
+  "physicalAddress": null,
+  "phone": "780-353-3770",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Gordondale TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-kakwa-swd",
+  "name": "R360 Kakwa SWD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "swd",
+  "facilityTypes": [
+   "swd"
+  ],
+  "legalLocation": "01-29-061-04 W6M",
+  "physicalAddress": null,
+  "phone": "780-783-3020",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "AdminKakwaSWD@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Kakwa SWD"
+  ]
+ },
+ {
+  "facilityKey": "r360-la-glace-trd",
+  "name": "R360 La Glace TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "12-08-073-08 W6M",
+  "physicalAddress": null,
+  "phone": "780-766-3111",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 La Glace TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-la-glace-landfill",
+  "name": "R360 La Glace Landfill",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "16-15-073-09 W6M",
+  "physicalAddress": null,
+  "phone": "780-356-0007",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 La Glace Landfill"
+  ]
+ },
+ {
+  "facilityKey": "r360-lindbergh-cavern",
+  "name": "R360 Lindbergh Cavern",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "cavern",
+  "facilityTypes": [
+   "cavern"
+  ],
+  "legalLocation": "05-26-056-05 W4M",
+  "physicalAddress": null,
+  "phone": "780-724-3002",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Lindbergh Cavern"
+  ]
+ },
+ {
+  "facilityKey": "r360-moose-creek-swd",
+  "name": "R360 Moose Creek SWD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "swd",
+  "facilityTypes": [
+   "swd"
+  ],
+  "legalLocation": "15-08-053-16 W5M",
+  "physicalAddress": null,
+  "phone": "587-792-1211",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Moose Creek SWD"
+  ]
+ },
+ {
+  "facilityKey": "r360-south-wapiti-trd",
+  "name": "R360 South Wapiti TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "15-13-069-06 W6M",
+  "physicalAddress": null,
+  "phone": "780-539-6917",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 South Wapiti TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-south-wapiti-landfill",
+  "name": "R360 South Wapiti Landfill",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "16-24-069-06 W6M",
+  "physicalAddress": null,
+  "phone": "780-539-7677",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 South Wapiti Landfill"
+  ]
+ },
+ {
+  "facilityKey": "r360-spirit-river-trd",
+  "name": "R360 Spirit River TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "12-31-077-05 W6M",
+  "physicalAddress": null,
+  "phone": "780-765-2395",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Spirit River TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-spirit-river-landfill",
+  "name": "R360 Spirit River Landfill",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "04-31-077-05 W6M",
+  "physicalAddress": null,
+  "phone": "780-765-3745",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Spirit River Landfill"
+  ]
+ },
+ {
+  "facilityKey": "r360-west-edson-trd",
+  "name": "R360 West Edson TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "07-18-053-18 W5M",
+  "physicalAddress": null,
+  "phone": "780-723-1912",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE",
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 West Edson TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-willesden-green-terminal",
+  "name": "R360 Willesden Green Terminal",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "transfer",
+  "facilityTypes": [
+   "transfer"
+  ],
+  "legalLocation": "14-07-043-06 W5M",
+  "physicalAddress": null,
+  "phone": "403-844-8641",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Willesden Green Terminal"
+  ]
+ },
+ {
+  "facilityKey": "r360-willesden-green-landfill",
+  "name": "R360 Willesden Green Landfill",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "AB",
+  "municipality": null,
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "SW-12-043-07 W5M",
+  "physicalAddress": null,
+  "phone": "403-845-2336",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "AdminWillesdenGreenLF@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE",
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Willesden Green Landfill"
+  ]
+ },
+ {
+  "facilityKey": "r360-kindersley-trd",
+  "name": "R360 Kindersley TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "SK",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "16-16-030-23 W3M",
+  "physicalAddress": null,
+  "phone": "306-463-6220",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Kindersley TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-unity-cavern",
+  "name": "R360 Unity Cavern",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "SK",
+  "municipality": null,
+  "facilityType": "cavern",
+  "facilityTypes": [
+   "cavern"
+  ],
+  "legalLocation": "15-04-040-22 W3M",
+  "physicalAddress": null,
+  "phone": "306-228-3001",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Unity Cavern"
+  ]
+ },
+ {
+  "facilityKey": "r360-silverberry-trd",
+  "name": "R360 Silverberry TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "BC",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "16-07-088-20 W6M",
+  "physicalAddress": null,
+  "phone": "250-827-6852",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "AdminSilverberryTRD@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Silverberry TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-silverberry-landfill",
+  "name": "R360 Silverberry Landfill",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "BC",
+  "municipality": null,
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "A-08-088-20 W6M",
+  "physicalAddress": null,
+  "phone": "250-827-6834",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "SilverberryLF@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Silverberry Landfill"
+  ]
+ },
+ {
+  "facilityKey": "r360-south-taylor-trd",
+  "name": "R360 South Taylor TRD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "BC",
+  "municipality": null,
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd"
+  ],
+  "legalLocation": "08-31-081-17 W6M",
+  "physicalAddress": null,
+  "phone": "250-789-3603",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Catapult"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 South Taylor TRD"
+  ]
+ },
+ {
+  "facilityKey": "r360-tower-lake-swd",
+  "name": "R360 Tower Lake SWD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "BC",
+  "municipality": null,
+  "facilityType": "swd",
+  "facilityTypes": [
+   "swd"
+  ],
+  "legalLocation": "09-28-081-17 W6M",
+  "physicalAddress": null,
+  "phone": "250-262-6771",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "AdminTowerSWD@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Tower Lake SWD"
+  ]
+ },
+ {
+  "facilityKey": "r360-mile-103-swd",
+  "name": "R360 Mile 103 SWD",
+  "operatorKey": "r360",
+  "parentCompany": "Waste Connections",
+  "province": "BC",
+  "municipality": null,
+  "facilityType": "swd",
+  "facilityTypes": [
+   "swd"
+  ],
+  "legalLocation": "D-096-K/094-A-12",
+  "physicalAddress": null,
+  "phone": "250-772-3075",
+  "dispatchPhone": "1-855-591-5360",
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@r360canada.com",
+  "websiteUrl": "https://www.r360canada.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "SECURE"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "R360 Mile 103 SWD"
+  ]
+ },
+ {
+  "facilityKey": "secure-fox-creek-east-landfill",
+  "name": "SECURE Fox Creek East Landfill",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Fox Creek",
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "02-06-062-18 W5M",
+  "physicalAddress": null,
+  "phone": "780-622-2981",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "1-877-518-4321",
+  "salesContact": "780-233-0737",
+  "email": "foxcreeklf@secure.ca",
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Fox Creek East Landfill"
+  ]
+ },
+ {
+  "facilityKey": "secure-janvier-landfill",
+  "name": "SECURE Janvier Landfill",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Janvier",
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "04-03-081-06 W4M",
+  "physicalAddress": null,
+  "phone": "780-808-4239",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "1-877-518-4321",
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Janvier Landfill"
+  ]
+ },
+ {
+  "facilityKey": "secure-pembina-landfill",
+  "name": "SECURE Pembina Landfill",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Drayton Valley",
+  "facilityType": "class_i_landfill",
+  "facilityTypes": [
+   "class_i_landfill",
+   "norm"
+  ],
+  "legalLocation": "01-18-050-11 W5M",
+  "physicalAddress": null,
+  "phone": "780-542-4733",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "1-877-518-4321",
+  "salesContact": "587-433-1474",
+  "email": "pembinalf@secure.ca",
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": true,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Pembina Landfill"
+  ]
+ },
+ {
+  "facilityKey": "secure-saddle-hills-landfill",
+  "name": "SECURE Saddle Hills Landfill",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Bonanza",
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "16-31-078-11 W6M",
+  "physicalAddress": null,
+  "phone": "855-306-3486",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "1-877-518-4321",
+  "salesContact": "780-814-4910",
+  "email": "saddlehillslf@secure.ca",
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Saddle Hills Landfill"
+  ]
+ },
+ {
+  "facilityKey": "secure-south-grande-prairie-wpf",
+  "name": "SECURE South Grande Prairie WPF",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Grovedale",
+  "facilityType": "waste_processing",
+  "facilityTypes": [
+   "waste_processing"
+  ],
+  "legalLocation": "06-36-068-06 W6M",
+  "physicalAddress": null,
+  "phone": "866-206-5395",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "1-877-518-4321",
+  "salesContact": "587-297-1264",
+  "email": "southgplandfill@secure.ca",
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE South Grande Prairie WPF"
+  ]
+ },
+ {
+  "facilityKey": "secure-tulliby-lake",
+  "name": "SECURE Tulliby Lake",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Marwayne",
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "07-36-055-03 W4M",
+  "physicalAddress": null,
+  "phone": "855-306-1442",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "1-877-518-4321",
+  "salesContact": "780-872-7848",
+  "email": "tullibylf@secure.ca",
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Tulliby Lake"
+  ]
+ },
+ {
+  "facilityKey": "secure-judy-creek-wpf",
+  "name": "SECURE Judy Creek WPF",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Whitecourt",
+  "facilityType": "waste_processing",
+  "facilityTypes": [
+   "waste_processing"
+  ],
+  "legalLocation": "01-03-064-10 W5M",
+  "physicalAddress": null,
+  "phone": "855-391-9739 ext. 6180",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "780-225-2000",
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": true,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Judy Creek WPF"
+  ]
+ },
+ {
+  "facilityKey": "secure-obed-wpf",
+  "name": "SECURE Obed WPF",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Hinton",
+  "facilityType": "waste_processing",
+  "facilityTypes": [
+   "waste_processing"
+  ],
+  "legalLocation": "16-26-052-23 W5M",
+  "physicalAddress": null,
+  "phone": "866-765-0798",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "780-225-2000",
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": true,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Obed WPF"
+  ]
+ },
+ {
+  "facilityKey": "secure-deerhill-edson-wpf",
+  "name": "SECURE Deerhill / Edson WPF",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edson",
+  "facilityType": "waste_processing",
+  "facilityTypes": [
+   "waste_processing"
+  ],
+  "legalLocation": "08-01-055-18 W5M",
+  "physicalAddress": null,
+  "phone": "587-466-9831",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "1-877-518-4321",
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Deerhill / Edson WPF"
+  ]
+ },
+ {
+  "facilityKey": "secure-nosehill-swd",
+  "name": "SECURE Nosehill SWD",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edson",
+  "facilityType": "swd",
+  "facilityTypes": [
+   "swd"
+  ],
+  "legalLocation": "11-21-055-20 W5M",
+  "physicalAddress": null,
+  "phone": "587-466-9831",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "1-877-518-4321",
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Nosehill SWD"
+  ]
+ },
+ {
+  "facilityKey": "secure-marshall-landfill",
+  "name": "SECURE Marshall Landfill",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "SK",
+  "municipality": null,
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "02-21-048-26 W3M",
+  "physicalAddress": null,
+  "phone": "306-387-6507",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "1-877-518-4321",
+  "salesContact": "306-830-7747",
+  "email": "marshall@secure.ca",
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Marshall Landfill"
+  ]
+ },
+ {
+  "facilityKey": "secure-northern-rockies-landfill",
+  "name": "SECURE Northern Rockies Landfill",
+  "operatorKey": "secure",
+  "parentCompany": null,
+  "province": "BC",
+  "municipality": "Fort Nelson",
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": "A-77-G/94-J-10",
+  "physicalAddress": null,
+  "phone": "250-774-3027",
+  "dispatchPhone": "1-866-391-0444",
+  "afterHoursPhone": "1-877-518-4321",
+  "salesContact": "780-814-4910",
+  "email": "norocklf@secure.ca",
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "SECURE Northern Rockies Landfill"
+  ]
+ },
+ {
+  "facilityKey": "virden-facility-conflicting",
+  "name": "Virden waste facility \u2014 status conflicting (SECURE: no longer in operation; Town of Virden: managed by LOCAL Industrial Partners)",
+  "operatorKey": "unknown",
+  "parentCompany": null,
+  "province": "MB",
+  "municipality": "Virden",
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill"
+  ],
+  "legalLocation": null,
+  "physicalAddress": null,
+  "phone": null,
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://secure.ca/facilities-and-landfills",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "unknown",
+  "lifecycle": "conflicting",
+  "historicalOperators": [
+   "SECURE",
+   "Tervita"
+  ],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": "Two sources disagree on who runs it and whether it runs; nothing here is dispatchable until a person resolves it.",
+  "sourceBriefNames": [
+   "Virden waste facility \u2014 status conflicting (SECURE: no longer in operation; Town of Virden: managed by LOCAL Industrial Partners)"
+  ],
+  "latitude": 49.85,
+  "longitude": -100.93,
+  "coordinatePrecision": "community_only",
+  "coordinateSourceUrl": "https://secure.ca/facilities-and-landfills"
+ },
+ {
+  "facilityKey": "clean-harbors-ryley",
+  "name": "Clean Harbors Ryley",
+  "operatorKey": "clean_harbors",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Ryley",
+  "facilityType": "class_i_landfill",
+  "facilityTypes": [
+   "class_i_landfill",
+   "hazardous_treatment"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "50114 Range Road 173, Ryley, AB T0B 4A0",
+  "phone": "780-663-3828",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.cleanharbors.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Clean Harbors Ryley"
+  ]
+ },
+ {
+  "facilityKey": "pure-environmental-fort-kent",
+  "name": "Pure Environmental Fort Kent (WM 212)",
+  "operatorKey": "pure_environmental",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Fort Kent",
+  "facilityType": "hazardous_treatment",
+  "facilityTypes": [
+   "hazardous_treatment"
+  ],
+  "legalLocation": "09-14-063-04 W4M",
+  "physicalAddress": null,
+  "phone": "587-792-0855",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Pure Environmental Fort Kent (WM 212)"
+  ],
+  "regulatorRef": "WM 212"
+ },
+ {
+  "facilityKey": "voda-grande-cache",
+  "name": "Voda Grande Cache (WM 074)",
+  "operatorKey": "voda_midstream",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Grande Cache",
+  "facilityType": "hazardous_treatment",
+  "facilityTypes": [
+   "hazardous_treatment"
+  ],
+  "legalLocation": "01-19-057-05 W6M",
+  "physicalAddress": null,
+  "phone": "403-827-4801 (Dan Humphries, dhumphries@vodamidstream.com)",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Voda Grande Cache (WM 074)"
+  ],
+  "regulatorRef": "WM 074"
+ },
+ {
+  "facilityKey": "voda-paddle-river",
+  "name": "Voda Paddle River (WM 060)",
+  "operatorKey": "voda_midstream",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Paddle River",
+  "facilityType": "hazardous_treatment",
+  "facilityTypes": [
+   "hazardous_treatment"
+  ],
+  "legalLocation": "16-31-056-08 W5M",
+  "physicalAddress": null,
+  "phone": "780-674-0654 (Bill Hughes, bhughes@vodamidstream.com)",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Voda Paddle River (WM 060)"
+  ],
+  "regulatorRef": "WM 060"
+ },
+ {
+  "facilityKey": "recover-lodgepole",
+  "name": "Recover Inc. Lodgepole (WM 189)",
+  "operatorKey": "recover",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Brazeau County",
+  "facilityType": "trd",
+  "facilityTypes": [
+   "trd",
+   "hydrovac"
+  ],
+  "legalLocation": "15-28-047-09 W5M",
+  "physicalAddress": "9309 Township Road 475, Brazeau County",
+  "phone": "780-514-5698",
+  "dispatchPhone": null,
+  "afterHoursPhone": "1-844-732-6864",
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Recover Inc. Lodgepole (WM 189)"
+  ],
+  "regulatorRef": "WM 189"
+ },
+ {
+  "facilityKey": "gfl-edmonton-84-ave",
+  "name": "GFL Liquid Waste Processing \u2014 Edmonton 84 Ave",
+  "operatorKey": "gfl",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hazardous_treatment",
+  "facilityTypes": [
+   "hazardous_treatment",
+   "liquid_waste"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "4208 84 Ave NW, Edmonton",
+  "phone": "780-485-5000",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "GFL Liquid Waste Processing \u2014 Edmonton 84 Ave"
+  ]
+ },
+ {
+  "facilityKey": "gfl-edmonton-27-st",
+  "name": "GFL Environmental Services \u2014 Edmonton 27 St",
+  "operatorKey": "gfl",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hazardous_treatment",
+  "facilityTypes": [
+   "hazardous_treatment"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "6110 27 St, Edmonton",
+  "phone": "780-233-4499 (Ryan Lambie)",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "GFL Environmental Services \u2014 Edmonton 27 St"
+  ]
+ },
+ {
+  "facilityKey": "kbl-hydrovac-edmonton",
+  "name": "KBL Hydrovac Edmonton",
+  "operatorKey": "kbl",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac",
+   "transfer"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "4810 68 Ave, Edmonton",
+  "phone": "780-452-7779",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "KBL Hydrovac Edmonton"
+  ]
+ },
+ {
+  "facilityKey": "one-environmental-east",
+  "name": "One Environmental East",
+  "operatorKey": "one_environmental",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "waste_processing",
+  "facilityTypes": [
+   "waste_processing"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "13145 24 St NE, Edmonton",
+  "phone": "780-271-8166",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "One Environmental East"
+  ]
+ },
+ {
+  "facilityKey": "one-environmental-west",
+  "name": "One Environmental West",
+  "operatorKey": "one_environmental",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "waste_processing",
+  "facilityTypes": [
+   "waste_processing"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "22132 113 Ave NW, Edmonton",
+  "phone": "780-271-8166",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "One Environmental West"
+  ]
+ },
+ {
+  "facilityKey": "one-environmental-rocky-view",
+  "name": "One Environmental Rocky View (TDG 4.1 / 8 / 9)",
+  "operatorKey": "one_environmental",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Rocky View County",
+  "facilityType": "hazardous_treatment",
+  "facilityTypes": [
+   "hazardous_treatment",
+   "dangerous_goods"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "261131 Wagon Wheel Way, Rocky View County",
+  "phone": "587-777-8604",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "One Environmental Rocky View (TDG 4.1 / 8 / 9)"
+  ]
+ },
+ {
+  "facilityKey": "harbour-environmental-edmonton",
+  "name": "Harbour Environmental Edmonton",
+  "operatorKey": "harbour_environmental",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac",
+   "contaminated_soil"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "4011 84 Ave NW, Edmonton",
+  "phone": "587-855-1444",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Harbour Environmental Edmonton"
+  ]
+ },
+ {
+  "facilityKey": "dispovac-edmonton",
+  "name": "DispoVac Edmonton",
+  "operatorKey": "dispovac",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "8336 1 St, Edmonton",
+  "phone": "587-876-5866",
+  "dispatchPhone": null,
+  "afterHoursPhone": "403-854-1184",
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "DispoVac Edmonton"
+  ]
+ },
+ {
+  "facilityKey": "mdx-recycling-edmonton",
+  "name": "MDX Recycling",
+  "operatorKey": "mdx_recycling",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "recycling",
+  "facilityTypes": [
+   "recycling"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "12125 Mt Lawn Rd NW, Edmonton",
+  "phone": "780-235-1098",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "MDX Recycling"
+  ]
+ },
+ {
+  "facilityKey": "reearth-leduc-county",
+  "name": "ReEarth",
+  "operatorKey": "reearth",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Leduc County",
+  "facilityType": "contaminated_soil",
+  "facilityTypes": [
+   "contaminated_soil"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "49432 Range Road 244, Leduc County",
+  "phone": "780-982-0055",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "ReEarth"
+  ]
+ },
+ {
+  "facilityKey": "envirosort-red-deer-county",
+  "name": "EnviroSORT (Clean Harbors) Red Deer County",
+  "operatorKey": "clean_harbors",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Red Deer County",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac",
+   "hazardous_treatment"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "4229 Hewlett Drive, Red Deer County",
+  "phone": "403-342-7823; facility GM 403-350-1411",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "EnviroSORT (Clean Harbors) Red Deer County"
+  ]
+ },
+ {
+  "facilityKey": "calgary-aggregate-recycling",
+  "name": "Calgary Aggregate Recycling",
+  "operatorKey": "calgary_aggregate_recycling",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Calgary",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac",
+   "recycling"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "6020 94 Ave SE, Calgary",
+  "phone": "403-279-8330",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Calgary Aggregate Recycling"
+  ]
+ },
+ {
+  "facilityKey": "harbour-environmental-calgary",
+  "name": "Harbour Environmental Calgary",
+  "operatorKey": "harbour_environmental",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Calgary",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac",
+   "contaminated_soil"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "9595 Enterprise Way SE, Calgary",
+  "phone": "587-324-2768 (cgy.admin@harbourenvgroup.ca)",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Harbour Environmental Calgary"
+  ]
+ },
+ {
+  "facilityKey": "gfl-calgary-44-st",
+  "name": "GFL Calgary",
+  "operatorKey": "gfl",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Calgary",
+  "facilityType": "hazardous_treatment",
+  "facilityTypes": [
+   "hazardous_treatment"
+  ],
+  "legalLocation": "22-23-29-W4M",
+  "physicalAddress": "9611 44 St SE, Calgary",
+  "phone": "403-215-6916 (Tom Kereluk)",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "GFL Calgary"
+  ]
+ },
+ {
+  "facilityKey": "enerstar-tide-lake",
+  "name": "Enerstar Petroleum Tide Lake",
+  "operatorKey": "enerstar",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Tide Lake",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac",
+   "trd"
+  ],
+  "legalLocation": "08-27-016-11 W4M",
+  "physicalAddress": null,
+  "phone": "403-875-2721 (Lee Materi) / 403-317-3978 (Kyle James)",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Enerstar Petroleum Tide Lake"
+  ]
+ },
+ {
+  "facilityKey": "taber-water-disposal",
+  "name": "Taber Water Disposal",
+  "operatorKey": "taber_water_disposal",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Taber",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac",
+   "swd"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "6002 58 St, Taber, AB T1G 2B8",
+  "phone": "403-223-2658",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Taber Water Disposal"
+  ]
+ },
+ {
+  "facilityKey": "alberta-village-environmental-edmonton",
+  "name": "Alberta Village Environmental Services",
+  "operatorKey": "alberta_village_environmental",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "Building E, 6415 75 St, Edmonton",
+  "phone": "780-446-8444",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Alberta Village Environmental Services"
+  ]
+ },
+ {
+  "facilityKey": "clay-tech-services-edmonton",
+  "name": "Clay Tech Services",
+  "operatorKey": "clay_tech",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "21815 115 Ave, Edmonton",
+  "phone": "780-395-1188",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Clay Tech Services"
+  ]
+ },
+ {
+  "facilityKey": "fort-mcmurray-hydrovac-receiving",
+  "name": "Fort McMurray Hydrovac Waste Receiving Facility",
+  "operatorKey": "unknown",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Fort McMurray",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "820 Memorial Dr, Fort McMurray",
+  "phone": "780-791-0326",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Fort McMurray Hydrovac Waste Receiving Facility"
+  ]
+ },
+ {
+  "facilityKey": "hydrovac-waste-solutions-edmonton",
+  "name": "Hydrovac Waste Solutions",
+  "operatorKey": "hydrovac_waste_solutions",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "5920 98 St, Edmonton",
+  "phone": "780-872-1245",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Hydrovac Waste Solutions"
+  ]
+ },
+ {
+  "facilityKey": "hydrovac-waste-solutions-west",
+  "name": "Hydrovac Waste Solutions West",
+  "operatorKey": "hydrovac_waste_solutions",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "12240 170 St NW, Edmonton",
+  "phone": "780-872-1245",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Hydrovac Waste Solutions West"
+  ]
+ },
+ {
+  "facilityKey": "seven-t-bar-ranch-edmonton",
+  "name": "Seven T Bar Ranch",
+  "operatorKey": "seven_t_bar_ranch",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "24249 18 St NW, Edmonton",
+  "phone": "780-499-8814",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Seven T Bar Ranch"
+  ]
+ },
+ {
+  "facilityKey": "solid-energy-edmonton",
+  "name": "Solid Energy",
+  "operatorKey": "solid_energy",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Edmonton",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "11023 201 St, Edmonton",
+  "phone": "780-915-3755",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Solid Energy"
+  ]
+ },
+ {
+  "facilityKey": "summit-disposal-acheson",
+  "name": "Summit Disposal Solutions",
+  "operatorKey": "summit_disposal",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Acheson",
+  "facilityType": "hydrovac",
+  "facilityTypes": [
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "27113 87 Ave, Acheson",
+  "phone": "587-596-2224",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Summit Disposal Solutions"
+  ]
+ },
+ {
+  "facilityKey": "westlock-regional-waste",
+  "name": "Westlock Regional Waste Management Commission",
+  "operatorKey": "westlock_regional",
+  "parentCompany": null,
+  "province": "AB",
+  "municipality": "Westlock County",
+  "facilityType": "class_ii_landfill",
+  "facilityTypes": [
+   "class_ii_landfill",
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "59424 Range Road 262, Westlock County",
+  "phone": "780-307-2456",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.alberta.ca/system/files/epa-facilities-list-hydrovac-waste.pdf",
+  "licenceKey": "ogl_alberta",
+  "sourceAuthority": "Alberta Facilities that Accept Hydrovac Waste, 2026-04-10 (OGL\u2013Alberta), via operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Westlock Regional Waste Management Commission"
+  ]
+ },
+ {
+  "facilityKey": "aqua-terra-fort-st-john",
+  "name": "Aqua Terra Fort St. John (produced water incl. sour and frac flowback; non-hazardous waste)",
+  "operatorKey": "aqua_terra",
+  "parentCompany": "Canadian Aqua Terra",
+  "province": "BC",
+  "municipality": "Fort St. John",
+  "facilityType": "swd",
+  "facilityTypes": [
+   "swd",
+   "trd"
+  ],
+  "legalLocation": "11-12-084-19 W6M",
+  "physicalAddress": "approx. 3.6 km north of Hwy 97 on 116 Street / West Bypass Road",
+  "phone": "250-261-4311",
+  "dispatchPhone": "1-888-538-3967",
+  "afterHoursPhone": null,
+  "salesContact": "780-518-6519",
+  "email": null,
+  "websiteUrl": "https://www.canadianaquaterra.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": true,
+  "twentyFourHourCallout": true,
+  "notes": "24-hour unloading by call-out",
+  "sourceBriefNames": [
+   "Aqua Terra Fort St. John (produced water incl. sour and frac flowback; non-hazardous waste)"
+  ]
+ },
+ {
+  "facilityKey": "miller-vaughn-bullough-environmental-centre",
+  "name": "Miller Environmental \u2014 Vaughn Bullough Environmental Centre",
+  "operatorKey": "miller_environmental",
+  "parentCompany": null,
+  "province": "MB",
+  "municipality": "Saint Jean Baptiste",
+  "facilityType": "class_i_landfill",
+  "facilityTypes": [
+   "class_i_landfill",
+   "hazardous_treatment",
+   "hydrovac"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "Hwy 14 & Hwy 75, Saint Jean Baptiste, MB R0G 2B0",
+  "phone": "204-737-2045",
+  "dispatchPhone": "204-925-9600",
+  "afterHoursPhone": "204-957-6327",
+  "salesContact": null,
+  "email": "inquiries@millerenvironmental.mb.ca",
+  "websiteUrl": "https://www.millerenvironmental.mb.ca/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": true,
+  "notes": null,
+  "sourceBriefNames": [
+   "Miller Environmental \u2014 Vaughn Bullough Environmental Centre"
+  ],
+  "latitude": 49.26,
+  "longitude": -97.33,
+  "coordinatePrecision": "community_only",
+  "coordinateSourceUrl": "https://www.millerenvironmental.mb.ca/"
+ },
+ {
+  "facilityKey": "clean-harbors-lambton",
+  "name": "Clean Harbors Lambton / Sarnia (incineration, secure landfill, treatment)",
+  "operatorKey": "clean_harbors",
+  "parentCompany": null,
+  "province": "ON",
+  "municipality": "Corunna",
+  "facilityType": "incineration",
+  "facilityTypes": [
+   "incineration",
+   "class_i_landfill",
+   "hazardous_treatment"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "4090 Telfer Road, RR #1, Corunna, ON N0N 1G0",
+  "phone": "519-864-3970; 519-864-1021",
+  "dispatchPhone": null,
+  "afterHoursPhone": "1-800-645-8265",
+  "salesContact": null,
+  "email": null,
+  "websiteUrl": "https://www.cleanharbors.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Clean Harbors Lambton / Sarnia (incineration, secure landfill, treatment)"
+  ],
+  "latitude": 42.88,
+  "longitude": -82.43,
+  "coordinatePrecision": "community_only",
+  "coordinateSourceUrl": "https://www.cleanharbors.com/"
+ },
+ {
+  "facilityKey": "stablex-blainville",
+  "name": "Stablex Canada Blainville (hazardous treatment / stabilization / secure placement)",
+  "operatorKey": "stablex",
+  "parentCompany": null,
+  "province": "QC",
+  "municipality": "Blainville",
+  "facilityType": "hazardous_treatment",
+  "facilityTypes": [
+   "hazardous_treatment",
+   "class_i_landfill"
+  ],
+  "legalLocation": null,
+  "physicalAddress": "760 Boulevard Industriel, Blainville, QC J7C 3V4",
+  "phone": "450-430-9230",
+  "dispatchPhone": null,
+  "afterHoursPhone": null,
+  "salesContact": null,
+  "email": "info@stablex.com",
+  "websiteUrl": "https://www.stablex.com/",
+  "licenceKey": "company_website",
+  "sourceAuthority": "operator brief 2026-09-17 (ChatGPT research citing r360canada.com, secure.ca, cleanharbors.com, millerenvironmental.mb.ca, stablex.com, aquaterra and the Alberta hydrovac facilities list of 2026-04-10)",
+  "commercialAccess": "commercial_preapproval_required",
+  "lifecycle": "operating",
+  "historicalOperators": [],
+  "normAccepted": null,
+  "sourAccepted": null,
+  "twentyFourHourCallout": null,
+  "notes": null,
+  "sourceBriefNames": [
+   "Stablex Canada Blainville (hazardous treatment / stabilization / secure placement)"
+  ],
+  "latitude": 45.67,
+  "longitude": -73.88,
+  "coordinatePrecision": "community_only",
+  "coordinateSourceUrl": "https://www.stablex.com/"
+ }
+]

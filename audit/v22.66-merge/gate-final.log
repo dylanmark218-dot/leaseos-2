@@ -1,0 +1,541 @@
+GATE START Sun Sep 20 13:41:34 UTC 2026
+
+== 0. Reserved migration slots untouched ==
+0016/0017 reserved
+
+== 1. Clean database ==
+dropped and recreated leaseos_ci
+
+== 2. Migrations ==
+  applying 0000_productive_thundra.sql
+  applying 0001_parallel_bastion.sql
+  applying 0002_orange_rockslide.sql
+  applying 0003_rich_multiple_man.sql
+  applying 0004_lazy_colonel_america.sql
+  applying 0005_closed_madripoor.sql
+  applying 0006_clean_namor.sql
+  applying 0007_brainy_black_tarantula.sql
+  applying 0008_trip_operations.sql
+  applying 0009_gps_zone_events.sql
+  applying 0010_billing_records_chain.sql
+  applying 0011_taxonomy_billing_snapshots.sql
+  applying 0012_road_graph_ingestion.sql
+  applying 0013_dispatch_operations.sql
+  applying 0014_assistant_proposals.sql
+  applying 0015_workflow_orchestration.sql
+  applying 0018_billing_adjustments.sql
+  applying 0019_records_evidence_vault.sql
+  applying 0020_domain_role_assignments.sql
+  applying 0021_active_role_uniqueness.sql
+  applying 0022_payroll_finance_tax.sql
+  applying 0023_finance_roles.sql
+  applying 0024_external_data_sources.sql
+  applying 0025_assistant_commit_receipts.sql
+  applying 0026_funding_intelligence.sql
+  applying 0027_document_extraction_questions.sql
+  applying 0028_commit_receipt_expense_target.sql
+  applying 0029_fingerprints_merchant_memory.sql
+  applying 0030_commit_receipt_disposal_target.sql
+  applying 0031_proposal_load_facility_context.sql
+  applying 0032_integrity_closure.sql
+  applying 0033_fuel_energy_ledger.sql
+  applying 0034_roadside_purchasing_ap.sql
+  applying 0035_secure_field_runtime.sql
+  applying 0036_compliance_master_registry.sql
+  applying 0037_requirement_engine_packs_calibration.sql
+  applying 0038_insurance_risk.sql
+  applying 0039_dispatch_enforcement.sql
+  applying 0040_ifta.sql
+  applying 0041_bulk_fuel_statements.sql
+  applying 0042_period_close.sql
+  applying 0043_offline_capture_ref.sql
+  applying 0044_gst_hst.sql
+  applying 0045_bank_and_receivables.sql
+  applying 0046_customer_accounts.sql
+  applying 0047_commercial_core_portals.sql
+  applying 0048_site_signoff_chain.sql
+  applying 0049_portal_hardening_adjustments.sql
+  applying 0050_customer_alert_preferences.sql
+  applying 0051_fleet_shop.sql
+  applying 0052_capital_assets_cca.sql
+  applying 0053_commercial_projects.sql
+  applying 0054_integration_gateway.sql
+  applying 0055_telematics_video_safety.sql
+  applying 0056_workforce_lifecycle.sql
+  applying 0057_audit_packages.sql
+  applying 0058_spatial_foundation.sql
+  applying 0059_contract_terms.sql
+  applying 0060_audit_package_kinds.sql
+  applying 0061_money_cents_shadows.sql
+  applying 0062_money_shadows_everywhere.sql
+  applying 0063_retire_vendor_bill_doubles.sql
+  applying 0064_retire_fuel_doubles.sql
+  applying 0065_commercial_setup.sql
+  applying 0066_lines_carry_pricing_decisions.sql
+  applying 0067_invoice_lines.sql
+  applying 0068_invoice_documents.sql
+  applying 0069_invoice_void.sql
+  applying 0070_ats_grid_and_access_roads.sql
+  applying 0071_site_access_points.sql
+  applying 0072_structures_and_route_staleness.sql
+  applying 0073_road_graph.sql
+  applying 0074_communications.sql
+  applying 0075_communications_reach_dispatch.sql
+  applying 0076_offline_communication_package.sql
+  applying 0077_hos_rule_registry.sql
+  applying 0078_route_geography_provenance.sql
+  applying 0079_sync_capture_authorization.sql
+  applying 0080_source_licence_review.sql
+  applying 0081_feed_runs_and_road_advisories.sql
+  applying 0082_enforcement_persistence.sql
+  applying 0083_oos_required_finding_type.sql
+  applying 0084_oos_release_policies.sql
+  applying 0085_policy_scope_binding.sql
+  applying 0086_organizations_and_memberships.sql
+  applying 0087_device_safety_latches.sql
+  applying 0088_roadside_panel_grants.sql
+  applying 0089_outbox_lease_and_retry.sql
+  applying 0090_leave_requests.sql
+  applying 0091_shift_posts.sql
+  applying 0092_worker_qualifications.sql
+  applying 0093_crews.sql
+  applying 0096_message_board.sql
+  applying 0097_message_revisions.sql
+  applying 0099_message_attachments.sql
+  applying 0100_agent_runs.sql
+  applying 0101_knowledge_passages.sql
+  applying 0102_retrieval_probes.sql
+  applying 0103_probe_origin.sql
+  applying 0104_corpus_hash.sql
+  applying 0105_probe_provenance.sql
+  applying 0106_measurement_identity.sql
+  applying 0107_training_academy.sql
+  applying 0108_training_academy_hardening.sql
+  applying 0109_loadsense_material_movement.sql
+  applying 0110_device_cryptographic_binding.sql
+  applying 0111_integration_tenant_scope.sql
+  applying 0112_loadsense_authenticated_ingestion.sql
+  applying 0113_core_record_ownership.sql
+  applying 0114_loadsense_gateway_binding.sql
+  applying 0115_contractor_owner_operator_operations.sql
+  applying 0116_contractor_commercial_payables.sql
+  applying 0117_commercial_chain_numbers.sql
+  applying 0118_knowledge_source_registry.sql
+  applying 0119_hos_limit_provenance.sql
+  applying 0120_hos_rule_limit_history.sql
+  applying 0121_academy_retention_chain_guards.sql
+  applying 0122_academy_inspector_requests.sql
+  applying 0123_academy_tdg_topic_coverage.sql
+  applying 0124_hos_limit_recorded_by.sql
+  applying 0125_academy_sheet_serial_registry.sql
+  applying 0126_academy_sheet_transcribe_once.sql
+  applying 0127_widget_dashboards.sql
+  applying 0128_widget_layout_revision.sql
+  applying 0129_manifest_chain_of_custody.sql
+  applying 0130_manifest_seal_guard.sql
+  applying 0131_security_incidents_privacy_breaches.sql
+  applying 0132_jobs_trips_org_scope.sql
+  applying 0133_commercial_office_configuration.sql
+  applying 0134_organization_record_links.sql
+  applying 0135_facility_statements.sql
+  applying 0136_commercial_approval_ledger.sql
+  applying 0137_vendor_bill_ledger.sql
+  applying 0138_gl_mapping.sql
+  applying 0139_facility_directory.sql
+  applying 0140_facility_driver_coordination.sql
+  applying 0141_facility_directory_contacts_access.sql
+  applying 0142_sync_package_verification_mode.sql
+  applying 0143_facility_imports.sql
+  applying 0144_commercial_document_registry.sql
+  applying 0145_audit_package_vendor_kind.sql
+  applying 0146_financial_entity_scope.sql
+  applying 0147_applicant_scope.sql
+  applying 0148_rate_card_scope.sql
+  applying 0149_vendor_book_scope.sql
+  applying 0150_passage_reproduction_basis.sql
+  applying 0151_passage_basis_correction.sql
+  applying 0152_eligibility_capability_picture.sql
+migrations applied and Academy retention guard verified
+
+== 3. Table parity ==
+schema.ts declares : 397
+migrations create  : 397
+parity OK
+
+== 4. Typecheck ==
+clean
+
+== 5. Bare protectedProcedure ==
+0
+
+== 6. Test suite (includes column-level parity and reserved-word audit) ==
+
+ RUN  v2.1.9 /home/user/leaseos
+
+ ✓ server/commercialOffice.db.test.ts (17 tests) 1165ms
+ ✓ server/commRoute.test.ts (64 tests) 24ms
+ ✓ server/assistantAskApi.test.ts (58 tests) 1175ms
+ ✓ server/invoicing.test.ts (6 tests) 676ms
+   ✓ an invoice from the ticket's decisions, end to end > is blocked before signature, drafted from accepted priced lines, refused on an unverified rate, finalized zero-rated into a hashed snapshot, and books the job 367ms
+ ✓ server/enforcementApi.test.ts (39 tests) 847ms
+ ✓ server/facilityDirectory.db.test.ts (8 tests) 1482ms
+   ✓ facility directory — the operator briefs of 2026-09-17 > seeds 77 sites: LSDs become approximate_site pins (never routable), NTS stays unconverted, contacts land in their columns, former operators become aliases, Virden is conflicting and fails closed, a producer-private site fails closed 368ms
+   ✓ facility directory — Alberta's hydrovac list (OGL–Alberta) and duplicate proposals > imports the 89 listed facilities as confirmation-required hydrovac sites with cached OGL evidence, keeps WM 042's two sites apart, pins LSD rows at ±2 km, and proposes — never applies — same-LSD duplicates against the brief's sites 468ms
+ ✓ server/fieldDevice.test.ts (25 tests) 304ms
+ ✓ server/siteCloseout.test.ts (11 tests) 451ms
+   ✓ a day on the lease, signed before the truck leaves > freezes R1 at the consultant's signature, appends R2 under the signed basis, keeps restocking off the bill, and lets the customer see why 437ms
+ ✓ server/commercialSetup.test.ts (16 tests) 211ms
+ ✓ server/fuelLedger.test.ts (33 tests) 204ms
+ ✓ server/_core/recordsAuthorization.test.ts (58 tests) 17ms
+ ✓ server/cash.test.ts (12 tests) 249ms
+ ✓ server/insuranceRisk.test.ts (25 tests) 229ms
+ ✓ server/commercialPortal.test.ts (11 tests) 254ms
+ ✓ server/fieldRuntime.test.ts (11 tests) 420ms
+ ✓ server/purchasingAp.test.ts (27 tests) 202ms
+ ✓ server/_core/payrollFinanceTax.test.ts (59 tests) 15ms
+ ✓ server/portalHardening.test.ts (9 tests) 477ms
+   ✓ a signed ticket, a bonus, a document, a report > adds an hour-equivalent that changes billing and no clock, renders R1 from the frozen snapshot, downloads it under audit and account scope, and reports the day from the records 302ms
+ ✓ server/hos.test.ts (30 tests) 354ms
+ ✓ server/_core/portalFunding.test.ts (54 tests) 22ms
+ ✓ server/auditPackage.test.ts (7 tests) 413ms
+ ✓ server/compliancePassport.test.ts (25 tests) 130ms
+ ✓ server/communications.test.ts (16 tests) 483ms
+ ✓ server/commsDispatch.test.ts (16 tests) 353ms
+ ✓ server/requirementEngine.test.ts (22 tests) 106ms
+ ✓ server/b20WorkflowWiring.test.ts (16 tests) 4941ms
+   ✓ end to end: sealed incident > turns a sealed collision into a safety task and a held unit 309ms
+   ✓ end to end: sealed incident > does not raise management review for a hazard observation 303ms
+   ✓ end to end: sealed incident > notifies management for a sealed serious incident 303ms
+   ✓ end to end: near miss escalation > raises a safety review when a near miss reports an injury 308ms
+   ✓ end to end: evidence integrity > raises an office task when the server cannot reproduce the seal 309ms
+   ✓ end to end: evidence integrity > emits nothing at all when the seal verifies 306ms
+   ✓ end to end: legal hold > tracks a placed hold as a confirmable obligation 309ms
+   ✓ end to end: the maintenance chain > carries a defect from shop dispatch to release and dispatch recalculation 613ms
+   ✓ end to end: the maintenance chain > tells dispatch the restriction when a unit is released under limits 304ms
+   ✓ end to end: the maintenance chain > holds the unit again when a release is revoked 308ms
+   ✓ end to end: the maintenance chain > does not raise a restriction task for an unrestricted release 305ms
+   ✓ transactional integrity > loses the incident event when the operational write rolls back 303ms
+   ✓ regression: notify actions are actually delivered > notifies a role that owns no task from the same event 306ms
+   ✓ regression: notify actions are actually delivered > does not notify the same role twice for a redelivered event 609ms
+ ✓ server/dispatchGate.test.ts (11 tests) 414ms
+   ✓ can Unit 142 take this job tomorrow? > refuses a held unit, lifts on mechanic release, needs a manager for the unknown route, and refuses when the facts move 388ms
+ ✓ server/procedureAuthorization.test.ts (35 tests) 61ms
+ ✓ server/fleetShop.test.ts (7 tests) 285ms
+ ✓ server/commPackage.test.ts (23 tests) 208ms
+ ✓ server/surfaces.test.ts (19 tests) 253ms
+ ✓ server/ifta.test.ts (14 tests) 141ms
+ ✓ server/operationalApiAuthorization.test.ts (36 tests) 256ms
+ ✓ server/workforce.test.ts (7 tests) 327ms
+   ✓ a person, hired to offboarded > is screened with evidence, refused a hire while a screening is pending, hired into a plan, credentialed into the registry by a second person, signed off, decided by two people on probation, and offboarded only when every door is shut 318ms
+ ✓ server/customerLiveView.test.ts (8 tests) 270ms
+ ✓ server/bulkFuel.test.ts (10 tests) 151ms
+ ✓ server/assistantCommitService.test.ts (7 tests) 192ms
+ ↓ server/widgetPersistence.db.test.ts (22 tests | 22 skipped)
+ ✓ server/payrollApiAuthorization.test.ts (28 tests) 254ms
+ ✓ server/dispatchEnforcement.test.ts (11 tests) 309ms
+ ✓ server/academyTdgWiring.db.test.ts (13 tests) 463ms
+ ✓ server/crewChannelApi.test.ts (27 tests) 1108ms
+ ✓ server/structures.test.ts (6 tests) 190ms
+ ✓ server/telematics.test.ts (7 tests) 239ms
+ ✓ server/capitalAssets.test.ts (8 tests) 136ms
+ ✓ server/_core/workflowWiring.test.ts (39 tests) 179ms
+ ✓ server/recordsApiAuthorization.test.ts (28 tests) 177ms
+ ✓ server/commercialProjects.test.ts (5 tests) 291ms
+ ✓ server/operationalTruth.test.ts (12 tests) 214ms
+ ✓ server/spatialFoundation.test.ts (7 tests) 200ms
+ ✓ server/_core/externalSourceSeeds.test.ts (35 tests) 74ms
+ ✓ server/geographyAgreement.test.ts (10 tests) 424ms
+ ✓ server/legalLand.test.ts (6 tests) 555ms
+   ✓ legal land, entrances and corridors over imported data > locates a position, proposes and confirms an entrance, counts passages, and evaluates a corridor with limits UNKNOWN 528ms
+ ✓ server/fieldroute.test.ts (15 tests) 213ms
+ ✓ server/integrityClosure.test.ts (16 tests) 220ms
+ ✓ server/gst.test.ts (11 tests) 172ms
+ ✓ server/periodClose.test.ts (12 tests) 236ms
+ ✓ server/contractTerms.test.ts (6 tests) 295ms
+ ✓ server/integrationGateway.test.ts (7 tests) 238ms
+ ✓ server/tenantIsolation.test.ts (16 tests) 83ms
+ ✓ server/customerTransaction.test.ts (4 tests) 383ms
+   ✓ the customer's transaction, end to end > is told at each step once, sees the loads as far as their evidence goes, works the queue, signs, gets R1 and the package, and another account gets none of it 377ms
+ ✓ server/_core/evidenceVault.test.ts (30 tests) 11ms
+ ✓ server/documentationTruth.test.ts (24 tests) 122ms
+ ✓ server/enforcementCommit.test.ts (12 tests) 177ms
+ ✓ server/manifestCustody.db.test.ts (5 tests) 552ms
+ ✓ server/widgetDashboard.test.ts (31 tests) 46ms
+ ✓ server/portalFundingApi.test.ts (24 tests) 254ms
+ ✓ server/_core/externalDataRouting.test.ts (32 tests) 10ms
+ ✓ server/documentDedupDisposal.test.ts (23 tests) 135ms
+ ✓ server/safetyLatch.test.ts (24 tests) 9ms
+ ✓ server/geoImport.test.ts (6 tests) 553ms
+   ✓ importing the grid and the roads, then locating a lease > imports from the registered sources, logs the run, locates the LSD, and verifies a location as ats_v41 517ms
+ ✓ server/termsComplete.test.ts (5 tests) 220ms
+ ✓ server/_core/workflowEngine.test.ts (36 tests) 11ms
+ ✓ server/_core/incidentMaintenance.test.ts (35 tests) 11ms
+ ✓ server/oosPolicyApi.test.ts (13 tests) 303ms
+ ✓ server/enforcementLifecycle.test.ts (1 test) 76ms
+ ✓ server/_core/billingAdjustment.test.ts (35 tests) 8ms
+ ✓ server/messageLifecycleCanonical.test.ts (20 tests) 414ms
+ ✓ server/_core/aiProposal.test.ts (32 tests) 21ms
+ ✓ server/_core/documentExtraction.test.ts (28 tests) 14ms
+ ✓ server/_core/dispatchLifecycle.test.ts (37 tests) 10ms
+ ✓ server/actionGateway.test.ts (27 tests) 586ms
+   ✓ a capability cannot require a permission that does not exist > declares only permissions the authorization model actually defines 577ms
+ ✓ server/_core/dispatchAward.test.ts (26 tests) 11ms
+ ✓ server/_core/dispatchReadiness.test.ts (25 tests) 9ms
+ ✓ server/_core/readinessCapabilities.test.ts (16 tests) 9ms
+ ✓ server/roadGraph.test.ts (5 tests) 888ms
+   ✓ routing over the imported fabric, through the database > builds a graph, computes a real route, and hands it to the evaluator where every unstated limit is UNKNOWN 854ms
+ ✓ server/zzMoneyPrecision.test.ts (7 tests) 104ms
+ ✓ server/promotionLedger.db.test.ts (27 tests) 157ms
+ ✓ server/linePricing.test.ts (3 tests) 225ms
+ ✓ server/widgetsBoard.db.test.ts (8 tests) 371ms
+ ✓ server/workflowEndToEnd.test.ts (12 tests) 3693ms
+   ✓ end to end: critical defect > turns a real mutation into a mechanic task and a dispatcher consequence 309ms
+   ✓ end to end: critical defect > queues a notification for the owning role 305ms
+   ✓ end to end: critical defect > creates no second task when the same defect is reported again 912ms
+   ✓ end to end: critical defect > does not fire for an advisory defect 304ms
+   ✓ end to end: disposal ticket > raises a driver task naming the specific evidence 309ms
+   ✓ end to end: disposal ticket > emits nothing at all for a facility that issues no tickets 304ms
+   ✓ end to end: dispatch invalidation > raises a dispatcher task when the verdict actually moved 308ms
+   ✓ end to end: dispatch invalidation > emits nothing when a re-evaluation produced the same verdict 308ms
+   ✓ transactional integrity of emission > loses the event when the operational write rolls back 307ms
+   ✓ unmatched events > marks an event with no matching rule processed rather than retrying it forever 304ms
+ ✓ server/contextAdmission.test.ts (19 tests) 11ms
+ ✓ server/boardRuntime.test.ts (12 tests) 13ms
+ ✓ server/engineReachability.test.ts (4 tests) 6ms
+ ✓ server/federalCandidates.db.test.ts (10 tests) 118ms
+ ✓ server/workflowOrchestration.test.ts (10 tests) 466ms
+ ✓ server/agentRuntimeApi.test.ts (16 tests | 3 skipped) 306ms
+ ✓ server/knowledgeSourceGate.test.ts (28 tests) 9ms
+ ✓ server/_core/routeEvaluation.test.ts (21 tests) 9ms
+ ✓ server/messageAttachmentApi.test.ts (14 tests) 187ms
+ ✓ server/knowledgeAdmission.test.ts (22 tests) 8ms
+ ✓ server/feedIngest.test.ts (12 tests) 12ms
+ ✓ server/_core/taxonomy.test.ts (19 tests) 9ms
+ ✓ server/tenantScopeMonolithTail.db.test.ts (3 tests) 239ms
+ ✓ server/agentBoundary.test.ts (14 tests) 213ms
+ ✓ server/enforcement.test.ts (19 tests) 12ms
+ ✓ server/clientTruth.test.ts (10 tests) 33ms
+ ✓ server/retrievalQuality.test.ts (23 tests) 10ms
+ ✓ server/productionPath.test.ts (1 test) 212ms
+ ✓ server/portalViewModels.test.ts (11 tests) 7ms
+ ✓ server/crewForecast.test.ts (12 tests) 368ms
+ ✓ server/roleIsolation.test.ts (15 tests) 17ms
+ ✓ server/contractorOperations.db.test.ts (2 tests) 234ms
+ ✓ server/documentValidity.test.ts (21 tests) 8ms
+ ✓ server/tenantScopeJobsTrips.db.test.ts (7 tests) 227ms
+ ✓ server/widgetLayoutWrite.test.ts (23 tests) 10ms
+ ✓ server/crewCoverage.test.ts (19 tests) 10ms
+ ✓ server/registryV2.test.ts (26 tests) 11ms
+ ✓ server/limitPromote.db.test.ts (10 tests) 219ms
+ ✓ server/demoDataset.db.test.ts (4 tests) 109ms
+ ✓ server/_core/dataIngestion.test.ts (25 tests) 8ms
+ ✓ server/destinationAcceptance.db.test.ts (2 tests) 198ms
+ ✓ server/_core/interEngineStatus.test.ts (13 tests) 8ms
+ ✓ server/messageBoard.test.ts (18 tests) 8ms
+ ✓ server/widgetService.test.ts (11 tests) 19ms
+ ✓ server/promotionEngineEffect.db.test.ts (4 tests) 109ms
+ ✓ server/widgetSemantics.test.ts (24 tests) 9ms
+ ✓ server/readinessApi.test.ts (11 tests) 267ms
+ ✓ server/escalation.test.ts (12 tests) 69ms
+ ✓ server/secretaryCoordination.test.ts (21 tests) 9ms
+ ✓ server/_core/dispatchMatching.test.ts (17 tests) 9ms
+ ✓ server/knowledgeRepository.db.test.ts (9 tests) 47ms
+ ✓ server/feedHttp.test.ts (14 tests) 8ms
+ ✓ server/scopeGuard.db.test.ts (16 tests) 50ms
+ ✓ server/knowledgePerimeter.test.ts (27 tests) 11ms
+ ✓ server/tenantScopeMoney.db.test.ts (3 tests) 216ms
+ ✓ server/calendarProjectionApi.test.ts (11 tests) 245ms
+ ✓ server/securityIncidents.db.test.ts (2 tests) 258ms
+ ✓ server/trainingAcademyHardening.test.ts (29 tests) 8ms
+ ✓ server/tdgCertificateContents.test.ts (25 tests) 10ms
+ ✓ server/contextAssembly.test.ts (17 tests) 11ms
+ ✓ server/commsVault.test.ts (9 tests) 14ms
+ ✓ server/openShiftsApi.test.ts (12 tests) 230ms
+ ✓ server/verificationConsole.test.ts (18 tests) 8ms
+ ✓ server/modelGateway.test.ts (15 tests) 7ms
+ ✓ server/roadsidePanel.test.ts (15 tests) 8ms
+ ✓ server/boardSemantics.test.ts (19 tests) 13ms
+ ✓ server/dispatchConcurrency.test.ts (8 tests) 686ms
+   ✓ award concurrency > holds under four simultaneous attempts, not just two 378ms
+ ✓ server/reservedWordColumns.test.ts (8 tests) 1307ms
+   ✓ the reserved set is derived from the server, not from memory > matches exactly the grandfathered list across every column in the schema 1241ms
+ ✓ server/oneDoorInvariant.db.test.ts (7 tests) 134ms
+ ✓ server/evidenceGrounding.test.ts (17 tests) 8ms
+ ✓ server/enforcementOutbox.test.ts (7 tests) 228ms
+ ✓ server/openShifts.test.ts (16 tests) 9ms
+ ✓ server/dashboardWidget.test.ts (17 tests) 8ms
+ ✓ server/_core/measurementQuality.test.ts (16 tests) 7ms
+ ✓ server/feedCollector.test.ts (14 tests) 8ms
+ ↓ server/widgetConflict.db.test.ts (8 tests | 8 skipped)
+ ✓ server/crewChannels.test.ts (21 tests) 11ms
+ ✓ server/widgetProjection.test.ts (16 tests) 9ms
+ ✓ server/tdgTopicCoverage.test.ts (24 tests) 8ms
+ ✓ server/shiftReadiness.test.ts (13 tests) 8ms
+ ✓ server/_core/fieldTicket.test.ts (19 tests) 8ms
+ ✓ server/messageBoardApi.test.ts (12 tests) 295ms
+ ✓ server/_core/assistantExtraction.test.ts (24 tests) 10ms
+ ✓ server/qualificationStore.test.ts (8 tests) 244ms
+ ✓ server/migrationLedger.db.test.ts (4 tests) 3264ms
+   ✓ the ledger applies the real corpus > advances a fresh database through every real migration and lands the same shape the gate does: all files recorded, triggers present, non-ASCII stored intact 3182ms
+ ✓ server/tenantScopeFieldRuntime.db.test.ts (1 test) 177ms
+ ✓ server/advisoryImpact.test.ts (12 tests) 9ms
+ ✓ server/timeOffApi.test.ts (11 tests) 167ms
+ ✓ server/messageLifecycle.test.ts (15 tests) 7ms
+ ✓ server/trainingAcademy.test.ts (10 tests) 10ms
+ ✓ server/timeOff.test.ts (18 tests) 8ms
+ ✓ server/calendarProjection.test.ts (18 tests) 7ms
+ ✓ server/offlineCapability.test.ts (16 tests) 7ms
+stdout | server/calendarFixtures.test.ts > fixture dates the calendar is about to pass > names what is coming, so the next review is not a surprise
+[calendar-fixtures] 5 unreviewed file(s) with a fixture date inside 60 days:
+  server/capitalAssets.test.ts → 2026-10-15
+  server/commercialPortal.test.ts → 2026-10-30
+  server/crewForecast.test.ts → 2026-11-01
+  server/openShiftsApi.test.ts → 2026-11-01
+  server/timeOffApi.test.ts → 2026-11-02
+
+ ✓ server/calendarFixtures.test.ts (2 tests) 3ms
+ ✓ server/enforcementReadiness.test.ts (7 tests) 101ms
+ ✓ server/tenantScopeMonolithRecords.db.test.ts (1 test) 130ms
+ ✓ server/recordsAuthorizationDb.test.ts (7 tests) 59ms
+ ✓ server/financialCalendar.test.ts (15 tests) 8ms
+ ✓ server/tenantScopeRecords.db.test.ts (1 test) 126ms
+ ✓ server/_core/driverTraining.test.ts (16 tests) 6ms
+ ✓ server/inspectorRequest.test.ts (20 tests) 6ms
+ ✓ server/_core/routingCompiler.test.ts (16 tests) 10ms
+ ✓ server/_core/billing.test.ts (15 tests) 8ms
+ ✓ server/_core/loadSense.test.ts (15 tests) 7ms
+ ✓ server/domainTokens.test.ts (20 tests) 8ms
+ ✓ server/outboxLease.test.ts (8 tests) 71ms
+ ✓ server/a11yCoverage.test.ts (3 tests) 5ms
+ ✓ server/restoreDefault.test.ts (10 tests) 8ms
+ ✓ server/limitPromoteSeparationOfDuties.db.test.ts (5 tests) 205ms
+ ✓ server/jurisdiction.test.ts (10 tests) 6ms
+ ✓ server/workerLifecycle.test.ts (10 tests) 7ms
+ ✓ server/knowledgeWritePaths.test.ts (5 tests) 273ms
+ ✓ server/_core/commercialPolicy.test.ts (7 tests) 6ms
+ ✓ server/commsView.test.ts (14 tests) 7ms
+ ✓ server/tenantScopeCloseout.db.test.ts (1 test) 133ms
+ ✓ server/_core/assistantCommitAdapters.test.ts (6 tests) 5ms
+ ✓ server/actingScope.test.ts (9 tests) 74ms
+ ✓ server/_core/manifestCustody.test.ts (12 tests) 7ms
+ ✓ server/attachmentAuthorization.test.ts (13 tests) 6ms
+ ✓ server/readinessRouting.test.ts (10 tests) 8ms
+ ✓ server/tenantScopeWorkforce.db.test.ts (1 test) 153ms
+ ✓ server/_core/tracking.test.ts (18 tests) 6ms
+ ✓ server/sourceReview.test.ts (6 tests) 78ms
+ ✓ server/_core/disposalReconciliation.test.ts (13 tests) 10ms
+ ✓ server/tenantScopeShop.db.test.ts (1 test) 121ms
+ ✓ server/widgetPayload.test.ts (11 tests) 6ms
+ ✓ server/tenantScopeSpatial.db.test.ts (1 test) 112ms
+ ✓ server/tenantScopeAcademy.db.test.ts (1 test) 515ms
+   ✓ the academy belongs to the organization the learner is a member of > assigns, supervises and dispatch-checks only a learner in the caller's organization; another organization's learner, or an unaffiliated one, is not found; the single tenant sees only the unaffiliated 512ms
+ ✓ server/federalCandidateCorrection.test.ts (9 tests) 5ms
+ ✓ server/columnParity.test.ts (4 tests) 103ms
+ ✓ server/registerClaims.test.ts (5 tests) 116ms
+stdout | server/crossLayerIntegrity.test.ts
+[OAuth] Initialized with baseURL: 
+
+stderr | server/crossLayerIntegrity.test.ts
+[OAuth] ERROR: OAUTH_SERVER_URL is not configured! Set OAUTH_SERVER_URL environment variable.
+
+stderr | server/crossLayerIntegrity.test.ts > HTTP boot smoke > routes an anonymous request through the real router and context and refuses a role-gated procedure with UNAUTHORIZED
+[Auth] Missing session cookie
+
+stderr | server/crossLayerIntegrity.test.ts > HTTP boot smoke > returns NOT_FOUND for a path that does not exist, so a stale client would fail loudly rather than silently
+[Auth] Missing session cookie
+
+ ✓ server/crossLayerIntegrity.test.ts (4 tests) 81ms
+ ✓ server/tenantScopeUnitRecords.db.test.ts (1 test) 116ms
+ ✓ server/questionQueueService.test.ts (4 tests) 56ms
+ ✓ server/p44SignoffInvariants.test.ts (7 tests) 7ms
+ ✓ server/_core/sheetSerial.test.ts (14 tests) 6ms
+ ✓ server/inboxIsolation.test.ts (4 tests) 59ms
+ ✓ server/trackingNumbers.db.test.ts (5 tests) 238ms
+ ✓ server/assistantCalibrationPage.test.ts (12 tests) 5ms
+ ✓ server/rulePromotion.db.test.ts (10 tests) 31ms
+ ✓ server/_core/complianceSecretary.test.ts (6 tests) 4ms
+ ✓ server/_core/geofence.test.ts (10 tests) 6ms
+ ✓ server/_core/facilityStatements.test.ts (3 tests) 5ms
+ ✓ server/_core/hydrovacList.test.ts (3 tests) 7ms
+ ✓ server/widgetSourceContract.test.ts (8 tests) 5ms
+ ✓ server/widgetPromotion.test.ts (5 tests) 4ms
+ ✓ server/_core/sheetSerialAllocator.test.ts (17 tests) 7ms
+ ✓ server/communicationsPackagePage.test.ts (9 tests) 5ms
+ ✓ server/transmitCheckPage.test.ts (10 tests) 4ms
+ ✓ server/assistantAskPage.test.ts (11 tests) 4ms
+ ✓ server/portalPanelContract.test.ts (4 tests) 5ms
+ ✓ server/_core/arcgisImport.test.ts (3 tests) 5ms
+ ✓ server/routePreviewPage.test.ts (9 tests) 4ms
+ ✓ server/sheetSerialAllocator.db.test.ts (2 tests) 52ms
+ ✓ server/communicationsPackageStatusPage.test.ts (8 tests) 3ms
+ ✓ server/_core/commercialApprovals.test.ts (2 tests) 3ms
+ ✓ server/_core/projections.test.ts (3 tests) 4ms
+ ✓ server/_core/facilityCompatibility.test.ts (9 tests) 4ms
+ ✓ server/_core/assistantPersistence.test.ts (4 tests) 5ms
+ ✓ server/_core/deviceSignature.test.ts (2 tests) 7ms
+ ✓ server/contractorCommercialChainBoundary.test.ts (5 tests) 4ms
+ ✓ server/_core/legalLocation.test.ts (1 test) 5ms
+ ✓ server/auth.logout.test.ts (1 test) 4ms
+ ✓ server/_core/loadSenseMaterialMovement.test.ts (4 tests) 3ms
+ ✓ server/contractorOperationsBoundary.test.ts (5 tests) 4ms
+ ✓ server/_core/facilitySeed.test.ts (5 tests) 10ms
+ ✓ server/coreRecordOwnershipBoundary.test.ts (3 tests) 3ms
+ ✓ server/academyReadinessBindings.test.ts (3 tests) 3ms
+ ✓ server/loadSenseAuthenticatedProjectionBoundary.test.ts (4 tests) 3ms
+ ✓ server/_core/loadSenseProtocol.test.ts (3 tests) 4ms
+ ✓ server/_core/facilityNavigation.test.ts (3 tests) 3ms
+ ✓ server/_core/widgetRoleKeys.test.ts (3 tests) 3ms
+ ✓ server/_core/facilityExport.test.ts (2 tests) 4ms
+ ✓ server/_core/loadSenseEvents.test.ts (1 test) 3ms
+ ✓ client/src/a11y/a11y.dom.test.tsx (36 tests) 1244ms
+ ✓ client/src/widgets/WidgetBoard.dom.test.tsx (17 tests) 957ms
+ ✓ client/src/widgets/WidgetTileShell.dom.test.tsx (22 tests) 334ms
+ ✓ client/src/widgets/AddWidgetPicker.dom.test.tsx (12 tests) 879ms
+ ✓ client/src/pages/DisposalFinderView.dom.test.tsx (4 tests) 160ms
+ ✓ client/src/pages/CommercialOfficeView.dom.test.tsx (4 tests) 143ms
+ ✓ client/src/showcase/panelSource.dom.test.tsx (3 tests) 41ms
+ ✓ client/src/lib/analytics.dom.test.tsx (4 tests) 16ms
+
+ Test Files  261 passed | 2 skipped (263)
+      Tests  3607 passed | 33 skipped (3640)
+   Start at  13:42:21
+   Duration  273.81s (transform 6.84s, setup 11.82s, collect 148.40s, tests 52.11s, environment 2.84s, prepare 13.72s)
+
+
+== 7. Production build ==
+
+> leaseos-fieldroute@1.0.0 build /home/user/leaseos
+> vite build && esbuild server/_core/index.ts server/_core/worker.ts --platform=node --packages=external --bundle --format=esm --outdir=dist
+
+vite v7.1.9 building for production...
+transforming...
+✓ 1827 modules transformed.
+rendering chunks...
+computing gzip size...
+../dist/public/index.html                   368.33 kB │ gzip: 105.81 kB
+../dist/public/assets/index-V4mawJR0.css    132.14 kB │ gzip:  22.52 kB
+../dist/public/assets/index-DK8b4rfM.js   1,075.17 kB │ gzip: 262.71 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.14s
+
+  dist/index.js     2.8mb ⚠️
+  dist/worker.js  403.2kb
+
+⚡ Done in 151ms
+
+== Summary ==
+tables: 397
+migrations: 148
+role-authorized procedures: 625
+== 7b. External gate: portal mounts only externalProcedure, and the count is pinned ==
+externally-gated procedures: 36
+== 7c. Machine gate: inbound mounts only integrationProcedure, and the count is pinned ==
+integration-gated procedures: 2
+== 8. Current-state document is generated, not claimed ==
+current
+== PASS ==
+GATE EXIT=0 Sun Sep 20 13:47:01 UTC 2026

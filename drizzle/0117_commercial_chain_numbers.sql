@@ -1,0 +1,4 @@
+-- 0117 Human-readable inherited job/load numbering.
+ALTER TABLE `commercialJobChains` ADD COLUMN `chainNumber` varchar(120) NULL AFTER `chainRef`, ADD UNIQUE KEY `commercialJobChains_chainNumber_unique` (`chainNumber`);
+CREATE TABLE `commercialChainSequences` (`scopeRef` varchar(120) NOT NULL,`nextValue` int NOT NULL DEFAULT 1,`updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,PRIMARY KEY (`scopeRef`));
+CREATE TABLE `commercialLoadChainRefs` (`id` int NOT NULL AUTO_INCREMENT,`loadId` int NOT NULL,`chainRef` varchar(80) NOT NULL,`loadChainNumber` varchar(140) NOT NULL,`createdByUserId` int NOT NULL,`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY (`id`),UNIQUE KEY `commercialLoadChainRefs_loadId_unique` (`loadId`),UNIQUE KEY `commercialLoadChainRefs_loadChainNumber_unique` (`loadChainNumber`),KEY `commercialLoadChainRefs_chain_idx` (`chainRef`));
