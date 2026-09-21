@@ -30,6 +30,7 @@ import { asChecklist, composeReadiness } from "./readinessComposer";
 import { requestOverride, type DispatchBlocker, type OverrideRequest } from "./_core/dispatchReadiness";
 import { awardAssignment } from "./_core/dispatchTransaction";
 import type { GrantedOverride } from "./_core/dispatchAward";
+import { addRole, createPosting, listRoles, scopeOf } from "./dispatchRoleService";
 
 // v22.18 — a readiness may name the route it is about. Optional, so every
 // caller that does not keeps exactly the behaviour it had.
@@ -46,7 +47,70 @@ async function overrideRoleFor(userId: number): Promise<OverrideRequest["request
   return "driver";
 }
 
+/** A role slot draft, as a caller may describe one. */
+const ROLE_DRAFT = z.object({
+  roleCode: z.string().min(1).max(60),
+  roleLabel: z.string().min(1).max(180).optional(),
+  required: z.boolean().optional(),
+  requiredEquipmentClass: z.string().max(60).nullable().optional(),
+  requiredTrailerClass: z.string().max(60).nullable().optional(),
+});
+
 export const dispatchGateRouter = router({
+  /**
+   * The creation door — B12's slot model had none.
+   *
+   * `dispatchPostings` and `dispatchRoles` had zero production INSERTs anywhere in the tree, so the
+   * multi-resource model the schema describes ("a rig move is a lead, winch tractors, a bed truck,
+   * a picker and pilot vehicles, each assigned independently") could only ever be populated by a
+   * test fixture. These three procedures are that door.
+   *
+   * Creating a posting is planning, not awarding: nothing here writes a booking, an award audit
+   * event, or an eligibility check.
+   */
+  createPosting: roleProcedure("dispatch.createPosting")
+    .input(z.object({
+      jobId: z.number().int().positive(),
+      distribution: z.enum(["direct_assignment", "public_internal_bid", "invite_only", "selected_pool", "on_call", "emergency", "subcontractor_bid"]).optional(),
+      roles: z.array(ROLE_DRAFT).max(40).optional(),
+    }))
+    .mutation(async ({ ctx, input }) =>
+      createPosting({
+        jobId: input.jobId, distribution: input.distribution, roles: input.roles,
+        actorUserId: ctx.user.id, scope: await scopeOf(ctx.user.id),
+      })),
+
+  addRole: roleProcedure("dispatch.addRole")
+    .input(z.object({ postingId: z.number().int().positive() }).and(ROLE_DRAFT))
+    .mutation(async ({ ctx, input }) =>
+      addRole({
+        postingId: input.postingId,
+        draft: {
+          roleCode: input.roleCode, roleLabel: input.roleLabel, required: input.required,
+          requiredEquipmentClass: input.requiredEquipmentClass, requiredTrailerClass: input.requiredTrailerClass,
+        },
+        scope: await scopeOf(ctx.user.id),
+      })),
+
+  /**
+   * Every slot for a job, with the precise staffing picture beside the persisted lifecycle value.
+   *
+   * The two are never merged. `planningState` cannot express zero-of-N — from `staffed` its only
+   * legal backward transition is `partially_staffed` — so `staffing` is what a screen should read
+   * and `planningState` is reported as itself.
+   */
+  listRoles: roleProcedure("dispatch.listRoles")
+    .input(z.object({
+      jobId: z.number().int().positive().optional(),
+      postingId: z.number().int().positive().optional(),
+      includeHistory: z.boolean().optional(),
+    }))
+    .query(async ({ ctx, input }) =>
+      listRoles({
+        jobId: input.jobId, postingId: input.postingId, includeHistory: input.includeHistory,
+        scope: await scopeOf(ctx.user.id),
+      })),
+
   readiness: roleProcedure("dispatch.readiness")
     .input(SUBJECT)
     .query(async ({ input }) => {
