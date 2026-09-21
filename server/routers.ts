@@ -43,6 +43,7 @@ import { drizzleWidgetLayoutStore } from "./widgetLayouts";
 import { widgetReaderFor } from "./widgetSources";
 import { automationPolicyRouter } from "./automationPolicyRouter";
 import { movementPermitRouter } from "./movementPermitRouter";
+import { printingRouter } from "./printingRouter";
 import { restrictedVaultRouter } from "./restrictedVaultRouter";
 import { composeReadiness } from "./readinessComposer";
 import { branchRolesFor } from "./_core/widgetRoleKeys";
@@ -321,6 +322,7 @@ export const appRouter = router({
   widgets: widgetsRouter(widgetDeps),
   automationPolicy: automationPolicyRouter,
   movementPermit: movementPermitRouter,
+  printing: printingRouter,
   restrictedVault: restrictedVaultRouter,
   manifestCustody: manifestCustodyRouter,
   securityIncidents: securityIncidentsRouter,

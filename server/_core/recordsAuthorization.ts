@@ -209,6 +209,9 @@ export type Permission =
    * a third act, kept apart so whoever typed the number cannot also vouch for it.
    */
   | "permit.read" | "permit.record" | "permit.determine" | "permit.verify"
+  // v23.27: printing. Recording a print is ordinary work and the printer is in the cab, so drivers
+  // hold it; saying which printer is in which unit is fleet administration.
+  | "print.read" | "print.record" | "printer.manage"
   | "manifest.override.grant"
   /*
    * 0163 (P4.2): running a calibration sweep. Deliberately NOT given to the ordinary office role —
@@ -356,6 +359,9 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    // v23.27 — printing: the printer is in the cab, so the driver records what it printed.
+    "print.read",
+    "print.record",
     // v23.26 — a driver may read the permit position on their own load and nothing more.
     "permit.read",
     "automation.override.operational",
@@ -441,6 +447,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    // v23.27 — printing: records and reads prints; does not manage the printer registry.
+    "print.read",
+    "print.record",
     // v23.26 — permits: a dispatcher decides whether a load is oversize; that is the job. They do
     // not verify their own entries, which is the one separation worth keeping here.
     "permit.read",
@@ -831,6 +840,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    // v23.27 — printing: office registers printers and says which unit carries which.
+    "print.read",
+    "print.record",
+    "printer.manage",
     // v23.26 — permits: office records and verifies with the authority, but does not determine
     // whether a movement needs one — that is a call about the load, made where the load is known.
     "permit.read",
@@ -998,6 +1011,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    // v23.27 — printing: all three.
+    "print.read",
+    "print.record",
+    "printer.manage",
     // v23.26 — permits: management holds all four.
     "permit.read",
     "permit.record",
@@ -2574,6 +2591,12 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "movementPermit.record": "permit.record",
   "movementPermit.determine": "permit.determine",
   "movementPermit.verify": "permit.verify",
+  "printing.registerPrinter": "printer.manage",
+  "printing.assignPrinter": "printer.manage",
+  "printing.listPrinters": "print.read",
+  "printing.assess": "print.read",
+  "printing.record": "print.record",
+  "printing.staleCopies": "print.read",
   "dispatch.award": "dispatch.award",
   "dispatch.overrideRequest": "dispatch.override.request",
   "dispatch.overrideGrant": "dispatch.override.grant",

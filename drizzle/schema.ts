@@ -8590,6 +8590,46 @@ export const commercialDocumentDeliveries = mysqlTable("commercialDocumentDelive
   deliveredAt: timestamp("deliveredAt"),
   deliveryEvidence: varchar("deliveryEvidence", { length: 300 }),
   failureReason: varchar("failureReason", { length: 500 }),
+  // v23.27 — 0169: what a print could not say before. NULL on older rows means "not recorded".
+  printerId: int("printerId"),
+  copyKind: mysqlEnum("copyKind", ["original", "reprint"]),
+  printabilityVerdict: mysqlEnum("printabilityVerdict", ["printable", "printable_with_markings", "refused"]),
+  printabilityDetail: text("printabilityDetail"),
+  printedOffline: boolean("printedOffline"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * v23.27 — 0169. A printer is a peripheral, not a LeaseOS client: it holds no keys and syncs
+ * nothing, so it is not a fieldDevice; it measures nothing, so it is not a measurementDevice.
+ */
+export const fieldPrinters = mysqlTable("fieldPrinters", {
+  id: int("id").autoincrement().primaryKey(),
+  printerRef: varchar("printerRef", { length: 40 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  manufacturer: varchar("manufacturer", { length: 80 }).notNull(),
+  model: varchar("model", { length: 80 }).notNull(),
+  serialNumber: varchar("serialNumber", { length: 80 }),
+  connectionType: mysqlEnum("connectionType", ["bluetooth_classic", "bluetooth_le", "wifi", "wifi_direct", "usb", "network"]).notNull(),
+  paperFormat: mysqlEnum("paperFormat", ["letter", "receipt_4in", "receipt_3in", "receipt_2in", "label"]).notNull(),
+  printTechnology: mysqlEnum("printTechnology", ["direct_thermal", "thermal_transfer", "inkjet", "laser"]).notNull(),
+  /** NULL is "not established": Bluetooth Classic on iOS needs Apple MFi, and nobody should assume it. */
+  iosMfiCertified: boolean("iosMfiCertified"),
+  status: mysqlEnum("status", ["active", "out_of_service", "retired"]).default("active").notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** Superseded, never edited: "which printer was in unit 14 that day" stays answerable. */
+export const fieldPrinterAssignments = mysqlTable("fieldPrinterAssignments", {
+  id: int("id").autoincrement().primaryKey(),
+  printerId: int("printerId").notNull(),
+  assignedToType: mysqlEnum("assignedToType", ["unit", "yard", "office"]).notNull(),
+  assignedToId: int("assignedToId"),
+  assignedFrom: timestamp("assignedFrom").defaultNow().notNull(),
+  assignedUntil: timestamp("assignedUntil"),
+  assignedByUserId: int("assignedByUserId").notNull(),
+  endedByUserId: int("endedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
