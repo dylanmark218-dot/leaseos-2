@@ -40,8 +40,23 @@ usable Docker daemon, so gates 1–3 could not run. The rest were run directly.
 | 6. Test suite | **3,272 passed, 15 failed, 856 skipped** — see below |
 | 7. Production build | **pass** — client 1,075 kB (263 kB gzip), `dist/index.js` 2.9 MB |
 | 7b. Portal external gate | **pass** — 36 `externalProcedure`, 0 `roleProcedure` |
+| 7c. Machine gate | **pass** — 2 `integrationProcedure`, 0 role/external in `inboundRouter` |
+| 8. Current-state document is generated | **pass** — `LEASEOS_CURRENT_STATE.md` regenerates identically |
 
 646 role-authorized procedures across the routers.
+
+> **Corrected 2026-09-21.** The first version of this table stopped at 7b and
+> omitted gates 7c and 8 — not because they failed, but because the run that
+> produced it never invoked them: the gates were enumerated by reading
+> `scripts/ci-gate.sh` down to the `Summary` header and taking that for the end
+> of the file, when 7c and 8 sit *after* it. Gate 8 then caught the omission the
+> hard way on the very next change (PR #2), where adding one test file left
+> `LEASEOS_CURRENT_STATE.md` claiming 290/3938 against a regenerated 291/3941.
+>
+> Worth recording rather than quietly editing: a gate table assembled by reading
+> a script is a claim about that script, and this one was wrong in the direction
+> that matters — it under-reported coverage while reading as complete. Both gates
+> have since been run and pass.
 
 The 856 skipped tests and 52 fully skipped `.db.test.ts` files are the database-backed
 suites, which self-skip without `DATABASE_URL`. **CI is the authority on those**: the

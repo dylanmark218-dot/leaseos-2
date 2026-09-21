@@ -147,8 +147,28 @@ and are not in the shipped bundle.
 ## Verification
 
 `tsc --noEmit` clean; test-file ratchet 0 against a pinned ceiling of 0; 0 bare
-`protectedProcedure`; portal mounts 0 `roleProcedure`; reserved migration slots
-0016/0017 free; production build succeeds; 3,276 tests pass.
+`protectedProcedure`; portal mounts 0 `roleProcedure`; `inboundRouter` mounts 0
+role or external procedures (2 `integrationProcedure`); reserved migration slots
+0016/0017 free; `LEASEOS_CURRENT_STATE.md` regenerates identically; production
+build succeeds; 3,276 tests pass.
+
+### Gate 8 caught this change, and it was right to
+
+The first push of this branch failed CI at **gate 8 — "Current-state document is
+generated, not claimed."** Adding `workflowRuntimeBindParams.test.ts` moved the
+test counts, and `LEASEOS_CURRENT_STATE.md` still read `290 / 3938` against a
+regenerated `291 / 3941`.
+
+The document was regenerated with `scripts/current-state.sh` rather than hand-
+edited, which is the whole point of that gate: a figure typed into a document is
+a claim, and the same figure produced by a script is a measurement.
+
+The reason it was not caught before pushing is worth stating. The local gate run
+was assembled by reading `scripts/ci-gate.sh`, and the reader stopped at the
+`Summary` header, taking it for the end — gates 7c and 8 sit after it. So the
+local run was not the gate; it was a subset that looked like the gate. Both are
+now run, and the table in `audit/github-import-2026-09-21/AUDIT.md` has been
+corrected to list all ten.
 
 The 14 failures in `server/fieldroute.test.ts` are the database-dependent ones
 described in the import audit (TEST-1) and are unchanged by this work. The clean

@@ -40,7 +40,7 @@ d("an authorized caller cannot establish a trusted state through a create", () =
     const office = await withRole("office");
     await expect(callerFor(office).fieldRoute.evidence.add({ title: "Scale ticket", category: "disposal", capturedAt: new Date(), status: "verified" } as never)).rejects.toThrow(REFUSED);
     const id = await callerFor(office).fieldRoute.evidence.add({ title: "Scale ticket", category: "disposal", capturedAt: new Date() });
-    const [row] = await pool.execute<mysql.RowDataPacket[]>("SELECT status FROM evidenceRecords WHERE id = ?", [Number(id)]);
+    const [row] = await pool.execute<mysql.RowDataPacket[]>("SELECT status FROM evidenceRecords WHERE id = ?", [id!]);
     expect(row[0].status).toBe("needs_review");
   });
   it("documents: a verified document cannot be created; it arrives needs_review", async () => {
