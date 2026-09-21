@@ -247,7 +247,7 @@ export const dispatchGateRouter = router({
       const check = (await db.select().from(dispatchEligibilityChecks).where(eq(dispatchEligibilityChecks.id, input.checkId)).limit(1))[0];
       if (!check) throw new TRPCError({ code: "NOT_FOUND", message: "Eligibility check not found" });
       // v21.2 — a check recorded for a direct job assignment is not a posting award.
-      if (check.postingId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This check is for a direct job assignment — use jobUnits.create with its eligibilityCheckId" });
+      if (check.postingId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This check is for a direct job assignment — award applies to a posting. Assign the job's dispatch roles with dispatch.setRoleAssignment, then award the posting those roles belong to" });
       const posting = (await db.select({ jobId: dispatchPostings.jobId }).from(dispatchPostings).where(eq(dispatchPostings.id, check.postingId)).limit(1))[0];
       const now = new Date();
       // The facts are recomputed here, never accepted from the caller.
