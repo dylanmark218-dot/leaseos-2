@@ -29,7 +29,10 @@ async function incident(over: Record<string, unknown> = {}) {
   const keys = Object.keys(cols);
   const [r] = await pool.execute<mysql.ResultSetHeader>(
     `INSERT INTO incidentReports (${keys.map(k => `\`${k}\``).join(",")}) VALUES (${keys.map(() => "?").join(",")})`,
-    keys.map(k => (cols as Record<string, unknown>)[k]));
+    // Bind values are typed as what a driver can actually serialise. `unknown`
+    // compiled only because nothing checked: mysql2 rejects an undefined or a
+    // function at runtime, so a fixture that grew one would fail in the insert.
+    keys.map(k => (cols as Record<string, mysql.ExecuteValues>)[k]!));
   return Number(r.insertId);
 }
 

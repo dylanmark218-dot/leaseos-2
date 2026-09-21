@@ -1,0 +1,609 @@
+
+ RUN  v2.1.9 /home/user/leaseos-2
+
+ ↓ server/commercialOffice.db.test.ts (17 tests | 17 skipped)
+ ✓ server/commRoute.test.ts (64 tests) 35ms
+ ✓ server/assistantAskApi.test.ts (58 tests | 57 skipped) 4ms
+ ✓ server/invoicing.test.ts (6 tests | 3 skipped) 7ms
+ ✓ server/enforcementApi.test.ts (39 tests | 38 skipped) 4ms
+ ↓ server/facilityDirectory.db.test.ts (8 tests | 8 skipped)
+ ✓ server/fieldDevice.test.ts (25 tests | 3 skipped) 12ms
+ ✓ server/siteCloseout.test.ts (11 tests | 1 skipped) 14ms
+ ✓ server/commercialSetup.test.ts (16 tests | 3 skipped) 13ms
+ ✓ server/fuelLedger.test.ts (33 tests | 5 skipped) 17ms
+ ✓ server/_core/recordsAuthorization.test.ts (58 tests) 24ms
+ ✓ server/cash.test.ts (12 tests | 1 skipped) 11ms
+ ✓ server/insuranceRisk.test.ts (25 tests | 2 skipped) 16ms
+ ✓ server/commercialPortal.test.ts (11 tests | 3 skipped) 15ms
+ ✓ server/fieldRuntime.test.ts (11 tests | 3 skipped) 39ms
+ ✓ server/purchasingAp.test.ts (27 tests | 3 skipped) 13ms
+ ✓ server/_core/payrollFinanceTax.test.ts (59 tests) 20ms
+ ✓ server/portalHardening.test.ts (9 tests | 2 skipped) 11ms
+ ↓ server/operationalApiAuthorization.test.ts (37 tests | 37 skipped)
+ ✓ server/hos.test.ts (30 tests | 5 skipped) 21ms
+ ✓ server/_core/portalFunding.test.ts (54 tests) 30ms
+ ✓ server/auditPackage.test.ts (7 tests | 3 skipped) 8ms
+ ✓ server/engineReachability.test.ts (5 tests) 36ms
+ ✓ server/compliancePassport.test.ts (25 tests | 2 skipped) 15ms
+ ✓ server/communications.test.ts (16 tests | 15 skipped) 4ms
+ ↓ server/manifestCustody.db.test.ts (10 tests | 10 skipped)
+ ✓ server/commsDispatch.test.ts (16 tests | 7 skipped) 9ms
+ ✓ server/procedureAuthorization.test.ts (35 tests) 88ms
+ ✓ server/requirementEngine.test.ts (22 tests | 3 skipped) 16ms
+ ↓ server/b20WorkflowWiring.test.ts (16 tests | 16 skipped)
+ ✓ server/dispatchGate.test.ts (11 tests | 2 skipped) 9ms
+ ✓ server/fleetShop.test.ts (7 tests | 1 skipped) 11ms
+ ✓ server/commPackage.test.ts (23 tests | 4 skipped) 18ms
+ ✓ server/surfaces.test.ts (19 tests | 2 skipped) 15ms
+ ✓ server/ifta.test.ts (14 tests | 1 skipped) 23ms
+ ✓ server/workforce.test.ts (7 tests | 1 skipped) 9ms
+ ✓ server/dispatchEnforcement.test.ts (28 tests | 1 skipped) 13ms
+ ✓ server/customerLiveView.test.ts (8 tests | 1 skipped) 11ms
+ ✓ server/bulkFuel.test.ts (10 tests | 1 skipped) 9ms
+ ↓ server/assistantCommitService.test.ts (7 tests | 7 skipped)
+ ↓ server/widgetPersistence.db.test.ts (22 tests | 22 skipped)
+ ↓ server/payrollApiAuthorization.test.ts (28 tests | 28 skipped)
+ ✓ server/_core/siteBaseline.test.ts (34 tests) 17ms
+ ↓ server/academyTdgWiring.db.test.ts (13 tests | 13 skipped)
+ ↓ server/crewChannelApi.test.ts (27 tests | 27 skipped)
+ ✓ server/structures.test.ts (6 tests | 2 skipped) 10ms
+ ✓ server/telematics.test.ts (7 tests | 1 skipped) 9ms
+ ↓ server/recordsApiAuthorization.test.ts (28 tests | 28 skipped)
+ ✓ server/capitalAssets.test.ts (8 tests | 1 skipped) 10ms
+ ✓ server/_core/externalSourceSeeds.test.ts (35 tests | 4 skipped) 20ms
+ ✓ server/operationalTruth.test.ts (12 tests | 11 skipped) 4ms
+ ✓ server/_core/workflowWiring.test.ts (39 tests) 182ms
+ ✓ server/commercialProjects.test.ts (5 tests | 1 skipped) 7ms
+ ✓ server/spatialFoundation.test.ts (7 tests | 1 skipped) 43ms
+ ↓ server/geographyAgreement.test.ts (10 tests | 10 skipped)
+ ✓ server/legalLand.test.ts (6 tests | 1 skipped) 26ms
+ ✓ server/integrityClosure.test.ts (16 tests | 7 skipped) 7ms
+ ✓ server/gst.test.ts (11 tests | 1 skipped) 11ms
+ ✓ server/automationPolicySurface.test.ts (14 tests | 9 skipped) 60ms
+ ❯ server/fieldroute.test.ts (15 tests | 14 failed) 28ms
+   × fieldRoute jobs > returns a list without requiring client-side REST plumbing 11ms
+     → User holds no domain role
+   × fieldRoute jobs > validates the job mode and creates a typed job payload 4ms
+     → promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+   × fieldRoute evidence > accepts storage metadata without accepting file bytes 1ms
+     → promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+   × fieldRoute evidence and safety > verifies a persisted evidence record through the typed procedure 1ms
+     → User holds no domain role
+   × fieldRoute evidence and safety > creates a safety event with an explicit severity 1ms
+     → User holds no domain role
+   × fieldRoute route context > persists a source-aware operational context 0ms
+     → User holds no domain role
+   × fieldRoute identity and compliance > creates metadata-only identity and compliance records 1ms
+     → promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+   × fieldRoute job units and inspections > creates an associated unit and an authenticated pre-trip inspection record 1ms
+     → promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+   × fieldRoute location identity and scans > persists a well identity, manifest chain, and role-aware QR scan 1ms
+     → User holds no domain role
+   × fieldRoute compliance engine > creates a tracked trip passport, tailgate record, and transfer audit 1ms
+     → User holds no domain role
+   × trip operations > creates a round-trip and calculates distance from odometers 1ms
+     → User holds no domain role
+   × trip operations > records load/unload timing events and duty status 0ms
+     → User holds no domain role
+   × trip operations > persists clearly typed loading/unloading operating zones 1ms
+     → promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+   × trip operations > opens a maintenance work order for a serviceability issue 1ms
+     → promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+ ✓ server/periodClose.test.ts (12 tests | 1 skipped) 12ms
+ ✓ server/_core/automationPolicy.test.ts (26 tests) 45ms
+ ✓ server/contractTerms.test.ts (6 tests | 2 skipped) 9ms
+ ✓ server/integrationGateway.test.ts (7 tests | 2 skipped) 9ms
+ ✓ server/tenantIsolation.test.ts (16 tests) 122ms
+ ✓ server/customerTransaction.test.ts (4 tests | 1 skipped) 6ms
+ ✓ server/_core/evidenceVault.test.ts (30 tests) 15ms
+ ✓ server/documentationTruth.test.ts (24 tests) 157ms
+ ↓ server/enforcementCommit.test.ts (12 tests | 12 skipped)
+ ✓ server/widgetDashboard.test.ts (31 tests) 39ms
+ ↓ server/portalFundingApi.test.ts (24 tests | 24 skipped)
+ ✓ server/_core/externalDataRouting.test.ts (32 tests) 14ms
+ ✓ server/_core/readinessCapabilities.test.ts (21 tests) 15ms
+ ✓ server/hosAttestation.test.ts (10 tests | 6 skipped) 5ms
+ ✓ server/documentDedupDisposal.test.ts (23 tests | 4 skipped) 15ms
+ ✓ server/safetyLatch.test.ts (24 tests) 12ms
+ ✓ server/termsComplete.test.ts (5 tests | 2 skipped) 9ms
+ ✓ server/_core/calibrationEvidence.test.ts (16 tests) 16ms
+ ✓ server/geoImport.test.ts (6 tests | 2 skipped) 30ms
+ ✓ server/_core/workflowEngine.test.ts (36 tests) 16ms
+ ✓ server/_core/incidentMaintenance.test.ts (35 tests) 15ms
+ ✓ server/oosPolicyApi.test.ts (13 tests | 12 skipped) 3ms
+ ✓ server/registerClaims.test.ts (10 tests) 236ms
+ ↓ server/enforcementLifecycle.test.ts (1 test | 1 skipped)
+ ✓ server/_core/billingAdjustment.test.ts (35 tests) 12ms
+ ✓ server/messageLifecycleCanonical.test.ts (20 tests | 14 skipped) 6ms
+ ✓ server/_core/aiProposal.test.ts (32 tests) 29ms
+ ✓ server/_core/documentExtraction.test.ts (28 tests) 16ms
+ ✓ server/_core/dispatchLifecycle.test.ts (37 tests) 13ms
+ ✓ server/actionGateway.test.ts (27 tests) 831ms
+   ✓ a capability cannot require a permission that does not exist > declares only permissions the authorization model actually defines 819ms
+ ✓ server/_core/dispatchAward.test.ts (26 tests) 15ms
+ ✓ server/_core/dispatchReadiness.test.ts (25 tests) 12ms
+ ✓ server/roadGraph.test.ts (5 tests | 1 skipped) 42ms
+ ✓ server/zzMoneyPrecision.test.ts (7 tests | 6 skipped) 5ms
+ ✓ server/promotionLedger.db.test.ts (27 tests | 13 skipped) 7ms
+ ↓ server/restrictedVaultApi.test.ts (9 tests | 9 skipped)
+ ↓ server/widgetsBoard.db.test.ts (8 tests | 8 skipped)
+ ✓ server/linePricing.test.ts (3 tests | 2 skipped) 3ms
+ ✓ server/_core/tripPassportPackage.test.ts (21 tests) 13ms
+ ✓ server/_core/roadSourceNeutrality.test.ts (17 tests) 21ms
+ ↓ server/workflowEndToEnd.test.ts (12 tests | 12 skipped)
+ ✓ server/_core/deviceSignature.attestation.test.ts (16 tests) 272ms
+ ✓ server/contextAdmission.test.ts (19 tests) 14ms
+ ✓ server/boardRuntime.test.ts (12 tests) 16ms
+ ↓ server/federalCandidates.db.test.ts (10 tests | 10 skipped)
+ ↓ server/workflowOrchestration.test.ts (10 tests | 10 skipped)
+ ✓ server/agentRuntimeApi.test.ts (16 tests | 15 skipped) 4ms
+ ✓ server/agentBoundary.test.ts (14 tests | 8 skipped) 6ms
+ ✓ server/knowledgeSourceGate.test.ts (28 tests) 12ms
+ ✓ server/_core/routeEvaluation.test.ts (21 tests) 10ms
+ ✓ server/messageAttachmentApi.test.ts (14 tests | 11 skipped) 5ms
+ ✓ server/knowledgeAdmission.test.ts (22 tests) 10ms
+ ✓ server/feedIngest.test.ts (12 tests) 13ms
+ ✓ server/_core/taxonomy.test.ts (19 tests) 12ms
+ ↓ server/tenantScopeMonolithTail.db.test.ts (3 tests | 3 skipped)
+ ✓ server/_core/restrictedVault.test.ts (20 tests) 13ms
+ ✓ server/enforcement.test.ts (19 tests) 15ms
+ ✓ server/_core/evidenceChainWalk.test.ts (15 tests) 11ms
+ ✓ server/clientTruth.test.ts (10 tests) 39ms
+ ✓ server/retrievalQuality.test.ts (23 tests) 13ms
+ ↓ server/productionPath.test.ts (1 test | 1 skipped)
+ ✓ server/portalViewModels.test.ts (11 tests) 9ms
+ ✓ server/crewForecast.test.ts (12 tests | 11 skipped) 3ms
+ ✓ server/roleIsolation.test.ts (15 tests) 23ms
+ ↓ server/contractorOperations.db.test.ts (2 tests | 2 skipped)
+ ✓ server/documentValidity.test.ts (21 tests) 15ms
+ ↓ server/tenantScopeJobsTrips.db.test.ts (7 tests | 7 skipped)
+ ✓ server/widgetLayoutWrite.test.ts (23 tests) 19ms
+ ✓ server/crewCoverage.test.ts (19 tests) 14ms
+ ✓ server/registryV2.test.ts (26 tests) 14ms
+ ↓ server/limitPromote.db.test.ts (10 tests | 10 skipped)
+ ↓ server/demoDataset.db.test.ts (4 tests | 4 skipped)
+ ✓ server/_core/legalAxleDetermination.test.ts (14 tests) 8ms
+ ✓ server/_core/dataIngestion.test.ts (25 tests) 11ms
+ ✓ server/destinationAcceptance.db.test.ts (2 tests | 1 skipped) 5ms
+ ✓ server/_core/interEngineStatus.test.ts (13 tests) 9ms
+ ✓ server/messageBoard.test.ts (18 tests) 11ms
+ ✓ server/widgetService.test.ts (11 tests) 27ms
+ ↓ server/promotionEngineEffect.db.test.ts (4 tests | 4 skipped)
+ ✓ server/widgetSemantics.test.ts (24 tests) 12ms
+ ↓ server/readinessApi.test.ts (11 tests | 11 skipped)
+ ✓ server/escalation.test.ts (12 tests | 3 skipped) 9ms
+ ✓ server/secretaryCoordination.test.ts (21 tests) 13ms
+ ✓ server/_core/dispatchMatching.test.ts (17 tests) 11ms
+ ✓ server/knowledgeRepository.db.test.ts (9 tests | 7 skipped) 6ms
+stdout | server/calendarFixtures.test.ts > fixture dates the calendar is about to pass > names what is coming, so the next review is not a surprise
+[calendar-fixtures] 5 unreviewed file(s) with a fixture date inside 60 days:
+  server/capitalAssets.test.ts → 2026-10-15
+  server/commercialPortal.test.ts → 2026-10-30
+  server/crewForecast.test.ts → 2026-11-01
+  server/openShiftsApi.test.ts → 2026-11-01
+  server/timeOffApi.test.ts → 2026-11-02
+
+ ✓ server/calendarFixtures.test.ts (2 tests) 4ms
+ ✓ server/_core/billing.test.ts (19 tests) 12ms
+ ✓ server/_core/routeApprovalPolicy.test.ts (13 tests) 19ms
+ ✓ server/feedHttp.test.ts (14 tests) 10ms
+ ✓ server/_core/tripBillingProjection.test.ts (16 tests) 14ms
+ ✓ server/scopeGuard.db.test.ts (16 tests | 8 skipped) 10ms
+ ✓ server/knowledgePerimeter.test.ts (27 tests) 15ms
+ ↓ server/tenantScopeMoney.db.test.ts (3 tests | 3 skipped)
+ ↓ server/calendarProjectionApi.test.ts (11 tests | 11 skipped)
+ ↓ server/securityIncidents.db.test.ts (2 tests | 2 skipped)
+ ✓ server/trainingAcademyHardening.test.ts (29 tests) 11ms
+ ✓ server/tdgCertificateContents.test.ts (25 tests) 13ms
+ ✓ server/contextAssembly.test.ts (17 tests) 14ms
+ ✓ server/commsVault.test.ts (9 tests) 16ms
+ ✓ server/openShiftsApi.test.ts (12 tests | 11 skipped) 3ms
+ ✓ server/verificationConsole.test.ts (18 tests) 10ms
+ ✓ server/modelGateway.test.ts (15 tests) 9ms
+ ✓ server/roadsidePanel.test.ts (15 tests) 12ms
+ ✓ server/alberta511Gate.test.ts (17 tests) 102ms
+ ✓ server/boardSemantics.test.ts (19 tests) 12ms
+ ↓ server/dispatchConcurrency.test.ts (8 tests | 8 skipped)
+ ✓ server/reservedWordColumns.test.ts (8 tests | 3 skipped) 78ms
+ ↓ server/oneDoorInvariant.db.test.ts (7 tests | 7 skipped)
+ ✓ server/evidenceGrounding.test.ts (17 tests) 12ms
+ ↓ server/enforcementOutbox.test.ts (7 tests | 7 skipped)
+ ✓ server/openShifts.test.ts (16 tests) 11ms
+ ✓ server/_core/measurementQuality.test.ts (16 tests) 10ms
+ ✓ server/dashboardWidget.test.ts (17 tests) 11ms
+ ✓ server/feedCollector.test.ts (14 tests) 10ms
+ ↓ server/widgetConflict.db.test.ts (8 tests | 8 skipped)
+ ✓ server/crewChannels.test.ts (21 tests) 14ms
+ ✓ server/widgetProjection.test.ts (16 tests) 12ms
+ ✓ server/_core/degradationSuite.test.ts (25 tests) 35ms
+ ✓ server/tdgTopicCoverage.test.ts (24 tests) 11ms
+ ✓ server/shiftReadiness.test.ts (13 tests) 9ms
+ ✓ server/_core/phoneLocationGate.test.ts (14 tests) 7ms
+ ✓ server/_core/fieldTicket.test.ts (19 tests) 13ms
+ ✓ server/_core/osmImport.test.ts (16 tests) 10ms
+ ✓ server/messageBoardApi.test.ts (12 tests | 11 skipped) 4ms
+ ✓ server/_core/assistantExtraction.test.ts (24 tests) 13ms
+ ↓ server/qualificationStore.test.ts (8 tests | 8 skipped)
+ ✓ server/knowledgeWritePaths.test.ts (5 tests) 406ms
+ ✓ server/migrationLedger.db.test.ts (4 tests | 3 skipped) 4ms
+ ↓ server/tenantScopeFieldRuntime.db.test.ts (1 test | 1 skipped)
+ ✓ server/advisoryImpact.test.ts (12 tests) 11ms
+ ✓ server/timeOffApi.test.ts (11 tests | 10 skipped) 3ms
+ ✓ server/messageLifecycle.test.ts (15 tests) 13ms
+ ✓ server/trainingAcademy.test.ts (10 tests) 14ms
+ ✓ server/timeOff.test.ts (18 tests) 11ms
+ ✓ server/calendarProjection.test.ts (18 tests) 11ms
+ ✓ server/offlineCapability.test.ts (16 tests) 9ms
+ ✓ server/enforcementReadiness.test.ts (7 tests | 5 skipped) 4ms
+ ↓ server/tenantScopeMonolithRecords.db.test.ts (1 test | 1 skipped)
+ ↓ server/recordsAuthorizationDb.test.ts (7 tests | 7 skipped)
+ ↓ server/outboxLease.test.ts (8 tests | 8 skipped)
+ ✓ server/financialCalendar.test.ts (15 tests) 11ms
+ ↓ server/tenantScopeRecords.db.test.ts (1 test | 1 skipped)
+ ✓ server/_core/driverTraining.test.ts (16 tests) 8ms
+ ✓ server/_core/preDepartureCache.test.ts (11 tests) 9ms
+ ✓ server/inspectorRequest.test.ts (20 tests) 8ms
+ ✓ server/_core/routingCompiler.test.ts (16 tests) 20ms
+ ✓ server/_core/loadSense.test.ts (15 tests) 10ms
+ ✓ server/domainTokens.test.ts (20 tests) 12ms
+ ✓ server/a11yCoverage.test.ts (3 tests) 6ms
+ ✓ server/restoreDefault.test.ts (10 tests) 10ms
+ ↓ server/limitPromoteSeparationOfDuties.db.test.ts (5 tests | 5 skipped)
+ ✓ server/jurisdiction.test.ts (10 tests) 8ms
+ ✓ server/_core/sourcePrecedence.test.ts (11 tests) 7ms
+ ✓ server/workerLifecycle.test.ts (10 tests) 9ms
+ ✓ server/_core/commercialPolicy.test.ts (7 tests) 7ms
+ ✓ server/commsView.test.ts (14 tests) 9ms
+ ↓ server/tenantScopeCloseout.db.test.ts (1 test | 1 skipped)
+ ✓ server/_core/assistantCommitAdapters.test.ts (6 tests) 7ms
+ ✓ server/actingScope.test.ts (9 tests | 7 skipped) 4ms
+ ✓ server/_core/syncRefusal.test.ts (11 tests) 8ms
+ ✓ server/_core/safetyBinder.test.ts (11 tests) 19ms
+ ✓ server/_core/manifestCustody.test.ts (12 tests) 9ms
+ ✓ server/_core/monitoringNotice.test.ts (13 tests) 9ms
+ ✓ server/_core/workflowRuntimeBindParams.test.ts (3 tests) 7ms
+ ✓ server/attachmentAuthorization.test.ts (13 tests) 9ms
+ ✓ server/_core/geofence.test.ts (15 tests) 8ms
+ ✓ server/readinessRouting.test.ts (10 tests) 9ms
+ ↓ server/tenantScopeWorkforce.db.test.ts (1 test | 1 skipped)
+ ✓ server/_core/tracking.test.ts (18 tests) 8ms
+ ✓ server/_core/manifestFactReconciliation.test.ts (10 tests) 8ms
+ ✓ server/sourceReview.test.ts (6 tests | 5 skipped) 3ms
+ ✓ server/_core/disposalReconciliation.test.ts (13 tests) 9ms
+ ↓ server/tenantScopeShop.db.test.ts (1 test | 1 skipped)
+ ✓ server/_core/osmLoadPlan.test.ts (11 tests) 10ms
+ ✓ server/_core/osmTopology.test.ts (12 tests) 10ms
+ ✓ server/widgetPayload.test.ts (11 tests) 9ms
+ ✓ server/storageCapability.test.ts (5 tests) 187ms
+ ✓ server/_core/osmLoad.test.ts (11 tests) 11ms
+ ↓ server/columnParity.test.ts (4 tests | 4 skipped)
+ ↓ server/tenantScopeSpatial.db.test.ts (1 test | 1 skipped)
+stdout | server/crossLayerIntegrity.test.ts
+[OAuth] Initialized with baseURL: 
+
+stderr | server/crossLayerIntegrity.test.ts
+[OAuth] ERROR: OAUTH_SERVER_URL is not configured! Set OAUTH_SERVER_URL environment variable.
+
+ ✓ server/crossLayerIntegrity.test.ts (4 tests | 2 skipped) 11ms
+ ↓ server/tenantScopeAcademy.db.test.ts (1 test | 1 skipped)
+ ✓ server/federalCandidateCorrection.test.ts (9 tests) 8ms
+ ↓ server/tenantScopeUnitRecords.db.test.ts (1 test | 1 skipped)
+ ↓ server/questionQueueService.test.ts (4 tests | 4 skipped)
+ ✓ server/_core/regulatoryDataDiscipline.test.ts (8 tests) 6ms
+ ✓ server/p44SignoffInvariants.test.ts (7 tests) 6ms
+ ✓ server/evidenceSealVerification.test.ts (7 tests) 6ms
+ ✓ server/_core/sheetSerial.test.ts (14 tests) 7ms
+ ↓ server/inboxIsolation.test.ts (4 tests | 4 skipped)
+ ✓ server/_core/trainingAcademy.test.ts (5 tests) 6ms
+ ✓ server/_core/routeEvaluationIdentity.test.ts (8 tests) 6ms
+ ✓ server/trackingNumbers.db.test.ts (5 tests | 3 skipped) 3ms
+ ✓ server/assistantCalibrationPage.test.ts (12 tests) 11ms
+ ✓ server/rulePromotion.db.test.ts (10 tests | 4 skipped) 4ms
+ ✓ server/_core/complianceSecretary.test.ts (6 tests) 5ms
+ ✓ server/_core/purchaseOrderLimitSources.test.ts (4 tests) 5ms
+ ✓ server/_core/facilityStatements.test.ts (3 tests) 5ms
+ ✓ server/_core/hydrovacList.test.ts (3 tests) 6ms
+ ✓ server/widgetSourceContract.test.ts (8 tests) 6ms
+ ✓ server/widgetPromotion.test.ts (5 tests) 5ms
+ ✓ server/_core/sheetSerialAllocator.test.ts (17 tests) 10ms
+ ✓ server/communicationsPackagePage.test.ts (9 tests) 6ms
+ ✓ server/_core/roadTopologyStrategy.test.ts (6 tests) 5ms
+ ✓ server/transmitCheckPage.test.ts (10 tests) 6ms
+ ✓ server/assistantAskPage.test.ts (11 tests) 7ms
+ ✓ server/portalPanelContract.test.ts (4 tests) 6ms
+ ✓ server/trackingNumberCoverage.test.ts (3 tests) 46ms
+ ✓ server/_core/arcgisImport.test.ts (3 tests) 6ms
+ ✓ server/routePreviewPage.test.ts (9 tests) 6ms
+ ↓ server/sheetSerialAllocator.db.test.ts (2 tests | 2 skipped)
+ ✓ server/communicationsPackageStatusPage.test.ts (8 tests) 5ms
+ ✓ server/_core/commercialApprovals.test.ts (2 tests) 5ms
+ ✓ server/_core/projections.test.ts (3 tests) 6ms
+ ✓ server/_core/facilityCompatibility.test.ts (9 tests) 6ms
+ ✓ server/_core/assistantPersistence.test.ts (4 tests) 6ms
+ ✓ server/_core/deviceSignature.test.ts (2 tests) 8ms
+ ✓ server/contractorCommercialChainBoundary.test.ts (5 tests) 5ms
+ ✓ server/_core/legalLocation.test.ts (1 test) 5ms
+ ✓ server/auth.logout.test.ts (1 test) 5ms
+ ✓ server/_core/loadSenseMaterialMovement.test.ts (4 tests) 4ms
+ ✓ server/contractorOperationsBoundary.test.ts (5 tests) 5ms
+ ✓ server/_core/facilitySeed.test.ts (5 tests) 13ms
+ ✓ server/coreRecordOwnershipBoundary.test.ts (3 tests) 4ms
+ ✓ server/academyReadinessBindings.test.ts (3 tests) 3ms
+ ✓ server/loadSenseAuthenticatedProjectionBoundary.test.ts (4 tests) 3ms
+ ✓ server/_core/loadSenseProtocol.test.ts (3 tests) 5ms
+ ✓ server/_core/facilityNavigation.test.ts (3 tests) 4ms
+ ✓ server/_core/widgetRoleKeys.test.ts (3 tests) 4ms
+ ✓ server/_core/facilityExport.test.ts (2 tests) 6ms
+ ✓ server/_core/loadSenseEvents.test.ts (1 test) 3ms
+ ✓ client/src/a11y/a11y.dom.test.tsx (36 tests) 1668ms
+ ✓ client/src/widgets/WidgetBoard.dom.test.tsx (17 tests) 1267ms
+ ✓ client/src/widgets/WidgetTileShell.dom.test.tsx (22 tests) 422ms
+ ✓ client/src/widgets/AddWidgetPicker.dom.test.tsx (12 tests) 1124ms
+   ✓ accessibility > reports no axe violations 307ms
+ ✓ client/src/pages/DisposalFinderView.dom.test.tsx (4 tests) 199ms
+ ✓ client/src/pages/CommercialOfficeView.dom.test.tsx (4 tests) 179ms
+ ✓ client/src/showcase/panelSource.dom.test.tsx (3 tests) 62ms
+ ✓ client/src/lib/analytics.dom.test.tsx (4 tests) 19ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  server/fieldroute.test.ts > fieldRoute jobs > returns a list without requiring client-side REST plumbing
+TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+    118| 
+    119|       if (!decision.allowed) {
+    120|         throw new TRPCError({
+       |               ^
+    121|           code:
+    122|             decision.outcome === "denied_unauthenticated"
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:83:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/14]⎯
+
+ FAIL  server/fieldroute.test.ts > fieldRoute jobs > validates the job mode and creates a typed job payload
+AssertionError: promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+ ❯ server/fieldroute.test.ts:102:5
+    100|         longitude: -113.286,
+    101|       })
+    102|     ).resolves.toBeDefined();
+       |     ^
+    103|   });
+    104| });
+
+Caused by: TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:90:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'FORBIDDEN' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/14]⎯
+
+ FAIL  server/fieldroute.test.ts > fieldRoute evidence > accepts storage metadata without accepting file bytes
+AssertionError: promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+ ❯ server/fieldroute.test.ts:120:5
+    118|         notes: "Original retained in field storage.",
+    119|       })
+    120|     ).resolves.toBeDefined();
+       |     ^
+    121|   });
+    122| });
+
+Caused by: TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:109:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'FORBIDDEN' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/14]⎯
+
+ FAIL  server/fieldroute.test.ts > fieldRoute evidence and safety > verifies a persisted evidence record through the typed procedure
+TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+    118| 
+    119|       if (!decision.allowed) {
+    120|         throw new TRPCError({
+       |               ^
+    121|           code:
+    122|             decision.outcome === "denied_unauthenticated"
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:127:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/14]⎯
+
+ FAIL  server/fieldroute.test.ts > fieldRoute evidence and safety > creates a safety event with an explicit severity
+TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+    118| 
+    119|       if (!decision.allowed) {
+    120|         throw new TRPCError({
+       |               ^
+    121|           code:
+    122|             decision.outcome === "denied_unauthenticated"
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:157:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/14]⎯
+
+ FAIL  server/fieldroute.test.ts > fieldRoute route context > persists a source-aware operational context
+TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+    118| 
+    119|       if (!decision.allowed) {
+    120|         throw new TRPCError({
+       |               ^
+    121|           code:
+    122|             decision.outcome === "denied_unauthenticated"
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:171:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/14]⎯
+
+ FAIL  server/fieldroute.test.ts > fieldRoute identity and compliance > creates metadata-only identity and compliance records
+AssertionError: promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+ ❯ server/fieldroute.test.ts:196:5
+    194|         emergencyContact: "Operations desk",
+    195|       })
+    196|     ).resolves.toBeDefined();
+       |     ^
+    197|     await expect(
+    198|       caller.fieldRoute.identity.units.create({
+
+Caused by: TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:188:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'FORBIDDEN' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/14]⎯
+
+ FAIL  server/fieldroute.test.ts > fieldRoute job units and inspections > creates an associated unit and an authenticated pre-trip inspection record
+AssertionError: promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+ ❯ server/fieldroute.test.ts:272:5
+    270|         workPerformed: "Vacuum support and hose transfer",
+    271|       })
+    272|     ).resolves.toBeDefined();
+       |     ^
+    273|     await expect(
+    274|       caller.fieldRoute.identity.inspections.create({
+
+Caused by: TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:261:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'FORBIDDEN' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/14]⎯
+
+ FAIL  server/fieldroute.test.ts > fieldRoute location identity and scans > persists a well identity, manifest chain, and role-aware QR scan
+TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+    118| 
+    119|       if (!decision.allowed) {
+    120|         throw new TRPCError({
+       |               ^
+    121|           code:
+    122|             decision.outcome === "denied_unauthenticated"
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:291:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/14]⎯
+
+ FAIL  server/fieldroute.test.ts > fieldRoute compliance engine > creates a tracked trip passport, tailgate record, and transfer audit
+TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+    118| 
+    119|       if (!decision.allowed) {
+    120|         throw new TRPCError({
+       |               ^
+    121|           code:
+    122|             decision.outcome === "denied_unauthenticated"
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:327:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/14]⎯
+
+ FAIL  server/fieldroute.test.ts > trip operations > creates a round-trip and calculates distance from odometers
+TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+    118| 
+    119|       if (!decision.allowed) {
+    120|         throw new TRPCError({
+       |               ^
+    121|           code:
+    122|             decision.outcome === "denied_unauthenticated"
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:359:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/14]⎯
+
+ FAIL  server/fieldroute.test.ts > trip operations > records load/unload timing events and duty status
+TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+    118| 
+    119|       if (!decision.allowed) {
+    120|         throw new TRPCError({
+       |               ^
+    121|           code:
+    122|             decision.outcome === "denied_unauthenticated"
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:375:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/14]⎯
+
+ FAIL  server/fieldroute.test.ts > trip operations > persists clearly typed loading/unloading operating zones
+AssertionError: promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+ ❯ server/fieldroute.test.ts:419:5
+    417|         source: "field survey",
+    418|       })
+    419|     ).resolves.toBeDefined();
+       |     ^
+    420|   });
+    421| 
+
+Caused by: TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:410:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'FORBIDDEN' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/14]⎯
+
+ FAIL  server/fieldroute.test.ts > trip operations > opens a maintenance work order for a serviceability issue
+AssertionError: promise rejected "TRPCError: User holds no domain role { code: '…' }" instead of resolving
+ ❯ server/fieldroute.test.ts:435:5
+    433|         correctiveAction: "Inspect before release",
+    434|       })
+    435|     ).resolves.toBeDefined();
+       |     ^
+    436|   });
+    437| });
+
+Caused by: TRPCError: User holds no domain role
+ ❯ server/_core/trpc.ts:120:15
+ ❯ callRecursive node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:664:12
+ ❯ procedure node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:682:20
+ ❯ node_modules/.pnpm/@trpc+server@11.19.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:473:20
+ ❯ server/fieldroute.test.ts:424:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'FORBIDDEN' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/14]⎯
+
+ Test Files  1 failed | 246 passed | 52 skipped (299)
+      Tests  14 failed | 3276 passed | 856 skipped (4146)
+   Start at  06:28:11
+   Duration  314.50s (transform 8.65s, setup 19.39s, collect 198.75s, tests 10.30s, environment 3.86s, prepare 19.79s)
+
+TEST_EXIT=1

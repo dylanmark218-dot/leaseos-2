@@ -93,14 +93,14 @@ d("machines, in and out", () => {
     await pool.execute("INSERT INTO units (unitNumber, vehicleType, inspectionStatus, maintenanceStatus, createdAt) VALUES (?, 'vac truck', 'current', 'clear', NOW())", [unitNo]);
     const r1 = await machine(reg.key).inbound.ingest({ feed: "fuel_transaction", idempotencyKey: "txn-88192", payload: { occurredAt: "2026-09-10T09:40:00Z", quantity: 275, total: 412.5, unitRef: unitNo, jurisdiction: "CA-AB", vendorName: "Cardlock Nisku", fuelType: "diesel", financialEntityId: FIXTURE_ENTITY_ID } });
     expect(r1).toMatchObject({ status: "accepted", becomes: "fuel transaction proposal" });
-    const [fuel] = await pool.execute<mysql.RowDataPacket[]>("SELECT status, jurisdiction, jurisdictionSource, payerType, hosRuleConclusion FROM fuelTransactions WHERE fuelRef = ?", [r1.resultRef]);
+    const [fuel] = await pool.execute<mysql.RowDataPacket[]>("SELECT status, jurisdiction, jurisdictionSource, payerType, hosRuleConclusion FROM fuelTransactions WHERE fuelRef = ?", [String(r1.resultRef)]);
     expect(fuel[0]).toMatchObject({ status: "needs_review", jurisdiction: "CA-AB", jurisdictionSource: "fleet_card_statement", payerType: "company", hosRuleConclusion: "unknown" }); // a proposal, never confirmed
     // Same key again: the same event, and no second transaction; different content under the same key is named.
     const r2 = await machine(reg.key).inbound.ingest({ feed: "fuel_transaction", idempotencyKey: "txn-88192", payload: { occurredAt: "2026-09-10T09:40:00Z", quantity: 275, total: 412.5, unitRef: unitNo, jurisdiction: "CA-AB", vendorName: "Cardlock Nisku", fuelType: "diesel", financialEntityId: FIXTURE_ENTITY_ID } });
     expect(r2).toMatchObject({ status: "duplicate", inboundRef: r1.inboundRef, resultRef: r1.resultRef });
     const r3 = await machine(reg.key).inbound.ingest({ feed: "fuel_transaction", idempotencyKey: "txn-88192", payload: { occurredAt: "2026-09-10T09:40:00Z", quantity: 999, total: 1, unitRef: unitNo } });
     expect(r3.note).toContain("DIFFERENT content");
-    const [n] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM fuelTransactions WHERE fuelRef = ?", [r1.resultRef]);
+    const [n] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM fuelTransactions WHERE fuelRef = ?", [String(r1.resultRef)]);
     expect(Number(n[0].n)).toBe(1);
     // Out of scope: rejected and kept as rejected; a GPS client's position is evidence only.
     const r4 = await machine(reg.key).inbound.ingest({ feed: "gps_position", idempotencyKey: "pos-1", payload: { latitude: 53.5, longitude: -113.4, recordedAt: "2026-09-10T09:41:00Z", unitRef: unitNo } });

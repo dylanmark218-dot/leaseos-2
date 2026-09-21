@@ -8,6 +8,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startProductionWorker } from "./productionWorker";
+import { assertProductionSecrets } from "./env";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -29,6 +30,11 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  // Before anything binds a port or starts a worker. A production server that
+  // cannot sign a session safely should never reach the point of accepting a
+  // request it would mis-authenticate.
+  assertProductionSecrets();
+
   const app = express();
   const server = createServer(app);
   const worker = await startProductionWorker();
@@ -74,4 +80,10 @@ async function startServer() {
   process.on("SIGINT", shutdown);
 }
 
-startServer().catch(console.error);
+startServer().catch(error => {
+  // A refusal to start is not a background error to log and carry on from: the
+  // process has no server, and exiting non-zero is what makes a supervisor or a
+  // deploy pipeline report the failure rather than declare success.
+  console.error(error);
+  process.exitCode = 1;
+});
