@@ -175,6 +175,15 @@ the single-tenant era it is not.
 The operational rule it implies is worth stating plainly: **offboarding must revoke role grants.
 Ending the membership alone does not end access.**
 
+### A smaller thing the investigation turned up
+
+`organizationMemberships.effectiveFrom` and `effectiveTo` are MariaDB `TIMESTAMP`
+columns, so their range ends at 2038-01-19 03:14:07 UTC and a membership dated past that
+is a rejected INSERT rather than a far-future membership. A membership meant to run
+indefinitely therefore has to leave `effectiveTo` NULL; a sentinel far-future date does
+not express "no end", it fails in strict mode. `server/actingScopeMembership.db.test.ts`
+pins it, so nothing has to rediscover it.
+
 ### Why it was not fixed here
 
 The obvious correction is small — distinguish "has no membership row at all" (the legitimate fallback,

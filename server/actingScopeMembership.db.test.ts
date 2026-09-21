@@ -92,8 +92,16 @@ async function member(args: {
   return userId;
 }
 
-const future = "2099-01-01 00:00:00";
+/**
+ * Not 2099. `organizationMemberships.effectiveFrom` and `effectiveTo` are
+ * MariaDB `TIMESTAMP` columns, whose range ends at 2038-01-19 03:14:07 UTC, and
+ * the server runs in strict mode — so a membership dated beyond that is not a
+ * far-future membership, it is a rejected INSERT. The suite below pins that as
+ * a fact rather than working around it quietly.
+ */
+const future = "2037-01-01 00:00:00";
 const past = "2021-01-01 00:00:00";
+const beyondTimestampRange = "2099-01-01 00:00:00";
 
 d("membership state decides the acting organization", () => {
   it("resolves an active membership inside its window", async () => {
@@ -133,6 +141,21 @@ d("membership state decides the acting organization", () => {
     const u = await member({ orgRef: a, effectiveTo: past });
     const session = await callerFor(u).portals.mine();
     expect(session.organization.state).toBe("single_tenant_fallback");
+  }, 20_000);
+
+  it("cannot store a membership dated past the TIMESTAMP ceiling", async () => {
+    // Recorded because this suite tripped over it. A membership that is meant
+    // to run indefinitely has to leave `effectiveTo` NULL; writing a sentinel
+    // far-future date does not express "no end", it fails. Anything that later
+    // wants an explicit far end date needs a column change, not a larger
+    // literal.
+    const a = await org();
+    await expect(
+      pool.execute(
+        "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active',?,1)",
+        [`MEM-${rnd()}`, a, seq++, beyondTimestampRange]
+      )
+    ).rejects.toThrow(/Incorrect datetime value/);
   }, 20_000);
 
   it("reports two live memberships as ambiguous rather than picking one", async () => {
