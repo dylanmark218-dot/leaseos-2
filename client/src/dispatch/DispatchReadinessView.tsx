@@ -32,8 +32,20 @@ export type ReadinessResult = {
   contributions: { engine: string; finding: string }[];
 };
 
-/** The P8.1 picture, when something supplies it. `dispatch.readiness` does not — see below. */
-export type CapabilityRow = { capability: string; status: string; detail?: string | null };
+/**
+ * One P8.1 capability result, exactly as `dispatch.readiness` sends it. `reason` is present only on
+ * NOT_EVALUATED and is required there — there is no unexplained NOT_EVALUATED, and the screen is
+ * the last place that rule could be lost.
+ */
+export type CapabilityRow = { capability: string; status: string; detail?: string | null; reason?: string | null };
+
+/**
+ * The server's own combined status for the capability picture. It is shown as what it is — the
+ * capability picture's combined answer — and it is never the panel's overall verdict. Those are two
+ * server outputs, and when they disagree the disagreement belongs to the server, not to a screen
+ * picking the one it likes.
+ */
+export type CapabilityVerdict = { status: string; explanation: string; missingRequired: readonly string[] };
 
 export type ReadinessPanelState =
   | { kind: "loading" }
@@ -46,11 +58,13 @@ export type DispatchReadinessViewProps = {
   subject: { operatorId: number; unitId: number | null; trailerId: number | null } | null;
   state: ReadinessPanelState;
   /**
-   * Null means "this endpoint did not supply a capability picture" — which is the truth today,
-   * and is shown as such. It is not an empty list, because an empty list of checks reads as
-   * nothing wrong.
+   * Null means the server sent no capability picture at all; an empty array means it sent one with
+   * nothing in it. Both are shown as themselves, and neither is shown as nothing-wrong — an empty
+   * list of checks reads as clear to anyone glancing at it, which is the failure mode this whole
+   * contract exists to prevent.
    */
   capabilities: CapabilityRow[] | null;
+  capabilityVerdict: CapabilityVerdict | null;
   onRefresh: () => void;
   refreshing: boolean;
 };
@@ -98,7 +112,7 @@ function Frame({ jobId, subject, children, onRefresh, refreshing }: {
 }
 
 export function DispatchReadinessView(props: DispatchReadinessViewProps) {
-  const { jobId, subject, state, capabilities, onRefresh, refreshing } = props;
+  const { jobId, subject, state, capabilities, capabilityVerdict, onRefresh, refreshing } = props;
   const frame = (children: React.ReactNode) =>
     <Frame jobId={jobId} subject={subject} onRefresh={onRefresh} refreshing={refreshing}>{children}</Frame>;
 
@@ -177,11 +191,40 @@ export function DispatchReadinessView(props: DispatchReadinessViewProps) {
 
       <section aria-label="Capability checks" className="space-y-2">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Capability checks</h2>
+        {capabilityVerdict && (() => {
+          const p = presentCapability(capabilityVerdict.status);
+          return (
+            <div data-testid="capability-verdict" data-readiness={p.readiness}
+              className={`space-y-1 rounded border p-3 ${TONE[p.readiness]}`}>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-sm font-medium">Capability picture: {p.label}</span>
+                <Badge p={p} />
+              </div>
+              <p className="text-sm">{capabilityVerdict.explanation}</p>
+              {capabilityVerdict.missingRequired.length > 0 && (
+                <p className="text-sm">
+                  Required but not evaluated: {capabilityVerdict.missingRequired.join(", ")}
+                </p>
+              )}
+              <p className="text-xs opacity-80">
+                This is the capability picture's own combined status. The verdict above is the one
+                that governs dispatch.
+              </p>
+            </div>
+          );
+        })()}
         {capabilities === null
           ? (
             <p data-testid="capabilities-unavailable" className="rounded border border-slate-400 bg-slate-50 p-3 text-sm">
-              The readiness endpoint does not return the per-capability picture, so none is shown.
-              It is not being claimed that these checks passed — they were not supplied.
+              The server sent no capability picture with this readiness, so none is shown. It is not
+              being claimed that these checks passed — they were not supplied.
+            </p>
+          )
+          : capabilities.length === 0
+          ? (
+            <p data-testid="capabilities-empty" className="rounded border border-slate-400 bg-slate-50 p-3 text-sm">
+              The server returned no capabilities for this dispatch. Nothing was evaluated, which is
+              not the same as nothing being wrong.
             </p>
           )
           : capabilities.map(c => {
@@ -192,6 +235,8 @@ export function DispatchReadinessView(props: DispatchReadinessViewProps) {
                   <div>
                     <span className="font-medium">{c.capability}</span>
                     <p className="text-sm">{c.detail || p.meaning}</p>
+                    {/* Only ever rendered from what arrived. A capability with no reason shows none. */}
+                    {c.reason ? <p className="text-xs opacity-80">Not evaluated: {c.reason}</p> : null}
                   </div>
                   <Badge p={p} />
                 </div>

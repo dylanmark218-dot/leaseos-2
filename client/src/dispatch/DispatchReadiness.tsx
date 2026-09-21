@@ -7,8 +7,9 @@
  *   a failed query is a failure on screen, never a stale or cached answer — the query is not
  *   allowed to keep a previous result to fall back on, and an error outranks any data held;
  *
- *   the capability picture is passed as `null`, because `dispatch.readiness` does not return one.
- *   The view says so. Nothing here fabricates the missing half of the P8.1 contract.
+ *   the capability picture is passed through exactly as the server computed it — `null` when the
+ *   response carries none at all, which the view says outright rather than showing an empty grid
+ *   that reads as clear. Nothing here recombines it, and the overall verdict stays `verdict`.
  */
 import { trpc } from "@/lib/trpc";
 import { DispatchReadinessView, type ReadinessPanelState } from "./DispatchReadinessView";
@@ -57,7 +58,8 @@ export default function DispatchReadiness({ jobId }: { jobId: number }) {
       jobId={jobId}
       subject={validJob ? subject : null}
       state={state}
-      capabilities={null}
+      capabilities={readiness.data?.capabilities ?? null}
+      capabilityVerdict={readiness.data?.capabilityVerdict ?? null}
       onRefresh={refresh}
       refreshing={assignments.isFetching || readiness.isFetching}
     />

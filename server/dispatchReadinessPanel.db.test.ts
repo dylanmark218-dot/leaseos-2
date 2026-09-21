@@ -13,6 +13,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
+import { composeReadiness } from "./readinessComposer";
+import { CAPABILITY } from "./_core/readinessCapabilities";
 import { grantUserRole } from "./db";
 import type { DomainRole } from "./_core/recordsAuthorization";
 
@@ -112,10 +114,10 @@ const releaseFor = (workOrderId: number, defectIds: number[]) =>
 /* ================================================================== */
 
 d("dispatch.readiness — the shape the panel renders", () => {
-  it("P1. returns a verdict, an explanation, blockers and contributions, and nothing else", async () => {
+  it("P1. returns a verdict, an explanation, blockers, contributions and the capability picture, and nothing else", async () => {
     const s = await scenario("P1");
     const r = await panelQuery(s);
-    expect(Object.keys(r).sort()).toEqual(["blockers", "contributions", "explanation", "verdict"]);
+    expect(Object.keys(r).sort()).toEqual(["blockers", "capabilities", "capabilityVerdict", "contributions", "explanation", "verdict"]);
     expect(typeof r.verdict).toBe("string");
     expect(typeof r.explanation).toBe("string");
     expect(Array.isArray(r.blockers)).toBe(true);
@@ -153,17 +155,24 @@ d("dispatch.readiness — the shape the panel renders", () => {
   });
 
   /*
-   * The gap this slice found and did not paper over. `composeReadiness` computes the P8.1
-   * capability picture and `dispatch.evaluate` stores it on the check row, but `dispatch.readiness`
-   * does not return it — so the panel has no capability data to show and says so on screen rather
-   * than rendering an empty grid that reads as clear. If this assertion ever fails because the
-   * field was added, the panel can start showing it; until then it must not pretend.
+   * The gap the Readiness Panel found, now closed. `composeReadiness` always computed this; only
+   * `dispatch.evaluate` stored it, and no procedure returned it, so a dispatcher could see the
+   * eligibility verdict but not which capabilities answered and which were never asked — the exact
+   * distinction P8.1 exists to preserve.
    */
-  it("P5. does NOT return the P8.1 capability picture — the panel must not fabricate one", async () => {
+  it("P5. returns the P8.1 capability picture the composer already computed", async () => {
     const s = await scenario("P5");
-    const r = await panelQuery(s) as Record<string, unknown>;
-    expect(r.capabilities).toBeUndefined();
-    expect(r.capabilityVerdict).toBeUndefined();
+    const r = await panelQuery(s);
+    expect(Array.isArray(r.capabilities)).toBe(true);
+    expect(r.capabilities.length).toBeGreaterThan(0);
+    expect(r.capabilityVerdict).toBeTruthy();
+    expect(r.capabilityVerdict.consumer).toBe("dispatch readiness");
+  });
+
+  /* P8.2's policy snapshot is a separate contract and is deliberately still not on this wire. */
+  it("P5b. does not return the automation-policy snapshot — that is P8.2, not this", async () => {
+    const s = await scenario("P5b");
+    expect((await panelQuery(s) as Record<string, unknown>).automationPolicy).toBeUndefined();
   });
 });
 
@@ -248,5 +257,148 @@ d("the panel is behind the existing authorization, unchanged", () => {
   it("P12. a driver with no dispatch grant may not, and the panel gets an error rather than a verdict", async () => {
     const s = await scenario("P12");
     await expect(panelQuery(s, driverOnly)).rejects.toThrow();
+  });
+});
+
+/* ================================================================== */
+/* The capability picture, on the wire                                 */
+/* ================================================================== */
+
+d("the P8.1 capability picture survives the API boundary unchanged", () => {
+  it("C1. every capability status is one of the five canonical states, and nothing else", async () => {
+    const s = await scenario("C1");
+    await addCriticalDefect(s.unitId, "Brake air leak");
+    const r = await panelQuery(s);
+    for (const c of r.capabilities) {
+      expect(["PASS", "REVIEW", "BLOCKED", "UNKNOWN", "NOT_EVALUATED"], c.capability).toContain(c.status);
+    }
+    expect(["PASS", "REVIEW", "BLOCKED", "UNKNOWN", "NOT_EVALUATED"]).toContain(r.capabilityVerdict.status);
+  });
+
+  it("C2. capability identity survives — the names are the contract's own, not renamed for the screen", async () => {
+    const s = await scenario("C2");
+    const names = (await panelQuery(s)).capabilities.map(c => c.capability);
+    // Dispatch's always-required set must be present under exactly these names.
+    for (const name of [CAPABILITY.hos, CAPABILITY.operatorQualification, CAPABILITY.unitInspection, CAPABILITY.operatingDocuments, CAPABILITY.enforcementOrders]) {
+      expect(names, `dispatch requires "${name}" and the wire must name it that`).toContain(name);
+    }
+    expect(names.length, "no capability is dropped in transit").toBe(new Set(names).size);
+  });
+
+  it("C3. a NOT_EVALUATED capability carries its reason, and is never rounded to PASS or REVIEW", async () => {
+    const s = await scenario("C3");
+    const r = await panelQuery(s);
+    const unevaluated = r.capabilities.filter(c => c.status === "NOT_EVALUATED");
+    expect(unevaluated.length, "a job with no route named leaves at least one capability unevaluated").toBeGreaterThan(0);
+    for (const c of unevaluated) {
+      // There is no unexplained NOT_EVALUATED — the engine's own rule, and it must reach the screen.
+      expect(["module_disabled", "not_licensed", "not_applicable", "no_data_source_loaded"], c.capability).toContain(c.reason);
+      expect(c.status).not.toBe("PASS");
+      expect(c.status).not.toBe("REVIEW");
+    }
+  });
+
+  it("C4. blocker information survives where present — the detail is the engine's own labels", async () => {
+    const s = await scenario("C4");
+    await addCriticalDefect(s.unitId, "Brake air leak");
+    const r = await panelQuery(s);
+    const mech = r.capabilities.find(c => c.capability === CAPABILITY.mechanicRelease);
+    expect(mech?.status).toBe("BLOCKED");
+    expect(mech?.detail, "a blocked capability must say what blocked it").toBeTruthy();
+    // The same words the blocker list carries: one source, shown twice, never two derivations.
+    const labels = r.blockers.map(b => b.label);
+    for (const piece of (mech!.detail ?? "").split("; ")) expect(labels).toContain(piece);
+    expect(r.capabilityVerdict.blockers.map(c => c.capability)).toContain(CAPABILITY.mechanicRelease);
+  });
+
+  it("C5. the capability verdict is the server's own — byte-for-byte what composeReadiness produced", async () => {
+    const s = await scenario("C5");
+    await addCriticalDefect(s.unitId, "Brake air leak");
+    const viaApi = await panelQuery(s);
+    // The production composer, called directly. If the router reinterprets anything on the way out,
+    // these stop matching — which is the only thing this test is for.
+    const direct = await composeReadiness({ operatorId: s.operatorId, unitId: s.unitId, trailerId: null, jobId: s.jobId });
+    expect(viaApi.capabilities).toEqual(direct.capabilities);
+    expect(viaApi.capabilityVerdict).toEqual(direct.capabilityVerdict);
+  });
+
+  it("C6. UNKNOWN and NOT_EVALUATED are never rounded up by the combined verdict", async () => {
+    const s = await scenario("C6");
+    const r = await panelQuery(s);
+    // NOT_EVALUATED is set aside from the worst-of comparison and reported as its own field.
+    const unevaluatedNames = r.capabilityVerdict.notEvaluated.map(c => c.capability).sort();
+    expect(unevaluatedNames).toEqual(r.capabilities.filter(c => c.status === "NOT_EVALUATED").map(c => c.capability).sort());
+    if (r.capabilities.some(c => c.status === "UNKNOWN")) expect(r.capabilityVerdict.status).not.toBe("PASS");
+    if (r.capabilityVerdict.missingRequired.length) expect(r.capabilityVerdict.status).not.toBe("PASS");
+  });
+});
+
+/* ================================================================== */
+/* PR #4's repairs, visible in the capability picture                  */
+/* ================================================================== */
+
+d("the capability picture shows the repaired mechanic and enforcement reads", () => {
+  const capOf = (r: { capabilities: { capability: string; status: string; detail?: string }[] }, name: string) =>
+    r.capabilities.find(c => c.capability === name);
+
+  it("C7. an unresolved critical defect shows mechanic release BLOCKED", async () => {
+    const s = await scenario("C7");
+    await addCriticalDefect(s.unitId, "Brake air leak");
+    const r = await panelQuery(s);
+    expect(capOf(r, CAPABILITY.mechanicRelease)?.status).toBe("BLOCKED");
+    expect(r.capabilityVerdict.status).toBe("BLOCKED");
+  });
+
+  it("C8. a resolved critical defect with standing evidence shows mechanic release PASS", async () => {
+    const s = await scenario("C8");
+    const crit = await addCriticalDefect(s.unitId, "Brake air leak");
+    const wo = await addWorkOrder(s.unitId, crit);
+    expect(capOf(await panelQuery(s), CAPABILITY.mechanicRelease)?.status).toBe("BLOCKED");
+
+    const rel = await releaseFor(wo, [crit]);
+    expect(capOf(await panelQuery(s), CAPABILITY.mechanicRelease)?.status,
+      "a release is evidence, not resolution").toBe("BLOCKED");
+
+    await caller(mechanic).records.maintenance.resolveDefect({ defectId: crit, releaseId: rel.releaseId ?? null, note: "Brake chamber replaced and leak-tested" });
+    expect(capOf(await panelQuery(s), CAPABILITY.mechanicRelease)?.status).toBe("PASS");
+  });
+
+  /*
+   * The UNKNOWN path, from a real production fixture rather than a hand-made blocker: a roadside
+   * inspection whose result is not established. It must stay UNKNOWN on the wire. An UNKNOWN that
+   * reads as PASS is the single most dangerous rounding this contract can suffer, because unlike
+   * BLOCKED it looks like an answer.
+   */
+  it("C11. an unestablished inspection leaves enforcement orders UNKNOWN, never PASS", async () => {
+    const s = await scenario("C11");
+    await pool.execute(
+      "INSERT INTO enforcementEvents (eventRef, eventType, jurisdiction, tenantId, agency, occurredAt, inspectionResult, unitId, status, confirmedByUserId, confirmedAt) VALUES (?, 'roadside_inspection', 'AB', 'default', 'CVSA', DATE_SUB(NOW(), INTERVAL 2 HOUR), 'unknown', ?, 'under_review', 1, DATE_SUB(NOW(), INTERVAL 2 HOUR))",
+      [key("EV").slice(0, 60), s.unitId]);
+    const r = await panelQuery(s);
+    expect(r.blockers.map(b => b.code)).toContain("enforcement_result_unknown");
+    const enf = capOf(r, CAPABILITY.enforcementOrders);
+    expect(enf?.status, "an inspection whose result is not established is not a pass").toBe("UNKNOWN");
+    expect(r.capabilityVerdict.status).not.toBe("PASS");
+  });
+
+  it("C9. an active out-of-service order shows enforcement orders BLOCKED", async () => {
+    const s = await scenario("C9");
+    await addActiveOosOrder(s.unitId);
+    const r = await panelQuery(s);
+    expect(capOf(r, CAPABILITY.enforcementOrders)?.status).toBe("BLOCKED");
+    expect(capOf(r, CAPABILITY.enforcementOrders)?.detail).toBeTruthy();
+  });
+
+  it("C10. a revoked release can never leave mechanic release reading PASS", async () => {
+    const s = await scenario("C10");
+    const crit = await addCriticalDefect(s.unitId, "Brake air leak");
+    const wo = await addWorkOrder(s.unitId, crit);
+    const rel = await releaseFor(wo, [crit]);
+    await caller(mechanic).records.maintenance.resolveDefect({ defectId: crit, releaseId: rel.releaseId ?? null, note: "Brake chamber replaced and leak-tested" });
+    expect(capOf(await panelQuery(s), CAPABILITY.mechanicRelease)?.status).toBe("PASS");
+
+    await caller(shopLead).records.maintenance.revokeRelease({ workOrderId: wo, reason: "Leak reappeared on the yard walk-around" });
+    expect(capOf(await panelQuery(s), CAPABILITY.mechanicRelease)?.status,
+      "revoking a release never improves the capability picture").not.toBe("PASS");
   });
 });

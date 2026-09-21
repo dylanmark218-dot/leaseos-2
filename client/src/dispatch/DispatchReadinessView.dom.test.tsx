@@ -39,6 +39,7 @@ const props = (o: Partial<DispatchReadinessViewProps> = {}): DispatchReadinessVi
   subject: { operatorId: 7, unitId: 12, trailerId: null },
   state: { kind: "loaded", result: result() },
   capabilities: null,
+  capabilityVerdict: null,
   onRefresh: vi.fn(),
   refreshing: false,
   ...o,
@@ -213,7 +214,7 @@ describe("capability statuses", () => {
     expect(screen.getByTestId("overall-verdict").textContent).toContain("blocked");
   });
 
-  it("says outright when this procedure supplies no capability picture, rather than showing an empty pass", () => {
+  it("says outright when the server sent no capability picture at all, rather than showing an empty pass", () => {
     render(<DispatchReadinessView {...props({ capabilities: null })} />);
     expect(screen.getByTestId("capabilities-unavailable").textContent).toMatch(/not (returned|supplied)/i);
     expect(screen.queryAllByTestId(/^capability-/)).toHaveLength(0);
@@ -286,5 +287,92 @@ describe("when the job has no assignment to evaluate", () => {
     expect(screen.getByTestId("panel-no-subject").textContent).toMatch(/no (unit and driver|assignment)/i);
     expect(screen.queryByTestId("overall-verdict")).toBeNull();
     expect(saysReadyAnywhere()).toBe(false);
+  });
+});
+
+/* ── the capability picture, now that the server sends it ───────────────────── */
+
+describe("the P8.1 capability picture", () => {
+  const withCaps = (rows: CapabilityRow[], verdict: DispatchReadinessViewProps["capabilityVerdict"] = null) =>
+    props({ capabilities: rows, capabilityVerdict: verdict });
+
+  it("names each capability as the server named it, and shows the status it gave", () => {
+    render(<DispatchReadinessView {...withCaps([
+      { capability: "mechanic release", status: "BLOCKED", detail: "Open critical defect on this unit" },
+      { capability: "enforcement orders", status: "PASS" },
+      { capability: "route restrictions", status: "NOT_EVALUATED", reason: "not_applicable" },
+    ])} />);
+
+    const mech = screen.getByTestId("capability-mechanic release");
+    expect(within(mech).getByText("mechanic release")).toBeInTheDocument();
+    expect(mech).toHaveAttribute("data-readiness", "blocked");
+    expect(mech.textContent).toContain("Open critical defect on this unit");
+    expect(screen.getByTestId("capability-enforcement orders")).toHaveAttribute("data-readiness", "ready");
+  });
+
+  it("carries the reason a capability was not evaluated, because an unexplained NOT_EVALUATED is the hole this contract closes", () => {
+    render(<DispatchReadinessView {...withCaps([
+      { capability: "route restrictions", status: "NOT_EVALUATED", reason: "not_applicable" },
+      { capability: "hos", status: "NOT_EVALUATED", reason: "no_data_source_loaded" },
+    ])} />);
+    expect(screen.getByTestId("capability-route restrictions").textContent).toContain("not_applicable");
+    expect(screen.getByTestId("capability-hos").textContent).toContain("no_data_source_loaded");
+    for (const k of ["route restrictions", "hos"]) {
+      expect(screen.getByTestId(`capability-${k}`)).toHaveAttribute("data-readiness", "not_evaluated");
+    }
+  });
+
+  it("does not invent evidence a capability did not carry", () => {
+    render(<DispatchReadinessView {...withCaps([{ capability: "unit inspection", status: "PASS" }])} />);
+    const row = screen.getByTestId("capability-unit inspection");
+    // No detail was sent, so the row carries the status's own meaning and nothing dressed up as a finding.
+    expect(row.textContent).not.toMatch(/undefined|null/);
+  });
+
+  it("shows an explicit empty state when the server returned zero capabilities", () => {
+    render(<DispatchReadinessView {...withCaps([])} />);
+    expect(screen.getByTestId("capabilities-empty").textContent).toMatch(/no capabilit/i);
+    expect(screen.queryAllByTestId(/^capability-/)).toHaveLength(0);
+    expect(document.querySelectorAll('[data-testid^="capability"][data-readiness="ready"]')).toHaveLength(0);
+  });
+
+  it("shows the server's combined capability status, labelled as the capability picture's own", () => {
+    render(<DispatchReadinessView {...withCaps(
+      [{ capability: "hos", status: "NOT_EVALUATED", reason: "not_licensed" }],
+      { status: "REVIEW", explanation: "1 capability was not evaluated.", missingRequired: ["hos"] },
+    )} />);
+    const v = screen.getByTestId("capability-verdict");
+    expect(v).toHaveAttribute("data-readiness", "review");
+    expect(v.textContent).toContain("1 capability was not evaluated.");
+    expect(v.textContent).toContain("hos");
+  });
+});
+
+/* ── server authority: the capability rows never decide the verdict ─────────── */
+
+describe("the overall verdict stays the server's", () => {
+  it("a blocked verdict stays blocked even when every capability passed", () => {
+    render(<DispatchReadinessView {...props({
+      state: { kind: "loaded", result: result({ verdict: "blocked", blockers: [blocker()] }) },
+      capabilities: [
+        { capability: "hos", status: "PASS" },
+        { capability: "mechanic release", status: "PASS" },
+        { capability: "enforcement orders", status: "PASS" },
+      ],
+      capabilityVerdict: { status: "PASS", explanation: "All capabilities passed.", missingRequired: [] },
+    })} />);
+    expect(overall()).toHaveAttribute("data-readiness", "blocked");
+    expect(overall().textContent).toContain("blocked");
+  });
+
+  it("an eligible verdict stays eligible even when a capability is BLOCKED — the panel reports, it does not arbitrate", () => {
+    render(<DispatchReadinessView {...props({
+      state: { kind: "loaded", result: result({ verdict: "eligible" }) },
+      capabilities: [{ capability: "route restrictions", status: "BLOCKED", detail: "Bridge posting exceeded" }],
+      capabilityVerdict: { status: "BLOCKED", explanation: "1 capability blocked.", missingRequired: [] },
+    })} />);
+    // Disagreement between the two server outputs is the server's to resolve, not the screen's.
+    expect(overall()).toHaveAttribute("data-readiness", "ready");
+    expect(screen.getByTestId("capability-route restrictions")).toHaveAttribute("data-readiness", "blocked");
   });
 });

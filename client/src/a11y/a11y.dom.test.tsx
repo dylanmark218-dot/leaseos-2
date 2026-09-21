@@ -53,10 +53,22 @@ const office = (tab: CommercialOfficeViewProps["tab"]): CommercialOfficeViewProp
  * different screens: the blocked one is a list of reasons, the failed one is an alert with a
  * retry and no verdict at all.
  */
-const readinessPanel = (state: DispatchReadinessViewProps["state"]): DispatchReadinessViewProps => ({
+const readinessPanel = (
+  state: DispatchReadinessViewProps["state"],
+  capabilities: DispatchReadinessViewProps["capabilities"] = null,
+  capabilityVerdict: DispatchReadinessViewProps["capabilityVerdict"] = null,
+): DispatchReadinessViewProps => ({
   jobId: 41, subject: { operatorId: 7, unitId: 12, trailerId: null }, state,
-  capabilities: null, onRefresh: () => {}, refreshing: false,
+  capabilities, capabilityVerdict, onRefresh: () => {}, refreshing: false,
 });
+/** The P8.1 picture as the server sends it, with all five states on one screen. */
+const readinessCapabilities: DispatchReadinessViewProps["capabilities"] = [
+  { capability: "mechanic release", status: "BLOCKED", detail: "Open critical defect on this unit" },
+  { capability: "unit inspection", status: "PASS" },
+  { capability: "operator qualification", status: "REVIEW", detail: "Medical review due in 9 days" },
+  { capability: "enforcement orders", status: "UNKNOWN", detail: "Inspection result not established" },
+  { capability: "route restrictions", status: "NOT_EVALUATED", reason: "not_applicable" },
+];
 const readinessBlocked: DispatchReadinessViewProps["state"] = {
   kind: "loaded",
   result: {
@@ -84,6 +96,7 @@ const surfaces = [
   { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
   { name: "dispatch readiness — blocked", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked)} />) },
   { name: "dispatch readiness — query failed", render: () => render(<DispatchReadinessView {...readinessPanel({ kind: "failed", message: "Database unavailable" })} />) },
+  { name: "dispatch readiness — capability picture", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked, readinessCapabilities, { status: "BLOCKED", explanation: "1 capability blocked; 1 was not evaluated.", missingRequired: [] })} />) },
   { name: "commercial office — organizations", render: () => render(<CommercialOfficeView {...office("organizations")} />) },
   { name: "commercial office — documents", render: () => render(<CommercialOfficeView {...office("documents")} />) },
   { name: "commercial office — disposal", render: () => render(<CommercialOfficeView {...office("disposal")} />) },

@@ -51,7 +51,19 @@ export const dispatchGateRouter = router({
     .input(SUBJECT)
     .query(async ({ input }) => {
       const r = await composeReadiness({ operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null, jobId: input.jobId ?? null, routeApprovalRef: input.routeApprovalRef ?? null, loneWorker: input.loneWorker });
-      return { verdict: r.eligibility.verdict, explanation: r.eligibility.explanation, blockers: r.eligibility.blockers, contributions: r.contributions };
+      // 0170 — the P8.1 picture travels with the verdict. The composer has always computed it and
+      // `evaluate` has always stored it, but nothing returned it, so a reader could see that
+      // dispatch was blocked and not which capabilities answered, which passed, and which were
+      // never asked. That last distinction is the whole point of the contract: a verdict assembled
+      // from blockers reads an unevaluated capability's silence as consent, and the only thing that
+      // stops a screen doing the same is being told what was not evaluated.
+      //
+      // Passed through as computed. Nothing is reshaped, renamed, filtered or recombined here —
+      // `capabilities` and `capabilityVerdict` are already the consumer-facing vocabulary, their
+      // `detail` is the same blocker labels this response already carries, and a second shape
+      // would be a second place for the statuses to drift. P8.2's policy snapshot is a separate
+      // contract and deliberately stays off this wire.
+      return { verdict: r.eligibility.verdict, explanation: r.eligibility.explanation, blockers: r.eligibility.blockers, contributions: r.contributions, capabilities: r.capabilities, capabilityVerdict: r.capabilityVerdict };
     }),
 
   evaluate: roleProcedure("dispatch.evaluate")
