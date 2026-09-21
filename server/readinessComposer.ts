@@ -22,7 +22,7 @@ import { CAPABILITY, dispatchContractFor, pictureFor, type EvaluationMap } from 
 import { entitlementToEvaluation, snapshotOf, type PolicySnapshot } from "./_core/automationPolicy";
 import { resolveCapabilities } from "./_core/automationPolicyStore";
 import { destinationAcceptanceForJob } from "./_core/destinationAcceptance";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or as sqlOr } from "drizzle-orm";
 import { hosAttestations } from "../drizzle/schema";
 import { faultDispatchEffect } from "./_core/telematics";
 import { getDb } from "./db";
@@ -30,6 +30,7 @@ import {
   complianceDocuments, dispatchPostings, fieldDevices, insuranceCoveredEntities, insurancePolicies, insurancePolicyCoverages,
   jobs, maintenanceDefects, measurementDeviceAssignments, measurementDevices, calibrationEvents, operators, roadsideServiceEvents,
   units, workOrderReleases,
+  coreRecordOwnership, enforcementEvents, outOfServiceOrders,
   faultCodes,
   communicationCoverage, communicationPolicies, companyRadioAuthorizations, radioChannels,
   roadGraphEdges, roadRadioAssignments, routeApprovals, unitRadioCapabilities,
@@ -46,6 +47,8 @@ import { trainingDispatchDecision } from "./_core/trainingAcademy";
 import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
+import { currentReleaseEvidenceFor, type StoredRelease } from "./_core/mechanicRelease";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import {
   ADVISORY_POLICY, communicationBlockers, planCommunications,
   type CommunicationPolicy, type CoverageObservation, type GeoCondition, type PathSegment,
@@ -92,6 +95,109 @@ export async function currentCommunicationPolicy(db: NonNullable<Awaited<ReturnT
       loneWorkerRequiresSatellite: live.loneWorkerRequiresSatellite,
     },
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Enforcement state, read from the canonical table                    */
+/* ------------------------------------------------------------------ */
+
+/** The refs the evaluator matches on. Synthesized from entity ids, never from free text. */
+const subjectRefForUnit = (id: number) => `unit:${id}`;
+const subjectRefForTrailer = (id: number) => `trailer:${id}`;
+const subjectRefForOperator = (id: number) => `operator:${id}`;
+
+/**
+ * Active out-of-service orders and unestablished inspections covering this readiness subject.
+ *
+ * **Matched structurally, not by string.** `outOfServiceOrders.subjectRef` is free text the
+ * confirming caller supplies ("UNIT-127"), so matching a unit against it would be guesswork.
+ * `enforcementEvents` — the order's parent, one per stop — carries real `unitId`, `trailerId` and
+ * `operatorId` columns and an index on them, so the event is what says whose order this is. The
+ * refs handed to the evaluator are synthesized from those ids and the order keeps its own scope,
+ * which is what decides whether a prohibited driver can be replaced on a clear truck.
+ *
+ * **Tenant scoping is not optional.** An order recorded against another organization must not
+ * ground this one's truck. The unit's owning organization comes from `coreRecordOwnership`, the
+ * same source `ownershipScopeWhere` uses, and an unowned record is this deployment's single tenant
+ * — which is what `enforcementEvents.tenantId` already stores for it.
+ *
+ * One query for the events, one for their orders. No per-subject round trip.
+ */
+async function loadEnforcementState(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  ids: { unitId: number | null; trailerId: number | null; operatorId: number },
+): Promise<NonNullable<ReadinessSubject["enforcement"]>> {
+  const subjects: { subjectRef: string; scope: OosScope }[] = [];
+  if (ids.unitId != null) subjects.push({ subjectRef: subjectRefForUnit(ids.unitId), scope: "vehicle" });
+  if (ids.trailerId != null) subjects.push({ subjectRef: subjectRefForTrailer(ids.trailerId), scope: "trailer" });
+  subjects.push({ subjectRef: subjectRefForOperator(ids.operatorId), scope: "driver" });
+
+  // The organization this readiness belongs to, from the unit when there is one.
+  let orgRef: string | null = null;
+  if (ids.unitId != null) {
+    const owner = await db.select({ orgRef: coreRecordOwnership.orgRef }).from(coreRecordOwnership)
+      .where(and(eq(coreRecordOwnership.recordType, "unit"), eq(coreRecordOwnership.recordId, ids.unitId))).limit(1);
+    orgRef = owner[0]?.orgRef ?? null;
+  }
+  const tenantOf = (t: string | null) => t ?? SINGLE_TENANT_ID;
+  const ourTenant = tenantOf(orgRef);
+
+  const eventFilters = [
+    ids.unitId != null ? eq(enforcementEvents.unitId, ids.unitId) : null,
+    ids.trailerId != null ? eq(enforcementEvents.trailerId, ids.trailerId) : null,
+    eq(enforcementEvents.operatorId, ids.operatorId),
+  ].filter((f): f is NonNullable<typeof f> => f != null);
+
+  const events = (await db.select().from(enforcementEvents).where(sqlOr(...eventFilters)))
+    .filter(e => e.status !== "rescinded" && tenantOf(e.tenantId) === ourTenant);
+  if (!events.length) return { subjects, orders: [], unresolvedInspections: [] };
+
+  /** The ref this event's order should be attributed to, preferring the most specific subject. */
+  const refFor = (e: typeof events[number]): string | null =>
+    ids.unitId != null && e.unitId === ids.unitId ? subjectRefForUnit(ids.unitId)
+      : ids.trailerId != null && e.trailerId === ids.trailerId ? subjectRefForTrailer(ids.trailerId)
+        : e.operatorId === ids.operatorId ? subjectRefForOperator(ids.operatorId)
+          : null;
+
+  const byRef = new Map(events.map(e => [e.eventRef, e] as const));
+  const rows = await db.select().from(outOfServiceOrders).where(and(
+    inArray(outOfServiceOrders.eventRef, Array.from(byRef.keys())),
+    eq(outOfServiceOrders.status, "active"),
+  ));
+
+  const orders: OosOrder[] = [];
+  for (const o of rows) {
+    const e = byRef.get(o.eventRef);
+    const ref = e ? refFor(e) : null;
+    if (!ref) continue;
+    // The order keeps its own scope; only the ref is normalized. A vehicle order and a cargo order
+    // on the same stop are different prohibitions and stay different here.
+    subjects.push({ subjectRef: ref, scope: o.scope });
+    orders.push({
+      orderRef: o.orderRef, scope: o.scope, subjectRef: ref, issuedAt: o.issuedAt,
+      issuingAgency: o.issuingAgency, releaseCondition: o.releaseCondition,
+      releasedAt: o.releasedAt, releasedByUserId: o.releasedByUserId,
+      releaseEvidenceRef: o.releaseEvidenceRef, rescindedAt: o.rescindedAt,
+    });
+  }
+
+  /*
+   * An inspection whose result was never established denies authorization for what it covered —
+   * the evaluator's own rule, and "we could not read the document" is not a pass.
+   */
+  const unresolvedInspections = events
+    .filter(e => e.inspectionResult === "unknown")
+    .map(e => ({ inspectionRef: e.inspectionReportNumber ?? e.eventRef, coversSubjectRefs: [refFor(e)].filter((r): r is string => r != null) }))
+    .filter(i => i.coversSubjectRefs.length > 0);
+
+  const seen = new Set<string>();
+  const uniqueSubjects = subjects.filter(s => {
+    const k = `${s.subjectRef}|${s.scope}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return { subjects: uniqueSubjects, orders, unresolvedInspections };
 }
 
 export type ComposedReadiness = {
@@ -309,28 +415,63 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     if (!unit) throw new Error(`Unit ${subject.unitId} not found`);
     const [uCreds, defects, releases, roadside, pols, assignments] = await Promise.all([
       credentialsFor("unit", unit.id),
-      db.select().from(maintenanceDefects).where(and(eq(maintenanceDefects.unitId, unit.id), inArray(maintenanceDefects.status, ["open", "in_progress"]))),
-      db.select().from(workOrderReleases).where(eq(workOrderReleases.unitId, unit.id)).orderBy(desc(workOrderReleases.releasedAt)).limit(5),
+      /*
+       * Open defects, AND every critical one whatever its status. A resolved critical defect still
+       * matters: the release that evidenced its resolution can be revoked afterwards, and readiness
+       * has to be able to notice that.
+       */
+      db.select().from(maintenanceDefects).where(and(
+        eq(maintenanceDefects.unitId, unit.id),
+        sqlOr(inArray(maintenanceDefects.status, ["open", "in_progress"]), eq(maintenanceDefects.severity, "critical")),
+      )),
+      /*
+       * Every release on the unit, not the newest five. Under the old timestamp rule a window was
+       * harmless because only the newest row could ever matter; matching by defect identity, an
+       * older release is the one that names a given defect, and a window would silently drop it.
+       */
+      db.select().from(workOrderReleases).where(eq(workOrderReleases.unitId, unit.id)).orderBy(desc(workOrderReleases.releasedAt)),
       db.select().from(roadsideServiceEvents).where(and(eq(roadsideServiceEvents.unitId, unit.id), inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"]))),
       policiesCovering("unit", unit.id, now),
       db.select().from(measurementDeviceAssignments).where(and(eq(measurementDeviceAssignments.assignedToType, "unit"), eq(measurementDeviceAssignments.assignedToId, unit.id))),
     ]);
+    /*
+     * Two conditions, kept apart — the manifest has always listed them separately ("unresolved
+     * critical defects" and "critical work-order mechanic release") and collapsing them into one
+     * timestamp comparison is what let a revocation read as an approval.
+     *
+     *   the DEFECT  — is there a critical defect nobody has resolved?
+     *   the RELEASE — does the release evidence for each critical defect still stand?
+     *
+     * Neither is inferred from the other, and neither is inferred from chronology. A release is
+     * evidence about the defects it NAMES; `records.maintenance.resolveDefect` is what closes a
+     * defect, and it is a separate, recorded act by a named person.
+     */
     const critical = defects.filter(d => d.severity === "critical");
-    criticalCount = critical.length;
-    const releasedAfter = (d: (typeof critical)[number]) => releases.some(r => r.releasedAt > d.reportedAt);
-    const unreleased = critical.filter(d => !releasedAfter(d));
+    const storedReleases: StoredRelease[] = releases.map(r => ({
+      id: r.id, workOrderId: r.workOrderId, releaseType: r.releaseType,
+      testResult: r.testResult, resolvedDefectIds: r.resolvedDefectIds, releasedAt: r.releasedAt,
+    }));
+    const unresolvedCritical = critical.filter(d => d.status !== "resolved");
+    criticalCount = unresolvedCritical.length;
+    /*
+     * Which critical defects owe standing release evidence: the unresolved ones, and the ones that
+     * were resolved ON a release — because revoking that release withdraws the evidence the
+     * resolution rested on, and readiness must get worse, never better, when that happens.
+     */
+    const owingEvidence = critical.filter(d => d.status !== "resolved" || d.resolvedByReleaseId != null);
+    const withoutEvidence = owingEvidence.filter(d => currentReleaseEvidenceFor(d.id, storedReleases) == null);
     truck = {
       unitNumber: unit.unitNumber,
       inspection: credentialState(uCreds, ["cvip_certificate", "annual_inspection"], "Annual inspection"),
       registration: credentialState(uCreds, ["vehicle_registration"], "Registration"),
       insurance: { label: "Insurance", present: pols.length > 0, expiresAt: pols.length ? new Date(Math.max(...pols.map(p => p.expiresAt.getTime()))) : null },
       maintenanceOverdue: unit.maintenanceStatus === "blocked",
-      criticalDefectOpen: unreleased.length > 0,
-      mechanicReleaseRequired: critical.length > 0,
-      mechanicReleaseGiven: critical.length > 0 && unreleased.length === 0,
+      criticalDefectOpen: unresolvedCritical.length > 0,
+      mechanicReleaseRequired: owingEvidence.length > 0,
+      mechanicReleaseGiven: owingEvidence.length > 0 && withoutEvidence.length === 0,
     };
-    unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}`)]);
-    releaseVersion = versionOf(releases.map(r => r.id));
+    unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}:${d.resolvedByReleaseId ?? "∅"}`)]);
+    releaseVersion = versionOf(releases.map(r => `${r.id}:${r.releaseType}:${r.testResult ?? "∅"}:${r.resolvedDefectIds ?? "∅"}`));
 
     // Insurance: the six statuses, in B12's vocabulary. Policy expiry blocks and
     // is overridable by no one; missing paper is review.
@@ -409,11 +550,41 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   if (!job) contributions.push({ engine: "dispatch", finding: "No job supplied — job requirements not evaluated" });
 
   /* ---- enforcement: an order from outside this company ---- */
-  if (subject.enforcement?.subjects.length) {
+  /*
+   * The composer loads this itself.
+   *
+   * It used to take enforcement only from `subject.enforcement`, and not one production caller
+   * supplied it — `dispatchRouter`'s input schema has no field for it. So the capability that this
+   * very file calls overridable by nobody ("a manager may override a company rule; an inspector's
+   * order is not a company rule") reported PASS on every dispatch, from an input nothing provided,
+   * while active orders sat in `outOfServiceOrders`. A caller forgetting to pass an optional object
+   * is not evidence that enforcement was checked and found clear.
+   *
+   * The caller-supplied form is kept as a seam for tests and for a caller that has already
+   * resolved the state, but it is now an override of a real read rather than the only source.
+   */
+  let enforcementSubject = subject.enforcement ?? null;
+  if (!enforcementSubject) {
+    try {
+      enforcementSubject = await loadEnforcementState(db, { unitId: subject.unitId, trailerId: subject.trailerId, operatorId: op.id });
+    } catch (error) {
+      /*
+       * A read that failed is NOT a clear result. It travels as NOT_EVALUATED in P8.1's own
+       * vocabulary, which the contract turns into an `unknown` blocker — never silence.
+       */
+      evaluation[CAPABILITY.enforcementOrders] = {
+        evaluated: false, reason: "no_data_source_loaded",
+        detail: `Enforcement orders could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      };
+      contributions.push({ engine: "enforcement", finding: "Enforcement state could not be read — reported as not evaluated, not as clear" });
+      enforcementSubject = null;
+    }
+  }
+  if (enforcementSubject?.subjects.length) {
     const enf = enforcementReadiness({
-      subjects: subject.enforcement.subjects,
-      orders: subject.enforcement.orders,
-      unresolvedInspections: subject.enforcement.unresolvedInspections,
+      subjects: enforcementSubject.subjects,
+      orders: enforcementSubject.orders,
+      unresolvedInspections: enforcementSubject.unresolvedInspections,
       at: now,
     });
     for (const b of enf.blockers) {

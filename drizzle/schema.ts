@@ -335,6 +335,16 @@ export const maintenanceDefects = mysqlTable("maintenanceDefects", {
   reportedBy: int("reportedBy"),
   workOrderNumber: varchar("workOrderNumber", { length: 80 }),
   completedAt: timestamp("completedAt"),
+  /* 0169 — the resolution act, recorded on the row it changes. */
+  resolvedAt: timestamp("resolvedAt"),
+  resolvedByUserId: int("resolvedByUserId"),
+  /**
+   * The release that evidenced this resolution, when one was required. Readiness reads it so that
+   * revoking that release is visible as the loss of evidence it is, rather than leaving a defect
+   * resolved on a release that no longer stands.
+   */
+  resolvedByReleaseId: int("resolvedByReleaseId"),
+  resolutionNote: varchar("resolutionNote", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
