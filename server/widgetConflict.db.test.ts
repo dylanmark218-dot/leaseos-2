@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { drizzleWidgetLayoutStore } from "./widgetLayouts";
 import type { NormalizedItem } from "./_core/widgetLayoutWrite";
 import type { StoredLayout } from "./_core/widgetService";
@@ -36,7 +36,24 @@ suite("layout revision and conflict", () => {
       database: process.env.WIDGET_DB_NAME ?? "leaseos_b24",
       multipleStatements: true, connectionLimit: 8,
     });
-    const sqlText = ["0089_widget_dashboards.sql", "0090_widget_layout_revision.sql"]
+    // Derived, not hard-coded. The list used to read
+    // ["0089_widget_dashboards.sql", "0090_widget_layout_revision.sql"], and the
+    // comment above it already argued for deriving — "exactly the kind of harness
+    // drift that gets blamed on the schema". It then drifted in the way it warned
+    // about: reconciliation renumbered those migrations to 0127 and 0128, the list
+    // did not follow, and readFileSync would have thrown ENOENT in beforeAll. It
+    // went unnoticed because nothing set WIDGET_DB_URL, so the suite reported
+    // "skipped" rather than broken for its whole life.
+    //
+    // Reading the directory means a renumbering cannot break it again, and a
+    // widget migration added later is picked up without anyone remembering to.
+    const migrations = readdirSync(new URL("../drizzle/", import.meta.url))
+      .filter(f => /^\d{4}_widget_.*\.sql$/.test(f))
+      .sort();
+    if (migrations.length === 0) {
+      throw new Error("No widget migrations found in drizzle/ — the harness cannot build its schema");
+    }
+    const sqlText = migrations
       .map((f) => readFileSync(new URL(`../drizzle/${f}`, import.meta.url), "utf8"))
       .join("\n");
     await pool.query("DROP TABLE IF EXISTS widgetLayoutItems");

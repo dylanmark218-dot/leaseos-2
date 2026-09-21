@@ -115,3 +115,9 @@ temp/
 # Manus version file (auto-generated, not part of source)
 client/public/__manus__/version.json
 .project-config.json
+
+# Agent worktrees. Isolated checkouts created for parallel review agents; they
+# contain a full copy of the tree and must never be staged. Named explicitly
+# rather than ignoring .claude/ wholesale, so project-level Claude config can
+# still be tracked deliberately.
+.claude/worktrees/

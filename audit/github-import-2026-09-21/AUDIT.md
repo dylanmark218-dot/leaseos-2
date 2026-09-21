@@ -202,14 +202,15 @@ imports. It needs `--splitting`, which changes the shape of the deployment
 artifact, so it belongs in a change made deliberately rather than folded into
 a dependency patch.
 
-### TEST-0 — 34 tests never run anywhere, including a cross-tenant regression (High)
+### TEST-0 — 30 tests never run anywhere, including a cross-tenant regression (High)
 
 Added 2026-09-21, and it is the most consequential thing this audit missed the
 first time.
 
-`server/widgetPersistence.db.test.ts` (24 cases) gates on `WIDGET_DB_URL`;
-`server/widgetConflict.db.test.ts` (10 cases) gates on `WIDGET_DB_SOCKET ||
-WIDGET_DB_URL`. Neither `.github/workflows/ci.yml` nor `scripts/ci-gate.sh`
+`server/widgetPersistence.db.test.ts` (22 cases) gates on `WIDGET_DB_URL`;
+`server/widgetConflict.db.test.ts` (8 cases) gates on `WIDGET_DB_SOCKET ||
+WIDGET_DB_URL`. Counts are vitest's, not `grep -c 'it('` — the latter reads 24
+and 10, because `it(` also appears inside comments in both files. Neither `.github/workflows/ci.yml` nor `scripts/ci-gate.sh`
 sets either variable — CI provisions MariaDB and exports `DATABASE_URL` only.
 So these suites skip locally **and** in CI. They have never run in this
 repository.
@@ -230,12 +231,37 @@ This also corrects the framing used throughout the rest of this document. "CI is
 the authority on the database-backed suites" is true of the 33 that gate on
 `DATABASE_URL` and false of these two.
 
-**Fix:** export `WIDGET_DB_URL` alongside `DATABASE_URL` in the CI job — the
-same MariaDB service can serve both — and fail the gate if a `.db.test.ts`
-suite reports skipped when a database is configured. Not applied here: pointing
-both at one database may need schema separation (`WIDGET_DB_NAME` exists), and
-switching on 34 previously-unrun tests is a change that should land on its own
-rather than inside a dependency patch.
+**They were also broken, which only turning them on revealed.** Both harnesses
+built their schema from a hard-coded list — `["0089_widget_dashboards.sql",
+"0090_widget_layout_revision.sql"]`. Neither file exists: reconciliation
+renumbered those migrations to `0127` and `0128`, and the lists did not follow.
+`readFileSync` would have thrown `ENOENT` in `beforeAll`. So these suites could
+not have passed in this tree at any point, and nothing said so, because a suite
+that never runs reports `skipped` rather than broken.
+
+The comment above one of those lists had already argued for deriving it — *"not
+a hard-coded one … exactly the kind of harness drift that gets blamed on the
+schema"* — directly above the hard-coded list that then drifted.
+
+**Fixed 2026-09-21:**
+
+- `scripts/ci-gate.sh` creates a second database, `${db}_widgets`, and exports
+  `WIDGET_DB_URL` at it. Separate rather than shared because
+  `widgetPersistence.db.test.ts` DROPs and recreates `widgetLayouts` and
+  `widgetLayoutItems` in its `beforeAll`, and vitest runs files concurrently —
+  pointed at the main database it would pull two tables out from under whatever
+  else was mid-query, after gate 3 had already passed.
+- Both harnesses now derive their migration list by reading `drizzle/` for
+  `NNNN_widget_*.sql`, so a renumbering cannot break them again and a later
+  widget migration is picked up without anyone remembering to.
+- Gate 6 fails if any `.db.test.ts` suite reports skipped while a database is
+  configured. A guard reading an environment variable nobody sets is exactly
+  how this hid, and the symptom — `↓` — is indistinguishable from a suite
+  correctly standing down.
+
+These 30 tests are running for the first time. If they fail, the failure is
+information rather than a regression: it is what the suites were written to
+detect, finally being asked.
 
 ### TEST-1 — `fieldroute.test.ts` needs a database but does not self-skip (Medium)
 

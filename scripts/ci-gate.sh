@@ -29,6 +29,19 @@ gate "1. Clean database"
 mysqlc -e "DROP DATABASE IF EXISTS \`$db\`; CREATE DATABASE \`$db\`;"
 echo "dropped and recreated $db"
 
+# A second, separate database for the two widget suites.
+#
+# They are not fussy for the sake of it: widgetPersistence.db.test.ts DROPs and
+# recreates widgetLayouts and widgetLayoutItems from migrations 0089/0090 in its
+# beforeAll, and vitest runs files concurrently. Pointed at $db that would pull
+# two tables out from under whatever else is mid-query, and gate 3 would have
+# passed before it happened. Its own database costs one CREATE and removes the
+# whole question.
+widget_db="${db}_widgets"
+mysqlc -e "DROP DATABASE IF EXISTS \`$widget_db\`; CREATE DATABASE \`$widget_db\`;"
+export WIDGET_DB_URL="mysql://${user}${pass:+:$pass}@${host}:${port}/${widget_db}"
+echo "dropped and recreated $widget_db (WIDGET_DB_URL set)"
+
 gate "2. Migrations"
 bash scripts/apply-migrations.sh
 
@@ -64,7 +77,26 @@ if [ "$count" != "0" ]; then echo "FAIL: $count bare protectedProcedure"; exit 1
 echo "0"
 
 gate "6. Test suite (includes column-level parity and reserved-word audit)"
-LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run
+LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run --reporter=basic 2>&1 | tee /tmp/vitest-gate.out
+# pipefail is on, so a failing vitest still fails the gate through the pipe.
+
+# A suite that needs a database and skips anyway reports as "↓", which is
+# indistinguishable from one correctly standing down because no database is
+# configured. Here one is, so a skipped .db.test.ts is a suite that is not
+# running and looks like it chose not to.
+#
+# This is why the check exists: widgetPersistence.db.test.ts (24 cases) and
+# widgetConflict.db.test.ts (10 cases) gate on WIDGET_DB_URL, nothing set it,
+# and they had never run — in CI or anywhere. The first of them exists to guard
+# a cross-tenant board overwrite, and it reported "skipped" the whole time.
+skipped_db=$(grep -E '^ *↓ .*\.db\.test\.ts' /tmp/vitest-gate.out || true)
+if [ -n "$skipped_db" ]; then
+  echo "FAIL: a .db.test.ts suite skipped while a database is configured:"
+  echo "$skipped_db"
+  echo "Either its guard reads an environment variable this gate does not set, or the gate stopped setting one."
+  exit 1
+fi
+echo "no database-backed suite skipped"
 
 gate "7. Production build"
 pnpm build
