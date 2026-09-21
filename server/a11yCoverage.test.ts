@@ -26,6 +26,7 @@ const NOT_A_SURFACE: Record<string, string> = {
   "client/src/portal/UniversalSearch.tsx": "a live tRPC caller; needs a client harness",
   "client/src/portal/QuickCapture.tsx": "a live tRPC caller; needs a client harness",
   "client/src/portal/SyncIndicator.tsx": "a status chip with no interactive content of its own",
+  "client/src/session/SessionGate.tsx": "a live tRPC caller; the three screens it renders — SignInView, WorkspaceChooserView, AccessDeniedView — are each surfaces in the suite",
 };
 
 describe("the accessibility suite keeps up with the screens", () => {

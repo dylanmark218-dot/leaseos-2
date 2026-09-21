@@ -29,7 +29,11 @@ export type PanelContract = {
 };
 
 export const PANEL_CONTRACTS: readonly PanelContract[] = [
-  { file: "PortalShell.tsx", procedures: ["portals.mine", "surfaces.myDay", "surfaces.exceptions", "surfaces.inbox"], portals: "every_portal" },
+  // v23.26 — `portals.mine` is gone from the shell: which workspaces this
+  // session holds now arrives with the identity and the organization, in one
+  // server-authoritative answer, and the switch itself goes through a procedure
+  // that refuses a workspace the caller does not hold.
+  { file: "PortalShell.tsx", procedures: ["session.selectWorkspace", "surfaces.myDay", "surfaces.exceptions", "surfaces.inbox"], portals: "every_portal" },
   { file: "UniversalSearch.tsx", procedures: ["surfaces.search"], portals: "every_portal" },
   { file: "QuickCapture.tsx", procedures: [], portals: "every_portal" },
   { file: "SyncIndicator.tsx", procedures: [], portals: "every_portal" },

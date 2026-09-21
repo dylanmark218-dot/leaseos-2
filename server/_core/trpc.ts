@@ -52,9 +52,11 @@ import {
   authorize,
   isSensitivePermission,
   permissionForProcedure,
+  SESSION_PROCEDURE_PERMISSIONS,
   type Permission,
-  type RoleGrant, type ProcedureName } from "./recordsAuthorization";
+  type RoleGrant, type ProcedureName, type SessionProcedureName } from "./recordsAuthorization";
 import { listActiveUserRoles, recordAuthorizationDecision } from "../db";
+import { AmbiguousOrganization, MembershipRevoked } from "./actingScope";
 
 /**
  * Enforces a domain permission server-side.
@@ -128,9 +130,103 @@ export function roleProcedure(procedureName: ProcedureName) {
         });
       }
 
-      return next({
-        ctx: { ...ctx, user: ctx.user!, roles: decision.effectiveRoles },
+      // v23.26 — an unresolved organization is a question, not a crash.
+      //
+      // `resolveActingScope` refuses rather than guesses when a person is a
+      // live member of two companies and has selected neither. That refusal is
+      // correct and stays; what was wrong is that it surfaced as an
+      // INTERNAL_SERVER_ERROR, which tells the shell nothing it can act on and
+      // tells an operator the system is broken when it is in fact protecting
+      // them. Translated once, here, so every one of the ~100 tenant-scoped
+      // procedures behind this gate gets the actionable answer.
+      try {
+        return await next({
+          ctx: { ...ctx, user: ctx.user!, roles: decision.effectiveRoles },
+        });
+      } catch (error) {
+        if (error instanceof AmbiguousOrganization) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Choose which organization you are working in before continuing.",
+          });
+        }
+        // A membership that ended is a refusal, and it is the caller's own
+        // status rather than a fault — FORBIDDEN, named, not a 500.
+        if (error instanceof MembershipRevoked) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Your LeaseOS membership is not active.",
+          });
+        }
+        throw error;
+      }
+    })
+  );
+}
+
+/* ==================================================================
+ * v23.26 — sessionProcedure: the "authenticated, not yet authorized" gate.
+ *
+ * There is exactly one question a signed-in person may ask before holding any
+ * domain role: *what am I allowed to open?* `roleProcedure` cannot answer it —
+ * it refuses a caller with no role, which is precisely the caller who needs to
+ * be told "no LeaseOS workspace is assigned to you yet" rather than shown a
+ * blank screen. `publicProcedure` cannot answer it either: the answer names a
+ * person's organizations and roles and must never be served to an anonymous
+ * request.
+ *
+ * So: authentication required, no role required, every decision audited
+ * through the same table as every other gate, and the set of procedure names
+ * that may use it pinned in `SESSION_PROCEDURE_PERMISSIONS`. That last part is
+ * what stops this becoming the hole the census exists to catch — a new
+ * procedure cannot hide behind a builder the drift guard does not count.
+ * ================================================================== */
+
+export function sessionProcedure(procedureName: SessionProcedureName) {
+  const permission = SESSION_PROCEDURE_PERMISSIONS[procedureName];
+  if (!permission) {
+    throw new Error(
+      `No session permission mapped for procedure "${procedureName}" — add it to SESSION_PROCEDURE_PERMISSIONS`
+    );
+  }
+
+  return t.procedure.use(
+    t.middleware(async ({ ctx, next }) => {
+      const userId = ctx.user?.id ?? null;
+      const now = new Date();
+
+      if (!userId) {
+        await recordAuthorizationDecision({
+          actorUserId: null,
+          procedureName,
+          permission,
+          rolesHeld: null,
+          outcome: "denied_unauthenticated",
+          detail: "No authenticated session",
+          occurredAt: now,
+        });
+        throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+      }
+
+      // Recorded as allowed because it IS allowed: being signed in is the whole
+      // requirement. What the caller may then DO is decided by every other gate,
+      // each of which writes its own row.
+      const grants: RoleGrant[] = await listActiveUserRoles(userId);
+      await recordAuthorizationDecision({
+        actorUserId: userId,
+        procedureName,
+        permission,
+        rolesHeld:
+          grants
+            .map(g => (g.scopeRef ? `${g.role}@${g.scopeRef}` : g.role))
+            .join(",")
+            .slice(0, 300) || null,
+        outcome: "allowed",
+        detail: null,
+        occurredAt: now,
       });
+
+      return next({ ctx: { ...ctx, user: ctx.user!, grants } });
     })
   );
 }

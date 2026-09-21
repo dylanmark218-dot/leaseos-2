@@ -9,6 +9,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startProductionWorker } from "./productionWorker";
 import { ENV, assertProductionSecrets } from "./env";
+import { organizationSelectionMiddleware } from "./organizationSelection";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -52,6 +53,13 @@ async function startServer() {
   // tRPC API
   app.use(
     "/api/trpc",
+    // v23.26 — the request's claimed organization, in scope for the whole
+    // handler. It carries a claim and never an authority: `resolveActingScope`
+    // checks it against the membership table on every request, so a forged
+    // cookie names an organization the caller has been proved to belong to or
+    // it names nothing. Mounted here rather than in `createContext` because a
+    // context factory returns before any procedure runs.
+    organizationSelectionMiddleware,
     createExpressMiddleware({
       router: appRouter,
       createContext,

@@ -2951,6 +2951,30 @@ export function permissionForProcedure(name: string): Permission | null {
 }
 
 /* ==================================================================
+ * v23.26 — The session surface.
+ *
+ * Three procedures, and it is a closed list on purpose. `sessionProcedure`
+ * requires authentication but no domain role, which is the only gate in this
+ * system that a person holding nothing can pass — so the set of things it may
+ * be used for is declared here rather than left to whoever writes the next
+ * router. `procedureAuthorization.test.ts` pins it.
+ *
+ * All three carry `portal.compose_own`: the existing universal permission for
+ * "assemble MY session from MY roles". They read `ctx.user.id`, the grants the
+ * gate already loaded, and the memberships those imply. Nobody composes
+ * somebody else's session, which is what makes the permission universal in the
+ * first place.
+ * ================================================================== */
+
+export const SESSION_PROCEDURE_PERMISSIONS = {
+  "session.context": "portal.compose_own",
+  "session.selectOrganization": "portal.compose_own",
+  "session.selectWorkspace": "portal.compose_own",
+} as const satisfies Record<string, Permission>;
+
+export type SessionProcedureName = keyof typeof SESSION_PROCEDURE_PERMISSIONS;
+
+/* ==================================================================
  * v21.10 — External identities
  *
  * A customer, vendor or facility identity is not a domain-role user. It

@@ -16,6 +16,9 @@ import type { BoardTileView } from "../widgets/WidgetBoard";
 import { listOfferable } from "../../../server/_core/widgetService";
 import type { RoleActor } from "../../../server/_core/roleActor";
 import { demonstration, fromQuery } from "../showcase/panelSource";
+import { SignInView } from "../session/SignInView";
+import { WorkspaceChooserView } from "../session/WorkspaceChooserView";
+import { AccessDeniedView } from "../session/AccessDeniedView";
 
 afterEach(cleanup);
 
@@ -69,6 +72,16 @@ const surfaces = [
   { name: "widget tile — unknown", render: () => render(<WidgetTileShell title="Hours Remaining" variant="kpi" payload={unknown("no verified duty record loaded")} />) },
   { name: "add-widget picker", render: () => render(<AddWidgetPicker offers={listOfferable(A11Y_DRIVER)} alreadyAdded={[]} onAdd={() => {}} />) },
   { name: "showcase panel — demonstration", render: () => render(<SourcedPanel title="Route alternatives" source={demonstration("no routing engine result is read on this page")}><p>body</p></SourcedPanel>) },
+  // v23.26 — the screens a person meets before anything else. A driver signs in
+  // on a phone in a cab and a mechanic on a shop tablet with wet hands, so these
+  // are the last surfaces in the product that may fail a contrast or a name-role
+  // rule.
+  { name: "sign in", render: () => render(<SignInView methods={[{ key: "leaseos", label: "Sign in to LeaseOS", detail: "LeaseOS uses your organization's single sign-on.", onSelect: () => {} }]} notice="Your session has ended. Sign in to continue." />) },
+  { name: "sign in — refused", render: () => render(<SignInView methods={[{ key: "leaseos", label: "Sign in to LeaseOS", detail: "single sign-on", onSelect: () => {} }]} error="Sign-in could not be completed. Try again." intendedLabel="the page you were opening (/portal/field_workforce)" />) },
+  { name: "workspace chooser", render: () => render(<WorkspaceChooserView displayName="Dana Reyes" workspaces={[{ key: "field_workforce", label: "Field", description: "Driver operations, jobs, routes and paperwork" }, { key: "fleet_maintenance", label: "Mechanic", description: "Work orders, repairs and vehicle maintenance" }]} activeWorkspace="field_workforce" onSelectWorkspace={() => {}} onSignOut={() => {}} />) },
+  { name: "organization chooser", render: () => render(<WorkspaceChooserView organizations={[{ orgRef: "ORG-A", name: "ABC Transport", membershipType: "employee" }, { orgRef: "ORG-B", name: "Northern Hauling", membershipType: "contractor" }]} activeOrgRef={null} workspaces={[]} onSelectWorkspace={() => {}} onSelectOrganization={() => {}} />) },
+  { name: "access denied — no workspace", render: () => render(<AccessDeniedView kind="no_workspace" onSignOut={() => {}} />) },
+  { name: "access denied — workspace not open", render: () => render(<AccessDeniedView kind="workspace_not_open" onGoToWorkspace={() => {}} workspaceLabel="Field" onSignOut={() => {}} />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {

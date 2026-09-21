@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { EXTERNAL_PROCEDURE_PERMISSIONS, OPERATIONAL_PROCEDURE_PERMISSIONS, RECORDS_PROCEDURE_PERMISSIONS, type ProcedureName } from "./_core/recordsAuthorization";
+import { EXTERNAL_PROCEDURE_PERMISSIONS, OPERATIONAL_PROCEDURE_PERMISSIONS, RECORDS_PROCEDURE_PERMISSIONS, SESSION_PROCEDURE_PERMISSIONS, type ProcedureName } from "./_core/recordsAuthorization";
 import {
   UNVERIFIED_DATA_SOURCES,
   VERIFIED_DATA_SOURCES,
@@ -71,6 +71,7 @@ const assistantAskRouter = readFileSync("server/assistantAskRouter.ts", "utf8");
 // procedures; a router the tripwire cannot see is a router it cannot defend.
 const contractorOperationsRouter = readFileSync("server/contractorOperationsRouter.ts", "utf8");
 const trainingAcademyRouter = readFileSync("server/trainingAcademyRouter.ts", "utf8");
+const sessionRouter = readFileSync("server/sessionRouter.ts", "utf8");
 const inventory = readFileSync("PROCEDURE_AUTHORIZATION_INVENTORY.md", "utf8");
 const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
 
@@ -311,6 +312,52 @@ describe("the untouched API is counted, not forgotten", () => {
   it("keeps the inventory document in step with the code", () => {
     expect(inventory).toContain("ROLE_AUTHORIZED");
     expect(inventory).toContain("356");
+  });
+});
+
+/**
+ * v23.26 — the session gate is a closed list.
+ *
+ * `sessionProcedure` is the one builder in this system that a caller holding
+ * NO domain role can pass: it requires authentication and nothing else, because
+ * the question "what am I allowed to open?" has to be answerable by the person
+ * who is allowed to open nothing. That makes it exactly the kind of builder the
+ * census exists to watch, so the set of procedures permitted to use it is
+ * declared in code and pinned here.
+ *
+ * If this count rises, somebody has added an endpoint reachable by any
+ * authenticated account, and this is the thing that noticed.
+ */
+describe("the session gate cannot be used to smuggle an ungated procedure", () => {
+  const wired = Array.from(sessionRouter.matchAll(/sessionProcedure\("([^"]+)"\)/g)).map(m => m[1]!);
+
+  it("mounts exactly the three declared session procedures, and no more", () => {
+    expect(Object.keys(SESSION_PROCEDURE_PERMISSIONS).sort()).toEqual([
+      "session.context",
+      "session.selectOrganization",
+      "session.selectWorkspace",
+    ]);
+    expect(wired.sort()).toEqual(Object.keys(SESSION_PROCEDURE_PERMISSIONS).sort());
+  });
+
+  it("uses the gate nowhere else in the router surface", () => {
+    const everyRouter = [OPERATIONAL_SOURCES, recordsRouter, portalRouter].join("\n");
+    expect((everyRouter.match(/sessionProcedure\(/g) ?? []).length).toBe(0);
+  });
+
+  it("carries only the self-scoped universal permission, never an operational one", () => {
+    // `portal.compose_own` is universal precisely because it is self-scoped in
+    // code: these procedures read `ctx.user.id` and the grants the gate loaded,
+    // and nobody composes somebody else\'s session. Anything else here would be
+    // an operational grant handed to every signed-in account.
+    for (const [name, permission] of Object.entries(SESSION_PROCEDURE_PERMISSIONS)) {
+      expect(permission, name).toBe("portal.compose_own");
+    }
+  });
+
+  it("has no bare protectedProcedure or publicProcedure in the session surface", () => {
+    expect(countBuilders(sessionRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(sessionRouter, "publicProcedure")).toBe(0);
   });
 });
 

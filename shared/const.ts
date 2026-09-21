@@ -10,9 +10,17 @@ export const NOT_ADMIN_ERR_MSG = 'You do not have required permission (10002)';
 // victim's browser.
 export const OAUTH_STATE_COOKIE = "__Host-oauth_state";
 
-// `state` carries the callback redirect URI (used at token exchange) plus the
-// CSRF nonce. Defined here so the client encoder and server decoder never drift.
-export type OAuthState = { redirectUri: string; nonce?: string };
+// `state` carries the callback redirect URI (used at token exchange), the CSRF
+// nonce, and — v23.26 — where inside LeaseOS the person was trying to go before
+// they were sent to sign in. Defined here so the client encoder and server
+// decoder never drift.
+//
+// `next` is attacker-influenceable, like every other field of `state`, and is
+// treated that way: the callback runs it through `safeRedirectPath` before it
+// reaches a `Location` header, so the worst a forged value achieves is landing
+// the person on a path of this same origin. It is never used for anything but
+// the redirect.
+export type OAuthState = { redirectUri: string; nonce?: string; next?: string };
 
 export const encodeOAuthState = (state: OAuthState): string =>
   btoa(JSON.stringify(state));

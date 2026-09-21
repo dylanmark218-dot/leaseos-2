@@ -37,6 +37,8 @@ async function scopeFor(userId: number) {
   return { tenantId: (await resolveActingScope(db, userId)).tenantId };
 }
 import { securityIncidentsRouter } from "./securityIncidentsRouter";
+import { sessionRouter } from "./sessionRouter";
+import { ORG_SELECTION_COOKIE } from "./_core/organizationSelection";
 import { commercialOfficeRouter } from "./commercialOfficeRouter";
 import { facilityDirectoryRouter } from "./facilityDirectoryRouter";
 import type { WidgetLayoutStore } from "./_core/widgetService";
@@ -49,6 +51,7 @@ import { branchRolesFor } from "./_core/widgetRoleKeys";
 import { isDomainRole, permissionsForDomainRole } from "./_core/recordsAuthorization";
 import {
   listActiveUserRoles,
+  recordAuthorizationDecision,
   actingScopeFor,
   evidenceInScope,
   jobInScope,
@@ -381,11 +384,33 @@ export const appRouter = router({
   // v21.18 — machines only; gated by integrationProcedure, never by roles.
   inbound: inboundRouter,
   insurance: insuranceRouter,
+  /**
+   * v23.26 — identity, organization and workspace, resolved server-side.
+   * The shell reads `session.context`; nothing it returns is an authority.
+   */
+  session: sessionRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      // v23.26 — the organization selection is part of the session, so it ends
+      // with it. Leaving it behind would hand the next person to use this
+      // browser a pre-selected tenant, which is a confusing way to start and a
+      // bad way to end.
+      ctx.res.clearCookie(ORG_SELECTION_COOKIE, { ...cookieOptions, maxAge: -1 });
+      // Through the same table every other security decision is written to.
+      // A sign-out is the event an access review most often needs and the one
+      // a system that only logs refusals never has.
+      await recordAuthorizationDecision({
+        actorUserId: ctx.user?.id ?? null,
+        procedureName: "auth.logout",
+        permission: "portal.compose_own",
+        rolesHeld: null,
+        outcome: ctx.user ? "allowed" : "denied_unauthenticated",
+        detail: "session ended",
+        occurredAt: new Date(),
+      });
       return { success: true } as const;
     }),
   }),

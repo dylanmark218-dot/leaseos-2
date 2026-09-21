@@ -2,16 +2,27 @@
  * PortalShell — one shell, role-composed.
  *
  * The same backend; a different first screen per portal. The shell reads
- * `portals.mine` for which portals this session holds, then the five surfaces
- * — My Day, Exceptions, Inbox, Search, Timeline — all of which the server
- * already filters to what the caller may see or act on. The shell decides
- * nothing about permission; it renders what it is given.
+ * `session.context` for who this is, which company they are acting for and
+ * which workspaces are open to them, then the five surfaces — My Day,
+ * Exceptions, Inbox, Search, Timeline — all of which the server already
+ * filters to what the caller may see or act on. The shell decides nothing
+ * about permission; it renders what it is given.
+ *
+ * v23.26 — the switcher is server-authoritative. It used to read
+ * `portals.mine` and hold the current portal in `useState`, so switching was a
+ * local variable: correct in practice, because every call behind it was gated
+ * anyway, but it meant the shell's idea of "which workspaces do I hold" and the
+ * server's could differ, and the shell's was the one on screen. Now the list
+ * comes from `session.context`, the switch goes through
+ * `session.selectWorkspace` — which refuses one the caller does not hold and
+ * remembers one they do — and access revoked server-side takes the tab with it
+ * on the next fetch.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { composeMyDayView, composeOfficeView, contextRibbon, defaultPortal, exceptionIndicator, switcherModel, type PortalKey } from "./viewModels";
+import { composeMyDayView, composeOfficeView, contextRibbon, exceptionIndicator, switcherModel, type PortalKey } from "./viewModels";
 import { MyDayPanel } from "./panels/MyDayPanel";
 import { ExceptionsPanel } from "./panels/ExceptionsPanel";
 import { InboxPanel } from "./panels/InboxPanel";
@@ -20,15 +31,39 @@ import { SetupPanel } from "./panels/SetupPanel";
 import { UniversalSearch } from "./UniversalSearch";
 import { SyncIndicator } from "./SyncIndicator";
 import { QuickCapture } from "./QuickCapture";
+import { SessionGate } from "@/session/SessionGate";
 
 export type PanelKey = "myday" | "exceptions" | "inbox" | "timeline" | "setup";
 
 const OFFICE_PORTALS = new Set<PortalKey>(["office_administration", "finance_billing", "management", "executive", "hr_workforce", "auditor_regulator"]);
 
-export function PortalShell({ initialPanel = "myday", displayName = null }: { initialPanel?: PanelKey; displayName?: string | null }) {
+/**
+ * The shell, behind the gate.
+ *
+ * `SessionGate` resolves identity, organization and workspace and renders the
+ * sign-in screen, the chooser or a refusal when any of those is unsettled. It
+ * hands the shell a workspace only once the server has said this person holds
+ * it — which is presentation, not permission: the gate could be deleted and
+ * not one call behind it would start succeeding.
+ */
+export function PortalShell(props: { initialPanel?: PanelKey; displayName?: string | null }) {
+  return (
+    <SessionGate>
+      {({ context, workspace }) => (
+        <PortalShellBody
+          {...props}
+          workspace={workspace as PortalKey}
+          held={context.availableWorkspaces.map(w => w.key as PortalKey)}
+          displayName={props.displayName ?? context.user?.name ?? null}
+        />
+      )}
+    </SessionGate>
+  );
+}
+
+function PortalShellBody({ initialPanel = "myday", displayName = null, workspace, held }: { initialPanel?: PanelKey; displayName?: string | null; workspace: PortalKey; held: readonly PortalKey[] }) {
   const [, navigate] = useLocation();
   const [panel, setPanel] = useState<PanelKey>(initialPanel);
-  const [portalOverride, setPortalOverride] = useState<PortalKey | null>(null);
   const [online, setOnline] = useState<boolean>(typeof navigator === "undefined" ? true : navigator.onLine);
   // v21.9.1 — subscribe; a value read once at mount is wrong the moment the truck leaves coverage.
   useEffect(() => {
@@ -38,13 +73,15 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
     return () => { window.removeEventListener("online", up); window.removeEventListener("offline", down); };
   }, []);
 
-  const session = trpc.portals.mine.useQuery();
+  const selectWorkspace = trpc.session.selectWorkspace.useMutation();
   const myDay = trpc.surfaces.myDay.useQuery(undefined, { refetchInterval: 60_000 });
   const exceptions = trpc.surfaces.exceptions.useQuery({ limit: 200 }, { refetchInterval: 60_000 });
   const inbox = trpc.surfaces.inbox.useQuery(undefined, { refetchInterval: 60_000 });
 
-  const held = useMemo(() => (session.data?.portals ?? []).map(p => p.portal as PortalKey), [session.data]);
-  const portal = portalOverride ?? defaultPortal(held);
+  // The server named the workspace and the list it came from. The shell picks
+  // nothing — there is no local default here any more, because a default the
+  // client chooses is a default the client can be wrong about.
+  const portal = workspace;
   const switcher = switcherModel(held, portal);
 
   const view = useMemo(() => {
@@ -57,8 +94,23 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
 
   const go = (link: { portal: string; route: string }) => navigate(`/portal/${link.portal}${link.route}`);
 
-  if (session.isLoading) return <div className="p-8 text-sm text-[#5b6b82]">Composing your portal…</div>;
-  if (!portal) return <div className="p-8 text-sm text-[#5b6b82]">No portal is open to this session — you do not hold a role that composes one. Ask your administrator for the role you need.</div>;
+  /**
+   * Switch workspace. The server decides, and it is the server that says where
+   * to land.
+   *
+   * A refusal here is not a bug to swallow: it means the tab on screen names a
+   * workspace this account no longer holds — revoked while they were signed in.
+   * The chooser is the right place to land, because it re-reads what is
+   * actually open rather than leaving a stale tab looking pressable.
+   */
+  const switchTo = async (key: PortalKey) => {
+    try {
+      const chosen = await selectWorkspace.mutateAsync({ workspace: key });
+      navigate(chosen.landing);
+    } catch {
+      navigate("/workspaces");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#f6f8fb] text-[#172033]">
@@ -66,7 +118,7 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-2">
           <nav aria-label="Portals" className="flex flex-wrap gap-1">
             {switcher.map(s => (
-              <button key={s.key} onClick={() => setPortalOverride(s.key)} aria-current={s.current ? "page" : undefined}
+              <button key={s.key} onClick={() => { void switchTo(s.key); }} aria-current={s.current ? "page" : undefined}
                 className={`rounded-full px-3 py-1 text-sm ${s.current ? "bg-[#132a4a] text-white" : "bg-[#eef2f7] text-[#172033] hover:bg-[#dfe5ee]"}`}>{s.label}</button>
             ))}
           </nav>

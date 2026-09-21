@@ -79,8 +79,9 @@ import {
   users,
   externalIdentities,
   integrationClients,
-  coreRecordOwnership, organizationMemberships, fieldTickets, incidentReports, loads } from "../drizzle/schema";
+  coreRecordOwnership, organizationMemberships, organizations, fieldTickets, incidentReports, loads } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import type { MembershipFact } from "./_core/workspaceAccess";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -1344,6 +1345,63 @@ export async function bootstrapManagementRole(args: {
   });
 
   return { ok: true, grantId };
+}
+
+/* ==================================================================
+ * v23.26 — the session surface's two reads and one write.
+ *
+ * Every membership row for a user, whatever its status, joined to its
+ * organization's status. Deliberately unfiltered: the session resolver needs
+ * to tell "you never had a membership here" (the historical single tenant)
+ * apart from "your membership ended" (a refusal with a sentence a person can
+ * act on), and a query that returned only live rows would collapse the two.
+ * ================================================================== */
+export async function listMembershipFacts(userId: number): Promise<MembershipFact[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({ m: organizationMemberships, orgName: organizations.name, orgStatus: organizations.status })
+    .from(organizationMemberships)
+    .leftJoin(organizations, eq(organizations.orgRef, organizationMemberships.orgRef))
+    .where(eq(organizationMemberships.userId, userId));
+  return rows.map(r => ({
+    membershipRef: r.m.membershipRef,
+    orgRef: r.m.orgRef,
+    organizationName: r.orgName ?? r.m.orgRef,
+    // A membership pointing at no organization row resolves to "closed", not to
+    // "active". There is no status to read, and an unreadable status is not a
+    // live one.
+    organizationStatus: (r.orgStatus ?? "closed") as MembershipFact["organizationStatus"],
+    membershipType: r.m.membershipType,
+    membershipStatus: r.m.status,
+    effectiveFrom: r.m.effectiveFrom,
+    effectiveTo: r.m.effectiveTo,
+    branchId: r.m.branchId,
+    defaultWorkspace: r.m.defaultWorkspace,
+  }));
+}
+
+/**
+ * Remember which workspace a person last entered, on the membership it belongs
+ * to.
+ *
+ * `organizationMemberships.defaultWorkspace` has been in the schema since
+ * 0086 and nothing has ever read or written it. It is the right home: the
+ * preference belongs to a person *in one company*, so a driver at one employer
+ * and a mechanic at another each keep their own. It is a PREFERENCE — the
+ * resolver checks it against the workspaces actually open before honouring it,
+ * so a stored value cannot outlive the access that justified it.
+ */
+export async function rememberDefaultWorkspace(args: {
+  membershipRef: string;
+  workspace: string;
+}): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(organizationMemberships)
+    .set({ defaultWorkspace: args.workspace })
+    .where(eq(organizationMemberships.membershipRef, args.membershipRef));
 }
 
 export async function grantUserRole(input: InsertUserRoleAssignment) {

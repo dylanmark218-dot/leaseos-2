@@ -14,26 +14,44 @@
  * resolved: picking one would silently decide which company a request writes
  * into.
  *
- * **Historically.** There was no tenant,
- * organization or membership table in this schema. `ctx` carries a user and
- * their effective roles and no tenant. `userRoleAssignments.scopeType` is
- * `global | branch` — there is no tenant scope to read. The single production
- * writer of `tenantId` hardcodes `"default"`.
- *
- * So this system is single-tenant in fact, and pretending otherwise by trusting
- * a client-supplied tenant was strictly worse than admitting it: it produced a
+ * **Historically.** There was no tenant, organization or membership table in
+ * this schema. `ctx` carried a user and their effective roles and no tenant, so
+ * the system was single-tenant in fact, and pretending otherwise by trusting a
+ * client-supplied tenant was strictly worse than admitting it: it produced a
  * multi-tenant-shaped API with no multi-tenant enforcement behind it. This
- * resolver returns the system's single tenant from server-owned context and
- * refuses to read one from input. When a real membership table exists, this is
- * the one function that changes, and every caller inherits the fix.
+ * resolver returned the system's single tenant from server-owned context and
+ * refused to read one from input, and said that when a real membership table
+ * existed, this would be the one function that changed and every caller would
+ * inherit the fix.
+ *
+ * **v22.20 (0086)** created `organizations` and `organizationMemberships`, and
+ * **v23.26** is that promised change:
+ *
+ *   - the organization's own status is consulted, so a suspended or closed
+ *     company resolves for nobody;
+ *   - a person whose every membership has ended is REFUSED rather than dropped
+ *     into the single-tenant fallback, because the fallback is for a deployment
+ *     that never had organizations, not for an ex-employee;
+ *   - a caller who is a live member of several organizations may SELECT one,
+ *     and the selection is verified against this same query before it decides
+ *     anything — so the ~100 callers of this function inherit the selection
+ *     without any of them being edited.
+ *
+ * `userRoleAssignments.scopeType` is still `global | branch` and carries no
+ * organization, so a person who is a member of two companies takes their role
+ * names into both. Membership and the tenant-scoped queries are what isolate
+ * the DATA; scoping a GRANT to an organization is the next migration, and
+ * `LEASEOS_B23_0_IDENTITY_AND_WORKSPACES.md` records it as outstanding rather
+ * than implying it is done.
  *
  * Branch scope IS server-owned and is enforced: a caller may only scope a
  * policy to a branch they actually hold a grant in.
  */
 
 import { and, eq, isNull } from "drizzle-orm";
-import { organizationMemberships, userRoleAssignments } from "../../drizzle/schema";
+import { organizationMemberships, organizations, userRoleAssignments } from "../../drizzle/schema";
 import type { DbOrTx } from "./dbTypes";
+import { requestedOrganization } from "./organizationSelection";
 
 /**
  * The tenant this deployment operates as. Matches what the existing
@@ -58,15 +76,39 @@ export type ActingScope = {
   global: boolean;
 };
 
+export type ActingScopeOptions = {
+  /** Evaluate memberships as of this instant. Defaults to now. */
+  at?: Date;
+  /**
+   * v23.26 — the organization the caller SAYS they are working in.
+   *
+   * A request, not an assertion. It is honoured only when this user has a live
+   * membership in it, and it is the tie-breaker for nothing else: a caller with
+   * one membership resolves to that one however loudly the request names
+   * another, and a caller naming an organization they do not belong to is
+   * treated as having named nothing — which, for a multi-organization caller,
+   * still ends in `AmbiguousOrganization`.
+   *
+   * When omitted it falls back to the request-scoped selection (the cookie the
+   * organization chooser writes), so the ~100 tenant-scoped readers that call
+   * `resolveActingScope(db, userId)` inherit the selection without each having
+   * to thread it. Outside a request there is no selection and behaviour is
+   * exactly what it was.
+   */
+  preferredOrgRef?: string | null;
+};
+
 /**
  * Resolve what the caller may act for. Never reads tenant, branch or terminal
- * from client input.
+ * from client input — a named organization is checked against the membership
+ * table before it is allowed to decide anything.
  */
 export async function resolveActingScope(
   db: DbOrTx,
   userId: number,
-  at?: Date,
+  options?: ActingScopeOptions,
 ): Promise<ActingScope> {
+  const at = options?.at;
   const grants = await db.select({ scopeType: userRoleAssignments.scopeType, scopeRef: userRoleAssignments.scopeRef })
     .from(userRoleAssignments)
     .where(and(eq(userRoleAssignments.userId, userId), isNull(userRoleAssignments.revokedAt)));
@@ -76,13 +118,47 @@ export async function resolveActingScope(
   const global = grants.some((g: { scopeType: string }) => g.scopeType === "global");
 
   const now = at ?? new Date();
-  const memberships = (await db.select().from(organizationMemberships)
-    .where(and(eq(organizationMemberships.userId, userId), eq(organizationMemberships.status, "active"))))
+  // v23.26 — the organization's own status is part of the answer. A membership in
+  // a suspended or closed company is not a live membership: the company is not
+  // trading, and resolving a request into it would let work continue inside a
+  // tenant an administrator has deliberately stopped.
+  const rows = await db.select({ m: organizationMemberships, orgStatus: organizations.status })
+    .from(organizationMemberships)
+    .leftJoin(organizations, eq(organizations.orgRef, organizationMemberships.orgRef))
+    .where(eq(organizationMemberships.userId, userId));
+  const memberships = rows
+    .filter((r: { m: { status: string } }) => r.m.status === "active")
+    // A membership pointing at no organization row is unresolvable, not
+    // permissive: there is no status to check, so it does not count.
+    .filter((r: { orgStatus: string | null }) => r.orgStatus === "active")
+    .map((r: { m: typeof organizationMemberships.$inferSelect }) => r.m)
     .filter((m: { effectiveFrom: Date; effectiveTo: Date | null }) =>
       m.effectiveFrom.getTime() <= now.getTime() && (!m.effectiveTo || m.effectiveTo.getTime() > now.getTime()));
 
   const orgs = Array.from(new Set(memberships.map((m: { orgRef: string }) => m.orgRef)));
+
+  // Had a membership, has none live. Refused rather than fallen back: the
+  // fallback exists for a deployment that never had organizations, not for a
+  // person whose organization ended their access.
+  if (orgs.length === 0 && rows.length > 0) {
+    throw new MembershipRevoked(
+      "This user holds no active organization membership. Access ends with the membership, not with the role grant.",
+    );
+  }
+
+  const requested = options?.preferredOrgRef ?? requestedOrganization();
   if (orgs.length > 1) {
+    // A selection, but only if it is one of theirs. Verified here rather than
+    // trusted at the edge, so a forged cookie names an organization this query
+    // has already proved the caller belongs to or it names nothing at all.
+    const selected = requested ? memberships.find((m: { orgRef: string }) => m.orgRef === requested) : undefined;
+    if (selected) {
+      return {
+        tenantId: selected.orgRef, derivedFrom: "membership", membershipRef: selected.membershipRef,
+        branchRefs: selected.branchId && !branchRefs.includes(selected.branchId) ? [...branchRefs, selected.branchId] : branchRefs,
+        global,
+      };
+    }
     // Two live memberships and no selection. Picking one would decide, silently,
     // which company's records this request writes into.
     throw new AmbiguousOrganization(
@@ -104,6 +180,23 @@ export async function resolveActingScope(
 
 /** Thrown rather than resolved, because a wrong organization is worse than a refusal. */
 export class AmbiguousOrganization extends Error {}
+
+/**
+ * v23.26 — thrown when every membership this person had is over.
+ *
+ * Before this, an ex-employee kept their role grants (revoking a membership
+ * does not revoke a grant) and fell through to the single-tenant fallback, so
+ * the server resolved them into the historical tenant and carried on. Their
+ * old employer's records were still out of reach — those are scoped to an
+ * organization they no longer match — but "carried on" was the wrong answer to
+ * "this person no longer works here", and a deployment that still holds
+ * unowned single-tenant rows would have served them.
+ *
+ * Someone who NEVER had a membership is a different case and is untouched: the
+ * single-tenant fallback exists for deployments that predate organizations, and
+ * removing it would lock out every such user.
+ */
+export class MembershipRevoked extends Error {}
 
 export type ScopeDecision = { allowed: true; scopeRef: string | null } | { allowed: false; reason: string };
 
