@@ -45,7 +45,6 @@ const DECLARED_UNWIRED: Record<string, string> = {
   phoneLocationGate: "S10.1 - whether LeaseOS may collect location from a driver's personal phone. Not mounted: there is no phone yet. The collector it governs is P1.1 device work, and a gate wired ahead of the thing it gates is a gate nothing passes through - it would report a decision about a collection that cannot happen, which is worse than reporting nothing.",
   osmImport: "M2 - an OSM way becomes a road edge or says why it did not. Pure and validated against all 734,600 Alberta highway ways; not mounted because the bulk loader that would call it is the rest of M2, and a conversion wired to nothing is easier to review than a half-written import job.",
   osmTopology: "M2 - where roads meet. Pure; validated on Alberta's 508,807 routable ways, 536,506 junctions and 883,380 edges. Not mounted for the same reason as osmImport: the bulk loader that would call it is the rest of M2.",
-  osmLoadPlan: "M2 - reads an extraction and says what it refused. Pure; run end to end with osmImport and osmTopology over a real Edmonton slice (13,441 ways, 0 rejections, 29,369 edges). Not mounted: the procedure that would call it writes half a million rows, and that wants a database that is not dropped and rebuilt every gate run.",
   osmLoad: "M2 - an extract becomes a graph build. Pure by design: it returns a plan rather than writing one, because a road graph is worth counting and diffing against the build in use before it replaces it. Proven on 103,001 real Edmonton ways. The write step is the remaining piece and wants a database that is not dropped between gate runs.",
   migrationLedger: "the production migration ledger; reached from scripts/migrate.ts (the deploy path), not from a router — declared by the session that reconciled 5f3bef4",
   offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
@@ -165,7 +164,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(49);   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(48);  // v23.26: -1 osmLoadPlan, deleted when osmLoad became the single loader;   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });

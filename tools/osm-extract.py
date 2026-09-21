@@ -14,13 +14,25 @@ made here is a decision the loader's tests cannot see.
 
 Requires: pip install osmium
 """
+import hashlib, os
 import osmium, json, sys
 VEH = {"motorway","trunk","primary","secondary","tertiary","unclassified","residential","living_street",
        "service","track","road","motorway_link","trunk_link","primary_link","secondary_link","tertiary_link"}
 NON = {"footway","cycleway","path","pedestrian","steps","bridleway","corridor","via_ferrata",
        "elevator","platform","raceway","proposed","construction"}
 minlon,minlat,maxlon,maxlat = [float(x) for x in sys.argv[3:7]]
+# The header the loader checks. sourceKey is argv[7]; the sha is computed from the bytes actually
+# read rather than taken on trust, so the loader can catch "the file you hashed is not the file you
+# are reading" by comparing it against what the caller was told.
+_h = hashlib.sha256()
+with open(sys.argv[1], "rb") as _f:
+    for _chunk in iter(lambda: _f.read(1 << 20), b""): _h.update(_chunk)
 out=open(sys.argv[2],"w"); n=0
+out.write(json.dumps({"format":"leaseos.osm.intermediate","version":1,
+                      "sourceKey":sys.argv[7] if len(sys.argv)>7 else "geofabrik_osm_ab",
+                      "extractFile":os.path.basename(sys.argv[1]),
+                      "extractSha256":_h.hexdigest(),
+                      "extractPublishedAt":sys.argv[8] if len(sys.argv)>8 else ""})+"\n")
 class E(osmium.SimpleHandler):
     def way(self, w):
         global n

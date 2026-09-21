@@ -38,6 +38,33 @@ import { buildTopology, type TopologyEdge, type WayForTopology } from "./osmTopo
 import { standingFor } from "./legalLand";
 
 /** One line of the intermediate, before it is trusted. */
+/**
+ * Bumped when the intermediate's shape changes in a way a reader must notice.
+ *
+ * Without it a format change is silent: the loader reads fields that moved, writes roads that are
+ * subtly wrong, and reports success. Refusing an unknown version costs one line and removes a whole
+ * class of failure nobody would find until a route went somewhere it should not.
+ */
+export const OSM_EXTRACT_FORMAT_VERSION = 1;
+
+/**
+ * The extraction's first line: what file this is of.
+ *
+ * `extractSha256` appears both here and in the caller's `opts`, deliberately. The header's copy is
+ * written by the extractor from the bytes it actually read; the caller's is whatever it was told.
+ * Comparing them catches the case neither catches alone — **the file you hashed is not the file you
+ * are reading** — which is what happens when an extraction is rerun and only one of the two is
+ * updated.
+ */
+export type ExtractHeader = {
+  format: "leaseos.osm.intermediate";
+  version: number;
+  sourceKey: string;
+  extractFile: string;
+  extractSha256: string;
+  extractPublishedAt: string;
+};
+
 export type ExtractRecord = {
   id: number;
   tags: Record<string, string>;
@@ -48,7 +75,7 @@ export type ExtractRecord = {
 export type LineRefusal = {
   /** 1-based, so it matches what an editor shows when somebody goes to look. */
   line: number;
-  reason: ImportRefusal["reason"] | "malformed_json" | "missing_field" | "arrays_disagree";
+  reason: ImportRefusal["reason"] | "malformed_json" | "missing_field" | "arrays_disagree" | "bad_header" | "wrong_version" | "extract_mismatch";
   detail: string;
 };
 
@@ -129,7 +156,32 @@ export function planLoad(
   const refusals: LineRefusal[] = [];
   const ways: WayForTopology[] = [];
 
+  /*
+   * The header is read first and a bad one stops the read. Judging thousands of following lines
+   * against a contract we could not confirm produces thousands of identical rejections, and that is
+   * not a report — it is noise with the real answer buried in line one.
+   */
+  const firstIdx = lines.findIndex(l => l.trim());
+  let headerOk = false;
+  if (firstIdx >= 0) {
+    let h: Partial<ExtractHeader> | null = null;
+    try { h = JSON.parse(lines[firstIdx]!) as Partial<ExtractHeader>; } catch { h = null; }
+    if (!h || h.format !== "leaseos.osm.intermediate") {
+      refusals.push({ line: firstIdx + 1, reason: "bad_header", detail: "first line is not an extract header" });
+    } else if (h.version !== OSM_EXTRACT_FORMAT_VERSION) {
+      refusals.push({ line: firstIdx + 1, reason: "wrong_version", detail: `extract is format version ${String(h.version)}, this loader reads ${OSM_EXTRACT_FORMAT_VERSION}` });
+    } else if (h.extractSha256 && h.extractSha256 !== opts.extractSha256) {
+      // The file you hashed is not the file you are reading.
+      refusals.push({ line: firstIdx + 1, reason: "extract_mismatch", detail: `header names ${h.extractSha256.slice(0, 12)}…, caller passed ${opts.extractSha256.slice(0, 12)}…` });
+    } else {
+      headerOk = true;
+    }
+  } else {
+    refusals.push({ line: 1, reason: "bad_header", detail: "empty extract" });
+  }
+
   lines.forEach((line, i) => {
+    if (!headerOk || i <= firstIdx) return;
     if (!line.trim()) return;
     const parsed = parseExtractLine(line, i + 1);
     if (isRefusal(parsed)) { refusals.push(parsed); return; }
@@ -161,7 +213,10 @@ export function planLoad(
     isolatedWays: topo.isolatedWays,
     refusals,
     counts: {
-      linesRead: lines.filter(l => l.trim()).length,
+      // The header is not a record, so it does not count as one. Including it would put every
+      // report one over and quietly break the invariant that makes the numbers auditable:
+      // linesRead == waysImported + refusals for a well-formed extract.
+      linesRead: lines.filter((l, i) => l.trim() && i !== firstIdx).length,
       waysImported: ways.length,
       edgesBuilt: topo.edges.length,
     },

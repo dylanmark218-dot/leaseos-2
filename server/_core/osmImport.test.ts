@@ -154,7 +154,8 @@ describe("a road that is only there when the ground is frozen", () => {
 
   it("recognises an ice road, not just a winter road", () => {
     // Alberta carries 13 and Saskatchewan 6; leaving ice_road out imported them as gravel track.
-    for (const tags of [{ winter_road: "yes" }, { ice_road: "yes" }, { seasonal: "winter" }]) {
+    const cases: Record<string, string>[] = [{ winter_road: "yes" }, { ice_road: "yes" }, { seasonal: "winter" }];
+    for (const tags of cases) {
       const r = imp({ highway: "track", ...tags });
       expect(r.imported && r.surfaceKind).toBe("winter");
     }

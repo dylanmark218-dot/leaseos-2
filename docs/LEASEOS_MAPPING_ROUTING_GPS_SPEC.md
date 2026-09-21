@@ -606,7 +606,7 @@ a driver is standing at a fence.
 
 ### M2 — the loader's input format (BUILT, v23.24)
 
-`server/_core/osmLoadPlan.ts`. **PBF parsing stays outside the product.** A `.osm.pbf` is
+`server/_core/osmLoad.ts`. **PBF parsing stays outside the product.** A `.osm.pbf` is
 protocol-buffer blobs with a string table and delta-encoded coordinates; parsing it well is a
 library's job, and doing it in the server would pull a heavy native dependency in to be exercised
 once per import — and would make every test of the loader need a 350 MB fixture.
