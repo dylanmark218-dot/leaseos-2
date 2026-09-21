@@ -115,8 +115,12 @@ describe("workflow runtime bind parameters", () => {
     await applyEventConsequences(runner, MINIMAL_EVENT, [MINIMAL_RULE], AT);
 
     const insert = calls.find(c => /INSERT INTO operationalTasks/i.test(c.sql))!;
-    // 21 placeholders, so 21 parameters: a column bound short would shift every
-    // later value one column left and the insert would still succeed.
+    // 21 placeholders, so 21 parameters. Not because a short bind would corrupt
+    // the row — these are prepared statements, and the server rejects a
+    // parameter count that does not match the placeholder count — but because a
+    // column added to the statement without a value, or removed from one
+    // without dropping its parameter, fails at the database rather than here,
+    // and a count checked next to the nulls says which of the two happened.
     expect(insert.params).toHaveLength(21);
     // description, branchId, jobId, tripId, unitId, rootDedupeKey, dueAt.
     expect(insert.params.filter(p => p === null)).toHaveLength(7);

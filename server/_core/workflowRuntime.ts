@@ -247,13 +247,16 @@ export async function applyEventConsequences(
           sourceEventId, sourceRuleKey, sourceRuleVersion, dedupeKey, rootDedupeKey,
           requiresEvidence, dueAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      // `?? null` on every optional column, and it is load-bearing rather than
-      // defensive: these fields are declared `?: T | null`, and mysql2 throws
-      // `Bind parameters must not contain undefined` rather than binding NULL.
-      // A task with no due date, no branch or no linked job — all ordinary —
-      // would have failed inside the worker's transaction. The old
-      // `unknown[]` parameter type accepted `undefined` happily, so the driver
-      // was the only thing that ever objected, at runtime, in a worker.
+      // `?? null` on every optional column. This is belt-and-braces, not a bug
+      // fix, and saying so matters: an earlier version of this comment claimed
+      // these calls rescued a live failure, and they do not. `planTasks` already
+      // normalises all seven to `null` at construction, so `undefined` never
+      // reached the driver from here.
+      //
+      // They are still worth writing, because the type now forbids `undefined`
+      // and mysql2 would throw on one rather than binding NULL. The call site
+      // agreeing with the producer is what keeps that true when a second
+      // producer appears.
       [
         task.taskNumber,
         task.taskType,

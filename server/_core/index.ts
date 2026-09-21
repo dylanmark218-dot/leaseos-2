@@ -8,7 +8,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startProductionWorker } from "./productionWorker";
-import { assertProductionSecrets } from "./env";
+import { ENV, assertProductionSecrets } from "./env";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -30,10 +30,17 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
-  // Before anything binds a port or starts a worker. A production server that
-  // cannot sign a session safely should never reach the point of accepting a
-  // request it would mis-authenticate.
-  assertProductionSecrets();
+  // One decision, read twice. Which bundle gets served and which configuration
+  // must be present to serve it are the same question, and asking it twice is
+  // how they drift: `ENV.isProduction` is `NODE_ENV === "production"`, while the
+  // choice below serves the production bundle for anything that is not
+  // "development". A deployment with NODE_ENV unset, or set to "staging", lands
+  // in the gap — production assets, no secret check.
+  const isDevelopment = process.env.NODE_ENV === "development";
+
+  // Before anything binds a port or starts a worker: a server that cannot
+  // authenticate anyone should not reach the point of accepting requests.
+  assertProductionSecrets(ENV, !isDevelopment);
 
   const app = express();
   const server = createServer(app);
@@ -51,7 +58,7 @@ async function startServer() {
     })
   );
   // development mode uses Vite, production mode uses static files
-  if (process.env.NODE_ENV === "development") {
+  if (isDevelopment) {
     await setupVite(app, server);
   } else {
     serveStatic(app);

@@ -12,7 +12,7 @@ it says so rather than assuming it would pass.
 
 | | |
 |---|---|
-| Files tracked | 1,220 |
+| Files tracked | 1,221 |
 | TypeScript / TSX | 747 files, 164,175 lines |
 | Test files | 298 (4,143 tests) |
 | SQL migrations | 165 |
@@ -58,7 +58,7 @@ usable Docker daemon, so gates 1–3 could not run. The rest were run directly.
 > that matters — it under-reported coverage while reading as complete. Both gates
 > have since been run and pass.
 
-The 856 skipped tests and 52 fully skipped `.db.test.ts` files are the database-backed
+The 856 skipped tests and the 35 `.db.test.ts` files are the database-backed
 suites, which self-skip without `DATABASE_URL`. **CI is the authority on those**: the
 workflow provisions MariaDB 10.11 and runs the full gate. Nothing in this audit should be
 read as having exercised the migration, parity or tenant-scope suites.
@@ -163,18 +163,62 @@ low, but the fix is a patch release.
 
 ### DEP-3 — 153 advisories in total (Informational)
 
-3 critical, 58 high, 81 moderate, 11 low across 915 resolved packages. The large majority
-are build- and test-chain only — `pnpm` itself, `vite`, `vitest`, `tar`, `postcss`,
-`dompurify`, `mermaid`, `rollup`, `browserslist` — and none of it ships in
-`dist/index.js`. Full output is in `pnpm-audit.json` beside this file.
+3 critical, 58 high, 81 moderate, 11 low across 915 resolved packages.
+
+**Corrected 2026-09-21. The original text said these were "build- and test-chain
+only" and that "none of it ships in `dist/index.js`". That is false**, and the
+evidence is in the bundle itself. `esbuild` is run with `--packages=external`,
+so every bare import survives into the output; `dist/index.js` carries:
+
+```
+from "vite"                            from "@vitejs/plugin-react"
+from "@tailwindcss/vite"               from "@builder.io/vite-plugin-jsx-loc"
+from "vite-plugin-manus-runtime"
+```
+
+They are there because `server/_core/index.ts:9` imports `./vite`
+unconditionally, and that module imports `vite` and `../../vite.config` at the
+top level. The production branch only calls `serveStatic`, but an ESM import is
+evaluated when the module loads, not when the branch is taken.
+
+Two consequences, both pre-existing rather than introduced by this work:
+
+1. **The production server requires five `devDependencies` at runtime.** A
+   deployment that installs without dev dependencies gets
+   `ERR_MODULE_NOT_FOUND` on `vite` at startup.
+2. **`tar` is reachable from the production runtime graph** —
+   `@tailwindcss/vite` → `@tailwindcss/oxide` → `tar` — and `tar` carries a
+   critical advisory. So the claim "no critical advisory remains in the shipped
+   tree" was wrong; `vitest` genuinely is test-only, `tar` is not.
+
+`dompurify` and `mermaid` arrive through `streamdown`, a production dependency,
+and were likewise miscategorised as build-chain.
+
+**The obvious repair does not work,** which is worth recording so the next
+attempt does not start there: splitting `serveStatic` into its own module and
+making `setupVite` a dynamic `import()` leaves the externals list unchanged,
+because esbuild inlines a dynamic import of a local module and hoists its
+imports. It needs `--splitting`, which changes the shape of the deployment
+artifact, so it belongs in a change made deliberately rather than folded into
+a dependency patch.
 
 ### TEST-1 — `fieldroute.test.ts` needs a database but does not self-skip (Medium)
 
-The suite's `beforeAll` guards its fixture inserts with `if (!process.env.DATABASE_URL) return;`,
-then unconditionally calls `grantUserRole` and `dispatch.enforcementSet`, both of which
-need the database. The 52 sibling suites that need one are named `.db.test.ts` and skip
-cleanly; this one is not, so `pnpm test` without MariaDB reports 14 failures that mean
-nothing. CI has always had a database, which is why it has gone unnoticed.
+**Corrected 2026-09-21.** The original text said the `beforeAll` "guards its fixture
+inserts with `if (!process.env.DATABASE_URL) return;`, then unconditionally calls
+`grantUserRole` and `dispatch.enforcementSet`". It does not: that `return` is the
+hook's first statement, so without a database the whole hook exits immediately and
+`grantUserRole` is never reached at all.
+
+The effect is the same and the mechanism is the opposite. The suite fails not because
+a helper hit a missing database, but because the role grant the hook exists to perform
+never happened — so the caller holds no domain role and `roleProcedure` refuses all 14
+procedures, exactly as it should. Every failure reads `User holds no domain role`,
+which is the gate working, not a defect.
+
+The 35 sibling suites that need a database are named `.db.test.ts` and skip cleanly;
+this one is not, so `pnpm test` without MariaDB reports 14 failures that mean nothing.
+CI has always had a database, which is why it has gone unnoticed.
 
 Left as-is here: renaming the file touches the register's claim checks and the merge
 evidence, and this audit is not the place to do that quietly.
@@ -226,7 +270,10 @@ Worth recording, because an audit that only lists faults misdescribes the codeba
 - **No SQL injection surface.** Parameterised tagged templates throughout, `sql.raw` unused.
 - **No secrets in the tree.** Pattern scans for private keys, GitHub/AWS/OpenAI/Slack token
   formats and literal credential assignments all came back empty. Every secret is read from
-  the environment and every consumer fails closed when it is missing.
+  the environment, and the storage, MFA and webhook consumers fail closed when one is missing.
+  **Corrected: "every consumer fails closed" was too broad** — it was contradicted by this
+  document's own SEC-1, where `JWT_SECRET` fell back to `""` and nothing checked it. That is
+  now true of the session secret too, but it was not true when this line was written.
 - **The read-URL proxy was removed rather than gated,** and `server/storage.ts` explains
   why in the file: a gated proxy would have been a second authorization path to the same
   bytes.

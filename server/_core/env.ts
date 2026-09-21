@@ -10,49 +10,76 @@ export const ENV = {
 };
 
 /**
- * The shortest `JWT_SECRET` that may sign a session.
+ * The shortest `JWT_SECRET` that may sign a session, in BYTES.
  *
- * HS256's own security proof assumes a key with at least as much entropy as the
- * hash it keys, and 32 bytes is that floor. The number is not a house style
- * preference — a shorter secret is brute-forcible offline against any session
- * token the holder already has, and every session token is handed to a browser.
+ * HS256's security argument assumes a key with at least as much entropy as the
+ * hash it keys, and 32 bytes is that floor. The measure is bytes rather than
+ * characters because the two differ for exactly the secrets people use here: a
+ * 32-character hex string is 16 bytes, and half the entropy the number promises.
  */
 export const MIN_COOKIE_SECRET_LENGTH = 32;
 
 /**
- * Refuse to start a production server that cannot sign a session safely.
+ * Refuse to start a production server that cannot authenticate anyone.
  *
- * `cookieSecret` falls back to `""` so that development and the test suite do
- * not each need a secret configured before they can import this module. That
- * fallback is survivable in those places and is not survivable in production:
- * `signSession` and `verifySession` would both key HS256 with a zero-length
- * key, so anyone could mint a token for any `openId` and `roleProcedure` would
- * then look up that user's real roles and honour every one of them. There is no
- * error at the point of failure — the forged session simply works.
+ * `cookieSecret` and `appId` fall back to `""` so that development and the test
+ * suite do not each need them configured before this module can be imported.
+ * That fallback is survivable in those places and is not survivable in
+ * production.
  *
- * So the check happens at boot rather than at the first request. A server that
- * has already accepted traffic and then discovers it cannot authenticate anyone
- * has nowhere useful to put the answer, and a misconfigured deploy that dies
- * immediately is one somebody notices.
+ * What an empty `JWT_SECRET` actually does, stated precisely because an earlier
+ * version of this comment got it wrong: `jose` refuses a zero-length HS256 key
+ * outright — `SignJWT.sign()` throws `DOMException: Zero-length key is not
+ * supported`. So the failure is closed, not open: no session can be minted and
+ * `verifySession` rejects everything. Nobody forges a session; nobody logs in
+ * at all, and the only symptom is a login loop with a stack trace in the server
+ * log. The guard exists to turn that into a refusal at boot that names the
+ * cause.
  *
- * Throws rather than exiting: the caller decides what a failed start looks like,
- * and a thrown error carries the reason into whatever logs it.
+ * A SHORT secret is the open failure, and it is why the length floor is here
+ * rather than a mere non-empty check: a low-entropy key can be recovered
+ * offline from any session token its holder already has, and every session
+ * token is handed to a browser.
+ *
+ * `VITE_APP_ID` is required for a second reason. `verifySession` already
+ * refuses a token whose `appId` is not a non-empty string, and `signSession`
+ * fills that claim from `ENV.appId` — so with it unset the server mints tokens
+ * it will itself reject. It is already mandatory in fact; the only thing
+ * missing was saying so before the first request rather than after. Requiring
+ * it here is also what makes the appId equality check in `verifySession` do
+ * anything at all: that check is conditional on `ENV.appId` being set.
+ *
+ * Throws rather than exiting: the caller decides what a failed start looks
+ * like, and a thrown error carries the reason into whatever logs it.
  */
-export function assertProductionSecrets(env: typeof ENV = ENV): void {
-  if (!env.isProduction) return;
+export function assertProductionSecrets(
+  env: typeof ENV = ENV,
+  enforce: boolean = env.isProduction
+): void {
+  if (!enforce) return;
 
   const problems: string[] = [];
 
+  // Bytes, not characters — see MIN_COOKIE_SECRET_LENGTH.
+  const secretBytes = Buffer.byteLength(env.cookieSecret, "utf8");
+
   if (!env.cookieSecret) {
     problems.push(
-      "JWT_SECRET is not set. Sessions would be signed and verified with an empty key, " +
-        "which lets anyone mint a session for any user."
+      "JWT_SECRET is not set. jose refuses a zero-length HS256 key, so no session " +
+        "could be signed or verified and every sign-in would fail."
     );
-  } else if (env.cookieSecret.length < MIN_COOKIE_SECRET_LENGTH) {
+  } else if (secretBytes < MIN_COOKIE_SECRET_LENGTH) {
     // The length, never the secret.
     problems.push(
-      `JWT_SECRET is ${env.cookieSecret.length} characters; at least ${MIN_COOKIE_SECRET_LENGTH} are required ` +
+      `JWT_SECRET is ${secretBytes} bytes; at least ${MIN_COOKIE_SECRET_LENGTH} are required ` +
         "so that a session token cannot be brute-forced offline."
+    );
+  }
+
+  if (!env.appId) {
+    problems.push(
+      "VITE_APP_ID is not set. Sessions are signed with it and verifySession refuses " +
+        "a token whose appId is empty, so the server would reject every session it mints."
     );
   }
 
