@@ -202,6 +202,41 @@ imports. It needs `--splitting`, which changes the shape of the deployment
 artifact, so it belongs in a change made deliberately rather than folded into
 a dependency patch.
 
+### TEST-0 — 34 tests never run anywhere, including a cross-tenant regression (High)
+
+Added 2026-09-21, and it is the most consequential thing this audit missed the
+first time.
+
+`server/widgetPersistence.db.test.ts` (24 cases) gates on `WIDGET_DB_URL`;
+`server/widgetConflict.db.test.ts` (10 cases) gates on `WIDGET_DB_SOCKET ||
+WIDGET_DB_URL`. Neither `.github/workflows/ci.yml` nor `scripts/ci-gate.sh`
+sets either variable — CI provisions MariaDB and exports `DATABASE_URL` only.
+So these suites skip locally **and** in CI. They have never run in this
+repository.
+
+What is dormant matters. The first file says why it exists, in its own header:
+
+> The security block is the reason this file exists. B23's store could be made
+> to overwrite another user's board by supplying their `layoutRef`, and no unit
+> test could have caught it, because the defect was in a SQL statement that had
+> never executed.
+
+Its case at line 285 is `refuses across tenants, and the read cannot see it
+either`. The regression test for a cross-tenant overwrite is switched off by a
+variable nobody sets, and it reports as *skipped* — which reads like a suite
+waiting for a database rather than a guard that is not guarding.
+
+This also corrects the framing used throughout the rest of this document. "CI is
+the authority on the database-backed suites" is true of the 33 that gate on
+`DATABASE_URL` and false of these two.
+
+**Fix:** export `WIDGET_DB_URL` alongside `DATABASE_URL` in the CI job — the
+same MariaDB service can serve both — and fail the gate if a `.db.test.ts`
+suite reports skipped when a database is configured. Not applied here: pointing
+both at one database may need schema separation (`WIDGET_DB_NAME` exists), and
+switching on 34 previously-unrun tests is a change that should land on its own
+rather than inside a dependency patch.
+
 ### TEST-1 — `fieldroute.test.ts` needs a database but does not self-skip (Medium)
 
 **Corrected 2026-09-21.** The original text said the `beforeAll` "guards its fixture
@@ -220,8 +255,18 @@ The 35 sibling suites that need a database are named `.db.test.ts` and skip clea
 this one is not, so `pnpm test` without MariaDB reports 14 failures that mean nothing.
 CI has always had a database, which is why it has gone unnoticed.
 
-Left as-is here: renaming the file touches the register's claim checks and the merge
-evidence, and this audit is not the place to do that quietly.
+**Corrected: the rename this originally proposed would not have worked, and the
+reason given for deferring it was false.** The `.db.test.ts` suffix is inert —
+`vitest.config.ts` includes `server/**/*.test.ts`, which matches it identically.
+Those suites skip because each one opens with its own
+`const d = URL ? describe : describe.skip`, not because of its name. Renaming
+`fieldroute.test.ts` would leave all 14 failures exactly where they are.
+
+The deferral reason was also wrong. It said renaming "touches the register's
+claim checks"; `registerClaims.test.ts` reads only the paths cited in
+`docs/REMAINING_BUILD_REGISTER.md`, and that document does not cite this file.
+Nothing was at risk. The real fix is the in-file guard every sibling already
+has, and it is small — it was declined on a constraint that did not exist.
 
 ### TEST-2 — register commit claims could not resolve after import (fixed)
 
