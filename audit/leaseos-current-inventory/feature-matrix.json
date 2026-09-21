@@ -1,0 +1,1373 @@
+{
+  "repository": "dylanmark218-dot/leaseos-2",
+  "branch": "main",
+  "sha": "f21cd1bc2070ae179d431177fd0f286965e0f3c3",
+  "release": "v23.25",
+  "audited": "2026-09-21",
+  "readOnly": true,
+  "note": "PR #4 (readiness-defect-repair) is OPEN and NOT MERGED. This matrix describes main only.",
+  "counts": {
+    "productionSourceFiles": 444,
+    "testFiles": 304,
+    "tests": 4199,
+    "testsPassing": 4196,
+    "testsSkipped": 3,
+    "migrations": 165,
+    "tables": 408,
+    "procedures": 690,
+    "queries": 245,
+    "mutations": 445,
+    "proceduresUiReachable": 133,
+    "proceduresWithoutUi": 557,
+    "routers": 63,
+    "routersWithZeroUi": 48,
+    "uiRoutes": 38,
+    "permissions": 337,
+    "sensitivePermissions": 125,
+    "roles": 15,
+    "declaredUnwiredEngines": 52,
+    "orphanedTables": 38,
+    "writeOnlyTables": 29,
+    "readOnlyTables": 23
+  },
+  "statusVocabulary": [
+    "IMPLEMENTED",
+    "BACKEND_ONLY",
+    "PARTIAL",
+    "STUB",
+    "TEST_ONLY",
+    "DOCUMENTED_ONLY",
+    "BLOCKED",
+    "NOT_IMPLEMENTED"
+  ],
+  "features": [
+    {
+      "id": "platform.auth",
+      "name": "JWT session authentication",
+      "category": "platform",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/_core/sdk.ts",
+        "server/_core/context.ts",
+        "server/_core/env.ts"
+      ],
+      "frontend": [
+        "client/src/lib/trpc.ts"
+      ],
+      "database": [
+        "users",
+        "externalIdentities"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/sessionAppId.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [
+        "OAUTH_SERVER_URL",
+        "JWT_SECRET",
+        "VITE_APP_ID"
+      ],
+      "knownGaps": [
+        "one-year JWTs with no server-side revocation (roadmap)"
+      ],
+      "evidence": [
+        "sdk.ts:238 rejects a session minted for a different VITE_APP_ID",
+        "env.ts:55 assertProductionSecrets called at index.ts:43"
+      ]
+    },
+    {
+      "id": "platform.authz",
+      "name": "Role-based authorization",
+      "category": "platform",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/_core/trpc.ts",
+        "server/_core/recordsAuthorization.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "userRoleAssignments"
+      ],
+      "migrations": [
+        "0021_active_role_uniqueness.sql"
+      ],
+      "tests": [
+        "server/procedureAuthorization.test.ts",
+        "server/recordsApiAuthorization.test.ts",
+        "server/operationalApiAuthorization.test.ts"
+      ],
+      "permissions": [
+        "337 permissions, 125 sensitive, 13 universal"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "branch-scoped grants confer nothing unless the procedure resolves a resource branch"
+      ],
+      "evidence": [
+        "trpc.ts:71",
+        "CI gate 5 pins bare protectedProcedure at 0",
+        "recordsAuthorization.ts:2009-2016"
+      ]
+    },
+    {
+      "id": "platform.audit",
+      "name": "Authorization and domain audit trail",
+      "category": "platform",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/_core/trpc.ts",
+        "server/auditRouter.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "dispatchAuditEvents",
+        "dispatchOverrides",
+        "signatureAudits",
+        "evidenceAccessEvents",
+        "scanAudits",
+        "auditPackages",
+        "auditPackageItems",
+        "auditPackageAccess"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/auditPackage.test.ts"
+      ],
+      "permissions": [
+        "125 sensitive permissions fail closed"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "audit router is BACKEND ONLY - 6 procedures, 0 UI"
+      ],
+      "evidence": [
+        "trpc.ts:91 records allow and deny"
+      ]
+    },
+    {
+      "id": "platform.tenancy",
+      "name": "Multi-tenant isolation",
+      "category": "platform",
+      "status": "PARTIAL",
+      "backend": [
+        "server/db.ts",
+        "server/_core/actingScope.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "coreRecordOwnership",
+        "organizations",
+        "organizationMemberships"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/tenantScopeShop.db.test.ts",
+        "server/tenantScopeJobsTrips.db.test.ts",
+        "server/coreRecordOwnershipBoundary.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "only 4 record types carry ownership",
+        "actingScope.ts states 'single-tenant in fact'",
+        "roadmap step 3 still open"
+      ],
+      "evidence": [
+        "db.ts:791 ownershipScopeWhere",
+        "SINGLE_TENANT_ID = 'default'"
+      ]
+    },
+    {
+      "id": "dispatch.readiness",
+      "name": "Dispatch readiness engine",
+      "category": "dispatch",
+      "status": "BACKEND_ONLY",
+      "backend": [
+        "server/readinessComposer.ts",
+        "server/_core/dispatchReadiness.ts",
+        "server/dispatchRouter.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "dispatchEligibilityChecks",
+        "dispatchPostings",
+        "jobUnits"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/dispatchGate.test.ts",
+        "server/_core/dispatchReadiness.test.ts",
+        "server/_core/degradationSuite.test.ts"
+      ],
+      "permissions": [
+        "dispatch.readiness",
+        "dispatch.award",
+        "dispatch.override.grant"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "0 of 8 dispatch procedures reachable from any screen",
+        "enforcement input never supplied by any production caller"
+      ],
+      "evidence": [
+        "readinessComposer.ts:202",
+        "dispatchReadiness.ts:152",
+        "priority is deliberately not a parameter"
+      ]
+    },
+    {
+      "id": "dispatch.award",
+      "name": "Award with fact-change refusal",
+      "category": "dispatch",
+      "status": "BACKEND_ONLY",
+      "backend": [
+        "server/_core/dispatchAward.ts",
+        "server/dispatchRouter.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "dispatchEligibilityChecks",
+        "dispatchOverrides"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/dispatchGate.test.ts"
+      ],
+      "permissions": [
+        "dispatch.award"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "no UI",
+        "blocking blockers refused before overrides are consulted, so two overridable:true blocking codes are unreachable"
+      ],
+      "evidence": [
+        "dispatchAward.ts:225 decideAward",
+        "computeEligibilityFingerprint"
+      ]
+    },
+    {
+      "id": "readiness.p81",
+      "name": "P8.1 inter-engine status contract",
+      "category": "readiness",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/_core/interEngineStatus.ts",
+        "server/_core/readinessCapabilities.ts"
+      ],
+      "frontend": [],
+      "database": [],
+      "migrations": [],
+      "tests": [
+        "server/_core/degradationSuite.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "capabilityOf misattributes several blocker codes by regex"
+      ],
+      "evidence": [
+        "PASS/REVIEW/BLOCKED/UNKNOWN/NOT_EVALUATED; NOT_EVALUATED never rounds to PASS",
+        "degradationSuite enumerates capabilities from source"
+      ]
+    },
+    {
+      "id": "readiness.p82",
+      "name": "P8.2 automation policy layer",
+      "category": "readiness",
+      "status": "PARTIAL",
+      "backend": [
+        "server/_core/automationPolicy.ts",
+        "server/_core/automationPolicyStore.ts",
+        "server/automationPolicyRouter.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "capabilityEntitlements",
+        "automationPolicies"
+      ],
+      "migrations": [
+        "0153_automation_policy.sql",
+        "0154_automation_policy_backfill.sql"
+      ],
+      "tests": [
+        "server/automationPolicySurface.test.ts"
+      ],
+      "permissions": [
+        "automationPolicy.resolve",
+        "automationPolicy.set"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "committedProvenance called only from its own test - the mode has no operational consumer",
+        "automationPolicyRouter.ts:83 reports clamped only for AUTO while the resolver clamps by level",
+        "0 of 6 procedures reachable from UI"
+      ],
+      "evidence": [
+        "0154 seeds all eight capabilities as entitled for the single tenant"
+      ]
+    },
+    {
+      "id": "readiness.p83",
+      "name": "P8.3 paper/scanned HOS fallback",
+      "category": "readiness",
+      "status": "BACKEND_ONLY",
+      "backend": [
+        "server/_core/dispatchReadiness.ts",
+        "server/readinessComposer.ts",
+        "server/hosRouter.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "hosAttestations"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/hosAttestation.test.ts"
+      ],
+      "permissions": [
+        "hos.attestHours",
+        "hos.recordScannedLog"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "built for HOS only; the other seven capabilities have no attestation path",
+        "no UI"
+      ],
+      "evidence": [
+        "dispatchReadiness.ts:198-229 - attestation fills a void, never contradicts a computed figure",
+        "schema.ts:8637 'NEVER copied into hoursAvailableMinutes'"
+      ]
+    },
+    {
+      "id": "readiness.p84",
+      "name": "P8.4 safety ceilings",
+      "category": "readiness",
+      "status": "BLOCKED",
+      "backend": [
+        "server/_core/automationPolicy.ts",
+        "server/_core/automationPolicyStore.ts"
+      ],
+      "frontend": [],
+      "database": [],
+      "migrations": [],
+      "tests": [
+        "server/automationPolicySurface.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [
+        "owner decision: which capabilities may never run AUTO"
+      ],
+      "knownGaps": [
+        "SAFETY_CEILINGS is {} by design",
+        "SafetyCeiling cannot express a condition-specific rule"
+      ],
+      "evidence": [
+        "automationPolicyStore.ts:32",
+        "automationPolicySurface.test.ts:67 pins the empty literal"
+      ]
+    },
+    {
+      "id": "maintenance.release",
+      "name": "Mechanic release",
+      "category": "maintenance",
+      "status": "BACKEND_ONLY",
+      "backend": [
+        "server/_core/mechanicRelease.ts",
+        "server/shopRouter.ts",
+        "server/recordsRouter.ts",
+        "server/recordsService.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "workOrderReleases",
+        "workOrders",
+        "maintenanceDefects"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/_core/incidentMaintenance.test.ts",
+        "server/productionPath.test.ts"
+      ],
+      "permissions": [
+        "shop.release",
+        "maintenance.record_release",
+        "maintenance.revoke_release"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "readiness matches releases to defects by TIMESTAMP, so any later release - unrelated, failed-test, or REVOKED - clears a critical defect",
+        "resolvedDefectIds written and never read in production",
+        "no UI"
+      ],
+      "evidence": [
+        "readinessComposer.ts:318-330",
+        "confirmed by execution against MariaDB 10.11",
+        "PR #4 repairs this and is NOT merged"
+      ]
+    },
+    {
+      "id": "maintenance.defectResolution",
+      "name": "Defect resolution",
+      "category": "maintenance",
+      "status": "NOT_IMPLEMENTED",
+      "backend": [],
+      "frontend": [],
+      "database": [
+        "maintenanceDefects"
+      ],
+      "migrations": [],
+      "tests": [],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "status enum carries 'resolved'; five insert sites, zero update sites",
+        "telematicsRouter.ts:51 refuses to clear a fault until the defect is resolved - a state nothing can produce"
+      ],
+      "evidence": [
+        "db.ts:1107",
+        "purchasingRouter.ts:69",
+        "telematicsRouter.ts:41",
+        "_core/assistantCommitService.ts:656",
+        "_core/enforcementCommit.ts:211"
+      ]
+    },
+    {
+      "id": "enforcement.oos",
+      "name": "Out-of-service orders",
+      "category": "enforcement",
+      "status": "PARTIAL",
+      "backend": [
+        "server/enforcementRouter.ts",
+        "server/_core/enforcement.ts",
+        "server/_core/enforcementCommit.ts",
+        "server/_core/enforcementOutbox.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "outOfServiceOrders",
+        "enforcementEvents",
+        "enforcementViolations",
+        "enforcementCitations",
+        "oosReleaseFindings",
+        "oosReleasePolicies",
+        "roadsidePanelGrants"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/enforcementApi.test.ts",
+        "server/enforcementLifecycle.test.ts",
+        "server/enforcementOutbox.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "composeReadiness reads enforcement only from subject.enforcement, which NO production caller supplies - an active order does not block dispatch",
+        "0 of 11 procedures reachable from UI"
+      ],
+      "evidence": [
+        "readinessComposer.ts:412",
+        "confirmed by execution"
+      ]
+    },
+    {
+      "id": "hos.registry",
+      "name": "Hours of service",
+      "category": "compliance",
+      "status": "PARTIAL",
+      "backend": [
+        "server/hosRouter.ts",
+        "server/_core/hosClockPresentation.ts"
+      ],
+      "frontend": [
+        "client/src/pages/HosVerificationConsole.tsx"
+      ],
+      "database": [
+        "dutyRecords",
+        "drivingEvents",
+        "hosAttestations"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/hos.test.ts",
+        "server/hosAttestation.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [
+        "a qualified person must verify each figure against its clause (P6.1, P6.4, P6.5, P0.8)"
+      ],
+      "knownGaps": [
+        "CA_FEDERAL_NORTH60.daily_on_duty_minutes is STILL CONTESTED in the seed",
+        "no 7-day/14-day cycle, no reset rules, no sleeper-berth splitting, no ELD ingestion, no 160km home-terminal logic",
+        "HosVerificationConsole.tsx makes ZERO API calls",
+        "0 of 10 procedures reachable from UI"
+      ],
+      "evidence": [
+        "rules are registry values under a promotion ledger with separation of duties"
+      ]
+    },
+    {
+      "id": "mapping.roadgraph",
+      "name": "Road graph and route evaluation",
+      "category": "mapping",
+      "status": "PARTIAL",
+      "backend": [
+        "server/_core/routeEvaluation.ts",
+        "server/_core/roadGraph.ts"
+      ],
+      "frontend": [
+        "client/src/pages/RoutePreview.tsx"
+      ],
+      "database": [
+        "roadGraphBuilds",
+        "roadGraphNodes",
+        "roadGraphEdges",
+        "roadSegments",
+        "roadRestrictions",
+        "bridges",
+        "routeApprovals",
+        "routeDecisions",
+        "routeEvidenceEntries"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/geographyAgreement.test.ts",
+        "server/routeEvaluationIdentity.test.ts",
+        "server/_core/osmImport.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [
+        "Valhalla/HERE not deployed",
+        "21 external sources, 13 unverified"
+      ],
+      "knownGaps": [
+        "osmImport, osmTopology, osmLoad, osmLoadPlan all DECLARED UNWIRED despite being validated on 508,807 Alberta ways",
+        "feedScheduler never started, so no live data"
+      ],
+      "evidence": [
+        "server/engineReachability.test.ts DECLARED_UNWIRED"
+      ]
+    },
+    {
+      "id": "mapping.feeds",
+      "name": "External data feeds",
+      "category": "mapping",
+      "status": "BLOCKED",
+      "backend": [
+        "server/_core/externalSourceSeeds.ts",
+        "server/_core/feedIngest.ts",
+        "server/_core/feedScheduler.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "externalFeedFetches",
+        "externalDatasetImports",
+        "roadAdvisories"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/feedIngest.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [
+        "Alberta 511 written permission (P2.2, P6.3)",
+        "AER ST107 permission (P6.8)",
+        "Saskatchewan IRIS licence (P6.9)"
+      ],
+      "knownGaps": [
+        "scheduler is never started from any entry point",
+        "13 of 21 sources are status:unverified"
+      ],
+      "evidence": [
+        "externalSourceSeeds.ts declares 21 sources"
+      ]
+    },
+    {
+      "id": "mapping.facilities",
+      "name": "Disposal facility directory",
+      "category": "mapping",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/facilityDirectoryRouter.ts",
+        "server/_core/arcgisImport.ts"
+      ],
+      "frontend": [
+        "client/src/pages/DisposalDirectory.tsx",
+        "client/src/pages/DisposalFinder.tsx"
+      ],
+      "database": [
+        "facilities",
+        "facilityAliases",
+        "facilityCapabilities",
+        "facilityOperatingHours",
+        "facilityEvidence",
+        "facilitySourceLicences",
+        "facilityImportRuns"
+      ],
+      "migrations": [
+        "0168_retire_storage_capability_urls.sql"
+      ],
+      "tests": [
+        "server/storageCapability.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "5 of 28 procedures reachable from UI"
+      ],
+      "evidence": [
+        "docs/register/RB01_CLOSURE.md"
+      ]
+    },
+    {
+      "id": "mapping.comms",
+      "name": "Communications and radio planning",
+      "category": "mapping",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/_core/commRoute.ts",
+        "server/_core/commPackage.ts",
+        "server/routeCommunicationGeography.ts"
+      ],
+      "frontend": [
+        "client/src/pages/CommunicationsPackage.tsx",
+        "client/src/pages/TransmitCheck.tsx"
+      ],
+      "database": [
+        "communicationCoverage",
+        "communicationPlans",
+        "communicationPolicies",
+        "radioChannels",
+        "roadRadioAssignments",
+        "companyRadioAuthorizations",
+        "unitRadioCapabilities"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/commsDispatch.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [
+        "4 ISED sources unverified"
+      ],
+      "knownGaps": [
+        "3 of 26 comms procedures reachable from UI"
+      ],
+      "evidence": [
+        "wired into live readiness at readinessComposer.ts:503-524"
+      ]
+    },
+    {
+      "id": "tdg.manifests",
+      "name": "Manifests and chain of custody",
+      "category": "compliance",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/manifestCustodyRouter.ts",
+        "server/_core/manifestFactReconciliation.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "manifests",
+        "manifestPartySnapshots",
+        "manifestCustodyEvents",
+        "manifestAmendments",
+        "manifestEvidenceLinks",
+        "manifestReconciliationOverrides"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/manifestCustody.db.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "0 of 9 manifestCustody procedures reachable from UI"
+      ],
+      "evidence": [
+        "manifests_manifestNumber_unique"
+      ]
+    },
+    {
+      "id": "tdg.classification",
+      "name": "TDG classes, UN numbers, packing groups, placards",
+      "category": "compliance",
+      "status": "NOT_IMPLEMENTED",
+      "backend": [],
+      "frontend": [],
+      "database": [],
+      "migrations": [],
+      "tests": [],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "no table for TDG classes, UN numbers, packing groups or placards",
+        "dangerousGoods is derived by regex from job type/mode at readinessComposer.ts:227",
+        "tdgDocumentPrepared and emergencyPlanOnFile are set to null (UNKNOWN) whenever DG is true and nothing establishes them"
+      ],
+      "evidence": [
+        "_core/tdgCertificateContents.ts covers TRAINING topics by transport mode, not cargo classification"
+      ]
+    },
+    {
+      "id": "documents.compliance",
+      "name": "Compliance documents and expiry",
+      "category": "documents",
+      "status": "PARTIAL",
+      "backend": [
+        "server/_core/compliancePassport.ts",
+        "server/_core/documentValidity.ts",
+        "server/readinessComposer.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "complianceDocuments"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/compliancePassport.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "credentialState treats needs_review documents as satisfying a credential check - credentialBlocker never reads verificationStatus",
+        "no QR/DOT verification, no offline access, no hard-copy tracking"
+      ],
+      "evidence": [
+        "readinessComposer.ts:168-174",
+        "dispatchReadiness.ts:120-150"
+      ]
+    },
+    {
+      "id": "documents.vault",
+      "name": "Restricted records vault (P8.5)",
+      "category": "documents",
+      "status": "BACKEND_ONLY",
+      "backend": [
+        "server/restrictedVaultRouter.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "incidentMatters"
+      ],
+      "migrations": [
+        "0156"
+      ],
+      "tests": [
+        "server/_core/restrictedVault.test.ts",
+        "server/_core/vaultFailClosed.test.ts"
+      ],
+      "permissions": [
+        "restricted.read"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "only internal investigations are tier-gated; near misses are not gated at all; drug & alcohol results are not stored anywhere",
+        "0 of 9 procedures reachable from UI"
+      ],
+      "evidence": [
+        "docs/P_ROW_SUBSTANCE_AUDIT.md records this as an open question"
+      ]
+    },
+    {
+      "id": "training.academy",
+      "name": "Training Academy",
+      "category": "training",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/trainingAcademyRouter.ts",
+        "server/_core/trainingAcademy.ts",
+        "server/_core/trainingAcademyCatalog.ts",
+        "server/_core/trainingAcademyRegulatory.ts"
+      ],
+      "frontend": [
+        "client/src/pages/TrainingAcademy.tsx"
+      ],
+      "database": [
+        "academyQualifications",
+        "academyRequirements",
+        "academyRequirementBindings",
+        "academyDirectSupervisionRecords",
+        "academyCertificates",
+        "academyCertificateSignatures",
+        "sheetSerialAllocations"
+      ],
+      "migrations": [
+        "0126"
+      ],
+      "tests": [
+        "server/trainingAcademy.test.ts",
+        "server/trainingAcademyHardening.test.ts",
+        "server/_core/trainingAcademy.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "printable assessment sheet HTML is still to be served (P0.7)",
+        "8 of 28 procedures reachable from UI"
+      ],
+      "evidence": [
+        "consumed live by readinessComposer.ts:231-290",
+        "retention enforced by a database trigger verified on every migration run"
+      ]
+    },
+    {
+      "id": "loads.tickets",
+      "name": "Loads, field tickets and disposal",
+      "category": "operations",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/portalRouter.ts",
+        "server/_core/fieldTicket.ts"
+      ],
+      "frontend": [
+        "client/src/portal/external/SignOffScreen.tsx"
+      ],
+      "database": [
+        "loads",
+        "loadProfiles",
+        "fieldTickets",
+        "fieldTicketLines",
+        "fieldTicketSignatures",
+        "fieldTicketEvents",
+        "fieldTicketRevisions",
+        "disposalTickets",
+        "loadFacilityAssessments"
+      ],
+      "migrations": [
+        "0161"
+      ],
+      "tests": [
+        "server/commercialPortal.test.ts"
+      ],
+      "permissions": [
+        "portal.fieldTicketLineDecide",
+        "portal.fieldTicketSign"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "_core/fieldTicket.ts engine is DECLARED UNWIRED - 'router path predates it'",
+        "volume/weight/density depend on LoadSense hardware that does not exist"
+      ],
+      "evidence": [
+        "per-line acceptance verified; P3.2 fixed by migration 0161"
+      ]
+    },
+    {
+      "id": "commercial.office",
+      "name": "Commercial office: AP, AR, GL, tax, assets, payroll",
+      "category": "commercial",
+      "status": "BACKEND_ONLY",
+      "backend": [
+        "server/commercialOfficeRouter.ts",
+        "server/invoicingRouter.ts",
+        "server/payrollRouter.ts",
+        "server/_core/purchasing.ts"
+      ],
+      "frontend": [
+        "client/src/pages/CommercialOffice.tsx"
+      ],
+      "database": [
+        "invoices",
+        "invoiceLines",
+        "vendorBills",
+        "purchaseAuthorizations",
+        "gstReturns",
+        "iftaReturns",
+        "capitalAssets",
+        "ccaSchedules"
+      ],
+      "migrations": [
+        "0133",
+        "0136"
+      ],
+      "tests": [
+        "server/periodClose.test.ts",
+        "server/capitalAssets.test.ts",
+        "server/contractTerms.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "invoicing, ar, gst, ifta, payroll, asset, fuel, bank, period routers are ALL 0/N UI-reachable",
+        "invoicing.void mutates in place with no assertPeriodOpen and invoices has no accounting date",
+        "P6.7 purchase orders have two unreconciled limit sources - suspected dead configuration"
+      ],
+      "evidence": [
+        "assertPeriodOpen at 12 call sites"
+      ]
+    },
+    {
+      "id": "portal.external",
+      "name": "Customer, vendor and facility portals",
+      "category": "portal",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/portalRouter.ts"
+      ],
+      "frontend": [
+        "client/src/portal/external/CustomerPortal.tsx",
+        "client/src/portal/external/VendorFacilityPortal.tsx",
+        "client/src/portal/external/SignOffScreen.tsx",
+        "client/src/portal/external/ChainOfCustody.tsx"
+      ],
+      "database": [
+        "portalSubmissions",
+        "externalIdentities"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/commercialPortal.test.ts",
+        "server/portalAuthorization.test.ts"
+      ],
+      "permissions": [
+        "portal.customer.sign",
+        "portal.invitation.accept"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "no GPS tracking in the portal",
+        "no vehicle/sensor telemetry in the portal",
+        "consultant is not a distinct concept"
+      ],
+      "evidence": [
+        "38 externalProcedure calls, 0 roleProcedure - CI gate 7b",
+        "23 of 36 reachable from the portal client"
+      ]
+    },
+    {
+      "id": "integration.machine",
+      "name": "Machine integration gateway",
+      "category": "integration",
+      "status": "BACKEND_ONLY",
+      "backend": [
+        "server/integrationRouter.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "integrationClients"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/integrationGateway.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "0 of 11 procedures reachable from UI"
+      ],
+      "evidence": [
+        "4 integrationProcedure calls - CI gate 7c"
+      ]
+    },
+    {
+      "id": "ai.extraction",
+      "name": "Voice transcript to structured proposal",
+      "category": "ai",
+      "status": "BLOCKED",
+      "backend": [
+        "server/_core/llm.ts",
+        "server/routers.ts",
+        "server/_core/assistantExtraction.ts",
+        "server/_core/assistantPersistence.ts",
+        "server/_core/assistantCommitService.ts",
+        "server/_core/aiProposal.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "assistantProposals",
+        "assistantQuestions",
+        "formDefinitions"
+      ],
+      "migrations": [
+        "0014_assistant_proposals.sql"
+      ],
+      "tests": [
+        "server/_core/aiProposal.test.ts",
+        "server/_core/assistantExtraction.test.ts",
+        "server/_core/assistantCommitService.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [
+        "BUILT_IN_FORGE_API_URL",
+        "BUILT_IN_FORGE_API_KEY"
+      ],
+      "knownGaps": [
+        "no LLM SDK in package.json - llm.ts is a hand-written OpenAI-shaped HTTP client",
+        "exactly one production call site",
+        "assertApiKey throws without the key",
+        "formDefinitions table has no production reference"
+      ],
+      "evidence": [
+        "routers.ts:691",
+        "produces a proposal awaiting human readback, never writes a domain record directly"
+      ]
+    },
+    {
+      "id": "ai.knowledge",
+      "name": "Knowledge corpus and ask (P4.4)",
+      "category": "ai",
+      "status": "PARTIAL",
+      "backend": [
+        "server/assistantAskRouter.ts",
+        "server/_core/knowledge/"
+      ],
+      "frontend": [
+        "client/src/pages/AssistantAsk.tsx",
+        "client/src/pages/AssistantCalibration.tsx"
+      ],
+      "database": [
+        "knowledgeSources",
+        "knowledgeVersions"
+      ],
+      "migrations": [
+        "0118_knowledge_source_registry.sql"
+      ],
+      "tests": [
+        "server/knowledgeAdmission.test.ts",
+        "server/knowledgePerimeter.test.ts",
+        "server/knowledgeRepository.db.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "repository, perimeter and evaluationState are half-wired (roadmap)",
+        "knowledgeVersions has no production reference"
+      ],
+      "evidence": [
+        "5 of 8 assistantAsk procedures reachable from UI"
+      ]
+    },
+    {
+      "id": "ai.chat",
+      "name": "AI chat interface",
+      "category": "ai",
+      "status": "STUB",
+      "backend": [],
+      "frontend": [
+        "client/src/components/AIChatBox.tsx"
+      ],
+      "database": [],
+      "migrations": [],
+      "tests": [],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "378 lines with ZERO network calls - no fetch, no useQuery, no useMutation",
+        "mounted only in pages/ComponentShowcase.tsx, a component gallery"
+      ],
+      "evidence": [
+        "there is no working AI chat in the product"
+      ]
+    },
+    {
+      "id": "ai.agents",
+      "name": "Multi-agent architecture",
+      "category": "ai",
+      "status": "NOT_IMPLEMENTED",
+      "backend": [
+        "server/agentRouter.ts"
+      ],
+      "frontend": [],
+      "database": [],
+      "migrations": [],
+      "tests": [
+        "server/agentBoundary.test.ts",
+        "server/agentRuntimeApi.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "no planner/executor/tester/reviewer",
+        "modelGateway DECLARED UNWIRED - 'no AI provider is configured yet'",
+        "3 of agentRuntimeApi's tests are skipped as unreachable",
+        "0 of 5 procedures reachable from UI"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "offline.runtime",
+      "name": "Offline outbox and sync engine",
+      "category": "mobile",
+      "status": "PARTIAL",
+      "backend": [
+        "server/syncRouter.ts"
+      ],
+      "frontend": [
+        "client/src/runtime/outbox.ts",
+        "client/src/runtime/syncEngine.ts",
+        "client/src/runtime/commsVault.ts",
+        "client/src/runtime/crypto.ts",
+        "client/src/runtime/safetyLatch.ts"
+      ],
+      "database": [
+        "syncConflicts"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/fieldRuntime.test.ts"
+      ],
+      "permissions": [
+        "sync.push_own"
+      ],
+      "externalDependencies": [],
+      "knownGaps": [
+        "no device runs it",
+        "sync router 0 of 3 procedures reachable from UI",
+        "offlineCapability DECLARED UNWIRED - 'no device runtime calls them yet'"
+      ],
+      "evidence": [
+        "outbox.ts six states, nothing deleted",
+        "syncEngine captureSyncPriority puts oos_order, hos_event, roadside_enforcement at tier 0"
+      ]
+    },
+    {
+      "id": "mobile.native",
+      "name": "Native device capabilities",
+      "category": "mobile",
+      "status": "NOT_IMPLEMENTED",
+      "backend": [],
+      "frontend": [
+        "client/src/runtime/adapters/capacitor.ts"
+      ],
+      "database": [],
+      "migrations": [],
+      "tests": [],
+      "permissions": [],
+      "externalDependencies": [
+        "Capacitor shell",
+        "@capacitor-community/sqlite",
+        "@capacitor/filesystem",
+        "capacitor-secure-storage-plugin",
+        "@capacitor/camera",
+        "@capacitor/geolocation",
+        "Play Store enrolment"
+      ],
+      "knownGaps": [
+        "53 lines in which every binding throws NotOnDeviceError",
+        "no android/ directory",
+        "no ios/ directory",
+        "Capacitor is not a dependency",
+        "therefore no encrypted local database, file vault, keystore, camera, GPS or biometric signing"
+      ],
+      "evidence": [
+        "its own header lists the plugins as 'not installed in this repository'"
+      ]
+    },
+    {
+      "id": "contacts.directory",
+      "name": "Contact directory",
+      "category": "operations",
+      "status": "NOT_IMPLEMENTED",
+      "backend": [],
+      "frontend": [],
+      "database": [],
+      "migrations": [],
+      "tests": [],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "no contact table of any kind exists - company, driver, consultant, client, disposal, medic, emergency, ERAP, 911 or job-specific"
+      ],
+      "evidence": [
+        "roadmap lists it under 'Product not built' with the intended pattern manifestPartySnapshots"
+      ]
+    },
+    {
+      "id": "notifications.delivery",
+      "name": "Notification delivery",
+      "category": "platform",
+      "status": "NOT_IMPLEMENTED",
+      "backend": [
+        "server/_core/notification.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "workflowNotifications"
+      ],
+      "migrations": [],
+      "tests": [],
+      "permissions": [],
+      "externalDependencies": [
+        "BUILT_IN_FORGE_API_URL",
+        "BUILT_IN_FORGE_API_KEY",
+        "an SMS provider",
+        "an email provider",
+        "a push provider"
+      ],
+      "knownGaps": [
+        "no SMS, email or push dependency of any kind in package.json",
+        "notifyOwner throws without the Forge endpoint",
+        "workflowNotifications is written and never delivered"
+      ],
+      "evidence": [
+        "the only sms matches in the tree are two string literals"
+      ]
+    },
+    {
+      "id": "security.hardening",
+      "name": "HTTP security hardening",
+      "category": "security",
+      "status": "NOT_IMPLEMENTED",
+      "backend": [
+        "server/_core/index.ts"
+      ],
+      "frontend": [],
+      "database": [],
+      "migrations": [],
+      "tests": [],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "no rate limiting",
+        "no CSRF policy - roadmap notes SameSite=None with no explicit policy",
+        "no CORS configuration",
+        "no helmet",
+        "no SAST, dependency or secret scanning in CI",
+        "110 dependency vulnerabilities (2 critical, 39 high)"
+      ],
+      "evidence": [
+        "no match for helmet, cors, rateLimit or csrf in server/_core/index.ts"
+      ]
+    },
+    {
+      "id": "emergency.sos",
+      "name": "Emergency mode and SOS",
+      "category": "operations",
+      "status": "NOT_IMPLEMENTED",
+      "backend": [],
+      "frontend": [],
+      "database": [],
+      "migrations": [],
+      "tests": [],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "no SOS table, module or procedure",
+        "emergencyPlanOnFile exists only as a readiness input",
+        "ERAP appears only as text in complianceSecretary.ts"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "telematics.faults",
+      "name": "Telematics fault codes",
+      "category": "fleet",
+      "status": "BACKEND_ONLY",
+      "backend": [
+        "server/telematicsRouter.ts",
+        "server/_core/telematics.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "faultCodes",
+        "fieldDevices"
+      ],
+      "migrations": [],
+      "tests": [
+        "server/telematics.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "0 of 7 procedures reachable from UI",
+        "telematicsRouter.ts:51 cannot clear a fault because defect resolution does not exist"
+      ],
+      "evidence": [
+        "consumed live by readinessComposer.ts:365-372"
+      ]
+    },
+    {
+      "id": "loadsense.ingestion",
+      "name": "LoadSense hardware ingestion",
+      "category": "fleet",
+      "status": "BLOCKED",
+      "backend": [],
+      "frontend": [],
+      "database": [
+        "loadSenseCalibrationModels",
+        "loadSenseGatewayBindings",
+        "loadSenseGatewayFrames",
+        "loadSenseWeightSnapshots",
+        "loadSenseAxleWeights",
+        "loadSenseScaleReconciliations",
+        "materialDensityProfiles"
+      ],
+      "migrations": [
+        "0109_loadsense_material_movement.sql"
+      ],
+      "tests": [],
+      "permissions": [],
+      "externalDependencies": [
+        "LoadSense devices (P4.2)"
+      ],
+      "knownGaps": [
+        "loadSenseMaterialMovement and loadSenseEvents DECLARED UNWIRED - 'device ingestion does not emit it yet'",
+        "loadSenseScaleReconciliations and materialDensityProfiles have no production reference"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "workflow.worker",
+      "name": "Background workflow worker",
+      "category": "platform",
+      "status": "IMPLEMENTED",
+      "backend": [
+        "server/_core/worker.ts",
+        "server/_core/productionWorker.ts",
+        "server/_core/workflowRuntime.ts",
+        "server/_core/workerLifecycle.ts",
+        "server/_core/drainWorker.ts"
+      ],
+      "frontend": [],
+      "database": [
+        "workflowRules",
+        "operationalTasks",
+        "workflowNotifications",
+        "domainEventOutbox"
+      ],
+      "migrations": [
+        "0015_workflow_orchestration.sql"
+      ],
+      "tests": [
+        "server/b20WorkflowWiring.test.ts",
+        "server/workflowOrchestration.test.ts"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "workflowInstances and workflowTransitions from the same migration are orphaned - the runtime uses different tables"
+      ],
+      "evidence": [
+        "built as dist/worker.js"
+      ]
+    },
+    {
+      "id": "ui.showcase",
+      "name": "Showcase screens with declared data sources",
+      "category": "ui",
+      "status": "IMPLEMENTED",
+      "backend": [],
+      "frontend": [
+        "client/src/showcase/panelSource.ts",
+        "client/src/showcase/Home.tsx",
+        "client/src/showcase/FleetWorkspace.tsx",
+        "client/src/showcase/ComplianceEngine.tsx"
+      ],
+      "database": [],
+      "migrations": [],
+      "tests": [
+        "client/src/showcase/panelSource.dom.test.tsx"
+      ],
+      "permissions": [],
+      "externalDependencies": [],
+      "knownGaps": [
+        "24 panels declare themselves 'demonstration layout' with a named reason"
+      ],
+      "evidence": [
+        "panelSource.ts: 'a query that returns nothing is NOT records. It is a demonstration layout with a named reason.'"
+      ]
+    }
+  ]
+}
