@@ -68,6 +68,12 @@ export type ItemStatus =
   | "missing"
   | "evidence_unverified"
   | "evidence_rejected"
+  /**
+   * Private evidence that does not satisfy the requirement. The effect is the
+   * same as the state it replaces; the reason is not, because the reason is the
+   * private part.
+   */
+  | "evidence_withheld"
   | "requirement_unverified"
   | "not_applicable";
 
@@ -162,7 +168,34 @@ export function evaluateRequirement(args: {
   const rank = (c: Credential) => (c.verificationStatus === "verified" ? 2 : c.verificationStatus === "needs_review" ? 1 : 0);
   const best = [...candidates].sort((a, b) => rank(b) - rank(a) || (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0]!;
 
+  /**
+   * `privateDetail` was declared on Credential and read nowhere — a field that
+   * looks like a filter and is not one, which is worse than no field at all,
+   * because the next person to read the type will assume it is honoured.
+   *
+   * It is honoured here, for the states that disclose *why* a requirement is
+   * unmet. "Evidence was rejected on review" against a requirement titled
+   * "Commercial medical (45–65: every 3 years)" tells a dispatcher that a named
+   * person failed a medical. The passport's job is to answer whether the person
+   * may work; the reason belongs with HR, and `medicalFitnessForDispatch` already
+   * makes exactly that distinction — this brings the passport into line with it.
+   *
+   * Deliberately narrow. `satisfied`, `expiring` and `expired` keep their dates,
+   * because the expiry of a medical is already released to this same permission
+   * by `compliance.medicalEligibility` as `reviewDue`; withholding it here would
+   * remove a renewal reminder without closing anything.
+   */
+  const withheld = (effect: PassportItem["effect"], expiresAt: Date | null): PassportItem => ({
+    ...base,
+    status: "evidence_withheld",
+    effect,
+    expiresAt,
+    daysToExpiry: null,
+    reason: `${r.title} is not satisfied. The evidence is held privately — the reason is with the office, not on this passport.`,
+  });
+
   if (best.verificationStatus === "rejected" && candidates.every(c => c.verificationStatus === "rejected")) {
+    if (best.privateDetail) return withheld("blocked", null);
     return { ...base, status: "evidence_rejected", effect: "blocked", expiresAt: best.expiresAt ?? null, daysToExpiry: null, reason: `${r.title} evidence was rejected on review` };
   }
 
@@ -173,6 +206,7 @@ export function evaluateRequirement(args: {
     return { ...base, status: "expired", effect: "blocked", expiresAt, daysToExpiry: days, reason: `${r.title} expired ${Math.abs(days!)} day(s) ago` };
   }
   if (best.verificationStatus === "needs_review") {
+    if (best.privateDetail) return withheld("review", expiresAt);
     return { ...base, status: "evidence_unverified", effect: "review", expiresAt, daysToExpiry: days, reason: `${r.title} is on record but has not been verified` };
   }
   // A warn window of zero means "never warn": a 24-hour inspection is valid

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { storageKeyInput } from "./_core/storageKey";
 /**
  * v22.5.1 — the operational truth boundary. Authorization answers "may this
  * person perform this kind of action"; these refusals answer "what may the
@@ -459,7 +460,7 @@ export const appRouter = router({
             jobId: z.number().int().optional(),
             title: z.string().min(1).max(220),
             category: z.string().min(1).max(80),
-            storageKey: z.string().max(512).optional(),
+            storageKey: storageKeyInput.optional(),
             // A caller may record where a document lives, but not a `/manus-storage/`
             // path: that route is deleted, so such a value is a dead capability stored
             // as if it were live. Refused at the input rather than cleaned up later.
@@ -1524,7 +1525,7 @@ export const appRouter = router({
               ownerId: z.number().int(),
               docType: z.string().min(1).max(100),
               title: z.string().min(1).max(220),
-              storageKey: z.string().max(512).optional(),
+              storageKey: storageKeyInput.optional(),
               // A caller may record where a document lives, but not a `/manus-storage/`
             // path: that route is deleted, so such a value is a dead capability stored
             // as if it were live. Refused at the input rather than cleaned up later.
@@ -1613,7 +1614,7 @@ export const appRouter = router({
                 .default("advisory"),
               status: REFUSED,
               detail: z.string().optional(),
-              storageKey: z.string().max(512).optional(),
+              storageKey: storageKeyInput.optional(),
               // A caller may record where a document lives, but not a `/manus-storage/`
             // path: that route is deleted, so such a value is a dead capability stored
             // as if it were live. Refused at the input rather than cleaned up later.

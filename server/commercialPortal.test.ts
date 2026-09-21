@@ -96,7 +96,13 @@ describe("the external gate is wired like the role gate", () => {
       // Every kind holds its own identity lifecycle; everything else belongs to exactly one kind.
       if (!["portal.self", "portal.invitation.accept", "portal.credential.manage"].includes(perm)) expect(owners, proc).toHaveLength(1);
     }
-    expect([...EXTERNAL_SENSITIVE_PERMISSIONS].sort()).toEqual(["portal.credential.manage", "portal.customer.adjust", "portal.customer.commit", "portal.customer.decide", "portal.customer.dispute", "portal.customer.documents", "portal.customer.sign", "portal.facility.submit", "portal.vendor.submit"]);
+    // Pinned exactly, so widening the fail-closed set is a decision rather than a
+    // habit. `portal.invitation.accept` was added deliberately: accepting an
+    // invitation activates an external identity and mints a 90-day bearer token,
+    // which is the most consequential thing this gate does, and it was the one
+    // credential operation outside the set while `portal.credential.manage` —
+    // governing the lesser token rotation — was already inside it.
+    expect([...EXTERNAL_SENSITIVE_PERMISSIONS].sort()).toEqual(["portal.credential.manage", "portal.customer.adjust", "portal.customer.commit", "portal.customer.decide", "portal.customer.dispute", "portal.customer.documents", "portal.customer.sign", "portal.facility.submit", "portal.invitation.accept", "portal.vendor.submit"]);
   });
 
   it("keeps the inside roles that touch the outside narrow", () => {

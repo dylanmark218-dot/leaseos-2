@@ -43,7 +43,7 @@ import { assessCoverage, type PolicyRecord } from "./_core/insuranceRisk";
 import { calibrationEffectOnUse, calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import { medicalFitnessForDispatch } from "./_core/compliancePassport";
 import { trainingDispatchDecision } from "./_core/trainingAcademy";
-import { listActiveUserRoleNames } from "./db";
+import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
 import {
@@ -234,7 +234,9 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
    */
   let academyVersion = "none";
   if (job) {
-    const roles = op.userId ? await listActiveUserRoleNames(op.userId) : [];
+    // Every role, confined ones included: a driver confined to one branch is
+    // still a driver and still owes the driver's courses.
+    const roles = op.userId ? await listRoleNamesAnyScope(op.userId) : [];
     const unitForBinding = subject.unitId ? (await db.select().from(units).where(eq(units.id, subject.unitId)).limit(1))[0] ?? null : null;
     const bindingFacts: AcademyBindingFacts = {
       role: roles,

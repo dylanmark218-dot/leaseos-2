@@ -12,6 +12,7 @@ import {
   countActiveManagementGrants,
   grantUserRole,
   listActiveUserRoleNames,
+  listActiveUserRoles,
   revokeUserRole,
 } from "./db";
 
@@ -340,7 +341,10 @@ d("active grant uniqueness is enforced by the database", () => {
     const now = new Date();
     await grantUserRole({ userId, role: "dispatcher", scopeType: "branch", scopeRef: "GP", grantedByUserId: 1, grantedAt: now });
     await grantUserRole({ userId, role: "dispatcher", scopeType: "branch", scopeRef: "EDM", grantedByUserId: 1, grantedAt: now });
-    expect((await listActiveUserRoleNames(userId)).length).toBe(2);
+    // listActiveUserRoles, not the name projection: this asserts grantUserRole's
+    // per-branch uniqueness key, and the name projection now reports global roles
+    // only — which for this user is none.
+    expect((await listActiveUserRoles(userId)).length).toBe(2);
 
     // Same branch twice is still a duplicate.
     await expect(

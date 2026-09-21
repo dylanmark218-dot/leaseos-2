@@ -314,3 +314,81 @@ d("a driver, a unit and a carrier, through the registry", () => {
     expect(review.nextReviewDueAt?.toISOString().slice(0, 10)).toBe("2026-12-01");
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Private evidence says whether, never why                            */
+/* ------------------------------------------------------------------ */
+
+describe("private evidence does not explain itself on a passport", () => {
+  /*
+   * `Credential.privateDetail` was declared and read nowhere — a field shaped
+   * like a filter that filtered nothing. The module's own header swears dispatch
+   * "never learns why not", and `medicalFitnessForDispatch` keeps that promise by
+   * flattening rejection and expiry alike to eligible:"no". The passport did not:
+   * it returned `evidence_rejected` with the prose "evidence was rejected on
+   * review" against a requirement titled "Commercial medical (45–65: every 3
+   * years)", for any operator id a caller named, to any of the ten roles holding
+   * compliance.passport.read — drivers and dispatchers among them.
+   *
+   * That single bit is a medical judgement about a named person. The effect
+   * (blocked / review) is not private and is preserved, because dispatch has to
+   * act on it.
+   */
+  it("withholds the reason when private evidence was rejected", () => {
+    const item = evaluateRequirement({
+      requirement: req({ title: "Commercial medical (45–65: every 3 years)" }),
+      credentials: [cred({ verificationStatus: "rejected", privateDetail: true })],
+      now: NOW,
+    });
+    expect(item.status).toBe("evidence_withheld");
+    expect(item.effect, "the consequence is not private — dispatch still has to act").toBe("blocked");
+    expect(item.reason).not.toMatch(/rejected/i);
+  });
+
+  it("withholds the reason when private evidence is unverified", () => {
+    const item = evaluateRequirement({
+      requirement: req(),
+      credentials: [cred({ verificationStatus: "needs_review", privateDetail: true })],
+      now: NOW,
+    });
+    expect(item.status).toBe("evidence_withheld");
+    expect(item.effect).toBe("review");
+    expect(item.reason).not.toMatch(/not been verified/i);
+  });
+
+  it("still explains itself when the evidence is not private", () => {
+    // The withholding must be caused by privateDetail, not by the status —
+    // otherwise every rejection everywhere goes silent and the passport stops
+    // being useful for the ordinary case.
+    const item = evaluateRequirement({
+      requirement: req(),
+      credentials: [cred({ verificationStatus: "rejected", privateDetail: false })],
+      now: NOW,
+    });
+    expect(item.status).toBe("evidence_rejected");
+    expect(item.reason).toMatch(/rejected/i);
+  });
+
+  it("keeps an expiry date on private evidence, because that date is already released", () => {
+    // Deliberately NOT withheld: compliance.medicalEligibility returns the same
+    // expiry as `reviewDue` under the same permission, so hiding it here would
+    // remove a renewal reminder without closing anything. Expiry is administrative;
+    // rejection is a judgement about the person.
+    const item = evaluateRequirement({
+      requirement: req(),
+      credentials: [cred({ expiresAt: days(-1), privateDetail: true })],
+      now: NOW,
+    });
+    expect(item.status).toBe("expired");
+    expect(item.expiresAt).not.toBeNull();
+  });
+
+  it("does not disturb a satisfied private credential", () => {
+    const item = evaluateRequirement({
+      requirement: req(),
+      credentials: [cred({ privateDetail: true })],
+      now: NOW,
+    });
+    expect(item.status).toBe("satisfied");
+  });
+});

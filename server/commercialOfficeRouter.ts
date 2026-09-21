@@ -11,6 +11,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, gte, inArray, isNull, lte, notInArray, or, sql, like, desc } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { storageKeyInput } from "./_core/storageKey";
 import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries, evidenceRecords, fieldTicketDocuments, retentionPolicies } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
@@ -550,7 +551,7 @@ export const commercialOfficeRouter = router({
     register: roleProcedure("commercialOffice.documentRegister")
       .input(z.object({
         documentType: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), title: z.string().min(1).max(300), contentHash: z.string().regex(/^[a-f0-9]{64}$/), sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-        byteLength: z.number().int().nonnegative().optional(), mimeType: z.string().max(120).optional(), evidenceRecordId: z.number().int().positive().optional(), fieldTicketDocumentId: z.number().int().positive().optional(), storageKey: z.string().max(512).optional(),
+        byteLength: z.number().int().nonnegative().optional(), mimeType: z.string().max(120).optional(), evidenceRecordId: z.number().int().positive().optional(), fieldTicketDocumentId: z.number().int().positive().optional(), storageKey: storageKeyInput.optional(),
         counterpartyOrgRef: z.string().max(64).optional(), issuedAt: z.coerce.date().optional(), links: z.array(z.object({ recordType: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), recordRef: z.string().min(1).max(80) })).max(20).default([]),
       }))
       .mutation(async ({ ctx, input }) => {
@@ -573,7 +574,7 @@ export const commercialOfficeRouter = router({
         return { documentRef, version: 1, retention: "unknown — assign a retention class" as const };
       }),
     supersede: roleProcedure("commercialOffice.documentSupersede")
-      .input(z.object({ documentRef: z.string().min(1), reason: z.string().min(10).max(500), contentHash: z.string().regex(/^[a-f0-9]{64}$/), sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), byteLength: z.number().int().nonnegative().optional(), evidenceRecordId: z.number().int().positive().optional(), fieldTicketDocumentId: z.number().int().positive().optional(), storageKey: z.string().max(512).optional(), title: z.string().min(1).max(300).optional() }))
+      .input(z.object({ documentRef: z.string().min(1), reason: z.string().min(10).max(500), contentHash: z.string().regex(/^[a-f0-9]{64}$/), sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), byteLength: z.number().int().nonnegative().optional(), evidenceRecordId: z.number().int().positive().optional(), fieldTicketDocumentId: z.number().int().positive().optional(), storageKey: storageKeyInput.optional(), title: z.string().min(1).max(300).optional() }))
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         const old = (await db.select().from(commercialDocuments).where(eq(commercialDocuments.documentRef, input.documentRef)).limit(1))[0];
