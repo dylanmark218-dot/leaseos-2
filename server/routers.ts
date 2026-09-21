@@ -44,6 +44,7 @@ import { widgetReaderFor } from "./widgetSources";
 import { automationPolicyRouter } from "./automationPolicyRouter";
 import { movementPermitRouter } from "./movementPermitRouter";
 import { printingRouter } from "./printingRouter";
+import { scanningRouter } from "./scanningRouter";
 import { restrictedVaultRouter } from "./restrictedVaultRouter";
 import { composeReadiness } from "./readinessComposer";
 import { branchRolesFor } from "./_core/widgetRoleKeys";
@@ -323,6 +324,7 @@ export const appRouter = router({
   automationPolicy: automationPolicyRouter,
   movementPermit: movementPermitRouter,
   printing: printingRouter,
+  scanning: scanningRouter,
   restrictedVault: restrictedVaultRouter,
   manifestCustody: manifestCustodyRouter,
   securityIncidents: securityIncidentsRouter,

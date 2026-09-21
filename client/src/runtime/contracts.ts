@@ -19,6 +19,10 @@
  * native binding and is exercised only on a device.
  */
 
+import type { CaptureQualitySignals } from "@shared/captureQuality";
+
+export type { CaptureQualitySignals };
+
 export type SyncState = "saved_locally" | "queued" | "syncing" | "synchronized" | "failed" | "conflict";
 
 /** What the device knew at the moment of capture. This is historical evidence, not server authorization. */
@@ -28,7 +32,11 @@ export type CaptureKind =
   | "pretrip" | "posttrip" | "hos_event" | "job_accept" | "load_ticket" | "disposal_ticket" | "fuel_receipt"
   | "expense_receipt" | "photo" | "signature" | "incident" | "defect_report" | "tailgate" | "tdg_document" | "voice_note"
   // v22.20 — a roadside enforcement document and the order it carries.
-  | "roadside_enforcement" | "oos_order";
+  | "roadside_enforcement" | "oos_order"
+  // v23.28 — a document put through the page scanner whose type nobody has established.
+  // A scan the classifier DID place is saved under that kind instead, so a scanned
+  // disposal ticket syncs at ticket priority rather than at this one.
+  | "scanned_document";
 
 export type GpsFix = { latitude: number; longitude: number; accuracyM: number | null; fixedAt: string; source: "device_gps" | "network" | "manual" };
 
@@ -115,4 +123,83 @@ export interface Clock { now(): Date; }
 
 export class NotOnDeviceError extends Error {
   constructor(what: string) { super(`${what} is only available on a device with the native shell`); this.name = "NotOnDeviceError"; }
+}
+
+/* ------------------------------------------------------------------ */
+/* The page scanner                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * v23.28 — scanning is three separate pieces of hardware-backed machinery, and they are three
+ * interfaces because a device can have one without the others: a rugged Android tablet shipped
+ * without Google Play Services has no ML Kit document scanner and may still decode a barcode
+ * through the plain camera.
+ *
+ * Each is `available()`-first for the reason the vault is: a capability the device does not have
+ * must be declared unavailable in plain words at the moment the worker reaches for it, not
+ * discovered at the edge of coverage four hours later. `NotOnDeviceError` is thrown, never
+ * returned as a null result that reads like "the page was blank".
+ *
+ * Expected plugins (not installed in this repository):
+ *   @capacitor-mlkit/document-scanner   ML Kit Document Scanner (Android) / VisionKit (iOS)
+ *   @capacitor-mlkit/barcode-scanning   ML Kit barcode, Android + iOS + Web
+ *   @capacitor-mlkit/text-recognition   ML Kit Text Recognition v2 / Apple Vision, on-device
+ *
+ * What must be true on the device and cannot be proven here:
+ *   - recognition runs ON the device, so a photographed payroll document or a customer's rate
+ *     sheet never leaves it to be read;
+ *   - the bytes handed back are the scanner's own perspective-corrected output and nothing
+ *     re-encodes them between the sensor and the vault;
+ *   - the confidences the OCR binding reports are the engine's own. A binding that returned a
+ *     flattering constant would defeat the quality gate and the extraction floor together, and
+ *     neither would show a mark.
+ */
+
+/** One page as the scanner handed it back: already edge-detected, deskewed, shadow-removed. */
+export type ScannedPage = {
+  bytes: Uint8Array;
+  mimeType: string;
+  quality: CaptureQualitySignals;
+};
+
+export interface DocumentScanner {
+  available(): Promise<boolean>;
+  /**
+   * Opens the platform's own scanning UI and resolves with the pages the worker accepted, or null
+   * if they backed out. Cancelling is an ordinary outcome and not an error: a driver who opens the
+   * scanner by mistake has not failed at anything.
+   */
+  scan(options: { maxPages: number; allowGallery: boolean }): Promise<ScannedPage[] | null>;
+}
+
+export type OcrBlock = {
+  text: string;
+  /** 0-100. null where the platform does not expose a per-block score. */
+  confidence: number | null;
+};
+
+export type DeviceOcrResult = {
+  engine: string;
+  engineVersion: string | null;
+  rawText: string;
+  blocks: OcrBlock[];
+  /** Mean of the block confidences, or null when the platform scored none of them. */
+  meanConfidence: number | null;
+};
+
+export interface OcrEngine {
+  available(): Promise<boolean>;
+  /** On-device text recognition over one page. Nothing is uploaded to read it. */
+  recognize(bytes: Uint8Array, mimeType: string): Promise<DeviceOcrResult>;
+}
+
+export type DecodedBarcode = {
+  /** The symbology as the platform names it: QR_CODE, CODE_128, PDF417, ... */
+  format: string;
+  value: string;
+};
+
+export interface BarcodeScanner {
+  available(): Promise<boolean>;
+  scanImage(bytes: Uint8Array, mimeType: string): Promise<DecodedBarcode[]>;
 }

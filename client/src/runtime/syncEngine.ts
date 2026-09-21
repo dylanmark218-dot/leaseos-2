@@ -45,6 +45,10 @@ export function captureSyncPriority(kind: CaptureKind): number {
     case "fuel_receipt":
     case "expense_receipt":
     case "voice_note":
+    // v23.28 — an unclassified scan rides with the tickets rather than with the photos:
+    // nobody has established what it is, and a disposal ticket nobody has classified is
+    // still a disposal ticket.
+    case "scanned_document":
       return 20;
     case "photo":
       return 40;

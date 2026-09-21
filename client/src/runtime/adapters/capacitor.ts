@@ -12,6 +12,9 @@
  *   @capacitor/filesystem             encrypted file store under the app sandbox
  *   capacitor-secure-storage-plugin   Keychain / Keystore-backed device key
  *   @capacitor/camera, @capacitor/geolocation
+ *   @capacitor-mlkit/document-scanner ML Kit Document Scanner / VisionKit
+ *   @capacitor-mlkit/text-recognition  ML Kit Text Recognition v2 / Apple Vision
+ *   @capacitor-mlkit/barcode-scanning  ML Kit barcode
  *
  * What must be true on the device, and cannot be proven here:
  *   - the SQLite file is encrypted at rest with a key from the keystore;
@@ -19,9 +22,17 @@
  *     enrolment reports `keystoreAttestation: "hardware"` only when it is;
  *   - biometrics or the device PIN authorize signing and never leave the
  *     platform authenticator; LeaseOS stores no biometric template.
+ *   - the scanner and the text recognizer run wholly on the device, so a photographed
+ *     rate sheet or payroll document is never uploaded to be read;
+ *   - the confidences the OCR binding reports are the engine's own. A binding that
+ *     returned a flattering constant would defeat the quality gate and the extraction
+ *     floor together, and neither would show a mark.
  */
 
-import { NotOnDeviceError, type FileVault, type Keystore, type LocalStore } from "../contracts";
+import {
+  NotOnDeviceError,
+  type BarcodeScanner, type DocumentScanner, type FileVault, type Keystore, type LocalStore, type OcrEngine,
+} from "../contracts";
 
 type PluginLoader<T> = () => Promise<T | null>;
 
@@ -50,4 +61,40 @@ export function capacitorVault(): { available: () => Promise<boolean>; open: Plu
   };
 }
 
-export const NATIVE_ONLY_CAPABILITIES = ["encrypted_sqlite", "encrypted_file_vault", "hardware_keystore", "camera", "gps", "biometric_signing", "local_notifications"] as const;
+/**
+ * v23.28 — the page scanner.
+ *
+ * ML Kit's document scanner is Android-only and arrives through Google Play Services, so
+ * `available()` is a real question on a rugged tablet that ships without them and not a
+ * formality — which is exactly why the capability is asked for rather than assumed. On iOS
+ * the same plugin fronts VisionKit.
+ */
+export function capacitorDocumentScanner(): { available: () => Promise<boolean>; open: PluginLoader<DocumentScanner> } {
+  return {
+    available: async () => (await load("@capacitor-mlkit/document-scanner")) != null,
+    open: async () => { throw new NotOnDeviceError("Document scanner"); },
+  };
+}
+
+/**
+ * On-device text recognition.
+ *
+ * Deliberately not a cloud call. A driver photographs customer rate sheets and payroll letters,
+ * and the difference between reading those on the handset and posting them to a recognition
+ * service is the difference between a scanner and a disclosure.
+ */
+export function capacitorOcrEngine(): { available: () => Promise<boolean>; open: PluginLoader<OcrEngine> } {
+  return {
+    available: async () => (await load("@capacitor-mlkit/text-recognition")) != null,
+    open: async () => { throw new NotOnDeviceError("On-device text recognition"); },
+  };
+}
+
+export function capacitorBarcodeScanner(): { available: () => Promise<boolean>; open: PluginLoader<BarcodeScanner> } {
+  return {
+    available: async () => (await load("@capacitor-mlkit/barcode-scanning")) != null,
+    open: async () => { throw new NotOnDeviceError("Barcode scanner"); },
+  };
+}
+
+export const NATIVE_ONLY_CAPABILITIES = ["encrypted_sqlite", "encrypted_file_vault", "hardware_keystore", "camera", "gps", "biometric_signing", "local_notifications", "document_scanner", "on_device_ocr", "barcode_scanner"] as const;

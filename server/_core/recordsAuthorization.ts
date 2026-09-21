@@ -212,6 +212,19 @@ export type Permission =
   // v23.27: printing. Recording a print is ordinary work and the printer is in the cab, so drivers
   // hold it; saying which printer is in which unit is fleet administration.
   | "print.read" | "print.record" | "printer.manage"
+  /*
+   * v23.28: reading the paperwork guidance — what a document needs, who keeps it, and which values
+   * may not be guessed. A DRIVER permission first: the person standing at a facility gate with the
+   * ticket in their hand is the one who has to be told the receiving signature block is empty.
+   *
+   * Deliberately NOT `scan.read`, which is already taken and means something else entirely — the
+   * QR scan-audit trail behind `scans.list`. Reusing it would have handed that audit log to every
+   * role that needs paperwork guidance, which is most of them.
+   *
+   * Read-only: the scanner proposes and confirms nothing, so there is no `paperwork.write` to go
+   * with it until something actually persists.
+   */
+  | "paperwork.read"
   | "manifest.override.grant"
   /*
    * 0163 (P4.2): running a calibration sweep. Deliberately NOT given to the ordinary office role —
@@ -362,6 +375,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // v23.27 — printing: the printer is in the cab, so the driver records what it printed.
     "print.read",
     "print.record",
+    // v23.28 — the ticket is in the driver's hand at the gate, and that is the only moment a
+    // missing signature can still be fixed. Guidance they cannot read helps nobody.
+    "paperwork.read",
     // v23.26 — a driver may read the permit position on their own load and nothing more.
     "permit.read",
     "automation.override.operational",
@@ -498,6 +514,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // Needed to assign work: who is available, and is their paperwork current.
     "personnel.read",
     "compliance.read",
+    // v23.28 — paperwork guidance is compliance reference material; whoever may read one may read the other.
+    "paperwork.read",
     "job.read",
     "job.write",
     "trip.read",
@@ -592,6 +610,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "maintenance.write_work_order",
     "maintenance.record_release",
     "compliance.read",
+    // v23.28 — paperwork guidance is compliance reference material; whoever may read one may read the other.
+    "paperwork.read",
     "incident.create",
     "incident.read_summary",
     "payroll.read_own",
@@ -664,6 +684,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "maintenance.record_release",
     "maintenance.revoke_release",
     "compliance.read",
+    // v23.28 — paperwork guidance is compliance reference material; whoever may read one may read the other.
+    "paperwork.read",
     "incident.create",
     "incident.read_summary",
     "payroll.read_own",
@@ -778,6 +800,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "maintenance.read_defect",
     "safety.write",
     "compliance.read",
+    // v23.28 — paperwork guidance is compliance reference material; whoever may read one may read the other.
+    "paperwork.read",
     "compliance.write",
     "compliance.review",
     "job.read",
@@ -892,6 +916,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "personnel.read",
     "personnel.write",
     "compliance.read",
+    // v23.28 — paperwork guidance is compliance reference material; whoever may read one may read the other.
+    "paperwork.read",
     "compliance.write",
     "compliance.review",
     "compliance.sign",
@@ -1116,6 +1142,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "personnel.read",
     "personnel.write",
     "compliance.read",
+    // v23.28 — paperwork guidance is compliance reference material; whoever may read one may read the other.
+    "paperwork.read",
     "compliance.write",
     "compliance.review",
     "safety.write",
@@ -1318,6 +1346,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // Releasing a hold is deliberately narrower than placing one.
     "legal_hold.release",
     "compliance.read",
+    // v23.28 — paperwork guidance is compliance reference material; whoever may read one may read the other.
+    "paperwork.read",
     "job.read",
     "trip.read",
     "load.read",
@@ -1342,6 +1372,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "evidence.export",
     "incident.read_summary",
     "compliance.read",
+    // v23.28 — paperwork guidance is compliance reference material; whoever may read one may read the other.
+    "paperwork.read",
     "tax.read_business",
     "tax.year_end.read",
     "job.read",
@@ -1401,6 +1433,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "banking.reconcile",
     "billing.read",
     "compliance.read",
+    // v23.28 — paperwork guidance is compliance reference material; whoever may read one may read the other.
+    "paperwork.read",
     "evidence.read_commercial",
     "evidence.read_job_operational",
     "contractor.read",
@@ -2974,6 +3008,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsRecord": "closeout.terms.record",
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
+
+  /* ---- v23.28: the page scanner, all read-only ----
+   * Three queries that answer "what does this paperwork need", "what is this scan still missing"
+   * and "how long must it be kept". None writes, links, confirms or prints. */
+  "paperwork.guidance": "paperwork.read",
+  "paperwork.reviewScan": "paperwork.read",
+  "paperwork.retention": "paperwork.read",
 } as const satisfies Record<string, Permission>;
 
 /**

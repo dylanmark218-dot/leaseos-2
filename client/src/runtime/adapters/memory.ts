@@ -7,7 +7,12 @@
  * browser gets the offline queue and the sync protocol, not the vault.
  */
 
-import type { Clock, Connectivity, FileVault, Keystore, LocalCapture, LocalPackage, LocalStore, SyncState } from "../contracts";
+import {
+  NotOnDeviceError,
+  type BarcodeScanner, type Clock, type Connectivity, type DecodedBarcode, type DeviceOcrResult,
+  type DocumentScanner, type FileVault, type Keystore, type LocalCapture, type LocalPackage,
+  type LocalStore, type OcrEngine, type ScannedPage, type SyncState,
+} from "../contracts";
 import { decryptWithRawKey, encryptWithRawKey, generateRawKey, sha256Hex, toBase64 } from "../crypto";
 
 export class MemoryStore implements LocalStore {
@@ -69,3 +74,79 @@ export class MemoryVault implements FileVault {
 
 export class FlagConnectivity implements Connectivity { constructor(public isOnline = true) {} async online() { return this.isOnline; } }
 export class SettableClock implements Clock { constructor(private t: Date) {} now() { return new Date(this.t); } set(t: Date) { this.t = t; } advanceDays(n: number) { this.t = new Date(this.t.getTime() + n * 86_400_000); } }
+
+/* ------------------------------------------------------------------ */
+/* v23.28 — the page scanner: a script for tests, a refusal for the browser */
+/* ------------------------------------------------------------------ */
+
+/**
+ * There is deliberately no in-memory OCR engine.
+ *
+ * The other adapters in this file degrade honestly — a memory vault is real encryption with the
+ * key in the wrong place, and a worker on a plain browser still gets the queue and the sync
+ * protocol. Recognition has no such degraded form. Anything this file could compute would be a
+ * made-up read of a real document, and a made-up read is indistinguishable, downstream, from a
+ * real one: it acquires a confidence, passes the extraction floor, and arrives in front of a
+ * person as a proposal about a ticket nobody read.
+ *
+ * So the browser fallback DECLARES recognition unavailable — `available()` is false and every
+ * call throws `NotOnDeviceError`, which is observable rather than silent — while tests get a
+ * scanner they SCRIPT, named `Scripted` so a reader of a stack trace can never mistake one for an
+ * implementation.
+ */
+
+export class UnavailableDocumentScanner implements DocumentScanner {
+  async available() { return false; }
+  async scan(): Promise<ScannedPage[] | null> { throw new NotOnDeviceError("Document scanner"); }
+}
+
+export class UnavailableOcrEngine implements OcrEngine {
+  async available() { return false; }
+  async recognize(): Promise<DeviceOcrResult> { throw new NotOnDeviceError("On-device text recognition"); }
+}
+
+export class UnavailableBarcodeScanner implements BarcodeScanner {
+  async available() { return false; }
+  async scanImage(): Promise<DecodedBarcode[]> { throw new NotOnDeviceError("Barcode scanner"); }
+}
+
+/** Hands back the pages it was given, one session per call. */
+export class ScriptedDocumentScanner implements DocumentScanner {
+  /** Each entry is one session's worth of pages; null scripts a cancellation. */
+  constructor(private sessions: (ScannedPage[] | null)[], public isAvailable = true) {}
+  async available() { return this.isAvailable; }
+  async scan(options: { maxPages: number; allowGallery: boolean }): Promise<ScannedPage[] | null> {
+    if (!this.isAvailable) throw new NotOnDeviceError("Document scanner");
+    const next = this.sessions.shift();
+    if (next === undefined) throw new Error("ScriptedDocumentScanner: no session scripted for this call");
+    // A real scanner cannot return more pages than the UI allowed it to take; a script that does
+    // would be testing against a device that does not exist.
+    if (next && next.length > options.maxPages) {
+      throw new Error(`ScriptedDocumentScanner: scripted ${next.length} pages, maxPages is ${options.maxPages}`);
+    }
+    return next;
+  }
+}
+
+/** Returns the result scripted for a page's content hash, so reads follow bytes rather than call order. */
+export class ScriptedOcrEngine implements OcrEngine {
+  constructor(private byContentHash: Map<string, DeviceOcrResult>, public isAvailable = true) {}
+  async available() { return this.isAvailable; }
+  async recognize(bytes: Uint8Array, _mimeType: string): Promise<DeviceOcrResult> {
+    if (!this.isAvailable) throw new NotOnDeviceError("On-device text recognition");
+    const hash = await sha256Hex(bytes);
+    const scripted = this.byContentHash.get(hash);
+    // An unscripted page reads as a page the engine found no text on, which is a real outcome for
+    // a dark or blank frame — not an error.
+    return scripted ?? { engine: "scripted", engineVersion: null, rawText: "", blocks: [], meanConfidence: null };
+  }
+}
+
+export class ScriptedBarcodeScanner implements BarcodeScanner {
+  constructor(private byContentHash: Map<string, DecodedBarcode[]>, public isAvailable = true) {}
+  async available() { return this.isAvailable; }
+  async scanImage(bytes: Uint8Array, _mimeType: string): Promise<DecodedBarcode[]> {
+    if (!this.isAvailable) throw new NotOnDeviceError("Barcode scanner");
+    return this.byContentHash.get(await sha256Hex(bytes)) ?? [];
+  }
+}

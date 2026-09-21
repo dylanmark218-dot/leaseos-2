@@ -52,6 +52,15 @@ export class Outbox {
   async setSealed(localId: string, manifestHash: string | null) { const c = await this.must(localId); c.sealed = true; c.sealManifestHash = manifestHash ?? c.sealManifestHash; c.updatedAt = this.clock.now().toISOString(); await this.store.putCapture(c); return c; }
 
   /**
+   * Every capture on this device, newest state included.
+   *
+   * The outbox owns the store, so reading it goes through the outbox rather than around it. Added
+   * for the scanner's replay check, which has to ask "are these exact pages already filed" before
+   * it files them again.
+   */
+  async listAll(): Promise<LocalCapture[]> { return this.store.listCaptures(); }
+
+  /**
    * What the UI shows: counts by state, and how long ago the oldest evidence
    * that has not reached the server was CAPTURED — the figure the office asks
    * for is "how old is the evidence we have not got", not "when was it queued".
