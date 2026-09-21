@@ -385,3 +385,48 @@ describe("requiresReEvaluation", () => {
     expect(r.message).toContain("re-run the gate before awarding");
   });
 });
+
+describe("a permit requirement nobody has determined", () => {
+  const withPermit = (job: Partial<ReadinessInput["job"]>): ReadinessInput =>
+    ({ ...READY, job: { ...READY.job, ...job } });
+
+  it("refuses dispatch rather than passing, when nobody has determined whether a permit is needed", () => {
+    /*
+     * This is the state readinessComposer used to make unreachable by supplying `false` on every
+     * job. `false` is not a cautious default for "nobody has looked" — it is the answer that lets
+     * the truck go, and an oversize movement went with it.
+     */
+    const r = evaluateDispatchReadiness(withPermit({ permitRequired: null }));
+    expect(r.blockers.map(b => b.code)).toContain("permit_requirement_unknown");
+    expect(r.verdict).toBe("unknown");
+    expect(r.verdict).not.toBe("eligible");
+  });
+
+  it("can be accepted by a named manager, but never silently, and never like a missing permit", () => {
+    const b = evaluateDispatchReadiness(withPermit({ permitRequired: null }))
+      .blockers.find(x => x.code === "permit_requirement_unknown")!;
+    /*
+     * Overridable by a manager, but never silently: the verdict stays `unknown`, so dispatch is
+     * refused until a named person either records a determination or accepts the gap on the record.
+     * That is the difference between this and `permit_missing`, which no role may wave through.
+     */
+    expect(b.severity).toBe("unknown");
+    expect(b.overridable).toBe(true);
+    expect(b.overrideAuthority).toBe("manager");
+    expect(evaluateDispatchReadiness(withPermit({ permitRequired: null })).verdict).not.toBe("eligible");
+    const missing = evaluateDispatchReadiness(withPermit({ permitRequired: true, permitOnFile: false }))
+      .blockers.find(x => x.code === "permit_missing")!;
+    expect(missing.overridable).toBe(false);
+  });
+
+  it("still asks nothing about permits once somebody records that none is required", () => {
+    // A recorded false is a real determination and must not be confused with the unknown above.
+    const r = evaluateDispatchReadiness(withPermit({ permitRequired: false }));
+    expect(r.blockers.map(b => b.code).filter(c => c.startsWith("permit_"))).toEqual([]);
+  });
+
+  it("keeps the required-but-missing and required-but-unresolved cases distinct", () => {
+    expect(codes(withPermit({ permitRequired: true, permitOnFile: false }))).toContain("permit_missing");
+    expect(codes(withPermit({ permitRequired: true, permitOnFile: null }))).toContain("permit_unknown");
+  });
+});

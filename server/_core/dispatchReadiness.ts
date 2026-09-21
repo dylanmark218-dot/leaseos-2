@@ -393,7 +393,20 @@ export function evaluateDispatchReadiness(
       label: "Nobody has determined whether this movement needs a permit",
       severity: "unknown",
       subject: "job",
-      overridable: false,
+      /*
+       * Manager-overridable, unlike `permit_missing` and `permit_unknown` beneath it, because it is
+       * a different kind of claim. Those two say a legal artifact is known to be required and is
+       * absent or unresolved — nobody may wave that through. This one says a question has not been
+       * asked yet, which is the same shape as `hos_unknown` and `trailer_compatibility_unknown`,
+       * and those are manager-overridable for the same reason.
+       *
+       * It still fails closed: the verdict is `unknown`, dispatch is refused, and proceeding takes
+       * a named manager and leaves an override record. What it does not do is freeze every job in
+       * an existing deployment behind a gate no role can clear — the proper way to clear it is to
+       * record a determination, which is one row and the deep-link this blocker carries.
+       */
+      overridable: true,
+      overrideAuthority: "manager",
     });
   } else if (input.job.permitRequired) {
     if (input.job.permitOnFile === false) {
