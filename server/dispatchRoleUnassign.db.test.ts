@@ -44,15 +44,29 @@ async function job(orgRef: string) {
   const [r] = await pool.query<mysql.RowDataPacket[]>("SELECT id FROM jobs WHERE jobCode = ?", [jobCode]);
   return Number(r[0]!.id);
 }
+/*
+ * Units and operators are created with EXPLICIT high ids, not auto-increment.
+ *
+ * These fixtures claim `coreRecordOwnership` for every unit they make, because an org member can
+ * only see units their organization owns. Auto-increment ids start at 1 in a fresh gate database,
+ * and other suites hardcode low ids they expect to be UNOWNED — `productionPath.test.ts:45` uses
+ * `unitId = 127`, and the default scope's check is `isNull(owner)`, which a nonexistent unit
+ * satisfies. Left on auto-increment these fixtures eventually reach 127, own it, and make that
+ * suite's work order invisible to its own mechanic. Explicit ids keep this suite out of the range
+ * anyone hardcodes, without changing another suite to accommodate this one.
+ */
+let assetId = 1_400_000_000 + Math.floor(Math.random() * 40_000_000);
+const nextAssetId = () => assetId++;
+
 async function unit(orgRef: string) {
-  const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'vacuum_truck', 'ABC', 'clear')", [`U-${rnd()}`]);
-  const id = Number(u.insertId);
+  const id = nextAssetId();
+  await pool.execute("INSERT INTO units (id, unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, ?, 'vacuum_truck', 'ABC', 'clear')", [id, `U-${rnd()}`]);
   await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'unit', ?, 1)", [orgRef, id]);
   return id;
 }
 async function operator(orgRef: string) {
-  const [o] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name, licenseExpiresAt) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 400 DAY))", [seq++, `Op ${rnd()}`]);
-  const id = Number(o.insertId);
+  const id = nextAssetId();
+  await pool.execute("INSERT INTO operators (id, userId, name, licenseExpiresAt) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 400 DAY))", [id, seq++, `Op ${rnd()}`]);
   await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [orgRef, id]);
   return id;
 }
