@@ -38,6 +38,32 @@ describe("the inventory carries no count it does not read", () => {
   });
 });
 
+describe("the release marker and the generated document name the same release", () => {
+  /*
+   * `LEASEOS_RELEASE` was introduced by fix/cal05a-release-source-of-truth as THE explicit release
+   * source of truth, replacing a generator that inferred the label from the newest checkpoint
+   * filename. The recovery gap matrix closed that item on exactly that basis.
+   *
+   * It then drifted anyway, and silently: `scripts/current-state.sh` reads the file only as a
+   * FALLBACK, and the gate's step 8 always passes an explicit argument — the release it scrapes
+   * out of the document itself. So nothing ever consulted the marker, and nothing noticed when it
+   * went stale at v22.20 while the document advanced through v23.x.
+   *
+   * A source of truth that no check reads is not one. This is that check.
+   */
+  it("keeps LEASEOS_RELEASE equal to the Release row of LEASEOS_CURRENT_STATE.md", () => {
+    const marker = readFileSync("LEASEOS_RELEASE", "utf8").trim();
+    const documented = state.match(/\| Release \| \*\*([^*]+)\*\*/)?.[1]?.trim();
+    expect(marker.length).toBeGreaterThan(0);
+    expect(documented).toBeDefined();
+    expect(
+      marker,
+      `LEASEOS_RELEASE says ${marker} and LEASEOS_CURRENT_STATE.md says ${documented}. ` +
+      `These name one release; regenerate the document with that release, or correct the marker.`,
+    ).toBe(documented);
+  });
+});
+
 describe("the generated current state agrees with the tree", () => {
   it("reports the external-procedure and universal counts the source has", () => {
     expect(state).toContain(`| Externally-gated procedures (portal) | **${externalCount}** |`);
