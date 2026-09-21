@@ -65,10 +65,30 @@ non-empty string, and `signSession` fills that claim from `ENV.appId` — so wit
 it unset the server mints tokens it will itself reject. The only thing that
 changed is when you find out.
 
-**Still open:** cron sessions (`openId` beginning `cron_`) are not minted here,
-so whether the platform sets this app's `appId` on them is unverified from
-inside the repository. If it does not, this check refuses them. Flagged rather
-than worked around, because guessing either way is worse than saying so.
+**Every token creator inside this repository is safe, and it is provable.**
+`jose` is imported in exactly one file and `SignJWT` constructed in exactly one
+place — `signSession` — whose only caller is `createSessionToken`, whose only
+caller is the OAuth callback. That path sets `appId: ENV.appId` and
+`verifySession` compares against `ENV.appId`: the same value, same process.
+
+The pre-existing non-empty check bounds the rest, and this is the part that
+settles the blast radius. `verifySession` **already** refused a token whose
+`appId` was not a non-empty string, before this PR. So any token that has ever
+authenticated here was signed with this deployment's `JWT_SECRET` and carried a
+non-empty `appId`. And had `VITE_APP_ID` been unset in production,
+`createSessionToken` would have minted `appId: ""` and that pre-existing check
+would have rejected every session the server issued — login would already have
+been wholly broken. It follows that `VITE_APP_ID` is set wherever login works,
+and every live cookie already carries exactly the value now compared against.
+
+**Still open, and external:** cron sessions. A `cron_` token reaches the new
+check *first* — `authenticateRequest` calls `verifySession` before it inspects
+the `cron_` prefix, and the platform's own project validation
+(`getUserInfoWithJwt`, which posts `projectId: ENV.appId`) happens downstream,
+so it cannot rescue a refusal. Nothing in this repository mints such a token.
+See the external prerequisites below.
+
+`server/_core/sessionAppId.test.ts` pins the binding and the ordering.
 
 ### DEP-1 — unused AWS SDK in production dependencies (High)
 
@@ -156,79 +176,77 @@ rather than bound.
 
 The CI gate's test-file type-error ratchet is at its pinned **0**.
 
-### mysql2 3.22 changed authentication behaviour — check before deploying
+### mysql2 3.22 changed authentication behaviour — an external check before deploying
 
 The advisory that motivated the `mysql2` bump is fixed **by disabling the
 plugin**: from 3.22.0 `mysql_clear_password` is off unless
 `enableCleartextPlugin` is set, and a server asking for it is a fatal error
-rather than a silent downgrade. That is the right default and it is also a
-behaviour change this repository cannot opt out of in code — `server/db.ts`
-hands `DATABASE_URL` straight to `drizzle()`, with no connection-option seam.
+rather than a silent downgrade.
 
-CI is unaffected (MariaDB 10.11 over `mysql_native_password`). A production
-database that authenticates with `mysql_clear_password` — some LDAP and PAM
-setups do — will refuse connections after this upgrade. **Worth checking against
-the real database before deploying**, because the failure is at connection time
-and looks nothing like a dependency change.
+**Verdict on whether that breaks this deployment: cannot be determined from this
+repository.** Not "probably fine" — unknowable, and recorded as such. The
+repository contains no artifact describing the production database: no
+Dockerfile, no compose file, no `.env` or `.env.example`, no platform manifest,
+no Terraform, no Kubernetes, no deployment document. The only `.github` content
+is `ci.yml` and a PR template. No migration or script ever creates a database
+account — there is no `CREATE USER`, `GRANT` or `IDENTIFIED WITH` anywhere in
+the 169 files under `drizzle/` or in `scripts/`. `caching_sha2_password`,
+`authPlugins` and `authSwitchHandler` return zero hits; `ssl` appears nowhere in
+`server/`, `client/`, `shared/`, `scripts/`, `drizzle/` or `.github/`. The whole
+production database configuration is one runtime variable, `DATABASE_URL`,
+supplied by the host.
 
-## Not fixed, and why
+CI proves only that MariaDB 10.11 with an empty root password works under
+3.24.4, which says nothing about production.
 
-### SEC-2 — session JWT mirrored into `sessionStorage` (Medium)
+**Two corrections to the first version of this section, both verified here
+rather than taken on trust:**
 
-`client/src/main.tsx` reads a `manus-cookie` value out of `sessionStorage` and
-forwards the session as `Authorization: Bearer`; `server/_core/sdk.ts` accepts that
-header in every environment. It gives away the `httpOnly` cookie's protection: any
-XSS reads a valid session token directly.
+1. It said this is "a behaviour change this repository cannot opt out of in
+   code — `server/db.ts` hands `DATABASE_URL` straight to `drizzle()`, with no
+   connection-option seam." Right about the code, **wrong about the seam**.
+   mysql2's `ConnectionConfig.parseUrl` copies every URL query parameter into
+   the options object, and `enableCleartextPlugin` is a valid one. Verified
+   directly against the installed 3.24.4:
 
-The obvious fix is to gate it on a development build. It is **not applied** because
-the comment says it exists for browsers that block iframe cookies — Safari ITP,
-private browsing, WebView — and those are production-built preview sessions, not
-development ones. Gating on `import.meta.env.DEV` would fix the exposure by
-breaking the preview login it was written for, and which of those matters is a
-call about how this is deployed, not one to infer from the code.
+   ```
+   mysql://u:p@h:3306/db?enableCleartextPlugin=true  ->  true,  database "db"
+   mysql://u:p@h:3306/db                             ->  false, database "db"
+   ```
 
-**What it needs:** a decision on whether the preview path is still in use. If it
-is, an explicit opt-in flag rather than an unconditional fallback; if it is not,
-delete both halves.
+   So the escape hatch exists and is reachable by editing the environment
+   variable alone. **With a real caveat:** `scripts/ci-gate.sh` and
+   `scripts/apply-migrations.sh` parse `DATABASE_URL` by naive shell substring
+   removal, so the query string lands in the database *name* —
+   `db="${hostpart#*/}"` yields `leaseos?enableCleartextPlugin=true`, confirmed
+   by running it. The application would connect; the gate and migration scripts
+   would not.
 
-### SEC-3 — one-year sessions, no server-side revocation (Medium)
+2. **TLS does not rescue this case,** which is the obvious thing to reach for.
+   mysql2 treats `mysql_clear_password` as directly usable on a secure
+   connection, but then ANDs in `enableCleartextPlugin` regardless, so the
+   client answers the handshake with `mysql_native_password`, the server sends
+   an auth switch, and the auth-switch gate throws fatally with no
+   secure-connection exception. Adding `ssl` will not make a clear-password
+   server work.
 
-`ONE_YEAR_MS` in `server/_core/sdk.ts`, verified by signature alone — no session
-table, so logout cannot invalidate a token and a leaked one stays valid until it
-expires. Shortening the lifetime is a product decision with a visible cost (users
-signed out more often) and the real repair is a revocation path, which is a
-feature rather than a patch.
+**Also worth stating about this note's own evidence:**
+`audit/hardening-2026-09-21/vitest.log` was recorded without `DATABASE_URL`, so
+every `.db.test.ts` suite shows as skipped and that run opened no mysql2
+connection at all. The only place 3.24.4 has actually spoken to a database is
+GitHub Actions.
 
-### SEC-4 / SEC-5 — `sameSite: "none"`, no security headers, no rate limiting
+**External deployment prerequisite — run this against the real database before
+deploying:**
 
-`helmet`'s default CSP would need a policy written against what this app actually
-loads, and a wrong one breaks the page rather than failing safe. A rate limiter
-needs limits chosen per route — the portal already locks an identity after 5
-failures, so the gap is request volume and body size, where a guessed number
-either does nothing or throttles a legitimate field device.
+```sql
+SELECT user, host, plugin FROM mysql.user WHERE user = '<the DATABASE_URL user>';
+```
 
-Both are worth doing and neither is a one-line change.
-
-### Express 4 (`path-to-regexp`, `qs`, `body-parser`)
-
-These arrive through Express 4.21.2, the last 4.x release; the fixes are in
-Express 5. That is a framework migration with its own test pass, not a
-dependency bump.
-
-**Corrected: they are not the only ones left.** The original text said "the
-remaining shipped advisories all arrive through Express 4.21.2". Also shipped
-are `lodash` via `recharts`, and `dompurify` and `mermaid` via `streamdown` —
-all production dependencies. And `tar`, reached at runtime through the
-`@tailwindcss/vite` import that `dist/index.js` carries; see DEP-3 in the import
-audit for why the production bundle imports five devDependencies.
-
-### The `tailwindcss>nanoid` override
-
-`package.json` pins `tailwindcss>nanoid` to `3.3.7`, and the build chain resolves
-`nanoid` 3.3.11 regardless — the override matches no path in the current tree.
-Raising it was tried and changed nothing, so it was reverted rather than left as a
-confident-looking no-op. The 3.x copies come from postcss/tailwind at build time
-and are not in the shipped bundle.
+`mysql_native_password`, `caching_sha2_password` or `ed25519` — safe, nothing to
+do. `mysql_clear_password`, `auth_pam`, `pam` or any PAM/LDAP plugin — **unsafe**:
+connections will fail after this upgrade, and the fix is to change the account's
+auth plugin, not to re-enable cleartext.
 
 ### Also corrected
 
@@ -250,6 +268,25 @@ and are not in the shipped bundle.
   `drizzle.probe.config.ts`) were committed and pushed by a `git add -A` issued
   while review agents were writing in the same working tree, along with one
   agent's half-finished edit to a test. Removed.
+
+## External deployment prerequisites
+
+Neither of these can be settled from this repository, and neither is invented
+here. Both need a person with access to the real deployment.
+
+1. **The database account's authentication plugin.** Query and criteria above.
+2. **The cron token's `appId` claim.** When the platform scheduler invokes this
+   project's cron callback, is the `appId` in that JWT the same string injected
+   into the runtime as `VITE_APP_ID`, or a platform-internal identifier — a task
+   id, tenant id, or a different form of the project's identity? And is it stable
+   when a project is renamed, cloned to staging, or moved between tenants? If it
+   differs, scheduled tasks will fail authentication after this deploy.
+3. **Secondary, and pre-existing rather than caused by this PR:** does the cron
+   token carry a non-empty `name` claim? `verifySession` has always required one
+   and rejects before the cron branch is reached. `buildCronUser` defaults the
+   display name, but that default applies to the platform's *response*, not to
+   the token claim. Same class of unknown, worth confirming in the same
+   conversation.
 
 ## Verification
 
