@@ -1233,8 +1233,45 @@ export async function listActiveUserRoles(
   return rows.map(r => ({ role: r.role as string, scopeRef: r.scopeRef ?? null }));
 }
 
-/** Role names only, for callers that do not care about branch confinement. */
+/**
+ * The role names a caller holds GLOBALLY. Branch-confined grants are dropped.
+ *
+ * A bare role name is not a scope-free role — it is a global one. `normalizeGrants`
+ * turns each name into `{ role, scopeRef: null }`, and `permissionsFor()` has no
+ * scope axis at all, so every decision made from names alone reads a confined
+ * grant as reaching every branch. This projection used to return the names of
+ * confined grants too, which laundered them into global ones on the way out.
+ *
+ * That is exactly the case `authorize()` already rules on. When a caller cannot
+ * resolve the resource's branch — which is every consumer of this function —
+ * a branch-confined grant "does not apply; only a global grant passes". Filtering
+ * here makes the projection obey the rule instead of quietly undoing it:
+ * `authorize({ grants: [{ role: "safety", scopeRef: "YEG" }], ... })` denies, and
+ * `authorize({ roles: ["safety"], ... })` allowed, for the same person.
+ *
+ * It narrows, never widens, so it cannot open anything that was closed.
+ *
+ * A caller that CAN judge a branch should use `listActiveUserRoles` and pass
+ * `RoleGrant[]` to `authorize()`, the way `roleProcedure` does. A caller asking
+ * which roles a person holds for a non-authorization reason wants
+ * `listRoleNamesAnyScope`.
+ */
 export async function listActiveUserRoleNames(userId: number): Promise<string[]> {
+  return (await listActiveUserRoles(userId))
+    .filter(r => r.scopeRef == null)
+    .map(r => r.role);
+}
+
+/**
+ * Every role name the caller holds, branch-confined ones included.
+ *
+ * **Not for authorization.** It exists for the one question that genuinely wants
+ * the unfiltered answer: which courses a person must hold. A driver confined to
+ * one branch is still a driver, and still needs the driver's training — dropping
+ * confined roles there would silently stop demanding a required course, which is
+ * the same class of failure as over-granting, pointed the other way.
+ */
+export async function listRoleNamesAnyScope(userId: number): Promise<string[]> {
   return (await listActiveUserRoles(userId)).map(r => r.role);
 }
 

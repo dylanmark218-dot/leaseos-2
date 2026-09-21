@@ -151,9 +151,20 @@ d("a yard tank and a card statement, through the ledger", () => {
     const shopLead = await withRole("shop_lead");
     const driver = await withRole("driver");
     const bookkeeper = await withRole("bookkeeper");
-    const entityId = 950000 + Math.floor(Math.random() * 40000);
     const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'truck', 'ABC', 'clear')", [key("142").slice(0, 30)]);
     const unitId = Number(u.insertId);
+    // Derived from an auto-increment, not drawn from `Math.random() * 40000`.
+    //
+    // The assertions below read `ifta.quarter` for this entity, which aggregates
+    // every CA-AB litre it holds in the quarter — so two fixtures landing on one
+    // id do not read as two tests, they read as one test that dispensed twice.
+    // This failed in CI as "expected 600 to be 300" on a commit that changed only
+    // a markdown file, and passed on the commits either side of it.
+    //
+    // `loadQuarter` is correctly scoped by financialEntityId, so the id itself was
+    // the only shared thing. A real auto-increment cannot repeat within a run,
+    // which removes the collision rather than making it rarer.
+    const entityId = 950000 + unitId;
 
     // A tank in Alberta. A stated dispense enters needs_review; a metered one whose meter disagrees is refused.
     const tank = await callerFor(shopLead).fuel.tankRegister({ financialEntityId: entityId, name: "Yard tank 1", location: "Nisku yard", jurisdiction: "CA-AB", fuelType: "diesel", capacityLitres: 10000, varianceTolerancePct: 2 });

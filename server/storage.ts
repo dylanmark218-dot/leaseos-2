@@ -12,6 +12,7 @@
 // persisted; the signed URL is short-lived and minted per request.
 
 import { ENV } from "./_core/env";
+import { isValidStorageKey } from "./_core/storageKey";
 
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
@@ -27,7 +28,17 @@ function getForgeConfig() {
 }
 
 function normalizeKey(relKey: string): string {
-  return relKey.replace(/^\/+/, "");
+  const key = relKey.replace(/^\/+/, "");
+  // Enforced here as well as at every input that accepts a key, because this is
+  // the last point before the value becomes a presign request and the header
+  // above states the invariant it assumes. The inputs make a bad key hard to
+  // send; this makes it unconstructable — a stronger guarantee than checking
+  // the consumers, which is the argument storageCapability.test.ts already makes
+  // about this file.
+  if (!isValidStorageKey(key)) {
+    throw new Error("Refusing a storage key that is not a path of ordinary names");
+  }
+  return key;
 }
 
 function appendHashSuffix(relKey: string): string {

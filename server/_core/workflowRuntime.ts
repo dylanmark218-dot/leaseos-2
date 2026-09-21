@@ -25,11 +25,34 @@ import {
 import type { ClaimedEvent, WorkerPorts } from "./drainWorker";
 import { dispatchWebhooks, sweepWebhookRetries } from "../webhookDispatchService";
 
+/**
+ * What a prepared statement may actually be given as a bind parameter.
+ *
+ * This was `unknown[]`, which claimed any value at all could be bound. It never
+ * could: a driver has to serialise the value onto the wire, and there is no
+ * encoding for a function, a symbol or an arbitrary class instance. `unknown`
+ * only looked like it worked because nothing ever checked, so a bug of that
+ * shape would have surfaced at runtime as a driver error rather than here.
+ *
+ * `undefined` is deliberately absent. A hole in a parameter array is almost
+ * always a value the caller meant to compute and didn't, and binding it as SQL
+ * NULL silently turns that mistake into a row.
+ */
+export type SqlParam =
+  | string
+  | number
+  | bigint
+  | boolean
+  | Date
+  | Buffer
+  | Uint8Array
+  | null;
+
 /** Narrow surface so this works with a pool, a connection or a drizzle tx. */
 export type SqlRunner = {
   execute: <T = unknown>(
     sql: string,
-    params?: unknown[]
+    params?: SqlParam[]
   ) => Promise<[T, unknown]>;
 };
 export type PoolLike = SqlRunner & {
@@ -224,28 +247,38 @@ export async function applyEventConsequences(
           sourceEventId, sourceRuleKey, sourceRuleVersion, dedupeKey, rootDedupeKey,
           requiresEvidence, dueAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      // `?? null` on every optional column. This is belt-and-braces, not a bug
+      // fix, and saying so matters: an earlier version of this comment claimed
+      // these calls rescued a live failure, and they do not. `planTasks` already
+      // normalises all seven to `null` at construction, so `undefined` never
+      // reached the driver from here.
+      //
+      // They are still worth writing, because the type now forbids `undefined`
+      // and mysql2 would throw on one rather than binding NULL. The call site
+      // agreeing with the producer is what keeps that true when a second
+      // producer appears.
       [
         task.taskNumber,
         task.taskType,
         task.title,
-        task.description,
+        task.description ?? null,
         task.status,
         task.priority,
         task.tenantId,
-        task.branchId,
+        task.branchId ?? null,
         task.subjectType,
         task.subjectId,
-        task.jobId,
-        task.tripId,
-        task.unitId,
+        task.jobId ?? null,
+        task.tripId ?? null,
+        task.unitId ?? null,
         owner,
         task.sourceEventId,
         task.sourceRuleKey,
         task.sourceRuleVersion,
         task.dedupeKey,
-        task.rootDedupeKey,
+        task.rootDedupeKey ?? null,
         task.requiresEvidence ? 1 : 0,
-        task.dueAt,
+        task.dueAt ?? null,
       ]
     );
 
@@ -350,7 +383,7 @@ export function createWorkerPorts(
         for (const r of claimed) {
           await conn.execute(
             "UPDATE domainEventOutbox SET claimedAt = ?, claimedBy = ?, attemptCount = attemptCount + 1 WHERE id = ?",
-            [now(), workerId, r.id]
+            [now(), workerId, Number(r.id)]
           );
         }
         await conn.commit();

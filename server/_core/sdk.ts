@@ -225,6 +225,21 @@ class SDKServer {
         return null;
       }
 
+      // The token says which app it was minted for; until now nothing read it.
+      // A signing secret shared across deployments — the same value pasted into
+      // a staging environment, or a second app on the same platform — made a
+      // session from either one valid here, because the signature checks out and
+      // the claim that would have distinguished them was decoded and dropped.
+      //
+      // Only enforced when this server knows its own identity. `appId` is
+      // unset in development and in the test suite, and refusing every session
+      // there would turn a missing environment variable into an outage rather
+      // than the configuration gap it is.
+      if (ENV.appId && appId !== ENV.appId) {
+        console.warn("[Auth] Session was issued for a different app");
+        return null;
+      }
+
       return {
         openId,
         appId,

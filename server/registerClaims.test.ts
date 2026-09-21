@@ -17,7 +17,37 @@ import { describe, expect, it } from "vitest";
 
 const REGISTER = "docs/REMAINING_BUILD_REGISTER.md";
 const text = readFileSync(REGISTER, "utf8");
-const claimingRows = text.split("\n").filter(l => l.startsWith("|") && /\*\*(DONE|PARTLY DONE)/.test(l));
+/*
+ * The status words a row may carry. Stated, because they were ad hoc and that is why the guard
+ * could not tell "done" from "in progress": P8.1 read WIRED INTO ALL THREE CONSUMERS, which is
+ * true, informative and invisible to a check looking for DONE. A new word now has to be added here
+ * deliberately rather than invented in a row nobody re-reads.
+ */
+const STATUS_VOCABULARY = [
+  "DONE", "PARTLY DONE", "PARTIAL", "STAGED", "STARTED", "CORE BUILT",
+  // Added v22.82, by the guard's own insistence: P0.6 was a choice between two implementations, so
+  // the row records that the choice was made as well as that the work is finished. The guard caught
+  // me inventing it, which is the point — a status word is now a decision rather than a phrase.
+  "DECIDED AND DONE",
+] as const;
+
+/*
+ * A row claims something if it carries any status word, not only DONE.
+ *
+ * This used to match `**DONE` and `**PARTLY DONE` alone, which left 24 of the register's 66 status
+ * rows invisible to every existence check below — a fake migration number, a path that does not
+ * exist or an unresolvable commit could sit in a `DECIDED AND DONE`, `PARTIAL`, `CORE BUILT` or
+ * `STAGED` row and the suite stayed green. P0.6 is a real example: it is `DECIDED AND DONE`, it
+ * cites a branch commit, and nothing read it.
+ *
+ * Derived from STATUS_VOCABULARY rather than repeating it, so adding a status word cannot quietly
+ * add a blind spot at the same time. Longest-first, because `DONE` is a prefix of nothing here but
+ * `PARTLY DONE` and `DECIDED AND DONE` both end in one.
+ */
+const STATUS_PATTERN = new RegExp(
+  "\\*\\*(" + [...STATUS_VOCABULARY].sort((a, b) => b.length - a.length).join("|") + ")"
+);
+const claimingRows = text.split("\n").filter(l => l.startsWith("|") && STATUS_PATTERN.test(l));
 
 const tokens = (line: string) => Array.from(line.matchAll(/`([^`]+)`/g)).map(m => m[1]!);
 const rowId = (line: string) => line.split("|")[1]?.trim() ?? "?";
@@ -26,24 +56,26 @@ const rowId = (line: string) => line.split("|")[1]?.trim() ?? "?";
  * Commits made before the tree was imported into this repository.
  *
  * The working tree was carried into `dylanmark218-dot/leaseos-2` as a source snapshot with no
- * `.git` alongside it, so the history these six short hashes name is not reachable from here and
+ * `.git` alongside it, so the history these hashes name is not reachable from here and
  * `git cat-file` cannot resolve them. Deleting the citations would be the wrong repair: the rows
  * they sit in are the record of when that work landed, and losing the reference loses the
  * provenance the register exists to carry.
  *
- * So they are named once, here, as exactly what they are. The guard is unchanged for every other
- * hash: a commit cited by a row from this repository's history forward must still resolve, and a
- * new unresolvable hash still fails. This list is closed — it does not grow.
+ * Four, not six. An earlier version of this list carried `8a03803` and `d6a3433` as well, on the
+ * assumption that every hash in the document passes through this guard. They do not: both appear
+ * only in the register's prose, and the guard reads table rows. Whitelisting a token no check ever
+ * sees does nothing except suggest it was checked and excused, which is the opposite of true.
+ *
+ * The guard is unchanged for every other hash: a commit cited by a row from this repository's
+ * history forward must still resolve, and a new unresolvable hash still fails. The list is closed,
+ * and the test below enforces that rather than asserting it in a comment.
  */
 const PRE_IMPORT_COMMITS = new Set([
   "4531847", // P0.1, P0.2 — Chat 4 knowledge / HOS tranche; Chat 5 TDG evidence modules
   "6720087", // P0.2, P0.3, P0.4 — TDG modules, HOS separation of duties, field-signature fixes
   "4626eb6", // P4.4 — AI Secretary corpus, owner-signed 2026-09-18
   "54965ee", // P0.6 — fix/chat5-module-paths-and-vitest, the branch the bridge decision was taken on
-  "8a03803", // the commit the mapping/routing/GPS spec was written against
-  "d6a3433", // the recovery point each DONE row was compared against
 ]);
-
 describe("every DONE claim in the register points at something that exists", () => {
   it("has claiming rows to check at all", () => {
     expect(claimingRows.length).toBeGreaterThan(20);
@@ -86,21 +118,45 @@ describe("every DONE claim in the register points at something that exists", () 
     }
     expect(missing, "a row claims a commit this branch does not contain").toEqual([]);
   });
+
+  /*
+   * The whitelist is closed, and this is what makes that a fact rather than a sentence.
+   *
+   * The comment above PRE_IMPORT_COMMITS says the list does not grow. A comment cannot stop it:
+   * the cheapest way to silence this guard on a genuinely bad hash is to paste the hash into the
+   * set, which reads as housekeeping in a diff. Pinning the size means that edit has to change a
+   * number too, and changing the number is a decision somebody has to defend.
+   */
+  it("keeps the pre-import whitelist closed", () => {
+    expect(
+      PRE_IMPORT_COMMITS.size,
+      "the pre-import set is closed at the four hashes the guard actually reaches — a new entry " +
+        "means a commit is being excused, which needs saying out loud rather than adding quietly"
+    ).toBe(4);
+  });
+
+  /*
+   * And the guard still fails on a hash it cannot resolve.
+   *
+   * Asserted once in a report before it had been run, which is the failure this whole file exists
+   * to catch. A synthetic row is fed through the same filter and token reader the checks above use,
+   * so this exercises the real path rather than a restatement of it.
+   */
+  it("still refuses a commit it cannot resolve", () => {
+    const fabricated = "|  Z9.9 | Fabricated row | **DONE** (`deadbee`) | nothing real |";
+    expect(STATUS_PATTERN.test(fabricated), "the fabricated row must be seen as a claim").toBe(true);
+
+    const unresolved: string[] = [];
+    for (const t of tokens(fabricated)) {
+      if (!/^[0-9a-f]{7,40}$/.test(t)) continue;
+      if (PRE_IMPORT_COMMITS.has(t)) continue;
+      try { execSync(`git cat-file -e ${t}^{commit}`, { stdio: "ignore" }); }
+      catch { unresolved.push(t); }
+    }
+    expect(unresolved, "an unresolvable hash in a claiming row must be caught").toEqual(["deadbee"]);
+  });
 });
 
-/*
- * The status words a row may carry. Stated, because they were ad hoc and that is why the guard
- * could not tell "done" from "in progress": P8.1 read WIRED INTO ALL THREE CONSUMERS, which is
- * true, informative and invisible to a check looking for DONE. A new word now has to be added here
- * deliberately rather than invented in a row nobody re-reads.
- */
-const STATUS_VOCABULARY = [
-  "DONE", "PARTLY DONE", "PARTIAL", "STAGED", "STARTED", "CORE BUILT",
-  // Added v22.82, by the guard's own insistence: P0.6 was a choice between two implementations, so
-  // the row records that the choice was made as well as that the work is finished. The guard caught
-  // me inventing it, which is the point — a status word is now a decision rather than a phrase.
-  "DECIDED AND DONE",
-] as const;
 
 describe("a test claim in the register is checkable", () => {
   /*

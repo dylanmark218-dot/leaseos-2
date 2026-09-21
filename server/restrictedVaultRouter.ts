@@ -185,7 +185,13 @@ export const restrictedVaultRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const orgRef = await orgOf(ctx.user.id);
-      const p = (await db.select().from(investigationProposals).where(eq(investigationProposals.id, input.proposalId)).limit(1))[0];
+      // Scoped, like every list path in this file. A by-id lookup that omits the
+      // predicate is not a smaller version of the same query — it is a different
+      // one, answering about every organization at once.
+      const p = (await db.select().from(investigationProposals).where(and(
+        eq(investigationProposals.id, input.proposalId),
+        scopeWhere(investigationProposals.orgRef as never, orgRef),
+      )).limit(1))[0];
       if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Proposal not found" });
       if (p.disposition !== "PENDING") throw new TRPCError({ code: "BAD_REQUEST", message: `This proposal was already decided (${p.disposition})` });
 
@@ -203,7 +209,10 @@ export const restrictedVaultRouter = router({
       await db.update(investigationProposals).set({
         disposition: input.disposition, decidedByUserId: ctx.user.id,
         decidedAt: new Date(), decisionReason: input.reason ?? null, matterId,
-      }).where(eq(investigationProposals.id, input.proposalId));
+      }).where(and(
+        eq(investigationProposals.id, input.proposalId),
+        scopeWhere(investigationProposals.orgRef as never, orgRef),
+      ));
 
       return {
         proposalId: input.proposalId, disposition: input.disposition, matterId,
@@ -248,9 +257,27 @@ export const restrictedVaultRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const orgRef = await orgOf(ctx.user.id);
-      const matter = (await db.select().from(incidentMatters).where(eq(incidentMatters.id, input.matterId)).limit(1))[0];
+      const matter = (await db.select().from(incidentMatters).where(and(
+        eq(incidentMatters.id, input.matterId),
+        scopeWhere(incidentMatters.orgRef as never, orgRef),
+      )).limit(1))[0];
       if (!matter) throw new TRPCError({ code: "NOT_FOUND", message: "Record not found" });
       if (!isRestricted(matter.sensitivityTier)) {
+        // The one path through this procedure that served content without logging it.
+        // The doc comment above says "Logs before it fetches; a refusal is logged too",
+        // and this arm did neither — so the cheapest way to pull a matter row out of the
+        // vault was to name one that happens not to be restricted, and `accessHistory`,
+        // the surface an auditor consults, showed nothing at all.
+        //
+        // Audited on the same reasoning as `restrictedIndex`: a disclosure that needs no
+        // grant is still a disclosure. The row is a real read, so it is recorded as one.
+        await db.insert(restrictedAccessEvents).values({
+          orgRef, grantId: null, userId: ctx.user.id,
+          recordType: "incidentMatter", recordId: input.matterId,
+          action: "READ", purpose: null,
+          decisionCode: "NOT_RESTRICTED_SERVED",
+          decisionReason: `Served tier ${matter.sensitivityTier}; no grant required, and the read is recorded because it happened.`,
+        });
         return { served: true as const, content: matter, note: "Not a restricted record; read through the ordinary path." };
       }
       const grants = await db.select().from(restrictedAccessGrants).where(and(
@@ -291,9 +318,15 @@ export const restrictedVaultRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const orgRef = await orgOf(ctx.user.id);
-      const g = (await db.select().from(restrictedAccessGrants).where(eq(restrictedAccessGrants.id, input.grantId)).limit(1))[0];
+      const g = (await db.select().from(restrictedAccessGrants).where(and(
+        eq(restrictedAccessGrants.id, input.grantId),
+        scopeWhere(restrictedAccessGrants.orgRef as never, orgRef),
+      )).limit(1))[0];
       if (!g) throw new TRPCError({ code: "NOT_FOUND", message: "Grant not found" });
-      await db.update(restrictedAccessGrants).set({ revokedAt: new Date(), revokedByUserId: ctx.user.id }).where(eq(restrictedAccessGrants.id, input.grantId));
+      await db.update(restrictedAccessGrants).set({ revokedAt: new Date(), revokedByUserId: ctx.user.id }).where(and(
+        eq(restrictedAccessGrants.id, input.grantId),
+        scopeWhere(restrictedAccessGrants.orgRef as never, orgRef),
+      ));
       await db.insert(restrictedAccessEvents).values({
         orgRef, grantId: input.grantId, userId: ctx.user.id,
         recordType: g.recordType, recordId: g.recordId, action: "GRANT_REVOKED",

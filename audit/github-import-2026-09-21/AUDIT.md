@@ -12,7 +12,7 @@ it says so rather than assuming it would pass.
 
 | | |
 |---|---|
-| Files tracked | 1,220 |
+| Files tracked | 1,221 |
 | TypeScript / TSX | 747 files, 164,175 lines |
 | Test files | 298 (4,143 tests) |
 | SQL migrations | 165 |
@@ -40,10 +40,25 @@ usable Docker daemon, so gates 1–3 could not run. The rest were run directly.
 | 6. Test suite | **3,272 passed, 15 failed, 856 skipped** — see below |
 | 7. Production build | **pass** — client 1,075 kB (263 kB gzip), `dist/index.js` 2.9 MB |
 | 7b. Portal external gate | **pass** — 36 `externalProcedure`, 0 `roleProcedure` |
+| 7c. Machine gate | **pass** — 2 `integrationProcedure`, 0 role/external in `inboundRouter` |
+| 8. Current-state document is generated | **pass** — `LEASEOS_CURRENT_STATE.md` regenerates identically |
 
 646 role-authorized procedures across the routers.
 
-The 856 skipped tests and 52 fully skipped `.db.test.ts` files are the database-backed
+> **Corrected 2026-09-21.** The first version of this table stopped at 7b and
+> omitted gates 7c and 8 — not because they failed, but because the run that
+> produced it never invoked them: the gates were enumerated by reading
+> `scripts/ci-gate.sh` down to the `Summary` header and taking that for the end
+> of the file, when 7c and 8 sit *after* it. Gate 8 then caught the omission the
+> hard way on the very next change (PR #2), where adding one test file left
+> `LEASEOS_CURRENT_STATE.md` claiming 290/3938 against a regenerated 291/3941.
+>
+> Worth recording rather than quietly editing: a gate table assembled by reading
+> a script is a claim about that script, and this one was wrong in the direction
+> that matters — it under-reported coverage while reading as complete. Both gates
+> have since been run and pass.
+
+The 856 skipped tests and the 35 `.db.test.ts` files are the database-backed
 suites, which self-skip without `DATABASE_URL`. **CI is the authority on those**: the
 workflow provisions MariaDB 10.11 and runs the full gate. Nothing in this audit should be
 read as having exercised the migration, parity or tenant-scope suites.
@@ -148,21 +163,150 @@ low, but the fix is a patch release.
 
 ### DEP-3 — 153 advisories in total (Informational)
 
-3 critical, 58 high, 81 moderate, 11 low across 915 resolved packages. The large majority
-are build- and test-chain only — `pnpm` itself, `vite`, `vitest`, `tar`, `postcss`,
-`dompurify`, `mermaid`, `rollup`, `browserslist` — and none of it ships in
-`dist/index.js`. Full output is in `pnpm-audit.json` beside this file.
+3 critical, 58 high, 81 moderate, 11 low across 915 resolved packages.
+
+**Corrected 2026-09-21. The original text said these were "build- and test-chain
+only" and that "none of it ships in `dist/index.js`". That is false**, and the
+evidence is in the bundle itself. `esbuild` is run with `--packages=external`,
+so every bare import survives into the output; `dist/index.js` carries:
+
+```
+from "vite"                            from "@vitejs/plugin-react"
+from "@tailwindcss/vite"               from "@builder.io/vite-plugin-jsx-loc"
+from "vite-plugin-manus-runtime"
+```
+
+They are there because `server/_core/index.ts:9` imports `./vite`
+unconditionally, and that module imports `vite` and `../../vite.config` at the
+top level. The production branch only calls `serveStatic`, but an ESM import is
+evaluated when the module loads, not when the branch is taken.
+
+Two consequences, both pre-existing rather than introduced by this work:
+
+1. **The production server requires five `devDependencies` at runtime.** A
+   deployment that installs without dev dependencies gets
+   `ERR_MODULE_NOT_FOUND` on `vite` at startup.
+2. **`tar` is reachable from the production runtime graph** —
+   `@tailwindcss/vite` → `@tailwindcss/oxide` → `tar` — and `tar` carries a
+   critical advisory. So the claim "no critical advisory remains in the shipped
+   tree" was wrong; `vitest` genuinely is test-only, `tar` is not.
+
+`dompurify` and `mermaid` arrive through `streamdown`, a production dependency,
+and were likewise miscategorised as build-chain.
+
+**The obvious repair does not work,** which is worth recording so the next
+attempt does not start there: splitting `serveStatic` into its own module and
+making `setupVite` a dynamic `import()` leaves the externals list unchanged,
+because esbuild inlines a dynamic import of a local module and hoists its
+imports. It needs `--splitting`, which changes the shape of the deployment
+artifact, so it belongs in a change made deliberately rather than folded into
+a dependency patch.
+
+### TEST-0 — 30 tests never run anywhere, including a cross-tenant regression (High)
+
+Added 2026-09-21, and it is the most consequential thing this audit missed the
+first time.
+
+`server/widgetPersistence.db.test.ts` (22 cases) gates on `WIDGET_DB_URL`;
+`server/widgetConflict.db.test.ts` (8 cases) gates on `WIDGET_DB_SOCKET ||
+WIDGET_DB_URL`. Counts are vitest's, not `grep -c 'it('` — the latter reads 24
+and 10, because `it(` also appears inside comments in both files. Neither `.github/workflows/ci.yml` nor `scripts/ci-gate.sh`
+sets either variable — CI provisions MariaDB and exports `DATABASE_URL` only.
+So these suites skip locally **and** in CI. They have never run in this
+repository.
+
+What is dormant matters. The first file says why it exists, in its own header:
+
+> The security block is the reason this file exists. B23's store could be made
+> to overwrite another user's board by supplying their `layoutRef`, and no unit
+> test could have caught it, because the defect was in a SQL statement that had
+> never executed.
+
+Its case at line 285 is `refuses across tenants, and the read cannot see it
+either`. The regression test for a cross-tenant overwrite is switched off by a
+variable nobody sets, and it reports as *skipped* — which reads like a suite
+waiting for a database rather than a guard that is not guarding.
+
+This also corrects the framing used throughout the rest of this document. "CI is
+the authority on the database-backed suites" is true of the 33 that gate on
+`DATABASE_URL` and false of these two.
+
+**They were also broken, which only turning them on revealed.** Both harnesses
+built their schema from a hard-coded list — `["0089_widget_dashboards.sql",
+"0090_widget_layout_revision.sql"]`. Neither file exists: reconciliation
+renumbered those migrations to `0127` and `0128`, and the lists did not follow.
+`readFileSync` would have thrown `ENOENT` in `beforeAll`. So these suites could
+not have passed in this tree at any point, and nothing said so, because a suite
+that never runs reports `skipped` rather than broken.
+
+The comment above one of those lists had already argued for deriving it — *"not
+a hard-coded one … exactly the kind of harness drift that gets blamed on the
+schema"* — directly above the hard-coded list that then drifted.
+
+**Fixed 2026-09-21:**
+
+- `scripts/ci-gate.sh` creates a second database, `${db}_widgets`, and exports
+  `WIDGET_DB_URL` at it. Separate rather than shared because
+  `widgetPersistence.db.test.ts` DROPs and recreates `widgetLayouts` and
+  `widgetLayoutItems` in its `beforeAll`, and vitest runs files concurrently —
+  pointed at the main database it would pull two tables out from under whatever
+  else was mid-query, after gate 3 had already passed.
+- Both harnesses now derive their migration list by reading `drizzle/` for
+  `NNNN_widget_*.sql`, so a renumbering cannot break them again and a later
+  widget migration is picked up without anyone remembering to.
+- Gate 6 fails if any `.db.test.ts` suite reports skipped while a database is
+  configured. A guard reading an environment variable nobody sets is exactly
+  how this hid, and the symptom — `↓` — is indistinguishable from a suite
+  correctly standing down.
+
+These 30 tests ran for the first time in CI on this branch, and the answer was
+worth having.
+
+`widgetPersistence.db.test.ts` **passed** — including the cross-tenant case the
+file was written for. The guard works; it had simply never been switched on.
+
+`widgetConflict.db.test.ts` **failed**, on a second defect in the same file that
+only running it could reveal: `Unknown database 'leaseos_b24'`. Its guard admits
+`WIDGET_DB_URL`, and its pool ignored it — `socketPath: DB_SOCKET` unconditionally,
+with a hard-coded database name from the B24 container that nothing here creates.
+So it declared it could run against a URL and then could not. It now builds the
+same two-branch pool its sibling does, and the hard-coded name survives only as
+the socket branch's fallback.
+
+Two latent defects in two files, both of the same shape: a harness asserting
+something about its environment that stopped being true, kept invisible by
+reporting `skipped`.
 
 ### TEST-1 — `fieldroute.test.ts` needs a database but does not self-skip (Medium)
 
-The suite's `beforeAll` guards its fixture inserts with `if (!process.env.DATABASE_URL) return;`,
-then unconditionally calls `grantUserRole` and `dispatch.enforcementSet`, both of which
-need the database. The 52 sibling suites that need one are named `.db.test.ts` and skip
-cleanly; this one is not, so `pnpm test` without MariaDB reports 14 failures that mean
-nothing. CI has always had a database, which is why it has gone unnoticed.
+**Corrected 2026-09-21.** The original text said the `beforeAll` "guards its fixture
+inserts with `if (!process.env.DATABASE_URL) return;`, then unconditionally calls
+`grantUserRole` and `dispatch.enforcementSet`". It does not: that `return` is the
+hook's first statement, so without a database the whole hook exits immediately and
+`grantUserRole` is never reached at all.
 
-Left as-is here: renaming the file touches the register's claim checks and the merge
-evidence, and this audit is not the place to do that quietly.
+The effect is the same and the mechanism is the opposite. The suite fails not because
+a helper hit a missing database, but because the role grant the hook exists to perform
+never happened — so the caller holds no domain role and `roleProcedure` refuses all 14
+procedures, exactly as it should. Every failure reads `User holds no domain role`,
+which is the gate working, not a defect.
+
+The 35 sibling suites that need a database are named `.db.test.ts` and skip cleanly;
+this one is not, so `pnpm test` without MariaDB reports 14 failures that mean nothing.
+CI has always had a database, which is why it has gone unnoticed.
+
+**Corrected: the rename this originally proposed would not have worked, and the
+reason given for deferring it was false.** The `.db.test.ts` suffix is inert —
+`vitest.config.ts` includes `server/**/*.test.ts`, which matches it identically.
+Those suites skip because each one opens with its own
+`const d = URL ? describe : describe.skip`, not because of its name. Renaming
+`fieldroute.test.ts` would leave all 14 failures exactly where they are.
+
+The deferral reason was also wrong. It said renaming "touches the register's
+claim checks"; `registerClaims.test.ts` reads only the paths cited in
+`docs/REMAINING_BUILD_REGISTER.md`, and that document does not cite this file.
+Nothing was at risk. The real fix is the in-file guard every sibling already
+has, and it is small — it was declined on a constraint that did not exist.
 
 ### TEST-2 — register commit claims could not resolve after import (fixed)
 
@@ -211,7 +355,10 @@ Worth recording, because an audit that only lists faults misdescribes the codeba
 - **No SQL injection surface.** Parameterised tagged templates throughout, `sql.raw` unused.
 - **No secrets in the tree.** Pattern scans for private keys, GitHub/AWS/OpenAI/Slack token
   formats and literal credential assignments all came back empty. Every secret is read from
-  the environment and every consumer fails closed when it is missing.
+  the environment, and the storage, MFA and webhook consumers fail closed when one is missing.
+  **Corrected: "every consumer fails closed" was too broad** — it was contradicted by this
+  document's own SEC-1, where `JWT_SECRET` fell back to `""` and nothing checked it. That is
+  now true of the session secret too, but it was not true when this line was written.
 - **The read-URL proxy was removed rather than gated,** and `server/storage.ts` explains
   why in the file: a gated proxy would have been a second authorization path to the same
   bytes.

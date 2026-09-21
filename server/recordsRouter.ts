@@ -22,6 +22,7 @@
 import { TRPCError } from "@trpc/server";
 import { actingScopeFor, evidenceInScope, incidentInScope, unitInScope, userInScope, workOrderInScope } from "./db";
 import { z } from "zod";
+import { storageKeyInput } from "./_core/storageKey";
 import { adminProcedure, roleProcedure, router } from "./_core/trpc";
 import {
   authorizeMechanicRelease,
@@ -100,7 +101,7 @@ export const recordsRouter = router({
           relationships: z.array(relationshipInput).max(40),
           deviceId: z.string().max(120).optional(),
           devicePlatform: z.string().max(40).optional(),
-          storageKey: z.string().max(512).optional(),
+          storageKey: storageKeyInput.optional(),
           mimeType: z.string().max(120).optional(),
         })
       )

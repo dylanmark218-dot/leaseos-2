@@ -1909,6 +1909,14 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // program knowledge is what estimates are computed from.
   "funding.claim",
   "funding.programs.manage",
+  // P8.5 — the vault. `restricted.read` reads like an ordinary read and is not one:
+  // it gates break-glass grant creation, the revocation of somebody else's grant, and
+  // the decision that opens an internal investigation. The fail-closed branch exists
+  // for exactly this — "granting a role, releasing a legal hold or signing a mechanic
+  // release with no record of who authorized it is worse than refusing". Minting a
+  // self-service grant into the restricted sector with no row saying the glass was
+  // broken is that category, and without this it proceeded when the audit insert failed.
+  "restricted.read",
 ] as const;
 
 export function isSensitivePermission(p: Permission): boolean {
@@ -3009,7 +3017,13 @@ export const EXTERNAL_PROCEDURE_PERMISSIONS = {
 } as const satisfies Record<string, ExternalPermission>;
 
 /** Writes from outside are refused when their audit row cannot be written. */
-export const EXTERNAL_SENSITIVE_PERMISSIONS: readonly ExternalPermission[] = ["portal.customer.commit", "portal.credential.manage", "portal.customer.adjust", "portal.customer.documents", "portal.customer.dispute", "portal.customer.sign", "portal.customer.decide", "portal.vendor.submit", "portal.facility.submit"];
+// `portal.invitation.accept` is here because accepting an invitation activates an
+// external identity and mints a 90-day bearer token. That is the most consequential
+// thing the portal gate does, and it was the one credential operation outside this
+// set: `portal.credential.manage`, which governs the lesser `tokenRotate`, was already
+// in it. Without it, a token could be issued in the one circumstance where nothing
+// recorded that it had been.
+export const EXTERNAL_SENSITIVE_PERMISSIONS: readonly ExternalPermission[] = ["portal.customer.commit", "portal.credential.manage", "portal.invitation.accept", "portal.customer.adjust", "portal.customer.documents", "portal.customer.dispute", "portal.customer.sign", "portal.customer.decide", "portal.vendor.submit", "portal.facility.submit"];
 
 export function externalPermissionForProcedure(name: string): ExternalPermission | null {
   return (EXTERNAL_PROCEDURE_PERMISSIONS as Record<string, ExternalPermission>)[name] ?? null;
