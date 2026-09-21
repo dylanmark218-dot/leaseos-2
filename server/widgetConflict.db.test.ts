@@ -31,11 +31,23 @@ suite("layout revision and conflict", () => {
   let db: any;
 
   beforeAll(async () => {
-    pool = mysql.createPool({
-      socketPath: DB_SOCKET as string, user: "root",
-      database: process.env.WIDGET_DB_NAME ?? "leaseos_b24",
-      multipleStatements: true, connectionLimit: 8,
-    });
+    // A URL or a socket, matching the guard above and the persistence harness.
+    //
+    // This used to build a socket pool unconditionally — `socketPath: DB_SOCKET`
+    // with a hard-coded `leaseos_b24` fallback — while the guard admitted
+    // WIDGET_DB_URL as well. So the suite declared it could run against a URL and
+    // then ignored it, connecting to a database name from the B24 container that
+    // nothing here creates: "Unknown database 'leaseos_b24'". Invisible for as
+    // long as neither variable was ever set.
+    pool = mysql.createPool(
+      DB_SOCKET
+        ? {
+            socketPath: DB_SOCKET, user: "root",
+            database: process.env.WIDGET_DB_NAME ?? "leaseos_b24",
+            multipleStatements: true, connectionLimit: 8,
+          }
+        : { uri: process.env.WIDGET_DB_URL as string, multipleStatements: true, connectionLimit: 8 },
+    );
     // Derived, not hard-coded. The list used to read
     // ["0089_widget_dashboards.sql", "0090_widget_layout_revision.sql"], and the
     // comment above it already argued for deriving — "exactly the kind of harness

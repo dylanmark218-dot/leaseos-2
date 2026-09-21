@@ -188,3 +188,36 @@ alone accepted `..`. The traversal case caught it before it shipped.
 
 `server/_core/storageKey.test.ts`, 16 cases, including every key shape the server
 itself mints — a validator that rejects legitimate uploads is worse than none.
+
+---
+
+## Appendix: an intermittent CI failure, not root-caused
+
+`server/bulkFuel.test.ts:169` failed once in CI with `expected 600 to be 300` —
+`ifta.quarter` reporting twice the litres it should for one entity.
+
+What was ruled out, by reading rather than assuming:
+
+- **Not a refusal that still writes.** The test's first dispense is expected to be
+  refused on a meter mismatch, and a doubled figure would follow if the refusal
+  persisted a row anyway. It does not: `fuel.dispenseRecord` performs the meter
+  check before any insert.
+- **Not a scoping defect.** `loadQuarter` filters `fuelTransactions` by
+  `financialEntityId` and by the quarter's bounds. The aggregation is correct.
+- **Not this branch's doing.** The failing commit changed a single markdown file,
+  and the commits either side of it passed with that suite's code untouched.
+
+What is left is a collision on the fixture's entity id, which the test drew as
+`950000 + Math.floor(Math.random() * 40000)` and then used as the key for an
+aggregate query. Two fixtures on one id do not read as two tests; they read as
+one test that dispensed twice.
+
+The id is now derived from the auto-increment of the unit the same test creates
+one line above, so it cannot repeat within a run.
+
+**Stated plainly: this is not a confirmed root cause.** No other suite was found
+allocating in that band, so the collision partner is unidentified, and it could
+not be reproduced here — the suite needs MariaDB. The change removes the only
+mechanism the evidence supports and makes the test deterministic either way. If
+it recurs, the cause was something else and this appendix is the record of what
+has already been eliminated.

@@ -259,9 +259,23 @@ schema"* — directly above the hard-coded list that then drifted.
   how this hid, and the symptom — `↓` — is indistinguishable from a suite
   correctly standing down.
 
-These 30 tests are running for the first time. If they fail, the failure is
-information rather than a regression: it is what the suites were written to
-detect, finally being asked.
+These 30 tests ran for the first time in CI on this branch, and the answer was
+worth having.
+
+`widgetPersistence.db.test.ts` **passed** — including the cross-tenant case the
+file was written for. The guard works; it had simply never been switched on.
+
+`widgetConflict.db.test.ts` **failed**, on a second defect in the same file that
+only running it could reveal: `Unknown database 'leaseos_b24'`. Its guard admits
+`WIDGET_DB_URL`, and its pool ignored it — `socketPath: DB_SOCKET` unconditionally,
+with a hard-coded database name from the B24 container that nothing here creates.
+So it declared it could run against a URL and then could not. It now builds the
+same two-branch pool its sibling does, and the hard-coded name survives only as
+the socket branch's fallback.
+
+Two latent defects in two files, both of the same shape: a harness asserting
+something about its environment that stopped being true, kept invisible by
+reporting `skipped`.
 
 ### TEST-1 — `fieldroute.test.ts` needs a database but does not self-skip (Medium)
 
