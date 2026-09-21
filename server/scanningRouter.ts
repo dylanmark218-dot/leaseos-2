@@ -118,7 +118,15 @@ async function scopeFor(userId: number) {
  */
 async function configuredBindings(db: Awaited<ReturnType<typeof getDb>>): Promise<TrackingBinding[]> {
   if (!db) return [];
-  const rows = await db.select().from(trackingSequences).orderBy(desc(trackingSequences.updatedAt));
+  /*
+   * `updatedAt` is a second-granularity timestamp, so "most recently updated" ties whenever two
+   * rows of one sequence type are written in the same second — and the row that then wins is
+   * whichever the engine happened to return. `id` breaks the tie by insertion order, which is
+   * what "most recent" means when the clock cannot tell them apart. Without it the matcher picks
+   * a format at random from the tied rows, and a scan silently stops recognizing its own tickets.
+   */
+  const rows = await db.select().from(trackingSequences)
+    .orderBy(desc(trackingSequences.updatedAt), desc(trackingSequences.id));
   const seen: Record<string, true> = {};
   const bindings: TrackingBinding[] = [];
   for (const r of rows) {
