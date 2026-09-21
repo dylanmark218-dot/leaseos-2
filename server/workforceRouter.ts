@@ -8,6 +8,7 @@ import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb, revokeUserRole } from "./db";
+import { resolveActingScope } from "./_core/actingScope";
 import { applicantScreenings, applicants, competencySignoffs, complianceDocuments, fieldDevices, offboardings, onboardingPlans, onboardingTasks, operators, probationReviews, serializedTools, toolCheckouts, trainingRecords, userRoleAssignments } from "../drizzle/schema";
 import { COURSE_CREDENTIALS, competencyDecision, hireReadiness, offboardingClose, onboardingGaps, probationDecision, screeningRecordDecision, trainingVerification } from "./_core/workforce";
 
@@ -245,8 +246,19 @@ export const workforceRouter = router({
     const db = await dbOrThrow();
     const o = (await db.select().from(offboardings).where(eq(offboardings.offboardingRef, input.offboardingRef)).limit(1))[0];
     if (!o) throw new TRPCError({ code: "NOT_FOUND", message: "Offboarding not found" });
-    const roles = await db.select().from(userRoleAssignments).where(and(eq(userRoleAssignments.userId, o.userId), isNull(userRoleAssignments.revokedAt)));
-    for (const r of roles) await revokeUserRole({ userId: o.userId, role: r.role, revokedByUserId: ctx.user.id, reason: `offboarding ${o.offboardingRef}` });
+    // B23.1 — offboarding ends employment at THIS company, not everywhere.
+    //
+    // This used to select every un-revoked grant the account held and revoke
+    // each one, so a driver who also wrenched for a different employer lost
+    // that job too the moment one of them processed an offboarding. The grants
+    // revoked are now only the ones this organization issued.
+    const acting = await resolveActingScope(db, ctx.user.id);
+    const roles = await db.select().from(userRoleAssignments).where(and(
+      eq(userRoleAssignments.userId, o.userId),
+      eq(userRoleAssignments.orgRef, acting.tenantId),
+      isNull(userRoleAssignments.revokedAt),
+    ));
+    for (const r of roles) await revokeUserRole({ userId: o.userId, role: r.role, organization: acting.tenantId, revokedByUserId: ctx.user.id, reason: `offboarding ${o.offboardingRef}` });
     const devices = await db.select().from(fieldDevices).where(and(eq(fieldDevices.userId, o.userId), isNull(fieldDevices.revokedAt)));
     for (const d of devices) await db.update(fieldDevices).set({ status: "revoked", revokedAt: new Date(), revokedByUserId: ctx.user.id, revocationReason: `offboarding ${o.offboardingRef}` }).where(eq(fieldDevices.id, d.id));
     await db.update(offboardings).set({ rolesRevokedAt: new Date(), devicesRevokedAt: new Date() }).where(eq(offboardings.id, o.id));

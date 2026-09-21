@@ -64,6 +64,7 @@ import {
   type PortalSurface,
 } from "./portalComposition";
 import {
+  grantsInOrganization,
   isDomainRole,
   permissionsFor,
   UNIVERSAL_PERMISSIONS,
@@ -429,10 +430,23 @@ export function resolveSessionContext(input: SessionContextInput): SessionContex
         derivedFrom: "single_tenant_fallback",
       };
 
-  // Roles. Unrecognized names grant nothing — the same rule `authorize()` runs
-  // on, applied here so the chooser cannot offer what the gate would refuse.
+  // B23.1 — scoped roles → scoped capabilities → scoped workspaces, in that
+  // order and no other.
+  //
+  // The tempting shape is to compute every role the ACCOUNT holds, derive
+  // every capability, compose every workspace, and let the screen hide the
+  // ones that do not belong. That is a filter, not a boundary: the response
+  // still carries the other company's authority, and the first consumer that
+  // forgets to filter hands it over. So the organization narrows the GRANTS,
+  // at the top, and everything downstream is computed from the narrowed set —
+  // which is why the same account legitimately gets a different workspace menu
+  // in each company it works for.
+  //
+  // Unrecognized role names still grant nothing, the same rule `authorize()`
+  // runs on, so the chooser cannot offer what the gate would refuse.
+  const scopedGrants = grantsInOrganization(input.grants, activeOrganization.orgRef);
   const roles = Array.from(
-    new Set(input.grants.map(g => g.role).filter(isDomainRole))
+    new Set(scopedGrants.map(g => g.role).filter(isDomainRole))
   ) as DomainRole[];
   const permissions = permissionsFor(roles);
 

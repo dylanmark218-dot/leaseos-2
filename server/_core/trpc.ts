@@ -55,7 +55,7 @@ import {
   SESSION_PROCEDURE_PERMISSIONS,
   type Permission,
   type RoleGrant, type ProcedureName, type SessionProcedureName } from "./recordsAuthorization";
-import { listActiveUserRoles, recordAuthorizationDecision } from "../db";
+import { listActiveUserRoles, listRoleGrantsInActingOrganization, recordAuthorizationDecision } from "../db";
 import { AmbiguousOrganization, MembershipRevoked } from "./actingScope";
 
 /**
@@ -84,18 +84,55 @@ export function roleProcedure(procedureName: ProcedureName) {
   return t.procedure.use(
     t.middleware(async ({ ctx, next }) => {
       const userId = ctx.user?.id ?? null;
-      const grants: RoleGrant[] = userId
-        ? await listActiveUserRoles(userId)
-        : [];
-      const decision = authorize({ userId, grants, permission });
+
+      // B23.1 — the decision is made IN an organization, or it is not made.
+      //
+      // The gate resolves which company this request is acting for and loads
+      // only the grants that company issued. A role granted by another
+      // employer is not "outvoted" here, it is absent: it never enters the set
+      // the decision is computed from. That is what makes the boundary hold
+      // for all ~650 gated procedures without any of them being edited.
+      //
+      // The two refusals `resolveActingScope` raises are authority answers,
+      // not faults, and are translated below rather than escaping as a 500.
+      let grants: RoleGrant[] = [];
+      let organization: string | null = null;
+      try {
+        if (userId) {
+          const scoped = await listRoleGrantsInActingOrganization(userId);
+          grants = scoped.grants;
+          organization = scoped.organization;
+        }
+      } catch (error) {
+        const refusal = organizationRefusal(error);
+        if (!refusal) throw error;
+        await recordAuthorizationDecision({
+          actorUserId: userId,
+          procedureName,
+          permission,
+          rolesHeld: null,
+          outcome: "denied_scope",
+          detail: refusal.message.slice(0, 400),
+          occurredAt: new Date(),
+        });
+        throw refusal;
+      }
+
+      const decision = authorize({ userId, grants, permission, organization });
 
       const auditId = await recordAuthorizationDecision({
         actorUserId: userId,
         procedureName,
         permission,
+        // The organization is part of the decision now, so it is part of the
+        // record of it. An access review that cannot tell which company a
+        // refusal happened in cannot review anything.
         rolesHeld:
-          grants
-            .map(g => (g.scopeRef ? `${g.role}@${g.scopeRef}` : g.role))
+          [
+            organization ? `@${organization}` : null,
+            ...grants.map(g => (g.scopeRef ? `${g.role}/${g.scopeRef}` : g.role)),
+          ]
+            .filter(Boolean)
             .join(",")
             .slice(0, 300) || null,
         outcome: decision.outcome,
@@ -138,30 +175,56 @@ export function roleProcedure(procedureName: ProcedureName) {
       // INTERNAL_SERVER_ERROR, which tells the shell nothing it can act on and
       // tells an operator the system is broken when it is in fact protecting
       // them. Translated once, here, so every one of the ~100 tenant-scoped
-      // procedures behind this gate gets the actionable answer.
+      // procedures behind this gate gets the actionable answer — and again for
+      // the handlers that resolve their own scope after the gate has passed.
       try {
         return await next({
-          ctx: { ...ctx, user: ctx.user!, roles: decision.effectiveRoles },
+          ctx: {
+            ...ctx,
+            user: ctx.user!,
+            roles: decision.effectiveRoles,
+            // B23.1 — the organization the gate decided in, for handlers that
+            // would otherwise resolve it a second time and could resolve it
+            // differently.
+            organization,
+          },
         });
       } catch (error) {
-        if (error instanceof AmbiguousOrganization) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "Choose which organization you are working in before continuing.",
-          });
-        }
-        // A membership that ended is a refusal, and it is the caller's own
-        // status rather than a fault — FORBIDDEN, named, not a 500.
-        if (error instanceof MembershipRevoked) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Your LeaseOS membership is not active.",
-          });
-        }
+        const refusal = organizationRefusal(error);
+        if (refusal) throw refusal;
         throw error;
       }
     })
   );
+}
+
+/**
+ * The two organization refusals, as named tRPC errors.
+ *
+ * One function because the gate raises them in two places — resolving the
+ * acting organization before the decision, and again from a handler that
+ * resolves its own scope afterwards — and two copies of a refusal is two
+ * chances for one of them to say something different.
+ *
+ * Returns null for anything else, so a real fault is never swallowed into a
+ * FORBIDDEN that hides it.
+ */
+function organizationRefusal(error: unknown): TRPCError | null {
+  if (error instanceof AmbiguousOrganization) {
+    return new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Choose which organization you are working in before continuing.",
+    });
+  }
+  // A membership that ended is a refusal, and it is the caller's own status
+  // rather than a fault — FORBIDDEN, named, not a 500.
+  if (error instanceof MembershipRevoked) {
+    return new TRPCError({
+      code: "FORBIDDEN",
+      message: "Your LeaseOS membership is not active.",
+    });
+  }
+  return null;
 }
 
 /* ==================================================================

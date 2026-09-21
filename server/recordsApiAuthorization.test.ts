@@ -283,6 +283,7 @@ d("revocation takes effect on the next request", () => {
     ).toBe("passed_gate");
 
     await revokeUserRole({
+      organization: null,
       userId,
       role: "safety",
       revokedByUserId: 1,
@@ -321,7 +322,7 @@ d("active grant uniqueness is enforced by the database", () => {
       userId, role: "office", scopeType: "global",
       grantedByUserId: 1, grantedAt: new Date(),
     });
-    await revokeUserRole({ userId, role: "office", revokedByUserId: 1, reason: "moved" });
+    await revokeUserRole({ userId, role: "office", organization: null, revokedByUserId: 1, reason: "moved" });
     await grantUserRole({
       userId, role: "office", scopeType: "global",
       grantedByUserId: 1, grantedAt: new Date(),

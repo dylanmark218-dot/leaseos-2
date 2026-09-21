@@ -41,6 +41,7 @@ import {
   type PriorCapture,
 } from "./documentFingerprint";
 import { getDb } from "../db";
+import { resolveActingScope } from "./actingScope";
 import { FORMS, commitProposal, type CommittedField } from "./aiProposal";
 import { rehydrateProposal } from "./assistantPersistence";
 import {
@@ -196,15 +197,23 @@ export async function executeAssistantCommit(args: {
           isNull(userRoleAssignments.revokedAt)
         )
       );
+    // B23.1 — the scope travels with the grant, and the decision is made in
+    // the organization this commit is acting for. Flattening `scopeType` to a
+    // nullable branch, as this did, discarded the organization entirely: a
+    // grant from another employer arrived here indistinguishable from one this
+    // company issued.
     const grants: RoleGrant[] = roleRows.map(r => ({
       role: r.role,
-      scopeRef: r.scopeType === "global" ? null : r.scopeRef,
+      scopeType: r.scopeType as RoleGrant["scopeType"],
+      orgRef: r.orgRef ?? null,
+      scopeRef: r.scopeType === "branch" ? r.scopeRef : null,
     }));
     const targetPermission = plan.intent.requiredPermission as Permission;
     const decision = authorize({
       userId: args.actorUserId,
       grants,
       permission: targetPermission,
+      organization: (await resolveActingScope(tx as never, args.actorUserId)).tenantId,
     });
 
     const auditInserted = await tx.insert(authorizationDecisions).values({

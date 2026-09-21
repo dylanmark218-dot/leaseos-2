@@ -55,6 +55,7 @@ d("role resolution", () => {
     ).toBe(true);
 
     await revokeUserRole({
+      organization: null,
       userId,
       role: "mechanic",
       revokedByUserId: 1,
@@ -80,6 +81,7 @@ d("role resolution", () => {
       grantedAt: new Date(),
     });
     await revokeUserRole({
+      organization: null,
       userId,
       role: "office",
       revokedByUserId: 2,
@@ -117,7 +119,7 @@ d("role resolution", () => {
     await grantUserRole({ userId, role: "mechanic", grantedByUserId: 1, grantedAt: now });
     await grantUserRole({ userId, role: "safety", grantedByUserId: 1, grantedAt: now });
 
-    await revokeUserRole({ userId, role: "mechanic", revokedByUserId: 1, reason: "Reassigned" });
+    await revokeUserRole({ userId, role: "mechanic", organization: null, revokedByUserId: 1, reason: "Reassigned" });
     expect(await listActiveUserRoleNames(userId)).toEqual(["safety"]);
   });
 });

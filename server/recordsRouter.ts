@@ -57,7 +57,9 @@ import {
   countActiveManagementGrants,
   grantUserRole,
   listActiveUserRoles,
+  revokeUserRole,
 } from "./db";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 
 /** Company default policy until a verified statutory source is loaded. */
 const DEFAULT_POLICY: RetentionPolicy = {
@@ -936,19 +938,82 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        // P4.1: a role is granted only to a person in the caller's scope.
-        if (!(await userInScope(input.targetUserId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
-      // P4.1: a role is granted only to a person in the caller's scope.
-      if (!(await userInScope(input.targetUserId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
+        // B23.1 — the organization comes from the ACTOR's verified acting
+        // scope, never from the request. An administrator cannot name the
+        // company a grant lands in, so "I administer somewhere, therefore let
+        // me grant here" has no input to travel on. This is the same rule
+        // `resolveActingScope` applies to every tenant-scoped write.
+        const acting = await actingScopeFor(ctx.user.id);
+
+        // P4.1: a role is granted only to a person in the caller's scope —
+        // which, after B23.1, means a person who is a live member of the same
+        // organization the grant will be written into.
+        if (!(await userInScope(input.targetUserId, acting))) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
+        }
+
         const id = await grantUserRole({
           userId: input.targetUserId,
           role: input.role,
-          scopeType: input.scopeRef ? "branch" : "global",
+          scopeType: input.scopeRef ? "branch" : "organization",
+          // For a deployment with no organizations this is SINGLE_TENANT_ID,
+          // which is exactly what `resolveActingScope` resolves such callers
+          // to — so a grant written before organizations existed and one
+          // written now match the same acting scope.
+          orgRef: acting.tenantId,
           scopeRef: input.scopeRef ?? null,
           grantedByUserId: ctx.user.id,
           grantedAt: new Date(),
         });
-        return { granted: true, assignmentId: id ?? null };
+        return { granted: true, assignmentId: id ?? null, organization: acting.tenantId };
+      }),
+
+    /**
+     * B23.1 — take a role away, in one organization.
+     *
+     * There was no revoke procedure at all before this: the only path that
+     * revoked anything was offboarding, and it revoked every grant the account
+     * held anywhere. An administrator who wanted to stop one person driving
+     * had no way to do it that did not also stop them wrenching for a
+     * different company.
+     *
+     * Scoped exactly like the grant: the organization is the actor's own, the
+     * target must be a member of it, and a grant issued by another company is
+     * simply not found here.
+     */
+    revoke: roleProcedure("records.roles.revoke")
+      .input(
+        z.object({
+          targetUserId: z.number().int(),
+          role: z.enum([
+            "driver", "dispatcher", "mechanic", "shop_lead", "safety",
+            "office", "management", "hr", "legal", "auditor",
+          ]),
+          reason: z.string().min(3).max(1000),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const acting = await actingScopeFor(ctx.user.id);
+        if (!(await userInScope(input.targetUserId, acting))) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
+        }
+        const revoked = await revokeUserRole({
+          userId: input.targetUserId,
+          role: input.role,
+          organization: acting.tenantId,
+          revokedByUserId: ctx.user.id,
+          reason: input.reason,
+        });
+        if (revoked === 0) {
+          // Not "already revoked": from here, a grant this organization did not
+          // issue does not exist. Saying so would confirm the person holds it
+          // somewhere else.
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `No active ${input.role} grant issued by this organization`,
+          });
+        }
+        return { revoked, organization: acting.tenantId };
       }),
   }),
 });

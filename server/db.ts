@@ -82,6 +82,7 @@ import {
   coreRecordOwnership, organizationMemberships, organizations, fieldTickets, incidentReports, loads } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import type { MembershipFact } from "./_core/workspaceAccess";
+import { grantsInOrganization, type RoleGrant } from "./_core/recordsAuthorization";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -1214,14 +1215,14 @@ export async function listProposalFields(proposalId: string) {
  * deleted at revoke time, so "what could this person do in March" stays an
  * answerable question.
  */
-export async function listActiveUserRoles(
-  userId: number
-): Promise<{ role: string; scopeRef: string | null }[]> {
+export async function listActiveUserRoles(userId: number): Promise<RoleGrant[]> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db
     .select({
       role: userRoleAssignments.role,
+      scopeType: userRoleAssignments.scopeType,
+      orgRef: userRoleAssignments.orgRef,
       scopeRef: userRoleAssignments.scopeRef,
     })
     .from(userRoleAssignments)
@@ -1231,7 +1232,46 @@ export async function listActiveUserRoles(
         isNull(userRoleAssignments.revokedAt)
       )
     );
-  return rows.map(r => ({ role: r.role as string, scopeRef: r.scopeRef ?? null }));
+  // B23.1 — the scope travels with the grant. `scopeType` is optional in the
+  // TYPE only so pre-B23.1 pure fixtures still compile; the production reader
+  // always populates it, and a grant arriving here without one would be read as
+  // platform-global, so it is never left to a default.
+  return rows.map(r => ({
+    role: r.role as string,
+    scopeType: r.scopeType as RoleGrant["scopeType"],
+    orgRef: r.orgRef ?? null,
+    scopeRef: r.scopeRef ?? null,
+  }));
+}
+
+/**
+ * B23.1 — the grants that authorize in the organization this request is acting
+ * for, and the organization itself.
+ *
+ * The choke point. `roleProcedure` calls this instead of `listActiveUserRoles`,
+ * so every one of the ~650 gated procedures inherits the organization boundary
+ * without being edited — the same way B23.0's organization selection reached
+ * every tenant-scoped reader through `resolveActingScope`.
+ *
+ * It THROWS the same refusals `resolveActingScope` throws — `AmbiguousOrganization`
+ * when a person is a live member of several companies and has selected none,
+ * `MembershipRevoked` when every membership they had is over — because those
+ * are answers about authority and the gate is where authority is decided. Both
+ * are translated to named tRPC refusals in `roleProcedure`.
+ */
+export async function listRoleGrantsInActingOrganization(
+  userId: number
+): Promise<{ grants: RoleGrant[]; organization: string | null }> {
+  const db = await getDb();
+  if (!db) return { grants: [], organization: null };
+  const [acting, grants] = await Promise.all([
+    resolveActingScope(db, userId),
+    listActiveUserRoles(userId),
+  ]);
+  return {
+    grants: grantsInOrganization(grants, acting.tenantId),
+    organization: acting.tenantId,
+  };
 }
 
 /**
@@ -1256,9 +1296,15 @@ export async function listActiveUserRoles(
  * `RoleGrant[]` to `authorize()`, the way `roleProcedure` does. A caller asking
  * which roles a person holds for a non-authorization reason wants
  * `listRoleNamesAnyScope`.
+ *
+ * B23.1 — the same argument now applies one level out. A name is stripped of
+ * its organization as well as its branch, so returning a role granted by
+ * another company would launder it into authority here, which is the exact bug
+ * this checkpoint closes. The projection is therefore taken from the acting
+ * organization's grants, not the account's. It still only ever narrows.
  */
 export async function listActiveUserRoleNames(userId: number): Promise<string[]> {
-  return (await listActiveUserRoles(userId))
+  return (await listRoleGrantsInActingOrganization(userId)).grants
     .filter(r => r.scopeRef == null)
     .map(r => r.role);
 }
@@ -1411,28 +1457,51 @@ export async function grantUserRole(input: InsertUserRoleAssignment) {
   return result[0]?.insertId;
 }
 
+/**
+ * Revoke a grant.
+ *
+ * B23.1 — `organization` is REQUIRED, and it is the whole point of the change.
+ * This function used to match on (userId, role) alone, so revoking a driver at
+ * one employer revoked them at every employer: a person who drives for two
+ * companies lost both jobs when one of them let them go. `null` means the
+ * historical single tenant and is written explicitly, never defaulted, so that
+ * "revoke everywhere" cannot be reached by forgetting an argument.
+ *
+ * Returns how many grants were actually revoked, so a caller can tell the
+ * difference between "revoked" and "there was nothing to revoke" instead of
+ * reporting success either way.
+ */
 export async function revokeUserRole(args: {
   userId: number;
   role: string;
+  organization: string | null;
   revokedByUserId: number;
   reason: string;
-}) {
+}): Promise<number> {
   const db = await getDb();
-  if (!db) return undefined;
-  return db
+  if (!db) return 0;
+  const target = and(
+    eq(userRoleAssignments.userId, args.userId),
+    eq(userRoleAssignments.role, args.role as never),
+    args.organization === null
+      ? isNull(userRoleAssignments.orgRef)
+      : eq(userRoleAssignments.orgRef, args.organization),
+    isNull(userRoleAssignments.revokedAt)
+  );
+  const matched = await db
+    .select({ id: userRoleAssignments.id })
+    .from(userRoleAssignments)
+    .where(target);
+  if (matched.length === 0) return 0;
+  await db
     .update(userRoleAssignments)
     .set({
       revokedAt: new Date(),
       revokedByUserId: args.revokedByUserId,
       revokeReason: args.reason,
     })
-    .where(
-      and(
-        eq(userRoleAssignments.userId, args.userId),
-        eq(userRoleAssignments.role, args.role as never),
-        isNull(userRoleAssignments.revokedAt)
-      )
-    );
+    .where(target);
+  return matched.length;
 }
 
 /**

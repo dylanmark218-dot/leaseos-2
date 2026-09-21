@@ -115,7 +115,16 @@ export async function resolveActingScope(
   const branchRefs = Array.from(new Set(
     grants.flatMap(g => (g.scopeType === "branch" && g.scopeRef ? [g.scopeRef] : [])),
   ));
-  const global = grants.some((g: { scopeType: string }) => g.scopeType === "global");
+  // B23.1 — `global` here has always meant "this caller's authority is not
+  // confined to a branch", which is the only question `mayScopePolicyTo` asks
+  // it. 0170 split the old `global` into `global` (platform-wide) and
+  // `organization` (the ordinary case), so testing for the literal string
+  // would have quietly answered "no" for every administrator in the system and
+  // refused every company-wide policy write. A quarantined grant authorizes
+  // nothing, so it confers nothing here either.
+  const global = grants.some(
+    (g: { scopeType: string }) => g.scopeType === "global" || g.scopeType === "organization",
+  );
 
   const now = at ?? new Date();
   // v23.26 — the organization's own status is part of the answer. A membership in

@@ -71,12 +71,18 @@ here can be added rather than read.
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
 
-Records vault · roles and server-side authorization · one identity across
-several jobs: the session surface that resolves membership, organization and
-workspace server-side, refuses a workspace the caller does not hold, ends
-access with the membership rather than with the grant, and verifies a named
-organization against the membership table before it scopes anything · payroll,
-finance, tax
+Records vault · roles and server-side authorization, scoped to the
+organization that granted them: a role issued by one company authorizes
+nothing in another, capabilities and workspaces are computed from the acting
+organization's grants rather than filtered afterwards, branch grants name
+their organization explicitly because branch identifiers have no owner, grant
+and revoke are organization-specific, and a pre-scope grant that could not be
+attributed without guessing is quarantined rather than assigned · one identity
+across several jobs: the session surface that resolves membership,
+organization and workspace server-side, refuses a workspace the caller does
+not hold, ends access with the membership rather than with the grant, and
+verifies a named organization against the membership table before it scopes
+anything · payroll, finance, tax
 rules (unverified) · geospatial source registry (8 verified licences, 10
 blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card

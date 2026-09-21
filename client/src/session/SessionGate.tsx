@@ -38,6 +38,7 @@ export function SessionGate(p: SessionGateProps) {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const { logout } = useAuth();
+  const utils = trpc.useUtils();
 
   // What the URL names, and where the person was heading. Both are claims; the
   // server checks both and this component uses only what comes back.
@@ -87,7 +88,19 @@ export function SessionGate(p: SessionGateProps) {
       setActionError(null);
       try {
         await selectOrganization.mutateAsync({ organization: orgRef });
-        await context.refetch();
+        // B23.1 — the organization changed, so EVERY cached answer is now an
+        // answer about the wrong company.
+        //
+        // Not just the session: My Day, the exception queue, the inbox, a
+        // widget board, a job list. The server would refuse any action taken
+        // from a stale screen — the boundary does not depend on this — but a
+        // dispatcher looking at the previous employer's exception queue after
+        // switching has been shown another company's operational data, and
+        // that is a disclosure whether or not a button works.
+        //
+        // The whole cache, deliberately, rather than a list of keys somebody
+        // has to remember to extend when a query is added.
+        await utils.invalidate();
       } catch (error) {
         setActionError(
           error instanceof Error ? error.message : "That organization could not be opened."
@@ -96,7 +109,7 @@ export function SessionGate(p: SessionGateProps) {
         setBusyKey(null);
       }
     },
-    [selectOrganization, context]
+    [selectOrganization, utils]
   );
 
   const onSignOut = useCallback(async () => {

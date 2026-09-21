@@ -6,27 +6,33 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **v23.26** | `LEASEOS_RELEASE` (or explicit argument 1) |
+| Release | **v23.27** | `LEASEOS_RELEASE` (or explicit argument 1) |
 | Tables | **408** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **165** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **646** | `roleProcedure(` call sites across all routers |
+| Migrations | **166** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **647** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
 | Permissions | **355** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **125** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **298 / 4041** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **301 / 4092** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
 
-Records vault · roles and server-side authorization · one identity across
-several jobs: the session surface that resolves membership, organization and
-workspace server-side, refuses a workspace the caller does not hold, ends
-access with the membership rather than with the grant, and verifies a named
-organization against the membership table before it scopes anything · payroll,
-finance, tax
+Records vault · roles and server-side authorization, scoped to the
+organization that granted them: a role issued by one company authorizes
+nothing in another, capabilities and workspaces are computed from the acting
+organization's grants rather than filtered afterwards, branch grants name
+their organization explicitly because branch identifiers have no owner, grant
+and revoke are organization-specific, and a pre-scope grant that could not be
+attributed without guessing is quarantined rather than assigned · one identity
+across several jobs: the session surface that resolves membership,
+organization and workspace server-side, refuses a workspace the caller does
+not hold, ends access with the membership rather than with the grant, and
+verifies a named organization against the membership table before it scopes
+anything · payroll, finance, tax
 rules (unverified) · geospatial source registry (8 verified licences, 10
 blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card

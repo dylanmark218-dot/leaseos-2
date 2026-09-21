@@ -2991,7 +2991,15 @@ export const userRoleAssignments = mysqlTable("userRoleAssignments", {
     "bookkeeper", "payroll_admin", "tax_preparer", "controller",
     "external_accountant",
   ]).notNull(),
-  scopeType: mysqlEnum("scopeType", ["global", "branch"]).default("global").notNull(),
+  // B23.1 (0170) — how far the grant reaches. `global` is deliberate
+  // platform-wide authority and is held by nobody after the backfill;
+  // `organization` is the ordinary case; `branch` names its organization too,
+  // because branch identifiers are bare strings with no owner;
+  // `unscoped_legacy` is a pre-B23.1 grant whose organization could not be
+  // inferred without guessing, and authorizes nothing until re-granted.
+  scopeType: mysqlEnum("scopeType", ["global", "organization", "branch", "unscoped_legacy"]).default("global").notNull(),
+  /** The organization that issued this grant. NULL only for platform-global and quarantined rows. */
+  orgRef: varchar("orgRef", { length: 40 }),
   scopeRef: varchar("scopeRef", { length: 64 }),
   grantedByUserId: int("grantedByUserId").notNull(),
   grantedAt: timestamp("grantedAt").notNull(),
@@ -3000,7 +3008,9 @@ export const userRoleAssignments = mysqlTable("userRoleAssignments", {
   revokeReason: text("revokeReason"),
   // Persistent generated column: NULL for revoked rows, collision key for
   // active ones. Never written by the application — the database derives it.
-  activeGrantKey: varchar("activeGrantKey", { length: 180 }),
+  // B23.1 (0170) widened it to include orgRef: without that, `driver @ ABC`
+  // and `driver @ XYZ` collide and the second grant cannot be written at all.
+  activeGrantKey: varchar("activeGrantKey", { length: 220 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
