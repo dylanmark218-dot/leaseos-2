@@ -1,7 +1,8 @@
 # Dispatch Assignment Model — design
 
-**Status:** design only. Nothing here is implemented. No production code, schema or migration is
-written by this document.
+**Status:** **APPROVED** with three owner decisions, recorded in §18 and incorporated throughout.
+Design only — nothing here is implemented, and no production code, schema or migration is written by
+this document. The implementation plan is `DISPATCH_ASSIGNMENT_IMPLEMENTATION_PLAN.md`.
 
 **Written against:** `main` at `f21cd1b`, with the in-flight stack `#4 → #5 → #6`
 (`c72a55a`, `8bb6002`, `363327f`) read for the readiness parts. Every claim carries a `file:line`.
@@ -207,12 +208,52 @@ jobUnits                                 legacy participation/worklog + direct-a
 | Column | Type | Why |
 |---|---|---|
 | `required` | `boolean NOT NULL DEFAULT true` | `assessStaffing` already distinguishes required from optional and `dispatchTransaction.ts:328` hardcodes `true` because the data cannot express it. This is a real missing semantic, not a nicety. |
-| `jobId` | `int NULL` | *Only if* §15's owner decision goes the "roles may hang off a job without a posting" way. Default recommendation is **not** to add it — see §15. |
+
+`roleCode` keeps its type (`varchar(60)`) and gains a **validation rule**, not a constraint: it must
+match an `active` row in the new catalog (§5.2). No foreign key — house style validates in the
+mutation (`jobInScope`, `unitInScope`) rather than at the DDL level, and a hard FK would make
+deactivating a role type fail against historical rows.
 
 Nothing else changes. `assignedOperatorId`, `assignedUnitId`, `assignedTrailerId` and `status`
 already carry the binding.
 
-### 5.2 `dispatchRoleAssignmentEvents` — new, append-only
+### 5.2 `dispatchRoleTypes` — new controlled catalog (OWNER DECISION 3)
+
+`roleCode` must be neither free text nor a closed enum. Free text is how `jobUnits.role` became
+meaningless — `varchar(100)`, unvalidated, read by nothing. A SQL/TypeScript enum would mean a
+migration every time LeaseOS supports another trucking role.
+
+A catalog table is rows, so it extends without a migration, and it is the same shape LeaseOS already
+uses for vocabularies (`facilityDirectory.vocabulary.list` backs the disposal waste-code picker the
+same way).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `int AUTO_INCREMENT PK` | |
+| `roleCode` | `varchar(60) NOT NULL` | stable machine code, never displayed raw |
+| `orgRef` | `varchar(64) NULL` | NULL = available to every tenant; set = that organization's own role type. The 0132 convention. |
+| `displayName` | `varchar(120) NOT NULL` | what a dispatcher reads |
+| `description` | `varchar(500) NULL` | |
+| `defaultEquipmentClass` | `varchar(60) NULL` | seeds `dispatchRoles.requiredEquipmentClass` when a role is created |
+| `defaultTrailerClass` | `varchar(60) NULL` | seeds `requiredTrailerClass` |
+| `active` | `boolean NOT NULL DEFAULT true` | deactivate rather than delete — historical roles keep their code |
+| `createdByUserId` | `int NOT NULL` | |
+| `createdAt` | `timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP` | |
+
+Unique on `(orgRef, roleCode)`, so a tenant may define `LEAD` without colliding with the global
+`LEAD`. Resolution is tenant-first, then global.
+
+**Seed — evidenced only.** From the rig-move sentence in `drizzle/schema.ts:1864-1865`:
+`LEAD`, `WINCH_TRACTOR`, `BED_TRUCK`, `PICKER`, `PILOT_VEHICLE`. From the shipped showcase crew
+panel (`client/src/showcase/FleetWorkspace.tsx:551,556,561`): `PRIMARY_UNIT`, `SUPPORT_UNIT`,
+`STANDBY`.
+
+That is the whole seed. The worked example in §9 uses `VAC_TRUCK` and `WATER_TRUCK`, which are
+**illustrative and deliberately not seeded** — adding them is one row insert by whoever knows the
+operation, which is precisely the property this design is buying. No industry taxonomy is invented
+here.
+
+### 5.3 `dispatchRoleAssignmentEvents` — new, append-only
 
 Modelled on `dispatchAuditEvents` (`drizzle/schema.ts:1999`), which is already role-aware
 (`postingId`, `roleId`, `eventType`, `actorUserId`, `actorRole`).
@@ -240,7 +281,7 @@ Indexes: `(roleId, id)` — the precondition read in §10 and the per-slot histo
 job before writing (§8). Adding an `orgRef` that nothing filters on would be a column that looks
 like a guard and is not.
 
-### 5.3 What is *not* added
+### 5.4 What is *not* added
 
 No `version` column. LeaseOS has no optimistic-versioning convention — there is no `expectedVersion`,
 no `ifMatch`, no `updatedAt`-as-precondition anywhere in `server/`. See §10 for what is used instead.
@@ -264,7 +305,7 @@ making the caller declare it invites the caller to be wrong.
 | **Concurrency** | `SELECT … FOR UPDATE` on the role; `expectedLastEventId` compare-and-set (§10) |
 | **Audit** | one `dispatchRoleAssignmentEvents` row, `assignment_created` when the slot was `open`, `assignment_reassigned` when it was `assigned` |
 | **Readiness** | none computed, none consumed. Changing the binding changes the facts; the client re-queries `dispatch.readiness` |
-| **Refuses** | a `cancelled` role; a role whose posting is `completed` or `cancelled`; an out-of-scope job/unit/operator; a stale `expectedLastEventId`; `reason` absent when the slot was already filled |
+| **Refuses** | a `cancelled` role; a role whose posting is `completed` or `cancelled`; an out-of-scope job/unit/operator; a stale `expectedLastEventId`; `reason` absent when the slot was already filled; **an operator or unit already occupying another active role on this posting** (OD-1); a `roleCode` absent from the active catalog |
 
 ### `dispatch.clearRoleAssignment` — unassign
 
@@ -345,11 +386,16 @@ the role row.
 
 ```
 BEGIN
-  SELECT … FROM dispatchRoles WHERE id = :roleId FOR UPDATE
+  SELECT … FROM dispatchPostings WHERE id = :postingId FOR UPDATE   ← serialises the posting
+  SELECT … FROM dispatchRoles    WHERE id = :roleId    FOR UPDATE
   role exists, not cancelled                                  → else NOT_FOUND / PRECONDITION_FAILED
+  posting not completed/cancelled                             → else PRECONDITION_FAILED
   posting → job; jobInScope(job, scope)                       → else NOT_FOUND
-  unitInScope / operatorInScope for each supplied id          → else NOT_FOUND
+  unitInScope / operatorInScope / unitInScope(trailerId)      → else NOT_FOUND
+  roleCode resolves in the active catalog (tenant, then global)→ else BAD_REQUEST
   lastEventId(roleId) == expectedLastEventId                  → else CONFLICT
+  no OTHER active role on this posting holds operatorId       → else CONFLICT   (OD-1)
+  no OTHER active role on this posting holds unitId           → else CONFLICT   (OD-1)
   capture the old binding from the locked row
   UPDATE dispatchRoles SET assigned*, status='assigned'
   INSERT dispatchRoleAssignmentEvents (from…, to…, reason, actor)
@@ -358,9 +404,64 @@ BEGIN
 COMMIT
 ```
 
+**Why the posting lock.** OD-1's rule is "not twice on this posting", which is a statement about a
+*set* of rows, and MariaDB has no filtered/partial unique index that could express "unique among
+rows whose status is assigned". So the guarantee is transactional: take the posting lock the award
+already takes (`_core/dispatchTransaction.ts:93-97`), then check and write inside it. Two concurrent
+assignments to the same posting serialise; two to different postings do not contend.
+
 The staffing recomputation is the *same* call the award already makes
 (`_core/dispatchTransaction.ts:319-343`), so assignment and award cannot disagree about whether a
 posting is staffed.
+
+### 8.1 Staffing state, and what it can and cannot say (OWNER DECISION 2)
+
+**The rule.** Staffing is *derived from current required-slot occupancy*, every time a binding
+changes. Losing a required role stops a posting presenting itself as staffed, immediately.
+
+| Required roles filled | `assessStaffing().state` | `planningState` |
+|---|---|---|
+| all | `staffed` | `staffed` |
+| some, not all | `partially_staffed` | `partially_staffed` |
+| none | `unstaffed` | **see the limitation below** |
+
+An understaffed posting **never** transitions to `awarding`. `awarding` means "we are choosing who
+gets this", not "we are missing a truck", and using it for the second would make the bid path
+unreadable.
+
+**Award history is never erased.** `dispatchAuditEvents` rows are append-only and nothing in this
+design deletes or rewrites one, so an `assignment_approved` for a posting that later loses a driver
+stays exactly where it is. What changes is not the record but its *currency*: the binding change
+moves `computeEligibilityFingerprint`, `assessEligibilityValidity` returns
+`invalidatedBy: "dependency_change"`, and the stale check can no longer authorise an award
+(`_core/dispatchAward.ts:100-110`). Historical truth is preserved; stale authority is not reusable.
+That is the existing mechanism, used as-is — no new invalidation column.
+
+**A limitation to name rather than hide**, exactly as the owner asked.
+
+`assessStaffing` has three states; `PostingState` has no `unstaffed`
+(`_core/dispatchLifecycle.ts:20-44`), and from `staffed` the only legal backward transitions are
+`dispatched`, `partially_staffed` and `cancelled`. So a posting that was `staffed` and loses *every*
+required role can legally land only on `partially_staffed` — which is not true, and
+`planningState` cannot say so.
+
+More fundamentally: `planningState` is one field carrying two questions — *where is this posting in
+its commercial life* (was it awarded?) and *is it crewed right now*. Those can disagree the moment a
+driver is pulled off an awarded dispatch.
+
+**Recommendation, smallest first:**
+
+1. **Do not overload `planningState`.** Return the precise staffing truth from `dispatch.listRoles`
+   as `assessStaffing`'s own `{ state, filled, requiredTotal, unfilledRoles }`, which already exists
+   and already distinguishes `unstaffed`. The screen shows "0 of 3 required roles filled"; nothing
+   has to lie.
+2. **Clamp the backward transition** to `partially_staffed`, the only legal one, and treat it as a
+   coarse lifecycle marker rather than a staffing readout.
+3. **Do not** redesign commercial award history to fix this. If the imprecision proves operationally
+   costly, the correct fix is a separate `staffingState` column beside `planningState` — one field
+   per question — and that is a follow-up with its own owner decision, not part of this work.
+
+The implementation plan carries this as an explicit checkpoint-F note so it cannot be lost.
 
 ---
 
@@ -377,8 +478,10 @@ units per job, uniform across work types — stated in `drizzle/schema.ts:1864-1
 |---|---|
 | One binding per role | structural — a role row *is* the binding |
 | A role may be filled only once at a time | `FOR UPDATE` + `expectedLastEventId` |
+| **One operator may hold at most one active role per posting** (OD-1) | transactional check under the posting lock |
+| **One unit may hold at most one active role per posting** (OD-1) | transactional check under the posting lock |
 | A resource may not be double-booked across **overlapping postings** | already exists: `_core/dispatchTransaction.ts:182-206` |
-| Two roles on the *same* posting may hold different resources | already explicit: `if (o.postingId === input.postingId) continue` (`:199`) |
+| Two roles on the *same* posting hold **different** resources | OD-1; the pre-existing `if (o.postingId === input.postingId) continue` (`:199`) skips same-posting *booking* overlap, so this rule is new and lives in the assignment path |
 
 Worked example — Job 812:
 
@@ -394,15 +497,25 @@ Worked example — Job 812:
 Fill role 4 → `staffed`. Reassign role 2 from Truck 34 to Truck 77 → roles 1, 3 and 4 are untouched,
 posting stays `staffed`, one `assignment_reassigned` event is written naming Truck 34 → Truck 77.
 
-**Duplicate vs legitimate multi-unit:** the accidental double-submit is *the same role set twice*,
-and it is refused by `expectedLastEventId` — the second submit carries a token the first one
-invalidated. Three trucks on one job is three roles and is never refused. Note the contrast with
-today: `dispatchEnforcement.test.ts:152-183` creates three identical `jobUnits` rows without
-complaint, because that table has no identity to be duplicated.
+**Duplicate vs legitimate multi-unit — three distinct shapes, three distinct answers:**
 
-**One remaining question that is genuinely open:** may the *same* operator or unit hold two roles on
-the *same* posting? Nothing today forbids it, and there are real operations where it is right (one
-driver, two trailers across a shift) and real ones where it is a typo. Listed in §19.
+| Shape | Answer | Mechanism |
+|---|---|---|
+| Three trucks, three drivers, three roles on job 812 | **allowed** — this is the whole point | nothing refuses it |
+| The same role submitted twice (double-click, retry) | **refused** | `expectedLastEventId` — the second carries a token the first invalidated |
+| Driver A on role 1 *and* role 2 of the same posting | **refused** (OD-1) | the transactional check under the posting lock |
+
+OD-1's reasoning: one operator in two active slots is far more often an accidental duplicate, or a
+false statement of simultaneous operational capacity, than a real assignment. A person cannot drive
+two trucks at once, and a posting that claims they can will mis-staff.
+
+**Sequential use is not affected.** Driver A on role 1, later unassigned, later assigned to role 2 is
+two events in history and one active binding at a time. OD-1 constrains *simultaneous* occupancy only.
+
+**If one resource must legitimately satisfy several roles at once** — one driver with two trailers
+across a shift — that is a future explicit feature (linked roles, or a shareable role type) with its
+own authorization and audit. It is **not** built now, and it must never arrive by relaxing this rule
+silently.
 
 ---
 
@@ -569,12 +682,22 @@ doing at step 2 so the name matches what it does.
 
 ## 15. Migration requirements
 
-Schema changes required, in one migration, all additive:
+Schema changes required, in **two** migrations, all additive. `main` ends at `0168` and PR #4 takes
+`0169`, so these are `0170` and `0171`:
 
-1. `ALTER TABLE dispatchRoles ADD COLUMN required boolean NOT NULL DEFAULT true` — expresses the
+**`0170_dispatch_role_types.sql`**
+1. `CREATE TABLE dispatchRoleTypes (…)` per §5.2, unique on `(orgRef, roleCode)`.
+2. `ALTER TABLE dispatchRoles ADD COLUMN required boolean NOT NULL DEFAULT true` — expresses the
    optional-role semantics `assessStaffing` already implements.
-2. `CREATE TABLE dispatchRoleAssignmentEvents (…)` per §5.2, with indexes `(roleId, id)` and
+3. Seed the eight evidenced global role types (`orgRef` NULL).
+
+**`0171_dispatch_role_assignment_events.sql`**
+4. `CREATE TABLE dispatchRoleAssignmentEvents (…)` per §5.3, with indexes `(roleId, id)` and
    `(jobId, occurredAt)`.
+
+No `UNIQUE` index expresses OD-1: MariaDB has no filtered unique index, so "unique among rows whose
+status is assigned" cannot be a constraint. It is enforced transactionally under the posting lock
+(§8).
 
 **No destructive change.** No column is dropped, no row is rewritten, no historical lifecycle state
 is manufactured. `DEFAULT true` on `required` is the value `dispatchTransaction.ts:328` already
@@ -636,6 +759,26 @@ Written before implementation, as RED. Database-backed tests call production tRP
 6. unassign without a reason → refused
 7. optional role left open → posting still `staffed`
 
+**OD-1 — duplicate occupancy**
+7a. the same operator on a second active role of the same posting → `CONFLICT`, first binding intact
+7b. the same unit on a second active role of the same posting → `CONFLICT`, first binding intact
+7c. the same operator on a role of a *different* posting → allowed
+7d. operator unassigned from role 1, then assigned to role 2 → allowed (sequential ≠ simultaneous)
+
+**OD-2 — staffing derivation**
+7e. unassign one of three filled required roles → posting leaves `staffed`, `assessStaffing` reports
+    2 of 3, posting is `partially_staffed`
+7f. unassign every required role → posting never reads `staffed`, never transitions to `awarding`,
+    and `assessStaffing().state` is `unstaffed`
+7g. an already-awarded posting that loses a role keeps every `dispatchAuditEvents` row it had
+7h. after that loss, the prior eligibility check reports `invalidatedBy: "dependency_change"`
+
+**OD-3 — role catalog**
+7i. a `roleCode` absent from the catalog → refused
+7j. a deactivated role type cannot be used for a new role, and existing roles carrying it still read
+7k. a tenant-scoped role type resolves ahead of a global one with the same code, and is invisible to
+    another tenant
+
 **Identity and concurrency**
 8. stale `expectedLastEventId` → `CONFLICT`, and the first writer's binding survives unchanged
 9. two concurrent `setRoleAssignment` on one role → exactly one wins (the `dispatchConcurrency.test.ts`
@@ -675,31 +818,61 @@ byte-for-byte:
 - drop the `expectedLastEventId` check → 8 and 9 fail
 - drop `unitInScope` → 13 fails
 - hardcode `required: true` again → 7 fails
+- drop the same-posting operator check → 7a fails
+- drop the same-posting unit check → 7b fails
+- take the role lock without the posting lock → 7a/7b become racy under the concurrency harness
+- recompute staffing only on assign, not on clear → 7e and 7f fail
+- accept any `roleCode` string → 7i fails
 
 ---
 
-## 18. Open owner decisions
+## 18. Owner decisions — resolved
 
-Only questions that code and prior LeaseOS requirements genuinely cannot answer. Everything else in
-this document is derived from the repository.
+All three questions this design raised have been answered by the owner. They are recorded here in
+full because the reasoning, not just the ruling, constrains the implementation.
 
-1. **May the same operator or unit hold two roles on the same posting?**
-   Nothing forbids it today (`_core/dispatchTransaction.ts:199` explicitly skips same-posting overlap).
-   One driver with two trailers across a shift is real; the same pair entered twice is a typo. This
-   is an operations-policy question about how LeaseOS's customers actually dispatch, and the code is
-   silent. *Default if undecided:* allow it, because refusing costs a legitimate operation and the
-   duplicate case is already caught by `expectedLastEventId`.
+### OD-1 — a resource may not occupy two active roles on one posting
 
-2. **Does unassigning the last filled role move a `staffed` posting back to `partially_staffed`, or
-   to `awarding`?** `canTransitionPosting` permits both (`_core/dispatchLifecycle.ts:31-32`). The
-   difference is whether losing a driver un-awards a dispatch — a commercial question, not a
-   technical one. *Default if undecided:* `partially_staffed`, since assignment must not un-award.
+The same `operatorId` may not hold two active roles on the same posting; nor may the same `unitId`;
+exact duplicate bindings are refused. Different operators and units on different roles remain
+normal.
 
-3. **Is `roleCode` a closed enum, and if so what are the values?** `jobUnits.role` was free text and
-   nothing read it, which is how it became meaningless. A closed set (`VAC_TRUCK`, `WATER_TRUCK`,
-   `WINCH_TRACTOR`, `BED_TRUCK`, `PICKER`, `PILOT_VEHICLE`, …) is derivable from the schema comment's
-   rig-move example but the real list is operational knowledge I do not have.
+*Reason:* that shape is far more likely to be an accidental duplicate, or a false statement of
+simultaneous operational capacity, than a real assignment.
 
-Deliberately **not** escalated, because the repository answers them: multi-unit cardinality (§9),
-whether trailer is included now (§13), which table is canonical (§4), whether history is append-only
-(§5.2), and what permission assignment needs (§7).
+*Not solved by relaxing this later.* If one resource must legitimately satisfy several roles at
+once, that is an explicit future feature — linked roles, shareable role types, explicit multi-role
+authorization — with its own validation and audit. Sequential use is already expressed by assignment
+history and is unaffected. Incorporated in §8, §9.
+
+### OD-2 — losing a required role ends staffed status immediately
+
+Staffing is derived from current required-slot occupancy. All required filled → `staffed`; some →
+`partially_staffed`; none → the existing pre-staffed vocabulary. Never `awarding`, which is not a
+substitute for missing resources. Award history is never erased; previous authority becomes stale
+through the existing fingerprint mechanism and must be re-evaluated. Where one `planningState` field
+cannot carry both award history and current staffing truth, that is named rather than hidden.
+Incorporated in §8.1.
+
+### OD-3 — `roleCode` is a controlled, extensible catalog
+
+Neither free text nor a permanently closed enum. A `dispatchRoleTypes` catalog with stable machine
+code, display name, active flag, optional description and optional default equipment/trailer
+classes, carrying house provenance columns, extensible by row rather than by migration, with
+`dispatchRoles.roleCode` validated against it. Seeded only with roles the repository evidences.
+Tenant-specific types are supported by a nullable `orgRef`, which the 0132 convention makes
+straightforward and safely scoped. Incorporated in §5.2.
+
+## 19. Remaining blockers
+
+**None that block implementation.**
+
+Two items are carried forward as *named follow-ups*, neither of which gates this work:
+
+1. **Asset typing for trailers.** `units.vehicleType` is free text no production line reads, so the
+   server cannot prove a given id is a trailer rather than a truck (§13). The assignment model is
+   not weakened to accommodate this — trailer binding ships, and the screen states the limitation.
+   Stronger asset typing is a separate prerequisite if and when it is wanted.
+2. **`planningState` carrying two questions.** Named in §8.1 with the smallest-first recommendation.
+   A separate `staffingState` column is the correct fix if the imprecision proves costly; it is not
+   part of this work.
