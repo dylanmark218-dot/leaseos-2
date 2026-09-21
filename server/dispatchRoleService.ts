@@ -13,13 +13,14 @@
 
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
-import { getDb, jobInScope } from "./db";
-import { resolveActingScope } from "./_core/actingScope";
+import { getDb, jobInScope, operatorInScope, unitInScope } from "./db";
+import { SINGLE_TENANT_ID, resolveActingScope } from "./_core/actingScope";
 import {
   dispatchPostings, dispatchRoleAssignmentEvents, dispatchRoles, dispatchRoleTypes,
 } from "../drizzle/schema";
 import { resolveRoleType, requirementDefaultsOf, type RoleType } from "./_core/dispatchRoleCatalog";
-import { assessStaffing } from "./_core/dispatchLifecycle";
+import { assessStaffing, canTransitionPosting } from "./_core/dispatchLifecycle";
+import { describeTransition, headEventId, type AssignmentEventType, type Binding } from "./_core/dispatchAssignmentEvents";
 
 export type Scope = { tenantId: string };
 
@@ -277,6 +278,252 @@ export async function listRoles(args: {
     staffing,
     history,
   };
+}
+
+/* ================================================================== */
+/* Assignment                                                          */
+/* ================================================================== */
+
+export type AssignmentOutcome = {
+  roleId: number;
+  status: string;
+  binding: { operatorId: number | null; unitId: number | null; trailerId: number | null };
+  eventId: number;
+  eventType: AssignmentEventType;
+  lastEventId: number;
+  planningState: string;
+  staffing: ReturnType<typeof assessStaffing>;
+};
+
+/**
+ * Bind, rebind or clear one slot.
+ *
+ * The whole transaction exists to keep three promises, and each one costs something structural:
+ *
+ * **It is not an award.** It writes `dispatchRoles`, `dispatchRoleAssignmentEvents` and — derived —
+ * `dispatchPostings.planningState`, and nothing else. No booking, no `usedForAward`, no
+ * `assignment_approved`, no bid or invitation touched. Those are the award's durable evidence and
+ * the reason `jobUnits.create` became an award path by accident.
+ *
+ * **It takes the posting lock, not just the role lock.** OD-1 — one operator and one unit per
+ * posting at a time — is a claim about a *set* of rows, and MariaDB has no filtered unique index
+ * that can say "unique among rows whose status is assigned". Two dispatchers filling two slots of
+ * one posting with the same driver would both pass a read-then-write check. Locking the posting is
+ * what makes the check true rather than likely, and it is the same lock the award already takes.
+ *
+ * **Staleness is refused, not merged.** `expectedLastEventId` is the head of this slot's own
+ * history: a version that already had to exist. A client that submits the token it read before
+ * somebody else's change landed is told so.
+ *
+ * Cross-posting exclusivity is deliberately absent. The repository's conflict checker compares
+ * `resourceBookings` windows; assignment creates no booking and a posting carries no window at all
+ * (the award takes `startsAt`/`endsAt` as call input). Enforcing it here would mean inventing a
+ * window — a weaker second conflict engine. It stays the award's job, against real bookings.
+ */
+async function applyBinding(args: {
+  roleId: number;
+  next: Binding;
+  expectedLastEventId: number | null;
+  reason: string | null;
+  actorUserId: number;
+  actorRole: string;
+  scope: Scope;
+  /** A clear always needs a reason; a first binding does not. */
+  requireReason: boolean;
+}): Promise<AssignmentOutcome> {
+  const db = await database();
+  const now = new Date();
+
+  return db.transaction(async tx => {
+    // 1. The role, and through it the posting we must serialise on.
+    const role = (await tx.select().from(dispatchRoles).where(eq(dispatchRoles.id, args.roleId)).limit(1))[0];
+    if (!role) throw new TRPCError({ code: "NOT_FOUND", message: `Role ${args.roleId} not found` });
+
+    // 2. Posting lock FIRST, then the role — a deterministic order, so two callers touching the
+    //    same posting queue rather than deadlock.
+    const lockedPosting = (await tx.select().from(dispatchPostings)
+      .where(eq(dispatchPostings.id, role.postingId)).for("update").limit(1))[0];
+    if (!lockedPosting) throw new TRPCError({ code: "NOT_FOUND", message: `Role ${args.roleId} not found` });
+
+    const locked = (await tx.select().from(dispatchRoles)
+      .where(eq(dispatchRoles.id, args.roleId)).for("update").limit(1))[0]!;
+
+    // 3. Tenancy, on the job the posting belongs to.
+    if (!(await jobInScope(lockedPosting.jobId, args.scope))) {
+      throw new TRPCError({ code: "NOT_FOUND", message: `Role ${args.roleId} not found` });
+    }
+    if (locked.status === "cancelled") {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Role ${args.roleId} is cancelled` });
+    }
+    if (lockedPosting.planningState === "cancelled" || lockedPosting.planningState === "completed") {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Posting ${lockedPosting.id} is ${lockedPosting.planningState}` });
+    }
+
+    // 4. Every resource named must be one this scope may use. A trailer is a `units` row here —
+    //    see the module note on what that can and cannot prove.
+    if (args.next.unitId != null && !(await unitInScope(args.next.unitId, args.scope))) {
+      throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${args.next.unitId} not found` });
+    }
+    if (args.next.trailerId != null && !(await unitInScope(args.next.trailerId, args.scope))) {
+      throw new TRPCError({ code: "NOT_FOUND", message: `Trailer ${args.next.trailerId} not found` });
+    }
+    if (args.next.operatorId != null && !(await operatorInScope(args.next.operatorId, args.scope))) {
+      throw new TRPCError({ code: "NOT_FOUND", message: `Operator ${args.next.operatorId} not found` });
+    }
+
+    // 5. The concurrency head, read under the lock.
+    // Locking read for the same snapshot reason as the sibling scan below.
+    const priorEvents = await tx.select({ id: dispatchRoleAssignmentEvents.id })
+      .from(dispatchRoleAssignmentEvents).where(eq(dispatchRoleAssignmentEvents.roleId, args.roleId)).for("update").limit(1000);
+    const head = headEventId(priorEvents);
+    if (head !== args.expectedLastEventId) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: `Role ${args.roleId} changed since you loaded it — reload and try again`,
+      });
+    }
+
+    const previous: Binding = {
+      operatorId: locked.assignedOperatorId, unitId: locked.assignedUnitId, trailerId: locked.assignedTrailerId,
+    };
+    const eventType = describeTransition(previous, args.next);
+    if (!eventType) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "That is already the assignment" });
+    }
+    if (args.requireReason && !args.reason?.trim()) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "A reason is required" });
+    }
+    // A reassignment displaces somebody; that always needs accounting for.
+    if (eventType === "assignment_reassigned" && !args.reason?.trim()) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "A reason is required to reassign a filled slot" });
+    }
+
+    // 6. OD-1, under the posting lock: one operator and one unit per posting at a time.
+    //    A cancelled slot reserves nothing — it was withdrawn, not left occupied.
+    //    `.for("update")` is not decoration. MariaDB's default REPEATABLE READ establishes the
+    //    transaction's snapshot at its FIRST plain SELECT — which happens above, before the posting
+    //    lock — so a plain read here returns the world as it was before the other dispatcher
+    //    committed, even while we hold the lock. A locking read always sees the latest committed
+    //    row. Without it, two slots of one posting both take the same driver; D14 proves it.
+    const siblings = (await tx.select().from(dispatchRoles)
+      .where(eq(dispatchRoles.postingId, lockedPosting.id)).for("update").limit(200))
+      .filter(r => r.id !== args.roleId && r.status !== "cancelled");
+    if (args.next.operatorId != null && siblings.some(r => r.assignedOperatorId === args.next.operatorId)) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: `Operator ${args.next.operatorId} is already on another role of this posting — one person cannot hold two slots at once`,
+      });
+    }
+    if (args.next.unitId != null && siblings.some(r => r.assignedUnitId === args.next.unitId)) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: `Unit ${args.next.unitId} is already on another role of this posting — one truck cannot hold two slots at once`,
+      });
+    }
+
+    // 7. The binding.
+    await tx.update(dispatchRoles).set({
+      assignedOperatorId: args.next.operatorId,
+      assignedUnitId: args.next.unitId,
+      assignedTrailerId: args.next.trailerId,
+      status: eventType === "assignment_unassigned" ? "open" : "assigned",
+    }).where(eq(dispatchRoles.id, args.roleId));
+
+    // 8. The history. Append-only; nothing in production updates or deletes one of these.
+    const insEvent = await tx.insert(dispatchRoleAssignmentEvents).values({
+      eventRef: mintRef("RAE"),
+      roleId: args.roleId,
+      postingId: lockedPosting.id,
+      jobId: lockedPosting.jobId,
+      orgRef: args.scope.tenantId === SINGLE_TENANT_ID ? null : args.scope.tenantId,
+      eventType,
+      fromOperatorId: previous.operatorId, fromUnitId: previous.unitId, fromTrailerId: previous.trailerId,
+      toOperatorId: args.next.operatorId, toUnitId: args.next.unitId, toTrailerId: args.next.trailerId,
+      reason: args.reason ?? null,
+      actorUserId: args.actorUserId,
+      actorRole: args.actorRole,
+      occurredAt: now,
+    } as never);
+    const eventId = Number(insEvent[0]?.insertId ?? 0);
+
+    // 9. Staffing, recomputed from current occupancy — the same assessStaffing the award calls, so
+    //    the two can never disagree about whether a posting is crewed.
+    const after = (await tx.select().from(dispatchRoles)
+      .where(eq(dispatchRoles.postingId, lockedPosting.id)).for("update").limit(200))
+      .filter(r => r.status !== "cancelled");
+    const staffing = assessStaffing(after.map(r => ({
+      roleId: r.id, roleLabel: r.roleLabel, required: r.required, assignedOperatorId: r.assignedOperatorId,
+    })));
+
+    // The persisted field is a coarse lifecycle marker and cannot express zero-of-N: from `staffed`
+    // its only legal backward transition is `partially_staffed`. So it is clamped to what the state
+    // machine permits and the precise truth is returned beside it, never merged into it.
+    const desired = staffing.state === "staffed" ? "staffed" : "partially_staffed";
+    const from = lockedPosting.planningState;
+    if (from !== desired && canTransitionPosting(from, desired)) {
+      await tx.update(dispatchPostings).set({ planningState: desired }).where(eq(dispatchPostings.id, lockedPosting.id));
+    }
+    const planningState = from !== desired && canTransitionPosting(from, desired) ? desired : from;
+
+    return {
+      roleId: args.roleId,
+      status: eventType === "assignment_unassigned" ? "open" : "assigned",
+      binding: { ...args.next },
+      eventId, eventType, lastEventId: eventId,
+      planningState, staffing,
+    };
+  });
+}
+
+/** Assign or reassign — which one it is, is server state, not caller intent. */
+export function setRoleAssignment(args: {
+  roleId: number;
+  operatorId: number | null;
+  unitId: number | null;
+  trailerId: number | null;
+  expectedLastEventId: number | null;
+  reason: string | null;
+  actorUserId: number;
+  actorRole: string;
+  scope: Scope;
+}): Promise<AssignmentOutcome> {
+  return applyBinding({
+    roleId: args.roleId,
+    next: { operatorId: args.operatorId, unitId: args.unitId, trailerId: args.trailerId },
+    expectedLastEventId: args.expectedLastEventId,
+    reason: args.reason,
+    actorUserId: args.actorUserId,
+    actorRole: args.actorRole,
+    scope: args.scope,
+    requireReason: false,
+  });
+}
+
+/**
+ * Return a slot to `open`.
+ *
+ * Always takes a reason: an unassignment removes somebody from work they were expected to do, and
+ * it is the one operation that can move a staffed posting backwards. It destroys nothing — the
+ * history keeps the binding, and the award's records are untouched.
+ */
+export function clearRoleAssignment(args: {
+  roleId: number;
+  expectedLastEventId: number | null;
+  reason: string;
+  actorUserId: number;
+  actorRole: string;
+  scope: Scope;
+}): Promise<AssignmentOutcome> {
+  return applyBinding({
+    roleId: args.roleId,
+    next: { operatorId: null, unitId: null, trailerId: null },
+    expectedLastEventId: args.expectedLastEventId,
+    reason: args.reason,
+    actorUserId: args.actorUserId,
+    actorRole: args.actorRole,
+    scope: args.scope,
+    requireReason: true,
+  });
 }
 
 export { and, eq };

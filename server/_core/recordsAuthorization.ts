@@ -2560,6 +2560,10 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "dispatch.createPosting": "dispatch.assign",
   "dispatch.addRole": "dispatch.assign",
   "dispatch.listRoles": "dispatch.read",
+  // Binding a slot is assignment, never award. dispatch.award stays a separate permission so the
+  // two can be separated by grant later without touching this code.
+  "dispatch.setRoleAssignment": "dispatch.assign",
+  "dispatch.clearRoleAssignment": "dispatch.assign",
   /* ---- v21.2: enforcement ---- */
   "dispatch.enforcementSet": "dispatch.enforcement.manage",
   "dispatch.enforcementGet": "dispatch.read",

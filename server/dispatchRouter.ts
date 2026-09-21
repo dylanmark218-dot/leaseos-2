@@ -30,7 +30,7 @@ import { asChecklist, composeReadiness } from "./readinessComposer";
 import { requestOverride, type DispatchBlocker, type OverrideRequest } from "./_core/dispatchReadiness";
 import { awardAssignment } from "./_core/dispatchTransaction";
 import type { GrantedOverride } from "./_core/dispatchAward";
-import { addRole, createPosting, listRoles, scopeOf } from "./dispatchRoleService";
+import { addRole, clearRoleAssignment, createPosting, listRoles, scopeOf, setRoleAssignment } from "./dispatchRoleService";
 
 // v22.18 — a readiness may name the route it is about. Optional, so every
 // caller that does not keeps exactly the behaviour it had.
@@ -108,6 +108,53 @@ export const dispatchGateRouter = router({
     .query(async ({ ctx, input }) =>
       listRoles({
         jobId: input.jobId, postingId: input.postingId, includeHistory: input.includeHistory,
+        scope: await scopeOf(ctx.user.id),
+      })),
+
+  /**
+   * Bind or rebind one slot. Which of the two it is, is server state rather than caller intent — a
+   * caller declaring "this is a reassignment" while the slot was open is describing what they meant
+   * to do, not what happened.
+   *
+   * `.strict()` is load-bearing: an `eligibilityCheckId` is *refused*, not stripped. Silently
+   * ignoring it would let a caller believe they had awarded something, which is the precise
+   * confusion `jobUnits.create` created by accepting one and setting `usedForAward`.
+   */
+  setRoleAssignment: roleProcedure("dispatch.setRoleAssignment")
+    .input(z.object({
+      roleId: z.number().int().positive(),
+      operatorId: z.number().int().positive().nullable(),
+      unitId: z.number().int().positive().nullable(),
+      trailerId: z.number().int().positive().nullable().optional(),
+      /** The head of this slot's own history, as the caller last saw it. Null = "it had none". */
+      expectedLastEventId: z.number().int().positive().nullable(),
+      reason: z.string().max(500).optional(),
+    }).strict())
+    .mutation(async ({ ctx, input }) =>
+      setRoleAssignment({
+        roleId: input.roleId,
+        operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null,
+        expectedLastEventId: input.expectedLastEventId,
+        reason: input.reason ?? null,
+        actorUserId: ctx.user.id,
+        actorRole: await overrideRoleFor(ctx.user.id),
+        scope: await scopeOf(ctx.user.id),
+      })),
+
+  /** Return a slot to `open`. Always takes a reason, and destroys nothing. */
+  clearRoleAssignment: roleProcedure("dispatch.clearRoleAssignment")
+    .input(z.object({
+      roleId: z.number().int().positive(),
+      expectedLastEventId: z.number().int().positive().nullable(),
+      reason: z.string().min(1).max(500),
+    }).strict())
+    .mutation(async ({ ctx, input }) =>
+      clearRoleAssignment({
+        roleId: input.roleId,
+        expectedLastEventId: input.expectedLastEventId,
+        reason: input.reason,
+        actorUserId: ctx.user.id,
+        actorRole: await overrideRoleFor(ctx.user.id),
         scope: await scopeOf(ctx.user.id),
       })),
 
