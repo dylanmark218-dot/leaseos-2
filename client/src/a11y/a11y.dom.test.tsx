@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NEEDS_A_RENDERER, VIEWPORTS, describeRun, runAxe, setViewport } from "./axeHarness";
 import { DisposalFinderView, type DisposalFinderViewProps } from "../pages/DisposalFinderView";
 import { CommercialOfficeView, type CommercialOfficeViewProps } from "../pages/CommercialOfficeView";
+import { DispatchReadinessView, type DispatchReadinessViewProps } from "../dispatch/DispatchReadinessView";
 import { SourcedPanel } from "../showcase/SourcedPanel";
 import { WidgetBoard } from "../widgets/WidgetBoard";
 import { WidgetTileShell } from "../widgets/WidgetTileShell";
@@ -47,6 +48,28 @@ const office = (tab: CommercialOfficeViewProps["tab"]): CommercialOfficeViewProp
   profitDimension: "job", onProfitDimension: () => {},
 });
 
+/**
+ * The dispatcher's readiness panel. Two states, because a blocked panel and a failed one are
+ * different screens: the blocked one is a list of reasons, the failed one is an alert with a
+ * retry and no verdict at all.
+ */
+const readinessPanel = (state: DispatchReadinessViewProps["state"]): DispatchReadinessViewProps => ({
+  jobId: 41, subject: { operatorId: 7, unitId: 12, trailerId: null }, state,
+  capabilities: null, onRefresh: () => {}, refreshing: false,
+});
+const readinessBlocked: DispatchReadinessViewProps["state"] = {
+  kind: "loaded",
+  result: {
+    verdict: "blocked",
+    explanation: "Two conditions must be corrected before this unit can be dispatched.",
+    blockers: [
+      { code: "critical_defect", label: "Open critical defect on this unit", severity: "blocking", subject: "truck", overridable: false },
+      { code: "route_unapproved", label: "Route approval outstanding", severity: "review", subject: "route", overridable: true, overrideAuthority: "dispatcher" },
+    ],
+    contributions: [{ engine: "enforcement", finding: "Enforcement: blocked — 1 active order(s)" }],
+  },
+};
+
 const A11Y_NOW = new Date("2026-09-12T14:00:00Z");
 const a11yProv: Provenance = { source: "measured", verification: "verified", exact: true, observedAt: A11Y_NOW };
 const a11yTiles: BoardTileView[] = [
@@ -59,6 +82,8 @@ const A11Y_DRIVER: RoleActor = { roles: ["driver"], permissions: [] } as never;
 
 const surfaces = [
   { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
+  { name: "dispatch readiness — blocked", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked)} />) },
+  { name: "dispatch readiness — query failed", render: () => render(<DispatchReadinessView {...readinessPanel({ kind: "failed", message: "Database unavailable" })} />) },
   { name: "commercial office — organizations", render: () => render(<CommercialOfficeView {...office("organizations")} />) },
   { name: "commercial office — documents", render: () => render(<CommercialOfficeView {...office("documents")} />) },
   { name: "commercial office — disposal", render: () => render(<CommercialOfficeView {...office("disposal")} />) },
