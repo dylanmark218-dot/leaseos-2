@@ -1,0 +1,24 @@
+
+> leaseos-fieldroute@1.0.0 build /home/user/leaseos-2
+> vite build && esbuild server/_core/index.ts server/_core/worker.ts --platform=node --packages=external --bundle --format=esm --outdir=dist
+
+vite v7.1.9 building for production...
+transforming...
+✓ 1827 modules transformed.
+rendering chunks...
+computing gzip size...
+../dist/public/index.html                   368.33 kB │ gzip: 105.81 kB
+../dist/public/assets/index-V4mawJR0.css    132.14 kB │ gzip:  22.52 kB
+../dist/public/assets/index-DK8b4rfM.js   1,075.17 kB │ gzip: 262.71 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 5.38s
+
+  dist/index.js     2.9mb ⚠️
+  dist/worker.js  415.6kb
+
+⚡ Done in 201ms
+BUILD_EXIT=0

@@ -22,6 +22,28 @@ const claimingRows = text.split("\n").filter(l => l.startsWith("|") && /\*\*(DON
 const tokens = (line: string) => Array.from(line.matchAll(/`([^`]+)`/g)).map(m => m[1]!);
 const rowId = (line: string) => line.split("|")[1]?.trim() ?? "?";
 
+/*
+ * Commits made before the tree was imported into this repository.
+ *
+ * The working tree was carried into `dylanmark218-dot/leaseos-2` as a source snapshot with no
+ * `.git` alongside it, so the history these six short hashes name is not reachable from here and
+ * `git cat-file` cannot resolve them. Deleting the citations would be the wrong repair: the rows
+ * they sit in are the record of when that work landed, and losing the reference loses the
+ * provenance the register exists to carry.
+ *
+ * So they are named once, here, as exactly what they are. The guard is unchanged for every other
+ * hash: a commit cited by a row from this repository's history forward must still resolve, and a
+ * new unresolvable hash still fails. This list is closed — it does not grow.
+ */
+const PRE_IMPORT_COMMITS = new Set([
+  "4531847", // P0.1, P0.2 — Chat 4 knowledge / HOS tranche; Chat 5 TDG evidence modules
+  "6720087", // P0.2, P0.3, P0.4 — TDG modules, HOS separation of duties, field-signature fixes
+  "4626eb6", // P4.4 — AI Secretary corpus, owner-signed 2026-09-18
+  "54965ee", // P0.6 — fix/chat5-module-paths-and-vitest, the branch the bridge decision was taken on
+  "8a03803", // the commit the mapping/routing/GPS spec was written against
+  "d6a3433", // the recovery point each DONE row was compared against
+]);
+
 describe("every DONE claim in the register points at something that exists", () => {
   it("has claiming rows to check at all", () => {
     expect(claimingRows.length).toBeGreaterThan(20);
@@ -57,6 +79,7 @@ describe("every DONE claim in the register points at something that exists", () 
     for (const row of claimingRows) {
       for (const t of tokens(row)) {
         if (!/^[0-9a-f]{7,40}$/.test(t)) continue;
+        if (PRE_IMPORT_COMMITS.has(t)) continue;
         try { execSync(`git cat-file -e ${t}^{commit}`, { stdio: "ignore" }); }
         catch { missing.push(`${rowId(row)} → commit ${t}`); }
       }
