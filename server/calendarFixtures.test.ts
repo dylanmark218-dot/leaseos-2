@@ -24,11 +24,18 @@ const WINDOW_DAYS = 60;
 const FAIL_WITHIN_DAYS = 21;
 
 /** Reviewed files: the dates seen at review and why the clock never meets them. Re-review when the dates change. */
+/*
+ * List EVERY future date in a reviewed file, not only the ones inside the window. The window slides
+ * with the clock, so a date that was 61 days out at review walks into it later and reads as "dates
+ * changed since review" although the file never changed. That happened to cash.test.ts on
+ * 2026-09-21, when 2026-11-20 crossed the 60-day line; 2026-12-01 would have done it again on
+ * 2026-10-02.
+ */
 const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; reason: string }> = {
   "server/_core/calibrationEvidence.test.ts": { dates: ["2026-09-20", "2026-10-01"], verdict: "clock_independent", reason: "both are compared only against fixed dates — 2026-10-01 against a reading at a fixed AT, 2026-09-20 against the finding's own performedAt. The two tests in this file that DO read the real clock pass it to deriveExceptions and involve neither date" },
   "server/_core/evidenceVault.test.ts": { dates: ["2026-09-20", "2026-09-21"], verdict: "clock_independent", reason: "every evaluation receives an explicit `now`; the only real read stamps amendedAt" },
   "server/communications.test.ts": { dates: ["2026-09-18", "2026-09-25"], verdict: "clock_independent", reason: "effectiveTo and planForPath `at` are both explicit; Date.now() only mints keys" },
-  "server/cash.test.ts": { dates: ["2026-09-20", "2026-09-25", "2026-09-28", "2026-09-30", "2026-10-02", "2026-10-10", "2026-10-20"], verdict: "clock_independent", reason: "statement periods and END are fixed ranges compared with each other, not with now" },
+  "server/cash.test.ts": { dates: ["2026-09-20", "2026-09-25", "2026-09-28", "2026-09-30", "2026-10-02", "2026-10-10", "2026-10-20", "2026-11-20", "2026-12-01"], verdict: "clock_independent", reason: "statement periods and END are fixed ranges compared with each other, not with now; re-reviewed 2026-09-21: the aging fixtures (dueAt 2026-11-20 and 2026-10-10) are measured against an explicit asOf of 2026-12-01, never the clock" },
   "server/auditPackage.test.ts": { dates: ["2026-09-30"], verdict: "clock_independent", reason: "periodFrom/periodTo bound the package; nothing compares them with now" },
   "server/bulkFuel.test.ts": { dates: ["2026-09-30"], verdict: "clock_independent", reason: "statement period and anomaly window are fixed ranges" },
   "server/purchasingAp.test.ts": { dates: ["2026-09-30", "2026-10-02", "2026-10-08"], verdict: "clock_independent", reason: "fourWayMatch compares dates with each other, not with now" },
