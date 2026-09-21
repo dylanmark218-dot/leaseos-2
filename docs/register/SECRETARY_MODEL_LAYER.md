@@ -20,7 +20,7 @@ if so. What follows is that report, then what was built on top of it.
 | The load/unload schema | `FORMS.unload_stop` in `aiProposal.ts`, version 1, eight slots. |
 | zod version | **4.1.12** — `z.toJSONSchema()` is available and is what the derivation uses. |
 
-### Nine things that contradict the plan as written
+### Eleven things that contradict the plan as written
 
 **1. Checkpoint 1 was not merged.** No `server/ai/` anywhere. Both checkpoints are in this branch.
 
@@ -63,6 +63,23 @@ narrow to MANUAL and may never widen.
 stored **on the proposal**; anything deriving an exception item reads that state. Exceptions stay
 derived, never stored, per the checkpoint.
 
+**10. `assistant.draft` calls `invokeLLM` inside a tRPC mutation.**
+`server/routers.ts:691`. That is a model call inside a request handler — the thing the house rules
+forbid — and it is **pre-existing, in the live path**, written before this layer existed. It is
+**pinned, not fixed**: `server/ai/workerBoundary.test.ts` asserts the count is exactly one, so a
+second call site fails the suite and removing the first one fails it too, at which point the test
+tells whoever fixed it to delete the pin. Fixing it properly means `assistant.draft` stops
+answering synchronously and starts returning a queued job, which changes what a driver sees. That
+is a product decision, not something to slip into a checkpoint asked to add a model layer.
+
+**11. There is only one propose procedure.** The checkpoint asked for five propose tools mapping to
+five procedures. The repository has `assistant.draft`, parameterised by `formKey`. So the tools
+differ by the form they **pin**, not by the procedure they call — and the pin is a constant the
+agent cannot supply, which is stronger than five procedures would have been: `propose.preTripFinding`
+can only ever draft a `defect_report`. Three of the asked-for tools have no form to pin and are
+recorded in code as `PROPOSE_TOOLS_NOT_POSSIBLE_YET` (duty event, work order, billing line) rather
+than as a sentence here, so they surface in a test run.
+
 ### One more, and it is the important one
 
 **`docs/register/SPINE_WIRING_PLAN.md` declares a moratorium** — *"no new engines until this path is
@@ -92,7 +109,7 @@ server/ai/
   validate/      normalizers.ts  validator.ts  questions.ts
   context/       contextPack.ts
   dialogue/      machine.ts
-  tools/         registry.ts
+  tools/         registry.ts  caller.ts
   injection/     guard.ts
   proposal/      bridge.ts
   worker/        secretaryExtractionJob.ts
@@ -154,10 +171,25 @@ third leg is simply absent, so the worst an injection achieves is a proposal a h
 
 ### Agent tools
 
-Thin wrappers over a tRPC server-side caller built with the **driver's** context. No service
-account, so there is no powerful identity to be tricked into borrowing. One tool, one procedure,
-chosen in advance — nothing dispatches on a string. Per-task allowlists, a step budget, and an
-idempotency key derived from the **device's own capture id** so an offline replay proposes once.
+`server/ai/tools/caller.ts` builds one `appRouter.createCaller(ctx)` with the **driver's** context,
+so `roleProcedure` runs its real middleware: permission lookup, active roles, an authorization
+decision row, refusal if they do not hold it. The agent inherits exactly what the driver has,
+checked by the same gate and audited in the same table. No service account, so there is no powerful
+identity an injected instruction can try to borrow.
+
+`invokeTool` takes a tool key and an allowlist, never a procedure name — a function that took a
+procedure name would have the authority of whoever called it. A `FORBIDDEN` is allowed out rather
+than absorbed, because swallowing it would read to the agent as success. The allowlist is consulted
+**before** the step budget is spent, so a refused tool costs nothing; otherwise a run could be
+exhausted asking for things it was never allowed to have.
+
+**The correction worth recording.** The first version of the registry named eleven plausible
+procedures — `trip.getContext`, `assistant.proposeLoadEvent` — and *every one was invented*. They
+read correctly and the tests passed, because the tests only checked that the names were unique.
+A registry of aspirational procedure names is worse than no registry: it looks like a permission
+boundary and is a list of strings. `procedure` is now typed `ProcedureName`, so a made-up name is a
+compile error, and a test resolves every one through `permissionForProcedure` as well, because a
+type can be widened in a hurry.
 
 ### The context perimeter
 
@@ -192,7 +224,7 @@ against MariaDB 10.11.
 deep each — while vitest's include is `server/**/*.test.ts`. The first suite in a deeper directory
 would have run in CI and been **absent from the document's count**, which is precisely the shape of
 false claim gate 8 exists to catch. The counter now enumerates what the runner enumerates:
-296 / 3989 → **307 / 4132**.
+296 / 3989 → **307 / 4146**.
 
 ---
 
