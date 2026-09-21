@@ -1926,6 +1926,38 @@ export const dispatchRoleTypes = mysqlTable("dispatchRoleTypes", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+/**
+ * 0171 — append-only assignment history for a role slot.
+ *
+ * Deliberately not `dispatchAuditEvents`: that table's `assignment_approved` doubles as the award
+ * transaction's idempotency record, so assignment history written there would be indistinguishable
+ * from an award to the award's own replay check. An assignment writes here and nowhere else.
+ */
+export const dispatchRoleAssignmentEvents = mysqlTable("dispatchRoleAssignmentEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  roleId: int("roleId").notNull(),
+  postingId: int("postingId").notNull(),
+  jobId: int("jobId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  eventType: mysqlEnum("eventType", [
+    "assignment_created",
+    "assignment_reassigned",
+    "assignment_unassigned",
+  ]).notNull(),
+  fromOperatorId: int("fromOperatorId"),
+  fromUnitId: int("fromUnitId"),
+  fromTrailerId: int("fromTrailerId"),
+  toOperatorId: int("toOperatorId"),
+  toUnitId: int("toUnitId"),
+  toTrailerId: int("toTrailerId"),
+  reason: varchar("reason", { length: 500 }),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 60 }).notNull(),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const dispatchInvitations = mysqlTable("dispatchInvitations", {
   id: int("id").autoincrement().primaryKey(),
   postingId: int("postingId").notNull(),
