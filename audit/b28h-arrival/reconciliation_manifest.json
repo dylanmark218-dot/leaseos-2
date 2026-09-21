@@ -1,0 +1,504 @@
+{
+  "archives": {
+    "Chat1": {
+      "filename": "Chat1=leaseos=allfiles=sep14.zip",
+      "sha256": "bf836b0fcd9e32af23ca36e080deb01d6cd19ce36381771348f9c35d9875c738",
+      "bytes": 1559504
+    },
+    "Chat2": {
+      "filename": "Chat2=leaseos=allfiles=sep14.zip",
+      "sha256": "2313f57bcf0a7576418ff46ccdd7be055719b3f1e621e474c4efa7ec84a29004",
+      "bytes": 6077495
+    },
+    "Chat3": {
+      "filename": "Chat3_leaseos_allfiles=sept14.zip",
+      "sha256": "221d8b629497b11f60d18ec262c59ee8b8ad97b6e02f76429f9e536da9f209df",
+      "bytes": 5947133
+    },
+    "Chat4": {
+      "filename": "Chat4_leaseos_allfiles_sep14.zip",
+      "sha256": "48b7288839ed5c9f5686122bbca266987407294f59a5b0ba7b00c91de71b5753",
+      "bytes": 613285
+    }
+  },
+  "snapshots": {
+    "v20": {
+      "files": 229,
+      "root": "/mnt/data/leaseos_reconcile_work/chat1/expanded/top__leaseos-fieldroute-v20/v2"
+    },
+    "v22.16": {
+      "files": 558,
+      "root": "/mnt/data/leaseos_reconcile_work/chat2/expanded/top__leaseos-fieldroute-v22.16-routing-graph-1/v2"
+    },
+    "cal05a-v22.20": {
+      "files": 730,
+      "root": "/mnt/data/leaseos_reconcile_work/chat3/expanded/top__leaseos-CAL05a-GATE-VERIFIED-UNRELEASED-2"
+    },
+    "b28h-widget-engine": {
+      "files": 139,
+      "root": "/mnt/data/leaseos_reconcile_work/chat4/expanded/top__leaseos-b28h-widget-engine/b28h"
+    }
+  },
+  "checkpoints": [
+    {
+      "snapshot": "v20",
+      "file": "LEASEOS_B12_ROUTING_EVIDENCE.md",
+      "path": "LEASEOS_B12_ROUTING_EVIDENCE.md"
+    },
+    {
+      "snapshot": "v20",
+      "file": "LEASEOS_B13_DATA_GOVERNANCE.md",
+      "path": "LEASEOS_B13_DATA_GOVERNANCE.md"
+    },
+    {
+      "snapshot": "v20",
+      "file": "LEASEOS_B14_DISPATCH.md",
+      "path": "LEASEOS_B14_DISPATCH.md"
+    },
+    {
+      "snapshot": "v20",
+      "file": "LEASEOS_B15_TRANSACTIONAL_DISPATCH.md",
+      "path": "LEASEOS_B15_TRANSACTIONAL_DISPATCH.md"
+    },
+    {
+      "snapshot": "v20",
+      "file": "LEASEOS_B16_CI_DATABASE.md",
+      "path": "LEASEOS_B16_CI_DATABASE.md"
+    },
+    {
+      "snapshot": "v20",
+      "file": "LEASEOS_B17_1_PRODUCTION_WIRING.md",
+      "path": "LEASEOS_B17_1_PRODUCTION_WIRING.md"
+    },
+    {
+      "snapshot": "v20",
+      "file": "LEASEOS_B17_WORKFLOW_CORE.md",
+      "path": "LEASEOS_B17_WORKFLOW_CORE.md"
+    },
+    {
+      "snapshot": "v20",
+      "file": "LEASEOS_B18_BILLING_ADJUSTMENTS.md",
+      "path": "LEASEOS_B18_BILLING_ADJUSTMENTS.md"
+    },
+    {
+      "snapshot": "v20",
+      "file": "LEASEOS_B19_END_TO_END.md",
+      "path": "LEASEOS_B19_END_TO_END.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_10_VERIFIED_SOURCE_REGISTRY.md",
+      "path": "LEASEOS_B20_10_VERIFIED_SOURCE_REGISTRY.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_11_P3_TYPED_COMMIT.md",
+      "path": "LEASEOS_B20_11_P3_TYPED_COMMIT.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_12_V20_13_PROMOTION.md",
+      "path": "LEASEOS_B20_12_V20_13_PROMOTION.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_13_PORTALS_FUNDING.md",
+      "path": "LEASEOS_B20_13_PORTALS_FUNDING.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_14_V20_15_EXTRACTION_QUEUE.md",
+      "path": "LEASEOS_B20_14_V20_15_EXTRACTION_QUEUE.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_15_V20_16_FINGERPRINT_DISPOSAL.md",
+      "path": "LEASEOS_B20_15_V20_16_FINGERPRINT_DISPOSAL.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_16_V20_17_INTEGRITY_CLOSURE.md",
+      "path": "LEASEOS_B20_16_V20_17_INTEGRITY_CLOSURE.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_17_V20_18_FUEL_LEDGER.md",
+      "path": "LEASEOS_B20_17_V20_18_FUEL_LEDGER.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_18_V20_19_ROADSIDE_AP.md",
+      "path": "LEASEOS_B20_18_V20_19_ROADSIDE_AP.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_19_V20_20_SECURE_FIELD_RUNTIME.md",
+      "path": "LEASEOS_B20_19_V20_20_SECURE_FIELD_RUNTIME.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_1_WORKFLOW_WIRING.md",
+      "path": "LEASEOS_B20_1_WORKFLOW_WIRING.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_20_V20_21_COMPLIANCE_REGISTRY.md",
+      "path": "LEASEOS_B20_20_V20_21_COMPLIANCE_REGISTRY.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_21_V20_22_REQUIREMENT_ENGINE.md",
+      "path": "LEASEOS_B20_21_V20_22_REQUIREMENT_ENGINE.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_22_V20_23_INSURANCE_RISK.md",
+      "path": "LEASEOS_B20_22_V20_23_INSURANCE_RISK.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_2_AUTHORIZATION.md",
+      "path": "LEASEOS_B20_2_AUTHORIZATION.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_3_AUTHORIZATION_ENFORCEMENT.md",
+      "path": "LEASEOS_B20_3_AUTHORIZATION_ENFORCEMENT.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_4_API_MIGRATION.md",
+      "path": "LEASEOS_B20_4_API_MIGRATION.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_5_PAYROLL_FINANCE_TAX.md",
+      "path": "LEASEOS_B20_5_PAYROLL_FINANCE_TAX.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_6_AUTHORIZATION_COMPLETE.md",
+      "path": "LEASEOS_B20_6_AUTHORIZATION_COMPLETE.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_7_PAYROLL_FINANCE_API.md",
+      "path": "LEASEOS_B20_7_PAYROLL_FINANCE_API.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_8_EXTERNAL_DATA_ROUTING.md",
+      "path": "LEASEOS_B20_8_EXTERNAL_DATA_ROUTING.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_9_UNIVERSAL_PERMISSIONS.md",
+      "path": "LEASEOS_B20_9_UNIVERSAL_PERMISSIONS.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_MEASUREMENT_LADDER.md",
+      "path": "LEASEOS_B20_MEASUREMENT_LADDER.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B20_RECORDS_VAULT.md",
+      "path": "LEASEOS_B20_RECORDS_VAULT.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_0_UNIVERSAL_SURFACES.md",
+      "path": "LEASEOS_B21_0_UNIVERSAL_SURFACES.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_10_COMMERCIAL_PORTALS.md",
+      "path": "LEASEOS_B21_10_COMMERCIAL_PORTALS.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_11_SITE_SIGNOFF_CHAIN.md",
+      "path": "LEASEOS_B21_11_SITE_SIGNOFF_CHAIN.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_12_PORTAL_HARDENING.md",
+      "path": "LEASEOS_B21_12_PORTAL_HARDENING.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_13_CUSTOMER_LIVE_VIEW.md",
+      "path": "LEASEOS_B21_13_CUSTOMER_LIVE_VIEW.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_14_CUSTOMER_TRANSACTION.md",
+      "path": "LEASEOS_B21_14_CUSTOMER_TRANSACTION.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_15_FLEET_SHOP.md",
+      "path": "LEASEOS_B21_15_FLEET_SHOP.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_16_CAPITAL_ASSETS.md",
+      "path": "LEASEOS_B21_16_CAPITAL_ASSETS.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_17_COMMERCIAL_PROJECTS.md",
+      "path": "LEASEOS_B21_17_COMMERCIAL_PROJECTS.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_18_INTEGRATION_GATEWAY.md",
+      "path": "LEASEOS_B21_18_INTEGRATION_GATEWAY.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_19_TELEMATICS.md",
+      "path": "LEASEOS_B21_19_TELEMATICS.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_1_DISPATCH_GATE.md",
+      "path": "LEASEOS_B21_1_DISPATCH_GATE.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_20_WORKFORCE.md",
+      "path": "LEASEOS_B21_20_WORKFORCE.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_21_AUDIT_PACKAGES.md",
+      "path": "LEASEOS_B21_21_AUDIT_PACKAGES.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_2_DISPATCH_ENFORCEMENT.md",
+      "path": "LEASEOS_B21_2_DISPATCH_ENFORCEMENT.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_3_IFTA.md",
+      "path": "LEASEOS_B21_3_IFTA.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_4_BULK_FUEL_STATEMENTS.md",
+      "path": "LEASEOS_B21_4_BULK_FUEL_STATEMENTS.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_5_PERIOD_CLOSE.md",
+      "path": "LEASEOS_B21_5_PERIOD_CLOSE.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_6_FIELD_RUNTIME.md",
+      "path": "LEASEOS_B21_6_FIELD_RUNTIME.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_7_PORTAL_EXPERIENCE.md",
+      "path": "LEASEOS_B21_7_PORTAL_EXPERIENCE.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_8_GST_HST.md",
+      "path": "LEASEOS_B21_8_GST_HST.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_9_1_INTEGRITY_HOTFIX.md",
+      "path": "LEASEOS_B21_9_1_INTEGRITY_HOTFIX.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B21_9_BANK_AND_AR.md",
+      "path": "LEASEOS_B21_9_BANK_AND_AR.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_0_SPATIAL_FOUNDATION.md",
+      "path": "LEASEOS_B22_0_SPATIAL_FOUNDATION.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_10_INVOICE_TO_CUSTOMER.md",
+      "path": "LEASEOS_B22_10_INVOICE_TO_CUSTOMER.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_11_CREDITS_VOIDS.md",
+      "path": "LEASEOS_B22_11_CREDITS_VOIDS.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_12_SETUP_WIZARD.md",
+      "path": "LEASEOS_B22_12_SETUP_WIZARD.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_13_MAPPING_FOUNDATION.md",
+      "path": "LEASEOS_B22_13_MAPPING_FOUNDATION.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_14_LEGAL_LAND.md",
+      "path": "LEASEOS_B22_14_LEGAL_LAND.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_15_STRUCTURES_STALENESS.md",
+      "path": "LEASEOS_B22_15_STRUCTURES_STALENESS.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_16_ROUTING_GRAPH.md",
+      "path": "LEASEOS_B22_16_ROUTING_GRAPH.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_1_CONTRACT_TERMS.md",
+      "path": "LEASEOS_B22_1_CONTRACT_TERMS.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_2_TERMS_COMPLETE.md",
+      "path": "LEASEOS_B22_2_TERMS_COMPLETE.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_3_MONEY_PRECISION.md",
+      "path": "LEASEOS_B22_3_MONEY_PRECISION.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_4_SHADOWS_EVERYWHERE.md",
+      "path": "LEASEOS_B22_4_SHADOWS_EVERYWHERE.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_5_1_OPERATIONAL_TRUTH.md",
+      "path": "LEASEOS_B22_5_1_OPERATIONAL_TRUTH.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_5_FIRST_LEDGER_RETIRED.md",
+      "path": "LEASEOS_B22_5_FIRST_LEDGER_RETIRED.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_6_FUEL_RETIRED.md",
+      "path": "LEASEOS_B22_6_FUEL_RETIRED.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_7_COMMERCIAL_SETUP.md",
+      "path": "LEASEOS_B22_7_COMMERCIAL_SETUP.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_8_LINES_PRICED.md",
+      "path": "LEASEOS_B22_8_LINES_PRICED.md"
+    },
+    {
+      "snapshot": "v22.16",
+      "file": "LEASEOS_B22_9_INVOICE_PATH.md",
+      "path": "LEASEOS_B22_9_INVOICE_PATH.md"
+    },
+    {
+      "snapshot": "cal05a-v22.20",
+      "file": "LEASEOS_B22_17_COMMUNICATIONS.md",
+      "path": "LEASEOS_B22_17_COMMUNICATIONS.md"
+    },
+    {
+      "snapshot": "cal05a-v22.20",
+      "file": "LEASEOS_B22_18_COMMS_DISPATCH.md",
+      "path": "LEASEOS_B22_18_COMMS_DISPATCH.md"
+    },
+    {
+      "snapshot": "cal05a-v22.20",
+      "file": "LEASEOS_B22_19_OFFLINE_PACKAGE.md",
+      "path": "LEASEOS_B22_19_OFFLINE_PACKAGE.md"
+    },
+    {
+      "snapshot": "cal05a-v22.20",
+      "file": "LEASEOS_UNRELEASED_0079_CDEF.md",
+      "path": "LEASEOS_UNRELEASED_0079_CDEF.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B23_WIDGET_ENGINE.md",
+      "path": "docs/LEASEOS_B23_WIDGET_ENGINE.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B24_WIDGET_RUNTIME_INTEGRATION.md",
+      "path": "docs/LEASEOS_B24_WIDGET_RUNTIME_INTEGRATION.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B25_WIDGET_CLIENT_RUNTIME.md",
+      "path": "docs/LEASEOS_B25_WIDGET_CLIENT_RUNTIME.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B26_WIDGET_BOARD_UX.md",
+      "path": "docs/LEASEOS_B26_WIDGET_BOARD_UX.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B27_PRODUCTION_WIDGET_CATALOGUE.md",
+      "path": "docs/LEASEOS_B27_PRODUCTION_WIDGET_CATALOGUE.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B28A_BRANCHLESS_RECONCILIATION.md",
+      "path": "docs/LEASEOS_B28A_BRANCHLESS_RECONCILIATION.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B28B_SOURCE_CONTRACTS.md",
+      "path": "docs/LEASEOS_B28B_SOURCE_CONTRACTS.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B28C_COMPOSITION_SEMANTICS.md",
+      "path": "docs/LEASEOS_B28C_COMPOSITION_SEMANTICS.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B28D_SEMANTIC_CONTRACTS.md",
+      "path": "docs/LEASEOS_B28D_SEMANTIC_CONTRACTS.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B28E_REGISTRY_V2_MIGRATION.md",
+      "path": "docs/LEASEOS_B28E_REGISTRY_V2_MIGRATION.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B28F_GUARD_INTEGRITY.md",
+      "path": "docs/LEASEOS_B28F_GUARD_INTEGRITY.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B28G_GUARD_HARDENING.md",
+      "path": "docs/LEASEOS_B28G_GUARD_HARDENING.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B28H_BRANCH_ARRIVAL_RC.md",
+      "path": "LEASEOS_B28H_BRANCH_ARRIVAL_RC.md"
+    },
+    {
+      "snapshot": "b28h-widget-engine",
+      "file": "LEASEOS_B28_REAL_BRANCH_WIDGET_INTEGRATION.md",
+      "path": "docs/LEASEOS_B28_REAL_BRANCH_WIDGET_INTEGRATION.md"
+    }
+  ]
+}

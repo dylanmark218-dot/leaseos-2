@@ -1,0 +1,26 @@
+import { buildAssessment, certificateDecision, directSupervisionDecision, gradeAssessment, moduleGate, practicalGate, stableHash, trainingDispatchDecision } from "../server/_core/trainingAcademy";
+import { ACADEMY_COURSES, CATALOG_COUNTS } from "../server/_core/trainingAcademyCatalog";
+
+const assert = (v: unknown, m: string) => { if (!v) throw new Error(m); };
+assert(CATALOG_COUNTS.whmisQuestions === 50, "WHMIS bank != 50");
+assert(CATALOG_COUNTS.tdgQuestions === 75, "TDG bank != 75");
+assert(CATALOG_COUNTS.ergQuestions === 25, "ERG bank != 25");
+const tdg = ACADEMY_COURSES.find(c => c.code === "TDG-ROAD")!;
+const req = tdg.modules.map((m, i) => ({ moduleId: i + 1, moduleCode: m.code, moduleHash: stableHash(m), required: true }));
+assert(!moduleGate(req, []).ready, "assessment opened without modules");
+const completions = req.map(r => ({ moduleCode: r.moduleCode, contentVersionHash: r.moduleHash, status: "completed" as const }));
+assert(moduleGate(req, completions).ready, "completed current modules did not open assessment");
+const a = buildAssessment({ attemptSeed: "A-1", questions: tdg.questions, policy: tdg.policy });
+assert(a.items.length === 30, "TDG assessment count wrong");
+const perfect = Object.fromEntries(a.items.map(i => [i.questionCode, i.answerOrder.indexOf(0)]));
+const grade = gradeAssessment({ bank: tdg.questions, presented: a.items, responses: perfect, policy: tdg.policy });
+assert(grade.passed && grade.scorePercent === 100, "perfect TDG attempt failed");
+assert(!practicalGate({ requiresPractical: true, courseVersionId: 7, evaluation: null }).ready, "practical course passed with no signoff");
+assert(!certificateDecision({ credentialBoundary: "external_track_only", courseVersionId: 1, assignmentCourseVersionId: 1, assessmentPassed: true, practicalReady: true, sourceSnapshotRef: "SRC", sourceReviewStatus: "reviewed" }).permitted, "external credential was manufactured");
+assert(!certificateDecision({ credentialBoundary: "employer_certificate", courseVersionId: 1, assignmentCourseVersionId: 1, assessmentPassed: true, practicalReady: true, sourceSnapshotRef: "SRC", sourceReviewStatus: "unreviewed" }).permitted, "certificate issued on unreviewed source");
+assert(certificateDecision({ credentialBoundary: "employer_certificate", courseVersionId: 1, assignmentCourseVersionId: 1, assessmentPassed: true, practicalReady: true, sourceSnapshotRef: "SRC", sourceReviewStatus: "reviewed" }).permitted, "valid employer certificate refused");
+assert(!directSupervisionDecision({ traineeUserId: 1, supervisorUserId: 2, supervisorQualificationStatus: "current", supervisorQualificationCode: "TDG_ROAD", requiredQualificationCode: "TDG_ROAD", physicalPresenceAttested: false, startsAt: new Date("2026-01-01T10:00:00Z"), endsAt: new Date("2026-01-01T12:00:00Z"), jobId: 3, scope: "UN1203 load" }).permitted, "remote-only supervision accepted");
+assert(directSupervisionDecision({ traineeUserId: 1, supervisorUserId: 2, supervisorQualificationStatus: "current", supervisorQualificationCode: "TDG_ROAD", requiredQualificationCode: "TDG_ROAD", physicalPresenceAttested: true, startsAt: new Date("2026-01-01T10:00:00Z"), endsAt: new Date("2026-01-01T12:00:00Z"), jobId: 3, scope: "UN1203 load" }).permitted, "valid direct supervision refused");
+const dispatch = trainingDispatchDecision([{ code: "tdg", title: "TDG", qualificationCode: "TDG_ROAD", enforcement: "block", recoveryPath: "Complete TDG" }], []);
+assert(dispatch.status === "blocked" && dispatch.blockers[0]?.includes("Complete TDG"), "dispatch training blocker missing recovery path");
+console.log(JSON.stringify({ ok: true, counts: CATALOG_COUNTS, tdgAttemptQuestions: a.items.length, score: grade.scorePercent, dispatch: dispatch.status }, null, 2));

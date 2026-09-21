@@ -1,0 +1,502 @@
+Worked for 1m 22s
+
+Yes—but there’s an important distinction with what you uploaded.
+
+Your files are a split archive containing alberta-260910-free.gpkg.zip, which matches Geofabrik’s September 10, 2026 Alberta OpenStreetMap GeoPackage. So it is static in the sense that it is a snapshot in time, but it is not just a picture. A GeoPackage contains GIS geometry and attributes: road lines, road classes, names, coordinates, one-way information, speed data, bridges, tunnels, etc. 
+
+That is actually a very useful foundation for LeaseOS.
+
+How I would build it
+
+Think of the system as three separate layers:
+
+Offline map → Routing engine → Live Alberta 511 intelligence
+
+The GeoPackage is the offline physical map. Alberta 511 tells LeaseOS what is happening right now. The routing engine sits in between and decides which roads the truck can actually use.
+
+A route calculation would effectively work like:
+
+Truck profile
+   ↓
+Offline Alberta road network
+   ↓
+Apply permanent restrictions
+   ↓
+Apply current 511 restrictions
+   ↓
+Apply road bans / seasonal weights / permits
+   ↓
+Calculate legal candidate routes
+   ↓
+Rank routes
+   ↓
+Display on offline map
+
+1. Use your Alberta map as the offline base
+
+The Geofabrik data includes everything from major highways down through secondary/local roads and tracks. Their road classifications include motorway, trunk, primary, secondary, tertiary, unclassified roads, service roads, and even different grades of tracks. 
+
+That is valuable for your back-road concept because LeaseOS can distinguish something like:
+
+Hwy 16
+→ primary/highway
+
+Hwy 40
+→ highway
+
+Township / range road
+→ secondary / tertiary / unclassified
+
+lease access road
+→ service / track
+
+rough forestry track
+→ track_grade3 / track_grade4
+
+But there is one limitation: Geofabrik specifically says its ordinary free GeoPackage/vector exports are primarily prepared for GIS/cartography, whereas routing requires creating a proper graph split at road junctions. 
+
+So I wouldn't directly ask the .gpkg:
+
+> "Give me the route from Hinton to LSD 12-34-56-23-W5."
+
+
+
+Instead we convert/import the road geometry into a routing graph.
+
+2. I would add the matching OSM .pbf
+
+For the actual routing engine, I recommend that we also use the Alberta OpenStreetMap PBF.
+
+Geofabrik offers the raw Alberta .osm.pbf; unlike the simplified GeoPackage, the PBF contains the complete underlying OSM data for the region. 
+
+That gives us more truck-relevant tags such as:
+
+maxheight
+maxweight
+maxaxleload
+maxlength
+maxwidth
+hgv
+hazmat
+access
+surface
+tracktype
+oneway
+maxspeed
+bridge
+tunnel
+
+Then your existing GeoPackage can remain the offline display/reference package, while the PBF becomes the routing source.
+
+3. Build a truck routing engine
+
+For LeaseOS, GraphHopper is a particularly strong candidate.
+
+It already understands road edges and exposes truck-related properties including:
+
+maximum height
+
+maximum width
+
+maximum length
+
+maximum weight
+
+maximum axle load
+
+HGV access
+
+hazardous-material restrictions
+
+road class
+
+track grade
+
+slope
+
+speed limits
+
+
+and lets you create custom routing rules. 
+
+That means a LeaseOS truck profile could look conceptually like:
+
+Truck:
+  type: tractor_semitrailer
+  height: 4.15 m
+  width: 2.60 m
+  length: 25.0 m
+  gross_weight: 46,500 kg
+  axle_configuration: ...
+  dangerous_goods: true
+
+Preferences:
+  avoid_residential: true
+  prefer_highways: true
+  allow_gravel: true
+  allow_resource_roads: true
+  minimum_track_grade: 2
+
+And LeaseOS would calculate a route for that specific truck, rather than simply a car route.
+
+
+---
+
+Then Alberta 511 sits on top of it
+
+This is the part I think will make LeaseOS much better than simply displaying 511.
+
+Alberta 511's API does not need to be your routing engine.
+
+Instead, it becomes your live road-state engine.
+
+511 currently exposes things including:
+
+road conditions
+
+traffic events
+
+closures
+
+road work
+
+alerts
+
+cameras
+
+weather stations
+
+inspection stations
+
+rest areas/turnouts
+
+bridge restrictions
+
+
+through its developer API. 
+
+The API requires a developer key and is currently throttled to 10 calls per 60 seconds. 
+
+So we should never have every driver's phone hammering Alberta 511 directly.
+
+Instead:
+
+Alberta 511
+                     ↓
+            LeaseOS 511 Gateway
+                     ↓
+          Normalize + cache data
+                     ↓
+       Match events to road segments
+                     ↓
+             Routing engine
+                ↙         ↘
+         Mobile app       Dispatch
+
+That protects your key and solves the rate-limit issue.
+
+
+---
+
+Here's where it gets really powerful
+
+511 road conditions contain an encoded polyline, meaning they can describe the actual affected portion of road instead of merely giving you text like "Highway 16 icy." 
+
+Traffic events can also contain coordinates, polylines, detour geometry, full-closure status and restrictions. The API documents restriction information including width, height, weight and speed. 
+
+So LeaseOS can do map matching:
+
+511 says:
+
+HWY 40
+53.123, -117.456
+↓
+polyline
+↓
+road segment IDs 883421–883456
+
+Status:
+FULL CLOSURE
+
+LeaseOS marks:
+
+edge 883421 = CLOSED
+edge 883422 = CLOSED
+edge 883423 = CLOSED
+...
+
+Now GraphHopper can't route through those edges.
+
+It automatically searches around the closure.
+
+
+---
+
+Truck restrictions become hard routing rules
+
+For example, suppose the truck is:
+
+HEIGHT     4.30 m
+WIDTH      3.50 m
+GVW        52 tonnes
+HAZMAT     YES
+
+And LeaseOS encounters:
+
+Bridge:
+clearance = 4.20 m
+
+Then:
+
+4.30 > 4.20
+
+BLOCK ROAD
+
+No warning that the driver could accidentally dismiss.
+
+The route cannot be generated through that bridge.
+
+Alberta 511's bridge restriction endpoint supplies bridge coordinates, roadway and under-bridge clearance information. 
+
+Similarly:
+
+511 Event:
+Width restriction = 3.2 m
+
+Truck width = 3.5 m
+
+BLOCK
+
+Or:
+
+511 Event:
+Weight restriction = 40 t
+
+Truck = 46.5 t
+
+BLOCK
+
+
+---
+
+And then we add Alberta's trucking rules beside 511
+
+This part is critical.
+
+511 alone is not enough to create a legal heavy-truck routing system.
+
+Alberta separately publishes restrictions concerning things such as:
+
+road bans
+
+seasonal weights
+
+restricted bridges
+
+tridem restrictions
+
+vertical bridge clearances
+
+lane restrictions
+
+overweight/oversize permits.
+
+
+Alberta specifically notes that local road bans may be controlled by the municipality or county rather than the province. 
+
+So I would build another layer:
+
+LEASEOS ROAD AUTHORITY DATABASE
+
+Containing:
+
+Province
+Municipality
+County / MD
+Forestry / resource road
+Private road
+Lease road
+First Nation road
+
+That is especially important for oilfield work.
+
+
+---
+
+Back-road routing would work differently from highway routing
+
+For highway hauling, LeaseOS might prioritize:
+
+1. Legal for truck
+2. Permit compliant
+3. No closure
+4. No bridge conflict
+5. No road ban conflict
+6. Safest
+7. Fastest
+8. Lowest distance
+
+For oilfield/back-road routing:
+
+1. Known road
+2. Correct access authority
+3. Truck permitted
+4. Weight capable
+5. Road condition acceptable
+6. Surface acceptable
+7. Seasonal access open
+8. Radio channel known
+9. Bridge/load limit acceptable
+10. Lease destination reachable
+
+And then:
+
+Fastest
+Shortest
+Preferred company route
+Least gravel
+Least grades
+Heavy-haul route
+Winter route
+Loaded route
+Empty return route
+
+could all be selectable route profiles.
+
+
+---
+
+Here's an example
+
+A driver enters:
+
+START
+Hinton, AB
+
+DESTINATION
+LSD 04-22-052-25-W5
+
+UNIT
+Kenworth water truck
+
+GVW
+42,000 kg
+
+HEIGHT
+4.05 m
+
+WIDTH
+2.60 m
+
+LOAD
+Water
+
+ROAD PREFERENCE
+Oilfield / resource roads allowed
+
+LeaseOS finds the LSD coordinate.
+
+Then:
+
+OSM/GeoPackage
+↓
+find road network
+
+Truck profile
+↓
+remove illegal roads
+
+Alberta road restrictions
+↓
+remove overweight/height/width conflicts
+
+511 events
+↓
+remove closures
+
+511 winter conditions
+↓
+penalize poor conditions
+
+County/resource-road database
+↓
+add back roads
+
+Radio-road database
+↓
+attach radio channels
+
+Routing engine
+↓
+calculate 3 routes
+
+The driver gets:
+
+RECOMMENDED
+162.4 km
+2 h 39 min
+
+• Highway: 97 km
+• Gravel: 51 km
+• Resource road: 14 km
+• Maximum grade: 7.2%
+• Lowest clearance: 4.8 m
+• Bridge restriction: none
+• Current 511 closures: none
+• Road bans: none detected
+• Radio road begins: km 116
+• Channel: LADD 2
+
+That is much closer to the type of mapping system you've been describing for LeaseOS.
+
+
+---
+
+One design decision I'd make now
+
+I would not merge the live 511 information into the offline map itself.
+
+Keep these separate:
+
+BASE GRAPH
+OSM / government roads
+
+STATIC RESTRICTIONS
+bridges / dimensions / road authority
+
+LIVE OVERLAY
+511 / closures / weather / road conditions
+
+VEHICLE STATE
+weight / height / axles / permits / DG
+
+ROUTE
+calculated result
+
+That way a bad 511 update can't corrupt your actual map database.
+
+It also means that when the driver loses internet in the bush, the underlying road network continues to work.
+
+The app can show:
+
+ROUTING DATA
+Offline ✓
+
+511 LIVE DATA
+Last synchronized:
+18 min ago ⚠
+
+rather than pretending that old information is current.
+
+
+---
+
+One thing I need from your upload
+
+Please upload the final Offline maps.zip portion of that split archive as well. Right now you gave me .z01 through .z10, and the final ZIP directory is normally stored in the final .zip file.
+
+Once that's here, I can inspect every layer and every column in the Alberta GeoPackage and tell you precisely:
+
+what we already have → what can feed routing → what's missing → what Alberta 511 can supply → what other Alberta datasets LeaseOS still needs.
+
+Based on what I've already identified, though, yes—these maps are useful for what you want, and Alberta 511 should be treated as the live intelligence layer over an offline truck-routing graph rather than as the routing engine itself.

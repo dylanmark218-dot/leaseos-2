@@ -1,0 +1,276 @@
+# LeaseOS_Canada_HOS_Compliance_Logbook_v2
+
+_Text extracted from LeaseOS_Canada_HOS_Compliance_Logbook_v2.pdf (6 pages). The PDF beside it is the original._
+
+LeaseOS - Canada HOS Compliance Logbook v2
+Page 1
+ LeaseOS Canada Hours-of-Service Compliance
+ Logbook v2
+Provincial Alberta + federal interprovincial + over-160-km RODS + Canada-U.S. cross-border design controls
+Version: 2026-09-17. Purpose: LeaseOS / Claude project knowledge and implementation specification.
+Scope note: This version fully specifies the Alberta/federal decision path and adds a U.S. cross-border transition section. Other
+Canadian provinces and territories are represented as separate jurisdiction profiles to be populated/verified from their current legislation
+before production use.
+Core principle: The 160 km rule is a record-keeping exemption, not permission for extra hours. If a driver does not qualify for the
+applicable 160 km exemption, the driver must maintain the required record of duty status (RODS/daily log), and federally regulated
+drivers who are required to keep RODS generally require a certified ELD unless another regulatory exception applies.
+1. LeaseOS operating-mode decision tree
+Question
+Yes
+No
+Is the carrier/operation federally regulated
+(interprovincial/territorial or international undertaking)?
+Use federal Canadian HOS/ELD profile while
+operating under Canadian rules.
+Use the applicable provincial/territorial
+intra-provincial profile.
+Does the driver meet every applicable 160 km exemption
+condition?
+Normal daily RODS/ELD may be exempt;
+carrier time records are still mandatory.
+RODS/daily log required. For federally
+regulated drivers, certified ELD is generally
+required unless another exception applies.
+Does the trip enter the United States?
+Activate U.S. cross-border profile at the border
+and validate U.S. HOS/ELD eligibility/history.
+Remain on Canadian jurisdiction profile.
+2. Alberta intra-provincial 160 km exemption
+For Alberta's provincial daily-log exemption, all applicable conditions must remain true: the driver does not operate beyond a 160 km
+radius from the home terminal; returns to the home terminal and is released from work within 15 hours from the start of the work shift;
+and the carrier retains accurate start/release time records for 6 months.
+When any condition stops applying, LeaseOS must change the day to LOG_REQUIRED. Alberta's carrier-training material says the
+driver must commence a daily log and record the total on-duty hours accumulated during the immediately preceding 7 days.
+3. Federal Canadian 160 km exemption
+Federal section 81 exempts the driver from the normal RODS requirement only when the driver drives, or is instructed to drive, within a
+160 km radius of the home terminal; returns to the home terminal each day to begin at least 8 consecutive hours off duty; the
+carrier keeps accurate/legible cycle and on-duty records plus supporting documents for at least 6 months; and the driver is not
+operating under a permit (unless the regulation/exemption provides otherwise).
+Important distinction: The federal rule is tied to the home terminal and its statutory conditions. LeaseOS should not replace this with a
+generic '160 km from current location' test.
+4. When the driver goes beyond 160 km
+Crossing the applicable radius, or otherwise losing an exemption condition, does not create extra driving time. It changes the
+record-keeping state. LeaseOS should immediately require a full RODS/daily log for that day and reconstruct the earlier duty
+status/history needed by the applicable rule.
+LeaseOS event
+Required action
+Route/geofence predicts travel beyond 160 km before
+departure
+Start day as LOG_REQUIRED/ELD_REQUIRED where applicable; do not wait for the boundary crossing.
+Unexpected dispatch takes driver beyond 160 km
+mid-shift
+Convert to LOG_REQUIRED; prompt driver to complete/manual-enter prior duty information required for
+continuity.
+Federal driver was radius-exempt but now must keep
+RODS
+Require certified ELD unless another federal ELD exception applies. Transport Canada says a driver who
+did not keep RODS at the start of the day may need to manually enter prior HOS history.
+Missing location/history needed to prove exemption
+Fail closed: do not claim RADIUS_EXEMPT. Require the more complete record.
+
+
+LeaseOS - Canada HOS Compliance Logbook v2
+Page 2
+5. Federal Canadian HOS controls - south of 60
+Control
+LeaseOS enforcement
+13 hours driving
+No driving after accumulating 13 hours driving unless the required qualifying off-duty period/rest calculation permits driving
+again.
+14 hours on duty
+No driving after accumulating 14 hours on-duty time in the applicable work-shift calculation.
+16 elapsed hours
+No driving after the 16th elapsed hour between qualifying core off-duty periods, subject to sleeper-berth calculations.
+Daily off-duty
+Track the statutory daily off-duty requirement and any valid deferral/sleeper exception separately.
+Cycle 1
+70 on-duty hours in 7 days; track reset eligibility.
+Cycle 2
+120 on-duty hours in 14 days plus the additional statutory 7-day control; track reset eligibility.
+6. Sleeper berth
+For a single driver under federal Canadian rules, qualifying sleeper time may be accumulated in no more than two periods when neither
+is shorter than 2 hours and the two total at least 10 hours. The paired periods must also satisfy the driving, on-duty and elapsed-time
+tests in section 18. Sleeper berth changes the calculation; it is not a blanket extension of legal hours.
+LeaseOS: store both qualifying sleeper periods, pair ID, start/end timestamps, total duration, preceding/following driving,
+preceding/following on-duty time, elapsed-time calculation, and VALID/PENDING/INVALID result.
+
+
+LeaseOS - Canada HOS Compliance Logbook v2
+Page 3
+7. Federal ELD requirements and exceptions
+Transport Canada states that federally regulated commercial drivers who must complete RODS must use a compliant,
+third-party-certified ELD. Regulatory exceptions include specified permit/exemption operations, qualifying rentals of 30 days or less,
+pre-2000 model-year vehicles, and drivers who are not required to keep RODS.
+The vehicle should carry the required ELD information packet, including user instructions, data-transfer instructions, malfunction
+instructions and enough blank RODS for at least 15 days. Carrier RODS and supporting documents are retained for at least 6 months.
+LeaseOS product boundary: LeaseOS may manage HOS workflows and integrate with an ELD, but it must not present itself as the
+legally required Canadian ELD unless the actual hardware/software implementation is tested and certified under the Transport Canada
+framework.
+8. Full RODS / daily log - required when exemption does not apply
+This is the LeaseOS data model for a full log day. Production ELD output must meet the applicable Canadian technical standard and
+regulation.
+Driver
+Date
+Co-driver
+Start of day
+Carrier
+Cycle
+1 / 2
+Home terminal
+Principal place of business
+Unit(s)
+Trailer(s)
+Start odometer
+End odometer
+Distance driven
+Personal-use distance
+ELD identifier
+Exemption/exception
+None / specify
+Shipping docs / manifest
+Time zone
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+Total
+Off duty
+Sleeper berth
+Driving
+On duty - not driving
+Duty-status events / annotations - every status change should preserve time and location plus required remarks/supporting data.
+Time
+Location
+Duty status / event
+Annotation / supporting document
+
+
+LeaseOS - Canada HOS Compliance Logbook v2
+Page 4
+Driver certification/signature: ________________________________________________
+
+
+LeaseOS - Canada HOS Compliance Logbook v2
+Page 5
+9. Radius-exempt carrier time record
+Use this instead of a normal daily RODS only when every applicable radius-exemption condition is satisfied.
+Driver name
+Carrier
+Date
+Home terminal
+Unit #
+Trailer #
+Rule set
+AB provincial / Federal
+Cycle
+1 / 2 / N/A
+Shift start
+Shift end / released
+Total on-duty
+Total driving
+Maximum radius
+Returned to terminal?
+Yes / No
+8 consecutive hours off next?
+Yes / No / N/A
+AB release within 15 h?
+Yes / No / N/A
+Permit/exemption involved?
+No / specify
+Supporting docs retained?
+Yes / No
+Driver/carrier certification: _____________________________________ Date: _____________
+10. Canada interprovincial / provincial-border operation
+A carrier that is an extra-provincial undertaking is governed by the federal Canadian HOS regime for covered operations. LeaseOS
+should therefore determine the carrier's regulatory status, not simply switch to each province's intra-provincial HOS rule whenever GPS
+crosses a provincial border.
+Routing behavior: Before dispatch, classify the trip as INTRAPROVINCIAL, INTERPROVINCIAL/TERRITORIAL or INTERNATIONAL.
+Preserve the classification in the job/trip audit record. A border-crossing route should trigger federal HOS/ELD validation before the
+driver accepts dispatch.
+11. Canada-U.S. international operation
+Canadian drivers entering the United States must comply with applicable U.S. FMCSA HOS/ELD requirements while operating in the
+U.S. FMCSA guidance states that a Canada/Mexico-domiciled driver operating in the U.S. who must use RODS for more than 8 days in
+any 30-day period is subject to the U.S. ELD rule unless another exception applies.
+FMCSA also recognizes the U.S. 150 air-mile short-haul exception for qualifying cross-border operations when all U.S. short-haul
+conditions are met. Current FMCSA cross-border guidance describes return to the normal work reporting location and release within 14
+hours as part of that exception.
+Do not reuse Canada's 160 km test for the U.S. The U.S. short-haul radius is 150 air miles and has its own statutory conditions.
+LeaseOS should treat the border as a jurisdiction transition and evaluate U.S. rules independently.
+At/Before Canada-U.S. border
+LeaseOS check
+Driver's current Canadian RODS/history
+Preserve/export the history needed to establish prior duty status and make it available for inspection.
+U.S. ELD applicability
+Determine whether U.S. ELD rule applies, including the more-than-8-days-in-30 rule and any valid exception.
+U.S. short-haul claim
+Validate 150 air-mile radius, normal work reporting location, return/release requirement and all other U.S.
+short-haul conditions.
+Return to Canada
+Re-evaluate Canadian federal HOS/ELD state and ensure cross-border duty events remain
+continuous/auditable.
+
+
+LeaseOS - Canada HOS Compliance Logbook v2
+Page 6
+12. Other Canadian provinces and territories - production architecture
+The following profiles must exist separately in LeaseOS. This v2 document does not assert that each jurisdiction uses Alberta's 160
+km/15-hour provincial exemption. Each profile must be verified against current provincial/territorial law before enabling enforcement
+decisions.
+Jurisdiction profile
+Required fields before production
+British Columbia
+Intra-provincial applicability, HOS limits, daily-log/radius exemption, ELD adoption/enforcement, retention,
+permits.
+Saskatchewan
+Same jurisdiction-specific controls; include oilfield/special permit handling where applicable.
+Manitoba
+Same jurisdiction-specific controls.
+Ontario
+Same jurisdiction-specific controls.
+Quebec
+Same jurisdiction-specific controls, including French-language regulatory/document requirements where
+applicable.
+New Brunswick / Nova Scotia / PEI / Newfoundland
+and Labrador
+Separate profiles; do not collapse Atlantic provinces into one rule set.
+Yukon / Northwest Territories
+Separate profiles and north-of-60/federal interactions where applicable.
+Nunavut
+Separate profile. Transport Canada notes the federal Regulations/ELD requirement are not presently applied
+there in the same manner; verify before production.
+13. LeaseOS compliance-engine states
+JURISDICTION_UNRESOLVED, PROVINCIAL_HOS, FEDERAL_CANADA_HOS, US_HOS, RADIUS_EXEMPT,
+RADIUS_AT_RISK, LOG_REQUIRED, ELD_REQUIRED, ELD_EXCEPTION, PAPER_MALFUNCTION_LOG,
+SLEEPER_SPLIT_PENDING, SLEEPER_SPLIT_VALID, SLEEPER_SPLIT_INVALID, HOS_WARNING, DRIVING_PROHIBITED.
+Recommended fail-closed sequence: resolve carrier regulatory status -> resolve trip jurisdiction -> resolve vehicle applicability ->
+resolve radius exemption -> resolve ELD requirement/exception -> validate current/prior duty history -> validate sleeper/deferral/cycle ->
+authorize or block driving.
+14. Official sources / verification basis
+Government of Canada - Commercial Vehicle Drivers Hours of Service Regulations (SOR/2005-313), including sections 13, 18 and 81.
+Transport Canada - Electronic logging devices for commercial drivers and motor carriers; ELD handout for motor carriers and drivers.
+Government of Alberta / Alberta Carrier Training - Module 3, Hours of Service, including Alberta and federal logbook-exemption guidance.
+U.S. Federal Motor Carrier Safety Administration - Cross Border Transportation FAQs, including U.S. ELD and 150 air-mile short-haul guidance for
+Canada/Mexico-domiciled carriers.
+Production warning for Claude/LeaseOS: Do not treat this PDF as an ELD certification. Do not infer that crossing 160 km permits
+additional hours. Do not apply Alberta's provincial exemption nationwide. Do not apply Canada's 160 km radius rule in place of the U.S.
+150 air-mile short-haul rule. Missing jurisdiction or duty-history data must fail closed.

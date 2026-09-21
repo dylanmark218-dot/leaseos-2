@@ -1,0 +1,1575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeaseOS — Interactive Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bed:#0F151C; --panel:#161E27; --panel2:#1D2733; --line:#2A3745; --line-soft:#212C38;
+  --ink:#E8EEF4; --dim:#93A7B9; --faint:#5F7488;
+  --amber:#F0A22E; --amber-dim:#3A2E17;
+  --verified:#4FB286; --verified-dim:#16302690;
+  --blocked:#E2603F; --blocked-dim:#341B15;
+  --sand:#C9B085;
+  --r:3px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bed); color:var(--ink);
+  font-family:'Barlow',system-ui,sans-serif; font-size:15px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.86em;letter-spacing:-.01em}
+.cond{font-family:'Barlow Condensed',sans-serif;letter-spacing:.02em}
+
+/* ---------- app frame ---------- */
+.app{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+@media(max-width:860px){.app{grid-template-columns:1fr}}
+
+/* ---------- top bar ---------- */
+.topbar{
+  grid-column:1/-1;display:flex;align-items:center;gap:18px;
+  padding:0 18px;height:56px;background:var(--panel);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:50
+}
+.brand{display:flex;align-items:baseline;gap:8px}
+.brand b{font-family:'Barlow Condensed';font-weight:700;font-size:22px;letter-spacing:.06em}
+.brand span{color:var(--faint);font-size:11px;letter-spacing:.16em;text-transform:uppercase}
+.roleswitch{margin-left:auto;display:flex;gap:2px;background:var(--bed);padding:3px;border:1px solid var(--line);border-radius:var(--r)}
+.roleswitch button{
+  background:none;border:0;color:var(--dim);font-family:inherit;font-size:12px;
+  padding:5px 11px;cursor:pointer;border-radius:2px;letter-spacing:.04em;text-transform:uppercase
+}
+.roleswitch button[aria-pressed=true]{background:var(--panel2);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+.roleswitch button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+.netpill{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--dim);letter-spacing:.05em}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--verified)}
+.dot.off{background:var(--amber)}
+@media(max-width:860px){.netpill{display:none}}
+
+/* ---------- nav ---------- */
+nav{background:var(--panel);border-right:1px solid var(--line);padding:14px 0 40px;overflow-y:auto}
+.navgroup{margin-bottom:6px}
+.navgroup h4{
+  font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);
+  padding:14px 18px 6px;font-weight:600
+}
+nav a{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:8px 18px;color:var(--dim);text-decoration:none;font-size:14px;
+  border-left:2px solid transparent;cursor:pointer
+}
+nav a:hover{color:var(--ink);background:var(--panel2)}
+nav a.on{color:var(--ink);border-left-color:var(--amber);background:var(--panel2)}
+nav a:focus-visible{outline:2px solid var(--amber);outline-offset:-2px}
+.count{font-family:'IBM Plex Mono';font-size:11px;background:var(--amber-dim);color:var(--amber);padding:1px 6px;border-radius:9px}
+.count.zero{background:var(--panel);color:var(--faint)}
+.navmob{display:none}
+@media(max-width:860px){
+  nav{display:none;position:fixed;inset:56px 0 0;z-index:40}
+  nav.open{display:block}
+  .navmob{display:block;background:none;border:1px solid var(--line);color:var(--ink);
+    font-family:inherit;padding:5px 9px;border-radius:var(--r);cursor:pointer}
+}
+
+/* ---------- main ---------- */
+main{padding:22px 26px 90px;max-width:1180px}
+@media(max-width:600px){main{padding:16px 14px 90px}}
+.head{margin-bottom:20px}
+.eyebrow{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--faint);margin-bottom:5px}
+h1{font-family:'Barlow Condensed';font-weight:700;font-size:30px;letter-spacing:.01em;line-height:1.1}
+.sub{color:var(--dim);font-size:14px;margin-top:6px;max-width:70ch}
+
+/* ---------- cards ---------- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.card h3{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-weight:600;margin-bottom:12px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+
+/* ---------- SIGNATURE: provenance ---------- */
+.prov{
+  display:inline-flex;align-items:center;gap:5px;font-family:'IBM Plex Mono';font-size:10px;
+  padding:1px 6px;border-radius:2px;letter-spacing:.02em;white-space:nowrap;vertical-align:middle
+}
+.prov.confirmed{background:var(--verified-dim);color:var(--verified);box-shadow:inset 0 0 0 1px #4FB28640}
+.prov.pending{background:var(--amber-dim);color:var(--amber);box-shadow:inset 0 0 0 1px #F0A22E40}
+.prov.unknown{background:#232C36;color:var(--faint);box-shadow:inset 0 0 0 1px var(--line)}
+.prov.blockedp{background:var(--blocked-dim);color:var(--blocked);box-shadow:inset 0 0 0 1px #E2603F40}
+/* unconfirmed values read differently everywhere */
+.unconf{border-bottom:1.5px dashed var(--amber);color:var(--amber)}
+.conf{border-bottom:1.5px solid #4FB28655}
+
+/* hazard edge — the pending stack */
+.hazard{border-left:3px solid transparent;
+  border-image:repeating-linear-gradient(45deg,var(--amber) 0 6px,#0000 6px 12px) 1}
+
+/* ---------- data rows ---------- */
+.kv{display:grid;grid-template-columns:minmax(120px,34%) 1fr;gap:6px 14px;font-size:14px}
+.kv dt{color:var(--faint);font-size:12px;letter-spacing:.04em;text-transform:uppercase;padding-top:2px}
+.kv dd{color:var(--ink)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+  font-weight:600;padding:0 10px 8px 0;border-bottom:1px solid var(--line)}
+td{padding:10px 10px 10px 0;border-bottom:1px solid var(--line-soft);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.wrapx{overflow-x:auto}
+
+/* ---------- buttons ---------- */
+button.btn,a.btn{
+  font-family:inherit;font-size:14px;background:var(--panel2);color:var(--ink);
+  border:1px solid var(--line);padding:9px 15px;border-radius:var(--r);cursor:pointer;
+  text-decoration:none;display:inline-flex;align-items:center;gap:7px
+}
+button.btn:hover,a.btn:hover{border-color:var(--faint)}
+button.btn:focus-visible,a.btn:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.btn.go{background:var(--amber);color:#20160A;border-color:var(--amber);font-weight:600}
+.btn.ok{background:transparent;border-color:#4FB28666;color:var(--verified)}
+.btn.no{background:transparent;border-color:#E2603F55;color:var(--blocked)}
+.btn.sm{padding:5px 10px;font-size:12.5px}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+
+/* driver one-tap */
+.tap{
+  width:100%;font-family:'Barlow Condensed';font-weight:700;font-size:23px;letter-spacing:.05em;
+  padding:22px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+  border-radius:var(--r);cursor:pointer;text-align:left;display:flex;align-items:center;
+  justify-content:space-between;gap:12px
+}
+.tap.next{background:var(--amber);color:#20160A;border-color:var(--amber)}
+.tap.done{color:var(--faint);border-style:dashed}
+.tap:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+.tap small{font-family:'IBM Plex Mono';font-size:12px;font-weight:400;letter-spacing:0;opacity:.75}
+
+/* ---------- timeline ---------- */
+.tl{position:relative;padding-left:96px}
+.tl::before{content:'';position:absolute;left:79px;top:6px;bottom:6px;width:1px;background:var(--line)}
+.ev{position:relative;padding:7px 0}
+.ev time{position:absolute;left:-96px;width:66px;text-align:right;font-family:'IBM Plex Mono';
+  font-size:12.5px;color:var(--dim)}
+.ev::before{content:'';position:absolute;left:-21px;top:14px;width:7px;height:7px;border-radius:50%;
+  background:var(--verified);box-shadow:0 0 0 3px var(--panel)}
+.ev.pend::before{background:var(--amber)}
+.ev.gap::before{background:transparent;box-shadow:inset 0 0 0 1px var(--faint),0 0 0 3px var(--panel)}
+.ev b{font-weight:600;font-size:14.5px}
+.ev p{color:var(--dim);font-size:13px;margin-top:1px}
+.gapnote{color:var(--sand);font-size:12.5px;font-family:'IBM Plex Mono'}
+
+/* ---------- misc ---------- */
+.stat{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:13px}
+.stat .n{font-family:'Barlow Condensed';font-weight:700;font-size:29px;line-height:1}
+.stat .l{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-top:4px}
+.stat.warn .n{color:var(--amber)} .stat.bad .n{color:var(--blocked)} .stat.good .n{color:var(--verified)}
+.note{border-left:2px solid var(--line);padding:2px 0 2px 12px;color:var(--dim);font-size:13.5px}
+.note.amber{border-left-color:var(--amber)}
+.tag{display:inline-block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 7px;border:1px solid var(--line);border-radius:2px;color:var(--dim)}
+.layer{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:14px}
+.layer:last-child{border-bottom:0}
+.layer input{accent-color:var(--amber);width:15px;height:15px}
+.maprect{background:
+  repeating-linear-gradient(0deg,#1a2531 0 1px,#0000 1px 42px),
+  repeating-linear-gradient(90deg,#1a2531 0 1px,#0000 1px 42px),var(--panel2);
+  border:1px solid var(--line);border-radius:var(--r);height:290px;position:relative;overflow:hidden}
+.pin{position:absolute;transform:translate(-50%,-50%);font-family:'IBM Plex Mono';font-size:11px;
+  background:var(--bed);border:1px solid var(--amber);color:var(--amber);padding:2px 6px;border-radius:2px;white-space:nowrap}
+.pin.v{border-color:var(--verified);color:var(--verified)}
+.zone{position:absolute;transform:translate(-50%,-50%);border:1px dashed var(--verified);
+  border-radius:50%;background:#4FB28610}
+.say{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:10px}
+.say.driver{border-left:2px solid var(--sand)}
+.say.ai{border-left:2px solid var(--amber)}
+.say .who{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:5px}
+.hide{display:none}
+.footnote{color:var(--faint);font-size:12.5px;margin-top:10px}
+.scr{scroll-margin-top:70px}
+@media(prefers-reduced-motion:no-preference){
+  main>*{animation:in .22s ease-out both}
+  @keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <button class="navmob" id="navtoggle" aria-label="Menu">☰</button>
+    <div class="brand"><b>LEASEOS</b><span>FieldRoute</span></div>
+    <div class="roleswitch" role="group" aria-label="Role">
+      <button data-role="driver" aria-pressed="true">Driver</button>
+      <button data-role="mechanic" aria-pressed="false">Shop</button>
+      <button data-role="office" aria-pressed="false">Office</button>
+      <button data-role="admin" aria-pressed="false">Admin</button>
+    </div>
+    <div class="netpill"><span class="dot off" id="netdot"></span><span id="nettext">Offline · 4 queued · synced 11m ago</span></div>
+  </header>
+
+  <nav id="nav"></nav>
+  <main id="view"></main>
+</div>
+
+<script>
+/* =========================================================================
+   PROTOTYPE DATA
+   Field names intentionally mirror drizzle/schema.ts so this file doubles
+   as the UI-side contract reference when the backends get built.
+   ========================================================================= */
+const DB = {
+  trip:{ tripNumber:"TRIP-2026-004821", tripType:"round_trip", status:"unloading",
+    jobCode:"JOB-8841", customer:"Northridge Energy", unitNumber:"VAC-27", operator:"D. Reid",
+    odometerStartKm:284291, odometerEndKm:null, distanceKm:null,
+    originLocation:"04-12-084-06W5 · North Pad", destinationFacility:"Clearwater Disposal #3" },
+
+  stops:[
+    {stopType:"load", seq:1, arrivedAt:"07:34", setupStartedAt:"07:41", operationStartedAt:"07:48",
+     operationCompletedAt:"08:16", departedAt:"08:21", waitMinutes:7, setupMinutes:7,
+     durationMinutes:47, quantity:8000, quantityUnit:"L", ticketNumber:"LD-77219",
+     delayReason:"Loading equipment unavailable", src:"confirmed"},
+    {stopType:"unload", seq:2, arrivedAt:"10:03", setupStartedAt:"10:11", operationStartedAt:"10:14",
+     operationCompletedAt:"10:37", departedAt:null, waitMinutes:8, setupMinutes:3,
+     durationMinutes:null, quantity:null, quantityUnit:"L", ticketNumber:null,
+     delayReason:"Scale delay", src:"pending"}
+  ],
+
+  pending:[
+    {id:"ZE-3391", kind:"zone", eventType:"exit", zone:"Clearwater Disposal #3 · Unload Zone",
+     detectedAt:"10:42:07", distanceMetres:96, accuracyMetres:11, confidence:"high",
+     asks:"Set departure at 10:42 for the unload stop?"},
+    {id:"ZE-3390", kind:"zone", eventType:"enter", zone:"North Pad · Loading Zone 14",
+     detectedAt:"07:33:51", distanceMetres:61, accuracyMetres:38, confidence:"low",
+     asks:"GPS accuracy was 38 m near the boundary. Did you arrive at 07:34?"},
+    {id:"AI-8812", kind:"ai", field:"Load quantity", value:"8,000 L", precision:"approximate",
+     source:"driver_voice", confidence:"medium",
+     asks:"You said “about 8,000 litres.” Was that metered or estimated?"},
+    {id:"OCR-441", kind:"ocr", field:"Disposal ticket", value:"Net 8,500 kg · DSP-99183",
+     source:"photo_ocr", confidence:"medium",
+     asks:"Attach this scale ticket to TRIP-2026-004821?"}
+  ],
+
+  exceptions:[
+    {n:3, label:"Missing documents", sev:"warn", detail:"Trips 4818, 4820, 4821 — disposal ticket"},
+    {n:2, label:"Expiring licences", sev:"warn", detail:"D. Reid (18d), M. Okonkwo (26d)"},
+    {n:1, label:"Insurance expiring", sev:"bad", detail:"Unit TRK-31 — 6 days"},
+    {n:4, label:"Trips missing tickets", sev:"warn", detail:"Oldest 9 days"},
+    {n:1, label:"Unit due inspection", sev:"bad", detail:"VAC-12 — overdue 3 days"},
+    {n:2, label:"Excessive load time", sev:"warn", detail:"Facility A · +31 min vs baseline"},
+    {n:6, label:"Unconfirmed GPS events", sev:"warn", detail:"Across 3 active trips"},
+    {n:3, label:"Incomplete logbooks", sev:"warn", detail:"Yesterday's shift"}
+  ],
+
+  jobs:[
+    {jobCode:"JOB-8841", customer:"Northridge Energy", type:"Vacuum haul", mode:"general",
+     location:"04-12-084-06W5", driver:"D. Reid", vehicle:"VAC-27", status:"in_transit", progress:72},
+    {jobCode:"JOB-8842", customer:"Northridge Energy", type:"Water delivery", mode:"transport",
+     location:"11-04-081-11W5", driver:"M. Okonkwo", vehicle:"WTR-08", status:"loading", progress:34},
+    {jobCode:"JOB-8843", customer:"Bearpaw Resources", type:"Hydrovac", mode:"hydrovac",
+     location:"07-22-079-05W5", driver:"—", vehicle:"—", status:"dispatched", progress:0},
+    {jobCode:"JOB-8839", customer:"Cold Lake Field Svc", type:"Recovery", mode:"recovery",
+     location:"02-18-086-09W5", driver:"J. Whitecalf", vehicle:"TRK-31", status:"awaiting_docs", progress:95}
+  ],
+
+  audit:[
+    {t:"11:15", who:"Office · S. Bell", what:"Corrected unload quantity",
+     was:"8.2 m³", now:"8.7 m³", why:"Corrected from scale ticket DSP-99183"},
+    {t:"11:12", who:"System", what:"Generated manifest M-28491", was:"—", now:"draft", why:"Trip stops complete"},
+    {t:"11:04", who:"Office · S. Bell", what:"Attached disposal ticket", was:"—", now:"DSP-99183", why:"Driver upload"},
+    {t:"10:37", who:"Driver · D. Reid", what:"Marked unloading complete", was:"in_progress", now:"complete", why:"—"},
+    {t:"08:42", who:"System", what:"Proposed zone enter (rejected)", was:"pending", now:"rejected",
+     why:"Driver: wrong lease, GPS drift"}
+  ],
+
+  defects:[
+    {id:"MD-4821", unit:"VAC-27", title:"Pump grinding on start-up", severity:"inspection_required",
+     status:"open", reportedAt:"12:31", by:"Driver voice report", blocks:false},
+    {id:"MD-4809", unit:"TRK-31", title:"Brake pull to right", severity:"critical",
+     status:"in_progress", reportedAt:"Aug 27", by:"Post-trip DVIR", blocks:true},
+    {id:"MD-4804", unit:"WTR-08", title:"Marker light out — driver side", severity:"advisory",
+     status:"open", reportedAt:"Aug 26", by:"Pre-trip", blocks:false}
+  ],
+
+  feedback:[
+    {id:184, area:"Trip logging", who:"Driver", problem:"Have to enter odometer twice",
+     freq:"Daily", impact:"High", status:"Under review"},
+    {id:183, area:"Disposal tickets", who:"Driver", problem:"Camera closes before I confirm",
+     freq:"Several/week", impact:"High", status:"Fix planned"},
+    {id:181, area:"Billing", who:"Office", problem:"Wait time not separated from load time",
+     freq:"Weekly", impact:"Medium", status:"Under review"}
+  ]
+};
+
+/* ---------- nav definition (role-scoped) ---------- */
+const NAV = [
+  {group:"Field", roles:["driver","office","admin"], items:[
+    ["job","Current job",null],["timeline","Trip timeline",null],
+    ["confirm","Confirmations","4"],["secretary","AI Secretary",null],
+    ["fieldticket","Field ticket & sign-off","1"],
+    ["map","Field map",null],["report","Report a condition",null],["pretrip","Pre-trip",null],
+    ["dailylog","Daily log",null]]},
+  {group:"Shop", roles:["mechanic","office","admin"], items:[
+    ["unit","Unit passport",null],["defects","Defects","3"],["workorders","Work orders",null]]},
+  {group:"Dispatch", roles:["office","admin"], items:[
+    ["dispatchboard","Dispatch board","4"],["bids","Invitations & bids","7"],
+    ["oncall","On call",null],["schedule","7-day schedule","1"]]},
+  {group:"Office", roles:["office","admin"], items:[
+    ["exceptions","Exception centre","22"],["search","Tracking search",null],
+    ["jobs","Jobs",null],["classify","Job classification",null],["trips","Trips",null],["billingbook","Billing book",null],["reconcile","Ticket reconciliation","1"],["disposalrecon","Disposal reconciliation","1"],
+    ["invoice","Invoices & acceptance","2"],
+    ["docs","Documents & expiry","3"],["disposal","Disposal directory",null],
+    ["billing","Rate cards",null],["audit","Audit log",null],["feedback","Feedback queue","3"]]},
+  {group:"Admin", roles:["admin"], items:[
+    ["numbering","Numbering & sequences",null],["customercfg","Customer billing config",null],["zones","Operating zones",null],
+    ["roles","Roles & permissions",null],["sync","Sync & offline",null]]}
+];
+
+let role="driver", screen="job";
+
+/* ---------- render helpers ---------- */
+const el=(h)=>{const d=document.createElement('div');d.innerHTML=h.trim();return d.firstElementChild};
+const provChip=(kind,text)=>`<span class="prov ${kind}">${text}</span>`;
+
+function renderNav(){
+  const nav=document.getElementById('nav'); nav.innerHTML='';
+  NAV.filter(g=>g.roles.includes(role)).forEach(g=>{
+    const box=el(`<div class="navgroup"><h4>${g.group}</h4></div>`);
+    g.items.forEach(([id,label,count])=>{
+      const a=el(`<a href="#${id}" ${screen===id?'class="on"':''}>${label}
+        ${count?`<span class="count">${count}</span>`:''}</a>`);
+      a.onclick=e=>{e.preventDefault();go(id)};
+      box.appendChild(a);
+    });
+    nav.appendChild(box);
+  });
+}
+function go(id){screen=id;renderNav();renderView();document.getElementById('nav').classList.remove('open');window.scrollTo(0,0)}
+
+/* =========================== SCREENS =========================== */
+const S={};
+
+S.job=()=>{
+  const t=DB.trip;
+  return `
+  <div class="head"><div class="eyebrow">Active assignment</div>
+    <h1>${t.tripNumber}</h1>
+    <p class="sub">${t.customer} · ${t.jobCode} · Unit ${t.unitNumber}</p></div>
+
+  <div class="card">
+    <h3>Unload — Clearwater Disposal #3</h3>
+    <div class="grid" style="gap:9px">
+      <button class="tap done">Arrived <small>10:03 · confirmed</small></button>
+      <button class="tap done">Setup started <small>10:11 · confirmed</small></button>
+      <button class="tap done">Unloading started <small>10:14 · confirmed</small></button>
+      <button class="tap done">Empty <small>10:37 · confirmed</small></button>
+      <button class="tap next" onclick="go('confirm')">Depart <small>GPS says 10:42 — needs your OK</small> →</button>
+    </div>
+    <p class="footnote">Every tap writes one event. Times, distance, wait reasons, logbook lines
+      and billing all read from these — you never enter them twice.</p>
+  </div>
+
+  <div class="grid g2">
+    <div class="card"><h3>This stop</h3>
+      <dl class="kv">
+        <dt>Arrived</dt><dd class="mono conf">10:03</dd>
+        <dt>Wait</dt><dd>8 min — <span class="tag">Scale delay</span></dd>
+        <dt>Setup</dt><dd>3 min</dd>
+        <dt>Unloading</dt><dd>23 min</dd>
+        <dt>Departed</dt><dd class="mono unconf">10:42 ${provChip('pending','GPS · UNCONFIRMED')}</dd>
+        <dt>Ticket</dt><dd class="mono unconf">DSP-99183 ${provChip('pending','OCR · REVIEW')}</dd>
+      </dl></div>
+    <div class="card"><h3>Still needed</h3>
+      <div class="grid" style="gap:8px">
+        <div class="note amber">Disposal ticket photo — office flagged this on trip 4818 too</div>
+        <div class="note">Closing odometer at yard</div>
+        <div class="note">Post-trip inspection</div>
+      </div>
+      <div class="btnrow" style="margin-top:12px">
+        <button class="btn go" onclick="go('secretary')">Tell the secretary</button>
+        <button class="btn" onclick="go('report')">Report a problem</button>
+      </div></div>
+  </div>`;
+};
+
+S.timeline=()=>`
+  <div class="head"><div class="eyebrow">${DB.trip.tripNumber}</div><h1>Trip timeline</h1>
+  <p class="sub">Built from confirmed events. Gaps are shown as gaps — the system never fills
+    them in with a guess.</p></div>
+  <div class="card"><div class="tl">
+    <div class="ev"><time>07:12</time><b>Dispatched</b><p>Office · JOB-8841</p></div>
+    <div class="ev"><time>07:34</time><b>Arrived — North Pad</b><p>Loading Zone 14 ${provChip('confirmed','GPS + DRIVER')}</p></div>
+    <div class="ev"><time>07:41</time><b>Loading setup</b><p>7 min wait — loading equipment unavailable</p></div>
+    <div class="ev"><time>07:48</time><b>Loading started</b></div>
+    <div class="ev"><time>08:16</time><b>Loading complete</b><p>8,000 L <span class="unconf">approximate</span> ${provChip('pending','DRIVER VOICE')}</p></div>
+    <div class="ev"><time>08:21</time><b>Departed</b><p>Ticket LD-77219</p></div>
+    <div class="ev gap"><time>—</time><b class="gapnote">1 h 42 m transit · 96 km</b><p>18 km gravel · no cellular for 23 min</p></div>
+    <div class="ev"><time>10:03</time><b>Arrived — Clearwater #3</b></div>
+    <div class="ev"><time>10:11</time><b>Unload setup</b><p>8 min wait — scale delay</p></div>
+    <div class="ev"><time>10:14</time><b>Unloading started</b></div>
+    <div class="ev"><time>10:37</time><b>Empty</b></div>
+    <div class="ev pend"><time>10:42</time><b>Departed <span class="unconf">proposed</span></b>
+      <p>Geofence exit · 96 m · accuracy 11 m ${provChip('pending','AWAITING DRIVER')}</p></div>
+  </div></div>
+  <div class="grid g4">
+    <div class="stat"><div class="n mono">2:24</div><div class="l">Drive</div></div>
+    <div class="stat warn"><div class="n mono">0:15</div><div class="l">Waiting</div></div>
+    <div class="stat"><div class="n mono">0:51</div><div class="l">Load / unload</div></div>
+    <div class="stat"><div class="n mono">96</div><div class="l">km</div></div>
+  </div>`;
+
+S.confirm=()=>{
+  const rows=DB.pending.map(p=>{
+    const conf = p.confidence==='low' ? 'blockedp' : p.confidence==='high' ? 'confirmed' : 'pending';
+    const head = p.kind==='zone'
+      ? `Geofence ${p.eventType} — ${p.zone}`
+      : p.kind==='ai' ? `Voice value — ${p.field}` : `Photo read — ${p.field}`;
+    const meta = p.kind==='zone'
+      ? `<dt>Detected</dt><dd class="mono">${p.detectedAt}</dd>
+         <dt>Distance</dt><dd class="mono">${p.distanceMetres} m from zone edge</dd>
+         <dt>GPS accuracy</dt><dd class="mono">±${p.accuracyMetres} m</dd>`
+      : `<dt>Value read</dt><dd class="mono unconf">${p.value}</dd>
+         <dt>Source</dt><dd class="mono">${p.source}</dd>
+         ${p.precision?`<dt>Precision</dt><dd>${p.precision}</dd>`:''}`;
+    return `<div class="card hazard"><h3>${p.id} — ${head}</h3>
+      <p style="margin-bottom:11px">${p.asks}</p>
+      <dl class="kv" style="margin-bottom:13px">${meta}
+        <dt>Confidence</dt><dd>${provChip(conf,p.confidence.toUpperCase())}</dd></dl>
+      <div class="btnrow">
+        <button class="btn ok" onclick="this.closest('.card').style.opacity=.35;this.closest('.btnrow').innerHTML='<span class=&quot;prov confirmed&quot;>CONFIRMED — WRITTEN TO TRIP</span>'">Yes, that's right</button>
+        <button class="btn no" onclick="this.closest('.card').style.opacity=.35;this.closest('.btnrow').innerHTML='<span class=&quot;prov unknown&quot;>REJECTED — TRIP UNCHANGED</span>'">No</button>
+        <button class="btn sm">Fix the value</button>
+      </div></div>`;
+  }).join('');
+  return `<div class="head"><div class="eyebrow">Nothing below has been saved yet</div>
+    <h1>Confirmations</h1>
+    <p class="sub">GPS, voice and photo reading all propose — they never write. Until you answer,
+      the trip record keeps its existing values and the field stays amber everywhere it appears.</p></div>
+    ${rows}
+    <p class="footnote">Rejecting leaves the record exactly as it was. Both answers are stored with
+      your name and the time, so the office can see why a proposal was turned down.</p>`;
+};
+
+S.secretary=()=>`
+  <div class="head"><div class="eyebrow">Voice-first paperwork</div><h1>AI Secretary</h1>
+  <p class="sub">Talk normally. It fills the form, marks what it wasn't sure about, and reads the
+    whole thing back before anything is saved.</p></div>
+
+  <div class="card">
+    <h3>End-of-stop, 41 seconds</h3>
+    <div class="say driver"><div class="who">Driver</div>
+      Got to the pit around ten, waited maybe eight minutes because the scale was backed up,
+      started unloading quarter after, finished about twenty to eleven. Pump was making that
+      grinding noise again on start-up.</div>
+    <div class="say ai"><div class="who">Secretary</div>
+      Two things I need to pin down. You said “around ten” — was that 10:00 exactly, or approximately?
+      And the grinding: is that new since the last trip?</div>
+    <div class="say driver"><div class="who">Driver</div>
+      Approximately. And no, it's the same as yesterday.</div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card"><h3>What it extracted</h3>
+      <dl class="kv">
+        <dt>Arrived</dt><dd class="mono unconf">10:00 · approximate</dd>
+        <dt>Wait</dt><dd class="mono">8 min</dd>
+        <dt>Delay reason</dt><dd>Scale delay ${provChip('pending','INFERRED')}</dd>
+        <dt>Unload start</dt><dd class="mono">10:15</dd>
+        <dt>Unload end</dt><dd class="mono unconf">10:40 · approximate</dd>
+        <dt>Defect</dt><dd>Pump grinding, recurring ${provChip('pending','NEW MD-4821')}</dd>
+      </dl>
+      <p class="footnote">“Around ten” is stored as 10:00 <em>flagged approximate</em> — not as
+        10:00:00. An auditor can always see which times were exact.</p></div>
+
+    <div class="card"><h3>Read-back before saving</h3>
+      <div class="say ai"><div class="who">Secretary</div>
+        Arrived about 10:00, waited 8 minutes for the scale, unloaded 10:15 to about 10:40.
+        I've opened a defect on VAC-27 for a recurring pump grind — I haven't diagnosed it,
+        just recorded what you told me. Save it?</div>
+      <div class="btnrow"><button class="btn go">Save</button>
+        <button class="btn">Change something</button></div>
+      <p class="footnote">One conversation writes the stop record, the logbook line, the manifest
+        quantity and a shop defect. The driver said it once.</p></div>
+  </div>
+
+  <div class="card"><h3>Same engine, every form</h3>
+    <p class="sub" style="margin:0 0 10px">Each of these is a form definition, not separate code —
+      fields, types, validation. The extract → flag → ask → read back → commit loop is shared.</p>
+    <div>${["Load stop","Unload stop","Daily log","Manifest","Tailgate","Pre-trip","Post-trip / DVIR",
+      "Fuel record","Defect report","Incident","Expense","Work order"]
+      .map(f=>`<span class="tag" style="margin:0 5px 5px 0">${f}</span>`).join('')}</div></div>`;
+
+S.map=()=>`
+  <div class="head"><div class="eyebrow">Vehicle-aware routing</div><h1>Field map</h1>
+  <p class="sub">Layers answer “can <em>this</em> truck, loaded like <em>this</em>, actually use this
+    road” — not “what's the fastest way”.</p></div>
+  <div class="grid" style="grid-template-columns:1fr 260px">
+    <div class="card" style="margin:0">
+      <div class="maprect">
+        <div class="zone" style="left:26%;top:34%;width:86px;height:86px"></div>
+        <div class="pin v" style="left:26%;top:34%">North Pad · Load 14</div>
+        <div class="zone" style="left:71%;top:66%;width:74px;height:74px"></div>
+        <div class="pin v" style="left:71%;top:66%">Clearwater #3</div>
+        <div class="pin" style="left:49%;top:47%">VAC-27 · ±11 m</div>
+        <div class="pin" style="left:57%;top:26%">⚠ Bridge AB-29381 · 4.32 m</div>
+        <div class="pin" style="left:35%;top:73%">◷ Radio dead zone 6.8 km</div>
+      </div>
+      <p class="footnote">Grey grid stands in for the tile layer. Circles are real geofences —
+        the same <span class="mono">operatingZones</span> rows the GPS engine reads.</p>
+    </div>
+    <div class="card" style="margin:0"><h3>Layers</h3>
+      ${[["Legal — truck / DG routes",1],["Weight & axle limits",1],["Bridges & clearance",1],
+         ["Oilfield leases & gates",1],["Loading / unloading zones",1],["Disposal facilities",1],
+         ["Commercial fuel",0],["Water fill",0],["Two-way radio & repeaters",0],
+         ["Cellular coverage",0],["Road conditions (temporary)",1],["Driver observations",1]]
+        .map(([l,on])=>`<label class="layer"><input type="checkbox" ${on?'checked':''}>${l}</label>`).join('')}
+      <p class="footnote">Fuel and radio layers are specified but not built — see the plan.</p></div>
+  </div>
+  <div class="card"><h3>Route check — VAC-27 loaded, Class 3</h3>
+    <div class="wrapx"><table>
+      <tr><th>Check</th><th>Result</th><th>Source</th></tr>
+      <tr><td>Steer axle 9,000 kg</td><td>${provChip('confirmed','WITHIN LIMIT')}</td><td class="mono">AB Transportation</td></tr>
+      <tr><td>Drive group 17,000 kg</td><td>${provChip('confirmed','WITHIN LIMIT')}</td><td class="mono">AB Transportation</td></tr>
+      <tr><td>Trailer group 24,000 kg</td><td>${provChip('blockedp','EXCEEDS 21,000')}</td><td class="mono">Bridge AB-29381</td></tr>
+      <tr><td>Loaded height 4.15 m</td><td>${provChip('confirmed','CLEARS 4.32')}</td><td class="mono">Posted</td></tr>
+      <tr><td>DG Class 3 corridor</td><td>${provChip('unknown','NOT ESTABLISHED')}</td><td class="mono">Municipal data 9 d old</td></tr>
+    </table></div>
+    <div class="note amber" style="margin-top:12px">Route needs review — one axle group over a posted
+      bridge limit, and the dangerous-goods corridor for this municipality hasn't been verified.
+      Unknown is not treated as clear. Signage and your permit are the authority, not this screen.</div>
+  </div>`;
+
+S.report=()=>`
+  <div class="head"><div class="eyebrow">One tap, GPS attached</div><h1>Report a condition</h1>
+  <p class="sub">Goes to the office for review. Approved reports become part of the shared map for
+    every driver.</p></div>
+  <div class="card"><h3>What did you find?</h3>
+    <div class="grid g3">${["Washout","Flooding","Ice","Mud","Construction","Road damage",
+      "Low clearance","Closed gate","Weight sign","No turnaround","Truck stuck","Radio dead zone",
+      "No cell service","Map position wrong","Other"]
+      .map(x=>`<button class="btn">${x}</button>`).join('')}</div>
+    <dl class="kv" style="margin-top:16px">
+      <dt>Location</dt><dd class="mono">51.0631, -114.0912 ${provChip('confirmed','GPS ±6 m')}</dd>
+      <dt>Road</dt><dd>Lease Road 7A, northbound</dd>
+      <dt>Unit</dt><dd class="mono">VAC-27 · loaded</dd>
+      <dt>Time</dt><dd class="mono">12:31</dd>
+    </dl>
+    <div class="btnrow" style="margin-top:14px">
+      <button class="btn go">Send</button><button class="btn">Add photo</button>
+      <button class="btn">Add voice note</button></div>
+  </div>
+  <div class="card"><h3>Recent, from your crew</h3>
+    <div class="wrapx"><table>
+      <tr><th>What</th><th>Where</th><th>Reported</th><th>State</th></tr>
+      <tr><td>Washout ~2 km east of lease entrance</td><td class="mono">Rd 284</td><td>Aug 28</td>
+        <td>${provChip('confirmed','APPROVED · ON MAP')}</td></tr>
+      <tr><td>Scale line backs onto access road</td><td class="mono">Clearwater #3</td><td>Aug 27</td>
+        <td>${provChip('confirmed','SITE NOTE')}</td></tr>
+      <tr><td>Ch. 5 reaches the north pad</td><td class="mono">Lease Rd 14</td><td>Aug 26</td>
+        <td>${provChip('pending','1 OF 3 CONFIRMATIONS')}</td></tr>
+    </table></div></div>`;
+
+S.pretrip=()=>`
+  <div class="head"><div class="eyebrow">VAC-27 · before dispatch</div><h1>Pre-trip inspection</h1></div>
+  <div class="card"><h3>Can this unit go out?</h3>
+    <div class="grid g2"><div>
+      <dl class="kv">
+        <dt>Insurance</dt><dd>${provChip('confirmed','CURRENT')}</dd>
+        <dt>Registration</dt><dd>${provChip('confirmed','CURRENT')}</dd>
+        <dt>Inspection</dt><dd>${provChip('confirmed','CURRENT')}</dd>
+        <dt>Open defects</dt><dd>${provChip('pending','1 ADVISORY')}</dd>
+      </dl></div><div>
+      <dl class="kv">
+        <dt>Licence</dt><dd>${provChip('pending','EXPIRES IN 18 D')}</dd>
+        <dt>Qualifications</dt><dd>${provChip('confirmed','CURRENT')}</dd>
+        <dt>Load paperwork</dt><dd>${provChip('confirmed','READY')}</dd>
+        <dt>Disposal pre-approval</dt><dd>${provChip('unknown','NOT ESTABLISHED')}</dd>
+      </dl></div></div>
+    <div class="note amber" style="margin-top:12px">Review required — the receiving facility hasn't
+      confirmed it accepts this material. Not a block; someone needs to make a phone call.</div>
+  </div>
+  <div class="card"><h3>Walkaround</h3>
+    <div class="wrapx"><table>
+      <tr><th>Item</th><th></th></tr>
+      ${["Brakes & air system","Steering","Lights & markers","Tires & wheels","Coupling",
+         "Pump / PTO","Tank & valves","Hoses & fittings","Placards","Emergency kit","Fluid leaks"]
+        .map(i=>`<tr><td>${i}</td><td><div class="btnrow">
+          <button class="btn sm ok">OK</button><button class="btn sm no">Defect</button>
+          <button class="btn sm">N/A</button></div></td></tr>`).join('')}
+    </table></div>
+    <div class="btnrow" style="margin-top:14px"><button class="btn go">Sign & release</button></div></div>`;
+
+S.unit=()=>`
+  <div class="head"><div class="eyebrow">Scanned from the door tag</div><h1>VAC-27</h1>
+  <p class="sub">2019 Western Star 4700 · vacuum tank · VIN 5KJ…8871</p></div>
+  <div class="grid g4">
+    <div class="stat"><div class="n mono">284,291</div><div class="l">km</div></div>
+    <div class="stat"><div class="n mono">6,812</div><div class="l">Engine hrs</div></div>
+    <div class="stat warn"><div class="n mono">4,204</div><div class="l">PTO hrs</div></div>
+    <div class="stat bad"><div class="n mono">412</div><div class="l">km to service</div></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h3>Safety binder — 96%</h3>
+      <dl class="kv">
+        <dt>Insurance</dt><dd>${provChip('confirmed','TO 2027-03')}</dd>
+        <dt>Registration</dt><dd>${provChip('confirmed','TO 2027-01')}</dd>
+        <dt>Inspection</dt><dd>${provChip('blockedp','MISSING CURRENT')}</dd>
+        <dt>Permits</dt><dd>${provChip('confirmed','2 ON FILE')}</dd>
+        <dt>Emergency plan</dt><dd>${provChip('confirmed','V3')}</dd>
+      </dl>
+      <p class="footnote">One document short. The office task queue already has it.</p></div>
+    <div class="card"><h3>Why PTO hours matter here</h3>
+      <p class="sub" style="margin-top:0">This unit runs low mileage and heavy pump duty. Service is
+        scheduled off PTO hours, not odometer — mileage alone would have missed two intervals
+        this year.</p>
+      <dl class="kv" style="margin-top:10px">
+        <dt>Last service</dt><dd class="mono">3,900 PTO hrs</dd>
+        <dt>Interval</dt><dd class="mono">500 PTO hrs</dd>
+        <dt>Now</dt><dd class="mono unconf">4,204 — 196 to go</dd>
+      </dl></div>
+  </div>
+  <div class="card"><h3>History</h3>
+    <div class="wrapx"><table>
+      <tr><th>When</th><th>What</th><th>Who</th></tr>
+      <tr><td class="mono">Today 12:31</td><td>Defect MD-4821 — pump grinding</td><td>D. Reid (voice)</td></tr>
+      <tr><td class="mono">Aug 27</td><td>Work order WO-2291 closed — hydraulic line</td><td>Shop · T. Nguyen</td></tr>
+      <tr><td class="mono">Aug 24</td><td>Annual inspection passed</td><td>Certified — cert not uploaded</td></tr>
+    </table></div></div>`;
+
+S.defects=()=>`
+  <div class="head"><div class="eyebrow">Shop queue</div><h1>Defects</h1>
+  <p class="sub">The system classifies and routes. It never diagnoses — a driver's words stay a
+    driver's words until a qualified person looks.</p></div>
+  ${DB.defects.map(d=>`<div class="card ${d.blocks?'hazard':''}">
+    <h3>${d.id} — ${d.unit}</h3>
+    <p style="font-size:16px;margin-bottom:10px">${d.title}</p>
+    <dl class="kv">
+      <dt>Severity</dt><dd>${provChip(d.severity==='critical'?'blockedp':d.severity==='inspection_required'?'pending':'unknown',
+        d.severity.replace(/_/g,' ').toUpperCase())}</dd>
+      <dt>Reported</dt><dd>${d.reportedAt} · ${d.by}</dd>
+      <dt>Dispatch</dt><dd>${d.blocks
+        ? provChip('blockedp','UNIT HELD — MECHANIC RELEASE REQUIRED')
+        : provChip('confirmed','MAY DISPATCH')}</dd>
+    </dl>
+    <div class="btnrow" style="margin-top:12px">
+      <button class="btn">Open work order</button><button class="btn sm">Change severity</button>
+      ${d.blocks?'<button class="btn sm ok">Release unit</button>':''}</div></div>`).join('')}
+  <div class="card"><h3>Escalation path</h3>
+    <div class="tl" style="padding-left:78px">
+      <div class="ev"><time>L1</time><b>Monitor</b><p>Logged, no action</p></div>
+      <div class="ev"><time>L2</time><b>Repair scheduled</b></div>
+      <div class="ev pend"><time>L3</time><b>Supervisor review</b></div>
+      <div class="ev pend"><time>L4</time><b>Unit unavailable</b><p>Dispatch blocked until a mechanic releases it</p></div>
+    </div></div>`;
+
+S.workorders=()=>`
+  <div class="head"><div class="eyebrow">Shop</div><h1>Work orders</h1></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>WO</th><th>Unit</th><th>From</th><th>Priority</th><th>Status</th><th>Tech</th></tr>
+    <tr><td class="mono">WO-2294</td><td>TRK-31</td><td>MD-4809</td>
+      <td>${provChip('blockedp','CRITICAL')}</td><td>In progress</td><td>T. Nguyen</td></tr>
+    <tr><td class="mono">WO-2293</td><td>VAC-12</td><td>Inspection due</td>
+      <td>${provChip('pending','URGENT')}</td><td>Waiting parts</td><td>—</td></tr>
+    <tr><td class="mono">WO-2292</td><td>WTR-08</td><td>MD-4804</td>
+      <td>${provChip('unknown','ROUTINE')}</td><td>Open</td><td>—</td></tr>
+  </table></div></div>
+  <div class="card"><h3>WO-2294 · brake pull</h3>
+    <dl class="kv">
+      <dt>Odometer</dt><dd class="mono">341,882 km</dd>
+      <dt>Engine hours</dt><dd class="mono">9,140</dd>
+      <dt>Findings</dt><dd>Right front caliper seized</dd>
+      <dt>Corrective action</dt><dd>Caliper replaced, brakes bled, road tested</dd>
+      <dt>Parts</dt><dd class="mono">CAL-4471 ×1</dd>
+      <dt>Labour</dt><dd class="mono">180 min</dd>
+      <dt>Release</dt><dd>${provChip('pending','AWAITING MECHANIC SIGN-OFF')}</dd>
+    </dl>
+    <div class="btnrow" style="margin-top:13px"><button class="btn go">Sign off & release unit</button></div></div>`;
+
+S.exceptions=()=>`
+  <div class="head"><div class="eyebrow">One place, instead of eleven screens</div>
+    <h1>Exception centre</h1>
+    <p class="sub">Everything that needs a person today. Each one opens straight to the fix.</p></div>
+  <div class="grid g3">${DB.exceptions.map(e=>`
+    <div class="stat ${e.sev==='bad'?'bad':'warn'}" style="cursor:pointer">
+      <div class="n mono">${e.n}</div><div class="l">${e.label}</div>
+      <p class="footnote" style="margin-top:6px">${e.detail}</p></div>`).join('')}</div>
+  <div class="card" style="margin-top:14px"><h3>Oldest first</h3>
+    <div class="wrapx"><table>
+      <tr><th>Age</th><th>Item</th><th>Blocking</th><th></th></tr>
+      <tr><td class="mono">9 d</td><td>TRIP-4812 — no disposal ticket</td>
+        <td>${provChip('blockedp','INVOICE HELD')}</td><td><button class="btn sm">Ask driver</button></td></tr>
+      <tr><td class="mono">6 d</td><td>TRK-31 insurance expires</td>
+        <td>${provChip('blockedp','DISPATCH AT RISK')}</td><td><button class="btn sm">Upload</button></td></tr>
+      <tr><td class="mono">3 d</td><td>VAC-12 inspection overdue</td>
+        <td>${provChip('blockedp','UNIT HELD')}</td><td><button class="btn sm">Book shop</button></td></tr>
+      <tr><td class="mono">2 d</td><td>Facility A averaging +31 min vs baseline</td>
+        <td>${provChip('unknown','NOT BLOCKING')}</td><td><button class="btn sm">See trend</button></td></tr>
+    </table></div></div>`;
+
+S.jobs=()=>`
+  <div class="head"><div class="eyebrow">Root record — everything hangs off this</div><h1>Jobs</h1>
+  <p class="sub">A trip can't exist without a job. Customer, rate card and billing all resolve from here.</p></div>
+  <div class="btnrow" style="margin-bottom:14px"><button class="btn go">New job</button>
+    <button class="btn">Import from customer PO</button></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>Job</th><th>Customer</th><th>Work</th><th>Location</th><th>Driver / unit</th><th>State</th></tr>
+    ${DB.jobs.map(j=>`<tr>
+      <td class="mono">${j.jobCode}</td><td>${j.customer}</td><td>${j.type}</td>
+      <td class="mono">${j.location}</td><td>${j.driver} / ${j.vehicle}</td>
+      <td>${provChip(j.status==='awaiting_docs'?'pending':j.status==='dispatched'?'unknown':'confirmed',
+        j.status.replace(/_/g,' ').toUpperCase())}</td></tr>`).join('')}
+  </table></div></div>
+  <div class="card"><h3>JOB-8843 — not yet dispatchable</h3>
+    <dl class="kv">
+      <dt>Customer</dt><dd>Bearpaw Resources</dd>
+      <dt>Driver</dt><dd>${provChip('blockedp','NOT ASSIGNED')}</dd>
+      <dt>Unit</dt><dd>${provChip('blockedp','NOT ASSIGNED')}</dd>
+      <dt>Load profile</dt><dd>${provChip('pending','NEEDS CLASSIFICATION')}</dd>
+      <dt>Disposal site</dt><dd>${provChip('unknown','NOT SELECTED')}</dd>
+      <dt>Rate card</dt><dd>Hydrovac — standard</dd>
+    </dl>
+    <div class="btnrow" style="margin-top:13px"><button class="btn">Assign crew</button>
+      <button class="btn">Classify load</button></div></div>`;
+
+S.trips=()=>`
+  <div class="head"><div class="eyebrow">Office</div><h1>Trips</h1></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>Trip</th><th>Job</th><th>Unit</th><th>Distance</th><th>Wait</th><th>Docs</th><th>Billing</th></tr>
+    <tr><td class="mono">4821</td><td class="mono">8841</td><td>VAC-27</td><td class="mono unconf">96 km*</td>
+      <td class="mono">15 m</td><td>${provChip('pending','1 MISSING')}</td><td>${provChip('unknown','HELD')}</td></tr>
+    <tr><td class="mono">4820</td><td class="mono">8839</td><td>TRK-31</td><td class="mono">142 km</td>
+      <td class="mono">41 m</td><td>${provChip('pending','1 MISSING')}</td><td>${provChip('unknown','HELD')}</td></tr>
+    <tr><td class="mono">4819</td><td class="mono">8838</td><td>WTR-08</td><td class="mono">64 km</td>
+      <td class="mono">6 m</td><td>${provChip('confirmed','COMPLETE')}</td><td>${provChip('confirmed','INVOICED')}</td></tr>
+  </table></div>
+  <p class="footnote">*Distance from GPS breadcrumbs — closing odometer not entered yet, so it's
+    shown as provisional rather than rounded into a billable number.</p></div>
+  <div class="card"><h3>Proof-of-service package — TRIP-4819</h3>
+    <div class="grid g3">${["Trip summary","Manifest M-28489","Load ticket","Scale ticket",
+      "Disposal ticket","Times & quantities","GPS confirmation","Photos (4)","Signature"]
+      .map(x=>`<div class="note">${x} ${provChip('confirmed','✓')}</div>`).join('')}</div>
+    <div class="btnrow" style="margin-top:13px"><button class="btn go">Generate PDF</button>
+      <button class="btn">Send to customer</button></div></div>`;
+
+S.docs=()=>`
+  <div class="head"><div class="eyebrow">Expiry engine</div><h1>Documents & expiry</h1>
+  <p class="sub">Current → expiring → expired → missing. Nobody has to remember.</p></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>Owner</th><th>Document</th><th>Expires</th><th>State</th><th></th></tr>
+    <tr><td>TRK-31</td><td>Insurance certificate</td><td class="mono">2026-09-04</td>
+      <td>${provChip('blockedp','6 DAYS')}</td><td><button class="btn sm">Upload</button></td></tr>
+    <tr><td>D. Reid</td><td>Licence — Class 1</td><td class="mono">2026-09-16</td>
+      <td>${provChip('pending','18 DAYS')}</td><td><button class="btn sm">Remind</button></td></tr>
+    <tr><td>M. Okonkwo</td><td>H2S Alive</td><td class="mono">2026-09-24</td>
+      <td>${provChip('pending','26 DAYS')}</td><td><button class="btn sm">Remind</button></td></tr>
+    <tr><td>VAC-12</td><td>Annual inspection</td><td class="mono">2026-08-26</td>
+      <td>${provChip('blockedp','EXPIRED')}</td><td><button class="btn sm">Book shop</button></td></tr>
+    <tr><td>VAC-27</td><td>Inspection certificate</td><td class="mono">—</td>
+      <td>${provChip('unknown','MISSING')}</td><td><button class="btn sm">Request</button></td></tr>
+  </table></div></div>
+  <div class="card"><h3>Photo read — pending review</h3>
+    <dl class="kv">
+      <dt>Document</dt><dd>Insurance certificate · TRK-31</dd>
+      <dt>Policy no.</dt><dd class="mono unconf">GL-4471-882 ${provChip('pending','OCR')}</dd>
+      <dt>Expires</dt><dd class="mono unconf">2027-09-04 ${provChip('pending','OCR')}</dd>
+      <dt>Insurer</dt><dd class="unconf">Prairie Mutual ${provChip('pending','OCR')}</dd>
+    </dl>
+    <div class="btnrow" style="margin-top:12px"><button class="btn ok">Accept all</button>
+      <button class="btn">Edit</button><button class="btn no">Reject</button></div>
+    <p class="footnote">Nothing here counts as current until a person accepts it.</p></div>`;
+
+S.disposal=()=>`
+  <div class="head"><div class="eyebrow">Canada / U.S.</div><h1>Disposal directory</h1>
+  <p class="sub">A registry listing is not proof a site accepts your load. Acceptance is shown as
+    verified, needs confirmation, or not established — never assumed.</p></div>
+  <div class="card"><h3>Clearwater Disposal #3</h3>
+    <div class="grid g2"><div><dl class="kv">
+      <dt>Type</dt><dd>Class 1B landfill / liquid</dd>
+      <dt>Jurisdiction</dt><dd>Alberta · AEP</dd>
+      <dt>Registry ID</dt><dd class="mono">AEP-118-2291</dd>
+      <dt>Hours</dt><dd class="mono">06:00–18:00 Mon–Sat</dd>
+      <dt>Scale</dt><dd>${provChip('confirmed','ON SITE')}</dd>
+      <dt>Washout</dt><dd>${provChip('confirmed','AVAILABLE')}</dd>
+    </dl></div><div><dl class="kv">
+      <dt>Hydrovac slurry</dt><dd>${provChip('confirmed','ACCEPTED')}</dd>
+      <dt>Liquid waste</dt><dd>${provChip('confirmed','ACCEPTED')}</dd>
+      <dt>DG Class 3</dt><dd>${provChip('pending','NEEDS FACILITY CONFIRMATION')}</dd>
+      <dt>Max vehicle</dt><dd>${provChip('unknown','NOT ESTABLISHED')}</dd>
+      <dt>Pre-approval</dt><dd>Required for DG</dd>
+      <dt>Last verified</dt><dd class="mono">2026-08-14 · by phone</dd>
+    </dl></div></div>
+    <div class="note amber" style="margin-top:12px">Two fields aren't established. Source:
+      AEP registry + one phone confirmation. Call before hauling Class 3 here.</div>
+    <div class="btnrow" style="margin-top:12px"><button class="btn">Call facility</button>
+      <button class="btn">Send to route check</button><button class="btn sm">Mark verified today</button></div></div>
+  <div class="card"><h3>Average turnaround, from our own trips</h3>
+    <div class="wrapx"><table>
+      <tr><th>Facility</th><th>Queue</th><th>Unload</th><th>Total stop</th><th>Trips</th></tr>
+      <tr><td>Clearwater #3</td><td class="mono">8 m</td><td class="mono">23 m</td><td class="mono">39 m</td><td class="mono">142</td></tr>
+      <tr><td>Facility A</td><td class="mono unconf">31 m</td><td class="mono">19 m</td><td class="mono">58 m</td><td class="mono">88</td></tr>
+      <tr><td>Redwater North</td><td class="mono">4 m</td><td class="mono">21 m</td><td class="mono">31 m</td><td class="mono">61</td></tr>
+    </table></div>
+    <p class="footnote">Measured, not estimated. This is the number to bring to a rate conversation.</p></div>`;
+
+S.billing=()=>`
+  <div class="head"><div class="eyebrow">Built from confirmed events only</div><h1>Billing</h1></div>
+  <div class="card"><h3>TRIP-4819 — ready to invoice</h3>
+    <div class="wrapx"><table>
+      <tr><th>Line</th><th>Qty</th><th>Rate</th><th>Amount</th><th>Where it came from</th></tr>
+      <tr><td>Vac truck — hourly</td><td class="mono">5.5 h</td><td class="mono">$185</td>
+        <td class="mono">$1,017.50</td><td>${provChip('confirmed','TRIP EVENTS')}</td></tr>
+      <tr><td>Disposal — liquid</td><td class="mono">8.5 m³</td><td class="mono">$42</td>
+        <td class="mono">$357.00</td><td>${provChip('confirmed','SCALE TICKET')}</td></tr>
+      <tr><td>Standby / wait</td><td class="mono">0.7 h</td><td class="mono">$140</td>
+        <td class="mono">$98.00</td><td>${provChip('confirmed','SCALE DELAY')}</td></tr>
+      <tr><td>Mileage</td><td class="mono">64 km</td><td class="mono">$3.10</td>
+        <td class="mono">$198.40</td><td>${provChip('confirmed','ODOMETER')}</td></tr>
+    </table></div>
+    <p class="footnote" style="margin-top:12px">Every line traces to a confirmed event with a
+      timestamp. That's what makes a wait-time charge defensible when a customer questions it.</p>
+    <div class="btnrow" style="margin-top:10px"><button class="btn go">Generate invoice package</button></div></div>
+  <div class="card"><h3>TRIP-4821 — held</h3>
+    <div class="note amber">Can't bill yet: disposal ticket missing, closing odometer not entered,
+      and the departure time is still an unconfirmed GPS proposal. Three specific things, not
+      “incomplete”.</div></div>`;
+
+S.audit=()=>`
+  <div class="head"><div class="eyebrow">Nothing is overwritten silently</div><h1>Audit log</h1>
+  <p class="sub">Every correction keeps the original value, who changed it, and why.</p></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>Time</th><th>Who</th><th>Change</th><th>Was</th><th>Now</th><th>Reason</th></tr>
+    ${DB.audit.map(a=>`<tr><td class="mono">${a.t}</td><td>${a.who}</td><td>${a.what}</td>
+      <td class="mono" style="color:var(--faint)">${a.was}</td><td class="mono">${a.now}</td>
+      <td style="color:var(--dim)">${a.why}</td></tr>`).join('')}
+  </table></div></div>
+  <div class="card"><h3>Why the rejected proposal is kept</h3>
+    <p class="sub" style="margin-top:0">The 08:42 row is a GPS event a driver turned down. Keeping
+      rejections is how you find out a geofence is drawn wrong — five rejections at the same zone is
+      a map problem, not five driver mistakes.</p></div>`;
+
+S.feedback=()=>`
+  <div class="head"><div class="eyebrow">Pilot instrumentation</div><h1>Feedback queue</h1>
+  <p class="sub">“Make this easier” on every screen. Captures which screen they were on.</p></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>#</th><th>Screen</th><th>From</th><th>Problem</th><th>How often</th><th>Impact</th><th>State</th></tr>
+    ${DB.feedback.map(f=>`<tr><td class="mono">${f.id}</td><td>${f.area}</td><td>${f.who}</td>
+      <td>${f.problem}</td><td>${f.freq}</td>
+      <td>${provChip(f.impact==='High'?'blockedp':'pending',f.impact.toUpperCase())}</td>
+      <td>${f.status}</td></tr>`).join('')}
+  </table></div></div>
+  <div class="card"><h3>What the pilot has to measure</h3>
+    <div class="grid g3">
+      <div class="stat"><div class="n mono">?</div><div class="l">Min paperwork / trip</div></div>
+      <div class="stat"><div class="n mono">?</div><div class="l">Office correction rate</div></div>
+      <div class="stat"><div class="n mono">?</div><div class="l">Missing-doc rate</div></div>
+      <div class="stat"><div class="n mono">?</div><div class="l">Days to invoice</div></div>
+      <div class="stat"><div class="n mono">?</div><div class="l">Defects captured</div></div>
+      <div class="stat"><div class="n mono">?</div><div class="l">Taps per job</div></div>
+    </div>
+    <p class="footnote">All six need a baseline measured on paper <em>before</em> go-live. Without
+      that the pilot ends with opinions instead of evidence.</p></div>`;
+
+S.zones=()=>`
+  <div class="head"><div class="eyebrow">Admin</div><h1>Operating zones</h1>
+  <p class="sub">Geofences the GPS engine reads. Radius is a judgement call — too tight and arrivals
+    get missed, too loose and a truck on the access road reads as on site.</p></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>Zone</th><th>Type</th><th>Radius</th><th>Detections</th><th>Rejected</th><th>Verified</th></tr>
+    <tr><td>North Pad · Loading 14</td><td>loading</td><td class="mono">75 m</td>
+      <td class="mono">142</td><td class="mono">3</td><td class="mono">2026-08-02</td></tr>
+    <tr><td>Clearwater #3 · Unload</td><td>unloading</td><td class="mono">90 m</td>
+      <td class="mono">98</td><td class="mono">1</td><td class="mono">2026-07-19</td></tr>
+    <tr><td>South Pit · Loading</td><td>loading</td><td class="mono unconf">50 m</td>
+      <td class="mono">61</td><td class="mono unconf">14</td><td class="mono">2026-05-11</td></tr>
+  </table></div>
+  <div class="note amber" style="margin-top:12px">South Pit is rejected 23% of the time — a strong
+    sign the radius is too tight or the coordinates are off. Worth a site visit.</div></div>`;
+
+S.roles=()=>`
+  <div class="head"><div class="eyebrow">Admin</div><h1>Roles & permissions</h1></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>Role</th><th>Can see</th><th>Can change</th></tr>
+    <tr><td>Driver</td><td>Own trips, logs, inspections, own documents, tailgates</td>
+      <td>Own events, confirm proposals, report conditions</td></tr>
+    <tr><td>Dispatcher</td><td>Jobs, routes, drivers, units, live status</td>
+      <td>Assign, dispatch, re-route</td></tr>
+    <tr><td>Mechanic</td><td>Units, inspections, defects, work orders</td>
+      <td>Severity, work orders, release a held unit</td></tr>
+    <tr><td>Office</td><td>Documents, compliance, billing, manifests</td>
+      <td>Corrections with a reason, verify documents</td></tr>
+    <tr><td>Manager</td><td>Everything operational + analytics</td><td>Rate cards, zones</td></tr>
+    <tr><td>Administrator</td><td>All, plus audit and configuration</td><td>Roles, retention, integrations</td></tr>
+  </table></div>
+  <p class="footnote">Sensitive radio frequencies, repeater tones and gate codes stay
+    permission-scoped rather than visible to everyone with the app.</p></div>`;
+
+S.sync=()=>`
+  <div class="head"><div class="eyebrow">Offline-first</div><h1>Sync & offline</h1>
+  <p class="sub">Cellular will drop. The app has to keep working and the driver has to be able to
+    see that their work is safe.</p></div>
+  <div class="grid g2">
+    <div class="card"><h3>Right now</h3>
+      <dl class="kv">
+        <dt>Connection</dt><dd>${provChip('pending','OFFLINE · 23 MIN')}</dd>
+        <dt>Queued</dt><dd class="mono">4 events, 2 photos</dd>
+        <dt>Last sync</dt><dd class="mono">11:04 · 11 min ago</dd>
+        <dt>Local store</dt><dd>${provChip('confirmed','ENCRYPTED · 41 MB')}</dd>
+      </dl>
+      <div class="note" style="margin-top:12px">✓ Saved on this device — waiting for a connection.
+        Nothing is lost.</div></div>
+    <div class="card"><h3>Cached before departure</h3>
+      ${[["Route & map tiles",1],["Site profiles for this trip",1],["Facility hours & contacts",1],
+         ["Unit safety plan",1],["Radio / comms profile",0],["Rate card",1]]
+        .map(([l,on])=>`<div class="layer">${on?provChip('confirmed','CACHED'):provChip('unknown','NOT BUILT')} ${l}</div>`).join('')}
+      <p class="footnote">Pulled while still on wi-fi at the yard, not fetched live at the lease.</p></div>
+  </div>
+  <div class="card"><h3>When two versions disagree</h3>
+    <p class="sub" style="margin-top:0">Driver marked unloading complete at 10:37 offline. Office
+      set it to 10:35 from the facility's ticket. Both are kept; a person decides. The app does not
+      silently pick a winner.</p>
+    <div class="btnrow"><button class="btn">Keep driver's 10:37</button>
+      <button class="btn">Keep office 10:35</button><button class="btn sm">See both sources</button></div></div>`;
+
+S.billingbook=()=>`
+  <div class="head"><div class="eyebrow">JOB-2026-001842 · Northridge Energy</div>
+    <h1>Billing book BB-2026-001842</h1>
+    <p class="sub">One job, many trips, many loads, many tickets. The book is the binder that holds
+      them together — not a flat list of charge lines.</p></div>
+
+  <div class="grid g4">
+    <div class="stat"><div class="n mono">3</div><div class="l">Trips</div></div>
+    <div class="stat"><div class="n mono">4</div><div class="l">Loads</div></div>
+    <div class="stat warn"><div class="n mono">3/4</div><div class="l">Disposal verified</div></div>
+    <div class="stat warn"><div class="n mono">86%</div><div class="l">Billing ready</div></div>
+  </div>
+
+  <div class="card"><h3>Load register</h3>
+    <div class="wrapx"><table>
+      <tr><th>Load</th><th>Trip</th><th>Qty</th><th>Measured by</th><th>Load ticket</th><th>Disposal</th><th>Chain</th></tr>
+      <tr><td class="mono">LD-…4821-01</td><td class="mono">TR-…4821</td><td class="mono">8.7 m³</td>
+        <td>Scale</td><td class="mono">LT-…-01</td><td class="mono">DT-…-01</td>
+        <td>${provChip('confirmed','BILLED')}</td></tr>
+      <tr><td class="mono">LD-…4822-01</td><td class="mono">TR-…4822</td><td class="mono">8.2 m³</td>
+        <td>Scale</td><td class="mono">LT-…-02</td><td class="mono">DT-…-02</td>
+        <td>${provChip('confirmed','DISPOSAL VERIFIED')}</td></tr>
+      <tr><td class="mono">LD-…4823-01</td><td class="mono">TR-…4823</td><td class="mono">8.5 m³</td>
+        <td>Scale</td><td class="mono">LT-…-03</td><td class="mono">DT-…-03</td>
+        <td>${provChip('confirmed','DISPOSAL VERIFIED')}</td></tr>
+      <tr><td class="mono">LD-…4823-02</td><td class="mono">TR-…4823</td><td class="mono unconf">~8 m³</td>
+        <td class="unconf">Estimate</td><td class="mono">LT-…-04</td>
+        <td>${provChip('blockedp','MISSING')}</td><td>${provChip('pending','UNLOADED')}</td></tr>
+    </table></div>
+    <p class="footnote">Load 4 was measured by estimate, not by scale. Measurement method travels
+      with the quantity, because an estimate and a weighed figure are not equally billable.</p></div>
+
+  <div class="card"><h3>Loads can share one disposal batch</h3>
+    <p class="sub" style="margin:0 0 10px">Loads 2 and 3 went to the facility under a single batch
+      ticket. The model never assumes one load equals one ticket.</p>
+    <div class="tl" style="padding-left:96px">
+      <div class="ev"><time>LD-02</time><b>8.2 m³</b></div>
+      <div class="ev"><time>LD-03</time><b>8.5 m³</b><p>→ Batch DB-2026-000118 · 16.7 m³ · ${provChip('confirmed','VERIFIED')}</p></div>
+    </div></div>
+
+  <div class="card"><h3>Billing state</h3>
+    <div class="tl" style="padding-left:78px">
+      <div class="ev"><time>1</time><b>Operations complete</b></div>
+      <div class="ev"><time>2</time><b>Documents complete</b></div>
+      <div class="ev pend"><time>3</time><b>Disposal verified</b><p>1 of 4 tickets outstanding</p></div>
+      <div class="ev gap"><time>4</time><b>Logs complete</b></div>
+      <div class="ev gap"><time>5</time><b>Billing review</b></div>
+      <div class="ev gap"><time>6</time><b>Approved</b></div>
+      <div class="ev gap"><time>7</time><b>Invoiced</b></div>
+    </div>
+    <div class="note amber" style="margin-top:10px">Held on two specific things: disposal ticket for
+      load 4, and load 4's quantity is an estimate rather than a weighed figure.</div>
+    <div class="btnrow" style="margin-top:12px"><button class="btn">Ask driver for ticket</button>
+      <button class="btn go">Export complete billing book</button></div></div>`;
+
+S.invoice=()=>`
+  <div class="head"><div class="eyebrow">Getting it signed, and getting it paid</div>
+    <h1>Invoices & acceptance</h1></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>Invoice</th><th>Customer</th><th>AFE</th><th>Total</th><th>State</th><th>Age</th></tr>
+    <tr><td class="mono">INV-2026-000391</td><td>Northridge Energy</td><td class="mono">AFE-8841-22</td>
+      <td class="mono">$1,951.03</td><td>${provChip('confirmed','APPROVED BY CLIENT')}</td><td class="mono">4 d</td></tr>
+    <tr><td class="mono">INV-2026-000390</td><td>Bearpaw Resources</td><td class="mono">AFE-7712-04</td>
+      <td class="mono">$4,180.55</td><td>${provChip('pending','SENT · VIEWED, NOT SIGNED')}</td><td class="mono">11 d</td></tr>
+    <tr><td class="mono">INV-2026-000388</td><td>Cold Lake Field Svc</td><td class="mono unconf">—</td>
+      <td class="mono">$2,644.00</td><td>${provChip('blockedp','DISPUTED')}</td><td class="mono">26 d</td></tr>
+  </table></div></div>
+
+  <div class="card"><h3>How a client signs — no login required</h3>
+    <div class="tl" style="padding-left:96px">
+      <div class="ev"><time>Aug 25</time><b>Sent</b><p>Secure link to accounts payable + company rep</p></div>
+      <div class="ev"><time>Aug 25</time><b>Opened</b><p>Recorded — so “we never got it” is answerable</p></div>
+      <div class="ev"><time>Aug 26</time><b>Package reviewed</b><p>Invoice, field ticket, disposal tickets, GPS times, photos</p></div>
+      <div class="ev"><time>Aug 26</time><b>Approved & signed</b><p>R. Hollis, Northridge Energy ${provChip('confirmed','COUNTERSIGNED PDF ON FILE')}</p></div>
+      <div class="ev gap"><time>—</time><b class="gapnote">Payment terms net 30 · due Sep 25</b></div>
+    </div>
+    <p class="footnote">The countersigned PDF goes straight to the financial records with the
+      invoice. That's the document that ends an argument.</p></div>
+
+  <div class="card"><h3>INV-2026-000388 — disputed</h3>
+    <dl class="kv">
+      <dt>Raised by</dt><dd>J. Marchand, Cold Lake Field Svc</dd>
+      <dt>Reason</dt><dd>Disputes 1.5 h standby on Aug 3</dd>
+      <dt>Our evidence</dt><dd>${provChip('confirmed','GPS ON SITE 13:12–14:44')}</dd>
+      <dt>Field ticket</dt><dd>${provChip('blockedp','NO SIGNATURE — REP OFF SITE')}</dd>
+    </dl>
+    <div class="note amber" style="margin-top:11px">GPS supports the standby, but nobody signed for
+      it at the lease. This is exactly the invoice that gets written off — and exactly what the
+      field ticket screen is designed to prevent.</div>
+    <div class="btnrow" style="margin-top:11px"><button class="btn">Send evidence package</button>
+      <button class="btn sm">Credit the line</button></div></div>
+
+  <div class="card"><h3>Outstanding</h3>
+    <div class="grid g4">
+      <div class="stat good"><div class="n mono">$1,951</div><div class="l">Approved</div></div>
+      <div class="stat warn"><div class="n mono">$4,181</div><div class="l">Awaiting client</div></div>
+      <div class="stat bad"><div class="n mono">$2,644</div><div class="l">Disputed</div></div>
+      <div class="stat"><div class="n mono">$12,418</div><div class="l">Not yet billed</div></div>
+    </div></div>`;
+
+S.search=()=>`
+  <div class="head"><div class="eyebrow">Any number, from anywhere in the chain</div>
+    <h1>Tracking search</h1>
+    <p class="sub">Somebody phones with a number off a paper ticket. Type it in and get the whole
+      chain — backward to the job, forward to the invoice.</p></div>
+  <div class="card">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input value="DT-2026-004821-01" readonly style="flex:1;min-width:220px;background:var(--bed);
+        border:1px solid var(--line);color:var(--ink);font-family:'IBM Plex Mono';font-size:15px;
+        padding:11px 13px;border-radius:var(--r)">
+      <button class="btn go">Search</button></div>
+    <p class="footnote">Accepts any prefix — JOB, BB, TR, LD, LT, DT, MF, FT, DL, TG, WO, INV.</p></div>
+
+  <div class="card"><h3>DT-2026-004821-01 — disposal ticket</h3>
+    <div class="tl" style="padding-left:118px">
+      <div class="ev"><time>JOB</time><b>JOB-2026-001842</b><p>Northridge Energy · AFE-8841-22</p></div>
+      <div class="ev"><time>BOOK</time><b>BB-2026-001842</b><p>Billing state: disposal verified</p></div>
+      <div class="ev"><time>TRIP</time><b>TR-2026-004821</b><p>VAC-27 · OP-0047 · 96 km</p></div>
+      <div class="ev"><time>LOAD</time><b>LD-2026-004821-01</b><p>8.7 m³ · measured by scale</p></div>
+      <div class="ev"><time>TICKET</time><b>DT-2026-004821-01</b><p>Clearwater #3 · net 8,500 kg ${provChip('confirmed','VERIFIED')}</p></div>
+      <div class="ev"><time>MANIFEST</time><b>MF-2026-004821</b></div>
+      <div class="ev"><time>SIGNED</time><b>FT-2026-001842</b><p>R. Hollis, Northridge Energy · Aug 29</p></div>
+      <div class="ev"><time>LOG</time><b>DL-2026-08-0047</b><p>Operator daily log</p></div>
+      <div class="ev"><time>INVOICE</time><b>INV-2026-000391</b><p>$1,951.03 ${provChip('confirmed','CLIENT APPROVED')}</p></div>
+    </div></div>
+
+  <div class="card"><h3>Who touched it</h3>
+    <div class="wrapx"><table>
+      <tr><th>When</th><th>Action</th><th>Signed in as</th><th>Acting for</th><th>Device</th></tr>
+      <tr><td class="mono">08:41</td><td>Ticket created</td><td>User #382</td><td class="mono">OP-0047</td>
+        <td class="mono">ANDROID-TRK-27</td></tr>
+      <tr><td class="mono">11:04</td><td>Scale photo attached</td><td>User #382</td><td class="mono">OP-0047</td>
+        <td class="mono">ANDROID-TRK-27</td></tr>
+      <tr><td class="mono">11:15</td><td>Quantity corrected 8.2 → 8.7</td><td>Office #82</td>
+        <td class="mono">OP-0047</td><td class="mono">WEB</td></tr>
+    </table></div>
+    <p class="footnote">Row 3 is delegation: the office corrected it, on behalf of the operator, with
+      a reason. It never appears as though the driver made that change themselves.</p></div>`;
+
+S.dailylog=()=>`
+  <div class="head"><div class="eyebrow">DL-2026-08-0047 · D. Reid</div><h1>Daily log</h1>
+  <p class="sub">Duty events belong to a numbered log for the day, not scattered rows. The log is
+    what gets certified.</p></div>
+  <div class="card"><h3>August 29</h3>
+    <div class="tl" style="padding-left:112px">
+      <div class="ev"><time>00:00–06:30</time><b>Off duty</b></div>
+      <div class="ev"><time>06:30–07:00</time><b>On duty — pre-trip</b><p>VAC-27</p></div>
+      <div class="ev"><time>07:00–07:34</time><b>Driving</b><p>Yard → North Pad</p></div>
+      <div class="ev"><time>07:34–08:21</time><b>On duty — loading</b><p>TR-2026-004821</p></div>
+      <div class="ev"><time>08:21–10:03</time><b>Driving</b></div>
+      <div class="ev"><time>10:03–10:42</time><b>On duty — unloading</b></div>
+      <div class="ev pend"><time>10:42–?</time><b>Driving <span class="unconf">open</span></b>
+        <p>No closing entry yet</p></div>
+    </div>
+    <div class="grid g4" style="margin-top:14px">
+      <div class="stat"><div class="n mono">4:12</div><div class="l">Driving</div></div>
+      <div class="stat"><div class="n mono">2:16</div><div class="l">On duty</div></div>
+      <div class="stat warn"><div class="n mono">6:28</div><div class="l">Total on duty</div></div>
+      <div class="stat warn"><div class="n mono">92%</div><div class="l">Complete</div></div>
+    </div></div>
+  <div class="card"><h3>End-of-day reconciliation</h3>
+    <div class="say ai"><div class="who">Secretary</div>
+      You ran 4 trips today. I have 4 trip records, 4 load records and 3 disposal tickets —
+      TR-2026-004823 is missing its disposal ticket. Your last duty entry is still open. Want to
+      close the day out now?</div>
+    <div class="btnrow"><button class="btn go">Close out by voice</button>
+      <button class="btn">Photograph the missing ticket</button></div></div>
+  <div class="card"><h3>If the system was down</h3>
+    <dl class="kv">
+      <dt>Paper log</dt><dd class="mono">PL-2026-0047-0829</dd>
+      <dt>Scan</dt><dd>${provChip('pending','AWAITING OFFICE REVIEW')}</dd>
+      <dt>Entered by</dt><dd>Office #12, for OP-0047 — driver submitted paper</dd>
+    </dl>
+    <p class="footnote">The original scan stays attached. The digital record never pretends the
+      driver typed it.</p></div>`;
+
+S.numbering=()=>`
+  <div class="head"><div class="eyebrow">Admin</div><h1>Numbering & sequences</h1>
+  <p class="sub">Format is configuration. The database uses its own internal IDs, so changing how
+    numbers look never touches a single relationship.</p></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>Record</th><th>Format</th><th>Example</th><th>Resets</th><th>Next</th></tr>
+    <tr><td>Job</td><td class="mono">JOB-{YYYY}-{000000}</td><td class="mono">JOB-2026-001842</td>
+      <td>Yearly</td><td class="mono">1843</td></tr>
+    <tr><td>Billing book</td><td class="mono">BB-{YYYY}-{000000}</td><td class="mono">BB-2026-001842</td>
+      <td>Yearly</td><td class="mono">1843</td></tr>
+    <tr><td>Trip</td><td class="mono">TR-{YYYY}-{000000}</td><td class="mono">TR-2026-004821</td>
+      <td>Yearly</td><td class="mono">4824</td></tr>
+    <tr><td>Load</td><td class="mono">LD-{trip}-{00}</td><td class="mono">LD-2026-004821-01</td>
+      <td>Per trip</td><td class="mono">—</td></tr>
+    <tr><td>Disposal ticket</td><td class="mono">DT-{trip}-{00}</td><td class="mono">DT-2026-004821-01</td>
+      <td>Per trip</td><td class="mono">—</td></tr>
+    <tr><td>Field ticket</td><td class="mono">FT-{YYYY}-{000000}</td><td class="mono">FT-2026-001842</td>
+      <td>Yearly</td><td class="mono">1843</td></tr>
+    <tr><td>Daily log</td><td class="mono">DL-{YYYY}-{MM}-{0000}</td><td class="mono">DL-2026-08-0047</td>
+      <td>Monthly</td><td class="mono">0065</td></tr>
+    <tr><td>Invoice</td><td class="mono">INV-{YYYY}-{000000}</td><td class="mono">INV-2026-000391</td>
+      <td>Yearly</td><td class="mono">392</td></tr>
+  </table></div></div>
+  <div class="card"><h3>If you open a second yard</h3>
+    <p class="sub" style="margin-top:0">Add a branch code and the same sequences keep running,
+      separately, without a migration:</p>
+    <div class="mono" style="color:var(--dim);line-height:2">CAL-JOB-2026-000182<br>
+      EDM-JOB-2026-000391<br>JAS-JOB-2026-000047</div>
+    <p class="footnote">Child numbers hang off their parent — the third load on trip 4821 is
+      LD-2026-004821-03, not the 903rd load of the year. Readable on a paper ticket.</p></div>`;
+
+S.fieldticket=()=>`
+  <div class="head"><div class="eyebrow">A billable service event — not a job, not a trip</div>
+    <h1>Field ticket FT-2026-000421</h1>
+    <p class="sub">Signed by the customer's representative before you leave. Unsigned work is the
+      single most common reason a charge gets argued about ninety days later.</p></div>
+
+  <div class="card"><h3>Scope — what this one ticket covers</h3>
+    <div class="grid g4">
+      <button class="btn">Whole job</button>
+      <button class="btn go">This site visit</button>
+      <button class="btn">One load</button>
+      <button class="btn">Service event</button></div>
+    <p class="footnote" style="margin-top:11px">Set to <b>site visit</b>: the rep signs once for
+      07:18–09:14 covering all five loads. A different customer can sign per load instead — same
+      table, no schema change. Two visits to the same site on the same day get two tickets, so one
+      signature is never used to prove something that happened hours later.</p>
+    <dl class="kv" style="margin-top:12px">
+      <dt>Job</dt><dd class="mono">JOB-2026-001842</dd>
+      <dt>Trip</dt><dd class="mono">TR-2026-004821</dd>
+      <dt>Loads covered</dt><dd class="mono">LD-…-01 through LD-…-05</dd>
+      <dt>Site</dt><dd>North Pad · 04-12-084-06W5</dd>
+      <dt>Window</dt><dd class="mono">07:18 – 09:14</dd>
+    </dl></div>
+
+  <div class="card"><h3>Service timeline</h3>
+    <div class="tl" style="padding-left:96px">
+      <div class="ev"><time>07:18</time><b>Arrival</b></div>
+      <div class="ev"><time>07:23</time><b>Setup</b></div>
+      <div class="ev"><time>07:41</time><b>Loading</b></div>
+      <div class="ev"><time>08:22</time><b>Loading complete</b><p>5 loads</p></div>
+      <div class="ev pend"><time>08:25</time><b>Standby begins</b><p>Authorised on site by R. Hollis</p></div>
+      <div class="ev pend"><time>09:10</time><b>Standby ends</b><p>45 min ${provChip('pending','DRIVER VOICE')}</p></div>
+      <div class="ev"><time>09:14</time><b>Departure</b></div>
+    </div></div>
+
+  <div class="card hazard"><h3>Line by line — he accepted most of it</h3>
+    <div class="wrapx"><table>
+      <tr><th>Line</th><th>Qty</th><th>Measured</th><th>Rep's answer</th></tr>
+      <tr><td>Vac truck — on site</td><td class="mono">3.0 h</td><td>System timed</td>
+        <td>${provChip('confirmed','ACCEPTED')}</td></tr>
+      <tr><td>Loads — 5 × liquid</td><td class="mono">42.1 m³</td><td>Scale</td>
+        <td>${provChip('confirmed','ACCEPTED')}</td></tr>
+      <tr><td>Disposal</td><td class="mono">42.1 m³</td><td>Scale</td>
+        <td>${provChip('confirmed','ACCEPTED')}</td></tr>
+      <tr><td>Extra hose — 200 ft</td><td class="mono">1</td><td>Driver</td>
+        <td>${provChip('confirmed','ACCEPTED')}</td></tr>
+      <tr><td>Standby</td><td class="mono unconf">45 min</td><td class="unconf">Driver voice</td>
+        <td>${provChip('blockedp','DISPUTED')}</td></tr>
+    </table></div>
+    <div class="note amber" style="margin-top:12px">
+      <b>Standby — both statements kept.</b><br>
+      Driver: 45 minutes, 08:25–09:10.<br>
+      Company rep: 20 minutes.<br>
+      Neither figure is erased. The disputed line goes to billing review; the other four bill now.</div>
+    <p class="footnote">If the whole ticket failed on one disagreement, drivers would stop asking
+      for signatures at all.</p></div>
+
+  <div class="card"><h3>Signature — what he actually agreed to</h3>
+    <dl class="kv">
+      <dt>Result</dt><dd>${provChip('pending','PARTIALLY ACCEPTED')}</dd>
+      <dt>Signer</dt><dd>R. Hollis · Northridge Energy · Company representative</dd>
+      <dt>Phone</dt><dd class="mono">403-555-0148</dd>
+      <dt>Captured</dt><dd class="mono">09:15 · 51.0631, -114.0912 ${provChip('confirmed','GPS ±6 m')}</dd>
+      <dt>Method</dt><dd>Drawn on driver's device</dd>
+      <dt>Connection</dt><dd>${provChip('pending','SIGNED OFFLINE · QUEUED')}</dd>
+      <dt>AFE</dt><dd class="mono unconf">AFE-8841-22 ${provChip('pending','SPOKEN BY REP')}</dd>
+    </dl>
+    <div class="note" style="margin-top:12px">
+      <span class="mono" style="font-size:12.5px;color:var(--ink)">R. Hollis (Northridge Energy)
+      accepted field ticket FT-2026-000421 for service at North Pad from 07:18 to 09:14, covering
+      3 h vac truck service; 42.1 m³ loads; 42.1 m³ disposal; 200 ft extra hose — standby
+      disputed.</span></div>
+    <p class="footnote">That sentence is stored with the signature. “R. Hollis signed” on its own
+      proves very little six weeks later.</p>
+    <div class="btnrow" style="margin-top:12px">
+      <button class="btn go">Capture signature</button>
+      <button class="btn no">Refused everything</button>
+      <button class="btn">No representative on site</button></div></div>
+
+  <div class="card"><h3>After signing</h3>
+    <p class="sub" style="margin-top:0">The ticket is hashed at signature. Edit a quantity
+      afterwards and the signed version stays intact while the job flags
+      <span class="unconf">amended after signature</span> — nobody unknowingly invoices something
+      different from what the rep agreed to.</p>
+    <p class="sub">The ticket records facts, not money. “45 minutes standby” is evidence; the rate
+      engine decides separately whether that becomes 45 × the standby rate. Accounting logic stays
+      out of field evidence.</p></div>`;
+
+S.reconcile=()=>`
+  <div class="head"><div class="eyebrow">JOB-2026-001842 · closeout</div><h1>Ticket reconciliation</h1>
+  <p class="sub">Before the job closes, does every load have the paperwork it needs?</p></div>
+  <div class="grid g3">
+    <div class="stat"><div class="n mono">6</div><div class="l">Trips</div></div>
+    <div class="stat"><div class="n mono">8</div><div class="l">Loads</div></div>
+    <div class="stat"><div class="n mono">8</div><div class="l">Field tickets</div></div>
+    <div class="stat"><div class="n mono">8</div><div class="l">Disposal tickets</div></div>
+    <div class="stat"><div class="n mono">8</div><div class="l">Manifests</div></div>
+    <div class="stat good"><div class="n mono">7</div><div class="l">Fully accepted</div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>Signature outcomes</h3>
+    <div class="wrapx"><table>
+      <tr><th>Result</th><th>Count</th><th>Effect on billing</th></tr>
+      <tr><td>Accepted</td><td class="mono">7</td><td>${provChip('confirmed','READY')}</td></tr>
+      <tr><td>Partially accepted</td><td class="mono">1</td>
+        <td>${provChip('pending','4 LINES BILL · 1 IN REVIEW')}</td></tr>
+      <tr><td>Refused</td><td class="mono">0</td><td>—</td></tr>
+      <tr><td>No representative</td><td class="mono">0</td><td>—</td></tr>
+      <tr><td>Never presented</td><td class="mono">0</td><td>—</td></tr>
+    </table></div>
+    <div class="note" style="margin-top:12px">Billing ready: <b>7</b> · Review required: <b>1</b>
+      · No gaps in paperwork.</div>
+    <p class="footnote">Gaps are named individually — “2 load(s) with no field ticket”, not
+      “incomplete”. Office needs to know which phone call to make.</p></div>`;
+
+S.classify=()=>`
+  <div class="head"><div class="eyebrow">One classification, five outputs</div>
+    <h1>Job classification</h1>
+    <p class="sub">Pick the work once. The routing profile, permits, tickets, PPE, inspection items
+      and billing units all derive from it — nobody re-enters any of them.</p></div>
+
+  <div class="card"><h3>Classify</h3>
+    <div class="grid g2">
+      <div><dl class="kv">
+        <dt>Service</dt><dd>Oilfield — vacuum haul</dd>
+        <dt>Truck</dt><dd>Tri-drive vacuum truck</dd>
+        <dt>Trailer</dt><dd>None</dd>
+        <dt>Cargo</dt><dd>Produced water · 16,000 kg</dd>
+      </dl></div>
+      <div><dl class="kv">
+        <dt>Environment</dt><dd>Oilfield lease · gravel</dd>
+        <dt>Radius</dt><dd>Regional</dd>
+        <dt>Load method</dt><dd>Vacuum</dd>
+        <dt>Unload method</dt><dd>Pump</dd>
+      </dl></div></div>
+    <p class="footnote">Twelve independent dimensions, not one giant dropdown — so
+      “Class 1 / Super-B / oilfield pipe / oversize / TDG / permit-required” is a valid combination
+      without anyone having hard-coded it.</p></div>
+
+  <div class="card"><h3>→ Routing profile <span class="tag">for the map engine</span></h3>
+    <div class="wrapx"><table>
+      <tr><th>Axle group</th><th>Axles</th><th>Modelled load</th><th>Rating</th><th></th></tr>
+      <tr><td>Steer</td><td class="mono">1</td><td class="mono">4,900 kg</td><td class="mono">8,200</td>
+        <td>${provChip('confirmed','WITHIN')}</td></tr>
+      <tr><td>Drive</td><td class="mono">3</td><td class="mono">28,600 kg</td><td class="mono">24,000</td>
+        <td>${provChip('blockedp','OVER RATING')}</td></tr>
+    </table></div>
+    <dl class="kv" style="margin-top:12px">
+      <dt>GVW</dt><dd class="mono">33,500 kg</dd>
+      <dt>Envelope</dt><dd class="mono">11.6 m × 2.59 m × 4.05 m</dd>
+      <dt>Oversize</dt><dd>${provChip('confirmed','NO')}</dd>
+      <dt>Permit</dt><dd>${provChip('confirmed','NOT TRIGGERED')}</dd>
+    </dl>
+    <p style="margin:13px 0 7px;font-size:13px;color:var(--dim)">Layers the router must evaluate:</p>
+    <div>${["gross_weight","axle_weight","bridge_weight","bridge_clearance","truck_route",
+      "gravel_surface","seasonal_road_ban","lease_access","turnaround_capability"]
+      .map(l=>`<span class="tag mono" style="margin:0 5px 5px 0">${l}</span>`).join('')}</div>
+    <div class="note amber" style="margin-top:12px">Dangerous-goods layer <b>not</b> added —
+      produced water isn't classified hazardous here. Swap the cargo to crude and the layer appears
+      automatically, along with placarding on the inspection and TDG on the licence.</div></div>
+
+  <div class="card"><h3>→ Everything else, derived</h3>
+    <div class="grid g2">
+      <div><dl class="kv">
+        <dt>Licence</dt><dd>Class 3 / D <span class="tag">no trailer</span></dd>
+        <dt>Endorsements</dt><dd>Air brake (Z)</dd>
+        <dt>Tickets</dt><dd>H2S Alive · First Aid · Ground Disturbance · Site orientation</dd>
+        <dt>PPE</dt><dd>Hard hat · glasses · boots · hi-vis · FR coveralls · gas monitor</dd>
+      </dl></div>
+      <div><dl class="kv">
+        <dt>Permits</dt><dd>${provChip('confirmed','NONE REQUIRED')}</dd>
+        <dt>Documents</dt><dd>Trip inspection · daily log · field ticket</dd>
+        <dt>Inspection adds</dt><dd>Pump / PTO · tank and valves · hoses and fittings</dd>
+        <dt>Billing units</dt><dd>Per hour · per load · standby · wait time · fuel surcharge</dd>
+      </dl></div></div>
+    <div class="note amber" style="margin-top:12px">
+      <b>Thresholds unverified.</b> Oversize triggers for this jurisdiction are placeholders and
+      must be confirmed with the issuing authority before dispatch relies on them. The engine says
+      so rather than treating a default as law.</div></div>`;
+
+S.disposalrecon=()=>`
+  <div class="head"><div class="eyebrow">JOB-2026-001842 · the gate between operations and money</div>
+    <h1>Disposal reconciliation</h1>
+    <p class="sub">Is every disposal provable? A gap holds the disposal charge only — every other
+      accepted charge still bills.</p></div>
+  <div class="grid g4">
+    <div class="stat"><div class="n mono">8</div><div class="l">Disposals</div></div>
+    <div class="stat good"><div class="n mono">7</div><div class="l">Complete</div></div>
+    <div class="stat warn"><div class="n mono">1</div><div class="l">Needs review</div></div>
+    <div class="stat"><div class="n mono">$0</div><div class="l">Other charges held</div></div>
+  </div>
+  <div class="card hazard" style="margin-top:14px"><h3>DT-2026-004821-08</h3>
+    <div class="wrapx"><table>
+      <tr><th>Check</th><th>State</th></tr>
+      <tr><td>Tracking number · job · trip · load</td><td>${provChip('confirmed','PASS')}</td></tr>
+      <tr><td>Authenticated operator</td><td>${provChip('confirmed','PASS')}</td></tr>
+      <tr><td>Facility · material · quantity</td><td>${provChip('confirmed','PASS')}</td></tr>
+      <tr><td>Measurement method</td><td>${provChip('confirmed','SCALE')}</td></tr>
+      <tr><td>Arrival · departure</td><td>${provChip('confirmed','PASS')}</td></tr>
+      <tr><td>Facility ticket</td><td>${provChip('blockedp','MISSING')}</td></tr>
+      <tr><td>Net weight</td><td>${provChip('confirmed','PASS')}</td></tr>
+      <tr><td>Manifest</td><td>${provChip('unknown','NOT REQUIRED')}</td></tr>
+      <tr><td>Facility acknowledgement</td><td>${provChip('unknown','NOT REQUIRED')}</td></tr>
+      <tr><td>Billing relationship</td><td>${provChip('confirmed','PASS')}</td></tr>
+      <tr><td>Human verification</td><td>${provChip('pending','AWAITING')}</td></tr>
+    </table></div>
+    <div class="note amber" style="margin-top:12px">Missing: facility ticket.<br>
+      Effect: disposal charge held · other accepted charges may proceed.</div>
+    <p class="footnote">Two checks read <b>not required</b> — this facility issues no manifest and
+      takes no signature. A blanket checklist would show them as failures and train office staff to
+      ignore this screen.</p>
+    <div class="btnrow" style="margin-top:11px"><button class="btn">Ask driver for ticket</button>
+      <button class="btn sm">Mark verified</button></div></div>`;
+
+S.customercfg=()=>`
+  <div class="head"><div class="eyebrow">Admin</div><h1>Customer billing configuration</h1>
+  <p class="sub">Ticket scope is customer policy, not a decision for a driver standing at a lease
+    at 6am. LeaseOS presents each customer's normal workflow.</p></div>
+  <div class="card"><h3>Northridge Energy</h3>
+    <dl class="kv">
+      <dt>Default scope</dt><dd>Load</dd>
+      <dt>Driver may override to</dt><dd>Trip · service event</dd>
+      <dt>Signature</dt><dd>${provChip('confirmed','REQUIRED')}</dd>
+      <dt>Partial acceptance</dt><dd>${provChip('confirmed','ALLOWED')}</dd>
+      <dt>Required fields</dt><dd>AFE · PO · cost centre · material · quantity · measurement method</dd>
+      <dt>Required documents</dt><dd>Field ticket · disposal ticket · scale ticket · manifest</dd>
+      <dt>Portal</dt><dd>OpenInvoice</dd>
+      <dt>Terms</dt><dd class="mono">Net 30</dd>
+    </dl></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>Customer</th><th>Default scope</th><th>Signature</th><th>Partial</th><th>Terms</th></tr>
+    <tr><td>Northridge Energy</td><td>Load</td><td>Required</td><td>Yes</td><td class="mono">Net 30</td></tr>
+    <tr><td>Bearpaw Resources</td><td>Trip</td><td>Required</td><td>No</td><td class="mono">Net 45</td></tr>
+    <tr><td>Cold Lake Field Svc</td><td>Job</td><td>${provChip('unknown','NOT SET')}</td>
+      <td>Yes</td><td class="mono">Net 60</td></tr>
+  </table></div>
+  <div class="note amber" style="margin-top:12px">Cold Lake has no signature policy set — which is
+    why INV-2026-000388's standby is being disputed with no ticket to point at.</div></div>`;
+
+S.dispatchboard=()=>`
+  <div class="head"><div class="eyebrow">Dispatch operations centre</div><h1>Dispatch board</h1>
+  <p class="sub">Match, bid and eligibility are three different things. Nothing here assigns work
+    on its own.</p></div>
+  <div class="grid g4">
+    <div class="stat"><div class="n mono">12</div><div class="l">Jobs today</div></div>
+    <div class="stat warn"><div class="n mono">4</div><div class="l">Unassigned</div></div>
+    <div class="stat"><div class="n mono">7</div><div class="l">Open bids</div></div>
+    <div class="stat bad"><div class="n mono">2</div><div class="l">Start &lt; 2 h, no crew</div></div>
+    <div class="stat"><div class="n mono">9</div><div class="l">Operators available</div></div>
+    <div class="stat"><div class="n mono">3</div><div class="l">On call</div></div>
+    <div class="stat warn"><div class="n mono">2</div><div class="l">Units blocked</div></div>
+    <div class="stat bad"><div class="n mono">1</div><div class="l">Emergency</div></div>
+  </div>
+
+  <div class="card" style="margin-top:14px"><h3>Open for bid</h3>
+    <div class="card" style="background:var(--panel2);margin:0">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div>
+          <div class="mono" style="font-size:15px">JOB-2026-008841</div>
+          <div style="color:var(--dim);font-size:13.5px">Northridge Energy · Vac haul — produced water</div>
+          <div class="mono" style="font-size:12.5px;color:var(--faint);margin-top:3px">
+            04-12-084-06W5 → Clearwater Disposal #3</div>
+        </div>
+        <div style="text-align:right">
+          <div class="mono">Tomorrow 06:30</div>
+          <div class="tag" style="margin-top:4px">Normal priority</div>
+        </div>
+      </div>
+      <dl class="kv" style="margin-top:13px">
+        <dt>Crew</dt><dd>1 operator</dd>
+        <dt>Equipment</dt><dd>Tri-drive vac truck · pump · 12,000 L min</dd>
+        <dt>Estimated</dt><dd>4 loads / 10 hours / 96 km</dd>
+        <dt>Qualifications</dt><dd>TDG · H2S Alive · First Aid · customer orientation <span class="tag">preferred</span></dd>
+        <dt>Bids</dt><dd class="mono">4</dd>
+        <dt>Readiness</dt><dd>${provChip('pending','REVIEW — FACILITY ACCEPTANCE UNVERIFIED')}</dd>
+      </dl>
+      <div class="btnrow" style="margin-top:12px">
+        <button class="btn" onclick="go('bids')">Compare bids</button>
+        <button class="btn sm">Invite</button><button class="btn sm">Route check</button>
+        <button class="btn sm">Message</button></div>
+    </div>
+    <p class="footnote">Only operators whose profile could satisfy the basic requirements see this
+      posting. A heavy-haul assignment is never advertised to someone who can't perform it.</p></div>
+
+  <div class="card"><h3>Coming up — not yet assignable</h3>
+    <div class="wrapx"><table>
+      <tr><th>Job</th><th>Customer</th><th>When</th><th>Waiting on</th></tr>
+      <tr><td class="mono">JOB-8843</td><td>Bearpaw Resources</td><td>Thu</td>
+        <td>${provChip('pending','AWAITING PERMIT')}</td></tr>
+      <tr><td class="mono">JOB-8846</td><td>Northridge Energy</td><td>Fri</td>
+        <td>${provChip('pending','AWAITING CUSTOMER PO/AFE')}</td></tr>
+      <tr><td class="mono">JOB-8847</td><td>Cold Lake Field Svc</td><td>Fri</td>
+        <td>${provChip('unknown','MATERIAL CLASSIFICATION PENDING')}</td></tr>
+      <tr><td class="mono">JOB-8849</td><td>Bearpaw Resources</td><td>Sat</td>
+        <td>${provChip('pending','AWAITING CREW')}</td></tr>
+    </table></div>
+    <p class="footnote">Visible to dispatch, never presented as confirmed assignments.</p></div>
+
+  <div class="card hazard"><h3>Emergency — JOB-8852 · spill response</h3>
+    <dl class="kv">
+      <dt>Priority</dt><dd>${provChip('blockedp','EMERGENCY')}</dd>
+      <dt>Nearest qualified</dt><dd>M. Okonkwo · 41 km · environmental pool</dd>
+      <dt>Readiness</dt><dd>${provChip('blockedp','BLOCKED — WTR-08 ANNUAL INSPECTION EXPIRED')}</dd>
+    </dl>
+    <div class="note amber" style="margin-top:12px">Emergency accelerates who gets notified and how
+      fast. It does not weaken a single safety blocker — priority isn't even an input to the
+      readiness gate. Assign a different unit.</div></div>`;
+
+S.bids=()=>`
+  <div class="head"><div class="eyebrow">JOB-2026-008841 · 4 bids</div><h1>Bid comparison</h1>
+  <p class="sub">Facts side by side. Where LeaseOS suggests someone, it says why — the dispatcher
+    decides.</p></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>Operator</th><th>Unit</th><th>Distance</th><th>Departs</th><th>HOS</th><th>Match</th><th>Eligibility</th></tr>
+    <tr><td>D. Reid</td><td class="mono">VAC-27</td><td class="mono">28 km</td><td class="mono">06:10</td>
+      <td class="mono">600 min</td><td class="mono">86</td>
+      <td>${provChip('pending','REVIEW')}</td></tr>
+    <tr><td>M. Okonkwo</td><td class="mono">VAC-12</td><td class="mono">64 km</td><td class="mono">06:00</td>
+      <td class="mono">480 min</td><td class="mono">74</td>
+      <td>${provChip('blockedp','BLOCKED')}</td></tr>
+    <tr><td>J. Whitecalf</td><td class="mono">VAC-31</td><td class="mono">112 km</td><td class="mono">07:15</td>
+      <td class="mono unconf">not reported</td><td class="mono">61</td>
+      <td>${provChip('unknown','UNKNOWN')}</td></tr>
+    <tr><td>T. Lavallee</td><td class="mono">VAC-19</td><td class="mono">31 km</td><td class="mono">06:20</td>
+      <td class="mono">540 min</td><td class="mono">83</td>
+      <td>${provChip('confirmed','ELIGIBLE')}</td></tr>
+  </table></div>
+  <p class="footnote">Match and eligibility are separate columns because they answer different
+    questions. D. Reid scores highest and is still not assignable.</p></div>
+
+  <div class="card"><h3>Why T. Lavallee is suggested</h3>
+    <div class="note">Suggested because TDG certification (current), H2S Alive (current),
+      Specialty pool (vacuum_fluid), Equipment class (tri_drive_vac), Tank capacity (16,000 L),
+      Pump (fitted), Distance from origin (31 km). This is a suitability match only — dispatch
+      eligibility is evaluated separately.</div>
+    <p class="footnote">Every factor and its point contribution is stored. There is no hidden
+      ranking to argue with.</p></div>
+
+  <div class="card"><h3>Why M. Okonkwo is blocked</h3>
+    <dl class="kv">
+      <dt>Blocker</dt><dd>${provChip('blockedp','VAC-12 ANNUAL INSPECTION EXPIRED 2026-08-26')}</dd>
+      <dt>Overridable</dt><dd>${provChip('blockedp','NO — NOT BY ANY ROLE')}</dd>
+    </dl>
+    <div class="note amber" style="margin-top:11px">An expired inspection isn't a judgement call a
+      manager gets to make. The condition has to be fixed. An attempted override would still be
+      recorded — a refused attempt is exactly what an auditor wants to see.</div></div>
+
+  <div class="card"><h3>Why J. Whitecalf is unknown</h3>
+    <div class="note amber">Hours-of-service state not reported. Unknown ranks above review here:
+      an unevaluated condition is not a known-minor one, and it can't resolve to eligible by
+      default.</div></div>
+
+  <div class="card"><h3>Before awarding</h3>
+    <dl class="kv">
+      <dt>Bid submitted</dt><dd class="mono">3 h 12 m ago</dd>
+      <dt>Gate last run</dt><dd class="mono unconf">3 h 12 m ago</dd>
+      <dt>Action</dt><dd>${provChip('pending','RE-RUN READINESS BEFORE AWARD')}</dd>
+    </dl>
+    <p class="footnote">A licence can expire at midnight between bid and award. The gate is re-run
+      at assignment, never trusted from bid time.</p>
+    <div class="btnrow" style="margin-top:11px"><button class="btn go">Re-run gate & award</button></div></div>`;
+
+S.oncall=()=>`
+  <div class="head"><div class="eyebrow">Rotation</div><h1>On call</h1></div>
+  <div class="card"><div class="wrapx"><table>
+    <tr><th>#</th><th>Operator</th><th>Pool</th><th>Region</th><th>Window</th><th>Status</th></tr>
+    <tr><td class="mono">1</td><td>T. Lavallee</td><td>vacuum_fluid</td><td>Grande Prairie</td>
+      <td class="mono">18:00–06:00</td><td>${provChip('confirmed','ON CALL')}</td></tr>
+    <tr><td class="mono">2</td><td>D. Reid</td><td>vacuum_fluid</td><td>Grande Prairie</td>
+      <td class="mono">18:00–06:00</td><td>${provChip('pending','NEXT')}</td></tr>
+    <tr><td class="mono">3</td><td>S. Cardinal</td><td>environmental</td><td>Peace River</td>
+      <td class="mono">18:00–06:00</td><td>${provChip('unknown','NO RESPONSE · 22 MIN')}</td></tr>
+    <tr><td class="mono">—</td><td>M. Okonkwo</td><td>vacuum_fluid</td><td>Grande Prairie</td>
+      <td class="mono">—</td><td>${provChip('blockedp','UNAVAILABLE')}</td></tr>
+  </table></div></div>
+  <div class="card"><h3>What an operator can declare</h3>
+    <div class="grid g3">${["Available","Unavailable","Available after a time","Region limit",
+      "Equipment available","Max working radius","Preferred service types"]
+      .map(x=>`<div class="note">${x}</div>`).join('')}</div>
+    <div class="note amber" style="margin-top:12px">Declaring availability doesn't override HOS,
+      qualifications, maintenance, permits or safety restrictions. It's an input to matching, not a
+      bypass of the gate.</div></div>`;
+
+S.schedule=()=>`
+  <div class="head"><div class="eyebrow">7-day view</div><h1>Dispatch schedule</h1></div>
+  <div class="card"><h3>Tomorrow — 31 August</h3>
+    <div class="tl" style="padding-left:96px">
+      <div class="ev"><time>06:30</time><b>JOB-8841 · VAC-27 · D. Reid</b><p>Northridge · 4 loads · until ~16:00</p></div>
+      <div class="ev pend"><time>14:00</time><b>JOB-8850 · VAC-27 <span class="unconf">conflict</span></b>
+        <p>Proposed while VAC-27 is still on JOB-8841</p></div>
+      <div class="ev"><time>07:00</time><b>JOB-8842 · WTR-08 · M. Okonkwo</b><p>Water delivery</p></div>
+      <div class="ev gap"><time>09:00</time><b class="gapnote">VAC-12 — annual inspection booked</b></div>
+      <div class="ev gap"><time>—</time><b class="gapnote">D. Reid licence expires in 17 days</b></div>
+    </div>
+    <div class="note amber" style="margin-top:12px">
+      VAC-27 is assigned to JOB-8841 until approximately 16:00 and is also proposed for JOB-8850 at
+      14:00. Resources are never silently double-booked — back-to-back is fine, overlap is flagged.</div>
+    <div class="btnrow" style="margin-top:11px"><button class="btn">Reassign JOB-8850</button>
+      <button class="btn sm">Shift start time</button></div></div>
+
+  <div class="card"><h3>Fleet availability</h3>
+    <div class="wrapx"><table>
+      <tr><th>Unit</th><th>State</th><th>Until</th><th>Notes</th></tr>
+      <tr><td class="mono">VAC-27</td><td>${provChip('pending','ON JOB')}</td><td class="mono">~16:00</td><td>JOB-8841</td></tr>
+      <tr><td class="mono">VAC-19</td><td>${provChip('confirmed','AVAILABLE')}</td><td class="mono">—</td><td>—</td></tr>
+      <tr><td class="mono">VAC-12</td><td>${provChip('blockedp','DISPATCH BLOCKED')}</td><td class="mono">—</td>
+        <td>Annual inspection overdue 3 days</td></tr>
+      <tr><td class="mono">TRK-31</td><td>${provChip('blockedp','SHOP')}</td><td class="mono">—</td>
+        <td>Critical defect MD-4809 — awaiting mechanic release</td></tr>
+      <tr><td class="mono">WTR-08</td><td>${provChip('pending','RETURNING')}</td><td class="mono">15:10</td><td>JOB-8842</td></tr>
+    </table></div></div>`;
+
+/* ---------- boot ---------- */
+function renderView(){
+  const v=document.getElementById('view');
+  v.innerHTML=(S[screen]||S.job)();
+}
+document.querySelectorAll('.roleswitch button').forEach(b=>{
+  b.onclick=()=>{
+    role=b.dataset.role;
+    document.querySelectorAll('.roleswitch button').forEach(x=>x.setAttribute('aria-pressed',x===b));
+    const first=NAV.find(g=>g.roles.includes(role)).items[0][0];
+    go(first);
+  };
+});
+document.getElementById('navtoggle').onclick=()=>document.getElementById('nav').classList.toggle('open');
+document.getElementById('netdot').parentElement.onclick=()=>{
+  const d=document.getElementById('netdot'),t=document.getElementById('nettext');
+  const off=d.classList.toggle('off');
+  t.textContent=off?'Offline · 4 queued · synced 11m ago':'Online · all synced';
+};
+renderNav();renderView();
+</script>
+</body>
+</html>

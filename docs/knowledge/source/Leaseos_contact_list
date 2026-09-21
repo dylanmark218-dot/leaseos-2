@@ -1,0 +1,522 @@
+Worked for 1m 5s
+
+Yes. What you’re describing should be built as a LeaseOS Contact & Communications subsystem, but it should deliberately not behave like a normal phone contact app.
+
+The key rule should be:
+
+> LeaseOS stores operational relationships and approved work-contact information. It does not ingest or synchronize a worker’s personal address book.
+
+
+
+That separation gives you the job-history intelligence you want without creating a huge privacy problem.
+
+1. I’d divide the directory into five layers
+
+Layer	What belongs there	Typical visibility
+
+LeaseOS Platform Directory	LeaseOS support, billing, administration, safety/security escalation	Contracting-company admins; selected support options for users
+Company Directory	Drivers, dispatchers, mechanics, safety, HR, supervisors, managers, owner, office	Controlled by company role
+Partner / Operations Catalog	Consultants, client reps/company men, disposal facilities, medics, towing, recovery, vendors, shops, terminals, loading facilities	Dispatch/admin broadly; drivers when relevant
+Job Contact Roster	Exact people/facilities relevant to one dispatched job	Assigned personnel and approved client users
+Emergency Directory	911, CANUTEC, job ERAP number, company emergency contact, medic, client emergency contact, jurisdictional contacts	Always available where applicable
+
+
+This is much safer than creating one giant contacts table and then trying to hide individual records afterward.
+
+2. The Job Contact Roster becomes the important piece
+
+When dispatch creates something like:
+
+Job 26-00982 → Client A → Consultant B → Lease 12-34-...
+
+LeaseOS automatically assembles:
+
+Contact role	Example
+
+Assigned driver	Dylan / work contact
+Company dispatch	24-hour dispatch
+Company safety	safety coordinator
+Client representative	company man
+Consultant	field consultant
+On-site medic	medic unit / medic
+Disposal	selected disposal facility
+Loading location	facility/operator
+ERAP	applicable ERAP holder
+Emergency	911 / CANUTEC / other applicable authority
+Mechanic	only if assigned/relevant
+Supervisor	if included by dispatch
+
+
+So instead of giving a driver the entire corporate address book, LeaseOS gives them the people they need for this job.
+
+The client portal gets an even smaller projection of exactly the same data. A client could see the assigned driver, dispatcher, designated safety/emergency contact and perhaps company owner/operations manager if the contractor enables it. They would not see HR, unrelated mechanics, other drivers, payroll contacts, other clients, or your vendor directory.
+
+3. Your past-job idea is worth building
+
+I would call it Relationship History rather than simply “old contacts.”
+
+Suppose a driver worked for the same consulting company six months ago. When that company appears again, LeaseOS could show:
+
+Worked with before
+
+ABC Consulting
+
+John Smith — Field Consultant
+
+Last worked together: Job 25-1837
+
+Last verified: April 2026
+
+4 previous jobs
+
+Work phone
+
+Work email
+
+Previous locations worked together
+
+
+But an old number should never silently be treated as current.
+
+Give each contact:
+
+active inactive superseded last_verified_at verified_by source organization_id
+
+Then LeaseOS can say:
+
+John Smith — number last verified 184 days ago
+
+instead of pretending historical information is definitely current.
+
+When dispatch creates another ABC Consulting job, LeaseOS can suggest:
+
+“You have previously worked with these ABC Consulting contacts. Add one to this job?”
+
+That is much better than automatically exposing everybody.
+
+4. Drivers should have a personal “work history directory”
+
+This is slightly different from the corporate directory.
+
+A driver should be able to see approved work contacts associated with jobs they actually participated in.
+
+For example:
+
+My Work Contacts → ABC Oil → 7 previous jobs → John Smith
+
+But they should not suddenly be able to search ABC Oil's entire employee list merely because their employer has that information elsewhere in LeaseOS.
+
+That gives you the accumulated operational knowledge you're talking about while maintaining a tenant/privacy boundary.
+
+5. Separate a person from their contact methods
+
+I would not put phoneNumber directly on a person record.
+
+Use something closer to:
+
+Person
+    ↓
+Organization Membership
+    ↓
+Role
+    ↓
+Contact Methods
+
+A single person might have:
+
+John Smith
+ABC Consulting
+
+Role:
+Field Consultant
+
+Contact methods:
+780-555-0101   work_mobile
+780-555-0102   office
+john@abc.ca    work_email
+780-555-0199   emergency_only
+
+And every contact method gets a privacy classification.
+
+Classification	Meaning
+
+public_work	Generally usable for business
+internal_work	Company personnel only
+job_only	Only participants on assigned jobs
+client_visible	May appear to client
+dispatch_only	Dispatch/admin
+emergency_only	Revealed under defined emergency conditions
+private_personal	Never exposed through LeaseOS operational views
+
+
+That last category is important.
+
+If an employee gives HR their personal home phone number, that does not mean it belongs in the driver's operational contact directory.
+
+6. The database could look roughly like this
+
+organizations
+people
+
+organization_memberships
+    person_id
+    organization_id
+    role
+    active_from
+    active_to
+
+contact_methods
+    person_id
+    type
+    value_encrypted
+    classification
+    verified_at
+    status
+
+organization_relationships
+    tenant_id
+    external_organization_id
+    relationship_type
+
+jobs
+
+job_contact_assignments
+    job_id
+    person_id
+    contact_role
+    visibility
+    added_by
+    active_from
+    active_to
+
+contact_revisions
+    contact_method_id
+    value
+    valid_from
+    valid_to
+
+emergency_contact_catalog
+    jurisdiction
+    emergency_type
+    organization_id
+    number
+    source
+    verified_at
+
+contact_access_events
+    actor_id
+    contact_id
+    job_id
+    action
+    timestamp
+
+I particularly like the revision concept.
+
+If someone's phone number changes tomorrow, an old job can still retain evidence that the contact number used on that job was the number valid at that time without corrupting the historical record.
+
+7. Access control should be both role-based and job-based
+
+LeaseOS shouldn't ask only:
+
+Is this person a Driver?
+
+It should ask:
+
+Who is requesting this?
+        +
+Which company?
+        +
+What role?
+        +
+What job?
+        +
+Are they assigned to that job?
+        +
+What classification is this contact method?
+        =
+Allowed fields
+
+So a driver requesting:
+
+GET /jobs/26-00982/contacts
+
+might receive:
+
+assigned dispatcher
+client representative
+consultant
+medic
+disposal
+ERAP
+emergency contacts
+
+The same driver requesting:
+
+GET /organizations/client-A/all-employees
+
+gets:
+
+DENIED
+
+That fail-closed model fits LeaseOS very well.
+
+8. Company administration gets the broader directory
+
+The contracting company should have its own organizational directory:
+
+Operations
+
+dispatch
+
+supervisors
+
+owner
+
+managers
+
+
+Safety
+
+safety manager
+
+emergency coordinator
+
+HSE
+
+incident reporting
+
+
+Maintenance
+
+shop
+
+mechanics
+
+service truck
+
+
+Administration
+
+HR
+
+payroll
+
+billing
+
+accounts receivable/payable
+
+
+Field
+
+drivers
+
+operators
+
+labourers
+
+
+But even here, permissions matter.
+
+A dispatcher may need a driver's company cell number but doesn't necessarily need the driver's home address, emergency family contact, payroll information or HR notes.
+
+9. Don't request the driver's phone contacts
+
+This is one point where I would make LeaseOS intentionally restrictive.
+
+Android classifies READ_CONTACTS as a dangerous permission. Google also recommends minimizing permissions. 
+
+So LeaseOS should not do:
+
+Grant access to your contacts
+↓
+upload phone address book
+↓
+merge everything into LeaseOS
+
+Instead:
+
+LeaseOS approved contact
+        ↓
+Tap phone number
+        ↓
+Android system dialer
+        ↓
+User presses Call
+
+Android specifically supports this with ACTION_DIAL; unlike direct ACTION_CALL, it doesn't require LeaseOS to obtain the stronger CALL_PHONE permission. 
+
+That is exactly how I would build the first version.
+
+Later we could optionally have:
+
+Add this LeaseOS work contact to my phone
+
+but it should be a deliberate one-contact export initiated by the user, not LeaseOS reading their address book.
+
+10. Emergency contacts should be special
+
+I would put a red Emergency button in Field/Route that remains available offline.
+
+Something like:
+
+EMERGENCY
+────────────────────
+911
+Call
+
+Dangerous Goods
+CANUTEC
+Call
+
+ERAP — This Load
+ERAP Ref: 2-XXXX
+Call ERAP Holder
+
+Company Emergency
+Call Safety
+
+Site Emergency
+Call Site Medic
+
+Client Emergency
+Call Client Representative
+
+And importantly, an ERAP telephone number should come from the actual shipment/job documentation, rather than LeaseOS assuming there is a universal ERAP number.
+
+Transport Canada says every ERAP has its own ERAP telephone number and, when a consignment requires an ERAP, that number appears on the shipping document. 
+
+LeaseOS should therefore connect:
+
+Dangerous Goods Manifest
+        ↓
+UN / commodity determination
+        ↓
+ERAP required?
+        ↓
+ERAP reference
+ERAP holder
+ERAP telephone
+        ↓
+Job Emergency Directory
+
+That is a really useful integration with the TDG work we've already discussed.
+
+11. CANUTEC can be a verified system contact
+
+Transport Canada currently directs people dealing with a dangerous-goods release or anticipated release to the appropriate local authority, CANUTEC, and—when applicable—the ERAP holder identified on the shipping document. 
+
+That means LeaseOS can maintain system-managed verified emergency records, separate from tenant-entered contacts.
+
+I would distinguish them visually:
+
+✓ LeaseOS Verified — Government Source
+
+versus
+
+Company supplied — verified Sep. 15, 2026
+
+That prevents someone accidentally editing an official number and propagating a bad number across the fleet.
+
+12. Offline operation is essential
+
+Current-job contact information should be bundled into the offline job package:
+
+Job
+Route
+Manifest
+TDG
+ERAP
+Safety forms
+Job contacts
+Emergency contacts
+
+Then if the driver loses internet on a lease road, they still have the numbers.
+
+But LeaseOS should not download the company's entire workforce database onto every driver's phone.
+
+Cache only what the user is authorized to use:
+
+Current jobs
+Recent assigned-job contacts
+Required company contacts
+Required emergency directory
+
+Encrypt that data locally and invalidate it when the assignment/account changes.
+
+13. This also gives the AI secretary a much better model
+
+Instead of the AI having arbitrary access to phone numbers, the AI asks the contact service:
+
+Who is the disposal contact for this job?
+
+Contact service:
+
+User: driver_82
+Job: 26-00982
+Authorized: yes
+
+Jane Doe
+Secure Disposal – Fox Creek
+Role: Scale House
+780-...
+
+Then the AI could say:
+
+“Secure Fox Creek's scale-house contact is Jane Doe. Do you want me to open the dialer?”
+
+The AI should never receive unrestricted contact-directory access if it doesn't need it.
+
+14. It also addresses the privacy concern you raised
+
+Alberta PIPA applies to many private-sector businesses and limits collection of personal information to reasonable purposes and to what is reasonably needed for those purposes. Organizations also have obligations to protect the personal information they hold. 
+
+Your instinct to avoid pulling workers' personal phone contacts into LeaseOS is therefore the right architectural direction.
+
+The architecture I recommend
+
+LEASEOS CONTACT SERVICE
+                            │
+       ┌────────────────────┼─────────────────────┐
+       │                    │                     │
+ Platform Directory   Tenant Directory     Partner Catalog
+ LeaseOS staff         company workers      clients/vendors
+       │                    │                     │
+       └───────────────┬────┴─────────────┬───────┘
+                       │                  │
+                JOB CONTACT ROSTER   RELATIONSHIP HISTORY
+                       │                  │
+                       ├──────────────────┘
+                       │
+              Role/assignment filter
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+        Driver View          Client View
+             │                   │
+ assigned contacts       assigned driver
+ dispatch                dispatch
+ consultant              safety
+ medic                   approved emergency
+ disposal
+ safety
+             │
+             └───────┬───────────┘
+                     │
+              EMERGENCY LAYER
+                     │
+          911 / CANUTEC / ERAP
+          company / site / medic
+
+I would make this a first-class LeaseOS subsystem, not bury it inside dispatch. Dispatch, safety, billing, TDG, job history and the AI secretary would all consume the same contact service.
+
+And I would make one rule non-negotiable in the implementation:
+
+> No API is allowed to return a phone number merely because the caller can see the person. It must separately authorize that specific contact method for that user, organization, job and purpose.
+
+
+
+That single design choice will prevent a lot of privacy leakage later.
+
+I also surfaced Codex Security for you. Once we start implementing this module, it would be useful for scanning the RBAC/tenant-isolation and permission code for accidental contact-data exposure.
+
+This design is substantial enough that the next step should be to turn it into the formal LeaseOS Contact, Communications & Emergency Directory specification, with the exact schemas, permission matrix, API routes, offline rules, client/driver/admin screens, audit requirements and test gates before we code it.

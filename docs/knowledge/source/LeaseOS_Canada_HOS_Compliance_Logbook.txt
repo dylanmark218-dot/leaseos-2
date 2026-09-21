@@ -1,0 +1,190 @@
+# LeaseOS_Canada_HOS_Compliance_Logbook
+
+_Text extracted from LeaseOS_Canada_HOS_Compliance_Logbook.pdf (5 pages). The PDF beside it is the original._
+
+LeaseOS - Canada Hours-of-Service Compliance Logbook
+Page 1
+ LeaseOS Canada Hours-of-Service Compliance
+ Logbook
+Alberta-focused rules, federal interprovincial rules, 160 km records, sleeper-berth controls, and duty-status forms
+Version: 2026-09-17. Purpose: LeaseOS / Claude project knowledge and compliance-engine specification.
+Important: This is a compliance design aid, not legal advice. Production logic must select the rule set from the carrier's operating
+status, vehicle, jurisdiction, trip and permits/exemptions.
+Key correction: Staying inside 160 km does not exempt a driver from hours-of-service limits. It can exempt a qualifying driver from
+the normal daily log/ELD record only when every applicable condition is met and the carrier keeps the required records.
+1. Alberta - which HOS regime applies?
+Operation
+Regime
+LeaseOS treatment
+Carrier operates solely within Alberta and
+is provincially regulated.
+Alberta Drivers' Hours of Service Regulation.
+Apply Alberta provincial HOS. Alberta says provincially regulated
+carriers do not currently have to install/use ELDs solely because of
+the federal mandate.
+Extra-provincial undertaking: covered
+commercial operations cross
+provincial/territorial or international
+boundaries.
+Federal Commercial Vehicle Drivers Hours of
+Service Regulations.
+Apply federal HOS/ELD rules. Federal status can apply across the
+carrier's covered drivers, not only on the day a border is crossed.
+2. Alberta provincial 160 km daily-log exemption
+A daily log is not required only when all applicable Alberta conditions are satisfied:
+ driver stays within a 160 km radius of the home terminal;
+ driver returns to the home terminal and is released from work within 15 hours from the start of the work shift; and
+ carrier keeps accurate start/end time records for at least 6 months.
+If a condition fails, the driver must begin a daily log and account for the required preceding duty history. The 160 km provision is a
+record-keeping exemption only.
+3. Federal 160 km record-of-duty-status / ELD exemption
+Under federal rules, the normal record-of-duty-status requirement does not apply when the driver is instructed to drive within a 160
+km radius of the home terminal, returns there each day to begin at least 8 consecutive hours off duty, and the carrier keeps
+accurate cycle/on-duty records and supporting documents for at least 6 months. Permit/exemption status can alter eligibility.
+A qualifying federal 160 km driver can therefore be exempt from the normal ELD/daily record, but the carrier still needs records
+proving compliance.
+4. Core federal south-of-60 limits
+Control
+Limit / requirement
+Driving in a day
+No driving after 13 hours of driving time in the day.
+On-duty in a day
+No driving after 14 hours of on-duty time in the day.
+Work shift
+No driving after 13 hours driving, 14 hours on duty, or the 16th elapsed hour, subject to detailed sleeper-berth
+calculations.
+Daily off-duty
+Generally 10 hours off duty in a day, including at least 8 consecutive hours, subject to permitted deferral/sleeper
+provisions.
+Cycle 1
+70 hours on duty in 7 days; 36 consecutive hours off duty to reset.
+Cycle 2
+120 hours on duty in 14 days, including the 70-hours-in-7-days control; 72 consecutive hours off duty to reset.
+
+
+LeaseOS - Canada Hours-of-Service Compliance Logbook
+Page 2
+5. Sleeper berth - LeaseOS logic
+Sleeper berth does not authorize exceeding legal driving/on-duty limits. For a single driver under federal rules, qualifying off-duty
+time may be split into no more than two sleeper periods; neither can be shorter than 2 hours and together they must total at least 10
+hours. The regulation still applies combined 13-hour driving and 14-hour on-duty controls and a special calculation for the 16-hour
+elapsed-time rule.
+Do not make sleeper use an automatic ELD trigger. Determine log/ELD status separately. When split sleeper is used, preserve
+precise timestamps and validate both periods before treating the split as compliant.
+6. Recommended LeaseOS states
+RADIUS_EXEMPT, LOG_REQUIRED, ELD_REQUIRED, PAPER_ALLOWED, ELD_MALFUNCTION,
+SLEEPER_SPLIT_PENDING, SLEEPER_SPLIT_VALID, HOS_WARNING, DRIVING_PROHIBITED. Convert a radius-exempt
+day to LOG_REQUIRED as soon as an exemption condition fails.
+
+
+LeaseOS - Canada Hours-of-Service Compliance Logbook
+Page 3
+7. Radius Time Record - Alberta / Federal Short-Haul
+Use when claiming a 160 km logbook exemption. LeaseOS should retain the electronic equivalent plus supporting records.
+Driver name
+Carrier
+Date
+Home terminal
+Unit #
+Trailer #
+Rule set
+Alberta provincial / Federal
+Cycle
+1 / 2 / N/A
+Shift start
+Shift end / released
+Total on-duty
+Total driving
+Max distance from terminal
+Returned to terminal?
+Yes / No
+Inside 160 km entire shift?
+Yes / No
+Supporting records retained?
+Yes / No
+Driver certification: I certify that this record accurately reflects my duty status and that I met the applicable radius-exemption conditions.
+Driver signature: ____________________________________ Date: __________________
+
+
+LeaseOS - Canada Hours-of-Service Compliance Logbook
+Page 4
+8. Daily Record of Duty Status - LeaseOS Worksheet
+For regulated production use, LeaseOS must capture every field required by the applicable regulation. If an ELD is mandatory, this
+PDF is not a substitute for a Transport Canada-certified ELD.
+Driver
+Date
+Co-driver
+Day start time
+Carrier
+Cycle
+1 / 2
+Home terminal
+Principal place of business
+Unit(s)
+Trailer(s)
+Start odometer
+End odometer
+Distance driven
+Personal-use km
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+Total
+Off duty
+Sleeper berth
+Driving
+On duty - not driving
+Duty-status changes / remarks - record time, location, status/event, sleeper split, deferral, adverse condition, personal use, ELD malfunction or other required
+annotation:
+Time
+Location
+Status / event
+Remarks
+Driver signature / certification: _____________________________________________
+
+
+LeaseOS - Canada Hours-of-Service Compliance Logbook
+Page 5
+9. Canada-wide implementation rule
+Canada does not use one identical provincial short-haul/logbook rule for every intra-provincial carrier. Provinces and territories
+regulate intra-provincial undertakings; federal rules govern extra-provincial undertakings. LeaseOS should select the jurisdiction
+profile from the carrier's legal operating status and trip, not merely the driver's current GPS province.
+Production profiles should separately version Alberta, British Columbia, Saskatchewan, Manitoba, Ontario, Quebec, New
+Brunswick, Nova Scotia, Prince Edward Island, Newfoundland and Labrador, Yukon, Northwest Territories and Nunavut. Each
+should store applicability thresholds, daily/work-shift limits, cycles, radius/log exemptions, ELD rules, special/oilfield permits,
+north-of-60 rules, retention periods and required fields.
+10. Official sources used
+Government of Alberta - Hours of service and fatigue management
+https://www.alberta.ca/hours-of-service-and-fatigue-management
+Alberta Carrier Training - Module 3, Hours of Service
+https://commercial-driver-training.511.alberta.ca/module/module/3
+Government of Canada - Commercial Vehicle Drivers Hours of Service Regulations, SOR/2005-313
+https://laws-lois.justice.gc.ca/eng/regulations/SOR-2005-313/
+Federal section 18 - split sleeper berth
+https://laws-lois.justice.gc.ca/eng/regulations/SOR-2005-313/section-18.html
+Federal section 81 - record-of-duty-status exemption
+https://laws-lois.justice.gc.ca/eng/regulations/SOR-2005-313/section-81.html
+Fail-closed instruction: Never infer that sleeper-berth use permits extra statutory driving/on-duty time. Never infer that every
+driver inside 160 km is log-exempt. Evaluate every condition first; if required data are missing, require the safer/more complete
+record.

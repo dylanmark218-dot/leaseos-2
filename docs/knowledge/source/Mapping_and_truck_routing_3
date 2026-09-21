@@ -1,0 +1,571 @@
+Worked for 3m 46s
+
+Yes. The final piece worked, and I was able to inspect the complete archive.
+
+The big result is: you already have both the map-display dataset and the stronger routing dataset.
+
+Your archive contains:
+
+Offline maps
+├── alberta-260910-free.gpkg.zip
+│   └── alberta.gpkg        ≈ 1.2 GB extracted
+│
+└── alberta-260910.osm.pbf  ≈ 334 MB
+
+The data snapshot in your package is from September 10, 2026.
+
+What is actually inside the GeoPackage
+
+I found 20 GIS layers, including roads, traffic features, transport features, POIs, buildings, waterways, administrative boundaries, railways, land use, protected areas and others.
+
+Most important for LeaseOS is:
+
+gis_osm_roads_free
+731,903 road/path segments
+
+The road table contains:
+
+fid
+geometry
+osm_id
+code
+fclass
+name
+ref
+oneway
+maxspeed
+layer
+bridge
+tunnel
+
+And there is a substantial amount of Alberta back-road data already represented.
+
+For example, I found approximately:
+
+Range Road-named segments       43,897
+Township Road-named segments    31,315
+
+service roads                  192,026
+unclassified roads             139,675
+tertiary roads                  34,644
+secondary roads                 23,817
+tracks                          12,319
+
+track_grade1                        94
+track_grade2                       409
+track_grade3                       663
+track_grade4                       539
+track_grade5                     1,090
+
+Those are segments, not unique roads, because a single Range Road may consist of many geometry segments.
+
+So this is absolutely useful for LeaseOS back-road routing.
+
+But don't build the routing engine from the GeoPackage alone
+
+The GeoPackage is excellent for:
+
+offline map display
+road search
+road-name lookup
+highway/reference lookup
+basic speed information
+one-way detection
+bridge/tunnel identification
+offline POIs
+visual road classification
+
+But notice what's missing from its simplified road table:
+
+maxweight
+maxaxleload
+maxheight
+maxwidth
+maxlength
+surface
+smoothness
+access
+hgv
+hazmat
+seasonal
+winter_service
+operator
+private/access rules
+
+That's why the .osm.pbf file you uploaded is so important.
+
+Geofabrik describes the PBF as the underlying OSM extract suitable for tools such as Osmium, Osmosis and other OSM-processing systems. 
+
+So I'd use:
+
+GeoPackage
+    ↓
+DISPLAY / SEARCH / OFFLINE GIS
+
+PBF
+    ↓
+ROUTABLE ROAD GRAPH
+    ↓
+GraphHopper / custom LeaseOS router
+
+Then plug Alberta 511 into that graph
+
+511 currently provides:
+
+road conditions
+
+traffic events
+
+alerts
+
+cameras
+
+weather stations
+
+inspection stations
+
+bridge restrictions
+
+rest areas/turnouts
+
+
+and currently requires a developer key with a documented throttle of 10 calls per 60 seconds. 
+
+So our architecture should now become:
+
+LEASEOS
+
+     OSM PBF                   GeoPackage
+        │                          │
+        ▼                          ▼
+ ROUTING GRAPH              OFFLINE MAP/UI
+        │
+        ├──────── Truck profile
+        │
+        ├──────── Permanent restrictions
+        │
+        ├──────── Municipal road bans
+        │
+        ├──────── Bridge database
+        │
+        ├──────── Seasonal rules
+        │
+        └──────── Alberta 511 LIVE
+                         │
+                         ▼
+                   ROUTE ENGINE
+                         │
+                    candidate routes
+                         │
+                   legal validation
+                         │
+                         ▼
+                   APPROVED ROUTE
+
+511 can be geometrically matched directly to our roads
+
+This is particularly good.
+
+511's winter-road endpoint provides an EncodedPolyline representing the affected roadway portion. 
+
+So instead of doing:
+
+"Highway 16 has bad conditions somewhere"
+
+we can do:
+
+511 encoded polyline
+        ↓
+decode coordinates
+        ↓
+spatially intersect / map-match
+        ↓
+OSM road edges
+        ↓
+mark affected edges
+
+Example:
+
+edge 1103921
+edge 1103922
+edge 1103923
+
+511 condition:
+Partly snow covered
+
+routing penalty = +25
+
+But:
+
+511 condition:
+CLOSED
+
+routing availability = FALSE
+
+That is precisely how I would integrate it.
+
+511 events are even more useful
+
+The event endpoint gives us:
+
+RoadwayName
+DirectionOfTravel
+Latitude
+Longitude
+secondary coordinates
+EventType
+IsFullClosure
+Severity
+EncodedPolyline
+Restrictions
+DetourPolyline
+DetourInstructions
+StartDate
+PlannedEndDate
+LastUpdated
+
+
+
+So an event becomes an actual LeaseOS routing object:
+
+LiveRoadRestriction {
+    source: ALBERTA_511
+    source_id
+    geometry
+    roadway
+    direction
+    closure
+    severity
+    width_limit
+    height_limit
+    length_limit
+    weight_limit
+    speed_limit
+    starts_at
+    ends_at
+    last_updated
+    raw_payload
+}
+
+Then route calculation can do:
+
+Truck height: 4.32 m
+
+             ↓
+
+511 restriction matched to Edge 81442
+
+             ↓
+
+Allowed height: 4.10 m
+
+             ↓
+
+EDGE BLOCKED
+
+rather than just showing a warning.
+
+I found one thing we should specifically defend against
+
+511's documentation describes restriction units as width/height in feet, weight in tons and speed in mph, but its example description text shows metric values such as metres, kilograms and km/h. 
+
+I would therefore never trust units implicitly.
+
+LeaseOS should store:
+
+raw_value
+raw_unit
+normalized_value_si
+normalization_source
+normalization_confidence
+
+and convert internally to:
+
+metres
+kilograms
+km/h
+
+That prevents a particularly nasty routing bug where:
+
+4.2 feet
+
+could accidentally be interpreted as:
+
+4.2 metres
+
+for a bridge clearance.
+
+
+---
+
+HERE and Google can still be included
+
+I'd keep the architecture we discussed.
+
+Level 1 — Free/offline
+
+OSM PBF
+GeoPackage
+LeaseOS routing graph
+cached restrictions
+
+No connection required.
+
+Level 2 — Alberta online
+
++
+511 events
+511 road conditions
+511 bridge restrictions
+511 weather
+511 inspection stations
+
+This should probably be the normal Alberta operating mode.
+
+Because of the 511 rate limit, the phones should not each query 511 themselves.
+
+Instead:
+
+Alberta 511
+                    │
+                    ▼
+           LeaseOS 511 Gateway
+                    │
+             poll + normalize
+                    │
+           central cached state
+                 ↙     ↘
+             Driver    Dispatch
+
+One set of calls serves the entire fleet.
+
+Level 3 — Commercial truck validation
+
+HERE truck routing
+
+Use this as:
+
+secondary route source
+and/or
+independent route validator
+
+particularly for:
+
+oversize
+overweight
+multi-trailer
+TDG
+unusual axle arrangements
+cross-province trips
+
+Level 4 — Google
+
+Google can provide:
+
+basemap
+satellite imagery
+street/address searching
+visual reference
+optional consumer-navigation handoff
+
+but LeaseOS keeps ownership of the truck-approved route.
+
+
+---
+
+The GeoPackage has other useful LeaseOS material too
+
+I also inspected its other layers.
+
+For example, the offline traffic layer has around:
+
+226,603 traffic features
+
+including:
+
+traffic signals
+stop signs
+railway crossings
+motorway junctions
+fuel
+parking
+speed cameras
+turning circles
+
+There are about 703 fuel-related points in that particular OSM traffic layer.
+
+We should be able to use those for things such as:
+
+fuel planning
+safe turnaround identification
+rail-crossing warnings
+truck stop/parking discovery
+offline emergency navigation
+
+There are also transport and POI layers that can feed offline search.
+
+
+---
+
+I'd make the actual LeaseOS road graph richer than OSM
+
+This becomes our canonical object:
+
+RoadEdge {
+    edge_id
+
+    // geometry
+    geometry
+    start_node
+    end_node
+
+    // OSM
+    osm_id
+    road_name
+    road_ref
+    road_class
+
+    // physical
+    surface
+    grade
+    width
+    clearance
+    bridge
+    tunnel
+
+    // legal
+    max_weight
+    max_axle
+    max_height
+    max_width
+    max_length
+    hgv_access
+    dangerous_goods
+
+    // back road
+    resource_road
+    lease_road
+    forestry_road
+    private_road
+    range_road
+    township_road
+
+    // communications
+    radio_required
+    radio_channel
+    calling_direction
+
+    // authority
+    province
+    municipality
+    county_md
+    road_authority
+
+    // dynamic
+    current_condition
+    closure_state
+    live_restriction
+
+    // provenance
+    sources[]
+    source_updated_at
+}
+
+That gives us a major advantage:
+
+OSM doesn't have to contain everything.
+
+One road can be enriched by several independent sources:
+
+OSM
+   └── geometry
+
+511
+   └── live closure
+
+Alberta government
+   └── bridge restriction
+
+County
+   └── 75% road ban
+
+LeaseOS company data
+   └── preferred haul road
+
+Driver verified data
+   └── radio channel
+
+Client
+   └── lease gate / access notes
+
+All of those attach to the same road edge.
+
+
+---
+
+One more thing I would build now: provenance
+
+This matters because we're making routing decisions involving heavy trucks.
+
+Every restriction should retain its source:
+
+WHY IS THIS ROAD BLOCKED?
+
+✓ Alberta 511 Event #XXXX
+Last updated: 07:42
+
+Weight restriction:
+40,000 kg
+
+Truck:
+46,300 kg
+
+Result:
+NOT LEGAL FOR CURRENT CONFIGURATION
+
+Rather than:
+
+Route unavailable
+
+That also gives the AI secretary something trustworthy to explain.
+
+
+---
+
+So we're past the “can these maps work?” question
+
+They can.
+
+Your uploaded package gives us a legitimate foundation:
+
+✓ Alberta vector map
+✓ raw OSM routing source
+✓ highways
+✓ secondary roads
+✓ township roads
+✓ range roads
+✓ service roads
+✓ resource/track-like roads
+✓ road geometry
+✓ bridges/tunnels
+✓ road names
+✓ highway references
+✓ basic speeds
+✓ offline POIs
+
+What we now add, rather than replace it with, is:
+
+Alberta 511 live state
+Alberta truck restrictions
+municipal road bans
+bridge/load data
+radio-road data
+LSD/well/rig locations
+private/resource roads
+company preferred routes
+HERE validation
+optional Google imagery
+
+One maintenance issue: your uploaded map snapshot is September 10. Geofabrik's current Alberta page shows newer OSM data is already available, so LeaseOS should eventually automate periodic PBF/map refreshes rather than shipping one permanent Alberta file. 
+
+You don't need to upload anything else from this archive. We now have enough information to design the actual Alberta offline-routing importer and 511 overlay contract.
