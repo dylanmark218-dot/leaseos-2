@@ -27,6 +27,8 @@
  *   product feature, and it is composed here like any other panel.
  */
 
+import type { ActingScope } from "./actingScope";
+import { AmbiguousOrganization } from "./actingScope";
 import type { DomainRole, Permission } from "./recordsAuthorization";
 
 export type PortalKey =
@@ -301,6 +303,72 @@ export function composeSession(roles: readonly DomainRole[]): ComposedSession {
     knowledgePanels: Array.from(panels).sort(),
     notReached: PORTALS.filter(p => !portals.includes(p)).map(p => p.portal),
   };
+}
+
+/**
+ * Which organization a session is acting for, as a state rather than an outcome.
+ *
+ * `resolveActingScope` throws `AmbiguousOrganization` for a user with two live
+ * memberships, and it is right to: its header explains that "picking one would
+ * silently decide which company a request writes into." But a thrown query
+ * reaches a screen as a fault, indistinguishable from a server that fell over,
+ * so the screen renders an error where it should render a decision. This turns
+ * that one refusal into a value and leaves every other error alone.
+ *
+ * `defaultWorkspace` travels with it, and travels **unvalidated**. It is a
+ * `varchar(60)` that nothing checks on write, so it is a preference and never a
+ * grant: `entryModel.resolvePortalEntry` checks it against the portals the
+ * session actually holds, and a stale or hostile value opens nothing.
+ *
+ * Nothing here names a portal or a permission. The moment this carries either,
+ * it has started deciding access, and access is the permission engine's.
+ */
+export type OrganizationState =
+  | {
+      state: "resolved";
+      orgRef: string;
+      membershipRef: string;
+      /** Unvalidated. A preference, checked against held portals at use. */
+      defaultWorkspace: string | null;
+    }
+  | { state: "single_tenant_fallback"; defaultWorkspace: string | null }
+  | { state: "ambiguous"; detail: string }
+  /**
+   * The question could not be asked — no database is configured. Distinct from
+   * `single_tenant_fallback`, which is a real answer meaning "this deployment
+   * has no organizations yet". Reporting the fallback here would claim a
+   * tenancy answer nothing established, which is the "missing is not the same
+   * as none" collapse the rest of this system refuses to make.
+   */
+  | { state: "unresolved"; reason: string };
+
+export function organizationStateFrom(
+  args:
+    | { scope: ActingScope; defaultWorkspace: string | null }
+    | { error: unknown }
+    | { unresolved: string }
+): OrganizationState {
+  if ("unresolved" in args) {
+    return { state: "unresolved", reason: args.unresolved };
+  }
+  if ("error" in args) {
+    // Only the ambiguity is a decision. Anything else is a fault and stays one.
+    if (args.error instanceof AmbiguousOrganization) {
+      return { state: "ambiguous", detail: args.error.message };
+    }
+    throw args.error;
+  }
+
+  const { scope, defaultWorkspace } = args;
+  if (scope.derivedFrom === "membership" && scope.membershipRef) {
+    return {
+      state: "resolved",
+      orgRef: scope.tenantId,
+      membershipRef: scope.membershipRef,
+      defaultWorkspace,
+    };
+  }
+  return { state: "single_tenant_fallback", defaultWorkspace };
 }
 
 export function portalsForRole(role: DomainRole): PortalKey[] {
