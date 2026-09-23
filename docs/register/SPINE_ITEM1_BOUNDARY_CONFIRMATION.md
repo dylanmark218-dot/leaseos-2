@@ -59,7 +59,7 @@ product-specific restrictions, equipment swaps. Until then, no trustworthy capac
 `capacity_unknown` / `NOT_EVALUATED`. `units` gets no capacity column; `bulkFuelTanks.capacityLitres`
 describes a fuel depot and is not reused.
 
-**RELEASE-BLOCKING — migration 0169 is claimed twice.** leaseos `main` carries
+**RELEASE BLOCKER — MIGRATION 0169 RECONCILIATION.** Migration 0169 is claimed twice. leaseos `main` carries
 `0169_trip_stop_provenance.sql`; PR #4 here (`readiness-defect-repair`) adds
 `0169_defect_resolution.sql`; and this repository has no trip-stop provenance at all. Two migrations
 cannot both own one canonical number. Resolve it before the next migration-bearing feature in either
