@@ -73,3 +73,68 @@ reachability, reserved-word, migration-ledger and commercial-office suites green
 register extension that makes definitions govern records (B), storage upload of the binaries
 (they stay as repository seed data with `repositoryPath`; `storageKey` is filled when a tenant's
 storage receives them in D).
+
+---
+
+## Checkpoint B — the origin-aware register (migration 0179)
+
+**What it adds.** The 0144 `commercialDocuments` row now carries `originKind` (eight values; NULL on
+legacy rows reads as "unrecorded", never a guess), `issuerKind` with its resolution (`issuerOrgRef`,
+`issuerFacilityId`, `issuerName`), `definitionRef`/`definitionKey`, `controlNumber` (unique per
+business through `bookScopeKey`, NULL on every externally issued document), `controlState`
+(`captured → needs_classification | proposed → confirmed → issued`, side exits `void` and
+`withdrawn`), template and render provenance, capture device and import channel, and who confirmed,
+issued or voided it. `commercialDocumentLinks` gains `recordId` beside the ref, a `role`, and whether
+a person, the owning domain or an extraction proposed it. Two new tables: `documentExternalReferences`
+(issuer-scoped identifiers: Facility A's 12345 and Facility B's 12345 both exist; within one issuer
+identical bytes are refused and different bytes need a recorded reason; a row that mirrors a
+domain-owned column says so) and `documentControlEvents` (append-only, per-document sequence, with
+BEFORE UPDATE/DELETE triggers that refuse outright).
+
+**The single write path.** `server/_core/documentRegisterService.ts`: `registerControlledDocument`,
+`confirmDocument`, `issueDocument`, `voidDocument`, `supersedeDocument`, `withdrawDocument`,
+`amendDocument`, `documentView`, `listDocuments`. Every write runs `registerRefusals` (pure,
+`documentRegister.ts`) and then, inside one transaction, resolves every link against the acting
+business's scope (a record another business owns is "not found", never "forbidden"), judges duplicate
+references, and appends the timeline event. The three rules that never bend: LeaseOS is never the
+issuer; an externally issued document never carries a LeaseOS-minted number; an external document
+cannot skip confirmation while a rendered one enters issued.
+
+**Revisions.** A supersession is a new row with `version + 1` that carries the provenance, links and
+confirmed references forward and takes the control number from the old row (released in the same
+transaction so the unique index sees one holder at a time). The same bytes are refused: a reprint
+is a print event, not a revision. `amend_with_reason` definitions correct keyed facts (issuer name,
+issued date, title) with the original and corrected values kept side by side in `recordAmendments`
+(its first production writer); the bytes and the hash are never touched. `domain_managed`
+definitions refuse amendment: their domain corrects them.
+
+**Reused.** 0144 register, links and deliveries (extended in place; the legacy `register` and
+`supersede` procedures keep working, bind the definition and the scope key, and record no origin);
+`recordAmendments`; `nextTrackingNumber` for the archival `DOC-` ref (bound into the transaction in
+Checkpoint C); `evidenceRecords` legal-hold refusal on withdraw; `coreRecordOwnership` for unit and
+operator scope; `jobs.orgRef` for job, load, trip, field-ticket and disposal-ticket scope;
+`facilities` as a shared directory. Not built: a second link table, a second audit ledger beyond the
+per-domain append-only convention the repository already uses, a numbering allocator (C).
+
+**Surface.** Ten procedures: `documents.intake` (`document.intake`), `registerRendered`
+(`document.issue`), `confirm` (`document.confirm`), `issue` (`document.issue`), `void`
+(`document.void`), `supersede` (`document.issue`), `withdraw` (`document.void`), `amend`
+(`document.confirm`), `get`/`list` (`document.read`). Census 651 (+10).
+
+**Tests.** `server/_core/documentRegister.test.ts` (13): enum/schema mirror, the three rules,
+import-acceptance and template-reference refusals, unclassified waiting states, evidence-not-key
+for externals, issuer scope keys and value normalisation, duplicate verdicts, the lifecycle table,
+disposal-source translation, provenance sentences. `server/documentControl.db.test.ts` (+5):
+facility scan in → proposed reference and link → confirmed by a person with the timeline in
+sequence → frozen facts → amendment kept beside the original; two facilities' 12345 coexist, same
+bytes refused, different bytes need a reason, search by the facility's number shows origin on each;
+cross-tenant link not found, cross-tenant read/confirm/list empty, unclassified named by a person;
+rendered field ticket issued with its domain number, duplicate number refused, same-bytes
+supersession refused as a reprint, amendment refused for domain-managed, supersession carries the
+number and links, append-only timeline enforced by the database, void refused after issue,
+withdrawal keeps the number; void of a captured scan, legacy 0144 path reads "origin unrecorded"
+and cannot be issued.
+
+**Gates.** See the commit: `tsc` clean, test-file type errors 0, parity 414/414, census 651,
+reachability, reserved-word, migration-ledger, commercial-office, audit-package and portal
+suites green, current state regenerated, build clean.

@@ -17,9 +17,12 @@ import { z } from "zod";
 import { documentDefinitions, documentSourceArtifacts } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { seedDocumentCatalog } from "./_core/documentCatalogSeed";
+import { CONTROL_STATES, IMPORT_CHANNELS, LINK_ROLES, LINK_SOURCES, REFERENCE_SOURCES } from "./_core/documentRegister";
+import { amendDocument, confirmDocument, DocumentControlRefusal, documentView, issueDocument, listDocuments, registerControlledDocument, supersedeDocument, voidDocument, withdrawDocument, type Actor } from "./_core/documentRegisterService";
+import { storageKeyInput } from "./_core/storageKey";
 import {
   applyOverlay, DEFINITION_KEY_PATTERN, definitionRefusals, DOCUMENT_CLASSES, DOCUMENT_LINK_KINDS, EXTERNAL_REFERENCE_POLICIES, EXTERNAL_REFERENCE_TYPES, ORIGIN_KINDS,
-  PRINT_POLICIES, READ_CATEGORIES, representationLabel, REVISION_POLICIES, rowToDefinition, SIGNATURE_POLICIES, TENANT_AUTHORABLE_NUMBERING, TENANT_OVERRIDABLE_COLUMNS,
+  EXTERNAL_ORIGINS, ISSUER_KINDS, PRINT_POLICIES, READ_CATEGORIES, RENDERED_ORIGINS, representationLabel, REVISION_POLICIES, rowToDefinition, SIGNATURE_POLICIES, TENANT_AUTHORABLE_NUMBERING, TENANT_OVERRIDABLE_COLUMNS,
   type DocumentDefinitionRow, type DocumentDefinitionSeed, type EffectiveDefinition,
 } from "./_core/documentDefinitions";
 import { roleProcedure, router } from "./_core/trpc";
@@ -33,6 +36,16 @@ async function bookFor(userId: number) {
 }
 const j = (v: unknown[]) => JSON.stringify(v);
 const tenantRef = () => `DEF-T-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+
+/** A service refusal becomes the TRPC code it names; anything else is rethrown untouched. */
+async function guarded<T>(fn: () => Promise<T>): Promise<T> {
+  try { return await fn(); } catch (e) { if (e instanceof DocumentControlRefusal) throw new TRPCError({ code: e.code, message: e.message }); throw e; }
+}
+const actorOf = (ctx: { user: { id: number } }, deviceRef?: string | null): Actor => ({ userId: ctx.user.id, source: "human", deviceRef: deviceRef ?? null });
+const issuerInput = z.object({ issuerKind: z.enum(ISSUER_KINDS), issuerOrgRef: z.string().max(64).nullable().optional(), issuerFacilityId: z.number().int().positive().nullable().optional(), issuerName: z.string().max(220).nullable().optional() });
+const referenceInput = z.object({ referenceType: z.enum(EXTERNAL_REFERENCE_TYPES), referenceValue: z.string().min(1).max(120), issuer: issuerInput.nullable().optional(), source: z.enum(REFERENCE_SOURCES).optional(), confirmed: z.boolean().optional(), duplicateOverrideReason: z.string().min(10).max(300).nullable().optional() });
+const linkInput = z.object({ recordType: z.enum(DOCUMENT_LINK_KINDS), recordRef: z.string().min(1).max(80), recordId: z.number().int().positive().nullable().optional(), role: z.enum(LINK_ROLES).nullable().optional(), source: z.enum(LINK_SOURCES).optional(), confirmed: z.boolean().optional() });
+const bytesInput = { contentHash: z.string().regex(/^[a-f0-9]{64}$/), sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), byteLength: z.number().int().nonnegative().nullable().optional(), mimeType: z.string().max(120).nullable().optional(), evidenceRecordId: z.number().int().positive().nullable().optional(), fieldTicketDocumentId: z.number().int().positive().nullable().optional(), storageKey: storageKeyInput.nullable().optional() };
 
 /** Platform rows plus this business's rows, folded into the effective view: overlay applied where one exists, tenant-authored rows as their own layer. */
 async function effectiveDefinitions(db: Awaited<ReturnType<typeof bookFor>>["db"], bookOrgRef: string | null, includeRetired: boolean): Promise<EffectiveDefinition[]> {
@@ -188,6 +201,98 @@ export const documentControlRouter = router({
         if (!own) throw new TRPCError({ code: "NOT_FOUND", message: `This business has no active definition or overlay "${input.definitionKey}" of its own` });
         await db.update(documentDefinitions).set({ status: "retired", retiredAt: new Date(), retiredByUserId: ctx.user.id, description: `retired by user ${ctx.user.id}: ${input.reason}` }).where(eq(documentDefinitions.id, own.id));
         return { definitionRef: own.definitionRef, status: "retired" as const };
+      }),
+  }),
+  /**
+   * DC-B — the register, origin-aware. Every write goes through
+   * `documentRegisterService`; these procedures decide who may ask.
+   */
+  documents: router({
+    /**
+     * Take an external document in: a scan or an upload, its original bytes
+     * already in the evidence vault, under the definition a person or an
+     * extraction proposes — or as unclassified. It enters captured; nothing
+     * here is confirmed, and no LeaseOS number is minted for it.
+     */
+    intake: roleProcedure("documentControl.documentIntake")
+      .input(z.object({
+        definitionKey: z.string().regex(DEFINITION_KEY_PATTERN).default("unclassified_external_document"), title: z.string().min(1).max(300),
+        originKind: z.enum(EXTERNAL_ORIGINS as unknown as [string, ...string[]]), issuer: issuerInput.default({ issuerKind: "unknown" }), importChannel: z.enum(IMPORT_CHANNELS).default("office_upload"), deviceRef: z.string().max(64).nullable().optional(),
+        evidenceRecordId: z.number().int().positive(), contentHash: z.string().regex(/^[a-f0-9]{64}$/), byteLength: z.number().int().nonnegative().nullable().optional(), mimeType: z.string().max(120).nullable().optional(),
+        issuedAt: z.coerce.date().nullable().optional(), counterpartyOrgRef: z.string().max(64).nullable().optional(),
+        externalReferences: z.array(referenceInput).max(20).default([]), links: z.array(linkInput).max(20).default([]),
+        requestedState: z.enum(["captured", "needs_classification", "proposed"]).default("captured"),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => registerControlledDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx, input.deviceRef), definitionKey: input.definitionKey, title: input.title, originKind: input.originKind as never, issuer: input.issuer, contentHash: input.contentHash, byteLength: input.byteLength, mimeType: input.mimeType, evidenceRecordId: input.evidenceRecordId, issuedAt: input.issuedAt, counterpartyOrgRef: input.counterpartyOrgRef, requestedState: input.requestedState, importChannel: input.importChannel, externalReferences: input.externalReferences, links: input.links }));
+      }),
+    /**
+     * Register something LeaseOS rendered (or a domain minted): a field ticket
+     * PDF, an invoice, a completion package. Issued by the tenant, with the
+     * number its domain gave it where the definition is domain-managed.
+     */
+    registerRendered: roleProcedure("documentControl.documentRegisterRendered")
+      .input(z.object({
+        definitionKey: z.string().regex(DEFINITION_KEY_PATTERN), title: z.string().min(1).max(300), originKind: z.enum(RENDERED_ORIGINS as unknown as [string, ...string[]]),
+        ...bytesInput, templateRevisionRef: z.string().max(64).nullable().optional(), renderManifestHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), controlNumber: z.string().max(64).nullable().optional(),
+        issuedAt: z.coerce.date().nullable().optional(), counterpartyOrgRef: z.string().max(64).nullable().optional(), requestedState: z.enum(["issued", "proposed"]).default("issued"),
+        externalReferences: z.array(referenceInput).max(20).default([]), links: z.array(linkInput).max(20).default([]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => registerControlledDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx), definitionKey: input.definitionKey, title: input.title, originKind: input.originKind as never, issuer: { issuerKind: "tenant", issuerOrgRef: bookOrgRef }, contentHash: input.contentHash, sourceSnapshotHash: input.sourceSnapshotHash, byteLength: input.byteLength, mimeType: input.mimeType, evidenceRecordId: input.evidenceRecordId, fieldTicketDocumentId: input.fieldTicketDocumentId, storageKey: input.storageKey, issuedAt: input.issuedAt, counterpartyOrgRef: input.counterpartyOrgRef, templateRevisionRef: input.templateRevisionRef, renderManifestHash: input.renderManifestHash, controlNumber: input.controlNumber, requestedState: input.requestedState, importChannel: "system", externalReferences: input.externalReferences, links: input.links }));
+      }),
+    /** A person says what an external document is, who issued it, and which proposed facts stand. */
+    confirm: roleProcedure("documentControl.documentConfirm")
+      .input(z.object({ documentRef: z.string().min(1).max(64), definitionKey: z.string().regex(DEFINITION_KEY_PATTERN).optional(), issuer: issuerInput.optional(), title: z.string().min(1).max(300).optional(), issuedAt: z.coerce.date().nullable().optional(), externalReferences: z.array(referenceInput).max(20).default([]), links: z.array(linkInput).max(20).default([]), confirmReferenceRefs: z.array(z.string().max(40)).max(50).default([]), confirmLinkIds: z.array(z.number().int().positive()).max(50).default([]), deviceRef: z.string().max(64).nullable().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => confirmDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx, input.deviceRef), ...input }));
+      }),
+    /** Issue a tenant-produced document. The control number, where the definition mints one, comes from the series (Checkpoint C); a domain-managed number is handed in. */
+    issue: roleProcedure("documentControl.documentIssue")
+      .input(z.object({ documentRef: z.string().min(1).max(64), controlNumber: z.string().max(64).nullable().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => issueDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx), documentRef: input.documentRef, controlNumber: input.controlNumber ?? null }));
+      }),
+    void: roleProcedure("documentControl.documentVoid")
+      .input(z.object({ documentRef: z.string().min(1).max(64), reason: z.string().min(10).max(500) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => voidDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx), ...input }));
+      }),
+    supersede: roleProcedure("documentControl.documentSupersede")
+      .input(z.object({ documentRef: z.string().min(1).max(64), reason: z.string().min(10).max(500), ...bytesInput, templateRevisionRef: z.string().max(64).nullable().optional(), renderManifestHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), title: z.string().min(1).max(300).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => supersedeDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx), ...input }));
+      }),
+    withdraw: roleProcedure("documentControl.documentWithdraw")
+      .input(z.object({ documentRef: z.string().min(1).max(64), reason: z.string().min(10).max(500) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => withdrawDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx), ...input }));
+      }),
+    /** A keyed-fact correction under amend_with_reason: original and corrected values are kept side by side; the bytes never change. */
+    amend: roleProcedure("documentControl.documentAmend")
+      .input(z.object({ documentRef: z.string().min(1).max(64), reason: z.string().min(10).max(500), changes: z.object({ title: z.string().min(1).max(300).optional(), issuedAt: z.coerce.date().nullable().optional(), issuerName: z.string().max(220).nullable().optional(), issuerFacilityId: z.number().int().positive().nullable().optional(), issuerOrgRef: z.string().max(64).nullable().optional() }) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => amendDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx), ...input }));
+      }),
+    get: roleProcedure("documentControl.documentGet")
+      .input(z.object({ documentRef: z.string().min(1).max(64) }))
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => documentView(db, { bookOrgRef }, input.documentRef));
+      }),
+    list: roleProcedure("documentControl.documentsList")
+      .input(z.object({ definitionKey: z.string().regex(DEFINITION_KEY_PATTERN).optional(), originKind: z.enum(ORIGIN_KINDS).optional(), issuerKind: z.enum(ISSUER_KINDS).optional(), controlState: z.enum(CONTROL_STATES).optional(), recordType: z.enum(DOCUMENT_LINK_KINDS).optional(), recordRef: z.string().max(80).optional(), recordId: z.number().int().positive().optional(), includeSuperseded: z.boolean().default(false), q: z.string().max(120).optional(), limit: z.number().int().positive().max(500).optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return listDocuments(db, { bookOrgRef }, input ?? {});
       }),
   }),
   artifacts: router({

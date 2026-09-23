@@ -49,7 +49,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/workforceRouter.ts` | `ROLE_AUTHORIZED` | **16** |
 | `server/auditRouter.ts` | `ROLE_AUTHORIZED` | **6** |
 | `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **11** |
-| `server/documentControlRouter.ts` | `ROLE_AUTHORIZED` | **7** (DC-A (0178): definitions list/get, catalog seed, overlay/create/retire, source artifacts) |
+| `server/documentControlRouter.ts` | `ROLE_AUTHORIZED` | **17** (DC-A: definitions list/get, catalog seed, overlay/create/retire, source artifacts; DC-B: intake, register rendered, confirm, issue, void, supersede, withdraw, amend, get, list) |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
