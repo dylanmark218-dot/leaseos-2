@@ -23,7 +23,9 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb, listActiveUserRoleNames } from "./db";
+import { getDb, jobInScope, listActiveUserRoleNames } from "./db";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
+import { assertEntityInScope } from "./_core/entityScope";
 import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, dispatchPostings, operators } from "../drizzle/schema";
 import { assertReadinessSubjectInScope, checkInScope, dispatchScopeFor, loadEnforcementMode, loadGrantedOverrides } from "./dispatchEnforcementService";
 import { asFinding, resolveOverridePolicy } from "./_core/complianceFinding";
@@ -56,6 +58,19 @@ async function scopedDb(userId: number) {
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   return { db, scope: await dispatchScopeFor(userId) };
+}
+
+/**
+ * The enforcement setting a caller may read or write. The global row (no entity) governs the legacy
+ * path for everyone, so only the historical single tenant may touch it; an entity row must belong to
+ * the caller's organization.
+ */
+async function assertEnforcementScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: Awaited<ReturnType<typeof dispatchScopeFor>>, financialEntityId: number | null) {
+  if (financialEntityId == null) {
+    if (scope.tenantId !== SINGLE_TENANT_ID) throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement setting is not an organization's to change or read — name your own entity" });
+    return;
+  }
+  await assertEntityInScope(db, financialEntityId, scope);
 }
 
 /** A stored check the caller's organization may act on, or "not found". */
@@ -94,7 +109,9 @@ export const dispatchGateRouter = router({
       // v21.2 — a check is for a posting or for a direct job; it must say which.
       if (!input.postingId && !input.jobId) throw new TRPCError({ code: "BAD_REQUEST", message: "A check needs a postingId or a jobId" });
       const posting = input.postingId ? (await db.select({ id: dispatchPostings.id, jobId: dispatchPostings.jobId }).from(dispatchPostings).where(eq(dispatchPostings.id, input.postingId)).limit(1))[0] : null;
-      if (input.postingId && !posting) throw new TRPCError({ code: "NOT_FOUND", message: "Posting not found" });
+      // C1a — a posting another organization owns is indistinguishable from one that does not exist.
+      if (input.postingId && (!posting || !(await jobInScope(posting.jobId, scope)))) throw new TRPCError({ code: "NOT_FOUND", message: "Posting not found" });
+      if (posting && input.jobId != null && input.jobId !== posting.jobId) throw new TRPCError({ code: "BAD_REQUEST", message: `Posting ${posting.id} is not for job ${input.jobId}` });
       const now = new Date();
       const jobId = input.jobId ?? posting?.jobId ?? null;
       // C1a — every identity named must belong to the caller's organization; the org is the server's.
@@ -189,6 +206,7 @@ export const dispatchGateRouter = router({
       // v21.2 — a check recorded for a direct job assignment is not a posting award.
       if (check.postingId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This check is for a direct job assignment — use jobUnits.create with its eligibilityCheckId" });
       const posting = (await db.select({ jobId: dispatchPostings.jobId }).from(dispatchPostings).where(eq(dispatchPostings.id, check.postingId)).limit(1))[0];
+      if (!posting || !(await jobInScope(posting.jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: "Posting not found" });
       const now = new Date();
       // The facts are recomputed here, never accepted from the caller.
       // v22.18 — the recompute asks the same question the check asked, route
@@ -210,8 +228,8 @@ export const dispatchGateRouter = router({
   enforcementSet: roleProcedure("dispatch.enforcementSet")
     .input(z.object({ mode: z.enum(["off", "advisory", "enforced"]), reason: z.string().min(10).max(400), financialEntityId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const { db, scope } = await scopedDb(ctx.user.id);
+      await assertEnforcementScope(db, scope, input.financialEntityId ?? null);
       const before = await loadEnforcementMode(input.financialEntityId ?? null);
       await db.insert(dispatchEnforcementSettings).values({ financialEntityId: input.financialEntityId ?? null, mode: input.mode, reason: input.reason, setByUserId: ctx.user.id, setAt: new Date() });
       return { scope: input.financialEntityId ?? "global", previous: before.mode, mode: input.mode };
@@ -219,16 +237,21 @@ export const dispatchGateRouter = router({
 
   enforcementGet: roleProcedure("dispatch.enforcementGet")
     .input(z.object({ financialEntityId: z.number().int().positive().nullable().optional() }).optional())
-    .query(async ({ input }) => loadEnforcementMode(input?.financialEntityId ?? null)),
+    .query(async ({ ctx, input }) => {
+      const { db, scope } = await scopedDb(ctx.user.id);
+      await assertEnforcementScope(db, scope, input?.financialEntityId ?? null);
+      return loadEnforcementMode(input?.financialEntityId ?? null);
+    }),
 
   /** The operator's own readiness, as a checklist. Reads ctx.user.id; nobody else's. */
   whatAmIMissing: roleProcedure("dispatch.whatAmIMissing")
     .input(z.object({ unitId: z.number().int().positive().nullable().optional(), jobId: z.number().int().positive().nullable().optional() }).optional())
     .query(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const { db, scope } = await scopedDb(ctx.user.id);
       const me = (await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, ctx.user.id)).limit(1))[0];
       if (!me) return { verdict: "unknown" as const, items: [], note: "No operator record is linked to your user" };
+      // C1a — the operator is the caller's own, but the unit and job are named by the caller.
+      await assertReadinessSubjectInScope(db, scope, { operatorId: me.id, unitId: input?.unitId ?? null, jobId: input?.jobId ?? null });
       const r = await composeReadiness({ operatorId: me.id, unitId: input?.unitId ?? null, trailerId: null, jobId: input?.jobId ?? null });
       return { ...asChecklist(r.eligibility), note: undefined };
     }),

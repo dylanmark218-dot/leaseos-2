@@ -245,7 +245,7 @@ describe("the readiness fingerprint: canonical SHA-256 over every governing fact
     mechanicReleaseVersion: "c", trailerId: null, trailerStatusVersion: "none", jobClassificationVersion: "d", materialClassificationVersion: "m",
     permitVersion: "none", destinationAcceptanceVersion: "x", routeProfileId: null, routeDecisionVersion: "not_evaluated", communicationPlanVersion: "none",
     unitCredentialVersion: "u", insuranceVersion: "i", enforcementVersion: "e", roadsideVersion: "r", telematicsFaultVersion: "t",
-    calibrationVersion: "c", medicalVersion: "m", hosVersion: "h", deviceVersion: "d", ruleSetHash: "rs", policyVersion: "pv",
+    calibrationVersion: "c", medicalVersion: "m", hosVersion: "h", deviceVersion: "d", ruleSetHash: "rs", policyVersion: "pv", expiryStateVersion: "es",
   };
   it("is SHA-256 with a version prefix, and independent of key order", () => {
     const fp = computeEligibilityFingerprint(FACTS);
@@ -259,5 +259,38 @@ describe("the readiness fingerprint: canonical SHA-256 over every governing fact
       if (typeof FACTS[k] !== "string") continue;
       expect(computeEligibilityFingerprint({ ...FACTS, [k]: `${FACTS[k]}-changed` }), k).not.toBe(fp);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Review findings on the C1a PR                                        */
+/* ------------------------------------------------------------------ */
+
+describe("review fixes", () => {
+  it("a lone worker with no recorded satellite device blocks — never easier to release than the confirmed-absent case", () => {
+    const unknown = f(blk({ code: "lone_worker_satellite_unknown", severity: "unknown", overridable: true, overrideAuthority: "manager" }));
+    const absent = f(blk({ code: "lone_worker_no_satellite", severity: "blocking", overridable: true, overrideAuthority: "manager" }));
+    expect(unknown.dispatchEffect).toBe("BLOCK");
+    expect(unknown.overrideClass).toBe("APPROVED_POLICY_ONLY");
+    expect(absent.overrideClass).toBe("APPROVED_POLICY_ONLY");
+  });
+
+  it("strictest wins on the authority an acknowledgement needs too, whichever duplicate arrived first", () => {
+    const byDispatcher = f(blk({ code: "dup", label: "same", severity: "review", overridable: true, overrideAuthority: "dispatcher" }));
+    const byManager = f(blk({ code: "dup", label: "same", severity: "review", overridable: true, overrideAuthority: "manager" }));
+    expect(mergeFindings([byDispatcher, byManager])[0].overrideAuthority).toBe("manager");
+    expect(mergeFindings([byManager, byDispatcher])[0].overrideAuthority).toBe("manager");
+    const truck = f(blk({ code: "dup2", label: "same", subject: "truck" }));
+    const job = f(blk({ code: "dup2", label: "same", subject: "job" }));
+    expect(mergeFindings([truck, job])[0].subject).toBe(mergeFindings([job, truck])[0].subject);
+  });
+
+  it("an approved-policy grant is re-checked against the policy in force at award, and needs two named approvers", () => {
+    const route = f(blk({ code: "route_not_evaluated", severity: "unknown", overridable: true }));
+    const base: OverridePolicy = { policyRef: "OP-2", version: 2, findingCodes: ["route_not_evaluated"], grantorMinimumRole: "administrator", maxValidityMinutes: 60, approvedBy: ["Owner A", "Owner B"], approvedAt: "2026-09-01T00:00:00Z", effectiveFrom: "2026-09-01T00:00:00Z", effectiveUntil: null, rationale: "t" };
+    const grant = { blockerCode: "route_not_evaluated", requestedByUserId: 1, grantedByUserId: 2, grantedByRole: "manager", reason: "r", grantedAt: AT, policyRef: "OP-2", expiresAt: null };
+    expect(uncoveredFindings([route], [grant], AT, [base])).not.toEqual([]); // manager grant, policy now needs administrator
+    expect(uncoveredFindings([route], [{ ...grant, grantedByRole: "administrator" }], AT, [base])).toEqual([]);
+    expect(resolveOverridePolicy("OP-2", route, AT, [{ ...base, approvedBy: ["Owner A", " "] }]).ok).toBe(false);
   });
 });

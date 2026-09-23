@@ -81,6 +81,12 @@ export type EligibilityFacts = {
   ruleSetHash: string;
   /** Approved communication policy and automation policy in force. */
   policyVersion: string;
+  /**
+   * Whether each governing expiry (credentials, legacy licence, medical, insurance and its proof,
+   * Academy qualifications, supervision windows) had passed at the evaluation instant. The award
+   * recomputes at ITS instant, so a lapse between check and award changes this even though no row did.
+   */
+  expiryStateVersion: string;
 };
 
 /** FNV-1a 32-bit. Kept only for the award idempotency key below, which is a replay key, not a fingerprint. */

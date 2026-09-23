@@ -11,7 +11,7 @@ const NOW = new Date("2026-09-10T12:00:00Z");
 const mins = (n: number) => new Date(NOW.getTime() + n * 60_000);
 const blk = (over: Partial<DispatchBlocker> & { code: string }): DispatchBlocker => ({ label: over.code, severity: "blocking", subject: "truck", overridable: false, ...over });
 const facts = { operatorId: 1, operatorCredentialVersion: "a", hoursAvailableMinutes: null, unitId: 2, unitStatusVersion: "b", criticalDefectCount: 0, mechanicReleaseVersion: "c", trailerId: null, trailerStatusVersion: "none", jobClassificationVersion: "d", materialClassificationVersion: "none", permitVersion: "none", destinationAcceptanceVersion: "none", routeProfileId: null, routeDecisionVersion: "not_evaluated" , communicationPlanVersion: "none",
-  unitCredentialVersion: "none", insuranceVersion: "none", enforcementVersion: "none", roadsideVersion: "none", telematicsFaultVersion: "none", calibrationVersion: "none", medicalVersion: "none", hosVersion: "none", deviceVersion: "none", ruleSetHash: "r", policyVersion: "p" };
+  unitCredentialVersion: "none", insuranceVersion: "none", enforcementVersion: "none", roadsideVersion: "none", telematicsFaultVersion: "none", calibrationVersion: "none", medicalVersion: "none", hosVersion: "none", deviceVersion: "none", ruleSetHash: "r", policyVersion: "p", expiryStateVersion: "e" };
 const check = (over: Partial<StoredEligibilityCheck> = {}): StoredEligibilityCheck => ({ checkId: 10, fingerprint: "EF-x", operatorId: 1, verdict: "eligible", blockers: [], evaluatedAt: mins(-5), explanation: "", ...over });
 const subject = { operatorId: 1, unitId: 2, jobId: 3 };
 

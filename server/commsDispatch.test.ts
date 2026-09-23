@@ -122,7 +122,7 @@ describe("the readiness fingerprint covers the channels", () => {
     communicationPlanVersion: "unknown:abc",
   unitCredentialVersion: "none", insuranceVersion: "none", enforcementVersion: "none", roadsideVersion: "none",
   telematicsFaultVersion: "none", calibrationVersion: "none", medicalVersion: "none", hosVersion: "none",
-  deviceVersion: "none", ruleSetHash: "rules-v1", policyVersion: "policy-v1",
+  deviceVersion: "none", ruleSetHash: "rules-v1", policyVersion: "policy-v1", expiryStateVersion: "e",
   };
   it("moves when the plan's verdict or its channels move", () => {
     expect(computeEligibilityFingerprint({ ...FACTS, communicationPlanVersion: "covered:abc" })).not.toBe(computeEligibilityFingerprint(FACTS));

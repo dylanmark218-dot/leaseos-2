@@ -22,8 +22,8 @@ export async function loadEnforcementMode(financialEntityId: number | null): Pro
 
 export type GatedJobUnitInput = InsertJobUnit & {
   eligibilityCheckId?: number | null;
-  /** C1a — the caller's organization; a check taken by another organization is "not found". */
-  actingScope?: TenantScope | null;
+  /** C1a — the caller's organization, required: a check taken by another organization is "not found". */
+  actingScope: TenantScope;
 };
 
 export type GatedJobUnitResult = { id: number; mode: EnforcementMode; checkId: number | null; exceptions: string[] };
@@ -98,16 +98,18 @@ export async function createJobUnitGated(input: GatedJobUnitInput): Promise<Gate
   let check: StoredEligibilityCheck | null = null;
   let granted: GrantedOverride[] = [];
   let checkRouteApprovalRef: string | null = null;
+  let checkTrailerId: number | null = null;
   if (eligibilityCheckId != null) {
     const c = (await db.select().from(dispatchEligibilityChecks).where(eq(dispatchEligibilityChecks.id, eligibilityCheckId)).limit(1))[0];
-    if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "Eligibility check not found" });
+    // C1a — scope first: another organization's check is "not found", before anything about it is compared.
+    if (!c || !checkInScope(c, input.actingScope)) throw new TRPCError({ code: "NOT_FOUND", message: "Eligibility check not found" });
     if (c.jobId != null && c.jobId !== input.jobId) throw new TRPCError({ code: "BAD_REQUEST", message: `Check ${c.id} is for job ${c.jobId}, not job ${input.jobId}` });
     if (c.unitId != null && c.unitId !== input.unitId) throw new TRPCError({ code: "BAD_REQUEST", message: `Check ${c.id} is for a different unit` });
-    if (input.actingScope && !checkInScope(c, input.actingScope)) throw new TRPCError({ code: "NOT_FOUND", message: "Eligibility check not found" });
     check = { checkId: c.id, fingerprint: c.fingerprint ?? "MISSING", operatorId: c.operatorId, verdict: c.verdict as StoredEligibilityCheck["verdict"], blockers: JSON.parse(c.blockersJson ?? "[]") as DispatchBlocker[], evaluatedAt: c.evaluatedAt, explanation: "" };
     // C1a-3 — the grantor, from the grant columns. This used to copy the requester into the grantor.
     granted = await loadGrantedOverrides(db, c.id);
     checkRouteApprovalRef = c.routeApprovalRef ?? null;
+    checkTrailerId = c.trailerId ?? null;
   }
 
   // Facts are recomputed only when there is something to compare them to and
@@ -115,7 +117,7 @@ export async function createJobUnitGated(input: GatedJobUnitInput): Promise<Gate
   const currentFacts = mode !== "off" && check && input.operatorId
     // R-8 — the recompute asks the same question the check asked, route included; without it every
     // route-bound check fingerprint-mismatched in enforced mode.
-    ? (await composeReadiness({ operatorId: input.operatorId, unitId: input.unitId, trailerId: null, jobId: input.jobId, routeApprovalRef: checkRouteApprovalRef }, now)).facts
+    ? (await composeReadiness({ operatorId: input.operatorId, unitId: input.unitId, trailerId: checkTrailerId, jobId: input.jobId, routeApprovalRef: checkRouteApprovalRef }, now)).facts
     : null;
 
   const decision = decideLegacyAssignment({

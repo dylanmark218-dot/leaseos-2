@@ -300,6 +300,25 @@ d("C1a-6: a readiness decision goes stale when anything it governed on changes",
   });
 });
 
+d("review fix: time itself stales a check — an expiry passing between check and award", () => {
+  it("the expiry state moves when a governing expiry passes, and not before", async () => {
+    const s = await establishedSubject();
+    const [orig] = await pool.execute<mysql.RowDataPacket[]>("SELECT expiresAt FROM insurancePolicies WHERE id = ?", [s.policyId]);
+    try {
+      await pool.execute("UPDATE insurancePolicies SET expiresAt = DATE_ADD(NOW(), INTERVAL 2 HOUR) WHERE id = ?", [s.policyId]);
+      const now = new Date();
+      const r0 = await composeReadiness(s.subject, now);
+      const r1 = await composeReadiness(s.subject, new Date(now.getTime() + 60_000));
+      const r2 = await composeReadiness(s.subject, new Date(now.getTime() + 3 * 3_600_000));
+      expect(r1.facts.expiryStateVersion).toBe(r0.facts.expiryStateVersion); // nothing has lapsed yet
+      expect(r2.facts.expiryStateVersion).not.toBe(r0.facts.expiryStateVersion); // the policy lapsed
+      expect(r2.fingerprint).not.toBe(r0.fingerprint);
+    } finally {
+      await pool.execute("UPDATE insurancePolicies SET expiresAt = ? WHERE id = ?", [orig[0].expiresAt, s.policyId]);
+    }
+  });
+});
+
 /* ------------------------------------------------------------------ */
 /* C1a-7 — dangerous goods, in the composer                            */
 /* ------------------------------------------------------------------ */
@@ -357,5 +376,43 @@ d("18. tenant-crossing attempts are refused, and the caller cannot supply a tena
     await expect(caller(outsider).dispatch.readiness({ ...s.subject, orgRef: "default", tenantId: "default" } as never)).rejects.toThrow(/not found/i);
     const [o] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM dispatchOverrides WHERE eligibilityCheckId = ? AND granted = 1", [c.checkId]);
     expect(Number(o[0].n)).toBe(0);
+  });
+
+  it("review fixes: a foreign posting, a foreign unit on the own checklist, the global enforcement setting and a foreign check on the legacy path are all refused", async () => {
+    const s = await establishedSubject();
+    const c = await caller(s.dispatcher).dispatch.evaluate({ ...s.subject, postingId: s.postingId });
+    const orgRef = key("ORG").slice(0, 60);
+    await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [orgRef, `o ${orgRef}`]);
+    const outsider = await withRole("management");
+    await pool.execute("INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01',1)", [key("MEM").slice(0, 60), orgRef, outsider]);
+    // The outsider's own job, so the only foreign thing in each call is the one under test.
+    const [oj] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress, orgRef) VALUES (?, 'water_haul', 'transport', 'Theirs', 'LSD', 'dispatched', 0, ?)", [key("JOB").slice(0, 40), orgRef]);
+    const ownJob = Number(oj.insertId);
+    // …and their own operator and unit, owned by their organization.
+    const [oo] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, 'Their driver')", [outsider]);
+    const [ou] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company) VALUES (?, 'vacuum_truck', 'Theirs')", [key("OU").slice(0, 30)]);
+    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1), (?, 'unit', ?, 1)", [orgRef, Number(oo.insertId), orgRef, Number(ou.insertId)]);
+    const ownSubject = { operatorId: Number(oo.insertId), unitId: Number(ou.insertId), trailerId: null, jobId: ownJob };
+    // Control: with nothing foreign, the outsider's own readiness is readable.
+    await expect(caller(outsider).dispatch.readiness(ownSubject)).resolves.toBeTruthy();
+
+    // 1. Another tenant's posting is "not found" — never "exists but is not yours" — even alongside the caller's own job.
+    await expect(caller(outsider).dispatch.evaluate({ ...ownSubject, postingId: 999_999_999 })).rejects.toThrow(/Posting not found/);
+    await expect(caller(outsider).dispatch.evaluate({ ...ownSubject, postingId: s.postingId })).rejects.toThrow(/Posting not found/);
+    // …and within one tenant, a posting cannot be paired with a different job.
+    const [j2] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Other', 'LSD', 'dispatched', 0)", [key("JOB").slice(0, 40)]);
+    await expect(caller(s.dispatcher).dispatch.evaluate({ ...s.subject, jobId: Number(j2.insertId), postingId: s.postingId })).rejects.toThrow(/is not for job/);
+
+    // 2. A driver's own checklist cannot be pointed at another tenant's unit.
+    await expect(caller(outsider).dispatch.whatAmIMissing({ unitId: ownSubject.unitId })).resolves.toBeTruthy();
+    await expect(caller(outsider).dispatch.whatAmIMissing({ unitId: s.unitId })).rejects.toThrow(/Unit not found/);
+
+    // 3. One organization cannot read or switch the global enforcement setting the legacy path uses.
+    await expect(caller(outsider).dispatch.enforcementSet({ mode: "off", reason: "Turn the gate off for everyone" })).rejects.toThrow(/global dispatch enforcement/);
+    await expect(caller(outsider).dispatch.enforcementGet()).rejects.toThrow(/global dispatch enforcement/);
+
+    // 4. The legacy path refuses another tenant's check as "not found", before comparing its job or unit.
+    await expect(caller(outsider).fieldRoute.identity.jobUnits.create({ jobId: ownJob, unitId: ownSubject.unitId, operatorId: ownSubject.operatorId, role: "operator", joinedAt: new Date(), eligibilityCheckId: c.checkId }))
+      .rejects.toThrow(/Eligibility check not found/);
   });
 });

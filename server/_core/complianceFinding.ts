@@ -45,7 +45,7 @@ export type FindingDomain =
   | "permit" | "destination" | "route" | "communications" | "capability" | "unclassified";
 
 /** Bumped whenever CLASSIFICATION changes meaning. Part of the rule-set hash, so a change stales every check. */
-export const CLASSIFICATION_VERSION = "c1a.1";
+export const CLASSIFICATION_VERSION = "c1a.2";
 
 /**
  * A readiness finding. It IS a `DispatchBlocker` — every existing consumer (the checklist, the
@@ -167,7 +167,10 @@ export const CLASSIFICATION: readonly Rule[] = [
   r("comms.radio_unknown", /^radio_authorization_unknown$/, "communications", "statute_regulation", ...UNKNOWN_BLOCKS),
   // The company's communication policy decides these (its own `unknownPlanBlocks` turns the plan
   // unknown into a blocker at source); absent that, an incomplete plan is administrative and warns.
-  r("comms.plan_unknown", /^(communication_plan_unknown|communication_plan_unmeasured_segments|communication_geometry_missing|lone_worker_satellite_unknown)$/, "communications", "company_policy", "UNKNOWN", "WARN", "WARNING_ONLY"),
+  // A lone worker beyond cellular with no recorded satellite device is a SAFETY unknown, and must not
+  // be easier to release than the confirmed-absent case below (review finding on C1a).
+  r("comms.lone_worker_unknown", /^lone_worker_satellite_unknown$/, "communications", "carrier_safety_policy", ...UNKNOWN_BLOCKS),
+  r("comms.plan_unknown", /^(communication_plan_unknown|communication_plan_unmeasured_segments|communication_geometry_missing)$/, "communications", "company_policy", "UNKNOWN", "WARN", "WARNING_ONLY"),
   r("comms.policy_breach", /^(communication_gap_exceeds_policy|lone_worker_no_satellite)$/, "communications", "company_policy", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
   r("comms.satellite_present", /^lone_worker_satellite_present$/, "communications", "company_policy", ...WARN_ACK),
 
@@ -245,15 +248,24 @@ export function asFinding(b: DispatchBlocker, evaluatedAt: Date | string): Compl
 /* Strictest duplicate wins (C1a-4)                                    */
 /* ------------------------------------------------------------------ */
 
-/** Total order on how strongly a finding constrains dispatch. Higher = stricter. */
+const AUTHORITY_RANK: Record<NonNullable<DispatchBlocker["overrideAuthority"]>, number> = { dispatcher: 1, manager: 2, administrator: 3 };
+const SUBJECT_ORDER: DispatchBlocker["subject"][] = ["operator", "truck", "trailer", "job", "route"];
+
+/**
+ * Total order on how strongly a finding constrains dispatch. Higher = stricter. The authority an
+ * acknowledgement needs is part of it: a duplicate that needs a manager outranks one a dispatcher
+ * could acknowledge, whichever arrived first.
+ */
 function strictness(f: ComplianceFinding): number[] {
-  return [EFFECT_RANK[f.dispatchEffect], OVERRIDE_RANK[f.overrideClass], SEVERITY_RANK[f.severity], RESULT_RANK[f.result]];
+  return [EFFECT_RANK[f.dispatchEffect], OVERRIDE_RANK[f.overrideClass], SEVERITY_RANK[f.severity], RESULT_RANK[f.result],
+    f.overrideAuthority ? AUTHORITY_RANK[f.overrideAuthority] : 0];
 }
 function compareStrictness(a: ComplianceFinding, b: ComplianceFinding): number {
   const sa = strictness(a), sb = strictness(b);
   for (let i = 0; i < sa.length; i++) if (sa[i] !== sb[i]) return sa[i] - sb[i];
-  // Fully deterministic tie-break, so merge(A,B) and merge(B,A) pick the same text too.
-  return a.label < b.label ? -1 : a.label > b.label ? 1 : 0;
+  // Fully deterministic tie-break on everything left, so merge(A,B) and merge(B,A) keep the same finding.
+  if (a.label !== b.label) return a.label < b.label ? -1 : 1;
+  return SUBJECT_ORDER.indexOf(a.subject) - SUBJECT_ORDER.indexOf(b.subject);
 }
 
 /**
@@ -317,7 +329,7 @@ export function resolveOverridePolicy(
   const candidates = registry.filter(p => p.policyRef === policyRef).sort((a, b) => b.version - a.version);
   const policy = candidates.find(p => Date.parse(p.effectiveFrom) <= at.getTime() && (p.effectiveUntil == null || Date.parse(p.effectiveUntil) > at.getTime()));
   if (!policy) return { ok: false, refusal: `No approved override policy ${policyRef} is in force` };
-  if (policy.approvedBy[0].trim() === "" || policy.approvedBy[0] === policy.approvedBy[1]) return { ok: false, refusal: `Override policy ${policyRef} does not carry two distinct approvers` };
+  if (policy.approvedBy[0].trim() === "" || policy.approvedBy[1].trim() === "" || policy.approvedBy[0].trim() === policy.approvedBy[1].trim()) return { ok: false, refusal: `Override policy ${policyRef} does not carry two distinct approvers` };
   if (!policy.findingCodes.includes(finding.code)) return { ok: false, refusal: `Override policy ${policyRef} does not cover ${finding.code}` };
   return { ok: true, policy };
 }
@@ -325,6 +337,9 @@ export function resolveOverridePolicy(
 /* ------------------------------------------------------------------ */
 /* Coverage: what an award needs, finding by finding                  */
 /* ------------------------------------------------------------------ */
+
+/** The override ladder's role ranks, as `dispatchRouter.overrideRoleFor` records them. */
+const GRANTOR_RANK: Record<string, number> = { driver: 0, dispatcher: 1, mechanic: 1, office: 1, manager: 2, administrator: 3 };
 
 /** A granted override as the award path reads it: the GRANTOR, never the requester. */
 export type OverrideGrant = {
@@ -357,7 +372,11 @@ export function uncoveredFindings(
     const grant = live.find(g => g.blockerCode === f.code);
     if (f.overrideClass === "APPROVED_POLICY_ONLY") {
       const policy = grant ? resolveOverridePolicy(grant.policyRef, f, at, registry) : null;
-      if (!grant || !policy?.ok) refusals.push(`${tag} — ${f.label} (${policy && !policy.ok ? policy.refusal : "released only under an approved override policy"})`);
+      if (!grant || !policy?.ok) { refusals.push(`${tag} — ${f.label} (${policy && !policy.ok ? policy.refusal : "released only under an approved override policy"})`); continue; }
+      // Re-checked against the policy in force NOW: a grant does not survive a policy that raised its bar.
+      if ((GRANTOR_RANK[grant.grantedByRole] ?? 0) < AUTHORITY_RANK[policy.policy.grantorMinimumRole]) {
+        refusals.push(`${tag} — ${f.label} (granted by a ${grant.grantedByRole || "role not recorded"}; ${policy.policy.policyRef} now requires ${policy.policy.grantorMinimumRole} or above)`);
+      }
       continue;
     }
     if (!grant) refusals.push(`${tag} — ${f.label} (unresolved, no authorised acknowledgement)`);

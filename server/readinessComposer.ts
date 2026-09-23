@@ -387,11 +387,20 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
    * difference, which is why the map is filled here rather than inferred downstream.
    */
   const evaluation: EvaluationMap = {};
+  /*
+   * C1a (review) — every expiry that governs a finding, so the fingerprint records whether each had
+   * passed AT THE EVALUATION INSTANT. Hashing only `expiresAt` missed time itself: a policy valid at
+   * 23:50 and lapsed at 00:10 left every row unchanged, and an award inside the reuse window went
+   * through on the 23:50 answer.
+   */
+  const governingExpiries: { what: string; at: Date | null | undefined }[] = [];
 
   /* ---- operator ---- */
   const op = (await db.select().from(operators).where(eq(operators.id, subject.operatorId)).limit(1))[0];
   if (!op) throw new Error(`Operator ${subject.operatorId} not found`);
   const opCreds = await credentialsFor("operator", op.id);
+  for (const c of opCreds) governingExpiries.push({ what: `operatorDoc:${c.id}`, at: c.expiresAt });
+  governingExpiries.push({ what: "legacyLicence", at: op.licenseExpiresAt });
   let licence = credentialState(opCreds, ["driver_licence"], "Driver licence");
   if (!licence.present && op.licenseExpiresAt) {
     // The flat legacy field is a weak signal: present, unverified. It keeps an
@@ -459,6 +468,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
         const conditionlessRequirementIds = new Set(matchedBindings.filter(b => !bindingHasUnevaluatedConditions(b.conditionsJson)).map(b => b.requirementId));
         const applicable = reqs.filter(r => conditionlessRequirementIds.has(r.id));
         const quals = await db.select().from(academyQualifications).where(eq(academyQualifications.userId, op.userId));
+        for (const q of quals) governingExpiries.push({ what: `academyQual:${q.id}`, at: q.expiresAt });
         const accepted = quals.filter(q => q.status === "current" && (!q.expiresAt || q.expiresAt > now)).map(q => ({ code: q.qualificationCode, status: q.status, expiresAt: q.expiresAt }));
         const supers = await db.select().from(academyDirectSupervisionRecords).where(and(
           eq(academyDirectSupervisionRecords.traineeUserId, op.userId),
@@ -466,6 +476,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
           eq(academyDirectSupervisionRecords.status, "active"),
           eq(academyDirectSupervisionRecords.physicalPresenceAttested, true),
         ));
+        for (const sup of supers) governingExpiries.push({ what: `supervisionStart:${sup.id}`, at: sup.startsAt }, { what: `supervisionEnd:${sup.id}`, at: sup.endsAt });
         for (const sup of supers) {
           if (sup.startsAt <= now && sup.endsAt > now && !accepted.some(q => q.code === sup.qualificationCode)) {
             accepted.push({ code: sup.qualificationCode, status: "current" as const, expiresAt: sup.endsAt });
@@ -568,6 +579,8 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}:${d.resolvedByReleaseId ?? "∅"}`)]);
     releaseVersion = versionOf(releases.map(r => `${r.id}:${r.releaseType}:${r.testResult ?? "∅"}:${r.resolvedDefectIds ?? "∅"}`));
     unitCredentialVersion = credentialVersionOf(uCreds);
+    for (const c of uCreds) governingExpiries.push({ what: `unitDoc:${c.id}`, at: c.expiresAt });
+    for (const p of pols) governingExpiries.push({ what: `unitPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `unitPolicyProof:${p.policyRef}`, at: p.document?.expiresAt });
     insuranceVersion = `unit=${insuranceVersionOf(pols)}`;
     roadsideVersion = versionOf(roadside.map(r => `${r.id}:${r.status}`).sort());
 
@@ -594,6 +607,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       for (const dv of devs) {
         const st = calibrationStatus({ events: evs.filter(e => e.measurementDeviceId === dv.id) as CalibrationEvent[], intervalDays: dv.calibrationIntervalDays, now });
         const eff = calibrationEffectOnUse(st, "dispatch_availability");
+        calibrationVersion = `${calibrationVersion};${dv.id}=${st.status}`; // status moves with time (due → expired)
         contributions.push({ engine: "calibration", finding: `${dv.deviceRef}: ${st.status} — dispatch ${eff.effect}` });
         if (eff.effect !== "ok") extra.push({ code: "measurement_device_uncalibrated", label: `${dv.deviceType.replace(/_/g, " ")} ${dv.deviceRef}: ${st.reason} — billing measurements on hold`, severity: "review", subject: "truck", overridable: true, overrideAuthority: "manager" });
       }
@@ -635,6 +649,8 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     // C1a-6 — was [id, number of documents]: a trailer inspection replaced by an expired one read as unchanged.
     trailerVersion = versionOf([tr.id, credentialVersionOf(tCreds)]);
     insuranceVersion = `${insuranceVersion};trailer=${insuranceVersionOf(pols)}`;
+    for (const c of tCreds) governingExpiries.push({ what: `trailerDoc:${c.id}`, at: c.expiresAt });
+    for (const p of pols) governingExpiries.push({ what: `trailerPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `trailerPolicyProof:${p.policyRef}`, at: p.document?.expiresAt });
   }
 
   /* ---- job ---- */
@@ -913,6 +929,9 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     routeProfileId, routeDecisionVersion, communicationPlanVersion,
     unitCredentialVersion, insuranceVersion, enforcementVersion, roadsideVersion, telematicsFaultVersion,
     calibrationVersion, medicalVersion, hosVersion, deviceVersion, ruleSetHash, policyVersion,
+    expiryStateVersion: sha256(canonicalJson(governingExpiries
+      .map(e => [e.what, e.at ? e.at.getTime() <= now.getTime() : null])
+      .sort((a, b) => String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0))),
   };
   return {
     eligibility, facts, fingerprint: computeEligibilityFingerprint(facts), contributions,
