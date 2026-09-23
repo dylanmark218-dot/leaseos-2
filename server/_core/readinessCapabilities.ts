@@ -192,22 +192,35 @@ export function capabilityResults(
 /**
  * The blockers a required-but-unevaluated capability must raise, so the engine's own verdict stops
  * reading the absence as satisfaction. Severity `unknown`, never `blocking`: blocked is an answer,
- * and the point is that no answer was given. Overridable, like the engine's other unknowns — a
- * person may still take responsibility, and now they can see what they are taking it for.
+ * and the point is that no answer was given. What may release it is the finding classification's
+ * decision (complianceFinding.ts), not this module's.
  */
 export function blockersForUnevaluatedRequired(verdict: CombinedVerdict, evaluation: EvaluationMap): DispatchBlocker[] {
-  return verdict.missingRequired.map((capability) => {
+  return verdict.missingRequired.map((capability): DispatchBlocker => {
     const e = evaluation[capability];
     const reason = e && !e.evaluated ? e.reason : "module_disabled";
+    /*
+     * C1a-5 — this used to set a `minimumRole` of "supervisor", a field DispatchBlocker does not have,
+     * behind a cast to the blocker type. The cast hid that `overrideAuthority` was absent, so the override
+     * path silently fell back to "manager". Typed now, with no cast. Under D-02 a required capability
+     * nobody evaluated blocks: the classification makes it APPROVED_POLICY_ONLY, and
+     * NEVER_OVERRIDABLE for enforcement orders. No role on its own may take responsibility for a
+     * check that was never run.
+     */
     return {
       code: `capability_not_evaluated_${capability.replace(/\s+/g, "_")}`,
       label: `${capability} is required for this dispatch and was not evaluated (${reason})`,
-      severity: "unknown" as const,
-      subject: (Object.entries(SUBJECT_CAPABILITIES).find(([, caps]) => caps.includes(capability))?.[0] ?? "job") as DispatchBlocker["subject"],
-      overridable: true,
-      minimumRole: "supervisor",
-    } as DispatchBlocker;
+      severity: "unknown",
+      subject: subjectOfCapability(capability),
+      overridable: capability !== CAPABILITY.enforcementOrders,
+    };
   });
+}
+
+const BLOCKER_SUBJECTS: readonly DispatchBlocker["subject"][] = ["operator", "truck", "trailer", "job", "route"];
+function subjectOfCapability(capability: string): DispatchBlocker["subject"] {
+  const owner = Object.entries(SUBJECT_CAPABILITIES).find(([, caps]) => caps.includes(capability))?.[0];
+  return BLOCKER_SUBJECTS.find(s => s === owner) ?? "job";
 }
 
 /** Compose the whole picture in one call, for a consumer that has both parts. */

@@ -100,7 +100,7 @@ d("a truck talks, and people decide", () => {
     expect(u1.odometer).toMatchObject({ telemetryKm: 168_400, lastShopKm: 160_000, tripsKm: null, determination: "consistent" });
     await expect(m.inbound.ingest({ feed: "vehicle_telemetry", idempotencyKey: "tel-x", payload: { recordedAt: "2026-09-10T08:00:00Z", unitRef: "NOPE", odometerKm: 1 } })).resolves.toMatchObject({ status: "rejected" });
 
-    // A fault, three times: one row, count 3, active, severity unknown — and dispatch says UNKNOWN, overridable by a manager, not blocked, not clear.
+    // A fault, three times: one row, count 3, active, severity unknown — and dispatch says UNKNOWN, not clear.
     for (let i = 1; i <= 3; i++) await m.inbound.ingest({ feed: "fault_code", idempotencyKey: `flt-${i}`, payload: { code: "SPN-100", subcode: "FMI-1", protocol: "j1939", seenAt: `2026-09-10T0${i}:00:00Z`, unitRef: unitNo, description: "Engine oil pressure low" } });
     const faults = (await callerFor(dispatcher).telematics.unit({ unitId })).faults;
     expect(faults).toHaveLength(1);
@@ -110,7 +110,9 @@ d("a truck talks, and people decide", () => {
     const op = [{ id: Number(opIns.insertId) }];
     const r1 = await callerFor(dispatcher).dispatch.readiness({ operatorId: Number(op[0].id), unitId });
     const faultItem = r1.blockers.find(b => b.code === "fault_spn-100_active");
-    expect(faultItem).toMatchObject({ severity: "unknown", subject: "truck", overridable: true, overrideAuthority: "manager" });
+    // C1a / D-02 — a fault nobody has assessed is a possible unresolved safety defect: UNKNOWN, and it
+    // BLOCKS. No manager may take it on alone; only an owner-approved policy could, and none exists.
+    expect(faultItem).toMatchObject({ severity: "unknown", subject: "truck", result: "UNKNOWN", dispatchEffect: "BLOCK", overrideClass: "APPROVED_POLICY_ONLY" });
     expect(faultItem!.label).toContain("a mechanic decides");
 
     // The mechanic acknowledges it as critical: a defect exists with the mechanic's words, the fault is acknowledged, dispatch is BLOCKED and not overridable; clearing is refused until the defect resolves.

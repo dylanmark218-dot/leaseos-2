@@ -16,7 +16,9 @@
  * all, so the rule can be tested without a database.
  */
 
-import type { DispatchBlocker, DispatchEligibility } from "./dispatchReadiness";
+import type { DispatchEligibility } from "./dispatchReadiness";
+import { canonicalJson, sha256 } from "./auditPackage";
+import { APPROVED_OVERRIDE_POLICIES, asFinding, uncoveredFindings, type OverrideGrant, type OverridePolicy } from "./complianceFinding";
 
 /**
  * The facts an eligibility verdict depends on. Any change here invalidates
@@ -47,8 +49,47 @@ export type EligibilityFacts = {
    * recomputes and refuses rather than binding an assignment to a stale brief.
    */
   communicationPlanVersion: string;
+  /*
+   * C1a-6 — governing state the fingerprint used to miss. Each of these could change after a check
+   * and, before C1a, the check stayed "valid" for up to its reuse window regardless:
+   * an out-of-service order issued at the roadside, a policy lapsing at midnight, a critical fault.
+   *
+   * Deliberately NOT here (high-frequency signals that would make every check stale within seconds
+   * without changing any decision): telemetry snapshots, GPS positions, odometer readings, a fault's
+   * last-seen time or occurrence count, device heartbeats, and the evaluation timestamp itself. A
+   * fault enters by identity, status and severity determination — the things that decide dispatch.
+   */
+  /** Verified credential documents on the unit (inspection, registration) — ids, status, expiry. */
+  unitCredentialVersion: string;
+  /** Insurance policies covering the unit and trailer: ref, status, verification, expiry, proof. */
+  insuranceVersion: string;
+  /** Enforcement events and out-of-service orders covering operator, unit and trailer. */
+  enforcementVersion: string;
+  /** Open roadside service events on the unit. */
+  roadsideVersion: string;
+  /** Active/acknowledged telematics faults: identity, status, severity determination. */
+  telematicsFaultVersion: string;
+  /** Calibration events on the unit's assigned measurement devices. */
+  calibrationVersion: string;
+  /** The operator's commercial medical fitness record (projection only). */
+  medicalVersion: string;
+  /** The HOS input actually used: today's current attestation, or none. */
+  hosVersion: string;
+  /** The operator's enrolled field device status. */
+  deviceVersion: string;
+  /** The rules the findings were decided under — see `ruleSetHash` in the composer. */
+  ruleSetHash: string;
+  /** Approved communication policy and automation policy in force. */
+  policyVersion: string;
+  /**
+   * Whether each governing expiry (credentials, legacy licence, medical, insurance and its proof,
+   * Academy qualifications, supervision windows) had passed at the evaluation instant. The award
+   * recomputes at ITS instant, so a lapse between check and award changes this even though no row did.
+   */
+  expiryStateVersion: string;
 };
 
+/** FNV-1a 32-bit. Kept only for the award idempotency key below, which is a replay key, not a fingerprint. */
 function stableHash(value: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < value.length; i++) {
@@ -58,14 +99,16 @@ function stableHash(value: string): string {
   return h.toString(16).padStart(8, "0");
 }
 
+/** Prefix for the C1a fingerprint. A pre-C1a `EF-` check never matches one, so it re-evaluates once. */
+export const FINGERPRINT_PREFIX = "EF2-";
+
+/**
+ * C1a-6 — canonical serialization (sorted keys, the audit package's `canonicalJson`) and SHA-256.
+ * Replaces the 32-bit FNV-1a of B15, which was a cache key, not a fingerprint: at dispatch volume a
+ * collision is a stale check reading as valid.
+ */
 export function computeEligibilityFingerprint(facts: EligibilityFacts): string {
-  const canonical = Object.entries(facts)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(
-      ([k, v]) => `${k}:${v === null || v === undefined ? "null" : String(v)}`
-    )
-    .join("|");
-  return `EF-${stableHash(canonical)}`;
+  return `${FINGERPRINT_PREFIX}${sha256(canonicalJson(facts))}`;
 }
 
 export type StoredEligibilityCheck = DispatchEligibility & {
@@ -166,13 +209,8 @@ const AWARDABLE_POSTING_STATES: PostingState[] = [
   "partially_staffed",
 ];
 
-export type GrantedOverride = {
-  blockerCode: string;
-  grantedByUserId: number;
-  grantedByRole: string;
-  reason: string;
-  grantedAt: Date;
-};
+/** C1a-3 — the grantor, the requester, the policy and the expiry, each its own field. */
+export type GrantedOverride = OverrideGrant;
 
 export type AwardRequest = {
   postingId: number;
@@ -197,6 +235,10 @@ export type AwardContext = {
     message: string;
   }>;
   grantedOverrides: GrantedOverride[];
+  /** The approved override policies in force; defaults to the reviewed registry. */
+  overridePolicies?: readonly OverridePolicy[];
+  /** When the award is decided; defaults to now. Expiry of grants and policies is judged at this instant. */
+  at?: Date;
 };
 
 export type AwardDecision =
@@ -229,49 +271,15 @@ export function decideAward(context: AwardContext): AwardDecision {
     refusals.push(context.validity.reason);
   }
 
-  const verdict = context.eligibility.verdict;
-  if (verdict === "blocked") {
-    const named = context.eligibility.blockers
-      .filter(b => b.severity === "blocking")
-      .map(b => `BLOCKED — ${b.label}`);
-    refusals.push(...named);
-  }
-  // v21.1 — an unknown blocker that the readiness engine marked overridable
-  // (route_not_evaluated, by a manager) IS resolved by a granted override:
-  // that is a recorded human decision with a reason, not a rounding-up. An
-  // unknown blocker nobody may override refuses regardless. Before this,
-  // every unknown verdict refused unconditionally and the override the
-  // engine offered was dead — found when the gate was first wired.
-  // Review blockers are checked whenever the verdict is review OR unknown;
-  // previously an unknown verdict skipped them.
-  if (verdict === "unknown" || verdict === "eligible_review") {
-    for (const b of context.eligibility.blockers.filter(
-      x => x.severity === "unknown" || x.severity === "review"
-    )) {
-      const covered =
-        b.overridable &&
-        context.grantedOverrides.some(o => o.blockerCode === b.code);
-      if (!covered)
-        refusals.push(
-          b.severity === "unknown"
-            ? `UNKNOWN — ${b.label}${b.overridable ? " (no authorised override)" : ""}`
-            : `REVIEW — ${b.label} (unresolved, no authorised override)`
-        );
-    }
-  }
-
-  // An override can never cover a non-overridable blocker, even if one was
-  // somehow recorded. Belt and braces against a bad write upstream.
-  for (const o of context.grantedOverrides) {
-    const blocker = context.eligibility.blockers.find(
-      b => b.code === o.blockerCode
-    );
-    if (blocker && !blocker.overridable) {
-      refusals.push(
-        `Override of ${blocker.code} is not permitted for any role`
-      );
-    }
-  }
+  /*
+   * C1a — one rule for every finding, by its override class: NEVER_OVERRIDABLE refuses; an
+   * APPROVED_POLICY_ONLY finding needs a grant under an approved policy in force; a WARNING_ONLY
+   * finding needs a grant by someone other than the requester. A grant whose grantor is the
+   * requester is not a grant. The same function decides the enforced legacy assignment.
+   */
+  const at = context.at ?? new Date();
+  const findings = context.eligibility.blockers.map(b => asFinding(b, context.eligibility.evaluatedAt));
+  refusals.push(...uncoveredFindings(findings, context.grantedOverrides, at, context.overridePolicies ?? APPROVED_OVERRIDE_POLICIES));
 
   for (const c of context.conflicts) {
     refusals.push(`Resource conflict — ${c.message}`);
