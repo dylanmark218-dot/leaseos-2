@@ -147,6 +147,8 @@ d("jobUnits.create under off, advisory and enforced", () => {
     const operatorId = Number(op.insertId);
     const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Acme', 'LSD 12-01-050-08W5', 'dispatched', 0)", [key("JOB").slice(0, 40)]);
     const jobId = Number(j.insertId);
+    // RI-0.6: a job with no load classification is UNKNOWN for dangerous goods; the established fixture classifies its load.
+    await pool.execute("INSERT INTO loadProfiles (jobId, material, classificationStatus, verifiedAt) VALUES (?, 'Produced water', 'verified', NOW())", [jobId]);
     // Insured, inspected, registered — so only the unknowns remain.
     for (const [t, title] of [["cvip_certificate", "CVIP"], ["vehicle_registration", "Registration"], ["insurance_proof", "Pink card"]]) await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('unit', ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 300 DAY), 'verified')", [unitId, t, title]);
     const [insr] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO insuranceProviders (providerRef, name, role, status) VALUES (?, ?, 'insurer', 'active')", [key("PRV").slice(0, 40), key("Ins").slice(0, 60)]);

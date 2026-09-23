@@ -143,6 +143,8 @@ d("can Unit 142 take this job tomorrow?", () => {
     const operatorId = Number(op.insertId);
     const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Acme', 'LSD 04-12-052-09W5', 'dispatched', 0)", [key("JOB").slice(0, 40)]);
     const jobId = Number(j.insertId);
+    // RI-0.6: a job with no load classification is UNKNOWN for dangerous goods; the established fixture classifies its load.
+    await pool.execute("INSERT INTO loadProfiles (jobId, material, classificationStatus, verifiedAt) VALUES (?, 'Produced water', 'verified', NOW())", [jobId]);
     const [p] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO dispatchPostings (postingNumber, jobId, distribution, planningState, planningBlocker, priority, crewSize, rateVisible, createdByUserId) VALUES (?, ?, 'direct_assignment', 'direct', 'none', 'normal', 1, 0, ?)", [key("POST").slice(0, 40), jobId, dispatcher]);
     const postingId = Number(p.insertId);
     // Unit credentials: inspection, registration verified; insured under a verified policy with proof on file.
