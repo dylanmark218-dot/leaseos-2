@@ -8785,3 +8785,47 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
+
+/* ---- 0169/0170: Driver Portfolio and Credential Wallet ---- */
+
+/**
+ * What a customer, a site, a job type, a piece of equipment or the company
+ * itself requires of the operator. `company` binds with subjectCode `*` and
+ * applies to every job; it is also the wallet's baseline. Only a `mandatory`
+ * binding can block dispatch.
+ */
+export const driverRequirementBindings = mysqlTable("driverRequirementBindings", {
+  id: int("id").autoincrement().primaryKey(),
+  bindingRef: varchar("bindingRef", { length: 96 }).notNull().unique(),
+  /** NULL = the historical single tenant. Applies only to work of the same organization. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  subjectType: mysqlEnum("subjectType", ["company", "customer", "site", "job_type", "equipment", "job"]).notNull(),
+  subjectCode: varchar("subjectCode", { length: 160 }).notNull(),
+  requirementKind: mysqlEnum("requirementKind", ["credential", "licence_class", "equipment"]).notNull(),
+  requirementCode: varchar("requirementCode", { length: 160 }).notNull(),
+  label: varchar("label", { length: 220 }),
+  enforcement: mysqlEnum("enforcement", ["mandatory", "informational"]).default("mandatory").notNull(),
+  effectiveAt: timestamp("effectiveAt"),
+  expiresAt: timestamp("expiresAt"),
+  active: boolean("active").default(true).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** Append-only (0170): what happened to a driver's credentials, and who did it. */
+export const driverPortfolioEvents = mysqlTable("driverPortfolioEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
+  operatorId: int("operatorId").notNull(),
+  credentialId: int("credentialId"),
+  actorUserId: int("actorUserId"),
+  eventType: mysqlEnum("eventType", [
+    "credential_uploaded", "credential_verified", "credential_rejected", "requirement_bound", "requirement_retired",
+    "wallet_viewed", "portfolio_viewed", "credential_shared", "share_verified", "used_for_dispatch",
+  ]).notNull(),
+  detail: varchar("detail", { length: 400 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
