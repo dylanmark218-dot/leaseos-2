@@ -292,7 +292,7 @@ d("a driver, a unit and a carrier, through the registry", () => {
 
   it("versions a written program without overwriting, and flags unmatched profile events", async () => {
     const safety = await withRole("safety");
-    const entityId = 700000 + Math.floor(Math.random() * 90000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1.1 — a real book: a made-up entity id is "not found"
     const pk = `safety-${entityId}`;
     const v1 = await callerFor(safety).compliance.programPublish({ programKey: pk, title: "Safety Program", programType: "safety", financialEntityId: entityId, effectiveFrom: new Date("2026-01-01T00:00:00Z") });
     const v2 = await callerFor(safety).compliance.programPublish({ programKey: pk, title: "Safety Program", programType: "safety", financialEntityId: entityId, effectiveFrom: new Date("2026-09-01T00:00:00Z") });

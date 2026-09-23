@@ -56,7 +56,9 @@ beforeAll(async () => {
       // Already granted by a concurrent run — the unique index is doing its job.
     }
   }
-  await appRouter.createCaller(createContext()).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
+  // F1.1 — the global mode governs every organization's dispatch, so a platform administrator sets it.
+  const admin = createContext();
+  await appRouter.createCaller({ ...admin, user: { ...admin.user!, role: "admin" } }).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
 });
 
 function createContext(): TrpcContext {

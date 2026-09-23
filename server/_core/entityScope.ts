@@ -120,3 +120,13 @@ export function bookOrgWhere(column: MySqlColumn, fs: FinanceScope): SQL {
 export function ownsBookOrg(fs: FinanceScope, bookOrgRef: string | null | undefined): boolean {
   return fs.tenantId === SINGLE_TENANT_ID ? bookOrgRef == null || bookOrgRef === SINGLE_TENANT_ID : bookOrgRef === fs.tenantId;
 }
+
+/**
+ * F1.1 — the same boundary for routers outside finance (compliance, requirements, calibration, dispatch):
+ * the caller's acting organization must own this entity. Any other id answers "<what> not found". The
+ * entity is the company's legal entity (0146), not a finance concept, so no finance context is involved.
+ */
+export async function assertCallerOwnsEntity(db: Db, userId: number, financialEntityId: number, what = `Financial entity ${financialEntityId}`): Promise<void> {
+  const fs = await financeScopeFor(db, userId);
+  if (!ownsEntity(fs, financialEntityId)) throw /^No such |not found$/.test(what) ? new TRPCError({ code: "NOT_FOUND", message: what }) : notFound(what);
+}

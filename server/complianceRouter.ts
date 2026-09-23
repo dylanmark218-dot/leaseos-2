@@ -10,9 +10,10 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, evidenceInScope, getDb } from "./db";
+import { assertCallerOwnsEntity } from "./_core/entityScope";
 import { carrierProfileReviews, complianceConsents, complianceDocuments, complianceRequirements, writtenProgramVersions } from "../drizzle/schema";
 import {
   abstractRequestPermitted, buildPassport, composeJobPassport, medicalFitnessForDispatch, nextRenewalDue,
@@ -201,8 +202,18 @@ export const complianceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.1 — the program is the caller's own company's; so is the version it supersedes. (A program key is
+      // not unique across companies: publishing "safety-manual" must never supersede another company's.)
+      await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);
+      if (input.documentEvidenceRecordId != null && !(await evidenceInScope(input.documentEvidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       const prior = await db.select({ id: writtenProgramVersions.id, version: writtenProgramVersions.version }).from(writtenProgramVersions)
-        .where(and(eq(writtenProgramVersions.programKey, input.programKey), isNull(writtenProgramVersions.supersededAt))).orderBy(desc(writtenProgramVersions.version)).limit(1);
+        .where(and(eq(writtenProgramVersions.programKey, input.programKey), eq(writtenProgramVersions.financialEntityId, input.financialEntityId), isNull(writtenProgramVersions.supersededAt))).orderBy(desc(writtenProgramVersions.version)).limit(1);
+      // Program keys are unique across LeaseOS (UNIQUE programKey+version) until the schema scopes them per company.
+      // A key another company holds is refused as taken — never superseded, never a database error.
+      if (!prior[0]) {
+        const elsewhere = (await db.select({ id: writtenProgramVersions.id }).from(writtenProgramVersions).where(and(eq(writtenProgramVersions.programKey, input.programKey), ne(writtenProgramVersions.financialEntityId, input.financialEntityId))).limit(1))[0];
+        if (elsewhere) throw new TRPCError({ code: "CONFLICT", message: `Program key ${input.programKey} is already in use — choose another key` });
+      }
       const version = (prior[0]?.version ?? 0) + 1;
       const now = new Date();
       await db.insert(writtenProgramVersions).values({
@@ -227,6 +238,9 @@ export const complianceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.1 — recorded against the caller's own company only.
+      await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);
+      if (input.evidenceRecordId != null && !(await evidenceInScope(input.evidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       // Anything on the regulator's profile that LeaseOS does not know about is
       // an exception to investigate, not a number to file.
       const unmatched = Math.max(0, input.inspectionsOnProfile - input.knownInspections) + Math.max(0, input.convictionsOnProfile - input.knownConvictions) + Math.max(0, input.collisionsOnProfile - input.knownCollisions);

@@ -104,7 +104,7 @@ d("F1 — Organization B cannot touch Organization A's money", () => {
     ["record a bill into A's book", () => as().vendor.billRecord({ financialEntityId: A.entityId, vendorId: A.vendorId, vendorInvoiceNumber: `X-${rnd()}`, invoiceDate: new Date("2026-09-01T00:00:00Z"), subtotal: 10, taxAmount: 0, total: 10, lines: [{ lineNo: 1, lineType: "other", description: "x", quantity: 1, unitPrice: 10, amount: 10 }] })],
     // Bank
     ["register a bank account in A's book", () => as().bank.accountRegister({ financialEntityId: A.entityId, name: "Theirs" })],
-    ["import a statement into A's bank account", () => as().bank.statementImport({ accountRef: A.bankRef, periodStart: new Date("2026-09-01T00:00:00Z"), periodEnd: new Date("2026-09-30T00:00:00Z"), openingBalanceCents: 0, closingBalanceCents: 1, lines: [{ postedAt: new Date("2026-09-02T00:00:00Z"), amountCents: 1 }] })],
+    ["import a statement into A's bank account", () => as().bank.statementImport({ accountRef: A.bankRef, periodStart: new Date("2026-06-01T00:00:00Z"), periodEnd: new Date("2026-06-30T00:00:00Z"), openingBalanceCents: 0, closingBalanceCents: 1, lines: [{ postedAt: new Date("2026-06-02T00:00:00Z"), amountCents: 1 }] })],
     // Period
     ["read A's close readiness", () => as().period.readiness({ financialEntityId: A.entityId, period: "2026-08" })],
     ["close A's period", () => as().period.close({ financialEntityId: A.entityId, period: "2026-08", action: "close", reason: "attempted by another organization" })],
@@ -114,7 +114,7 @@ d("F1 — Organization B cannot touch Organization A's money", () => {
     ["prepare A's GST return", () => as().gst.returnPrepare({ financialEntityId: A.entityId, period: "2026-Q3", jurisdiction: "CA-AB" })],
     ["finalize A's GST return", () => as().gst.returnFinalize({ returnRef: A.gstRef, acknowledgeReviewItems: [] })],
     // Fuel / IFTA
-    ["read A's fuel anomalies", () => as().fuel.anomalies({ financialEntityId: A.entityId, from: new Date("2026-07-01T00:00:00Z"), to: new Date("2026-09-30T00:00:00Z") })],
+    ["read A's fuel anomalies", () => as().fuel.anomalies({ financialEntityId: A.entityId, from: new Date("2026-06-01T00:00:00Z"), to: new Date("2026-06-30T00:00:00Z") })],
     ["reconcile A's tank", () => as().fuel.tankReconcile({ tankRef: A.tankRef })],
     ["register a tank in A's book", () => as().fuel.tankRegister({ financialEntityId: A.entityId, name: "x", jurisdiction: "CA-AB", fuelType: "diesel", capacityLitres: 1 })],
     ["read A's IFTA quarter", () => as().ifta.quarter({ financialEntityId: A.entityId, quarter: "2026-Q3" })],
@@ -281,4 +281,188 @@ describe("F1 — legacy ownership classification (pure)", () => {
     expect(classifyOwnership([]).verdict).toBe("UNPROVEN");
     expect(classifyOwnership([{ source: "job_organization", ref: "J", entityIds: [] }]).verdict).toBe("UNPROVEN");
   });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// F1.1 — insurance, the book-id procedures outside finance, funding, and inventory that cannot be owned
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+const ALL_ROLES = ["controller", "management", "office", "shop_lead", "mechanic", "safety", "bookkeeper", "dispatcher"];
+const days = (n: number) => new Date(Date.now() + n * 86_400_000);
+async function ownedUnit(orgRef: string) {
+  const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [`U-${rnd()}`]);
+  await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'unit', ?, 1)", [orgRef, u.insertId]);
+  return Number(u.insertId);
+}
+
+/** One organization's insurance, compliance, calibration, funding and dispatch records, made by its own people. */
+async function world11(orgRef: string) {
+  const people = { office: await member(orgRef, ["office"]), mgr: await member(orgRef, ["management"]), safety: await member(orgRef, ["safety"]), mechanic: await member(orgRef, ["mechanic"]), controller: await member(orgRef, ["controller"]), bookkeeper: await member(orgRef, ["bookkeeper"]) };
+  const [ent] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Carrier Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, orgRef]);
+  const entityId = Number(ent.insertId);
+  const unitId = await ownedUnit(orgRef);
+  const pol = await callerFor(people.office).insurance.policyRecord({ financialEntityId: entityId, policyType: "commercial_auto", insurerName: "XYZ Insurance", policyNumber: `PN-${rnd()}`, effectiveAt: days(-100), expiresAt: days(265), annualPremium: 180000, deductible: 5000, coverages: [{ coverageType: "commercial_auto", limitAmount: 5_000_000 }] });
+  await callerFor(people.office).insurance.coverageAssign({ policyRef: pol.policyRef, entities: [{ entityType: "unit", entityId: unitId }], coveredFrom: days(-100) });
+  await callerFor(people.mgr).insurance.coverageVerify({ policyRef: pol.policyRef, outcome: "coverage_verified" });
+  const claim = await callerFor(people.safety).insurance.claimOpen({ policyRef: pol.policyRef, unitId, lossOccurredAt: days(-3), claimType: "collision", estimatedLoss: 40000 });
+  await callerFor(people.controller).insurance.claimCostRecord({ claimRef: claim.claimRef, costType: "tow", amount: 850, incurredAt: days(-2) });
+  const programKey = `SAFETY-${rnd()}`;
+  await callerFor(people.safety).compliance.programPublish({ programKey, title: "Safety manual", programType: "safety", financialEntityId: entityId, effectiveFrom: days(-30) });
+  const dev = await callerFor(people.mechanic).calibration.deviceRegister({ financialEntityId: entityId, deviceType: "truck_scale", measures: "gross_weight", unitOfMeasure: "kg", calibrationIntervalDays: 180 });
+  await callerFor(people.mechanic).calibration.eventRecord({ deviceRef: dev.deviceRef, eventType: "calibrated", performedAt: days(-60) });
+  const calibrationEventId = Number((await one("SELECT id FROM calibrationEvents WHERE measurementDeviceId = ? ORDER BY id DESC LIMIT 1", [dev.deviceId])).id);
+  const expenseRef = `EXP-${rnd()}`;
+  await callerFor(people.bookkeeper).finance.expenseCreate({ expenseRef, financialEntityId: entityId, total: 120, transactionDate: days(-5) });
+  const opportunityRef = `OPP-${rnd()}`;
+  await pool.execute("INSERT INTO fundingOpportunities (opportunityRef, financialEntityId, fundingProgramId, matchStrength, status) VALUES (?, ?, 1, 'possible', 'estimated')", [opportunityRef, entityId]);
+  await callerFor(people.mgr).dispatch.enforcementSet({ financialEntityId: entityId, mode: "advisory", reason: "our own company's dispatch, advisory for now" });
+  return { orgRef, ...people, entityId, unitId, policyRef: pol.policyRef, claimRef: claim.claimRef, programKey, deviceRef: dev.deviceRef, calibrationEventId, expenseRef, opportunityRef };
+}
+
+d("F1.1 — Organization B cannot touch Organization A's insurance, compliance, calibration, funding or dispatch records", () => {
+  let A: Awaited<ReturnType<typeof world11>>, B: Awaited<ReturnType<typeof world11>>, attacker: number;
+  beforeAll(async () => {
+    A = await world11(await org());
+    B = await world11(await org());
+    attacker = await member(B.orgRef, ALL_ROLES);
+  }, 90_000);
+  const as = () => callerFor(attacker);
+  const attempts: [string, () => Promise<unknown>][] = [
+    // insurance — policies
+    ["record a policy into A's book", () => as().insurance.policyRecord({ financialEntityId: A.entityId, policyType: "cargo", insurerName: "x", policyNumber: `X-${rnd()}`, effectiveAt: days(-1), expiresAt: days(300), coverages: [{ coverageType: "cargo" }] })],
+    ["assign coverage on A's policy", () => as().insurance.coverageAssign({ policyRef: A.policyRef, entities: [{ entityType: "unit", entityId: B.unitId }], coveredFrom: days(-1) })],
+    ["cover A's unit under B's own policy", () => as().insurance.coverageAssign({ policyRef: B.policyRef, entities: [{ entityType: "unit", entityId: A.unitId }], coveredFrom: days(-1) })],
+    ["verify A's policy", () => as().insurance.coverageVerify({ policyRef: A.policyRef, outcome: "coverage_unknown" })],
+    ["read coverage for A's unit in A's book", () => as().insurance.coverageForEntity({ financialEntityId: A.entityId, entityType: "unit", entityId: A.unitId })],
+    ["read coverage for A's unit through B's book", () => as().insurance.coverageForEntity({ financialEntityId: B.entityId, entityType: "unit", entityId: A.unitId })],
+    ["match customer requirements against A's book", () => as().insurance.requirementMatch({ financialEntityId: A.entityId, customerRef: "Acme" })],
+    ["issue a certificate on A's policy", () => as().insurance.certificateIssue({ policyRef: A.policyRef, recipientCustomerRef: "Acme" })],
+    ["read A's renewal calendar", () => as().insurance.renewalCalendar({ financialEntityId: A.entityId })],
+    // insurance — claims
+    ["open a claim on A's policy", () => as().insurance.claimOpen({ policyRef: A.policyRef, lossOccurredAt: days(-1), claimType: "glass" })],
+    ["record a cost on A's claim", () => as().insurance.claimCostRecord({ claimRef: A.claimRef, costType: "repair", amount: 1, incurredAt: days(-1) })],
+    ["record a recovery on A's claim", () => as().insurance.claimRecoveryRecord({ claimRef: A.claimRef, recoveryType: "denied", amount: 1 })],
+    ["read A's claim financials", () => as().insurance.claimFinancials({ claimRef: A.claimRef })],
+    // compliance / requirements / calibration
+    ["publish a program into A's company", () => as().compliance.programPublish({ programKey: A.programKey, title: "Attempted manual", programType: "safety", financialEntityId: A.entityId, effectiveFrom: days(-1) })],
+    ["record a carrier profile review for A", () => as().compliance.profileReviewRecord({ financialEntityId: A.entityId, jurisdiction: "CA-AB", profileObtainedAt: days(-1), inspectionsOnProfile: 0, convictionsOnProfile: 0, collisionsOnProfile: 0, knownInspections: 0, knownConvictions: 0, knownCollisions: 0 })],
+    ["activate a compliance pack for A", () => as().requirement.packActivate({ financialEntityId: A.entityId, packKey: "ab.ground_disturbance" })],
+    ["evaluate a work context against A's company", () => as().requirement.workAuthorization({ financialEntityId: A.entityId, jurisdiction: "CA-AB", worker: null, equipment: null, work: { workType: "hauling", attributes: {} } })],
+    ["authorize an operator on equipment for A", () => as().requirement.authorize({ userId: A.safety, financialEntityId: A.entityId, equipmentType: "hydrovac" })],
+    ["register a device into A's company", () => as().calibration.deviceRegister({ financialEntityId: A.entityId, deviceType: "truck_scale", measures: "gross_weight", unitOfMeasure: "kg" })],
+    ["record a calibration event on A's device", () => as().calibration.eventRecord({ deviceRef: A.deviceRef, eventType: "verified", performedAt: days(-1) })],
+    ["read the impact of A's device", () => as().calibration.impact({ deviceRef: A.deviceRef })],
+    ["sweep A's calibration event", () => as().requirement.calibrationSweep({ calibrationEventId: A.calibrationEventId })],
+    // dispatch
+    ["set A's dispatch enforcement", () => as().dispatch.enforcementSet({ financialEntityId: A.entityId, mode: "off", reason: "attempted by another organization" })],
+    ["read A's dispatch enforcement", () => as().dispatch.enforcementGet({ financialEntityId: A.entityId })],
+    // funding / expenses
+    ["advance A's funding opportunity", () => as().funding.opportunityAdvance({ opportunityRef: A.opportunityRef, to: "potential" })],
+    ["record a funding claim on A's expense", () => as().funding.claimRecord({ claimRef: `C-${rnd()}`, programKey: "x", expenseRef: A.expenseRef, eligibleCost: 1, claimedAmount: 1 })],
+    ["set tax treatment on A's expense", () => as().finance.expenseSetTreatment({ expenseRef: A.expenseRef, treatment: "personal" })],
+  ];
+
+  it.each(attempts)("refuses to %s", async (_label, attempt) => {
+    const e = await attempt().then(() => null, (x: { code?: string; message?: string }) => x);
+    expect(e, "the attempt succeeded").not.toBeNull();
+    // NOT_FOUND — or, for a funding claim whose program key is unknown, "No such program" before the expense is reached (also NOT_FOUND).
+    expect(e!.code).toBe("NOT_FOUND");
+  });
+
+  it("never lets B's own-book program supersede A's program with the same key (the key is refused as taken)", async () => {
+    await expect(callerFor(B.safety).compliance.programPublish({ programKey: A.programKey, title: "B's manual", programType: "safety", financialEntityId: B.entityId, effectiveFrom: days(-1) })).rejects.toMatchObject({ code: "CONFLICT" });
+    const rows = await pool.query<mysql.RowDataPacket[]>("SELECT financialEntityId, supersededAt FROM writtenProgramVersions WHERE programKey = ? ORDER BY id", [A.programKey]);
+    expect(rows[0].find(r => r.financialEntityId === A.entityId)!.supersededAt).toBeNull();
+  });
+
+  it("lists only the caller's own funding opportunities", async () => {
+    const list = (await as().funding.opportunitiesList()).map(o => o.opportunityRef);
+    expect(list).toContain(B.opportunityRef);
+    expect(list).not.toContain(A.opportunityRef);
+  });
+
+  it("refuses the global dispatch mode to a tenant; a platform administrator may set it", async () => {
+    await expect(callerFor(B.mgr).dispatch.enforcementSet({ mode: "off", reason: "attempt to change every company's dispatch" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const admin = appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: B.mgr, role: "admin" } as never });
+    const before = await admin.dispatch.enforcementGet();
+    await expect(admin.dispatch.enforcementSet({ mode: before.mode, reason: "platform administrator restates the global mode" })).resolves.toMatchObject({ scope: "global" });
+  });
+
+  it("leaves A's insurance, calibration, funding and expense records as A left them", async () => {
+    expect((await one("SELECT coverageVerificationStatus FROM insurancePolicies WHERE policyRef = ?", [A.policyRef])).coverageVerificationStatus).toBe("coverage_verified");
+    expect((await one("SELECT COUNT(*) AS n FROM insuranceClaims c JOIN insurancePolicies p ON p.id = c.insurancePolicyId WHERE p.policyRef = ?", [A.policyRef])).n).toBe(1);
+    expect((await one("SELECT COUNT(*) AS n FROM insuranceClaimRecoveries r JOIN insuranceClaims c ON c.id = r.insuranceClaimId WHERE c.claimRef = ?", [A.claimRef])).n).toBe(0);
+    expect((await one("SELECT COUNT(*) AS n FROM insuranceCoveredEntities e JOIN insurancePolicies p ON p.id = e.insurancePolicyId WHERE e.entityType = 'unit' AND e.entityId = ? AND p.policyRef = ?", [A.unitId, B.policyRef])).n).toBe(0);
+    expect((await one("SELECT COUNT(*) AS n FROM calibrationEvents e JOIN measurementDevices d ON d.id = e.measurementDeviceId WHERE d.deviceRef = ?", [A.deviceRef])).n).toBe(1);
+    expect((await one("SELECT status FROM fundingOpportunities WHERE opportunityRef = ?", [A.opportunityRef])).status).toBe("estimated");
+    expect((await one("SELECT COUNT(*) AS n FROM fundingClaims WHERE expenseRef = ?", [A.expenseRef])).n).toBe(0);
+    expect((await one("SELECT mode FROM dispatchEnforcementSettings WHERE financialEntityId = ? ORDER BY id DESC LIMIT 1", [A.entityId])).mode).toBe("advisory");
+  });
+
+  it("still lets each organization work its own records", async () => {
+    expect((await callerFor(A.controller).insurance.claimFinancials({ claimRef: A.claimRef })).claimRef).toBe(A.claimRef);
+    expect((await callerFor(A.office).insurance.renewalCalendar({ financialEntityId: A.entityId })).calendar.length).toBeGreaterThan(0);
+    expect((await callerFor(A.office).insurance.certificateIssue({ policyRef: A.policyRef, recipientCustomerRef: "Acme" })).certificateRef).toBeTruthy();
+    expect((await callerFor(A.mgr).dispatch.enforcementGet({ financialEntityId: A.entityId })).mode).toBe("advisory");
+    expect((await callerFor(A.office).insurance.coverageForEntity({ financialEntityId: A.entityId, entityType: "unit", entityId: A.unitId })).assessments.length).toBeGreaterThan(0);
+    expect((await callerFor(A.mgr).funding.opportunitiesList()).map(o => o.opportunityRef)).toContain(A.opportunityRef);
+  });
+});
+
+d("F1.1 — inventory and other rows with no owner fail closed once organizations exist", () => {
+  it("knows the deployment is not one ownership domain (organizations exist here)", async () => {
+    const { singleOwnershipDomain } = await import("./ownershipDomain");
+    await org();
+    expect(await singleOwnershipDomain()).toBe(false);
+  });
+
+  it("refuses every ownerless shop operation — to an organization's shop lead AND to the historical single tenant — and writes nothing", async () => {
+    const orgA = await org();
+    const lead = await member(orgA, ["shop_lead", "mechanic", "controller", "management"]);
+    const legacy = await member(null, ["shop_lead", "mechanic", "controller", "management"]);
+    const unitId = await ownedUnit(orgA);
+    const [wo] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO workOrders (workOrderNumber, unitId, status, openedAt) VALUES (?, ?, 'open', NOW())", [`WO-${rnd()}`, unitId]);
+    const woNumber = (await one("SELECT workOrderNumber FROM workOrders WHERE id = ?", [wo.insertId])).workOrderNumber as string;
+    const before = Number((await one("SELECT COUNT(*) AS n FROM partMovements", [])).n);
+    const partsBefore = Number((await one("SELECT COUNT(*) AS n FROM parts", [])).n);
+    for (const who of [lead, legacy]) {
+      const c = callerFor(who).shop;
+      const ops: [string, () => Promise<unknown>][] = [
+        ["stock", () => c.stock({})],
+        ["partCount", () => c.partCount({ partNumber: "FILTER-OIL", countedQty: 0, reason: "zero someone else's stock" })],
+        ["partIssue", () => c.partIssue({ partNumber: "FILTER-OIL", qty: 6, workOrderNumber: woNumber })],
+        ["partReceive", () => c.partReceive({ partNumber: "FILTER-OIL", qty: 1, unitCostCents: 100 })],
+        ["partReturn", () => c.partReturn({ partNumber: "FILTER-OIL", qty: 1, reason: "return" })],
+        ["coreReturn", () => c.coreReturn({ partNumber: "FILTER-OIL", qty: 1 })],
+        ["partCreate", () => c.partCreate({ partNumber: `P-${rnd()}`, description: "filter", category: "filter" })],
+        ["tireRegister", () => c.tireRegister({ serial: `T-${rnd()}`, size: "11R22.5" })],
+        ["tireInstall", () => c.tireInstall({ serial: "T-ANY", unitId, axlePosition: "LF", installedAt: new Date() })],
+        ["tireRemove", () => c.tireRemove({ serial: "T-ANY", removedAt: new Date(), removalReason: "worn" })],
+        ["tireMeasure", () => c.tireMeasure({ serial: "T-ANY", measuredAt: new Date() })],
+        ["tireHistory", () => c.tireHistory({ serial: "T-ANY" })],
+        ["toolRegister", () => c.toolRegister({ serial: `TL-${rnd()}`, description: "torque wrench" })],
+        ["toolCheckout", () => c.toolCheckout({ serial: "TL-ANY", workerUserId: who })],
+        ["toolReturn", () => c.toolReturn({ serial: "TL-ANY", condition: "good" })],
+        ["warrantyPolicyRecord", () => c.warrantyPolicyRecord({ subjectType: "part", subjectId: 1, coverageUntil: days(300) } as never)],
+        ["warrantyClaimRaise", () => c.warrantyClaimRaise({ policyRef: "WPOL-ANY", claimedCents: 100, reason: "failed early, claim it" })],
+        ["warrantyClaimDecide", () => c.warrantyClaimDecide({ claimRef: "WCLM-ANY", decision: "approved", reason: "approve it" })],
+      ];
+      for (const [name, op] of ops) await expect(op(), name).rejects.toThrow(/OWNERSHIP_UNRESOLVED/);
+    }
+    expect(Number((await one("SELECT COUNT(*) AS n FROM partMovements", [])).n)).toBe(before);
+    expect(Number((await one("SELECT COUNT(*) AS n FROM parts", [])).n)).toBe(partsBefore);
+    // The scoped shop keeps working: the unit's own work-order cost is the unit owner's to read.
+    await expect(callerFor(lead).shop.workOrderCost({ workOrderNumber: woNumber })).resolves.toBeTruthy();
+  }, 60_000);
+
+  it("refuses customer insurance requirements (free-text, ownerless) and equipment credentials, and changes nothing", async () => {
+    const orgA = await org();
+    const office = await member(orgA, ["office", "management"]);
+    const cust = `Cust ${rnd()}`;
+    await pool.execute("INSERT INTO insuranceRequirements (customerRef, coverageType, minimumLimit, additionalInsuredRequired) VALUES (?, 'commercial_auto', 1000000, 0)", [cust]);
+    await expect(callerFor(office).insurance.requirementSet({ customerRef: cust, requirements: [{ coverageType: "cargo" }] })).rejects.toThrow(/OWNERSHIP_UNRESOLVED/);
+    expect((await one("SELECT coverageType FROM insuranceRequirements WHERE customerRef = ?", [cust])).coverageType).toBe("commercial_auto");
+    const [ent] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Own Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, orgA]);
+    await expect(callerFor(office).insurance.requirementMatch({ financialEntityId: Number(ent.insertId), customerRef: cust })).rejects.toThrow(/OWNERSHIP_UNRESOLVED/);
+    await expect(callerFor(office).requirement.workAuthorization({ financialEntityId: Number(ent.insertId), jurisdiction: "CA-AB", worker: null, equipment: { id: 1, equipmentType: "hydrovac", attributes: {} }, work: { workType: "hauling", attributes: {} } })).rejects.toThrow(/OWNERSHIP_UNRESOLVED/);
+  }, 30_000);
 });

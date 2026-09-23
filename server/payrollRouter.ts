@@ -25,8 +25,8 @@ import * as svc from "./payrollService";
 import { getDb } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
 import { assertAdjustmentInScope, assertDisputeInScope, assertEntityInScope, assertPeriodInScope, assertProfileInScope, assertRunInScope, assertSettlementInScope, entityIdsInScope, entityOwnerFor, type MoneyScope } from "./_core/entityScope";
-import { employeePayrollProfiles } from "../drizzle/schema";
-import { inArray } from "drizzle-orm";
+import { employeePayrollProfiles, expenseRecords } from "../drizzle/schema";
+import { eq, inArray } from "drizzle-orm";
 import {
   assertPayrollEligibility,
   assertSettlementEligibility,
@@ -725,6 +725,8 @@ export const financeRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // F1.1 — the expense is looked up and its book proved before its treatment changes.
+      { const m = await moneyScope(ctx.user.id); const exp = (await m.db.select({ financialEntityId: expenseRecords.financialEntityId }).from(expenseRecords).where(eq(expenseRecords.expenseRef, input.expenseRef)).limit(1))[0]; if (!exp) throw notFound("Expense not found"); try { await assertEntityInScope(m.db, exp.financialEntityId, m.scope); } catch { throw notFound("Expense not found"); } }
       const applied = applyHumanTreatment({
         treatment: input.treatment,
         determinedByUserId: ctx.user.id,

@@ -125,6 +125,8 @@ const nextUser = () => userSeq++;
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
 beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 6 }); });
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
+// F1.1 — the global enforcement mode governs every organization's dispatch; a platform administrator sets it.
+const platformAdmin = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "admin" } as never });
 async function withRole(role: DomainRole) { const id = nextUser(); await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
 
 d("jobUnits.create under off, advisory and enforced", () => {
@@ -147,7 +149,7 @@ d("jobUnits.create under off, advisory and enforced", () => {
     const identity = (uid: number) => callerFor(uid).fieldRoute.identity.jobUnits;
 
     // OFF: the setting is global and persists across runs, so establish it rather than assume it.
-    await callerFor(manager).dispatch.enforcementSet({ mode: "off", reason: "Test start — establish the default explicitly" });
+    await platformAdmin(manager).dispatch.enforcementSet({ mode: "off", reason: "Test start — establish the default explicitly" });
     expect((await callerFor(dispatcher).dispatch.enforcementGet()).mode).toBe("off");
     // Assigns as it always has, and records that it did so under "off".
     const id1 = await identity(dispatcher).create({ jobId, unitId, operatorId, role: "operator", joinedAt: new Date() });
@@ -157,7 +159,7 @@ d("jobUnits.create under off, advisory and enforced", () => {
 
     // A dispatcher may not change the setting; management may. The change is a row, not an update.
     await expect(callerFor(dispatcher).dispatch.enforcementSet({ mode: "advisory", reason: "Let us see what would be refused" })).rejects.toBeTruthy();
-    const s1 = await callerFor(manager).dispatch.enforcementSet({ mode: "advisory", reason: "Let us see what would be refused before we enforce" });
+    const s1 = await platformAdmin(manager).dispatch.enforcementSet({ mode: "advisory", reason: "Let us see what would be refused before we enforce" });
     expect(s1).toEqual({ scope: "global", previous: "off", mode: "advisory" });
 
     // ADVISORY: assigns without a check — and that assignment is an exception the centre raises.
@@ -169,7 +171,7 @@ d("jobUnits.create under off, advisory and enforced", () => {
     expect(ex.items.some(x => x.key === `ungated:${id1}`)).toBe(false); // made under "off" — not an exception
 
     // ENFORCED: refuses without a check; refuses on an unknown check; assigns once the unknowns are overridden.
-    await callerFor(manager).dispatch.enforcementSet({ mode: "enforced", reason: "Routing source and HOS rule not yet loaded; we accept manager overrides as the record" });
+    await platformAdmin(manager).dispatch.enforcementSet({ mode: "enforced", reason: "Routing source and HOS rule not yet loaded; we accept manager overrides as the record" });
     await expect(identity(dispatcher).create({ jobId, unitId, operatorId, role: "operator", joinedAt: new Date() })).rejects.toThrow(/without a readiness check/);
     const c = await callerFor(dispatcher).dispatch.evaluate({ operatorId, unitId, trailerId: null, jobId, postingId: null });
     expect(c.verdict).toBe("unknown");
@@ -203,7 +205,7 @@ d("jobUnits.create under off, advisory and enforced", () => {
     expect(hist.every(h => Number(h.setByUserId) === manager && String(h.reason).length > 10)).toBe(true);
 
     // Back to off, so other suites' legacy assignments are unaffected.
-    await callerFor(manager).dispatch.enforcementSet({ mode: "off", reason: "Test teardown — restore default" });
+    await platformAdmin(manager).dispatch.enforcementSet({ mode: "off", reason: "Test teardown — restore default" });
     expect((await callerFor(dispatcher).dispatch.enforcementGet()).mode).toBe("off");
   });
 });

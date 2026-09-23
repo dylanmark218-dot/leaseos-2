@@ -23,10 +23,11 @@
 import { TRPCError } from "@trpc/server";
 import { and, eq, inArray, isNull, notInArray, or, type SQL } from "drizzle-orm";
 import type { MySqlColumn } from "drizzle-orm/mysql-core";
-import { auditPackages, bankAccounts, bankStatements, capitalAssets, ccaSchedules, customerAccounts, customerCredits, disputeCases, externalIdentities, fuelAccounts, fuelStatements, fuelTransactions, gstReturns, iftaReturns, invoices, jurisdictionDistanceRecords, bulkFuelTanks, loads, organizationMemberships, portalSubmissions, purchaseAuthorizations, roadsideServiceEvents, safetyEvents, units, vendorBills, vendors, writeOffRequests } from "../drizzle/schema";
+import { auditPackages, bankAccounts, incidentReports, insuranceClaims, insurancePolicies, bankStatements, capitalAssets, ccaSchedules, customerAccounts, customerCredits, disputeCases, externalIdentities, fuelAccounts, fuelStatements, fuelTransactions, gstReturns, iftaReturns, invoices, jurisdictionDistanceRecords, bulkFuelTanks, loads, organizationMemberships, portalSubmissions, purchaseAuthorizations, roadsideServiceEvents, safetyEvents, units, vendorBills, vendors, writeOffRequests } from "../drizzle/schema";
 import { bookOrgWhere, notFound, ownsBookOrg, ownsEntity, requireOwnedEntity, type FinanceScope } from "./_core/entityScope";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
-import { evidenceInScope, fieldTicketInScope, getDb, jobInScope, jobScopeSubquery, operatorInScope, ownershipScopeWhere, tripInScope, unitInScope, userInScope } from "./db";
+import { requireProvableOwnership } from "./ownershipDomain";
+import { evidenceInScope, fieldTicketInScope, getDb, incidentInScope, jobInScope, jobScopeSubquery, operatorInScope, ownershipScopeWhere, tripInScope, unitInScope, userInScope } from "./db";
 
 export type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
@@ -250,4 +251,43 @@ export async function auditPackageInScope(db: Db, fs: FinanceScope, packageRef: 
   const p = (await db.select().from(auditPackages).where(eq(auditPackages.packageRef, packageRef)).limit(1))[0];
   if (!p || !(await userInScope(p.preparedByUserId, fs)) || !(await auditSubjectInScope(db, fs, p.kind, p.subjectRef))) throw notFound("Package");
   return p;
+}
+
+// ── Insurance (F1.1) ──────────────────────────────────────────────────────────────────────────────
+/** A policy is keyed to a book. */
+export async function policyInScope(db: Db, fs: FinanceScope, policyRef: string) {
+  return owned((await db.select().from(insurancePolicies).where(eq(insurancePolicies.policyRef, policyRef)).limit(1))[0], r => r.financialEntityId, fs, "Policy");
+}
+/** A claim has no book column; it is its policy's. */
+export async function claimInScope(db: Db, fs: FinanceScope, claimRef: string) {
+  const c = (await db.select().from(insuranceClaims).where(eq(insuranceClaims.claimRef, claimRef)).limit(1))[0];
+  if (!c) throw notFound("Claim");
+  const p = (await db.select({ financialEntityId: insurancePolicies.financialEntityId }).from(insurancePolicies).where(eq(insurancePolicies.id, c.insurancePolicyId)).limit(1))[0];
+  if (!p || !ownsEntity(fs, p.financialEntityId)) throw notFound("Claim");
+  return { claim: c, financialEntityId: p.financialEntityId };
+}
+/**
+ * What a policy may cover, or be asked about: the caller's own units, trailers (units rows) and
+ * operators; the caller's own book as "company"; a facility, which is a shared directory entry. An
+ * "equipment" or "branch" id has no owner model at all (no equipment table, no branch table), so it is
+ * accepted only while ownership is provable (`ownershipDomain`).
+ */
+export async function requireCoveredEntity(fs: FinanceScope, entityType: string, entityId: number) {
+  if (entityType === "unit" || entityType === "trailer") return requireUnit(fs, entityId);
+  if (entityType === "operator") { if (!(await operatorInScope(entityId, fs))) throw notFound("Operator"); return; }
+  if (entityType === "company") { requireOwnedEntity(fs, entityId, `Financial entity ${entityId}`); return; }
+  if (entityType === "facility") return;
+  return requireProvableOwnership(`Insurance coverage for a ${entityType}`, "an owner model for that record type exists");
+}
+/** An incident report by id: through its job, else its unit, else its operator, else the single tenant only. */
+export async function requireIncidentReport(db: Db, fs: FinanceScope, incidentReportId: number | null | undefined) {
+  if (incidentReportId == null) return;
+  const i = (await db.select({ incidentNumber: incidentReports.incidentNumber }).from(incidentReports).where(eq(incidentReports.id, incidentReportId)).limit(1))[0];
+  if (!i || !(await incidentInScope(i.incidentNumber, fs))) throw notFound("Incident");
+}
+/** A roadside event by id: the unit's. */
+export async function requireRoadsideEventId(db: Db, fs: FinanceScope, roadsideEventId: number | null | undefined) {
+  if (roadsideEventId == null) return;
+  const e = (await db.select({ unitId: roadsideServiceEvents.unitId }).from(roadsideServiceEvents).where(eq(roadsideServiceEvents.id, roadsideEventId)).limit(1))[0];
+  if (!e || !(await unitInScope(e.unitId, fs))) throw notFound("Roadside event");
 }

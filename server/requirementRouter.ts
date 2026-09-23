@@ -8,7 +8,9 @@ import { sweepSuspectReadings } from "./_core/calibrationEvidence";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, evidenceInScope, getDb, operatorInScope, userInScope } from "./db";
+import { assertCallerOwnsEntity } from "./_core/entityScope";
+import { requireProvableOwnership } from "./ownershipDomain";
 import {
   calibrationEvents, calibrationSweepFindings, calibrationSweeps, companyPackActivations, complianceDocuments, disposalTickets, invoices, loadSenseWeightSnapshots, loads,
   measurementDevices, operatorEquipmentAuthorizations,
@@ -41,6 +43,13 @@ async function credentialsFor(ownerType: string, ownerId: number): Promise<Crede
 
 const ATTRS = z.record(z.string(), z.unknown()).default({});
 
+/** F1.1 — a measurement device is its company's (financialEntityId NOT NULL); anyone else gets `notFound`. */
+async function deviceOwnedByCaller(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, userId: number, deviceId: number, notFound: string) {
+  const d = (await db.select({ financialEntityId: measurementDevices.financialEntityId }).from(measurementDevices).where(eq(measurementDevices.id, deviceId)).limit(1))[0];
+  if (!d) throw new TRPCError({ code: "NOT_FOUND", message: notFound });
+  await assertCallerOwnsEntity(db as never, userId, d.financialEntityId, notFound.replace(/ not found$/, ""));
+}
+
 export const requirementRouter = router({
   /**
    * P4.2 (0163) — sweep the readings a failure finding calls into question.
@@ -62,6 +71,8 @@ export const requirementRouter = router({
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Database unavailable" });
       const [ev] = await db.select().from(calibrationEvents).where(eq(calibrationEvents.id, input.calibrationEventId)).limit(1);
       if (!ev) throw new TRPCError({ code: "NOT_FOUND", message: "Calibration event not found" });
+      // F1.1 — the event's device belongs to a company; it must be the caller's.
+      await deviceOwnedByCaller(db, ctx.user.id, ev.measurementDeviceId, "Calibration event not found");
 
       const snaps = await db.select().from(loadSenseWeightSnapshots)
         .where(eq(loadSenseWeightSnapshots.measurementDeviceId, ev.measurementDeviceId));
@@ -107,6 +118,7 @@ export const requirementRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);   // F1.1
       if (!COMPLIANCE_PACK_SEEDS.some(p => p.packKey === input.packKey)) throw new TRPCError({ code: "NOT_FOUND", message: "Unknown pack" });
       await db.insert(companyPackActivations).values({ financialEntityId: input.financialEntityId, packKey: input.packKey, activatedAt: new Date(), activatedByUserId: ctx.user.id, reason: input.reason ?? null });
       return { packKey: input.packKey, requirementsInPack: EQUIPMENT_REQUIREMENT_SEEDS.filter(r => r.packKey === input.packKey).length };
@@ -125,7 +137,14 @@ export const requirementRouter = router({
       cargo: z.object({ classification: z.string().nullable(), dangerousGoods: z.boolean() }).nullable().optional(),
       customer: z.object({ ref: z.string().nullable(), requiredDocTypes: z.array(z.string()).optional() }).nullable().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx: caller, input }) => {
+      // F1.1 — the company is the caller's; so is the worker whose credentials are read. Equipment has no owner
+      // model (no equipment table), so its credentials are read only while ownership is provable.
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      await assertCallerOwnsEntity(db as never, caller.user.id, input.financialEntityId);
+      if (input.worker && !(await operatorInScope(input.worker.id, await actingScopeFor(caller.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Operator not found" });
+      if (input.equipment || input.attachments.length) await requireProvableOwnership("Evaluating equipment credentials", "equipment records carry an owner");
       const activePacks = await activePacksFor(input.financialEntityId, { jurisdiction: input.jurisdiction, attributes: input.companyAttributes });
       const ctx: WorkContext = {
         jurisdiction: input.jurisdiction, at: input.at ?? new Date(),
@@ -150,6 +169,11 @@ export const requirementRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.1 — the employer is the caller's company, the operator is one of its people, the evidence is its own.
+      await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await userInScope(input.userId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+      for (const e of [input.trainingEvidenceId, input.competencyEvidenceId]) if (e != null && !(await evidenceInScope(e, scope))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       const now = new Date();
       const complete = input.trainingEvidenceId != null && (input.competencyEvidenceId != null || input.competencyAssessedAt != null) && input.instructionsAcknowledgedAt != null;
       const authorizationRef = ref("EQA");
@@ -175,9 +199,10 @@ export const calibrationRouter = router({
       manufacturer: z.string().max(120).nullable().optional(), model: z.string().max(120).nullable().optional(), serialNumber: z.string().max(120).nullable().optional(),
       measures: z.string().min(1).max(60), unitOfMeasure: z.string().min(1).max(20), calibrationIntervalDays: z.number().int().positive().nullable().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);   // F1.1
       const deviceRef = ref("MD");
       const ins = await db.insert(measurementDevices).values({ deviceRef, ...input, manufacturer: input.manufacturer ?? null, model: input.model ?? null, serialNumber: input.serialNumber ?? null, calibrationIntervalDays: input.calibrationIntervalDays ?? null });
       return { deviceRef, deviceId: Number(ins[0]?.insertId ?? 0) };
@@ -196,6 +221,8 @@ export const calibrationRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const dev = (await db.select().from(measurementDevices).where(eq(measurementDevices.deviceRef, input.deviceRef)).limit(1))[0];
       if (!dev) throw new TRPCError({ code: "NOT_FOUND", message: "Device not found" });
+      await assertCallerOwnsEntity(db as never, ctx.user.id, dev.financialEntityId, "Device");   // F1.1
+      if (input.certificateEvidenceId != null && !(await evidenceInScope(input.certificateEvidenceId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       if ((input.eventType === "failed" || input.eventType === "out_of_tolerance_found") && !input.suspectFrom) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "A failure finding needs suspectFrom — from when was the device suspect? That bounds the impact analysis." });
       }
@@ -211,11 +238,12 @@ export const calibrationRouter = router({
   /** Which records depended on a device found wrong. */
   impact: roleProcedure("calibration.impact")
     .input(z.object({ deviceRef: z.string().min(1).max(64) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const dev = (await db.select().from(measurementDevices).where(eq(measurementDevices.deviceRef, input.deviceRef)).limit(1))[0];
       if (!dev) throw new TRPCError({ code: "NOT_FOUND", message: "Device not found" });
+      await assertCallerOwnsEntity(db as never, ctx.user.id, dev.financialEntityId, "Device");   // F1.1
       const events = await db.select().from(calibrationEvents).where(eq(calibrationEvents.measurementDeviceId, dev.id)).orderBy(desc(calibrationEvents.performedAt));
       const finding = events.find(e => e.eventType === "failed" || e.eventType === "out_of_tolerance_found");
       if (!finding) return { deviceRef: dev.deviceRef, finding: null, impact: null };

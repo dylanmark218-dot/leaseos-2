@@ -24,6 +24,8 @@ import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb, listActiveUserRoleNames } from "./db";
+import { assertCallerOwnsEntity } from "./_core/entityScope";
+import { singleOwnershipDomain } from "./ownershipDomain";
 import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, dispatchPostings, operators } from "../drizzle/schema";
 import { loadEnforcementMode } from "./dispatchEnforcementService";
 import { asChecklist, composeReadiness } from "./readinessComposer";
@@ -149,6 +151,12 @@ export const dispatchGateRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.1 — a company sets its own mode; only the caller's own entity is accepted. The global mode (no
+      // entity) governs every company's dispatch — legacy jobs carry no entity — so it is platform
+      // configuration: a platform administrator sets it, or anyone with the permission while the deployment
+      // is still one ownership domain. A tenant never does.
+      if (input.financialEntityId != null) await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);
+      else if (ctx.user.role !== "admin" && !(await singleOwnershipDomain())) throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement mode applies to every organization; it is set by a platform administrator. Set your own company's mode with financialEntityId." });
       const before = await loadEnforcementMode(input.financialEntityId ?? null);
       await db.insert(dispatchEnforcementSettings).values({ financialEntityId: input.financialEntityId ?? null, mode: input.mode, reason: input.reason, setByUserId: ctx.user.id, setAt: new Date() });
       return { scope: input.financialEntityId ?? "global", previous: before.mode, mode: input.mode };
@@ -156,7 +164,11 @@ export const dispatchGateRouter = router({
 
   enforcementGet: roleProcedure("dispatch.enforcementGet")
     .input(z.object({ financialEntityId: z.number().int().positive().nullable().optional() }).optional())
-    .query(async ({ input }) => loadEnforcementMode(input?.financialEntityId ?? null)),
+    .query(async ({ ctx, input }) => {
+      // F1.1 — another company's own mode is not found; the global mode is platform configuration, readable.
+      if (input?.financialEntityId != null) { const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId); }
+      return loadEnforcementMode(input?.financialEntityId ?? null);
+    }),
 
   /** The operator's own readiness, as a checklist. Reads ctx.user.id; nobody else's. */
   whatAmIMissing: roleProcedure("dispatch.whatAmIMissing")
