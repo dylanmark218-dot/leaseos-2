@@ -214,3 +214,17 @@ outbox worker for a fixed 300 ms over the whole outbox in id order, so events ot
 concurrently (C1a's OOS end-to-end among them) could push this test's event past the window. **Fix:**
 drain until every event that existed at the start is processed, dead-lettered or deferred, with a
 15 s ceiling. No assertion was loosened.
+
+## Integration record (final)
+
+| | |
+|---|---|
+| PR #4 merge | `38d26770bdcd5b4bd89f14fee6874559492394bf` |
+| PR #5 | head `e6b65f2`; **merge `6b01a0eaf5f1147fd0db0499e3cd9fccf3c03ee1`**; main gate PASS (315 files, 4416 passed, 3 skipped) |
+| C1a PR | **#12**, head `50ae78f216a46cf06f37b0770f30ed16f87aecf9` (rebased onto `6b01a0e`, then the review-round fixes); GitHub CI green (push and PR runs) |
+| C1a merge | **`42c454f34933a252138bfdad3c2f4535758d5e79`** (merge commit; tree identical to the gated `50ae78f`) |
+| Gate on the actual resulting `main` (`42c454f`) | **PASS** gates 0–8. **317** test files, **4492 passed**, **3 skipped** (pre-existing `agentRuntimeApi`), no DB suite skipped. Typecheck clean; test-file type errors 0/0. Bare `protectedProcedure` 0. Build OK. 408 tables; **167 migrations, head `0174_dispatch_override_provenance.sql`**; 647 role / 36 external / 2 integration procedures |
+| Migration | `0174` (moved from `0172` at integration; see `docs/architecture/MIGRATION_COLLISION_REGISTER.md`) |
+| Restack | PR #6 ← main merged (`1aaf4f7`), base retargeted to `main`; PR #9 ← main merged (`3e8aef0`, `dispatchRouter.ts` resolved to keep both #9's role-slot procedures and every C1a guard), base retargeted to `main`. Neither merged |
+
+Every "Starting/ending SHA" assumption earlier in this document is superseded by this table.
