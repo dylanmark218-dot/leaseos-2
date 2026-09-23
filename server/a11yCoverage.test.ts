@@ -76,6 +76,7 @@ describe("the accessibility suite keeps up with the screens", () => {
       "client/src/pages/TrainingAcademy.tsx",
       "client/src/pages/TransmitCheck.tsx",
       "client/src/pages/WidgetBoardPage.tsx",
+      "client/src/pages/WorkCalendar.tsx",
       "client/src/pages/authoritative/Surfaces.tsx",
       "client/src/portal/external/AlertsPanel.tsx",
       "client/src/portal/external/ChainOfCustody.tsx",

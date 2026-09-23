@@ -132,6 +132,7 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
               Attention{indicator.badge && <span className={`ml-2 rounded-full px-2 text-xs text-white ${indicator.tone === "critical" ? "bg-[#b42318]" : indicator.tone === "high" ? "bg-[#c4620a]" : "bg-[#5b6b82]"}`}>{indicator.badge}</span>}
             </button>
             <button onClick={() => setPanel("inbox")} className="rounded-full bg-[#eef2f7] px-3 py-1 text-sm">Inbox{inbox.data?.total ? ` · ${inbox.data.total}` : ""}</button>
+            <button onClick={() => navigate("/work")} className="rounded-full bg-[#eef2f7] px-3 py-1 text-sm">Calendar &amp; tasks</button>
             <SyncIndicator online={online} />
           </div>
         </div>

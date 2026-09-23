@@ -24,6 +24,8 @@ import {
 } from "./workflowSeeds";
 import type { ClaimedEvent, WorkerPorts } from "./drainWorker";
 import { dispatchWebhooks, sweepWebhookRetries } from "../webhookDispatchService";
+import { sweepWork } from "../workService";
+import { getDb } from "../db";
 
 /**
  * What a prepared statement may actually be given as a bind parameter.
@@ -431,6 +433,8 @@ export function createWorkerPorts(
     async heartbeat(_workerId, at) {
       // v22.1 — retry sweep for failed webhook deliveries that are due.
       try { await sweepWebhookRetries(at); } catch (e) { console.warn("[worker] webhook retry sweep failed", e instanceof Error ? e.message : e); }
+      // 0170 — fire due reminders, mark the missed, climb the ladders. Keyed, so a second pass is a no-op.
+      try { const db = await getDb(); if (db) await sweepWork(db, at); } catch (e) { console.warn("[worker] work sweep failed", e instanceof Error ? e.message : e); }
     },
     async markProcessed(id) {
       await pool.execute(

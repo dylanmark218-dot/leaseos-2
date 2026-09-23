@@ -82,6 +82,7 @@ import { timeOffRouter } from "./timeOffRouter";
 import { openShiftsRouter } from "./openShiftsRouter";
 import { crewRouter } from "./crewRouter";
 import { calendarRouter } from "./calendarRouter";
+import { workRouter } from "./workRouter";
 import { readinessRouter } from "./readinessRouter";
 import { messageBoardRouter } from "./messageBoardRouter";
 import { assistantAskRouter } from "./assistantAskRouter";
@@ -332,6 +333,7 @@ export const appRouter = router({
   shifts: openShiftsRouter,
   crews: crewRouter,
   calendar: calendarRouter,
+  work: workRouter,
   readiness: readinessRouter,
   board: messageBoardRouter,
   assistantAsk: assistantAskRouter,

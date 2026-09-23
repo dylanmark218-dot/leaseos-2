@@ -38,6 +38,7 @@ import {
   CloudOff,
   DollarSign,
   Navigation,
+  CalendarCheck,
   Factory,
   Timer,
   GraduationCap,
@@ -62,6 +63,7 @@ const menuItems = [
   { icon: Factory, label: "Disposal directory", path: "/disposal-directory" },
   { icon: Timer, label: "Trip operations", path: "/trip-operations" },
   { icon: GraduationCap, label: "Training Academy", path: "/training-academy" },
+  { icon: CalendarCheck, label: "Calendar & tasks", path: "/work" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";

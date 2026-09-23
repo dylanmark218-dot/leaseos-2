@@ -8795,3 +8795,263 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
+
+/* ---- 0170: the work calendar, the task board and the reminder engine ----
+ *
+ * Only what the calendar or the board OWNS. Leave, qualification expiries, shift interest,
+ * rotations, dispatch bookings, pay periods and HOS stay in their own tables and are projected
+ * (server/calendarRouter.ts); these rows may link to them by `sourceType`/`sourceRef` and never
+ * copy them. `orgRef` NULL is the historical single tenant (0132) and is always derived.
+ */
+
+export const recurrenceRules = mysqlTable("recurrenceRules", {
+  id: int("id").autoincrement().primaryKey(),
+  ruleRef: varchar("ruleRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 40 }),
+  frequency: mysqlEnum("frequency", ["daily", "weekdays", "weekly", "monthly"]).notNull(),
+  intervalCount: int("intervalCount").default(1).notNull(),
+  byWeekdayJson: varchar("byWeekdayJson", { length: 60 }),
+  byMonthDay: int("byMonthDay"),
+  ordinalWeek: int("ordinalWeek"),
+  ordinalWeekday: int("ordinalWeekday"),
+  /** Occurrences keep the anchor's wall clock in this zone across a DST change. */
+  timezone: varchar("timezone", { length: 64 }).notNull(),
+  anchorAt: timestamp("anchorAt").notNull(),
+  untilAt: timestamp("untilAt"),
+  occurrenceLimit: int("occurrenceLimit"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type RecurrenceRuleRow = typeof recurrenceRules.$inferSelect;
+
+export const calendarEvents = mysqlTable("calendarEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 40 }),
+  kind: mysqlEnum("kind", ["personal", "company"]).notNull(),
+  category: mysqlEnum("category", ["shift", "meeting", "training", "safety", "maintenance", "dispatch", "payroll", "compliance", "task_block", "personal", "other"]).notNull(),
+  /** CONFIRMED is a fact; PROJECTED and RECOMMENDED are advice; REQUIRED needs an acknowledgement. */
+  state: mysqlEnum("state", ["confirmed", "projected", "recommended", "required", "cancelled"]).default("confirmed").notNull(),
+  visibility: mysqlEnum("visibility", ["private", "operational", "administrative"]).notNull(),
+  ownerUserId: int("ownerUserId").notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  detail: text("detail"),
+  location: varchar("location", { length: 220 }),
+  startsAt: timestamp("startsAt").notNull(),
+  endsAt: timestamp("endsAt"),
+  allDay: boolean("allDay").default(false).notNull(),
+  timezone: varchar("timezone", { length: 64 }).notNull(),
+  recurrenceRuleRef: varchar("recurrenceRuleRef", { length: 64 }),
+  /** A link, never a copy. The owner keeps its own date. */
+  sourceType: varchar("sourceType", { length: 40 }),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  taskRef: varchar("taskRef", { length: 64 }),
+  requiresAcknowledgement: boolean("requiresAcknowledgement").default(false).notNull(),
+  previousStartsAt: timestamp("previousStartsAt"),
+  rescheduledAt: timestamp("rescheduledAt"),
+  rescheduledByUserId: int("rescheduledByUserId"),
+  cancelledAt: timestamp("cancelledAt"),
+  cancelledByUserId: int("cancelledByUserId"),
+  cancelReason: varchar("cancelReason", { length: 400 }),
+  version: int("version").default(1).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, t => ({
+  ownerWindow: index("calendarEvents_owner_window").on(t.orgRef, t.ownerUserId, t.state, t.startsAt),
+  orgWindow: index("calendarEvents_org_window").on(t.orgRef, t.kind, t.startsAt),
+}));
+export type CalendarEventRow = typeof calendarEvents.$inferSelect;
+export type InsertCalendarEvent = typeof calendarEvents.$inferInsert;
+
+export const calendarEventParticipants = mysqlTable("calendarEventParticipants", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  participantRole: mysqlEnum("participantRole", ["owner", "required", "optional", "informed"]).default("required").notNull(),
+  response: mysqlEnum("response", ["none", "accepted", "declined", "tentative"]).default("none").notNull(),
+  respondedAt: timestamp("respondedAt"),
+  acknowledgedAt: timestamp("acknowledgedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  unique: uniqueIndex("calendarEventParticipants_unique").on(t.eventRef, t.userId),
+  user: index("calendarEventParticipants_user").on(t.userId),
+}));
+export type CalendarEventParticipantRow = typeof calendarEventParticipants.$inferSelect;
+
+export const workTasks = mysqlTable("workTasks", {
+  id: int("id").autoincrement().primaryKey(),
+  taskRef: varchar("taskRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 40 }),
+  kind: mysqlEnum("kind", ["personal", "company"]).notNull(),
+  /** One vocabulary; which transitions are legal depends on `kind` (server/_core/workTasks.ts). */
+  status: mysqlEnum("status", ["inbox", "todo", "in_progress", "waiting", "blocked", "submitted", "verified", "completed", "cancelled"]).default("inbox").notNull(),
+  assignmentState: mysqlEnum("assignmentState", ["unassigned", "assigned", "accepted", "declined"]).default("unassigned").notNull(),
+  visibility: mysqlEnum("visibility", ["private", "operational"]).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  description: text("description"),
+  priority: mysqlEnum("priority", ["low", "normal", "high", "critical"]).default("normal").notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  assigneeUserId: int("assigneeUserId"),
+  teamRef: varchar("teamRef", { length: 64 }),
+  startAt: timestamp("startAt"),
+  dueAt: timestamp("dueAt"),
+  timezone: varchar("timezone", { length: 64 }).notNull(),
+  acceptedAt: timestamp("acceptedAt"),
+  submittedAt: timestamp("submittedAt"),
+  completedAt: timestamp("completedAt"),
+  completedByUserId: int("completedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  verifiedByUserId: int("verifiedByUserId"),
+  cancelledAt: timestamp("cancelledAt"),
+  cancelledByUserId: int("cancelledByUserId"),
+  blockedReason: varchar("blockedReason", { length: 400 }),
+  jobRef: varchar("jobRef", { length: 64 }),
+  dispatchRef: varchar("dispatchRef", { length: 64 }),
+  driverUserId: int("driverUserId"),
+  unitRef: varchar("unitRef", { length: 64 }),
+  documentRef: varchar("documentRef", { length: 64 }),
+  sourceType: varchar("sourceType", { length: 40 }),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  recurrenceRuleRef: varchar("recurrenceRuleRef", { length: 64 }),
+  requiresAcknowledgement: boolean("requiresAcknowledgement").default(false).notNull(),
+  acknowledgedAt: timestamp("acknowledgedAt"),
+  /** Regulated work does not clear because somebody pressed Done. */
+  requiresCompletionEvidence: boolean("requiresCompletionEvidence").default(false).notNull(),
+  completionEvidenceRef: varchar("completionEvidenceRef", { length: 120 }),
+  /** Company tasks only, and only when set. A personal task never escalates. */
+  escalationPolicyJson: text("escalationPolicyJson"),
+  escalationStep: int("escalationStep").default(0).notNull(),
+  escalatedAt: timestamp("escalatedAt"),
+  version: int("version").default(1).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, t => ({
+  assignee: index("workTasks_assignee").on(t.orgRef, t.assigneeUserId, t.status, t.dueAt),
+  creator: index("workTasks_creator").on(t.orgRef, t.createdByUserId, t.status),
+  due: index("workTasks_due").on(t.orgRef, t.kind, t.status, t.dueAt),
+}));
+export type WorkTaskRow = typeof workTasks.$inferSelect;
+export type InsertWorkTask = typeof workTasks.$inferInsert;
+
+export const workTaskChecklistItems = mysqlTable("workTaskChecklistItems", {
+  id: int("id").autoincrement().primaryKey(),
+  itemRef: varchar("itemRef", { length: 64 }).notNull().unique(),
+  taskRef: varchar("taskRef", { length: 64 }).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  label: varchar("label", { length: 220 }).notNull(),
+  done: boolean("done").default(false).notNull(),
+  doneAt: timestamp("doneAt"),
+  doneByUserId: int("doneByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ task: index("workTaskChecklistItems_task").on(t.taskRef, t.sortOrder) }));
+export type WorkTaskChecklistItemRow = typeof workTaskChecklistItems.$inferSelect;
+
+export const workTaskDependencies = mysqlTable("workTaskDependencies", {
+  id: int("id").autoincrement().primaryKey(),
+  taskRef: varchar("taskRef", { length: 64 }).notNull(),
+  dependsOnTaskRef: varchar("dependsOnTaskRef", { length: 64 }).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ unique: uniqueIndex("workTaskDependencies_unique").on(t.taskRef, t.dependsOnTaskRef) }));
+export type WorkTaskDependencyRow = typeof workTaskDependencies.$inferSelect;
+
+export const workTaskComments = mysqlTable("workTaskComments", {
+  id: int("id").autoincrement().primaryKey(),
+  commentRef: varchar("commentRef", { length: 64 }).notNull().unique(),
+  taskRef: varchar("taskRef", { length: 64 }).notNull(),
+  authorUserId: int("authorUserId").notNull(),
+  body: text("body").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ task: index("workTaskComments_task").on(t.taskRef, t.createdAt) }));
+export type WorkTaskCommentRow = typeof workTaskComments.$inferSelect;
+
+/** Evidence lives in the vault; this row points at it. */
+export const workTaskAttachments = mysqlTable("workTaskAttachments", {
+  id: int("id").autoincrement().primaryKey(),
+  attachmentRef: varchar("attachmentRef", { length: 64 }).notNull().unique(),
+  taskRef: varchar("taskRef", { length: 64 }).notNull(),
+  evidenceRecordId: int("evidenceRecordId"),
+  documentRef: varchar("documentRef", { length: 64 }),
+  label: varchar("label", { length: 220 }).notNull(),
+  addedByUserId: int("addedByUserId").notNull(),
+  addedAt: timestamp("addedAt").notNull(),
+}, t => ({ task: index("workTaskAttachments_task").on(t.taskRef) }));
+export type WorkTaskAttachmentRow = typeof workTaskAttachments.$inferSelect;
+
+export const reminders = mysqlTable("reminders", {
+  id: int("id").autoincrement().primaryKey(),
+  reminderRef: varchar("reminderRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 40 }),
+  kind: mysqlEnum("kind", ["personal", "company"]).notNull(),
+  level: mysqlEnum("level", ["normal", "important", "alarm", "compliance"]).default("normal").notNull(),
+  ownerUserId: int("ownerUserId").notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  subjectKind: mysqlEnum("subjectKind", ["task", "event", "standalone"]).default("standalone").notNull(),
+  subjectRef: varchar("subjectRef", { length: 64 }),
+  title: varchar("title", { length: 220 }).notNull(),
+  body: text("body"),
+  deepLink: varchar("deepLink", { length: 300 }),
+  relativeTo: mysqlEnum("relativeTo", ["none", "task_due", "event_start", "source_date"]).default("none").notNull(),
+  offsetMinutes: int("offsetMinutes"),
+  sourceType: varchar("sourceType", { length: 40 }),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  timezone: varchar("timezone", { length: 64 }).notNull(),
+  fireAt: timestamp("fireAt").notNull(),
+  originalFireAt: timestamp("originalFireAt").notNull(),
+  recurrenceRuleRef: varchar("recurrenceRuleRef", { length: 64 }),
+  state: mysqlEnum("state", ["scheduled", "fired", "snoozed", "acknowledged", "missed", "completed", "cancelled"]).default("scheduled").notNull(),
+  requiresAcknowledgement: boolean("requiresAcknowledgement").default(false).notNull(),
+  missedAfterMinutes: int("missedAfterMinutes").default(60).notNull(),
+  snoozeCount: int("snoozeCount").default(0).notNull(),
+  snoozedUntil: timestamp("snoozedUntil"),
+  lastFiredAt: timestamp("lastFiredAt"),
+  acknowledgedAt: timestamp("acknowledgedAt"),
+  missedAt: timestamp("missedAt"),
+  completedAt: timestamp("completedAt"),
+  cancelledAt: timestamp("cancelledAt"),
+  escalationPolicyJson: text("escalationPolicyJson"),
+  escalationStep: int("escalationStep").default(0).notNull(),
+  escalatedAt: timestamp("escalatedAt"),
+  version: int("version").default(1).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, t => ({
+  owner: index("reminders_owner").on(t.orgRef, t.ownerUserId, t.state, t.fireAt),
+  due: index("reminders_due").on(t.state, t.fireAt),
+  subject: index("reminders_subject").on(t.subjectKind, t.subjectRef),
+}));
+export type ReminderRow = typeof reminders.$inferSelect;
+export type InsertReminder = typeof reminders.$inferInsert;
+
+/** Append-only. `actionRef` is the idempotency key for device replays and repeated sweeps. */
+export const reminderActions = mysqlTable("reminderActions", {
+  id: int("id").autoincrement().primaryKey(),
+  actionRef: varchar("actionRef", { length: 120 }).notNull().unique(),
+  reminderRef: varchar("reminderRef", { length: 64 }).notNull(),
+  action: mysqlEnum("action", ["created", "fired", "acknowledged", "snoozed", "rescheduled", "missed", "completed", "cancelled", "escalated", "advanced"]).notNull(),
+  actorUserId: int("actorUserId"),
+  actorSource: mysqlEnum("actorSource", ["human", "system", "device"]).default("human").notNull(),
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  effectiveAt: timestamp("effectiveAt"),
+  detail: varchar("detail", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ reminder: index("reminderActions_reminder").on(t.reminderRef, t.occurredAt) }));
+export type ReminderActionRow = typeof reminderActions.$inferSelect;
+
+/** Append-only. A private subject's row carries the action and the reference and no content. */
+export const workAuditEvents = mysqlTable("workAuditEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 40 }),
+  subjectKind: mysqlEnum("subjectKind", ["task", "event", "reminder"]).notNull(),
+  subjectRef: varchar("subjectRef", { length: 64 }).notNull(),
+  action: varchar("action", { length: 40 }).notNull(),
+  actorUserId: int("actorUserId"),
+  actorSource: mysqlEnum("actorSource", ["human", "system", "device"]).default("human").notNull(),
+  visibility: mysqlEnum("visibility", ["private", "operational"]).notNull(),
+  detailJson: text("detailJson"),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ subject: index("workAuditEvents_subject").on(t.subjectKind, t.subjectRef, t.occurredAt) }));
+export type WorkAuditEventRow = typeof workAuditEvents.$inferSelect;

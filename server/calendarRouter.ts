@@ -43,7 +43,7 @@ const MAX_DAYS = 120;
  * two are separate on purpose — a dispatcher reading a driver's calendar is a
  * normal thing to do and must not be the same as the driver reading it.
  */
-async function buildEvents(d: DbOrTx, args: { tenantId: string; forUserId: number; from: Date; to: Date }): Promise<ProjectedEvent[]> {
+export async function buildEvents(d: DbOrTx, args: { tenantId: string; forUserId: number; from: Date; to: Date }): Promise<ProjectedEvent[]> {
   const events: ProjectedEvent[] = [];
 
   /* Leave. Sensitive categories are projected private, so the visibility rule

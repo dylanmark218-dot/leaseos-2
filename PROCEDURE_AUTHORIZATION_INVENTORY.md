@@ -49,11 +49,12 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/workforceRouter.ts` | `ROLE_AUTHORIZED` | **16** |
 | `server/auditRouter.ts` | `ROLE_AUTHORIZED` | **6** |
 | `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **11** |
+| `server/workRouter.ts` | `ROLE_AUTHORIZED` (0170: the work calendar, the task board and the reminder engine; five permissions — `work.own`, `work.assign`, `work.verify`, `work.scheduling`, `work.sweep` — with assign and verify fail-closed) | **33** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**356 role-authorized procedures. Zero on bare `protectedProcedure`.**
+**389 role-authorized procedures. Zero on bare `protectedProcedure`.**
 
 Baseline in `procedureAuthorization.test.ts` is 0 and must never rise.
 

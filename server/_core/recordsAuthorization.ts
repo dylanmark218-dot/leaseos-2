@@ -268,6 +268,10 @@ export type Permission =
   | "crews.read" | "crews.manage"
   // v22.20 — calendar. Your own is not the same act as somebody else's.
   | "calendar.own" | "calendar.scheduling"
+  // 0170 — the work calendar, the task board and the reminder engine. Your own list, handing
+  // work to somebody, verifying somebody's work, reading others' availability, and running the
+  // sweep are five different acts.
+  | "work.own" | "work.assign" | "work.verify" | "work.scheduling" | "work.sweep"
   // v22.20 — readiness. Reading your own is not reading somebody else's.
   | "readiness.read"
   // v22.20 — the read-only assistant. Asking and loading differ.
@@ -348,6 +352,8 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
     "automation.override.operational",
     "facility.directory.report",
     "facility.directory.read",
@@ -431,6 +437,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
+    "work.assign",
+    "work.verify",
+    "work.scheduling",
+    "work.sweep",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -542,6 +554,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
+    "work.scheduling",
     "assistant.ask",
     "board.read",
     "board.post",
@@ -608,6 +623,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
+    "work.assign",
+    "work.verify",
+    "work.scheduling",
     "facility.directory.read",
     "academy.evaluate",
     "assistant.ask",
@@ -695,6 +715,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
+    "work.assign",
+    "work.verify",
+    "work.scheduling",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -816,6 +841,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
+    "work.assign",
+    "work.verify",
+    "work.scheduling",
+    "work.sweep",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -978,6 +1009,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
+    "work.assign",
+    "work.verify",
+    "work.scheduling",
+    "work.sweep",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1230,6 +1267,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.graph.build",
   ],
   hr: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
+    "work.assign",
+    "work.verify",
+    "work.scheduling",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1266,6 +1308,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "audit.package.read",
   ],
   legal: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
     "evidence.read_legal",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
@@ -1293,6 +1337,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.read_safety_summary",
@@ -1347,6 +1393,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   /* ---- B20.5 finance and payroll functions ---- */
 
   bookkeeper: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
     "facility.directory.read",
     "commercial.read",
     "commercial.write",
@@ -1418,6 +1466,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   payroll_admin: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
+    "work.scheduling",
     "payroll.read_own",
     "payroll.read_employee",
     "payroll.read_all",
@@ -1437,6 +1488,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   tax_preparer: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
     "tax.read_business",
     "tax.expense.review",
     "tax.asset.read",
@@ -1469,6 +1522,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
+    "work.scheduling",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1621,6 +1677,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   // Time-limited, read-mostly, and scoped to the books. Everything operational
   // is absent by construction rather than denied afterwards.
   external_accountant: [
+    /* 0170 — work calendar, tasks, reminders */
+    "work.own",
     "tax.read_business",
     "tax.expense.review",
     "tax.asset.read",
@@ -1768,6 +1826,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "enforcement.release",
   // Approving leave changes who is available to work.
   "timeOff.decide",
+  // 0170 — handing somebody company work, and closing it as verified, are facts about a person's
+  // day and a person's record. Both fail closed when their audit row cannot be written.
+  "work.assign",
+  "work.verify",
   // Posting work commits the company to needing somebody there.
   "shifts.post",
   // Who is on a crew decides who is sent to work.
@@ -2927,6 +2989,41 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsRecord": "closeout.terms.record",
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
+
+  /* ---- 0170: the work calendar, the task board and the reminder engine ---- */
+  "work.calendar": "work.own",
+  "work.calendarFor": "work.scheduling",
+  "work.availability": "work.scheduling",
+  "work.eventCreate": "work.own",
+  "work.companyEventCreate": "work.assign",
+  "work.eventGet": "work.own",
+  "work.eventCancel": "work.own",
+  "work.eventReschedule": "work.own",
+  "work.eventAcknowledge": "work.own",
+  "work.taskCreate": "work.own",
+  "work.companyTaskCreate": "work.assign",
+  "work.taskAssign": "work.assign",
+  "work.taskList": "work.own",
+  "work.taskGet": "work.own",
+  "work.taskTransition": "work.own",
+  "work.taskVerify": "work.verify",
+  "work.taskChecklistSet": "work.own",
+  "work.taskChecklistTick": "work.own",
+  "work.taskComment": "work.own",
+  "work.taskAttach": "work.own",
+  "work.taskDependencyAdd": "work.own",
+  "work.reminderCreate": "work.own",
+  "work.companyReminderCreate": "work.assign",
+  "work.reminderCommand": "work.own",
+  "work.reminderList": "work.own",
+  "work.reminderSnooze": "work.own",
+  "work.reminderAcknowledge": "work.own",
+  "work.reminderCancel": "work.own",
+  "work.reminderReschedule": "work.own",
+  "work.deviceSchedule": "work.own",
+  "work.deviceActionsApply": "work.own",
+  "work.audit": "work.scheduling",
+  "work.sweep": "work.sweep",
 } as const satisfies Record<string, Permission>;
 
 /**

@@ -7,16 +7,16 @@ here can be added rather than read.
 | Measure | Value | Read from |
 |---|---|---|
 | Release | **v23.25** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **408** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **166** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **647** | `roleProcedure(` call sites across all routers |
+| Tables | **419** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **167** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **680** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **355** | the `Permission` union |
-| Sensitive (fail-closed) permissions | **125** | `SENSITIVE_PERMISSIONS` |
+| Permissions | **360** | the `Permission` union |
+| Sensitive (fail-closed) permissions | **127** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **303 / 4107** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **311 / 4216** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -167,6 +167,12 @@ match what was stored — proven in Node against the runtime contracts, with the
 native vault still a stub. Internal portal: shell, switcher, My Day, exceptions,
 inbox, timeline, search, sync indicator, quick capture, view-models.
 Training Academy at `/training-academy`: course catalog, My Training, current-version lesson completion, locked/unlocked final assessment, results, certificate/qualification portfolio, and self-signing of pending regulated certificates.
+Calendar and tasks at `/work` (0170): agenda, day and week over the merged
+calendar, the seven views, the board by lane with task detail and the actions
+the server listed, reminders with acknowledge, snooze and cancel, and the
+device's reminder queue — the cached schedule, what is due with no service, and
+a once-only replay — proven in Node; the native local-notification binding is
+device work.
 Customer portal at `/customer`: invitation acceptance, job board,
 pre-clearance, signing screen, chain of custody, adjustments, line disputes,
 approval queue, timeline, alerts and preferences, documents with download,
@@ -178,7 +184,9 @@ readiness — every step the server's answer.
 ## Not implemented — and not claimed
 
 Native shell (Capacitor), encrypted SQLite, hardware keystore, native file
-vault, camera, GPS, biometric signing, local notifications. Browser/mobile
+vault, camera, GPS, biometric signing, local notifications (the reminder
+schedule reaches the device and its replay is applied once; scheduling the
+notification under the operating system's rules is the shell's). Browser/mobile
 end-to-end tests. LoadSense authenticated gateway ingestion/native BLE service and hardware deployment (the recovered protocol, calibration/stability/material-movement engines and persistence model are present; the production machine-authenticated device edge is not yet wired). Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). Contracts and MSAs as
 records; WBS below cost code; earned-value schedules. AI extraction of rate sheets from
 uploaded documents (a proposal path exists; the document reader that fills
@@ -893,6 +901,26 @@ are different: a missing receipt is overdue and blocks nothing, an expired
 qualification the work requires blocks, and a date nobody has established is
 unknown rather than fine. Rotations answer for days before the anchor as well as
 after, because a rotation set up today still has to describe last month.
+
+The work calendar, the task board and the reminder engine (0170) keep that rule
+and add the one table the projection could not: what nothing else owns. A
+meeting, a training session, a stand-down, a driver's own appointment and a
+block of time for a task are stored; leave, expiries, rotations, dispatch
+bookings and HOS stay projected, and a stored event that links to a record
+refuses to be moved here because the record owns its date. A personal task or
+reminder is its owner's and never escalates — the validator refuses a personal
+reminder that carries a ladder, and the engine returns none for one however it
+is asked — while company work is assigned, accepted, submitted with evidence and
+verified by a second person who is never the assignee. A reminder is a resource
+with a life of its own: scheduled, fired, snoozed (three times, recorded, for a
+compliance reminder), acknowledged, missed, advanced to its next occurrence;
+every firing is one workflowNotifications row per channel under a derived key,
+so the sweep that runs twice delivers nothing twice, and every action a device
+replays carries a reference the server applies exactly once. Availability for a
+scheduler has no field for a title. An HOS clock projects the end of its window
+as PROJECTED and says on its face that the HOS engine, not the arithmetic,
+decides. Recurrence is arithmetic on a wall clock in a zone, so 05:30 stays
+05:30 on the Monday after the clocks change.
 
 An inspector can now be handed one: a time-limited grant is issued against a
 unit, the code carries its reference rather than any authority, and opening it

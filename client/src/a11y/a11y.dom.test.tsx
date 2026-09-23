@@ -19,6 +19,7 @@ import type { RoleActor } from "../../../server/_core/roleActor";
 import { demonstration, fromQuery } from "../showcase/panelSource";
 import { LoginView } from "../pages/LoginView";
 import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser } from "../portal/PortalChooser";
+import { WorkCalendarView, type WorkCalendarViewProps } from "../pages/WorkCalendarView";
 
 afterEach(cleanup);
 
@@ -99,7 +100,28 @@ const a11yPortals = [
   { portal: "fleet_maintenance", displayName: "Fleet Maintenance", purpose: "Work orders, defects and vehicle maintenance" },
 ];
 
+/** The work calendar, the board and the reminders, one tab each. A projected entry and a redacted one are both on the calendar, because both are states a reader must be able to tell apart. */
+const A11Y_TZ = "America/Edmonton";
+const workProps = (tab: WorkCalendarViewProps["tab"]): WorkCalendarViewProps => ({
+  tab, onTab: () => {}, timezone: A11Y_TZ, now: A11Y_NOW, online: true, offlineStatus: { dueNow: 1, pendingReplay: 0 },
+  mode: "agenda", onMode: () => {}, from: A11Y_NOW, onShift: () => {}, view: "my", onView: () => {}, calendarLoading: false,
+  agenda: [{ key: "2026-09-12", label: "Sat, Sep 12", entries: [
+    { eventKey: "a", title: "Tailgate", detail: "Yard, 07:00", at: "2026-09-12T13:00:00Z", endsAt: null, allDay: false, layer: "compliance", severity: "informational", state: "confirmed", basis: "record", deepLink: "/calendarEvent/CAL-1", source: { sourceType: "calendarEvent", sourceRef: "CAL-1" }, time: "07:00" },
+    { eventKey: "b", title: "Shift elapsed: about 45 min remaining", detail: "Projected from the clock", at: "2026-09-12T23:00:00Z", endsAt: null, allDay: false, layer: "compliance", severity: "due", state: "projected", basis: "projection", deepLink: "/hosDetermination/H-1", source: { sourceType: "hosDetermination", sourceRef: "H-1" }, time: "17:00" },
+    { eventKey: "c", title: "Unavailable", detail: null, at: "2026-09-12T19:00:00Z", endsAt: "2026-09-12T21:00:00Z", allDay: false, layer: "personal", severity: "informational", state: "confirmed", basis: "record", deepLink: "/calendarEvent/CAL-2", source: { sourceType: "calendarEvent", sourceRef: "CAL-2" }, redacted: true, time: "13:00" },
+  ] }],
+  week: [], actionable: [], selectedEntry: null, onSelectEntry: () => {}, onCreateEvent: () => {}, creatingEvent: false,
+  lanes: [{ key: "todo", label: "To do", tasks: [{ taskRef: "TSK-1", kind: "company", status: "todo", assignmentState: "assigned", title: "Post-trip inspection, unit 147", priority: "high", dueAt: "2026-09-12T19:30:00Z", overdue: false, deepLink: "/work/tasks/TSK-1" }] }, { key: "in_progress", label: "In progress", tasks: [] }],
+  taskDetail: { taskRef: "TSK-1", title: "Post-trip inspection, unit 147", description: null, status: "todo", kind: "company", priority: "high", dueLine: "Due in 6 h (13:30)", checklist: [{ itemRef: "TCI-1", label: "Brakes", done: false }], actions: ["accept", "decline"], dependencies: [], reminders: [] },
+  onOpenTask: () => {}, onCloseTask: () => {}, onTaskAction: () => {}, actingTask: false, onCreateTask: () => {}, creatingTask: false, onTickChecklist: () => {},
+  reminders: [{ reminderRef: "RMD-1", title: "Bring respirator", level: "alarm", state: "fired", fireAt: "2026-09-12T12:00:00Z", requiresAcknowledgement: false, snoozeCount: 0, when: "Sat, Sep 12 06:00", actions: ["acknowledge", "snooze", "cancel"] }],
+  onReminderAction: () => {}, actingReminder: false, onCreateReminder: () => {}, creatingReminder: false,
+});
+
 const surfaces = [
+  { name: "work — calendar", render: () => render(<WorkCalendarView {...workProps("calendar")} />) },
+  { name: "work — tasks", render: () => render(<WorkCalendarView {...workProps("tasks")} />) },
+  { name: "work — reminders", render: () => render(<WorkCalendarView {...workProps("reminders")} />) },
   { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
   { name: "dispatch readiness — blocked", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked)} />) },
   { name: "dispatch readiness — query failed", render: () => render(<DispatchReadinessView {...readinessPanel({ kind: "failed", message: "Database unavailable" })} />) },

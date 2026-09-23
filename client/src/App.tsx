@@ -32,6 +32,7 @@ import AssistantAsk from "./pages/AssistantAsk";
 import AssistantCalibration from "./pages/AssistantCalibration";
 import TripOperationsWorkspace from "./showcase/TripOperationsWorkspace";
 import TrainingAcademy from "./pages/TrainingAcademy";
+import WorkCalendar from "./pages/WorkCalendar";
 import DispatchReadiness from "./dispatch/DispatchReadiness";
 
 function DashboardRoute({ children }: { children: ReactNode }) {
@@ -110,6 +111,8 @@ function Router() {
       />
       <Route path="/trip-operations" component={() => <Redirect to="/showcase/trips" />} />
       <Route path="/training-academy" component={() => <DashboardRoute><TrainingAcademy /></DashboardRoute>} />
+      <Route path="/work/:rest*" component={() => <DashboardRoute><WorkCalendar /></DashboardRoute>} />
+      <Route path="/work" component={() => <DashboardRoute><WorkCalendar /></DashboardRoute>} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
