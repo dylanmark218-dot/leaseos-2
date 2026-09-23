@@ -2,12 +2,19 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import { getDb, grantUserRole, listActiveUserRoleNames } from "./db";
-import { jobs, units } from "../drizzle/schema";
+import { jobs, operators, units } from "../drizzle/schema";
 
-// P4.1: creates that name a job or unit must name one the caller may see. These were `jobId: FIXTURE_JOB_ID` / `unitId: FIXTURE_UNIT_ID`,
+// P4.1: creates that name a job or unit must name one the caller may see. These were `jobId: 1` / `unitId: 1`,
 // placeholders no row necessarily had; the suite now creates a real, unowned job and unit (the single tenant's).
+//
+// 0170: the operator was left behind by that pass and stayed `operatorId: 1`, which worked only
+// while this suite happened to insert the first operator row in the database. It is not the first
+// any more — the cross-tenant matrix seeds owned operators of its own — and a hardcoded 1 then
+// names somebody else's record, which the scope guard correctly refuses. Same treatment as the
+// job and the unit: create a real, unowned one and use the id it actually got.
 let FIXTURE_JOB_ID = 1;
 let FIXTURE_UNIT_ID = 1;
+let FIXTURE_OPERATOR_ID = 1;
 
 /**
  * B20.4 put personnel, billing, compliance, safety and maintenance behind
@@ -26,6 +33,7 @@ beforeAll(async () => {
     const tag = Math.random().toString(36).slice(2, 8).toUpperCase();
     FIXTURE_JOB_ID = (await db.insert(jobs).values({ jobCode: `JOB-FR-${tag}`, type: "Hydrovac", customer: "Fixture Energy", location: "Somewhere", status: "dispatched" } as never))[0].insertId;
     FIXTURE_UNIT_ID = (await db.insert(units).values({ unitNumber: `U-FR-${tag}`, vehicleType: "hydrovac" } as never))[0].insertId;
+    FIXTURE_OPERATOR_ID = (await db.insert(operators).values({ name: `FR Fixture Operator ${tag}` } as never))[0].insertId;
   }
   // Dispatch enforcement is a global setting another suite may leave at "enforced"; this suite is about creating the
   // records, not about readiness, and its fixture unit (now real) carries no credentials. Establish "off" explicitly.
@@ -264,7 +272,7 @@ describe("fieldRoute job units and inspections", () => {
       caller.fieldRoute.identity.jobUnits.create({
         jobId: FIXTURE_JOB_ID,
         unitId: FIXTURE_UNIT_ID,
-        operatorId: 1,
+        operatorId: FIXTURE_OPERATOR_ID,
         role: "support unit",
         joinedAt: new Date(),
         hours: 3,
@@ -366,7 +374,7 @@ describe("trip operations", () => {
       odometerEndKm: 1142.6,
       jobId: FIXTURE_JOB_ID,
       unitId: FIXTURE_UNIT_ID,
-      operatorId: 1,
+      operatorId: FIXTURE_OPERATOR_ID,
       manifestId: 1,
     });
     expect(id).toBeDefined();
@@ -397,7 +405,7 @@ describe("trip operations", () => {
       ).resolves.toBeDefined();
       await expect(
         caller.fieldRoute.dutyRecords.create({
-          operatorId: 1,
+          operatorId: FIXTURE_OPERATOR_ID,
           tripId,
           dutyStatus: "driving",
           startedAt: new Date(),
