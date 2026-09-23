@@ -262,6 +262,19 @@ function Slot(props: {
       setComplaint("Choose an operator, a unit, or both before saving.");
       return;
     }
+    /*
+     * Taking a crew off work they were expecting is an account somebody is owed, so the server
+     * refuses `assignment_reassigned` without a reason and accepts a first binding without one.
+     * The screen has to know that difference: without it, every crew change is a round trip that
+     * comes back rejected, and the dispatcher is told by an error rather than by the form.
+     */
+    if (presented.fill === "filled" && reason.trim() === "") {
+      setComplaint(
+        "A reason is required to change the crew on a filled slot — somebody is being taken off " +
+        "work they were expecting.",
+      );
+      return;
+    }
     setComplaint(null);
     props.onAssign({
       roleId: row.roleId, operatorId: op, unitId: un, trailerId: row.trailerId,
@@ -383,7 +396,9 @@ function Slot(props: {
             </select>
           </label>
           <label className="block text-xs">
-            Reason (optional on a first fill, recorded either way)
+            {presented.fill === "filled"
+              ? "Reason — required, because somebody is being taken off this slot"
+              : "Reason (not required to fill an empty slot; recorded if given)"}
             <input data-testid={`assign-reason-${row.roleId}`} value={reason}
               onChange={e => setReason(e.target.value)} className="mt-1 block w-full rounded border p-1 text-xs" />
           </label>

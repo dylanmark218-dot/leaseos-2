@@ -286,11 +286,12 @@ describe("I2c — assign, change and unassign", () => {
     fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /change/i }));
     fireEvent.change(screen.getByTestId("assign-operator-900"), { target: { value: "78" } });
     fireEvent.change(screen.getByTestId("assign-unit-900"), { target: { value: "513" } });
+    fireEvent.change(screen.getByTestId("assign-reason-900"), { target: { value: "Hours" } });
     fireEvent.click(screen.getByTestId("assign-submit-900"));
 
     expect(onAssign).toHaveBeenCalledTimes(1);
     expect(onAssign.mock.calls[0][0]).toMatchObject({
-      roleId: 900, operatorId: 78, unitId: 513, expectedLastEventId: 4100,
+      roleId: 900, operatorId: 78, unitId: 513, expectedLastEventId: 4100, reason: "Hours",
     });
   });
 
@@ -307,6 +308,45 @@ describe("I2c — assign, change and unassign", () => {
     fireEvent.click(screen.getByTestId("assign-submit-900"));
 
     expect(onAssign.mock.calls[0][0].expectedLastEventId).toBeNull();
+  });
+
+  /*
+   * The server requires a reason to reassign a filled slot and does not require one to fill an
+   * empty slot — `dispatchRoleService` refuses `assignment_reassigned` without one. The screen has
+   * to know the difference, or every crew change is a round trip that comes back rejected.
+   */
+  it("requires a reason to change the crew on a filled slot, as the server does", () => {
+    const onAssign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onAssign })} />);
+    fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /change/i }));
+    fireEvent.change(screen.getByTestId("assign-operator-900"), { target: { value: "78" } });
+    fireEvent.click(screen.getByTestId("assign-submit-900"));
+
+    expect(onAssign).not.toHaveBeenCalled();
+    expect(screen.getByTestId("assign-required-900").textContent).toMatch(/reason/i);
+  });
+
+  it("refuses a whitespace-only reason on a change, for the same reason the server does", () => {
+    const onAssign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onAssign })} />);
+    fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /change/i }));
+    fireEvent.change(screen.getByTestId("assign-operator-900"), { target: { value: "78" } });
+    fireEvent.change(screen.getByTestId("assign-reason-900"), { target: { value: "   " } });
+    fireEvent.click(screen.getByTestId("assign-submit-900"));
+    expect(onAssign).not.toHaveBeenCalled();
+  });
+
+  it("does not demand a reason to fill a slot nobody was on", () => {
+    const onAssign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onAssign, slots: {
+      kind: "loaded", rows: [slot({ status: "open", operatorId: null, unitId: null, lastEventId: null })],
+      staffing: staffing({ state: "unstaffed", filled: 0, requiredTotal: 1, unfilledRoles: ["Primary unit"], message: "0 of 1." }),
+      planningState: "direct", history: [],
+    } })} />);
+    fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /assign/i }));
+    fireEvent.change(screen.getByTestId("assign-operator-900"), { target: { value: "77" } });
+    fireEvent.click(screen.getByTestId("assign-submit-900"));
+    expect(onAssign).toHaveBeenCalledTimes(1);
   });
 
   it("never offers an eligibility check as something to attach to an assignment", () => {
