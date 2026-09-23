@@ -8655,7 +8655,33 @@ export const commercialDocuments = mysqlTable("commercialDocuments", {
   statusReason: varchar("statusReason", { length: 500 }),
   registeredByUserId: int("registeredByUserId").notNull(),
   registeredAt: timestamp("registeredAt").defaultNow().notNull(),
-});
+  // DC-B (0179) — provenance and lifecycle. NULL originKind = registered before Document Control
+  // kept provenance ("unrecorded"), never a guess. `bookScopeKey` = COALESCE(bookOrgRef,'default')
+  // so the control-number unique index can see the single tenant.
+  bookScopeKey: varchar("bookScopeKey", { length: 64 }).default("default").notNull(),
+  definitionRef: varchar("definitionRef", { length: 64 }),
+  definitionKey: varchar("definitionKey", { length: 40 }),
+  originKind: mysqlEnum("originKind", ["leaseos_generated", "organization_template", "customer_template", "external_form_rendered", "system_rendered", "external_scanned", "external_digital_import", "reference_document"]),
+  issuerKind: mysqlEnum("issuerKind", ["tenant", "customer", "facility", "vendor", "regulator", "government_authority", "manufacturer", "other_third_party", "unknown"]),
+  issuerOrgRef: varchar("issuerOrgRef", { length: 64 }),
+  issuerFacilityId: int("issuerFacilityId"),
+  issuerName: varchar("issuerName", { length: 220 }),
+  /** The LeaseOS business number, when the definition's policy mints one or the owning domain did. NULL for every externally issued document. */
+  controlNumber: varchar("controlNumber", { length: 64 }),
+  controlNumberIssuedAt: timestamp("controlNumberIssuedAt"),
+  controlState: mysqlEnum("controlState", ["captured", "needs_classification", "proposed", "confirmed", "issued", "void", "withdrawn"]).default("confirmed").notNull(),
+  templateRevisionRef: varchar("templateRevisionRef", { length: 64 }),
+  renderManifestHash: varchar("renderManifestHash", { length: 64 }),
+  capturedByUserId: int("capturedByUserId"),
+  capturedByDeviceRef: varchar("capturedByDeviceRef", { length: 64 }),
+  importChannel: mysqlEnum("importChannel", ["device_sync", "office_upload", "portal", "api", "email", "system"]),
+  confirmedByUserId: int("confirmedByUserId"),
+  confirmedAt: timestamp("confirmedAt"),
+  issuedByUserId: int("issuedByUserId"),
+  voidedByUserId: int("voidedByUserId"),
+  voidedAt: timestamp("voidedAt"),
+  voidReason: varchar("voidReason", { length: 500 }),
+}, (t) => ({ controlNumber: uniqueIndex("commercialDocuments_control_number").on(t.bookScopeKey, t.controlNumber), state: index("commercialDocuments_state").on(t.bookScopeKey, t.controlState, t.originKind) }));
 export const commercialDocumentLinks = mysqlTable("commercialDocumentLinks", {
   id: int("id").autoincrement().primaryKey(),
   documentId: int("documentId").notNull(),
@@ -8663,7 +8689,13 @@ export const commercialDocumentLinks = mysqlTable("commercialDocumentLinks", {
   recordRef: varchar("recordRef", { length: 80 }).notNull(),
   linkedByUserId: int("linkedByUserId").notNull(),
   linkedAt: timestamp("linkedAt").defaultNow().notNull(),
-});
+  // DC-B (0179) — the id beside the ref, the role the record plays, and whether a person or a domain said so.
+  recordId: int("recordId"),
+  role: varchar("role", { length: 40 }),
+  source: mysqlEnum("source", ["human", "domain", "ocr_proposed"]).default("human").notNull(),
+  confirmationStatus: mysqlEnum("confirmationStatus", ["proposed", "confirmed"]).default("confirmed").notNull(),
+  linkedByDeviceRef: varchar("linkedByDeviceRef", { length: 64 }),
+}, (t) => ({ recordId: index("commercialDocumentLinks_record_id").on(t.recordType, t.recordId) }));
 export const commercialDocumentDeliveries = mysqlTable("commercialDocumentDeliveries", {
   id: int("id").autoincrement().primaryKey(),
   deliveryRef: varchar("deliveryRef", { length: 40 }).notNull().unique(),
@@ -8962,3 +8994,62 @@ export const documentSourceArtifacts = mysqlTable("documentSourceArtifacts", {
 
 export type InsertDocumentDefinition = typeof documentDefinitions.$inferInsert;
 export type InsertDocumentSourceArtifact = typeof documentSourceArtifacts.$inferInsert;
+
+/* ==================================================================
+ * DC-B (0179) — Document Control: the 0144 register becomes origin-aware. The
+ * columns below are added to commercialDocuments and commercialDocumentLinks
+ * by 0179 (see the ALTER statements there); the two new tables carry external
+ * identifiers and the append-only timeline.
+ * ================================================================== */
+
+/** Identifiers another issuer assigned to a document, scoped by that issuer. Facility A's #12345 and Facility B's #12345 both exist. */
+export const documentExternalReferences = mysqlTable("documentExternalReferences", {
+  id: int("id").autoincrement().primaryKey(),
+  referenceRef: varchar("referenceRef", { length: 40 }).notNull().unique(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  /** COALESCE(bookOrgRef, 'default'), maintained by the write path so an index can see the single tenant. */
+  bookScopeKey: varchar("bookScopeKey", { length: 64 }).notNull(),
+  documentId: int("documentId").notNull(),
+  referenceType: varchar("referenceType", { length: 40 }).notNull(),
+  referenceValue: varchar("referenceValue", { length: 120 }).notNull(),
+  referenceValueRaw: varchar("referenceValueRaw", { length: 120 }).notNull(),
+  issuerKind: mysqlEnum("issuerKind", ["tenant", "customer", "facility", "vendor", "regulator", "government_authority", "manufacturer", "other_third_party", "unknown"]).notNull(),
+  issuerOrgRef: varchar("issuerOrgRef", { length: 64 }),
+  issuerFacilityId: int("issuerFacilityId"),
+  issuerName: varchar("issuerName", { length: 220 }),
+  issuerScopeKey: varchar("issuerScopeKey", { length: 160 }).notNull(),
+  source: mysqlEnum("source", ["ocr_proposed", "human_entered", "portal_submitted", "api_imported", "domain_mirrored"]).notNull(),
+  confirmationStatus: mysqlEnum("confirmationStatus", ["proposed", "confirmed", "rejected"]).default("proposed").notNull(),
+  confirmedByUserId: int("confirmedByUserId"),
+  confirmedAt: timestamp("confirmedAt"),
+  /** Set when the value is a mirror of a column another domain owns; the row is then read-only here. */
+  mirrorOfTable: varchar("mirrorOfTable", { length: 40 }),
+  mirrorOfId: int("mirrorOfId"),
+  mirrorOfColumn: varchar("mirrorOfColumn", { length: 40 }),
+  duplicateOfDocumentId: int("duplicateOfDocumentId"),
+  duplicateOverrideReason: varchar("duplicateOverrideReason", { length: 300 }),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  perDocument: uniqueIndex("documentExternalReferences_document_issuer_value").on(t.documentId, t.referenceType, t.issuerScopeKey, t.referenceValue),
+  lookup: index("documentExternalReferences_lookup").on(t.bookScopeKey, t.referenceType, t.referenceValue),
+}));
+
+/** Append-only. The timeline of a controlled document is read from here, never inferred from the row's final state. */
+export const documentControlEvents = mysqlTable("documentControlEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  documentId: int("documentId").notNull(),
+  sequence: int("sequence").notNull(),
+  eventType: varchar("eventType", { length: 60 }).notNull(),
+  actorUserId: int("actorUserId"),
+  actorSource: mysqlEnum("actorSource", ["human", "system", "ai", "integration", "external"]).notNull(),
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  previousState: varchar("previousState", { length: 40 }),
+  newState: varchar("newState", { length: 40 }),
+  detailJson: text("detailJson"),
+  occurredAt: timestamp("occurredAt").notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+}, (t) => ({ seq: uniqueIndex("documentControlEvents_seq_unique").on(t.documentId, t.sequence) }));
+
+export type InsertDocumentExternalReference = typeof documentExternalReferences.$inferInsert;
+export type InsertDocumentControlEvent = typeof documentControlEvents.$inferInsert;
