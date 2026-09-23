@@ -2555,6 +2555,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "dispatch.overrideGrant": "dispatch.override.grant",
   "dispatch.whatAmIMissing": "dispatch.readiness_own",
   "dispatch.readiness": "dispatch.read",
+  // The canonical slot model's door. Creating a posting or a slot is planning, so it sits under the
+  // permission that already means "decide who works this job" — never under dispatch.award.
+  "dispatch.createPosting": "dispatch.assign",
+  "dispatch.addRole": "dispatch.assign",
+  "dispatch.listRoles": "dispatch.read",
+  // Binding a slot is assignment, never award. dispatch.award stays a separate permission so the
+  // two can be separated by grant later without touching this code.
+  "dispatch.setRoleAssignment": "dispatch.assign",
+  "dispatch.clearRoleAssignment": "dispatch.assign",
   /* ---- v21.2: enforcement ---- */
   "dispatch.enforcementSet": "dispatch.enforcement.manage",
   "dispatch.enforcementGet": "dispatch.read",

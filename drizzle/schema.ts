@@ -1893,6 +1893,68 @@ export const dispatchRoles = mysqlTable("dispatchRoles", {
   ])
     .default("open")
     .notNull(),
+  // 0170 — whether this slot holds the posting back from `staffed`. `assessStaffing` has always
+  // distinguished required from optional; the data could not say which, so the award passed
+  // `required: true` for every row. Default true preserves exactly that.
+  required: boolean("required").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * 0170 — the vocabulary `dispatchRoles.roleCode` is drawn from.
+ *
+ * `orgRef` NULL means "every tenant may use this", which is the opposite of what NULL means
+ * elsewhere in this schema, where it marks the historical single tenant's own rows. A catalog is
+ * shared vocabulary rather than an owned record, so this table is never read with `orgScopeWhere` —
+ * that helper would hide every global row from a real tenant. See `_core/dispatchRoleCatalog.ts`.
+ */
+export const dispatchRoleTypes = mysqlTable("dispatchRoleTypes", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  roleCode: varchar("roleCode", { length: 60 }).notNull(),
+  displayName: varchar("displayName", { length: 120 }).notNull(),
+  description: varchar("description", { length: 500 }),
+  /** Copied onto a new slot at creation. Never read live — see the module comment. */
+  defaultEquipmentClass: varchar("defaultEquipmentClass", { length: 60 }),
+  defaultTrailerClass: varchar("defaultTrailerClass", { length: 60 }),
+  active: boolean("active").default(true).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  // Persistent generated column: CONCAT(COALESCE(orgRef,'*'), ':', roleCode), unique. Never written
+  // by the application — the database derives it. A nullable composite unique would not have
+  // refused a second global row, which is the bug 0021 found and fixed the same way.
+  roleTypeKey: varchar("roleTypeKey", { length: 140 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * 0171 — append-only assignment history for a role slot.
+ *
+ * Deliberately not `dispatchAuditEvents`: that table's `assignment_approved` doubles as the award
+ * transaction's idempotency record, so assignment history written there would be indistinguishable
+ * from an award to the award's own replay check. An assignment writes here and nowhere else.
+ */
+export const dispatchRoleAssignmentEvents = mysqlTable("dispatchRoleAssignmentEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  roleId: int("roleId").notNull(),
+  postingId: int("postingId").notNull(),
+  jobId: int("jobId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  eventType: mysqlEnum("eventType", [
+    "assignment_created",
+    "assignment_reassigned",
+    "assignment_unassigned",
+  ]).notNull(),
+  fromOperatorId: int("fromOperatorId"),
+  fromUnitId: int("fromUnitId"),
+  fromTrailerId: int("fromTrailerId"),
+  toOperatorId: int("toOperatorId"),
+  toUnitId: int("toUnitId"),
+  toTrailerId: int("toTrailerId"),
+  reason: varchar("reason", { length: 500 }),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 60 }).notNull(),
+  occurredAt: timestamp("occurredAt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

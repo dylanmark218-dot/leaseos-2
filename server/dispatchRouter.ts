@@ -32,6 +32,7 @@ import { asFinding, resolveOverridePolicy } from "./_core/complianceFinding";
 import { asChecklist, composeReadiness } from "./readinessComposer";
 import { requestOverride, type DispatchBlocker, type OverrideRequest } from "./_core/dispatchReadiness";
 import { awardAssignment } from "./_core/dispatchTransaction";
+import { addRole, clearRoleAssignment, createPosting, listRoles, scopeOf, setRoleAssignment } from "./dispatchRoleService";
 
 // v22.18 — a readiness may name the route it is about. Optional, so every
 // caller that does not keeps exactly the behaviour it had.
@@ -47,6 +48,15 @@ async function overrideRoleFor(userId: number): Promise<OverrideRequest["request
   if (roles.includes("office") || roles.includes("safety") || roles.includes("hr")) return "office";
   return "driver";
 }
+
+/** A role slot draft, as a caller may describe one. */
+const ROLE_DRAFT = z.object({
+  roleCode: z.string().min(1).max(60),
+  roleLabel: z.string().min(1).max(180).optional(),
+  required: z.boolean().optional(),
+  requiredEquipmentClass: z.string().max(60).nullable().optional(),
+  requiredTrailerClass: z.string().max(60).nullable().optional(),
+});
 
 /**
  * How long a WARNING_ONLY acknowledgement counts. It cannot outlive the longest check reuse window
@@ -81,6 +91,107 @@ async function scopedCheck(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, c
 }
 
 export const dispatchGateRouter = router({
+  /**
+   * The creation door — B12's slot model had none.
+   *
+   * `dispatchPostings` and `dispatchRoles` had zero production INSERTs anywhere in the tree, so the
+   * multi-resource model the schema describes ("a rig move is a lead, winch tractors, a bed truck,
+   * a picker and pilot vehicles, each assigned independently") could only ever be populated by a
+   * test fixture. These three procedures are that door.
+   *
+   * Creating a posting is planning, not awarding: nothing here writes a booking, an award audit
+   * event, or an eligibility check.
+   */
+  createPosting: roleProcedure("dispatch.createPosting")
+    .input(z.object({
+      jobId: z.number().int().positive(),
+      distribution: z.enum(["direct_assignment", "public_internal_bid", "invite_only", "selected_pool", "on_call", "emergency", "subcontractor_bid"]).optional(),
+      roles: z.array(ROLE_DRAFT).max(40).optional(),
+    }))
+    .mutation(async ({ ctx, input }) =>
+      createPosting({
+        jobId: input.jobId, distribution: input.distribution, roles: input.roles,
+        actorUserId: ctx.user.id, scope: await scopeOf(ctx.user.id),
+      })),
+
+  addRole: roleProcedure("dispatch.addRole")
+    .input(z.object({ postingId: z.number().int().positive() }).and(ROLE_DRAFT))
+    .mutation(async ({ ctx, input }) =>
+      addRole({
+        postingId: input.postingId,
+        draft: {
+          roleCode: input.roleCode, roleLabel: input.roleLabel, required: input.required,
+          requiredEquipmentClass: input.requiredEquipmentClass, requiredTrailerClass: input.requiredTrailerClass,
+        },
+        scope: await scopeOf(ctx.user.id),
+      })),
+
+  /**
+   * Every slot for a job, with the precise staffing picture beside the persisted lifecycle value.
+   *
+   * The two are never merged. `planningState` cannot express zero-of-N — from `staffed` its only
+   * legal backward transition is `partially_staffed` — so `staffing` is what a screen should read
+   * and `planningState` is reported as itself.
+   */
+  listRoles: roleProcedure("dispatch.listRoles")
+    .input(z.object({
+      jobId: z.number().int().positive().optional(),
+      postingId: z.number().int().positive().optional(),
+      includeHistory: z.boolean().optional(),
+    }))
+    .query(async ({ ctx, input }) =>
+      listRoles({
+        jobId: input.jobId, postingId: input.postingId, includeHistory: input.includeHistory,
+        scope: await scopeOf(ctx.user.id),
+      })),
+
+  /**
+   * Bind or rebind one slot. Which of the two it is, is server state rather than caller intent — a
+   * caller declaring "this is a reassignment" while the slot was open is describing what they meant
+   * to do, not what happened.
+   *
+   * `.strict()` is load-bearing: an `eligibilityCheckId` is *refused*, not stripped. Silently
+   * ignoring it would let a caller believe they had awarded something, which is the precise
+   * confusion `jobUnits.create` created by accepting one and setting `usedForAward`.
+   */
+  setRoleAssignment: roleProcedure("dispatch.setRoleAssignment")
+    .input(z.object({
+      roleId: z.number().int().positive(),
+      operatorId: z.number().int().positive().nullable(),
+      unitId: z.number().int().positive().nullable(),
+      trailerId: z.number().int().positive().nullable().optional(),
+      /** The head of this slot's own history, as the caller last saw it. Null = "it had none". */
+      expectedLastEventId: z.number().int().positive().nullable(),
+      reason: z.string().max(500).optional(),
+    }).strict())
+    .mutation(async ({ ctx, input }) =>
+      setRoleAssignment({
+        roleId: input.roleId,
+        operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null,
+        expectedLastEventId: input.expectedLastEventId,
+        reason: input.reason ?? null,
+        actorUserId: ctx.user.id,
+        actorRole: await overrideRoleFor(ctx.user.id),
+        scope: await scopeOf(ctx.user.id),
+      })),
+
+  /** Return a slot to `open`. Always takes a reason, and destroys nothing. */
+  clearRoleAssignment: roleProcedure("dispatch.clearRoleAssignment")
+    .input(z.object({
+      roleId: z.number().int().positive(),
+      expectedLastEventId: z.number().int().positive().nullable(),
+      reason: z.string().min(1).max(500),
+    }).strict())
+    .mutation(async ({ ctx, input }) =>
+      clearRoleAssignment({
+        roleId: input.roleId,
+        expectedLastEventId: input.expectedLastEventId,
+        reason: input.reason,
+        actorUserId: ctx.user.id,
+        actorRole: await overrideRoleFor(ctx.user.id),
+        scope: await scopeOf(ctx.user.id),
+      })),
+
   readiness: roleProcedure("dispatch.readiness")
     .input(SUBJECT)
     .query(async ({ ctx, input }) => {
@@ -204,7 +315,7 @@ export const dispatchGateRouter = router({
       const { db, scope } = await scopedDb(ctx.user.id);
       const check = await scopedCheck(db, input.checkId, scope);
       // v21.2 — a check recorded for a direct job assignment is not a posting award.
-      if (check.postingId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This check is for a direct job assignment — use jobUnits.create with its eligibilityCheckId" });
+      if (check.postingId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This check is for a direct job assignment — award applies to a posting. Assign the job's dispatch roles with dispatch.setRoleAssignment, then award the posting those roles belong to" });
       const posting = (await db.select({ jobId: dispatchPostings.jobId }).from(dispatchPostings).where(eq(dispatchPostings.id, check.postingId)).limit(1))[0];
       if (!posting || !(await jobInScope(posting.jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: "Posting not found" });
       const now = new Date();

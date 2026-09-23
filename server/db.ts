@@ -680,13 +680,6 @@ export async function listJobUnits(scope: TenantScope) {
   return db.select().from(jobUnits).where(jobKeyedScope(db, jobUnits.jobId, scope)).orderBy(desc(jobUnits.joinedAt)).limit(100);
 }
 
-export async function createJobUnit(input: InsertJobUnit) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.insert(jobUnits).values(input);
-  return result[0]?.insertId;
-}
-
 export async function listInspections(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
