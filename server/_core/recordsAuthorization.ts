@@ -2192,6 +2192,7 @@ export const RECORDS_PROCEDURE_PERMISSIONS = {
   "records.incident.review": "incident.review",
   "records.nearMiss.report": "incident.create",
   "records.maintenance.recordRelease": "maintenance.record_release",
+  "records.maintenance.resolveDefect": "maintenance.record_release",
   "records.maintenance.revokeRelease": "maintenance.revoke_release",
   "records.legalHold.place": "legal_hold.place",
   "records.legalHold.release": "legal_hold.release",

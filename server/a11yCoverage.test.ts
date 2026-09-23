@@ -26,6 +26,7 @@ const NOT_A_SURFACE: Record<string, string> = {
   "client/src/portal/UniversalSearch.tsx": "a live tRPC caller; needs a client harness",
   "client/src/portal/QuickCapture.tsx": "a live tRPC caller; needs a client harness",
   "client/src/portal/SyncIndicator.tsx": "a status chip with no interactive content of its own",
+  "client/src/dispatch/DispatchReadiness.tsx": "the readiness panel's container: a live tRPC caller that resolves the job's assignment and queries the gate; the panel it renders, DispatchReadinessView, is a surface in the suite",
   "client/src/pages/Login.tsx": "a live router and session caller; LoginView is the surface, and all four of its states are run through the axe rules",
   "client/src/pages/TrainingWalletView.tsx": "a module of presentational panels, not one component; each exported panel (WalletPanel, StudyCentrePanel, TutorPanel, PathwayPanel, CompliancePanel) is run through the axe rules",
 };
