@@ -1,25 +1,32 @@
 /**
- * The Dispatch Detail screen, as a screen.
+ * The Dispatch Detail screen, as a screen — now that it can change something.
  *
- * It reads one job: its header, who and what is assigned to it, and the readiness verdict for that
- * pairing. It changes nothing. The assignment controls a dispatcher would expect are deliberately
- * absent, and the screen says why rather than showing a dead button — the only reachable assignment
- * mutation (`jobUnits.create`) also carries award semantics, so a "Change driver" control here
- * could mark an eligibility check as awarded.
+ * PR #6 built this as a read-only view and said why in a banner: the only reachable assignment
+ * mutation was `jobUnits.create`, which also carries award semantics, so a "Change driver" control
+ * here could have marked an eligibility check as awarded. The canonical assignment backend removed
+ * that reason, and Checkpoint I removes the banner.
  *
- * Almost every test below is negative. The failure this screen must not have is showing something
- * that looks like fact and is not: a name it could not resolve, a job it could not read, an empty
- * assignment list that means "we only looked at the last hundred".
+ * What replaces it is not just buttons. The screen now reads `dispatch.listRoles`, which answers a
+ * different and better question than `jobUnits.list` did — it is keyed by job rather than job-blind,
+ * so the hundred-row window PR #6 had to disclose is gone, and it returns the slots nobody is in,
+ * which the old read could not represent at all.
+ *
+ * Most tests below are still negative, and the new ones concentrate on the three ways an editable
+ * screen can lie where a read-only one could not: showing a refused write as though it succeeded,
+ * letting a stale token through silently, and letting the act of filling a slot imply that the crew
+ * in it may legally be dispatched.
  */
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(cleanup);
 import {
   DispatchJobDetailView,
-  type AssignmentRow,
   type DispatchJobDetailViewProps,
+  type HistoryRow,
   type JobHeader,
+  type SlotRow,
+  type StaffingPicture,
 } from "./DispatchJobDetailView";
 
 const header = (o: Partial<JobHeader> = {}): JobHeader => ({
@@ -28,17 +35,41 @@ const header = (o: Partial<JobHeader> = {}): JobHeader => ({
   vehicleText: null, driverText: null, ...o,
 });
 
-const row = (o: Partial<AssignmentRow> = {}): AssignmentRow => ({
-  jobUnitId: 900, unitId: 512, unitName: null, operatorId: 77, operatorName: null,
-  role: "operator", joinedAt: new Date("2026-09-21T13:00:00Z"), departedAt: null, ...o,
+const slot = (o: Partial<SlotRow> = {}): SlotRow => ({
+  roleId: 900, postingId: 60, roleCode: "PRIMARY_UNIT", roleLabel: "Primary unit",
+  displayName: "Primary unit", required: true, status: "assigned",
+  operatorId: 77, operatorName: null, unitId: 512, unitName: null,
+  trailerId: null, trailerName: null,
+  requiredEquipmentClass: null, requiredTrailerClass: null,
+  lastEventId: 4100, ...o,
+});
+
+const staffing = (o: Partial<StaffingPicture> = {}): StaffingPicture => ({
+  state: "staffed", filled: 1, requiredTotal: 1, unfilledRoles: [],
+  message: "All 1 required roles filled.", ...o,
+});
+
+const event = (o: Partial<HistoryRow> = {}): HistoryRow => ({
+  id: 4100, roleId: 900, eventType: "assignment_created",
+  fromOperatorId: null, fromUnitId: null, toOperatorId: 77, toUnitId: 512,
+  reason: null, actorUserId: 3, occurredAt: new Date("2026-09-21T13:00:00Z"), ...o,
 });
 
 const props = (o: Partial<DispatchJobDetailViewProps> = {}): DispatchJobDetailViewProps => ({
   jobId: 41,
   job: { kind: "loaded", job: header() },
-  assignments: { kind: "loaded", rows: [row()] },
+  slots: {
+    kind: "loaded", rows: [slot()], staffing: staffing(),
+    planningState: "staffed", history: [event()],
+  },
   namesResolved: true,
+  operatorChoices: [{ id: 77, label: "Dana Whitecalf" }, { id: 78, label: "R. Okonkwo" }],
+  unitChoices: [{ id: 512, label: "T-512" }, { id: 513, label: "T-513" }],
+  mutation: { kind: "idle" },
+  canAssign: true,
   readiness: <div data-testid="readiness-slot">readiness lives here</div>,
+  onAssign: vi.fn(),
+  onUnassign: vi.fn(),
   onRefresh: vi.fn(),
   refreshing: false,
   ...o,
@@ -46,19 +77,17 @@ const props = (o: Partial<DispatchJobDetailViewProps> = {}): DispatchJobDetailVi
 
 /** Nothing on this screen may read as a fabricated fact. */
 const saysUnknown = () => screen.queryAllByText(/\bunknown\b/i).length > 0;
+const pageText = () => document.body.textContent ?? "";
 
-/* ── D1. real backend data ──────────────────────────────────────────────────── */
+/* ══ preserved from PR #6: the header is unchanged by activation ═════════════ */
 
 describe("D1 — the header shows what the server sent, and only that", () => {
   it("renders the job's own fields", () => {
     render(<DispatchJobDetailView {...props()} />);
     const h = screen.getByTestId("job-header").textContent ?? "";
-    expect(h).toContain("WH-2291");
-    expect(h).toContain("Northgate Energy");
-    expect(h).toContain("04-12-052-09W5");
-    expect(h).toContain("water_haul");
-    expect(h).toContain("transport");
-    expect(h).toContain("dispatched");
+    for (const v of ["WH-2291", "Northgate Energy", "04-12-052-09W5", "water_haul", "transport", "dispatched"]) {
+      expect(h).toContain(v);
+    }
   });
 
   it("omits a field the server left null rather than inventing a placeholder", () => {
@@ -68,133 +97,385 @@ describe("D1 — the header shows what the server sent, and only that", () => {
     expect(saysUnknown()).toBe(false);
   });
 
-  /*
-   * `jobs.vehicle` and `jobs.driver` are varchar free text a client typed — not references to a
-   * unit or an operator. Showing them beside the real assignment without saying so would read as
-   * two sources agreeing, when one of them is a note.
-   */
   it("marks the job's free-text vehicle and driver as captured text, not as the assignment", () => {
     render(<DispatchJobDetailView {...props({
       job: { kind: "loaded", job: header({ vehicleText: "the blue vac", driverText: "Dana" }) },
     })} />);
     const noted = screen.getByTestId("job-captured-text");
     expect(noted.textContent).toContain("the blue vac");
-    expect(noted.textContent).toContain("Dana");
     expect(noted.textContent).toMatch(/typed|captured|not a record|free text/i);
   });
 });
 
-/* ── D2/D3. current assignment ──────────────────────────────────────────────── */
+/* ══ I2a. the slot list — including the slots nobody is in ═══════════════════ */
 
-describe("D2/D3 — the current operator and unit", () => {
-  it("shows the ids as the authoritative text", () => {
-    render(<DispatchJobDetailView {...props()} />);
-    const a = screen.getByTestId("assignment-900").textContent ?? "";
-    expect(a).toContain("512");
-    expect(a).toContain("77");
-  });
-
-  it("appends a resolved name as secondary, never in place of the id", () => {
-    render(<DispatchJobDetailView {...props({
-      assignments: { kind: "loaded", rows: [row({ unitName: "HV-0031", operatorName: "J. Mercer" })] },
-    })} />);
-    const a = screen.getByTestId("assignment-900").textContent ?? "";
-    expect(a).toContain("512");
-    expect(a).toContain("HV-0031");
-    expect(a).toContain("77");
-    expect(a).toContain("J. Mercer");
-  });
-
+describe("I2a — every slot the posting has, filled or not", () => {
   /*
-   * A name can fail to resolve for at least four reasons a client cannot tell apart: the fleet
-   * exceeds the hundred-row list cap, the roster does, the record belongs to another organization,
-   * or the row is gone. "Unknown" asserts absence. The data only supports "not resolved".
+   * This is the capability `jobUnits` never had. A worklog row exists because somebody joined the
+   * job; there is no row for a winch tractor nobody has been put on, so the old screen could not
+   * distinguish "fully crewed" from "we have not staffed the rest yet".
    */
+  it("renders an unfilled slot as a slot, not as an absence", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded",
+      rows: [slot(), slot({ roleId: 901, roleCode: "WINCH_TRACTOR", roleLabel: "Winch tractor",
+        displayName: "Winch tractor", status: "open", operatorId: null, unitId: null, lastEventId: null })],
+      staffing: staffing({ state: "partially_staffed", filled: 1, requiredTotal: 2,
+        unfilledRoles: ["Winch tractor"], message: "1 of 2 required roles filled. Outstanding: Winch tractor." }),
+      planningState: "partially_staffed", history: [],
+    } })} />);
+
+    const open = screen.getByTestId("slot-901");
+    expect(open.textContent).toContain("Winch tractor");
+    expect(open.textContent).toMatch(/unfilled/i);
+    expect(screen.getByTestId("slot-900")).toBeInTheDocument();
+  });
+
+  it("shows the ids as the authoritative text and a resolved name as secondary", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded", rows: [slot({ operatorName: "Dana Whitecalf", unitName: "T-512" })],
+      staffing: staffing(), planningState: "staffed", history: [],
+    } })} />);
+    const s = screen.getByTestId("slot-900").textContent ?? "";
+    expect(s).toContain("77");
+    expect(s).toContain("512");
+    expect(s).toContain("Dana Whitecalf");
+  });
+
   it("says a name was not resolved rather than calling the record unknown", () => {
-    render(<DispatchJobDetailView {...props({
-      assignments: { kind: "loaded", rows: [row({ unitName: null, operatorName: null })] },
-    })} />);
-    expect(screen.getByTestId("assignment-900").textContent).toMatch(/not resolved/i);
+    render(<DispatchJobDetailView {...props()} />);
+    expect(screen.getByTestId("slot-900").textContent).toMatch(/not resolved/i);
     expect(saysUnknown()).toBe(false);
   });
 
-  it("shows an assignment with no operator as exactly that", () => {
-    render(<DispatchJobDetailView {...props({
-      // The unit name resolves, so anything reading "not resolved" here would be about the operator.
-      assignments: { kind: "loaded", rows: [row({ unitName: "HV-0031", operatorId: null, operatorName: null })] },
-    })} />);
-    const a = screen.getByTestId("assignment-900").textContent ?? "";
-    expect(a).toMatch(/no operator/i);
-    expect(a).not.toMatch(/not resolved/i);   // nothing failed to resolve; there is nobody to resolve
+  it("distinguishes a withdrawn slot from one nobody has taken", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded",
+      rows: [slot({ roleId: 902, status: "cancelled", operatorId: null, unitId: null })],
+      staffing: staffing({ state: "unstaffed", filled: 0, requiredTotal: 0, unfilledRoles: [], message: "0 of 0 required roles filled. Outstanding: ." }),
+      planningState: "direct", history: [],
+    } })} />);
+    expect(screen.getByTestId("slot-902").textContent).toMatch(/withdrawn/i);
   });
 
-  it("shows the captured role verbatim, labelled as captured", () => {
-    render(<DispatchJobDetailView {...props({ assignments: { kind: "loaded", rows: [row({ role: "support unit" })] } })} />);
-    const a = screen.getByTestId("assignment-900");
-    expect(a.textContent).toContain("support unit");
-    expect(a.textContent).toMatch(/captured|as recorded|free text/i);
+  it("marks a slot required or optional, and never calls an unfilled optional slot a deficiency", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded",
+      rows: [slot(), slot({ roleId: 903, roleLabel: "Standby", displayName: "Standby",
+        required: false, status: "open", operatorId: null, unitId: null, lastEventId: null })],
+      staffing: staffing(), planningState: "staffed", history: [],
+    } })} />);
+    expect(screen.getByTestId("slot-900").textContent).toMatch(/required/i);
+    const optional = screen.getByTestId("slot-903").textContent ?? "";
+    expect(optional).toMatch(/optional/i);
+    expect(optional).not.toMatch(/missing|outstanding/i);
   });
 
-  it("lists every assignment row the server returned, not just the newest", () => {
-    render(<DispatchJobDetailView {...props({
-      assignments: { kind: "loaded", rows: [row(), row({ jobUnitId: 901, unitId: 513, operatorId: 78 })] },
-    })} />);
-    expect(screen.getAllByTestId(/^assignment-\d+$/)).toHaveLength(2);
+  it("states the equipment class a slot requires, where the slot carries one", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded", rows: [slot({ requiredEquipmentClass: "winch_tractor" })],
+      staffing: staffing(), planningState: "staffed", history: [],
+    } })} />);
+    expect(screen.getByTestId("slot-900").textContent).toContain("winch_tractor");
+  });
+});
+
+/* ══ I2b. staffing — the precise picture, never merged with the coarse one ═══ */
+
+describe("I2b — the derived staffing result is what the screen shows", () => {
+  const withStaffing = (s: StaffingPicture, planningState: string | null) =>
+    props({ slots: { kind: "loaded", rows: [slot()], staffing: s, planningState, history: [] } });
+
+  it("shows 0 of 3, which the persisted lifecycle field cannot express", () => {
+    render(<DispatchJobDetailView {...withStaffing(staffing({
+      state: "unstaffed", filled: 0, requiredTotal: 3,
+      unfilledRoles: ["Lead", "Winch tractor", "Bed truck"],
+      message: "0 of 3 required roles filled. Outstanding: Lead, Winch tractor, Bed truck.",
+    }), "partially_staffed")} />);
+
+    const st = screen.getByTestId("staffing").textContent ?? "";
+    expect(st).toContain("0");
+    expect(st).toContain("3");
+    expect(st).toMatch(/unstaffed/i);
+    expect(st).toContain("Lead");
+  });
+
+  it("shows 1 of 3 and names what is outstanding", () => {
+    render(<DispatchJobDetailView {...withStaffing(staffing({
+      state: "partially_staffed", filled: 1, requiredTotal: 3, unfilledRoles: ["Winch tractor", "Bed truck"],
+      message: "1 of 3 required roles filled. Outstanding: Winch tractor, Bed truck.",
+    }), "partially_staffed")} />);
+    const st = screen.getByTestId("staffing").textContent ?? "";
+    expect(st).toContain("1");
+    expect(st).toContain("Winch tractor");
+  });
+
+  it("shows 3 of 3 without implying the job may be dispatched", () => {
+    render(<DispatchJobDetailView {...withStaffing(staffing({
+      state: "staffed", filled: 3, requiredTotal: 3, unfilledRoles: [], message: "All 3 required roles filled.",
+    }), "staffed")} />);
+    expect(screen.getByTestId("staffing").textContent).toMatch(/staffed/i);
+    expect(pageText()).not.toMatch(/\bReady\b|\bEligible\b|\bCleared\b/);
   });
 
   /*
-   * `jobUnits.list` returns the tenant's hundred most recent assignments with no job filter, so an
-   * empty list for this job is not proof that the job is unassigned. The screen must not convert
-   * "we did not see one" into "there is not one".
+   * The zero-of-N case is exactly where the two disagree: `assessStaffing` says `unstaffed`, and the
+   * persisted field's only legal backward step from `staffed` is `partially_staffed`. Merging them
+   * would mean printing "partially staffed" over a posting with nobody on it.
    */
-  it("states the window the assignment list came from", () => {
-    render(<DispatchJobDetailView {...props()} />);
-    expect(screen.getByTestId("assignment-window").textContent).toMatch(/most recent|hundred|100/i);
+  it("reports the persisted planning state as itself, separately, and never in place of the derived one", () => {
+    render(<DispatchJobDetailView {...withStaffing(staffing({
+      state: "unstaffed", filled: 0, requiredTotal: 2, unfilledRoles: ["Lead", "Bed truck"],
+      message: "0 of 2 required roles filled. Outstanding: Lead, Bed truck.",
+    }), "partially_staffed")} />);
+
+    const planning = screen.getByTestId("planning-state").textContent ?? "";
+    expect(planning).toContain("partially_staffed");
+    expect(planning).toMatch(/lifecycle|coarse|cannot express|approximation/i);
+    // and the authoritative line still says unstaffed
+    expect(screen.getByTestId("staffing").textContent).toMatch(/unstaffed/i);
+  });
+
+  it("does not hold a posting back for an unfilled optional slot", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded",
+      rows: [slot(), slot({ roleId: 903, roleLabel: "Standby", required: false, status: "open",
+        operatorId: null, unitId: null, lastEventId: null })],
+      staffing: staffing({ state: "staffed", filled: 1, requiredTotal: 1, unfilledRoles: [], message: "All 1 required roles filled." }),
+      planningState: "staffed", history: [],
+    } })} />);
+    expect(screen.getByTestId("staffing").textContent).toMatch(/staffed/i);
+    expect(screen.getByTestId("staffing").textContent).not.toMatch(/Standby/);
   });
 });
 
-/* ── D4. trailer ────────────────────────────────────────────────────────────── */
+/* ══ I2c. the controls that replaced the read-only banner ════════════════════ */
 
-describe("D4 — trailer and equipment", () => {
+describe("I2c — assign, change and unassign", () => {
+  it("offers an assign control on an unfilled slot", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded", rows: [slot({ status: "open", operatorId: null, unitId: null, lastEventId: null })],
+      staffing: staffing({ state: "unstaffed", filled: 0, requiredTotal: 1, unfilledRoles: ["Primary unit"], message: "0 of 1 required roles filled. Outstanding: Primary unit." }),
+      planningState: "direct", history: [],
+    } })} />);
+    expect(within(screen.getByTestId("slot-900")).getByRole("button", { name: /assign/i })).toBeInTheDocument();
+  });
+
+  it("offers change and unassign on a filled slot, and no assign", () => {
+    render(<DispatchJobDetailView {...props()} />);
+    const s = within(screen.getByTestId("slot-900"));
+    expect(s.getByRole("button", { name: /change/i })).toBeInTheDocument();
+    expect(s.getByRole("button", { name: /unassign/i })).toBeInTheDocument();
+  });
+
+  it("offers nothing that would award, override or force a dispatch", () => {
+    render(<DispatchJobDetailView {...props()} />);
+    expect(screen.queryByRole("button", { name: /award|override|force|dispatch now|approve/i })).toBeNull();
+  });
+
+  it("offers no control at all to a dispatcher who may read but not assign, and says so", () => {
+    render(<DispatchJobDetailView {...props({ canAssign: false })} />);
+    const s = within(screen.getByTestId("slot-900"));
+    expect(s.queryByRole("button", { name: /assign|change|unassign/i })).toBeNull();
+    expect(screen.getByTestId("assign-not-permitted").textContent).toMatch(/permission|not allowed|cannot/i);
+  });
+
+  it("carries the slot's own event head when assigning, so a change it did not see is refused", () => {
+    const onAssign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onAssign })} />);
+    fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /change/i }));
+    fireEvent.change(screen.getByTestId("assign-operator-900"), { target: { value: "78" } });
+    fireEvent.change(screen.getByTestId("assign-unit-900"), { target: { value: "513" } });
+    fireEvent.click(screen.getByTestId("assign-submit-900"));
+
+    expect(onAssign).toHaveBeenCalledTimes(1);
+    expect(onAssign.mock.calls[0][0]).toMatchObject({
+      roleId: 900, operatorId: 78, unitId: 513, expectedLastEventId: 4100,
+    });
+  });
+
+  it("sends a null event head for a slot that has no history, rather than inventing one", () => {
+    const onAssign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onAssign, slots: {
+      kind: "loaded", rows: [slot({ status: "open", operatorId: null, unitId: null, lastEventId: null })],
+      staffing: staffing({ state: "unstaffed", filled: 0, requiredTotal: 1, unfilledRoles: ["Primary unit"], message: "0 of 1." }),
+      planningState: "direct", history: [],
+    } })} />);
+    fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /assign/i }));
+    fireEvent.change(screen.getByTestId("assign-operator-900"), { target: { value: "77" } });
+    fireEvent.change(screen.getByTestId("assign-unit-900"), { target: { value: "512" } });
+    fireEvent.click(screen.getByTestId("assign-submit-900"));
+
+    expect(onAssign.mock.calls[0][0].expectedLastEventId).toBeNull();
+  });
+
+  it("never offers an eligibility check as something to attach to an assignment", () => {
+    render(<DispatchJobDetailView {...props()} />);
+    fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /change/i }));
+    expect(pageText()).not.toMatch(/eligibility check|eligibilityCheckId/i);
+  });
+});
+
+/* ══ I2d. unassigning takes a reason, and the screen enforces it ═════════════ */
+
+describe("I2d — a crew is never stood down without a reason", () => {
+  const openUnassign = () => {
+    fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /unassign/i }));
+  };
+
+  it("asks for a reason before it will submit", () => {
+    const onUnassign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onUnassign })} />);
+    openUnassign();
+    fireEvent.click(screen.getByTestId("unassign-submit-900"));
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(screen.getByTestId("unassign-reason-required-900").textContent).toMatch(/reason/i);
+  });
+
   /*
-   * There is no trailer assignment in this system to show: no trailers table, no trailer column on
-   * jobUnits, and the one trailer write (dispatchRoles.assignedTrailerId) sits behind an award path
-   * whose posting rows no procedure can create. An empty "Trailer: —" row would imply the concept
-   * exists and is simply unset.
+   * The server refuses a whitespace-only reason, and it took a mutation that survived its own test
+   * to discover that the schema's `min(1)` had been doing all the work. The screen refuses it too,
+   * so a dispatcher finds out here rather than through a round trip.
    */
-  it("says trailer assignment is not represented in the data, rather than showing it as unset", () => {
+  it("refuses a reason that is only whitespace, which a length check alone would let through", () => {
+    const onUnassign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onUnassign })} />);
+    openUnassign();
+    fireEvent.change(screen.getByTestId("unassign-reason-900"), { target: { value: "   " } });
+    fireEvent.click(screen.getByTestId("unassign-submit-900"));
+    expect(onUnassign).not.toHaveBeenCalled();
+  });
+
+  it("submits the reason with the event head once one is given", () => {
+    const onUnassign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onUnassign })} />);
+    openUnassign();
+    fireEvent.change(screen.getByTestId("unassign-reason-900"), { target: { value: "Driver called off sick" } });
+    fireEvent.click(screen.getByTestId("unassign-submit-900"));
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    expect(onUnassign.mock.calls[0][0]).toEqual({
+      roleId: 900, expectedLastEventId: 4100, reason: "Driver called off sick",
+    });
+  });
+});
+
+/* ══ I2e. a refused write is shown as refused ════════════════════════════════ */
+
+describe("I2e — a conflict is shown, never swallowed", () => {
+  /*
+   * The worst outcome for an editable screen: the server refused because somebody else moved the
+   * slot first, and the dispatcher walks away believing the change landed. The conflict is the one
+   * message that must survive all the way to the DOM.
+   */
+  it("shows a stale-token refusal against the slot it refused", () => {
+    render(<DispatchJobDetailView {...props({ mutation: {
+      kind: "conflict", roleId: 900,
+      message: "This slot changed since you loaded it. Re-read before assigning.",
+    } })} />);
+    const conflict = screen.getByTestId("slot-conflict-900");
+    expect(conflict.textContent).toMatch(/changed since/i);
+    expect(conflict.getAttribute("role")).toBe("alert");
+  });
+
+  it("does not present a conflict as a completed change", () => {
+    render(<DispatchJobDetailView {...props({ mutation: {
+      kind: "conflict", roleId: 900, message: "This slot changed since you loaded it.",
+    } })} />);
+    expect(pageText()).not.toMatch(/saved|assigned successfully|change applied|done/i);
+  });
+
+  it("tells the dispatcher to re-read, because the screen's copy of the slot is the stale part", () => {
+    render(<DispatchJobDetailView {...props({ mutation: {
+      kind: "conflict", roleId: 900, message: "This slot changed since you loaded it.",
+    } })} />);
+    expect(screen.getByTestId("slot-conflict-900").textContent).toMatch(/re-read|refresh|reload/i);
+  });
+
+  it("shows an ordinary failure as a failure too, and attributes it to its slot", () => {
+    render(<DispatchJobDetailView {...props({ mutation: {
+      kind: "failed", roleId: 900, message: "Operator 78 is already on another slot of this posting",
+    } })} />);
+    expect(screen.getByTestId("slot-error-900").textContent).toContain("already on another slot");
+  });
+
+  it("marks the slot it is writing to as in flight, and only that slot", () => {
+    render(<DispatchJobDetailView {...props({
+      slots: { kind: "loaded", rows: [slot(), slot({ roleId: 901 })], staffing: staffing(), planningState: "staffed", history: [] },
+      mutation: { kind: "pending", roleId: 900 },
+    })} />);
+    expect(screen.getByTestId("slot-pending-900")).toBeInTheDocument();
+    expect(screen.queryByTestId("slot-pending-901")).toBeNull();
+  });
+});
+
+/* ══ I2f. filling a slot still says nothing about readiness ══════════════════ */
+
+describe("I2f — assignment never implies readiness or an award", () => {
+  it("derives no readiness word of its own, on a fully staffed posting", () => {
     render(<DispatchJobDetailView {...props()} />);
-    const t = screen.getByTestId("trailer-unsupported").textContent ?? "";
-    expect(t).toMatch(/not (represented|recorded|supported)/i);
-    expect(screen.queryByTestId("trailer-value")).toBeNull();
+    for (const word of ["Ready", "Not ready", "Eligible", "Cleared to dispatch", "Awarded"]) {
+      expect(pageText().includes(word), `the detail screen must not say "${word}"`).toBe(false);
+    }
+  });
+
+  it("renders whatever readiness component it was handed, unmodified", () => {
+    render(<DispatchJobDetailView {...props()} />);
+    expect(screen.getByTestId("readiness-slot")).toBeInTheDocument();
+  });
+
+  it("shows the readiness section even when the job header could not be read", () => {
+    render(<DispatchJobDetailView {...props({ job: { kind: "outside_window" } })} />);
+    expect(screen.getByTestId("readiness-slot")).toBeInTheDocument();
+  });
+
+  it("says outright that a filled slot is not a dispatch decision", () => {
+    render(<DispatchJobDetailView {...props()} />);
+    expect(screen.getByTestId("assignment-scope-note").textContent)
+      .toMatch(/readiness|separate|does not/i);
   });
 });
 
-/* ── D5. unassigned ─────────────────────────────────────────────────────────── */
+/* ══ I2g. history ════════════════════════════════════════════════════════════ */
 
-describe("D5 — a job with no assignment", () => {
-  it("renders an explicit unassigned state", () => {
-    render(<DispatchJobDetailView {...props({ assignments: { kind: "loaded", rows: [] } })} />);
-    expect(screen.getByTestId("assignment-none").textContent).toMatch(/no assignment/i);
-    expect(screen.queryAllByTestId(/^assignment-\d+$/)).toHaveLength(0);
-    expect(saysUnknown()).toBe(false);
+describe("I2g — what happened to these slots", () => {
+  it("lists the events the server returned, newest information intact", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded", rows: [slot()], staffing: staffing(), planningState: "staffed",
+      history: [
+        event({ id: 4101, eventType: "assignment_reassigned", fromOperatorId: 77, toOperatorId: 78, reason: "Swapped for hours" }),
+        event(),
+      ],
+    } })} />);
+    const h = screen.getByTestId("history").textContent ?? "";
+    expect(h).toContain("Swapped for hours");
+    expect(h).toContain("77");
+    expect(h).toContain("78");
   });
 
-  it("still states the window, because an empty list is not proof of an unassigned job", () => {
-    render(<DispatchJobDetailView {...props({ assignments: { kind: "loaded", rows: [] } })} />);
-    expect(screen.getByTestId("assignment-window")).toBeInTheDocument();
+  it("names the displaced crew on a reassignment rather than only the new one", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded", rows: [slot()], staffing: staffing(), planningState: "staffed",
+      history: [event({ id: 4101, eventType: "assignment_reassigned", fromOperatorId: 77, toOperatorId: 78, reason: "Swapped" })],
+    } })} />);
+    expect(screen.getByTestId("history-4101").textContent).toMatch(/77/);
+  });
+
+  it("says there is no history rather than rendering an empty box", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded", rows: [slot()], staffing: staffing(), planningState: "staffed", history: [],
+    } })} />);
+    expect(screen.getByTestId("history-none")).toBeInTheDocument();
   });
 });
 
-/* ── D6. failure ────────────────────────────────────────────────────────────── */
+/* ══ I2h. the states that say less ═══════════════════════════════════════════ */
 
-describe("D6 — when a query fails", () => {
-  it("shows the failure and no assignment data at all", () => {
-    render(<DispatchJobDetailView {...props({ assignments: { kind: "failed", message: "Database unavailable" } })} />);
-    const alerts = screen.getAllByRole("alert").map(a => a.textContent).join(" ");
-    expect(alerts).toContain("Database unavailable");
-    expect(screen.queryAllByTestId(/^assignment-\d+$/)).toHaveLength(0);
-    expect(screen.queryByTestId("assignment-none")).toBeNull();   // a failure is not an unassigned job
+describe("I2h — failure, loading, and a job with no posting", () => {
+  it("shows a failed slot read as a failure and renders no slot data", () => {
+    render(<DispatchJobDetailView {...props({ slots: { kind: "failed", message: "Database unavailable" } })} />);
+    expect(screen.getAllByRole("alert").map(a => a.textContent).join(" ")).toContain("Database unavailable");
+    expect(screen.queryAllByTestId(/^slot-\d+$/)).toHaveLength(0);
+    expect(screen.queryByTestId("slots-no-posting")).toBeNull();
   });
 
   it("shows a failed job read as a failure, not as a job with empty fields", () => {
@@ -204,26 +485,28 @@ describe("D6 — when a query fails", () => {
   });
 
   it("renders nothing readable as data while loading", () => {
-    render(<DispatchJobDetailView {...props({ job: { kind: "loading" }, assignments: { kind: "loading" } })} />);
+    render(<DispatchJobDetailView {...props({ job: { kind: "loading" }, slots: { kind: "loading" } })} />);
     expect(screen.getByTestId("job-loading")).toBeInTheDocument();
     expect(screen.queryByTestId("job-header")).toBeNull();
-    expect(screen.queryByTestId("assignment-none")).toBeNull();
+    expect(screen.queryByTestId("slots-no-posting")).toBeNull();
   });
-});
 
-/* ── D7. a job this caller cannot read ──────────────────────────────────────── */
-
-describe("D7 — a job outside what this caller can read", () => {
   /*
-   * `jobs.list` returns the hundred most recently updated jobs in scope and takes no id. A job in
-   * another organization and a job that is merely older both arrive the same way: absent. The
-   * screen must not guess which, and must not render a header from nothing.
+   * A job with no dispatch posting is not a job with nobody on it — there is no slot model for it
+   * yet at all. Saying "unstaffed" would invent a posting that does not exist.
    */
+  it("says a job has no posting rather than showing it as unstaffed", () => {
+    render(<DispatchJobDetailView {...props({ slots: { kind: "no_posting" } })} />);
+    const m = screen.getByTestId("slots-no-posting").textContent ?? "";
+    expect(m).toMatch(/no dispatch posting|not been posted|no posting/i);
+    expect(m).not.toMatch(/unstaffed/i);
+    expect(screen.queryByTestId("staffing")).toBeNull();
+  });
+
   it("says the job is not among the ones it can read, and renders no header", () => {
     render(<DispatchJobDetailView {...props({ job: { kind: "outside_window" } })} />);
     const m = screen.getByTestId("job-unavailable").textContent ?? "";
     expect(m).toMatch(/not among/i);
-    expect(m).toContain("41");
     expect(screen.queryByTestId("job-header")).toBeNull();
     expect(saysUnknown()).toBe(false);
   });
@@ -234,53 +517,49 @@ describe("D7 — a job outside what this caller can read", () => {
   });
 });
 
-/* ── the readiness section is composed, never reimplemented ─────────────────── */
+/* ══ I2i. what activation removed ════════════════════════════════════════════ */
 
-describe("readiness", () => {
-  it("renders whatever readiness component it was handed, unmodified", () => {
+describe("I2i — the disclosures activation made untrue are gone", () => {
+  /*
+   * PR #6 had to disclose two things about `jobUnits`: a hundred-row job-blind window, and that
+   * trailers were not representable at all. `dispatch.listRoles` is keyed by job and slots carry a
+   * trailer, so repeating either would now be the fabrication.
+   */
+  it("no longer warns about a hundred-row window it no longer reads from", () => {
     render(<DispatchJobDetailView {...props()} />);
-    expect(screen.getByTestId("readiness-slot")).toBeInTheDocument();
+    expect(screen.queryByTestId("assignment-window")).toBeNull();
+    expect(pageText()).not.toMatch(/most recent 100|hundred/i);
   });
 
-  it("shows the readiness section even when the job header could not be read", () => {
-    // Readiness is about the operator/unit pairing, not about the job row. One failing does not
-    // silence the other.
-    render(<DispatchJobDetailView {...props({ job: { kind: "outside_window" } })} />);
-    expect(screen.getByTestId("readiness-slot")).toBeInTheDocument();
+  it("no longer says assignment cannot be changed from here", () => {
+    render(<DispatchJobDetailView {...props()} />);
+    expect(screen.queryByTestId("assignment-readonly-note")).toBeNull();
+    expect(pageText()).not.toMatch(/read-only|cannot be changed/i);
   });
 
-  it("never derives a readiness word of its own", () => {
-    render(<DispatchJobDetailView {...props()} />);
-    const page = document.body.textContent ?? "";
-    for (const word of ["Ready", "Not ready", "Eligible", "Cleared to dispatch"]) {
-      expect(page.includes(word), `the detail screen must not say "${word}" — readiness is the panel's`).toBe(false);
-    }
-  });
-});
-
-/* ── no assignment controls, and the screen says why ────────────────────────── */
-
-describe("the screen changes nothing", () => {
-  it("offers no control that would assign, award, override or force", () => {
-    render(<DispatchJobDetailView {...props()} />);
-    expect(screen.queryByRole("button", { name: /assign|change driver|change unit|award|override|force|dispatch now|unassign/i })).toBeNull();
+  it("shows a trailer the slot carries instead of saying trailers are unrepresentable", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded", rows: [slot({ trailerId: 640, trailerName: "TR-640" })],
+      staffing: staffing(), planningState: "staffed", history: [],
+    } })} />);
+    expect(screen.getByTestId("slot-900").textContent).toContain("640");
+    expect(screen.queryByTestId("trailer-unsupported")).toBeNull();
   });
 
   /*
-   * Saying nothing would be worse than saying "not yet": a dispatcher who cannot see why the
-   * control is missing will look for it elsewhere, and the elsewhere is the procedure that carries
-   * award semantics.
+   * But the limitation that is still real stays stated: the server cannot prove an id is a trailer
+   * rather than a truck, because `units.vehicleType` is free text nothing reads.
    */
-  it("says plainly that assignment is not available from here, and why", () => {
-    render(<DispatchJobDetailView {...props()} />);
-    const note = screen.getByTestId("assignment-readonly-note").textContent ?? "";
-    expect(note).toMatch(/read-only|cannot be changed|not available/i);
-    expect(note).toMatch(/award/i);
+  it("still says the trailer's type is not something the server can vouch for", () => {
+    render(<DispatchJobDetailView {...props({ slots: {
+      kind: "loaded", rows: [slot({ trailerId: 640, trailerName: "TR-640" })],
+      staffing: staffing(), planningState: "staffed", history: [],
+    } })} />);
+    expect(screen.getByTestId("trailer-typing-note").textContent).toMatch(/not verified|free text|cannot confirm|not checked/i);
   });
 
-  it("offers a re-read, which is the only action it has", () => {
-    const onRefresh = vi.fn();
-    render(<DispatchJobDetailView {...props({ onRefresh })} />);
+  it("offers a re-read, which is still available alongside the new controls", () => {
+    render(<DispatchJobDetailView {...props()} />);
     expect(screen.getByTestId("refresh")).toBeInTheDocument();
   });
 });
