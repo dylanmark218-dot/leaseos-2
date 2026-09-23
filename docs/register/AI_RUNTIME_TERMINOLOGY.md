@@ -8,8 +8,11 @@ resolver supplies it.
 
 **Authority rule.** Where an industry term and a repository name disagree, the repository name is
 canonical. Every module, type, function, table and column named below exists in the tree at the
-commit this document was written against. Nothing below is aspirational unless its status column
-says so.
+commit this document was written against: `929f721`, the head of PR #7
+(`claude/secretary-model-dialogue-yzszcv`), which is `main` plus the declared-unwired Secretary
+model layer. On `main` itself `server/_core/ai/` does not exist until PR #7 merges; everything
+this document says about that directory describes PR #7, and its status column says "declared /
+unwired" for all of it. Nothing below is aspirational unless its status column says so.
 
 **Why the document lives here.** The repository has no `docs/architecture/`. The two existing
 AI-layer register documents (`SECRETARY_MODEL_LAYER.md`, `SECRETARY_SPINE_MORATORIUM.md`) live in
