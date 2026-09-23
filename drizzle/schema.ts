@@ -6798,6 +6798,23 @@ export const organizationMemberships = mysqlTable("organizationMemberships", {
   createdByUserId: int("createdByUserId").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+/**
+ * 0170 — which organization a multi-member user is acting as.
+ *
+ * One row per user, naming the MEMBERSHIP rather than just the organization, so
+ * a selection cannot outlive the membership that justified it.
+ * `resolveActingScope` re-checks it against currently active memberships on
+ * every request: this is a preference, never a grant.
+ */
+export const actingOrganizationSelections = mysqlTable("actingOrganizationSelections", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().unique(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull(),
+  membershipRef: varchar("membershipRef", { length: 64 }).notNull(),
+  selectedAt: timestamp("selectedAt").defaultNow().notNull(),
+  selectedByUserId: int("selectedByUserId").notNull(),
+});
 export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
 
 /* ---- v22.20 (0087): what a device reports it is holding ---- */

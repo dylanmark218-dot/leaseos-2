@@ -9,10 +9,16 @@
  * **How the organization is established.** From the caller's active
  * organization membership. A user with no membership falls back to the single
  * tenant this system operated as before memberships existed, and says so in
- * `derivedFrom` rather than letting a reader assume isolation. A user with
- * active memberships in more than one organization is REFUSED rather than
- * resolved: picking one would silently decide which company a request writes
- * into.
+ * `derivedFrom` rather than letting a reader assume isolation.
+ *
+ * A user with active memberships in more than one organization is still
+ * REFUSED unless they have chosen one and the server recorded that choice
+ * (0170, `actingOrganizationSelections`). The refusal is the default and the
+ * choice is the exception, not the other way round: this function never picks,
+ * and a recorded selection is re-validated against the memberships loaded on
+ * THIS request before it is honoured. A selection that names a membership which
+ * has since ended, or an organization the user was never in, resolves to the
+ * same refusal as no selection at all. It is a preference, never a grant.
  *
  * **Historically.** There was no tenant,
  * organization or membership table in this schema. `ctx` carries a user and
@@ -32,7 +38,7 @@
  */
 
 import { and, eq, isNull } from "drizzle-orm";
-import { organizationMemberships, userRoleAssignments } from "../../drizzle/schema";
+import { actingOrganizationSelections, organizationMemberships, userRoleAssignments } from "../../drizzle/schema";
 import type { DbOrTx } from "./dbTypes";
 
 /**
@@ -45,12 +51,15 @@ export const SINGLE_TENANT_ID = "default";
 export type ActingScope = {
   tenantId: string;
   /**
-   * Where the organization came from. `membership` is the real answer;
-   * `single_tenant_fallback` means no organization has been created yet and the
-   * system is operating as the one it has always implicitly been. A reader can
-   * tell the difference, which was the whole complaint about the old version.
+   * Where the organization came from. `membership` is the real answer for a
+   * user who belongs to exactly one; `selection` means they belong to several
+   * and this is the one they chose, re-validated against those memberships on
+   * this request; `single_tenant_fallback` means no organization has been
+   * created yet and the system is operating as the one it has always implicitly
+   * been. A reader can tell the three apart, which was the whole complaint
+   * about the old version.
    */
-  derivedFrom: "membership" | "single_tenant_fallback";
+  derivedFrom: "membership" | "selection" | "single_tenant_fallback";
   membershipRef: string | null;
   /** Branches the caller holds a grant in. Empty means global-only grants. */
   branchRefs: string[];
@@ -83,8 +92,33 @@ export async function resolveActingScope(
 
   const orgs = Array.from(new Set(memberships.map((m: { orgRef: string }) => m.orgRef)));
   if (orgs.length > 1) {
-    // Two live memberships and no selection. Picking one would decide, silently,
-    // which company's records this request writes into.
+    /*
+     * Several live memberships. The refusal below is still the answer unless the
+     * person has already made a choice and the server recorded it — which is a
+     * different thing from this function guessing.
+     *
+     * The stored selection is re-validated here, every request, against the
+     * memberships just loaded: it must name one of them, by membershipRef AND
+     * orgRef together. So a selection cannot outlive the membership that
+     * justified it, cannot be pointed at an organization the user was never in,
+     * and confers nothing on its own. A stale one resolves to the same refusal
+     * as no selection at all.
+     */
+    const [selected] = await db.select().from(actingOrganizationSelections)
+      .where(eq(actingOrganizationSelections.userId, userId)).limit(1);
+    const chosen = selected
+      ? memberships.find((m: { membershipRef: string; orgRef: string }) =>
+          m.membershipRef === selected.membershipRef && m.orgRef === selected.orgRef)
+      : undefined;
+    if (chosen) {
+      return {
+        tenantId: chosen.orgRef, derivedFrom: "selection", membershipRef: chosen.membershipRef,
+        branchRefs: chosen.branchId && !branchRefs.includes(chosen.branchId) ? [...branchRefs, chosen.branchId] : branchRefs,
+        global,
+      };
+    }
+    // Two live memberships and no usable selection. Picking one would decide,
+    // silently, which company's records this request writes into.
     throw new AmbiguousOrganization(
       `This user is an active member of ${orgs.length} organizations (${orgs.join(", ")}). Which one they are acting for has to be established, not guessed.`,
     );

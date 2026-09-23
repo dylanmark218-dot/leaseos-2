@@ -531,6 +531,11 @@ describe("payroll and tax authorization boundaries", () => {
       "inbox.read_own", "myday.read_own",
       // v21.1 — your own readiness.
       "dispatch.readiness_own",
+      // 0170 — which of YOUR organizations you are acting as. Both procedures
+      // read and write only ctx.user.id's own memberships; gating it by domain
+      // role would mean a driver who works for two companies could not say
+      // which one they are driving for today.
+      "organization.act_own",
       "academy.read_own", "academy.progress_own", "academy.assessment_own",
       "academy.certificate.sign_own", "academy.direct_supervision_attest_own",
     ]);

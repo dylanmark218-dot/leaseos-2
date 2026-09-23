@@ -242,6 +242,10 @@ export type Permission =
      it can never increase automation, so it cannot become a way around the permission above. */
   | "automation.override.operational"
   | "dispatch.readiness_own"
+  /* 0170 — which of MY organizations I am acting as. Reads and writes only the
+     caller's own memberships, so it sits with the other `_own` permissions: a
+     driver who works for two companies must be able to say which one today. */
+  | "organization.act_own"
   // v21.2 — turning enforcement on or off changes what the company is bound by.
   | "dispatch.enforcement.manage"
   // v21.3 — IFTA. Recording distance is field work; verifying it and
@@ -1759,6 +1763,8 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "myday.read_own",
   // v21.1 — "what am I missing?" reads the caller's own operator record.
   "dispatch.readiness_own",
+  // 0170 — listing my own memberships and choosing which to act as.
+  "organization.act_own",
   "academy.read_own",
   "academy.progress_own",
   "academy.assessment_own",
@@ -3015,6 +3021,9 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "paperwork.guidance": "paperwork.read",
   "paperwork.reviewScan": "paperwork.read",
   "paperwork.retention": "paperwork.read",
+  // 0170 — the caller's own memberships, and the choice between them.
+  "organization.memberships": "organization.act_own",
+  "organization.actAs": "organization.act_own",
 } as const satisfies Record<string, Permission>;
 
 /**

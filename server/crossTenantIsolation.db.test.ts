@@ -195,6 +195,152 @@ d("Tenant A cannot reach Tenant B through the scoped read paths", () => {
   }, 20_000);
 });
 
+d("a user in two organizations acts as one of them, chosen and never guessed", () => {
+  it("refuses to resolve until a choice is made, then honours it", async () => {
+    const a = await org(), b = await org();
+    const userId = await member(a, ["office", "management"]);
+    // The same person, a second live membership. A contractor administrator, a
+    // consultant, an auditor with delegated access.
+    await pool.execute(
+      "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'contractor','active','2020-01-01',1)",
+      [`MEM-${rnd()}`, b, userId],
+    );
+
+    // Before choosing: the system refuses rather than picking one.
+    const before = await callerFor(userId).organization.memberships();
+    expect(before.mustChoose).toBe(true);
+    expect(before.acting).toBeNull();
+    expect(before.memberships).toHaveLength(2);
+    expect(before.memberships.map(m => m.orgRef).sort()).toEqual([a, b].sort());
+
+    // Anything that needs a scope is refused meanwhile — not silently resolved.
+    const { listJobs } = await import("./db");
+    await expect(callerFor(userId).scanning.reviewScan({
+      kind: "load_ticket",
+      pages: [{
+        pageIndex: 0, contentHash: `h-${rnd()}`, qualityVerdict: "acceptable", qualityFailures: [],
+        acceptedOverObjection: false, ocrAttempted: true, ocrMeanConfidence: 90, ocrText: "nothing", barcodes: null,
+      }],
+      observations: [],
+    })).rejects.toThrow(/active member of 2 organizations/);
+
+    // Choose B.
+    const chosenB = before.memberships.find(m => m.orgRef === b)!;
+    const acted = await callerFor(userId).organization.actAs({ membershipRef: chosenB.membershipRef });
+    expect(acted).toMatchObject({ orgRef: b, derivedFrom: "selection" });
+
+    // And the choice is what every other path now sees.
+    const after = await callerFor(userId).organization.memberships();
+    expect(after.mustChoose).toBe(false);
+    expect(after.acting).toMatchObject({ orgRef: b, derivedFrom: "selection" });
+    void listJobs;
+
+    // Switching is a choice too, not an escalation.
+    const chosenA = before.memberships.find(m => m.orgRef === a)!;
+    expect(await callerFor(userId).organization.actAs({ membershipRef: chosenA.membershipRef }))
+      .toMatchObject({ orgRef: a, derivedFrom: "selection" });
+  }, 30_000);
+
+  it("refuses a membership that is not the caller's, with the same answer as one that does not exist", async () => {
+    const a = await org(), b = await org();
+    const mine = await member(a, ["office"]);
+    const theirs = await member(b, ["office"]);
+
+    const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+      "SELECT membershipRef FROM organizationMemberships WHERE userId = ?", [theirs],
+    );
+    const foreignRef = rows[0].membershipRef as string;
+
+    // Knowing another person's membership reference must not be enough.
+    await expect(callerFor(mine).organization.actAs({ membershipRef: foreignRef }))
+      .rejects.toThrow(/No active membership of yours/);
+    // And a reference that names nothing answers identically.
+    await expect(callerFor(mine).organization.actAs({ membershipRef: `MEM-${rnd()}` }))
+      .rejects.toThrow(/No active membership of yours/);
+  }, 20_000);
+
+  it("stops honouring a selection the moment its membership ends", async () => {
+    const a = await org(), b = await org();
+    const userId = await member(a, ["office", "management"]);
+    const refB = `MEM-${rnd()}`;
+    await pool.execute(
+      "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'contractor','active','2020-01-01',1)",
+      [refB, b, userId],
+    );
+    expect(await callerFor(userId).organization.actAs({ membershipRef: refB }))
+      .toMatchObject({ orgRef: b, derivedFrom: "selection" });
+
+    // The contract ends. The selection row is untouched — nothing cleans it up —
+    // and it must stop working anyway.
+    await pool.execute("UPDATE organizationMemberships SET status = 'ended' WHERE membershipRef = ?", [refB]);
+    const after = await callerFor(userId).organization.memberships();
+    // One membership left, so there is no ambiguity and no selection needed.
+    expect(after.acting).toMatchObject({ orgRef: a, derivedFrom: "membership" });
+    const [still] = await pool.execute<mysql.RowDataPacket[]>(
+      "SELECT orgRef FROM actingOrganizationSelections WHERE userId = ?", [userId],
+    );
+    expect(still[0].orgRef).toBe(b);   // the stale row is still there, and inert
+  }, 30_000);
+
+  it("refuses rather than honouring a selection whose membership ended while others remain", async () => {
+    /*
+     * The case the previous test does not reach. Ending the selected membership
+     * when only one other remains leaves no ambiguity, so resolution never
+     * consults the selection at all. With THREE memberships it does, and a
+     * selection that is no longer backed by a live membership must fail closed —
+     * otherwise a person keeps acting as an organization they have left.
+     */
+    const a = await org(), b = await org(), c = await org();
+    const userId = await member(a, ["office", "management"]);
+    const refB = `MEM-${rnd()}`, refC = `MEM-${rnd()}`;
+    for (const [ref, o] of [[refB, b], [refC, c]] as const) {
+      await pool.execute(
+        "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'contractor','active','2020-01-01',1)",
+        [ref, o, userId],
+      );
+    }
+    expect(await callerFor(userId).organization.actAs({ membershipRef: refC }))
+      .toMatchObject({ orgRef: c, derivedFrom: "selection" });
+
+    await pool.execute("UPDATE organizationMemberships SET status = 'ended' WHERE membershipRef = ?", [refC]);
+
+    // Two live memberships (a, b) and a selection naming neither.
+    const after = await callerFor(userId).organization.memberships();
+    expect(after.mustChoose).toBe(true);
+    expect(after.acting).toBeNull();
+    expect(after.memberships.map(m => m.orgRef).sort()).toEqual([a, b].sort());
+    // And the stale selection is not silently used by anything else either.
+    await expect(callerFor(userId).scanning.reviewScan({
+      kind: "load_ticket",
+      pages: [{
+        pageIndex: 0, contentHash: `h-${rnd()}`, qualityVerdict: "acceptable", qualityFailures: [],
+        acceptedOverObjection: false, ocrAttempted: true, ocrMeanConfidence: 90, ocrText: "nothing", barcodes: null,
+      }],
+      observations: [],
+    })).rejects.toThrow(/active member of 2 organizations/);
+  }, 30_000);
+
+  it("refuses a selection whose organization and membership disagree", async () => {
+    // The row is server-written, but it is two columns and they must be checked
+    // together: a membershipRef from one organization paired with another's
+    // orgRef must not resolve to either.
+    const a = await org(), b = await org();
+    const userId = await member(a, ["office", "management"]);
+    const refB = `MEM-${rnd()}`;
+    await pool.execute(
+      "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'contractor','active','2020-01-01',1)",
+      [refB, b, userId],
+    );
+    await callerFor(userId).organization.actAs({ membershipRef: refB });
+    // Point B's membership reference at A's organization.
+    await pool.execute("UPDATE actingOrganizationSelections SET orgRef = ? WHERE userId = ?", [a, userId]);
+
+    const after = await callerFor(userId).organization.memberships();
+    expect(after.mustChoose).toBe(true);
+    expect(after.acting).toBeNull();
+  }, 30_000);
+});
+
 d("the scanner names a record only when it can prove whose it is", () => {
   /**
    * The chain: scan session tenant → the number names a subject → the subject
