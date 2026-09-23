@@ -448,6 +448,90 @@ prove, which is correct regardless.
 
 ---
 
+## 8b. Tracking dependency list, re-audited before migration
+
+The owner's decision is per-organization counters, with the canonical identity
+of a tracking reference becoming `(orgRef, trackingNumber)` rather than a
+globally unique `trackingNumber`. Re-auditing immediately before touching the
+schema found the change is **not confined to the two tracking tables**.
+
+### Who mints
+
+`nextTrackingNumber` has **12 production call sites** across 8 routers, and
+each writes its result into a different table's globally unique column:
+
+| Sequence | Call site | Lands in | That column | Ownership column |
+|---|---|---|---|---|
+| `CR` | invoicingRouter:107, cashRouter:186 | `customerCredits.creditRef` | UNIQUE | **none** |
+| `BB` | invoicingRouter:154 | `billingBooks.bookNumber` | UNIQUE | **none** |
+| `INV` | invoicingRouter:158 | `invoices.invoiceNumber` | UNIQUE | **none** |
+| `CSW` | requirementRouter:76 | `calibrationSweeps.sweepRef` | UNIQUE | **none** |
+| `MRO` | manifestCustodyRouter:165 | `manifestReconciliationOverrides.overrideRef` | UNIQUE | **none** |
+| `WO` | cashRouter:225 | `writeOffRequests.requestRef` | UNIQUE | **none** |
+| `DSP` | commercialRouter:158 | `disposalTickets.ticketNumber` | UNIQUE | **none** |
+| `FT` | closeoutRouter:140 | `fieldTickets.ticketNumber` | UNIQUE | **none** |
+| `DLY` | closeoutRouter:223 | `delayEvents.delayRef` | UNIQUE | **none** |
+| `SIG` | closeoutRouter:237 | `signatoryAuthorities.authorityRef` | UNIQUE | **none** |
+| `ORG` | commercialOfficeRouter:115 | `organizations.orgRef` | UNIQUE | *is* the tenant key |
+
+### What follows
+
+**A per-organization counter cannot be implemented in isolation.** Two
+organizations each counting from 1 both mint `INV-2026-000001`, and the second
+`INSERT` fails on `invoices_invoiceNumber_unique`. The same for field tickets,
+disposal tickets, billing books, credits, write-offs, delays, sweeps and
+custody overrides. That is production breakage in invoicing, cash, closeout,
+commercial and manifest custody — not a security improvement.
+
+**`ORG` is the one sequence that must stay installation-wide.** It mints
+`organizations.orgRef`, which *is* the tenant key: a per-organization counter
+for it would need an acting organization in order to create one.
+
+### The ordering constraint
+
+This is the part that decides the shape of the work, and getting it backwards
+would introduce the exact defect this checkpoint exists to remove:
+
+> **Every lookup-by-value must be tenant-scoped BEFORE uniqueness is relaxed.**
+
+While `invoiceNumber` is globally unique, `eq(invoices.invoiceNumber, x)`
+returns one row and it is unambiguous. The moment two organizations may both
+hold `INV-2026-000001`, that same unscoped lookup returns whichever row the
+database happens to yield — a cross-tenant read *created by* the change.
+
+Measured reader surface: 34 lookups-by-value across the nine columns
+(`invoiceNumber` 16, `ticketNumber` 13, `requestRef` 4, `creditRef` 1), out of
+~370 total references.
+
+### Therefore, two phases
+
+**Phase A — ownership, no behaviour change.** Add `orgRef` to the twelve
+affected tables, backfill only where the authoritative chain proves it, and
+scope every lookup-by-value. Uniqueness stays global and the counter stays
+shared throughout, so numbering does not move and nothing can collide. This
+phase is pure hardening and cannot break a flow.
+
+**Phase B — the flip.** Replace global uniqueness with `(orgRef, <number>)`
+and make the counter per-organization. Small diff, and every reader it affects
+was already scoped in Phase A.
+
+Each table's backfill path, from its own authoritative chain:
+
+| Table | Proven through | Legacy rows without it |
+|---|---|---|
+| `fieldTickets`, `disposalTickets`, `billingBooks`, `delayEvents` | `jobId → jobs.orgRef` | UNATTRIBUTED |
+| `invoices`, `customerCredits` | `financialEntityId → financialEntities.orgRef` | UNATTRIBUTED |
+| `writeOffRequests` | `invoiceId → invoices.orgRef` | UNATTRIBUTED |
+| `manifestReconciliationOverrides` | `manifestId → manifests.orgRef` | UNATTRIBUTED |
+| `trackingReferences` | `jobId → jobs.orgRef`, else the subject chain | UNATTRIBUTED |
+| `calibrationSweeps` | no ownership chain exists | all UNATTRIBUTED |
+| `signatoryAuthorities` | `customerAccountId` is the counterparty, not the owner | all UNATTRIBUTED |
+| `trackingSequences` | configuration, owned by nobody historically | all UNATTRIBUTED |
+
+`NULL` means UNATTRIBUTED and nothing else. Per the owner's §5 it is **not**
+readable by an ordinary acting organization — unknown ownership is not shared
+ownership.
+
 ## 9. What this audit did not establish
 
 Kept explicitly, rather than quietly assumed:

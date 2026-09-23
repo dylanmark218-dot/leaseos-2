@@ -924,6 +924,7 @@ export type InsertZoneEvent = typeof zoneEvents.$inferInsert;
 export const trackingSequences = mysqlTable("trackingSequences", {
   id: int("id").autoincrement().primaryKey(),
   sequenceType: varchar("sequenceType", { length: 24 }).notNull(),
+  orgRef: varchar("orgRef", { length: 40 }),
   branch: varchar("branch", { length: 12 }),
   periodKey: varchar("periodKey", { length: 16 }).notNull(),
   nextNumber: int("nextNumber").default(1).notNull(),
@@ -941,6 +942,7 @@ export const trackingSequences = mysqlTable("trackingSequences", {
 export const trackingReferences = mysqlTable("trackingReferences", {
   id: int("id").autoincrement().primaryKey(),
   trackingNumber: varchar("trackingNumber", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 40 }),
   entityType: varchar("entityType", { length: 40 }).notNull(),
   entityId: int("entityId").notNull(),
   parentTrackingNumber: varchar("parentTrackingNumber", { length: 64 }),
@@ -988,6 +990,8 @@ export const billingBooks = mysqlTable("billingBooks", {
   closedAt: timestamp("closedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  /** 0171 — tenant ownership. NULL means UNATTRIBUTED, never "shared". */
+  orgRef: varchar("orgRef", { length: 40 }),
 });
 
 export const loads = mysqlTable("loads", {
@@ -1067,6 +1071,8 @@ export const disposalTickets = mysqlTable("disposalTickets", {
     .notNull(),
   evidenceRefs: text("evidenceRefs"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0171 — tenant ownership. NULL means UNATTRIBUTED, never "shared". */
+  orgRef: varchar("orgRef", { length: 40 }),
 });
 
 // Several loads can roll into one facility batch — the system must never
@@ -1160,6 +1166,8 @@ export const fieldTickets = mysqlTable("fieldTickets", {
     .notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  /** 0171 — tenant ownership. NULL means UNATTRIBUTED, never "shared". */
+  orgRef: varchar("orgRef", { length: 40 }),
 });
 
 // What the representative is being asked to accept, line by line. Facts and
@@ -1338,6 +1346,8 @@ export const invoices = mysqlTable("invoices", {
   externalPortalRef: varchar("externalPortalRef", { length: 120 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  /** 0171 — tenant ownership. NULL means UNATTRIBUTED, never "shared". */
+  orgRef: varchar("orgRef", { length: 40 }),
 });
 
 // Append-only. Never update a row here — corrections create new rows.
@@ -4673,6 +4683,8 @@ export const customerCredits = mysqlTable("customerCredits", {
   status: mysqlEnum("status", ["requested", "approved", "refused"]).default("requested").notNull(),
   evidenceRecordId: int("evidenceRecordId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0171 — tenant ownership. NULL means UNATTRIBUTED, never "shared". */
+  orgRef: varchar("orgRef", { length: 40 }),
 });
 
 export const collectionEvents = mysqlTable("collectionEvents", {
@@ -4700,6 +4712,8 @@ export const writeOffRequests = mysqlTable("writeOffRequests", {
   status: mysqlEnum("status", ["requested", "approved", "refused"]).default("requested").notNull(),
   decisionReason: varchar("decisionReason", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0171 — tenant ownership. NULL means UNATTRIBUTED, never "shared". */
+  orgRef: varchar("orgRef", { length: 40 }),
 });
 
 export type InsertBankAccounts = typeof bankAccounts.$inferInsert;
@@ -4857,6 +4871,8 @@ export const signatoryAuthorities = mysqlTable("signatoryAuthorities", {
   status: mysqlEnum("status", ["active", "revoked"]).default("active").notNull(),
   recordedByUserId: int("recordedByUserId").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0171 — tenant ownership. NULL means UNATTRIBUTED, never "shared". */
+  orgRef: varchar("orgRef", { length: 40 }),
 });
 
 export const fieldTicketRevisions = mysqlTable("fieldTicketRevisions", {
@@ -4898,6 +4914,8 @@ export const delayEvents = mysqlTable("delayEvents", {
   broadcast: boolean("broadcast").default(false).notNull(),
   evidenceRecordId: int("evidenceRecordId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0171 — tenant ownership. NULL means UNATTRIBUTED, never "shared". */
+  orgRef: varchar("orgRef", { length: 40 }),
 });
 
 export type InsertSignatoryAuthorities = typeof signatoryAuthorities.$inferInsert;
@@ -8808,6 +8826,8 @@ export const manifestReconciliationOverrides = mysqlTable("manifestReconciliatio
   state: mysqlEnum("state", ["granted", "withdrawn"]).default("granted").notNull(),
   supersedesOverrideId: int("supersedesOverrideId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0171 — tenant ownership. NULL means UNATTRIBUTED, never "shared". */
+  orgRef: varchar("orgRef", { length: 40 }),
 });
 
 /** 0163 (P4.2): an immutable record of one calibration sweep. Written once; a second look is a second sweep. */
@@ -8829,6 +8849,8 @@ export const calibrationSweeps = mysqlTable("calibrationSweeps", {
   triagedByUserId: int("triagedByUserId"),
   triagedAt: timestamp("triagedAt"),
   triageNote: varchar("triageNote", { length: 1000 }),
+  /** 0171 — tenant ownership. NULL means UNATTRIBUTED, never "shared". */
+  orgRef: varchar("orgRef", { length: 40 }),
 });
 
 /** 0163: one reading inside the window, recorded as it stood — never re-derived later. */
