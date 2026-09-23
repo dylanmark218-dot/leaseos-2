@@ -36,6 +36,12 @@ export type DeepLink = { portal: string; route: string };
 export type Exception = {
   /** Stable across evaluations for the same underlying record — the UI keys on it. */
   key: string;
+  /**
+   * 0172 — the organization the underlying record belongs to, when the source knows it. An
+   * exception carrying one is shown only to callers acting for that organization
+   * (`forTenant`). Sources that predate this leave it unset and are unaffected.
+   */
+  tenantId?: string;
   category: ExceptionCategory;
   severity: ExceptionSeverity;
   title: string;
@@ -86,6 +92,14 @@ export type ExceptionSources = {
   /** 0131 security incidents: a required notification unsent, or personal information suspected with no privacy decision. */
   securityIncidents?: { incidentRef: string; title: string; severity: string; personalInformationSuspected: boolean; assessed: boolean; unsentNotifications: { recipientType: string; dueAt: Date | null }[] }[];
   periodsSoftClosed: { financialEntityId: number; period: string; reviewItems: number; since: Date }[];
+  /**
+   * 0172 — training wallet. Current verified holdings near their governing date (a legal expiry, or a
+   * company-policy review date, labelled as such), uploads awaiting verification, and training
+   * requests waiting on the office. `boundToDispatch` marks a code an active dispatch requirement names.
+   */
+  walletRenewals?: { tenantId: string; holdingRef: string; userId: number; code: string; displayName: string; targetAt: Date; targetKind: "legal_expiry" | "employer_review"; boundToDispatch: boolean }[];
+  walletUnverified?: { tenantId: string; holdingRef: string; userId: number; code: string; recordedAt: Date }[];
+  trainingHandoffs?: { tenantId: string; handoffRef: string; userId: number; code: string; status: string; requestedAt: Date; dueAt: Date | null }[];
   /** The disposal-facility directory's open items: sources that disagree, regulator evidence nobody reviewed, same-LSD duplicates nobody resolved. */
   facilityDirectory?: {
     conflicting: { facilityKey: string; name: string }[];
@@ -411,6 +425,50 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
     });
   }
 
+  // 0172 — training wallet. Derived from the holdings; nothing stored here.
+  for (const w of s.walletRenewals ?? []) {
+    const days = Math.floor((w.targetAt.getTime() - now.getTime()) / DAY);
+    if (days > 30) continue;
+    const legal = w.targetKind === "legal_expiry";
+    const past = days < 0;
+    out.push({
+      key: `wallet:${w.holdingRef}:${w.targetKind}`, tenantId: w.tenantId, category: "workforce", severity: past ? (legal ? "high" : "medium") : days <= 7 ? "high" : "medium",
+      title: legal ? (past ? `${w.displayName} expired — employee ${w.userId}` : `${w.displayName} expires in ${days} day(s) — employee ${w.userId}`)
+        : `Company policy review ${past ? "overdue" : `due in ${days} day(s)`}: ${w.displayName} — employee ${w.userId}`,
+      reason: legal ? `Verified certificate expires ${w.targetAt.toISOString().slice(0, 10)}` : `Company-policy review date ${w.targetAt.toISOString().slice(0, 10)} — not a legal expiry`,
+      subjectType: "wallet_holding", subjectId: w.holdingRef, action: legal ? "Arrange renewal / request training" : "Schedule the company review",
+      deepLink: { portal: "training_academy", route: `/training/compliance?user=${w.userId}&code=${w.code}` }, requiredPermission: "training.wallet.manage",
+      since: null, dueAt: w.targetAt,
+    });
+    // Operationally relevant: a dispatch requirement names this code and it is within two weeks or gone.
+    if (legal && w.boundToDispatch && days <= 14) {
+      out.push({
+        key: `wallet-dispatch:${w.holdingRef}`, tenantId: w.tenantId, category: "dispatch", severity: past ? "high" : "medium",
+        title: `${w.displayName} ${past ? "expired" : `expires in ${days} day(s)`} — employee ${w.userId} is bound to dispatch requirements that need it`,
+        reason: "Only work requiring this credential is affected; other work is not grounded", subjectType: "wallet_holding", subjectId: w.holdingRef,
+        action: "Plan assignments around it or confirm a verified renewal", deepLink: { portal: "dispatch_operations", route: `/readiness?user=${w.userId}` },
+        requiredPermission: "dispatch.evaluate", since: null, dueAt: w.targetAt,
+      });
+    }
+  }
+  for (const u of s.walletUnverified ?? []) {
+    out.push({
+      key: `wallet:${u.holdingRef}:verify`, tenantId: u.tenantId, category: "workforce", severity: "low",
+      title: `${u.code} uploaded — verification required (employee ${u.userId})`, reason: "An uploaded certificate is not a verified credential and satisfies nothing until checked",
+      subjectType: "wallet_holding", subjectId: u.holdingRef, action: "Verify against the document or issuer, or reject",
+      deepLink: { portal: "training_academy", route: `/training/compliance?holding=${u.holdingRef}` }, requiredPermission: "training.wallet.verify", since: u.recordedAt, dueAt: null,
+    });
+  }
+  for (const h of s.trainingHandoffs ?? []) {
+    if (!["REQUESTED", "ADMIN_REVIEW", "DOCUMENT_UPLOADED_UNVERIFIED", "UNKNOWN"].includes(h.status)) continue;
+    out.push({
+      key: `handoff:${h.handoffRef}`, tenantId: h.tenantId, category: "workforce", severity: h.dueAt && h.dueAt.getTime() - now.getTime() < 14 * DAY ? "high" : "medium",
+      title: `Training request ${h.code} — employee ${h.userId} (${h.status.replaceAll("_", " ").toLowerCase()})`, reason: "External training LeaseOS cannot issue; the office arranges it",
+      subjectType: "training_handoff", subjectId: h.handoffRef, action: h.status === "DOCUMENT_UPLOADED_UNVERIFIED" ? "Verify the uploaded certificate" : "Select a provider and book",
+      deepLink: { portal: "training_academy", route: `/training/requests/${h.handoffRef}` }, requiredPermission: "training.handoff.manage", since: h.requestedAt, dueAt: h.dueAt,
+    });
+  }
+
   for (const a of s.ungatedAssignments) {
     out.push({
       key: `ungated:${a.jobUnitId}`, category: "dispatch", severity: a.finding.includes("blocked") ? "high" : "medium",
@@ -453,6 +511,11 @@ export function visibleTo(args: { exceptions: readonly Exception[]; userId: numb
     return cache.get(p)!;
   };
   return args.exceptions.filter(x => may(x.requiredPermission));
+}
+
+/** 0172 — drop exceptions that name another organization's records. Untagged ones pass unchanged. */
+export function forTenant(xs: readonly Exception[], tenantId: string): Exception[] {
+  return xs.filter(x => x.tenantId === undefined || x.tenantId === tenantId);
 }
 
 export function summarize(xs: readonly Exception[]): { total: number; bySeverity: Record<ExceptionSeverity, number>; byCategory: Partial<Record<ExceptionCategory, number>>; headline: string } {

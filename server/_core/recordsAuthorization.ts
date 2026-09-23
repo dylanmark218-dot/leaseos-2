@@ -329,7 +329,11 @@ export type Permission =
   // v22.21 — Training Academy. Learner permissions are universal but self-scoped in the router.
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
-  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage";
+  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
+  // 0172 — the training wallet, renewal and external-training handoff.
+  | "training.wallet.read_own" | "training.wallet.record_own" | "training.handoff.request_own"
+  | "training.wallet.manage" | "training.wallet.verify" | "training.handoff.manage"
+  | "training.provider.manage" | "training.compliance.read";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -711,6 +715,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "academy.certificate.issue",
     "academy.requirement.manage",
     "academy.direct_supervision.manage",
+    "training.wallet.manage",
+    "training.wallet.verify",
+    "training.handoff.manage",
+    "training.provider.manage",
+    "training.compliance.read",
     "assistant.ask",
     "assistant.curate",
     "agent.read",
@@ -816,6 +825,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    "training.handoff.manage",
+    "training.provider.manage",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -1004,6 +1015,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "academy.certificate.issue",
     "academy.requirement.manage",
     "academy.direct_supervision.manage",
+    "training.wallet.manage",
+    "training.wallet.verify",
+    "training.handoff.manage",
+    "training.provider.manage",
+    "training.compliance.read",
     "assistant.ask",
     "assistant.curate",
     "agent.use",
@@ -1234,6 +1250,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "academy.manage",
     "academy.evaluate",
     "academy.certificate.issue",
+    "training.wallet.manage",
+    "training.wallet.verify",
+    "training.handoff.manage",
+    "training.compliance.read",
     "evidence.read_personnel",
     "incident.read_summary",
     "incident.read_investigation",
@@ -1688,6 +1708,11 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // 0172 — your own wallet, your own upload (recorded unverified), your own training request.
+  // Each reads ctx.user.id; acting for somebody else needs training.wallet.manage / training.handoff.manage.
+  "training.wallet.read_own",
+  "training.wallet.record_own",
+  "training.handoff.request_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -1740,6 +1765,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "academy.certificate.sign_own",
   "academy.requirement.manage",
   "academy.direct_supervision_attest_own",
+  // 0172 — verifying a credential, company renewal policy and provider directory fail closed.
+  "training.wallet.verify",
+  "training.wallet.manage",
+  "training.provider.manage",
   // Carried forward from the v22.16 audit: these actions already existed in
   // the Permission union and production routers but were never placed in the
   // fail-closed set. Each creates or changes operational/commercial truth.
@@ -2878,6 +2907,41 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "academy.inspectorRequestList": "academy.certificate.issue",
   "academy.sheetPrintRun": "academy.manage",
   "academy.sheetScanFile": "academy.evaluate",
+  // 0172 — Study Centre on the Academy engine. Self-scoped in code (ctx.user.id).
+  "academy.studyCentre": "academy.read_own",
+  "academy.studyEnroll": "academy.progress_own",
+  "academy.moduleResume": "academy.progress_own",
+  "academy.practiceOpen": "academy.assessment_own",
+  "academy.practiceAnswer": "academy.assessment_own",
+  "academy.practiceSubmit": "academy.assessment_own",
+  "academy.practiceHistory": "academy.read_own",
+  "academy.missedQuestions": "academy.read_own",
+  "academy.bookmarkToggle": "academy.progress_own",
+  "academy.bookmarks": "academy.read_own",
+  "academy.studyLibrary": "academy.read_own",
+  "academy.tutor": "academy.read_own",
+  "academy.sourceConfirmRedistribution": "academy.source.review",
+  // 0172 — the training wallet (workerQualifications), renewal and external handoff.
+  "trainingWallet.myWallet": "training.wallet.read_own",
+  "trainingWallet.recordOwn": "training.wallet.record_own",
+  "trainingWallet.recordFor": "training.wallet.manage",
+  "trainingWallet.verify": "training.wallet.verify",
+  "trainingWallet.reject": "training.wallet.verify",
+  "trainingWallet.personWallet": "training.wallet.manage",
+  "trainingWallet.operationalView": "dispatch.evaluate",
+  "trainingWallet.policies": "training.wallet.read_own",
+  "trainingWallet.settingsGet": "training.compliance.read",
+  "trainingWallet.settingsSet": "training.wallet.manage",
+  "trainingWallet.renewalSweep": "training.wallet.manage",
+  "trainingWallet.requestTraining": "training.handoff.request_own",
+  "trainingWallet.myHandoffs": "training.wallet.read_own",
+  "trainingWallet.handoffSelfUpdate": "training.handoff.request_own",
+  "trainingWallet.handoffQueue": "training.handoff.manage",
+  "trainingWallet.handoffUpdate": "training.handoff.manage",
+  "trainingWallet.providerOptions": "training.wallet.read_own",
+  "trainingWallet.providerCapabilitySet": "training.provider.manage",
+  "trainingWallet.complianceDashboard": "training.compliance.read",
+  "trainingWallet.pathway": "training.wallet.read_own",
 
   /* ---- v21.20: workforce lifecycle ---- */
   "workforce.applicantCreate": "hr.applicant.manage",

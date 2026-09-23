@@ -18,8 +18,25 @@ import type { RoleActor } from "../../../server/_core/roleActor";
 import { demonstration, fromQuery } from "../showcase/panelSource";
 import { LoginView } from "../pages/LoginView";
 import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser } from "../portal/PortalChooser";
+import { CompliancePanel, PathwayPanel, StudyCentrePanel, TutorPanel, WalletPanel, type StudyCourse, type WalletData } from "../pages/TrainingWalletView";
 
 afterEach(cleanup);
+
+/* 0172 — training wallet / study centre fixtures. */
+const a11yWallet: WalletData = {
+  disclaimer: "Studied, demonstrated, held, expiring and arranged are five different answers.",
+  studied: [{ ref: "A1", courseCode: "CLASS3", title: "Class 3 Preparation", status: "in_progress", note: "Study/preparation only — not a licence" }],
+  demonstrated: [{ evaluationRef: "E1", competencyCode: "VAC-UNIT", status: "competent", observedAt: "2026-09-01" }],
+  credentials: [
+    { holdingRef: "H1", code: "H2S_ALIVE", displayName: "H2S Alive", issuer: "Provider", issuingJurisdiction: "CA", certificateNumber: "1", issuedAt: "2024-01-01", expiresAt: "2027-01-01", endorsements: [], restrictions: [], verificationState: "verified", verifiedAt: "2024-01-02", boundary: "external_provider", lifecycle: "actual_expiry", current: true, supersededByHoldingRef: null },
+    { holdingRef: "H2", code: "DRIVER_LICENCE_CLASS_1", displayName: "Alberta Class 1", issuer: null, issuingJurisdiction: "CA-AB", certificateNumber: null, issuedAt: "2025-01-01", expiresAt: "2030-01-01", endorsements: ["Q"], restrictions: ["PROVINCIAL_RESTRICTION"], verificationState: "unverified", verifiedAt: null, boundary: "regulator_issued", lifecycle: "actual_expiry", current: false, supersededByHoldingRef: null },
+  ],
+  expiring: [{ code: "H2S_ALIVE", basis: "actual_expiry", legalExpiry: "2027-01-01", employerReviewAt: null, labels: ["Certificate expires 2027-01-01"], held: true, heldReason: "", canRequestTraining: true }],
+  arranged: [{ handoffRef: "HO-1", code: "FIRST_AID", status: "BOOKED", worker: { label: "Booked", step: 3 }, appointmentAt: null, bookingReference: "BK", requestedAt: "2026-09-01" }],
+};
+const a11yCourse: StudyCourse = { courseCode: "AIRBRAKE-Q", title: "Air Brake Q Preparation", jurisdiction: "CA-AB", track: "commercial_driver", boundaryNotice: "Completion never creates a Q endorsement.", currentVersion: { ref: "AIRBRAKE-Q:2", number: 2 }, moduleCount: 5, bankSize: 25, mockQuestionCount: 25, enrolment: { assignmentRef: "ASG", status: "in_progress", onCurrentVersion: true, resumeModule: null }, sources: [{ sourceRef: "S", title: "Commercial Driver's Guide", edition: "Spring 2025", url: "https://open.alberta.ca/publications/commercial-drivers-guide", reviewStatus: "unreviewed" }] };
+const a11yAttempt = { attemptRef: "ATT", kind: "PRACTICE" as const, notice: "Original practice questions.", questions: [{ questionCode: "Q1", domain: "supply", prompt: "What does the governor do?", options: ["Controls cut-in and cut-out", "Releases springs", "Warns", "Meters air"], sourceSection: "Ch. 3" }] };
+const noop = () => {};
 
 const finder = (): DisposalFinderViewProps => ({
   lsd: "07-18-053-18 W5M", onLsdChange: () => {}, wasteCode: "", onWasteCodeChange: () => {}, wasteCodes: ["produced_water"], onFind: () => {}, finding: false,
@@ -88,6 +105,12 @@ const surfaces = [
   { name: "workspace chooser — declined default and link", render: () => render(<PortalChooser options={a11yPortals} rejectedDefault="executive" rejectedRequest="executive" onChoose={() => {}} />) },
   { name: "no workspace available", render: () => render(<NoPortalAvailable notReached={a11yPortals} onSignOut={() => {}} />) },
   { name: "organization selection required", render: () => render(<OrganizationSelectionRequired detail="member of 2 organizations" />) },
+  { name: "training wallet", render: () => render(<WalletPanel wallet={a11yWallet} policies={[{ qualificationCode: "FIRST_AID", displayName: "First Aid", boundary: "external_provider", lifecycle: "actual_expiry" }]} onRequestTraining={noop} requesting={false} onUpload={noop} uploading={false} onHandoffDone={noop} />) },
+  { name: "driver study centre — courses", render: () => render(<StudyCentrePanel courses={[a11yCourse]} onEnroll={noop} onOpen={noop} onOpenLessons={noop} attempt={null} feedback={{}} onAnswer={noop} answers={{}} onSubmit={noop} result={null} onBookmark={noop} />) },
+  { name: "driver study centre — practice feedback", render: () => render(<StudyCentrePanel courses={[a11yCourse]} onEnroll={noop} onOpen={noop} onOpenLessons={noop} attempt={a11yAttempt} feedback={{ Q1: { correct: true, correctPresentedIndex: 0, explanation: "The governor controls cut-in and cut-out.", source: { title: "Commercial Driver's Guide", section: "Ch. 3", edition: "Spring 2025", url: null, reviewStatus: "unreviewed" }, studyThisTopic: null } }} onAnswer={noop} answers={{ Q1: 0 }} onSubmit={noop} result={null} onBookmark={noop} />) },
+  { name: "study tutor — unknown", render: () => render(<TutorPanel onAsk={noop} asking={false} answer={{ status: "UNKNOWN_REFER_TO_AUTHORITY", lines: ["UNKNOWN — refer to authority."], citations: [], referTo: [{ sourceRef: "S", title: "Class 1 Learning Pathway", url: "https://www.alberta.ca/class-1-learning-pathway" }], practice: [], notice: "Refer to the authority." }} />) },
+  { name: "career pathway", render: () => render(<PathwayPanel pathways={[{ code: "P", title: "Swamper to driver", disclaimer: "A development view only.", steps: [{ code: "A", title: "Study", state: "complete", detail: "Done" }, { code: "B", title: "Eligibility", state: "UNKNOWN_VERIFY_WITH_AUTHORITY", detail: "Verify with authority" }] }]} />) },
+  { name: "training compliance", render: () => render(<CompliancePanel dashboard={{ headlines: ["1 person's H2S_ALIVE expires within 30 days."], people: 3, views: { expiringSoon: [1] } }} queue={[{ handoffRef: "HO", status: "REQUESTED", employee: { userId: 1, name: "Sam" }, credential: { code: "H2S_ALIVE", displayName: "H2S Alive" }, currentExpiry: null, reason: null, latestVerified: null, requiredBy: null, dispatchImpact: null, requestedAt: "2026-09-01", providerOptions: { official: [{ sourceRef: "S", title: "ESC providers", sourceUrl: "https://www.energysafetycanada.com/course/10490" }], company: [] } }]} onMark={noop} onSweep={noop} sweeping={false} sweepResult={null} />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {

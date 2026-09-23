@@ -13,7 +13,16 @@ import { ACCESS_SCOPE_NOTICE, walkEvidenceChain, type ChainNodeKind } from "./_c
 import { roleProcedure, router } from "./_core/trpc";
 import { listActiveUserRoleNames } from "./db";
 import { authorize, isDomainRole, type Permission, type RoleGrant } from "./_core/recordsAuthorization";
-import { deriveExceptions, summarize, visibleTo } from "./_core/exceptionCentre";
+import { deriveExceptions, forTenant, summarize, visibleTo } from "./_core/exceptionCentre";
+import { getDb } from "./db";
+import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
+
+/** 0172 — the caller's organization, for tenant-tagged exceptions. */
+async function actingTenant(userId: number): Promise<string> {
+  const db = await getDb();
+  if (!db) return SINGLE_TENANT_ID;
+  return (await resolveActingScope(db, userId)).tenantId;
+}
 import { CHAIN_READ_PERMISSION, loadExceptionSources, loadInbox, loadTimeline, resolveChainAround, searchEverything } from "./surfacesService";
 import { composeSession } from "./_core/portalComposition";
 
@@ -37,7 +46,7 @@ export const surfacesRouter = router({
     .query(async ({ ctx, input }) => {
       const { grants } = await grantsFor(ctx.user.id);
       const all = deriveExceptions(await loadExceptionSources());
-      let mine = visibleTo({ exceptions: all, userId: ctx.user.id, grants });
+      let mine = forTenant(visibleTo({ exceptions: all, userId: ctx.user.id, grants }), await actingTenant(ctx.user.id));
       if (input?.category) mine = mine.filter(x => x.category === input.category);
       return { summary: summarize(mine), items: mine.slice(0, input?.limit ?? 200) };
     }),
@@ -58,7 +67,7 @@ export const surfacesRouter = router({
     const can = may(ctx.user.id, grants);
     const [inbox, exceptions] = await Promise.all([
       loadInbox({ userId: ctx.user.id, roles, canApprovePurchases: can("purchasing.approve"), canResolveConflicts: can("sync.resolve_conflict"), canReviewAssistant: can("assistant.review") }),
-      (async () => visibleTo({ exceptions: deriveExceptions(await loadExceptionSources()), userId: ctx.user.id, grants }))(),
+      (async () => forTenant(visibleTo({ exceptions: deriveExceptions(await loadExceptionSources()), userId: ctx.user.id, grants }), await actingTenant(ctx.user.id)))(),
     ]);
     const session = composeSession(roles as never);
     const waitingFor = inbox.filter(i => i.kind === "my_request" || i.kind === "ai_proposal");

@@ -79,11 +79,11 @@ export const ALBERTA_DRIVER_TRAINING_PROGRAMS: TrainingProgramDefinition[] = [
     kind: "government_pathway",
     recognition: "government_required",
     officialProviderRequired: true,
-    durationLabel: "Entry 40 h + Core 60 h + Q if needed + Competence Building 17–25 h for provincial restriction removal",
+    durationLabel: "Entry 40 h + Core 67 h (60 h for contracts signed on/before 2026-08-31) + 8 h air brake course if Q not held + Competence Building 10–18 h (17–25 h before 2026-09-01) for provincial restriction removal",
     summary: "Mandatory pathway for new Alberta Class 1 drivers. Entry + Core leads to eligibility for a provincially restricted Class 1 after testing; Competence Building removes the provincial restriction.",
     modules: [
       { code: "C1-ENTRY", title: "Tier 1 · Entry Program", objectives: ["Complete the 40-hour foundational program", "Prepare for the Class 1 knowledge test"] },
-      { code: "C1-CORE", title: "Tier 2 · Core Learning", practical: true, objectives: ["Complete 60 hours of in-yard and in-cab competence building", "Prepare for the Class 1 road test"] },
+      { code: "C1-CORE", title: "Tier 2 · Core Learning", practical: true, objectives: ["Complete 67 hours (60 under pre-2026-09-01 contracts) of in-yard and in-cab competence building", "Prepare for the Class 1 road test"] },
       { code: "C1-Q", title: "Air Brake Q prerequisite", practical: true, objectives: ["Hold or obtain Q before Class 1 licensing", "Demonstrate air-brake inspection competence"] },
       { code: "C1-COMP", title: "Tier 3 · Competence Building", practical: true, objectives: ["Complete individualized on-road development", "Remove the provincial restriction after successful completion"] },
       { code: "C1-ADV", title: "Tier 4 · Advanced industry training", practical: true, objectives: ["Build terrain, equipment and cargo-specific competence", "Maintain a career-long skills record"] },
@@ -91,7 +91,7 @@ export const ALBERTA_DRIVER_TRAINING_PROGRAMS: TrainingProgramDefinition[] = [
     source: {
       authority: "Alberta Transportation and Economic Corridors",
       url: "https://www.alberta.ca/class-1-learning-pathway",
-      effectiveNote: "Replaced Alberta Class 1 MELT for new trainees effective April 1, 2025.",
+      effectiveNote: "Replaced Alberta Class 1 MELT for new trainees effective April 1, 2025. Training hours rebalanced effective September 1, 2026 (7 h moved from Competence Building to Core Learning; totals unchanged).",
       verifiedOn: ALBERTA_SOURCE_VERIFIED,
     },
   },

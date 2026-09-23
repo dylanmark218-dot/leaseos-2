@@ -7,8 +7,10 @@ const ALL: DomainRole[] = ["driver","dispatcher","mechanic","shop_lead","safety"
 
 describe("v22.21 Academy catalog", () => {
   it("locks the requested question-bank sizes", () => {
-    expect(CATALOG_COUNTS).toMatchObject({ whmisQuestions: 50, tdgQuestions: 75, ergQuestions: 25, courses: 11 });
-    expect(CATALOG_COUNTS.totalQuestions).toBe(158);
+    // 0172: CLASS1/2/3/AIRBRAKE-Q became versioned Study Centre tracks with original practice banks, and
+    // AB-COMMERCIAL-FOUNDATION, CLASS4 and COMPANY-FIELD were added — 14 courses, 269 questions.
+    expect(CATALOG_COUNTS).toMatchObject({ whmisQuestions: 50, tdgQuestions: 75, ergQuestions: 25, courses: 14 });
+    expect(CATALOG_COUNTS.totalQuestions).toBe(269);
   });
   it("keeps external credentials track-only", () => {
     for (const code of ["CLASS1", "CLASS2", "CLASS3", "AIRBRAKE-Q", "H2S-TRACK", "FIRSTAID-TRACK"]) {

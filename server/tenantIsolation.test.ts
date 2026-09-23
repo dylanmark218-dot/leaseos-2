@@ -16,7 +16,9 @@ const schema = readFileSync("drizzle/schema.ts", "utf8");
 
 function tablesWithTenant(): { table: string; notNull: boolean }[] {
   const out: { table: string; notNull: boolean }[] = [];
-  const re = /export const \w+ = mysqlTable\("(\w+)", \{([\s\S]*?)\n\}\);/g;
+  // 0172: also match a table declared with an index callback — `}, t => [...]);` — which the
+  // earlier pattern skipped, hiding any tenant column on such a table from this pin.
+  const re = /export const \w+ = mysqlTable\("(\w+)", \{([\s\S]*?)\n\}(?:, [^\n]*)?\);/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(schema))) {
     const [, table, body] = m;
@@ -31,15 +33,17 @@ function tablesWithTenant(): { table: string; notNull: boolean }[] {
 }
 
 describe("the tenant surface is known", () => {
-  it("is nineteen tables, and the nullability split is deliberate", () => {
+  it("is twenty-one tables, and the nullability split is deliberate", () => {
     const scoped = tablesWithTenant();
     // The organization is carried only where something consults it. This count
     // moving is a new scoped concept and has to be changed on purpose — which
     // is what happened when leaveRequests arrived and this test failed first.
-    expect(scoped).toHaveLength(19);
+    // 0172: +2 — credentialCompanySettings (a company's renewal thresholds) and externalTrainingHandoffs
+    // (a company's training requests); both read and written only through resolveActingScope.
+    expect(scoped).toHaveLength(21);
     expect(scoped.map(t => t.table).sort()).toEqual([
-      "agentRuns", "assistantQueries", "billingAuthorityBands", "crews", "domainEventOutbox", "enforcementEvents",
-      "knowledgePassages", "leaveRequests", "messageChannels", "oosReleasePolicies", "operationalTasks", "outOfServiceOrders",
+      "agentRuns", "assistantQueries", "billingAuthorityBands", "credentialCompanySettings", "crews", "domainEventOutbox", "enforcementEvents",
+      "externalTrainingHandoffs", "knowledgePassages", "leaveRequests", "messageChannels", "oosReleasePolicies", "operationalTasks", "outOfServiceOrders",
       "retrievalMeasurements", "retrievalProbes", "shiftPosts", "workerQualifications", "workflowInstances", "workflowNotifications",
       "workflowRules",
     ]);
@@ -52,7 +56,7 @@ describe("the tenant surface is known", () => {
     // column would be a second place for the answer to disagree.
     expect(scoped.map(t => t.table)).not.toContain("shiftInterests");
     expect(scoped.filter(t => t.notNull).map(t => t.table).sort()).toEqual([
-      "domainEventOutbox", "operationalTasks", "workflowInstances", "workflowNotifications",
+      "credentialCompanySettings", "domainEventOutbox", "externalTrainingHandoffs", "operationalTasks", "workflowInstances", "workflowNotifications",
     ]);
     expect(scoped.filter(t => !t.notNull).map(t => t.table).sort()).toEqual([
       "agentRuns", "assistantQueries", "billingAuthorityBands", "crews", "enforcementEvents",

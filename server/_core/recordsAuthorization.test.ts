@@ -533,6 +533,8 @@ describe("payroll and tax authorization boundaries", () => {
       "dispatch.readiness_own",
       "academy.read_own", "academy.progress_own", "academy.assessment_own",
       "academy.certificate.sign_own", "academy.direct_supervision_attest_own",
+      // 0172 — your own wallet, your own (unverified) upload, your own training request.
+      "training.wallet.read_own", "training.wallet.record_own", "training.handoff.request_own",
     ]);
   });
 

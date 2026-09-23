@@ -53,6 +53,16 @@ const asVersion = (h: QualificationHolding, index: number): DocumentVersion => (
 });
 
 /**
+ * Oldest first. `recordedAt` is stored to the second, so a renewal recorded in the same second as the
+ * holding it replaces ties with it; a superseded holding was replaced by a later one, so on a tie it
+ * sorts first and the replacement is the current claim. (0172 — found when a renewal test recorded
+ * both inside one second and the superseded row came back as current.)
+ */
+export const byRecordedThenSuperseded = (a: QualificationHolding, b: QualificationHolding) =>
+  a.recordedAt.getTime() - b.recordedAt.getTime()
+  || (a.verificationState === "superseded" ? -1 : 0) - (b.verificationState === "superseded" ? -1 : 0);
+
+/**
  * Whether a person holds a given qualification at a moment.
  *
  * Returns the engine's own verdict, so "verified with no expiry recorded" comes
@@ -62,7 +72,7 @@ const asVersion = (h: QualificationHolding, index: number): DocumentVersion => (
 export function qualificationValidity(holdings: readonly QualificationHolding[], code: string, at: Date): Validity {
   const forCode = holdings
     .filter(h => h.code === code)
-    .sort((a, b) => a.recordedAt.getTime() - b.recordedAt.getTime())
+    .sort(byRecordedThenSuperseded)
     .map(asVersion);
   return validityOf(forCode, at);
 }
@@ -87,7 +97,7 @@ export function countsAsHeld(
   if (v.state === "unverified") {
     // Naming which non-verified state it is: "extracted" and "uploaded" are
     // both short of an assertion, and a reader chasing it needs to know which.
-    const actual = holdings.filter(h => h.code === code).sort((x, y) => y.recordedAt.getTime() - x.recordedAt.getTime())[0];
+    const actual = holdings.filter(h => h.code === code).sort((x, y) => byRecordedThenSuperseded(y, x))[0];
     const word = actual?.verificationState === "extracted" ? "extracted" : "unverified";
     return { held: false, code: "unverified", reason: `${code} is on file but ${word}; nobody has checked it against the certificate` };
   }
@@ -106,4 +116,72 @@ export function missingFrom(
     .map(qualification => ({ qualification, ...countsAsHeld(holdings, qualification, at) }))
     .filter(r => !r.held)
     .map(r => ({ code: r.qualification, reason: r.reason, why: r.code! }));
+}
+
+/* ------------------------------------------------------------------ */
+/* 0172 — the same rule, told what kind of credential it is reading.  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `countsAsHeld` refuses a verified holding with no expiry, and for a ticket
+ * that has one that is right. Two credentials the wallet now carries are not
+ * that shape, and each has a different reason:
+ *
+ *  - an endorsement with no renewal by rule (Alberta's Q) never has an expiry
+ *    to record, so "no expiry recorded" is not missing currency — its currency
+ *    is the licence it sits on, and it is held only while that licence is;
+ *  - a provincially restricted Class 1 is in force, but not for work that
+ *    leaves the province, so the restriction has to be read against the job.
+ *
+ * Neither is a second validity rule. Both call `countsAsHeld` and
+ * `qualificationValidity` for the in-force question and add only the one fact
+ * the plain rule cannot know. With no policy and no scope this returns exactly
+ * what `countsAsHeld` returns.
+ */
+export type HoldingExpiryBasis = "actual_expiry_required" | "no_expiry_by_rule";
+export type HeldPolicy = {
+  expiryBasis: HoldingExpiryBasis;
+  /** For `no_expiry_by_rule`: held only while at least one of these is held. */
+  parentAnyOf?: readonly string[] | null;
+};
+export type RequirementScope = { interprovincial?: boolean };
+export type HeldVerdict = { held: boolean; reason: string; code: NotHeldCode | "restricted" | null };
+
+/** Restriction codes that mean "this province only". Kept as data; the wallet writes these. */
+export const PROVINCIAL_RESTRICTION_CODES = ["PROVINCIAL_RESTRICTION", "AB_PROVINCIAL_RESTRICTION"] as const;
+
+/** The holding the canonical rule considers in force, so its restrictions can be read. */
+export function holdingInForce<T extends QualificationHolding>(holdings: readonly T[], code: string, at: Date): T | null {
+  const v = qualificationValidity(holdings, code, at);
+  if (v.version == null || (v.state !== "in_force" && v.state !== "expiring" && v.state !== "expired")) return null;
+  const ordered = holdings.filter(h => h.code === code).sort(byRecordedThenSuperseded);
+  return ordered[v.version - 1] ?? null;
+}
+
+export function countsAsHeldUnder(
+  holdings: readonly (QualificationHolding & { restrictions?: readonly string[] | null })[],
+  code: string,
+  at: Date,
+  policy?: HeldPolicy | null,
+  scope?: RequirementScope | null,
+): HeldVerdict {
+  let verdict: HeldVerdict = countsAsHeld(holdings, code, at);
+  if (!verdict.held && policy?.expiryBasis === "no_expiry_by_rule") {
+    const v = qualificationValidity(holdings, code, at);
+    if ((v.state === "in_force" || v.state === "expiring") && v.expiresAt == null) {
+      const parents = policy.parentAnyOf ?? [];
+      const parent = parents.map(p => ({ p, r: countsAsHeld(holdings, p, at) })).find(x => x.r.held);
+      verdict = parent
+        ? { held: true, code: null, reason: `${code} verified; no renewal by rule, and ${parent.p} is held` }
+        : parents.length
+          ? { held: false, code: "unknown", reason: `${code} is verified and has no renewal by rule, but it is only valid on a current licence — none of ${parents.join(", ")} is held` }
+          : verdict;
+    }
+  }
+  if (verdict.held && scope?.interprovincial) {
+    const h = holdingInForce(holdings, code, at);
+    const restricted = (h?.restrictions ?? []).some(r => (PROVINCIAL_RESTRICTION_CODES as readonly string[]).includes(r));
+    if (restricted) return { held: false, code: "restricted", reason: `${code} is provincially restricted; this work requires interprovincial operating authority` };
+  }
+  return verdict;
 }

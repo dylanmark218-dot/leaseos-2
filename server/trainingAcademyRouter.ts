@@ -7,7 +7,7 @@
  *  3. assessments and practical evidence are bound to one immutable course version;
  *  4. certificate issuance fails closed until the governing source snapshot is reviewed.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -45,7 +45,10 @@ import {
   complianceKnowledgeItems,
   complianceDocuments,
   users,
+  academyQuestionBookmarks,
 } from "../drizzle/schema";
+import { offlineCopyDecision } from "./_core/studyCentreCatalog";
+import { tutorAnswer, type TutorPassage, type TutorQuestion } from "./_core/studyTutor";
 import {
   buildAssessment,
   certificateDecision,
@@ -55,11 +58,14 @@ import {
   practicalGate,
   stableHash,
   trainingDispatchDecision,
+  attemptConsequences,
+  weakAreas,
   type AcademyQuestion,
   type AssessmentPolicy,
   type PresentedAssessmentItem,
 } from "./_core/trainingAcademy";
 import { ACADEMY_COURSES, ACADEMY_REQUIREMENT_SEEDS, ACADEMY_SOURCES, CATALOG_COUNTS } from "./_core/trainingAcademyCatalog";
+import { asHolding, canonicalVerdicts, holdingRowsFor, scopeOf, syncCredentialPolicies } from "./trainingWalletService";
 import { COMPLIANCE_KNOWLEDGE_CATALOG } from "./_core/complianceSecretary";
 import {
   ACADEMY_REGULATORY_PROFILES,
@@ -137,7 +143,14 @@ async function synchronizeCatalog(db: Awaited<ReturnType<typeof dbOrThrow>>, act
   for (const src of ACADEMY_SOURCES) {
     const existing = (await db.select().from(academySourceRecords).where(eq(academySourceRecords.sourceRef, src.sourceRef)).limit(1))[0];
     if (!existing) {
-      await db.insert(academySourceRecords).values({ ...src, reviewStatus: "unreviewed", snapshotHash: stableHash(src) });
+      const { sourceKind, licenceStatus, licenceNote, retrievedOn, contentHash, capabilityCodes, ...base } = src;
+      await db.insert(academySourceRecords).values({
+        ...base, reviewStatus: "unreviewed", snapshotHash: stableHash(src),
+        // 0172 — Study Library facts. Seeded as stated by the publisher; still unreviewed.
+        sourceKind: sourceKind ?? "study_source", licenceStatus: licenceStatus ?? "unknown", licenceNote: licenceNote ?? null,
+        retrievedAt: retrievedOn ? new Date(`${retrievedOn}T00:00:00.000Z`) : null, contentHash: contentHash ?? null,
+        capabilityCodesJson: capabilityCodes ? JSON.stringify(capabilityCodes) : null,
+      });
       created.sources++;
     }
   }
@@ -175,11 +188,17 @@ async function synchronizeCatalog(db: Awaited<ReturnType<typeof dbOrThrow>>, act
       created.courses++;
     }
     if (!course) throw new Error(`Could not create Academy course ${seed.code}`);
-    const versionRef = `${seed.code}:1`;
+    // 0172 — a seed's version number publishes a NEW immutable version; the previous published one is
+    // retired, never edited, so attempts taken against it keep their own questions, policy and source.
+    const versionNumber = seed.version ?? 1;
+    const versionRef = `${seed.code}:${versionNumber}`;
     let version = (await db.select().from(academyCourseVersions).where(eq(academyCourseVersions.versionRef, versionRef)).limit(1))[0];
     if (!version) {
       const courseHash = stableHash({ code: seed.code, title: seed.title, policy: seed.policy, modules: seed.modules, questions: seed.questions.map(q => ({ code: q.code, prompt: q.prompt, options: q.options, correctIndex: q.correctIndex })) });
-      const ins = await db.insert(academyCourseVersions).values({ courseId: course.id, versionRef, versionNumber: 1, status: "published", effectiveAt: new Date(), policyJson: JSON.stringify(seed.policy), courseHash, sourceSnapshotRef: seed.sourceRef ?? null, publishedByUserId: actorUserId, publishedAt: new Date() });
+      const older = await db.select({ id: academyCourseVersions.id }).from(academyCourseVersions).where(and(eq(academyCourseVersions.courseId, course.id), eq(academyCourseVersions.status, "published")));
+      const ins = await db.insert(academyCourseVersions).values({ courseId: course.id, versionRef, versionNumber, status: "published", effectiveAt: new Date(), policyJson: JSON.stringify(seed.policy), courseHash, sourceSnapshotRef: seed.sourceRef ?? null, publishedByUserId: actorUserId, publishedAt: new Date() });
+      for (const o of older) await db.update(academyCourseVersions).set({ status: "retired" }).where(eq(academyCourseVersions.id, o.id));
+      if (course.title !== seed.title) await db.update(academyCourses).set({ title: seed.title }).where(eq(academyCourses.id, course.id));
       const id = Number(ins[0]?.insertId ?? 0);
       version = (await db.select().from(academyCourseVersions).where(eq(academyCourseVersions.id, id)).limit(1))[0];
       created.versions++;
@@ -191,7 +210,7 @@ async function synchronizeCatalog(db: Awaited<ReturnType<typeof dbOrThrow>>, act
       for (let mi = 0; mi < seed.modules.length; mi++) {
         const m = seed.modules[mi];
         const moduleHash = stableHash(m);
-        const mins = await db.insert(academyModules).values({ courseVersionId: version.id, moduleCode: m.code, title: m.title, orderIndex: mi, domainCode: m.domain, requiresCompletion: true, requiresPractical: !!m.practical, estimatedMinutes: m.minutes, moduleHash });
+        const mins = await db.insert(academyModules).values({ courseVersionId: version.id, moduleCode: m.code, title: m.title, orderIndex: mi, domainCode: m.domain, requiresCompletion: true, requiresPractical: !!m.practical, estimatedMinutes: m.minutes, moduleHash, sourceRef: m.sourceRef ?? seed.sourceRef ?? null, sourceSection: m.sourceSection ?? null, companySpecific: !!m.companySpecific });
         const moduleId = Number(mins[0]?.insertId ?? 0);
         created.modules++;
         for (let bi = 0; bi < m.blocks.length; bi++) {
@@ -205,15 +224,28 @@ async function synchronizeCatalog(db: Awaited<ReturnType<typeof dbOrThrow>>, act
     const existingQuestions = await db.select({ id: academyQuestions.id }).from(academyQuestions).where(eq(academyQuestions.courseVersionId, version.id)).limit(1);
     if (existingQuestions.length === 0) {
       for (const q of seed.questions) {
-        await db.insert(academyQuestions).values({ courseVersionId: version.id, questionCode: q.code, bankCode: seed.code, domainCode: q.domain, prompt: q.prompt, optionsJson: JSON.stringify(q.options), correctAnswerJson: JSON.stringify({ correctIndex: q.correctIndex }), explanation: q.explanation, critical: !!q.critical, active: true, questionHash: stableHash(q) });
+        await db.insert(academyQuestions).values({ courseVersionId: version.id, questionCode: q.code, bankCode: seed.code, domainCode: q.domain, prompt: q.prompt, optionsJson: JSON.stringify(q.options), correctAnswerJson: JSON.stringify({ correctIndex: q.correctIndex }), explanation: q.explanation, critical: !!q.critical, active: true, questionHash: stableHash(q), sourceRef: q.sourceRef ?? seed.sourceRef ?? null, sourceSection: q.sourceSection ?? null });
         created.questions++;
       }
     }
     const assessmentCode = `${seed.code}-FINAL`;
     const existingAssessment = (await db.select().from(academyAssessments).where(and(eq(academyAssessments.courseVersionId, version.id), eq(academyAssessments.assessmentCode, assessmentCode))).limit(1))[0];
     if (!existingAssessment) {
-      await db.insert(academyAssessments).values({ courseVersionId: version.id, assessmentCode, title: `${seed.title} · Final Assessment`, questionCount: seed.policy.questionCount, passingScorePercent: seed.policy.passingScorePercent, maxAttempts: seed.policy.maxAttempts ?? null, policyJson: JSON.stringify(seed.policy), domainThresholdsJson: seed.policy.domainMinimumPercent ? JSON.stringify(seed.policy.domainMinimumPercent) : null, criticalFailurePolicyJson: JSON.stringify({ failOnCriticalMiss: !!seed.policy.failOnCriticalMiss }), active: true });
+      await db.insert(academyAssessments).values({ courseVersionId: version.id, assessmentCode, title: `${seed.title} · Final Assessment`, questionCount: seed.policy.questionCount, passingScorePercent: seed.policy.passingScorePercent, maxAttempts: seed.policy.maxAttempts ?? null, policyJson: JSON.stringify(seed.policy), domainThresholdsJson: seed.policy.domainMinimumPercent ? JSON.stringify(seed.policy.domainMinimumPercent) : null, criticalFailurePolicyJson: JSON.stringify({ failOnCriticalMiss: !!seed.policy.failOnCriticalMiss }), active: true, assessmentKind: "FINAL_INTERNAL" });
       created.assessments++;
+    }
+    // 0172 — practice and mock exams on the same bank and version. Unlimited attempts; never a credential.
+    if (seed.practice) {
+      const kinds = [
+        { code: `${seed.code}-PRACTICE`, kind: "PRACTICE" as const, title: `${seed.title} · Practice`, policy: { questionCount: Math.min(10, seed.questions.length), passingScorePercent: seed.practice.mockPassingPercent } },
+        { code: `${seed.code}-MOCK`, kind: "MOCK_EXAM" as const, title: `${seed.title} · Mock exam`, policy: { questionCount: seed.practice.mockQuestionCount, passingScorePercent: seed.practice.mockPassingPercent, stratifyByDomain: true } },
+      ];
+      for (const k of kinds) {
+        const has = (await db.select({ id: academyAssessments.id }).from(academyAssessments).where(and(eq(academyAssessments.courseVersionId, version.id), eq(academyAssessments.assessmentCode, k.code))).limit(1))[0];
+        if (has) continue;
+        await db.insert(academyAssessments).values({ courseVersionId: version.id, assessmentCode: k.code, title: k.title, questionCount: k.policy.questionCount, passingScorePercent: k.policy.passingScorePercent, maxAttempts: null, policyJson: JSON.stringify(k.policy), active: true, assessmentKind: k.kind });
+        created.assessments++;
+      }
     }
   }
   for (const r of ACADEMY_REQUIREMENT_SEEDS) {
@@ -223,7 +255,8 @@ async function synchronizeCatalog(db: Awaited<ReturnType<typeof dbOrThrow>>, act
       created.requirements++;
     }
   }
-  await audit(db, actorUserId, "academy_catalog", "v22.21", "catalog.synchronized", { created, catalogCounts: CATALOG_COUNTS });
+  const policySync = await syncCredentialPolicies(db);
+  await audit(db, actorUserId, "academy_catalog", "v22.21", "catalog.synchronized", { created, catalogCounts: CATALOG_COUNTS, credentialPolicies: policySync });
   return created;
 }
 
@@ -319,7 +352,8 @@ export const trainingAcademyRouter = router({
       const a = await assignmentForSelf(db, ctx.user.id, input.assignmentRef);
       const readiness = await moduleReadiness(db, a.id, a.courseVersionId);
       if (!readiness.ready) throw new TRPCError({ code: "PRECONDITION_FAILED", message: readiness.reason ?? "Current modules are not complete" });
-      const assessment = (await db.select().from(academyAssessments).where(and(eq(academyAssessments.courseVersionId, a.courseVersionId), eq(academyAssessments.active, true))).limit(1))[0];
+      // 0172 — only the FINAL_INTERNAL assessment can advance an assignment; practice/mock live beside it.
+      const assessment = (await db.select().from(academyAssessments).where(and(eq(academyAssessments.courseVersionId, a.courseVersionId), eq(academyAssessments.active, true), eq(academyAssessments.assessmentKind, "FINAL_INTERNAL"))).limit(1))[0];
       if (!assessment) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No active assessment exists for this course version" });
       const previous = await db.select().from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.assignmentId, a.id), eq(academyAssessmentAttempts.assessmentId, assessment.id)));
       const open = previous.find(x => x.status === "open");
@@ -353,6 +387,7 @@ export const trainingAcademyRouter = router({
       const attempt = (await db.select().from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.attemptRef, input.attemptRef), eq(academyAssessmentAttempts.userId, ctx.user.id))).limit(1))[0];
       if (!attempt) throw new TRPCError({ code: "NOT_FOUND", message: "Assessment attempt not found" });
       if (attempt.status !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Attempt is already ${attempt.status}` });
+      if (attempt.assessmentKind !== "FINAL_INTERNAL") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Practice and mock attempts are submitted through practiceSubmit and never advance an assignment" });
       const a = await assignmentForSelf(db, ctx.user.id, (await db.select({ assignmentRef: academyAssignments.assignmentRef }).from(academyAssignments).where(eq(academyAssignments.id, attempt.assignmentId)).limit(1))[0]?.assignmentRef ?? "missing");
       if (a.courseVersionId !== attempt.courseVersionId) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Attempt and assignment versions do not match" });
       const rows = await db.select().from(academyAssessmentItems).where(eq(academyAssessmentItems.attemptId, attempt.id));
@@ -409,7 +444,7 @@ export const trainingAcademyRouter = router({
       if (a.userId === ctx.user.id) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Learners cannot sign their own practical competency" });
       const { course } = await versionBundle(db, a.courseVersionId);
       if (!course.requiresPractical) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This course does not require a practical evaluation" });
-      const theory = (await db.select().from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.assignmentId, a.id), eq(academyAssessmentAttempts.courseVersionId, a.courseVersionId), eq(academyAssessmentAttempts.status, "passed"))).orderBy(desc(academyAssessmentAttempts.id)).limit(1))[0];
+      const theory = (await db.select().from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.assignmentId, a.id), eq(academyAssessmentAttempts.courseVersionId, a.courseVersionId), eq(academyAssessmentAttempts.status, "passed"), eq(academyAssessmentAttempts.assessmentKind, "FINAL_INTERNAL"))).orderBy(desc(academyAssessmentAttempts.id)).limit(1))[0];
       if (!theory) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Current-version theory assessment must be passed first" });
       const evaluationRef = ref("ACAD-PRAC");
       await db.insert(academyPracticalEvaluations).values({ evaluationRef, assignmentId: a.id, courseVersionId: a.courseVersionId, userId: a.userId, competencyCode: input.competencyCode, evaluatorUserId: ctx.user.id, status: input.status, rubricJson: JSON.stringify(input.rubric), evidenceRecordId: input.evidenceRecordId ?? null, observedAt: input.observedAt, signedAt: new Date(), expiresAt: input.expiresAt ?? null });
@@ -453,7 +488,7 @@ export const trainingAcademyRouter = router({
       const db = await dbOrThrow();
       const a = await assignmentByRef(db, input.assignmentRef);
       const { course, version } = await versionBundle(db, a.courseVersionId);
-      const passed = !!(await db.select({ id: academyAssessmentAttempts.id }).from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.assignmentId, a.id), eq(academyAssessmentAttempts.courseVersionId, a.courseVersionId), eq(academyAssessmentAttempts.status, "passed"))).limit(1))[0];
+      const passed = !!(await db.select({ id: academyAssessmentAttempts.id }).from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.assignmentId, a.id), eq(academyAssessmentAttempts.courseVersionId, a.courseVersionId), eq(academyAssessmentAttempts.status, "passed"), eq(academyAssessmentAttempts.assessmentKind, "FINAL_INTERNAL"))).limit(1))[0];
       const evalRow = (await db.select().from(academyPracticalEvaluations).where(and(eq(academyPracticalEvaluations.assignmentId, a.id), eq(academyPracticalEvaluations.courseVersionId, a.courseVersionId))).orderBy(desc(academyPracticalEvaluations.id)).limit(1))[0] ?? null;
       const p = practicalGate({ requiresPractical: course.requiresPractical, courseVersionId: a.courseVersionId, evaluation: evalRow ? { status: evalRow.status, courseVersionId: evalRow.courseVersionId } : null });
       const source = version.sourceSnapshotRef ? (await db.select().from(academySourceRecords).where(eq(academySourceRecords.sourceRef, version.sourceSnapshotRef)).limit(1))[0] : null;
@@ -763,7 +798,8 @@ export const trainingAcademyRouter = router({
       if (!r) throw new TRPCError({ code: "NOT_FOUND", message: "Inspector request not found" });
       if (r.state === "withdrawn") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Request was withdrawn" });
       const cert = (await db.select().from(academyCertificates).where(eq(academyCertificates.id, r.certificateId)).limit(1))[0] ?? null;
-      const attempts = cert ? await db.select({ id: academyAssessmentAttempts.id }).from(academyAssessmentAttempts).where(eq(academyAssessmentAttempts.assignmentId, cert.assignmentId)) : [];
+      // 0172 — the record of training is the FINAL_INTERNAL attempt; practice and mock attempts are study, not a record of training.
+      const attempts = cert ? await db.select({ id: academyAssessmentAttempts.id }).from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.assignmentId, cert.assignmentId), eq(academyAssessmentAttempts.assessmentKind, "FINAL_INTERNAL"))) : [];
       const version = cert ? (await db.select({ id: academyCourseVersions.id }).from(academyCourseVersions).where(eq(academyCourseVersions.id, cert.courseVersionId)).limit(1))[0] : null;
       const mods = version ? await db.select({ id: academyModules.id }).from(academyModules).where(eq(academyModules.courseVersionId, version.id)) : [];
       const blocks = mods.length ? await db.select({ id: academyContentBlocks.id }).from(academyContentBlocks).where(inArray(academyContentBlocks.moduleId, mods.map(m => m.id))) : [];
@@ -774,7 +810,10 @@ export const trainingAcademyRouter = router({
         contentBlockCount: blocks.length, courseVersionPresent: !!version, predatesRetentionGuards: !!cert && cert.issuedAt < guardsInstalledAt,
       });
       const producedAt = new Date();
-      const packageHash = stableHash({ requestRef: r.requestRef, certificateRef: cert?.certificateRef ?? null, parts: pkg.parts, attemptIds: attempts.map(a => a.id), blockIds: blocks.map(b => b.id), producedAt: producedAt.toISOString() });
+      // 0172 — SHA-256 hex. `stableHash` can emit '-' in a chunk (a signed XOR stringified before `>>> 0`) and so
+      // is not a fixed-format digest; it cannot be corrected in place because persisted profile hashes were made
+      // with it. The package hash is produced once and stored, never recomputed against a seed, so it can move.
+      const packageHash = createHash("sha256").update(JSON.stringify({ requestRef: r.requestRef, certificateRef: cert?.certificateRef ?? null, parts: pkg.parts, attemptIds: attempts.map(a => a.id), blockIds: blocks.map(b => b.id), producedAt: producedAt.toISOString() })).digest("hex");
       await db.update(academyInspectorRequests).set({ state: pkg.complete ? "produced" : "incomplete", producedAt: pkg.complete ? producedAt : null, producedByUserId: pkg.complete ? ctx.user.id : null, packageHash: pkg.complete ? packageHash : null, packagePartsJson: JSON.stringify(pkg.parts), missingPartsJson: JSON.stringify(pkg.missing), irrecoverable: pkg.irrecoverable }).where(eq(academyInspectorRequests.id, r.id));
       await audit(db, ctx.user.id, "academy_inspector_request", r.requestRef, pkg.complete ? "inspector_request.produced" : "inspector_request.incomplete", { parts: pkg.parts, missing: pkg.missing.map(m => m.code), irrecoverable: pkg.irrecoverable });
       const summary = inspectorRequestSummary({ requestRef: r.requestRef, requestDatedAt: r.requestDatedAt, requestReceivedAt: r.requestReceivedAt, subjectUserId: r.subjectUserId, certificateRef: cert?.certificateRef ?? "" }, { certificatePresent: !!cert, recordOfTrainingPresent: attempts.length > 0, statementOfExperiencePresent: !!cert?.statementOfExperienceId, contentBlockCount: blocks.length, courseVersionPresent: !!version, predatesRetentionGuards: !!cert && cert.issuedAt < guardsInstalledAt }, new Date());
@@ -846,6 +885,245 @@ export const trainingAcademyRouter = router({
       return { filed: true as const, ...outcome };
     }),
 
+  /* ================================================================
+   * 0172 — Commercial Driver Study Centre on the same engine.
+   * Every procedure below is self-scoped from ctx.user.id. None of them
+   * can create a certificate, a qualification or a wallet credential,
+   * advance an assignment, or change dispatch readiness.
+   * ================================================================ */
+
+  studyCentre: roleProcedure("academy.studyCentre").query(async ({ ctx }) => {
+    const db = await dbOrThrow();
+    const seeds = ACADEMY_COURSES.filter(c => c.studyCentre);
+    const courses = await db.select().from(academyCourses).where(inArray(academyCourses.courseCode, seeds.map(s => s.code)));
+    const mine = await db.select({ ref: academyAssignments.assignmentRef, status: academyAssignments.status, courseVersionId: academyAssignments.courseVersionId, lastModuleCode: academyAssignments.lastModuleCode }).from(academyAssignments).where(eq(academyAssignments.userId, ctx.user.id)).limit(500);
+    const versions = courses.length ? await db.select().from(academyCourseVersions).where(inArray(academyCourseVersions.courseId, courses.map(c => c.id))) : [];
+    const sources = await db.select().from(academySourceRecords).limit(200);
+    return seeds.map(seed => {
+      const course = courses.find(c => c.courseCode === seed.code);
+      const current = versions.filter(v => v.courseId === course?.id && v.status === "published").sort((a, b) => b.versionNumber - a.versionNumber)[0] ?? null;
+      const versionIds = new Set(versions.filter(v => v.courseId === course?.id).map(v => v.id));
+      const enrolment = mine.find(m => current && m.courseVersionId === current.id) ?? mine.find(m => versionIds.has(m.courseVersionId)) ?? null;
+      const srcRefs = Array.from(new Set([seed.sourceRef, ...seed.modules.map(m => m.sourceRef)].filter((x): x is string => !!x)));
+      return {
+        courseCode: seed.code, title: seed.title, jurisdiction: seed.jurisdiction, track: seed.studyCentre!.track, boundaryNotice: seed.studyCentre!.boundaryNotice,
+        credentialBoundary: seed.credentialBoundary, installed: !!course, currentVersion: current ? { ref: current.versionRef, number: current.versionNumber } : null,
+        moduleCount: seed.modules.length, bankSize: seed.questions.length, mockQuestionCount: seed.practice?.mockQuestionCount ?? null,
+        enrolment: enrolment ? { assignmentRef: enrolment.ref, status: enrolment.status, onCurrentVersion: enrolment.courseVersionId === current?.id, resumeModule: enrolment.lastModuleCode } : null,
+        sources: srcRefs.map(r => { const s = sources.find(x => x.sourceRef === r); return { sourceRef: r, title: s?.title ?? r, edition: s?.edition ?? null, url: s?.sourceUrl ?? null, reviewStatus: s?.reviewStatus ?? "not installed" }; }),
+      };
+    });
+  }),
+
+  /** Open a study track for yourself. Preparation only — the enrolment is study, never a credential. */
+  studyEnroll: roleProcedure("academy.studyEnroll").input(z.object({ courseCode: z.string().min(1).max(80) }).strict()).mutation(async ({ ctx, input }) => {
+    const seed = ACADEMY_COURSES.find(c => c.code === input.courseCode && c.studyCentre);
+    if (!seed) throw new TRPCError({ code: "NOT_FOUND", message: "Study Centre course not found" });
+    const db = await dbOrThrow();
+    let course = (await db.select().from(academyCourses).where(eq(academyCourses.courseCode, seed.code)).limit(1))[0];
+    const hasVersion = course ? (await db.select({ id: academyCourseVersions.id }).from(academyCourseVersions).where(and(eq(academyCourseVersions.courseId, course.id), eq(academyCourseVersions.versionRef, `${seed.code}:${seed.version ?? 1}`))).limit(1))[0] : null;
+    if (!course || !hasVersion) { await synchronizeCatalog(db, ctx.user.id); course = (await db.select().from(academyCourses).where(eq(academyCourses.courseCode, seed.code)).limit(1))[0]; }
+    if (!course) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Course could not be installed" });
+    const version = (await db.select().from(academyCourseVersions).where(and(eq(academyCourseVersions.courseId, course.id), eq(academyCourseVersions.status, "published"))).orderBy(desc(academyCourseVersions.versionNumber)).limit(1))[0];
+    if (!version) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Course has no published version" });
+    const existing = (await db.select().from(academyAssignments).where(and(eq(academyAssignments.userId, ctx.user.id), eq(academyAssignments.courseVersionId, version.id))).limit(1))[0];
+    if (existing) return { assignmentRef: existing.assignmentRef, status: existing.status, reused: true, notice: seed.studyCentre!.boundaryNotice };
+    const assignmentRef = ref("ACAD-ASG");
+    await db.insert(academyAssignments).values({ assignmentRef, userId: ctx.user.id, courseVersionId: version.id, status: "assigned", assignedByUserId: ctx.user.id, selfEnrolled: true });
+    await audit(db, ctx.user.id, "academy_assignment", assignmentRef, "assignment.self_enrolled", { courseCode: seed.code, versionRef: version.versionRef });
+    return { assignmentRef, status: "assigned" as const, reused: false, notice: seed.studyCentre!.boundaryNotice };
+  }),
+
+  /** Save your place so you resume where you left off on any device. */
+  moduleResume: roleProcedure("academy.moduleResume").input(z.object({ assignmentRef: z.string().min(1).max(96), moduleCode: z.string().min(1).max(80) }).strict()).mutation(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const a = await assignmentForSelf(db, ctx.user.id, input.assignmentRef);
+    const m = (await db.select({ id: academyModules.id }).from(academyModules).where(and(eq(academyModules.courseVersionId, a.courseVersionId), eq(academyModules.moduleCode, input.moduleCode))).limit(1))[0];
+    if (!m) throw new TRPCError({ code: "NOT_FOUND", message: "Module not found in this version" });
+    await db.update(academyAssignments).set({ lastModuleCode: input.moduleCode, lastViewedAt: new Date() }).where(eq(academyAssignments.id, a.id));
+    return { assignmentRef: a.assignmentRef, lastModuleCode: input.moduleCode };
+  }),
+
+  /** Open a PRACTICE or MOCK_EXAM attempt on the assignment's own version. No module gate, no attempt cap. */
+  practiceOpen: roleProcedure("academy.practiceOpen").input(z.object({ assignmentRef: z.string().min(1).max(96), kind: z.enum(["PRACTICE", "MOCK_EXAM"]), bookmarkedOnly: z.boolean().optional() }).strict()).mutation(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const a = await assignmentForSelf(db, ctx.user.id, input.assignmentRef);
+    const assessment = (await db.select().from(academyAssessments).where(and(eq(academyAssessments.courseVersionId, a.courseVersionId), eq(academyAssessments.assessmentKind, input.kind), eq(academyAssessments.active, true))).limit(1))[0];
+    if (!assessment) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `No ${input.kind.toLowerCase().replace("_", " ")} exists for this course version` });
+    let qrows = await db.select().from(academyQuestions).where(and(eq(academyQuestions.courseVersionId, a.courseVersionId), eq(academyQuestions.active, true)));
+    if (input.bookmarkedOnly) {
+      const marks = new Set((await db.select({ q: academyQuestionBookmarks.questionId }).from(academyQuestionBookmarks).where(eq(academyQuestionBookmarks.userId, ctx.user.id))).map(b => b.q));
+      qrows = qrows.filter(q => marks.has(q.id));
+      if (!qrows.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No bookmarked questions in this version" });
+    }
+    const bank: AcademyQuestion[] = qrows.map(q => ({ id: q.id, code: q.questionCode, domain: q.domainCode, prompt: q.prompt, options: json<string[]>(q.optionsJson, []), correctIndex: json<{ correctIndex: number }>(q.correctAnswerJson, { correctIndex: -1 }).correctIndex, explanation: q.explanation ?? "", critical: q.critical }));
+    const base = json<AssessmentPolicy>(assessment.policyJson, { questionCount: assessment.questionCount, passingScorePercent: assessment.passingScorePercent });
+    const policy = { ...base, questionCount: Math.min(base.questionCount, bank.length) };
+    const attemptRef = ref("ACAD-PRA");
+    const built = buildAssessment({ attemptSeed: attemptRef, questions: bank, policy });
+    const previous = await db.select({ id: academyAssessmentAttempts.id }).from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.assignmentId, a.id), eq(academyAssessmentAttempts.assessmentId, assessment.id)));
+    const ins = await db.insert(academyAssessmentAttempts).values({ attemptRef, assessmentId: assessment.id, assignmentId: a.id, userId: ctx.user.id, courseVersionId: a.courseVersionId, status: "open", attemptNumber: previous.length + 1, policySnapshotJson: JSON.stringify(built.policySnapshot), questionSetJson: JSON.stringify(built.items.map(i => ({ questionCode: i.questionCode, answerOrder: i.answerOrder, sequenceIndex: i.sequenceIndex }))), questionSetHash: built.questionSetHash, assessmentKind: input.kind });
+    const attemptId = Number(ins[0]?.insertId ?? 0);
+    for (const item of built.items) {
+      const q = qrows.find(x => x.questionCode === item.questionCode)!;
+      await db.insert(academyAssessmentItems).values({ attemptId, questionId: q.id, sequenceIndex: item.sequenceIndex, domainCode: item.domain, critical: item.critical, presentedPromptHash: item.presentedPromptHash, answerOrderJson: JSON.stringify(item.answerOrder) });
+    }
+    await audit(db, ctx.user.id, "academy_attempt", attemptRef, `${input.kind.toLowerCase()}.opened`, { assignmentRef: a.assignmentRef, courseVersionId: a.courseVersionId, questionSetHash: built.questionSetHash });
+    return {
+      attemptRef, kind: input.kind, notice: "Original LeaseOS practice questions — not government exam questions. Results never create a licence, endorsement or certificate.",
+      questions: built.items.map(i => { const q = qrows.find(x => x.questionCode === i.questionCode)!; return { questionCode: i.questionCode, domain: i.domain, prompt: i.prompt, options: i.presentedOptions, sourceSection: input.kind === "PRACTICE" ? q.sourceSection : null }; }),
+    };
+  }),
+
+  /** PRACTICE only: immediate answer, explanation, source section, and the module to study. */
+  practiceAnswer: roleProcedure("academy.practiceAnswer").input(z.object({ attemptRef: z.string().min(1).max(96), questionCode: z.string().min(1).max(100), presentedIndex: z.number().int().min(0).max(20) }).strict()).mutation(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const attempt = (await db.select().from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.attemptRef, input.attemptRef), eq(academyAssessmentAttempts.userId, ctx.user.id))).limit(1))[0];
+    if (!attempt) throw new TRPCError({ code: "NOT_FOUND", message: "Attempt not found" });
+    if (attempt.assessmentKind !== "PRACTICE") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Immediate answers are for practice mode only; mock and final attempts are graded on submit" });
+    if (attempt.status !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Attempt is already ${attempt.status}` });
+    const q = (await db.select().from(academyQuestions).where(and(eq(academyQuestions.courseVersionId, attempt.courseVersionId), eq(academyQuestions.questionCode, input.questionCode))).limit(1))[0];
+    const item = q ? (await db.select().from(academyAssessmentItems).where(and(eq(academyAssessmentItems.attemptId, attempt.id), eq(academyAssessmentItems.questionId, q.id))).limit(1))[0] : undefined;
+    if (!q || !item) throw new TRPCError({ code: "NOT_FOUND", message: "Question is not part of this attempt" });
+    const order = json<number[]>(item.answerOrderJson, []);
+    const correctIndex = json<{ correctIndex: number }>(q.correctAnswerJson, { correctIndex: -1 }).correctIndex;
+    const correct = order[input.presentedIndex] === correctIndex;
+    await db.update(academyAssessmentItems).set({ responseJson: JSON.stringify({ presentedIndex: input.presentedIndex }), correct, answeredAt: new Date() }).where(eq(academyAssessmentItems.id, item.id));
+    const src = q.sourceRef ? (await db.select().from(academySourceRecords).where(eq(academySourceRecords.sourceRef, q.sourceRef)).limit(1))[0] : undefined;
+    const studyModule = (await db.select({ code: academyModules.moduleCode, title: academyModules.title }).from(academyModules).where(and(eq(academyModules.courseVersionId, attempt.courseVersionId), eq(academyModules.domainCode, q.domainCode))).limit(1))[0] ?? null;
+    return {
+      correct, correctPresentedIndex: order.indexOf(correctIndex), explanation: q.explanation,
+      source: { sourceRef: q.sourceRef, section: q.sourceSection, title: src?.title ?? null, edition: src?.edition ?? null, url: src?.sourceUrl ?? null, reviewStatus: src?.reviewStatus ?? null },
+      studyThisTopic: studyModule,
+    };
+  }),
+
+  /** Grade a PRACTICE or MOCK_EXAM attempt: score, domain coverage, weak areas. Never advances anything. */
+  practiceSubmit: roleProcedure("academy.practiceSubmit").input(z.object({ attemptRef: z.string().min(1).max(96), answers: z.record(z.string(), z.number().int().min(0).max(20)) }).strict()).mutation(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const attempt = (await db.select().from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.attemptRef, input.attemptRef), eq(academyAssessmentAttempts.userId, ctx.user.id))).limit(1))[0];
+    if (!attempt) throw new TRPCError({ code: "NOT_FOUND", message: "Attempt not found" });
+    if (attempt.assessmentKind === "FINAL_INTERNAL") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Final assessments are submitted through assessmentSubmit" });
+    if (attempt.status !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Attempt is already ${attempt.status}` });
+    const rows = await db.select().from(academyAssessmentItems).where(eq(academyAssessmentItems.attemptId, attempt.id));
+    const qrows = await db.select().from(academyQuestions).where(eq(academyQuestions.courseVersionId, attempt.courseVersionId));
+    const bank: AcademyQuestion[] = qrows.map(q => ({ id: q.id, code: q.questionCode, domain: q.domainCode, prompt: q.prompt, options: json<string[]>(q.optionsJson, []), correctIndex: json<{ correctIndex: number }>(q.correctAnswerJson, { correctIndex: -1 }).correctIndex, explanation: q.explanation ?? "", critical: q.critical }));
+    const presented: PresentedAssessmentItem[] = rows.sort((x, y) => x.sequenceIndex - y.sequenceIndex).map(i => { const q = qrows.find(x => x.id === i.questionId)!; const order = json<number[]>(i.answerOrderJson, []); const opts = json<string[]>(q.optionsJson, []); return { questionCode: q.questionCode, sequenceIndex: i.sequenceIndex, domain: i.domainCode, critical: i.critical, prompt: q.prompt, presentedPromptHash: i.presentedPromptHash, answerOrder: order, presentedOptions: order.map(n => opts[n]) }; });
+    // Practice-mode answers already given count unless overridden in this submission.
+    const prior: Record<string, number> = {};
+    for (const i of rows) { const r = json<{ presentedIndex?: number } | null>(i.responseJson, null); const q = qrows.find(x => x.id === i.questionId); if (q && Number.isInteger(r?.presentedIndex)) prior[q.questionCode] = r!.presentedIndex!; }
+    const policy = json<AssessmentPolicy>(attempt.policySnapshotJson, { questionCount: presented.length, passingScorePercent: 80 });
+    const result = gradeAssessment({ bank, presented, responses: { ...prior, ...input.answers }, policy });
+    const now = new Date();
+    for (const r of result.itemResults) {
+      const item = rows.find(x => qrows.find(q => q.id === x.questionId)?.questionCode === r.questionCode);
+      if (item) await db.update(academyAssessmentItems).set({ responseJson: JSON.stringify({ presentedIndex: r.responsePresentedIndex }), correct: r.correct, answeredAt: item.answeredAt ?? now }).where(eq(academyAssessmentItems.id, item.id));
+    }
+    await db.update(academyAssessmentAttempts).set({ status: result.passed ? "passed" : "failed", submittedAt: now, scorePercent: result.scorePercent, domainScoresJson: JSON.stringify(result.domainScores), criticalFailuresJson: JSON.stringify(result.criticalFailures) }).where(eq(academyAssessmentAttempts.id, attempt.id));
+    await audit(db, ctx.user.id, "academy_attempt", attempt.attemptRef, `${attempt.assessmentKind.toLowerCase()}.submitted`, { scorePercent: result.scorePercent, courseVersionId: attempt.courseVersionId });
+    const consequences = attemptConsequences(attempt.assessmentKind);
+    return {
+      kind: attempt.assessmentKind, scorePercent: result.scorePercent, reachedPracticeBar: result.passed, domainScores: result.domainScores,
+      weakAreas: weakAreas(result.domainScores, policy.passingScorePercent),
+      missed: result.itemResults.filter(r => !r.correct).map(r => { const q = qrows.find(x => x.questionCode === r.questionCode)!; return { questionCode: r.questionCode, domain: r.domain, explanation: q.explanation, sourceSection: q.sourceSection }; }),
+      consequences, notice: "Practice/mock result only. It does not advance your assignment, create a credential or change dispatch readiness.",
+    };
+  }),
+
+  practiceHistory: roleProcedure("academy.practiceHistory").input(z.object({ assignmentRef: z.string().min(1).max(96).optional() }).optional()).query(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const a = input?.assignmentRef ? await assignmentForSelf(db, ctx.user.id, input.assignmentRef) : null;
+    const rows = await db.select({ attemptRef: academyAssessmentAttempts.attemptRef, kind: academyAssessmentAttempts.assessmentKind, status: academyAssessmentAttempts.status, scorePercent: academyAssessmentAttempts.scorePercent, domainScoresJson: academyAssessmentAttempts.domainScoresJson, startedAt: academyAssessmentAttempts.startedAt, submittedAt: academyAssessmentAttempts.submittedAt, versionRef: academyCourseVersions.versionRef, courseVersionId: academyAssessmentAttempts.courseVersionId })
+      .from(academyAssessmentAttempts).innerJoin(academyCourseVersions, eq(academyCourseVersions.id, academyAssessmentAttempts.courseVersionId))
+      .where(a ? and(eq(academyAssessmentAttempts.userId, ctx.user.id), eq(academyAssessmentAttempts.assignmentId, a.id)) : eq(academyAssessmentAttempts.userId, ctx.user.id)).orderBy(desc(academyAssessmentAttempts.id)).limit(200);
+    return rows.map(r => ({ ...r, domainScores: json<Record<string, number>>(r.domainScoresJson, {}), domainScoresJson: undefined }));
+  }),
+
+  /** Every question you got wrong on this version's practice/mock attempts, with where to study it. */
+  missedQuestions: roleProcedure("academy.missedQuestions").input(z.object({ assignmentRef: z.string().min(1).max(96) }).strict()).query(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const a = await assignmentForSelf(db, ctx.user.id, input.assignmentRef);
+    const attempts = await db.select({ id: academyAssessmentAttempts.id }).from(academyAssessmentAttempts).where(and(eq(academyAssessmentAttempts.assignmentId, a.id), eq(academyAssessmentAttempts.userId, ctx.user.id), inArray(academyAssessmentAttempts.assessmentKind, ["PRACTICE", "MOCK_EXAM"])));
+    if (!attempts.length) return [];
+    const wrong = await db.select().from(academyAssessmentItems).where(and(inArray(academyAssessmentItems.attemptId, attempts.map(x => x.id)), eq(academyAssessmentItems.correct, false)));
+    const qids = Array.from(new Set(wrong.map(w => w.questionId)));
+    if (!qids.length) return [];
+    const qs = await db.select().from(academyQuestions).where(inArray(academyQuestions.id, qids));
+    const mods = await db.select({ code: academyModules.moduleCode, title: academyModules.title, domain: academyModules.domainCode }).from(academyModules).where(eq(academyModules.courseVersionId, a.courseVersionId));
+    return qs.map(q => ({ questionCode: q.questionCode, prompt: q.prompt, domain: q.domainCode, timesMissed: wrong.filter(w => w.questionId === q.id).length, explanation: q.explanation, sourceRef: q.sourceRef, sourceSection: q.sourceSection, studyModule: mods.find(m => m.domain === q.domainCode) ?? null })).sort((x, y) => y.timesMissed - x.timesMissed);
+  }),
+
+  bookmarkToggle: roleProcedure("academy.bookmarkToggle").input(z.object({ assignmentRef: z.string().min(1).max(96), questionCode: z.string().min(1).max(100) }).strict()).mutation(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const a = await assignmentForSelf(db, ctx.user.id, input.assignmentRef);
+    const q = (await db.select({ id: academyQuestions.id }).from(academyQuestions).where(and(eq(academyQuestions.courseVersionId, a.courseVersionId), eq(academyQuestions.questionCode, input.questionCode))).limit(1))[0];
+    if (!q) throw new TRPCError({ code: "NOT_FOUND", message: "Question not found in this version" });
+    const existing = (await db.select().from(academyQuestionBookmarks).where(and(eq(academyQuestionBookmarks.userId, ctx.user.id), eq(academyQuestionBookmarks.questionId, q.id))).limit(1))[0];
+    if (existing) { await db.delete(academyQuestionBookmarks).where(eq(academyQuestionBookmarks.id, existing.id)); return { bookmarked: false }; }
+    await db.insert(academyQuestionBookmarks).values({ userId: ctx.user.id, questionId: q.id });
+    return { bookmarked: true };
+  }),
+
+  bookmarks: roleProcedure("academy.bookmarks").query(async ({ ctx }) => {
+    const db = await dbOrThrow();
+    const marks = await db.select({ questionId: academyQuestionBookmarks.questionId }).from(academyQuestionBookmarks).where(eq(academyQuestionBookmarks.userId, ctx.user.id)).limit(500);
+    if (!marks.length) return [];
+    const qs = await db.select().from(academyQuestions).where(inArray(academyQuestions.id, marks.map(m => m.questionId)));
+    return qs.map(q => ({ questionCode: q.questionCode, courseVersionId: q.courseVersionId, prompt: q.prompt, domain: q.domainCode, sourceSection: q.sourceSection }));
+  }),
+
+  /** The Study Library: authority, edition, dates, licence and review state; offline copy only when confirmed. */
+  studyLibrary: roleProcedure("academy.studyLibrary").query(async () => {
+    const db = await dbOrThrow();
+    const rows = await db.select().from(academySourceRecords).limit(300);
+    return rows.map(s => ({
+      sourceRef: s.sourceRef, authority: s.authority, tier: s.sourceTier, title: s.title, jurisdiction: s.jurisdiction, edition: s.edition, url: s.sourceUrl,
+      kind: s.sourceKind, licenceStatus: s.licenceStatus, licenceNote: s.licenceNote, retrievedAt: s.retrievedAt, reviewedAt: s.reviewedAt, reviewStatus: s.reviewStatus, contentHash: s.contentHash,
+      capabilityCodes: json<string[]>(s.capabilityCodesJson, []),
+      offline: offlineCopyDecision({ reviewStatus: s.reviewStatus, licenceStatus: s.licenceStatus, redistributionConfirmedByUserId: s.redistributionConfirmedByUserId }),
+      authoritative: s.reviewStatus === "reviewed",
+    }));
+  }),
+
+  /** A reviewer confirms the redistribution basis. Required before any offline copy; not implied by a stated licence. */
+  sourceConfirmRedistribution: roleProcedure("academy.sourceConfirmRedistribution").input(z.object({ sourceRef: z.string().min(1).max(96), note: z.string().min(10).max(1000) }).strict()).mutation(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const src = (await db.select().from(academySourceRecords).where(eq(academySourceRecords.sourceRef, input.sourceRef)).limit(1))[0];
+    if (!src) throw new TRPCError({ code: "NOT_FOUND", message: "Source not found" });
+    if (src.reviewStatus !== "reviewed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Review the source before confirming redistribution rights" });
+    if (src.licenceStatus !== "open_licence_stated") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No stated licence permits redistribution; learners open the official source instead" });
+    await db.update(academySourceRecords).set({ redistributionConfirmedByUserId: ctx.user.id, redistributionConfirmedAt: new Date(), notes: `${src.notes ?? ""}\nRedistribution confirmed: ${input.note}`.trim() }).where(eq(academySourceRecords.id, src.id));
+    await audit(db, ctx.user.id, "academy_source", src.sourceRef, "source.redistribution_confirmed", { note: input.note, licenceStatus: src.licenceStatus, contentHash: src.contentHash });
+    return { sourceRef: src.sourceRef, offlineCopyPermitted: true };
+  }),
+
+  /** "Explain this section" — grounded in approved sources for this version, or UNKNOWN / REFER TO AUTHORITY. */
+  tutor: roleProcedure("academy.tutor").input(z.object({
+    assignmentRef: z.string().min(1).max(96), mode: z.enum(["explain", "quiz", "why_wrong", "more_examples"]),
+    question: z.string().min(2).max(500), moduleCode: z.string().max(80).optional(),
+    wrongAnswer: z.object({ questionCode: z.string().min(1).max(100), chosenIndex: z.number().int().min(0).max(20) }).optional(),
+  }).strict()).mutation(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const a = await assignmentForSelf(db, ctx.user.id, input.assignmentRef);
+    const { course, version } = await versionBundle(db, a.courseVersionId);
+    let mods = await db.select().from(academyModules).where(eq(academyModules.courseVersionId, a.courseVersionId));
+    if (input.moduleCode) mods = mods.filter(m => m.moduleCode === input.moduleCode);
+    const blocks = mods.length ? await db.select().from(academyContentBlocks).where(inArray(academyContentBlocks.moduleId, mods.map(m => m.id))) : [];
+    const srcRefs = Array.from(new Set(mods.map(m => m.sourceRef ?? version.sourceSnapshotRef).filter((x): x is string => !!x)));
+    const sources = srcRefs.length ? await db.select().from(academySourceRecords).where(inArray(academySourceRecords.sourceRef, srcRefs)) : [];
+    const passages: TutorPassage[] = blocks.map(b => {
+      const m = mods.find(x => x.id === b.moduleId)!;
+      const sref = m.sourceRef ?? version.sourceSnapshotRef ?? "";
+      const src = sources.find(x => x.sourceRef === sref);
+      return { passageRef: `${m.moduleCode}/${b.blockCode}`, sourceRef: sref, sourceTitle: src?.title ?? sref, sourceUrl: src?.sourceUrl ?? null, sourceEdition: src?.edition ?? null, sourceReviewStatus: src?.reviewStatus ?? "unreviewed", section: m.sourceSection ?? m.title, jurisdiction: course.jurisdiction === "COMPANY" ? null : course.jurisdiction, text: json<string[]>(b.bodyJson, []).join(" "), companySpecific: m.companySpecific };
+    });
+    const qrows = await db.select().from(academyQuestions).where(eq(academyQuestions.courseVersionId, a.courseVersionId));
+    const bank: TutorQuestion[] = qrows.map(q => ({ code: q.questionCode, domain: q.domainCode, prompt: q.prompt, options: json<string[]>(q.optionsJson, []), correctIndex: json<{ correctIndex: number }>(q.correctAnswerJson, { correctIndex: -1 }).correctIndex, explanation: q.explanation ?? "", sourceRef: q.sourceRef, sourceSection: q.sourceSection }));
+    const answer = tutorAnswer({ mode: input.mode, question: input.question, passages, bank, wrongAnswer: input.wrongAnswer ?? null, at: new Date(), jurisdiction: null });
+    await audit(db, ctx.user.id, "academy_tutor", a.assignmentRef, "tutor.answered", { mode: input.mode, status: answer.status, citations: answer.citations.map(c => c.sourceRef) });
+    return { ...answer, versionRef: version.versionRef };
+  }),
+
   dispatchCheck: roleProcedure("academy.dispatchCheck")
     .input(z.object({ userId: z.number().int().positive(), requirementCodes: z.array(z.string().min(1).max(100)).min(1).max(50), jobId: z.number().int().positive().optional() }))
     .query(async ({ ctx, input }) => {
@@ -862,6 +1140,9 @@ export const trainingAcademyRouter = router({
         const supers = await db.select().from(academyDirectSupervisionRecords).where(and(eq(academyDirectSupervisionRecords.traineeUserId, input.userId), eq(academyDirectSupervisionRecords.jobId, input.jobId), eq(academyDirectSupervisionRecords.status, "active"), eq(academyDirectSupervisionRecords.physicalPresenceAttested, true)));
         for (const s of supers) if (s.startsAt <= now && s.endsAt > now && !accepted.some(q => q.code === s.qualificationCode)) accepted.push({ code: s.qualificationCode, status: "current" as const, expiresAt: s.endsAt });
       }
-      return trainingDispatchDecision(reqs.map(r => ({ code: r.requirementCode, title: r.title, qualificationCode: r.qualificationCode, enforcement: r.enforcement, recoveryPath: r.recoveryPath })), accepted, now);
+      // 0172 — verified wallet credentials, through the canonical rule (with Q's parent licence and a
+      // Class 1's provincial restriction read against the requirement's own scope).
+      const canonical = canonicalVerdicts((await holdingRowsFor(db, [input.userId])).map(asHolding), reqs, now);
+      return trainingDispatchDecision(reqs.map(r => ({ code: r.requirementCode, title: r.title, qualificationCode: r.qualificationCode, enforcement: r.enforcement, recoveryPath: r.recoveryPath, requiresInterprovincial: scopeOf(r.conditionsJson).interprovincial })), accepted, now, canonical);
     }),
 });

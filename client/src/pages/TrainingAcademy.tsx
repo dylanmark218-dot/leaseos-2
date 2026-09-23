@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CompliancePanel, LibraryPanel, PathwayPanel, StudyCentrePanel, TutorPanel, WalletPanel, type PracticeFeedback, type PracticeResult, type TutorResult, type UploadForm } from "./TrainingWalletView";
 
 function BoundaryBadge({ value }: { value: string }) {
   const label = value === "employer_certificate" ? "Employer certificate" : value === "company_certificate" ? "Company certificate" : value === "external_track_only" ? "External · track only" : "Knowledge only";
@@ -74,6 +75,44 @@ export default function TrainingAcademy() {
     onError: e => toast.error(e.message),
   });
 
+  /* ---- 0172: wallet, Study Centre, library, pathway, compliance ---- */
+  const wallet = trpc.trainingWallet.myWallet.useQuery();
+  const policies = trpc.trainingWallet.policies.useQuery();
+  const study = trpc.academy.studyCentre.useQuery();
+  const library = trpc.academy.studyLibrary.useQuery();
+  const pathway = trpc.trainingWallet.pathway.useQuery();
+  const dashboard = trpc.trainingWallet.complianceDashboard.useQuery(undefined, { retry: false });
+  const queue = trpc.trainingWallet.handoffQueue.useQuery(undefined, { retry: false, enabled: dashboard.isSuccess });
+  const [practice, setPractice] = useState<null | { assignmentRef: string; attemptRef: string; kind: "PRACTICE" | "MOCK_EXAM"; notice: string; questions: { questionCode: string; domain: string; prompt: string; options: string[]; sourceSection: string | null }[] }>(null);
+  const [practiceAnswers, setPracticeAnswers] = useState<Record<string, number>>({});
+  const [feedback, setFeedback] = useState<Record<string, PracticeFeedback>>({});
+  const [practiceResult, setPracticeResult] = useState<PracticeResult | null>(null);
+  const [tutorAnswer, setTutorAnswer] = useState<TutorResult | null>(null);
+  const [sweepResult, setSweepResult] = useState<{ sent: number; suppressed: number } | null>(null);
+  const [tab, setTab] = useState("mine");
+  const requestTraining = trpc.trainingWallet.requestTraining.useMutation({ onSuccess: async r => { toast.success(r.reused ? "You already have an open request — see its status below." : "Request sent to the office."); await wallet.refetch(); }, onError: e => toast.error(e.message) });
+  const recordOwn = trpc.trainingWallet.recordOwn.useMutation({ onSuccess: async r => { toast.success(r.notice); await wallet.refetch(); }, onError: e => toast.error(e.message) });
+  const handoffSelf = trpc.trainingWallet.handoffSelfUpdate.useMutation({ onSuccess: async () => { toast.success("Thanks — upload your certificate when you have it."); await wallet.refetch(); }, onError: e => toast.error(e.message) });
+  const enroll = trpc.academy.studyEnroll.useMutation({ onSuccess: async r => { toast.success("Enrolled. Preparation only."); await Promise.all([study.refetch(), my.refetch()]); setSelectedRef(r.assignmentRef); }, onError: e => toast.error(e.message) });
+  const practiceOpen = trpc.academy.practiceOpen.useMutation({ onError: e => toast.error(e.message) });
+  const practiceAnswer = trpc.academy.practiceAnswer.useMutation({ onError: e => toast.error(e.message) });
+  const practiceSubmit = trpc.academy.practiceSubmit.useMutation({ onSuccess: data => setPracticeResult(data), onError: e => toast.error(e.message) });
+  const bookmark = trpc.academy.bookmarkToggle.useMutation({ onSuccess: r => toast.success(r.bookmarked ? "Bookmarked." : "Bookmark removed."), onError: e => toast.error(e.message) });
+  const tutor = trpc.academy.tutor.useMutation({ onSuccess: data => setTutorAnswer(data), onError: e => toast.error(e.message) });
+  const handoffUpdate = trpc.trainingWallet.handoffUpdate.useMutation({ onSuccess: async () => { toast.success("Updated. Dispatch readiness is unchanged until a certificate is verified."); await Promise.all([queue.refetch(), dashboard.refetch()]); }, onError: e => toast.error(e.message) });
+  const sweep = trpc.trainingWallet.renewalSweep.useMutation({ onSuccess: r => setSweepResult(r), onError: e => toast.error(e.message) });
+  const resume = trpc.academy.moduleResume.useMutation();
+  const onUpload = (f: UploadForm) => recordOwn.mutate({
+    code: f.code, boundary: f.boundary as never, issuer: f.issuer || undefined, certificateNumber: f.certificateNumber || undefined,
+    issuedAt: f.issuedAt ? new Date(f.issuedAt) : null, expiresAt: f.expiresAt ? new Date(f.expiresAt) : null,
+    documentRef: f.documentRef || undefined, backDocumentRef: f.backDocumentRef || undefined,
+    restrictions: f.restrictions ? f.restrictions.split(",").map(x => x.trim()).filter(Boolean) : undefined,
+  });
+  const openPractice = async (assignmentRef: string, kind: "PRACTICE" | "MOCK_EXAM") => {
+    const data = await practiceOpen.mutateAsync({ assignmentRef, kind });
+    setPractice({ ...data, assignmentRef }); setPracticeAnswers({}); setFeedback({}); setPracticeResult(null);
+  };
+
   const selected = detail.data;
   const progress = useMemo(() => {
     if (!selected?.modules.length) return 0;
@@ -98,12 +137,47 @@ export default function TrainingAcademy() {
           </div>
         </header>
 
-        <Tabs defaultValue="mine" className="space-y-5">
-          <TabsList className="h-11 rounded-xl bg-white p-1 shadow-sm">
-            <TabsTrigger value="mine" className="rounded-lg">My Training</TabsTrigger>
-            <TabsTrigger value="catalog" className="rounded-lg">Course Catalog</TabsTrigger>
-            <TabsTrigger value="tickets" className="rounded-lg">Tickets & Qualifications</TabsTrigger>
+        <Tabs value={tab} onValueChange={setTab} className="space-y-5">
+          <TabsList className="flex h-auto min-h-12 flex-wrap gap-1 rounded-xl bg-white p-1 shadow-sm">
+            <TabsTrigger value="mine" className="min-h-10 rounded-lg">My Training</TabsTrigger>
+            <TabsTrigger value="wallet" className="min-h-10 rounded-lg">My Wallet</TabsTrigger>
+            <TabsTrigger value="study" className="min-h-10 rounded-lg">Driver Study Centre</TabsTrigger>
+            <TabsTrigger value="library" className="min-h-10 rounded-lg">Study Library</TabsTrigger>
+            <TabsTrigger value="pathway" className="min-h-10 rounded-lg">Career Path</TabsTrigger>
+            <TabsTrigger value="catalog" className="min-h-10 rounded-lg">Course Catalog</TabsTrigger>
+            <TabsTrigger value="tickets" className="min-h-10 rounded-lg">Tickets & Qualifications</TabsTrigger>
+            {dashboard.isSuccess && <TabsTrigger value="compliance" className="min-h-10 rounded-lg">Training Compliance</TabsTrigger>}
           </TabsList>
+
+          <TabsContent value="wallet">
+            <WalletPanel wallet={wallet.data ?? null} policies={policies.data?.policies ?? []} onRequestTraining={code => requestTraining.mutate({ qualificationCode: code })} requesting={requestTraining.isPending} onUpload={onUpload} uploading={recordOwn.isPending} onHandoffDone={ref => handoffSelf.mutate({ handoffRef: ref, to: "TRAINING_COMPLETED" })} />
+          </TabsContent>
+
+          <TabsContent value="study" className="space-y-5">
+            <StudyCentrePanel
+              courses={study.data ?? []}
+              onEnroll={code => enroll.mutate({ courseCode: code })}
+              onOpenLessons={ref => { setSelectedRef(ref); setTab("mine"); }}
+              onOpen={(ref, kind) => { void openPractice(ref, kind).catch(() => undefined); }}
+              attempt={practice}
+              feedback={feedback}
+              answers={practiceAnswers}
+              onAnswer={(code, idx) => {
+                setPracticeAnswers(a => ({ ...a, [code]: idx }));
+                if (practice?.kind === "PRACTICE") void practiceAnswer.mutateAsync({ attemptRef: practice.attemptRef, questionCode: code, presentedIndex: idx }).then(fb => setFeedback(f => ({ ...f, [code]: fb }))).catch(() => undefined);
+              }}
+              onSubmit={() => practice && practiceSubmit.mutate({ attemptRef: practice.attemptRef, answers: practiceAnswers })}
+              result={practiceResult}
+              onBookmark={code => practice && bookmark.mutate({ assignmentRef: practice.assignmentRef, questionCode: code })}
+            />
+            {(practice || practiceResult) && <Button variant="outline" className="min-h-12 rounded-xl" onClick={() => { setPractice(null); setPracticeResult(null); }}>Back to courses</Button>}
+          </TabsContent>
+
+          <TabsContent value="library"><LibraryPanel sources={library.data ?? []} /></TabsContent>
+          <TabsContent value="pathway"><PathwayPanel pathways={pathway.data ?? []} /></TabsContent>
+          {dashboard.isSuccess && <TabsContent value="compliance">
+            <CompliancePanel dashboard={dashboard.data ?? null} queue={queue.data ?? []} onMark={(ref, mark) => handoffUpdate.mutate({ handoffRef: ref, mark })} onSweep={() => sweep.mutate()} sweeping={sweep.isPending} sweepResult={sweepResult} />
+          </TabsContent>}
 
           <TabsContent value="mine" className="space-y-5">
             <div className="grid gap-5 lg:grid-cols-[340px_minmax(0,1fr)]">
@@ -147,7 +221,7 @@ export default function TrainingAcademy() {
                           <CardHeader className="pb-3"><div className="flex items-start justify-between gap-3"><div className="flex gap-3"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold ${done ? "bg-emerald-100 text-emerald-800" : "bg-[#edf2f8] text-[#40546e]"}`}>{done ? <CheckCircle2 className="h-5 w-5" /> : index + 1}</div><div><CardTitle className="text-base">{m.title}</CardTitle><p className="mt-1 text-xs text-[#6e7f96]">{m.domain} · {m.estimatedMinutes ?? "—"} min · {m.moduleCode}</p></div></div><Badge variant={done ? "secondary" : "outline"}>{m.stale ? "Version changed" : done ? "Complete" : "Required"}</Badge></div></CardHeader>
                           <CardContent className="space-y-3">
                             {m.blocks.map(b => <div key={b.code} className="rounded-xl border border-[#e6ebf1] bg-[#fbfcfe] p-4"><p className="text-sm font-semibold">{b.title}</p><div className="mt-2 space-y-2 text-sm leading-6 text-[#52657d]">{b.body.map((line, i) => <p key={i}>{line}</p>)}</div></div>)}
-                            {!done && <div className="flex justify-end"><Button disabled={complete.isPending} onClick={() => complete.mutate({ assignmentRef: selected.assignment.ref, moduleCode: m.moduleCode })} className="rounded-xl bg-[#132a4a] hover:bg-[#1c3a62]">{complete.isPending ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}Complete current module</Button></div>}
+                            {!done && <div className="flex justify-end"><Button disabled={complete.isPending} onClick={() => { resume.mutate({ assignmentRef: selected.assignment.ref, moduleCode: m.moduleCode }); complete.mutate({ assignmentRef: selected.assignment.ref, moduleCode: m.moduleCode }); }} className="min-h-12 rounded-xl bg-[#132a4a] hover:bg-[#1c3a62]">{complete.isPending ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}Complete current module</Button></div>}
                           </CardContent>
                         </Card>;
                       })}
@@ -166,6 +240,7 @@ export default function TrainingAcademy() {
                       onAnswer={(code, answer) => setAnswers(v => ({ ...v, [code]: answer }))}
                       onSubmit={() => attempt && submitAssessment.mutate({ attemptRef: attempt.attemptRef, answers })}
                     />
+                    <TutorPanel asking={tutor.isPending} answer={tutorAnswer} onAsk={(mode, question) => tutor.mutate({ assignmentRef: selected.assignment.ref, mode, question })} />
                   </>
                 )}
               </div>

@@ -95,6 +95,7 @@ import { inboundRouter, integrationRouter } from "./integrationRouter";
 import { telematicsRouter } from "./telematicsRouter";
 import { workforceRouter } from "./workforceRouter";
 import { trainingAcademyRouter } from "./trainingAcademyRouter";
+import { trainingWalletRouter } from "./trainingWalletRouter";
 import { contractorOperationsRouter } from "./contractorOperationsRouter";
 import { auditRouter } from "./auditRouter";
 import { spatialRouter } from "./spatialRouter";
@@ -376,6 +377,7 @@ export const appRouter = router({
   telematics: telematicsRouter,
   workforce: workforceRouter,
   academy: trainingAcademyRouter,
+  trainingWallet: trainingWalletRouter,
   audit: auditRouter,
   spatial: spatialRouter,
   // v21.18 — machines only; gated by integrationProcedure, never by roles.

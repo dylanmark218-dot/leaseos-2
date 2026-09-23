@@ -23,7 +23,9 @@ import { z } from "zod";
 import { and, eq, gte, isNull, lte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { crewMembers, crews, leaveRequests, shiftInterests, shiftPosts, workerQualifications } from "../drizzle/schema";
+import { academyAssignments, academyCourses, academyCourseVersions, crewMembers, crews, externalTrainingHandoffs, leaveRequests, shiftInterests, shiftPosts, workerQualifications } from "../drizzle/schema";
+import { lifecycleFacts, policyFor } from "./_core/credentialLifecycle";
+import { asHolding, settingsFor, tenantSettings } from "./trainingWalletService";
 import { resolveActingScope } from "./_core/actingScope";
 import type { DbOrTx } from "./_core/dbTypes";
 import {
@@ -68,24 +70,71 @@ async function buildEvents(d: DbOrTx, args: { tenantId: string; forUserId: numbe
     }));
   }
 
-  /* Qualification expiries. A verified holding with no expiry is unknown. */
+  /* Qualification expiries. A verified holding with no expiry is unknown — unless its policy says
+     there is no renewal by rule (Q), in which case there is no date to project at all. 0172: a
+     company-policy review date is projected as such, never as an expiry. */
   const held = await d.select().from(workerQualifications).where(and(
     eq(workerQualifications.userId, args.forUserId),
     eq(workerQualifications.verificationState, "verified"),
   )).limit(200);
+  const walletSettings = await tenantSettings(d as never, args.tenantId);
   for (const h of held) {
     if (h.supersededByHoldingRef) continue;
+    const policy = policyFor(h.code);
+    if (policy?.lifecycle === "no_expiry_endorsement") continue;
+    const facts = lifecycleFacts({ code: h.code, holdings: held.map(asHolding), policy, settings: settingsFor(walletSettings, h.code), now: args.from });
+    if (facts.basis === "employer_review") {
+      if (facts.employerReviewAt && facts.employerReviewAt >= args.from && facts.employerReviewAt <= args.to) {
+        events.push(project({
+          layer: "training", title: `Company policy review: ${h.displayName ?? h.code}`, detail: "Company policy — not a legal expiry",
+          at: facts.employerReviewAt, endsAt: null, allDay: true,
+          severity: severityOf({ dueAt: facts.employerReviewAt, now: args.from, blocksWork: false }), visibility: "operational", ownerUserId: h.userId,
+          source: { sourceType: "workerQualification", sourceRef: h.holdingRef, generatedBy: "qualification_review_projection" },
+        }));
+      }
+      continue;
+    }
     if (h.expiresAt && (h.expiresAt < args.from || h.expiresAt > args.to)) continue;
     events.push(project({
       layer: "compliance",
       title: h.expiresAt ? `${h.code} expires` : `${h.code} — no expiry recorded`,
-      detail: h.certificateNumber,
+      detail: null,
       at: h.expiresAt ?? args.from, endsAt: null, allDay: true,
       // blocksWork is true: a ticket the work requires is a blocking expiry.
       severity: severityOf({ dueAt: h.expiresAt, now: args.from, blocksWork: true }),
       visibility: "operational",
       ownerUserId: h.userId,
       source: { sourceType: "workerQualification", sourceRef: h.holdingRef, generatedBy: "qualification_projection" },
+    }));
+  }
+
+  /* 0172 — external training appointments, from the handoff that owns them. A booking is not a
+     credential; the event says so and points back to the request. */
+  const booked = await d.select().from(externalTrainingHandoffs).where(and(
+    eq(externalTrainingHandoffs.userId, args.forUserId),
+    lte(externalTrainingHandoffs.appointmentAt, args.to),
+    gte(externalTrainingHandoffs.appointmentAt, args.from),
+  )).limit(100);
+  for (const b of booked) {
+    if (!b.appointmentAt || b.status === "CANCELLED" || b.status === "NOT_REQUIRED") continue;
+    events.push(project({
+      layer: "training", title: `Training appointment: ${policyFor(b.qualificationCode)?.displayName ?? b.qualificationCode}`,
+      detail: "External training booking — the credential counts only once its certificate is verified",
+      at: b.appointmentAt, endsAt: b.appointmentEndsAt, allDay: false, severity: "informational", visibility: "operational", ownerUserId: b.userId,
+      source: { sourceType: "externalTrainingHandoff", sourceRef: b.handoffRef, generatedBy: "training_handoff_projection" },
+    }));
+  }
+
+  /* 0172 — Academy course due dates, from the assignment that owns them. */
+  const due = await d.select({ ref: academyAssignments.assignmentRef, dueAt: academyAssignments.dueAt, status: academyAssignments.status, userId: academyAssignments.userId, title: academyCourses.title })
+    .from(academyAssignments).innerJoin(academyCourseVersions, eq(academyCourseVersions.id, academyAssignments.courseVersionId)).innerJoin(academyCourses, eq(academyCourses.id, academyCourseVersions.courseId))
+    .where(and(eq(academyAssignments.userId, args.forUserId), lte(academyAssignments.dueAt, args.to), gte(academyAssignments.dueAt, args.from))).limit(100);
+  for (const a of due) {
+    if (!a.dueAt || a.status === "completed" || a.status === "cancelled") continue;
+    events.push(project({
+      layer: "training", title: `${a.status === "practical_pending" ? "Practical evaluation due" : "Course due"}: ${a.title}`, detail: null,
+      at: a.dueAt, endsAt: null, allDay: true, severity: severityOf({ dueAt: a.dueAt, now: args.from, blocksWork: false }), visibility: "operational", ownerUserId: a.userId,
+      source: { sourceType: "academyAssignment", sourceRef: a.ref, generatedBy: "academy_due_projection" },
     }));
   }
 

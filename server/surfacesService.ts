@@ -8,7 +8,7 @@
  */
 
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
-import { resolveActingScope } from "./_core/actingScope";
+import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { getDb } from "./db";
 import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
@@ -17,6 +17,9 @@ import {
   syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders, academyInspectorRequests, securityIncidents, privacyBreachAssessments, incidentNotificationObligations, facilities, facilityEvidence, facilitySourceLicences } from "../drizzle/schema";
 import { calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import type { ExceptionSources } from "./_core/exceptionCentre";
+import { academyRequirements, externalTrainingHandoffs, workerQualifications } from "../drizzle/schema";
+import { lifecycleFacts, policyFor } from "./_core/credentialLifecycle";
+import { academyHoldingsFor, asHolding, isCurrentVerified, settingsFor, tenantsForUsers, tenantSettings, type TenantSettings } from "./trainingWalletService";
 import { loadUngatedAssignments } from "./dispatchEnforcementService";
 import { loadFuelLineFindings } from "./periodCloseService";
 
@@ -133,6 +136,50 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
     carrierProfileReviews: Array.from(latestReviews.values()),
     ungatedAssignments: await loadUngatedAssignments(),
     ...(await loadFuelLineFindings()),
+    ...(await loadTrainingWalletExceptions(db, now)),
+  };
+}
+
+/**
+ * 0172 — the training wallet's open items for the Exception Centre. Current verified holdings whose
+ * governing date (legal expiry, or a company review date labelled as such) is within 30 days or past;
+ * uploads waiting on a verifier; training requests waiting on the office. Q-style endorsements with no
+ * renewal by rule never appear. Derived at read time, like everything else here.
+ */
+async function loadTrainingWalletExceptions(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, now: Date): Promise<Pick<ExceptionSources, "walletRenewals" | "walletUnverified" | "trainingHandoffs">> {
+  const soon = new Date(now.getTime() + 30 * DAY);
+  const rows = await db.select().from(workerQualifications).where(inArray(workerQualifications.verificationState, ["verified", "unverified", "extracted"])).limit(5000);
+  const bound = new Set((await db.select({ code: academyRequirements.qualificationCode }).from(academyRequirements).where(eq(academyRequirements.active, true))).map(r => r.code));
+  const renewals: NonNullable<ExceptionSources["walletRenewals"]> = [];
+  const settingsCache = new Map<string, TenantSettings>();
+  const settingsOf = async (t: string) => { if (!settingsCache.has(t)) settingsCache.set(t, await tenantSettings(db, t)); return settingsCache.get(t)!; };
+  const byUser = new Map<number, typeof rows>();
+  for (const r of rows) byUser.set(r.userId, [...(byUser.get(r.userId) ?? []), r]);
+  for (const [userId, rs] of Array.from(byUser.entries())) {
+    const holdings = rs.map(asHolding);
+    for (const r of rs.filter(isCurrentVerified)) {
+      const policy = policyFor(r.code);
+      if (!policy || policy.lifecycle === "no_expiry_endorsement") continue;
+      const f = lifecycleFacts({ code: r.code, holdings, policy, settings: settingsFor(await settingsOf(r.tenantId ?? SINGLE_TENANT_ID), r.code), now });
+      if (!f.reminderTarget || f.reminderTarget.at > soon) continue;
+      renewals.push({ tenantId: r.tenantId ?? SINGLE_TENANT_ID, holdingRef: r.holdingRef, userId, code: r.code, displayName: r.displayName ?? policy.displayName, targetAt: f.reminderTarget.at, targetKind: f.reminderTarget.kind, boundToDispatch: bound.has(r.code) });
+    }
+  }
+  // Academy-issued certificates (TDG road and company sign-offs) near expiry, tagged with the holder's organization.
+  const academy = await academyHoldingsFor(db);
+  const academyTenant = await tenantsForUsers(db, academy.map(a => a.userId!));
+  for (const a of academy) {
+    const policy = policyFor(a.code);
+    if (!policy || policy.lifecycle === "no_expiry_endorsement" || !a.expiresAt || a.expiresAt > soon) continue;
+    const t = academyTenant.get(a.userId!) ?? SINGLE_TENANT_ID;
+    if (t === "ambiguous") continue;
+    renewals.push({ tenantId: t, holdingRef: a.holdingRef, userId: a.userId!, code: a.code, displayName: policy.displayName, targetAt: a.expiresAt, targetKind: "legal_expiry", boundToDispatch: bound.has(a.code) });
+  }
+  const handoffs = await db.select().from(externalTrainingHandoffs).where(inArray(externalTrainingHandoffs.status, ["REQUESTED", "ADMIN_REVIEW", "DOCUMENT_UPLOADED_UNVERIFIED", "UNKNOWN"])).limit(1000);
+  return {
+    walletRenewals: renewals,
+    walletUnverified: rows.filter(r => r.verificationState === "unverified" || r.verificationState === "extracted").map(r => ({ tenantId: r.tenantId ?? SINGLE_TENANT_ID, holdingRef: r.holdingRef, userId: r.userId, code: r.code, recordedAt: r.recordedAt })),
+    trainingHandoffs: handoffs.map(h => ({ tenantId: h.tenantId, handoffRef: h.handoffRef, userId: h.userId, code: h.qualificationCode, status: h.status, requestedAt: h.requestedAt, dueAt: h.dueAt })),
   };
 }
 

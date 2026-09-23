@@ -43,6 +43,7 @@ import { assessCoverage, type PolicyRecord } from "./_core/insuranceRisk";
 import { calibrationEffectOnUse, calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import { medicalFitnessForDispatch } from "./_core/compliancePassport";
 import { trainingDispatchDecision } from "./_core/trainingAcademy";
+import { asHolding, canonicalVerdicts, holdingRowsFor, scopeOf } from "./trainingWalletService";
 import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
@@ -275,7 +276,11 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
             accepted.push({ code: sup.qualificationCode, status: "current" as const, expiresAt: sup.endsAt });
           }
         }
-        const decision = trainingDispatchDecision(applicable.map(r => ({ code: r.requirementCode, title: r.title, qualificationCode: r.qualificationCode, enforcement: r.enforcement, recoveryPath: r.recoveryPath })), accepted, now);
+        // 0172 — verified wallet credentials through the canonical rule. Handoffs, bookings and practice
+        // results are never read here; only a verified holding can change this answer.
+        const walletRows = await holdingRowsFor(db, [op.userId]);
+        const canonical = canonicalVerdicts(walletRows.map(asHolding), applicable, now);
+        const decision = trainingDispatchDecision(applicable.map(r => ({ code: r.requirementCode, title: r.title, qualificationCode: r.qualificationCode, enforcement: r.enforcement, recoveryPath: r.recoveryPath, requiresInterprovincial: scopeOf(r.conditionsJson).interprovincial })), accepted, now, canonical);
         // P0.6: the code is the requirement's own. A code derived from the title changes the moment
         // somebody edits the wording, and every override keyed to the old one stops matching.
         for (const b of decision.blocking) extra.push({ code: `academy_${b.code}`.slice(0, 80), label: b.detail, severity: "blocking", subject: "operator", overridable: false });
@@ -286,6 +291,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
           ...reqs.map(r => `${r.id}:${r.requirementCode}:${r.qualificationCode}:${r.enforcement}:${r.active}:${r.updatedAt.toISOString()}`),
           ...quals.map(q => `${q.id}:${q.qualificationCode}:${q.status}:${q.expiresAt?.toISOString() ?? "∅"}:${q.updatedAt.toISOString()}`),
           ...supers.map(x => `${x.id}:${x.qualificationCode}:${x.status}:${x.physicalPresenceAttested}:${x.startsAt.toISOString()}:${x.endsAt.toISOString()}`),
+          ...walletRows.map(w => `${w.holdingRef}:${w.code}:${w.verificationState}:${w.expiresAt?.toISOString() ?? "∅"}:${w.supersededByHoldingRef ?? "∅"}:${w.restrictionsJson ?? "∅"}`),
         ]);
       }
     }

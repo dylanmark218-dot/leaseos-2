@@ -153,14 +153,21 @@ d("a TDG certificate does not accept typed aspects", () => {
 });
 
 d("an inspector's fifteen days", () => {
+  // 0172: the certificate gets its own assignment. It used to name assignment id 1 — whichever row another
+  // suite happened to create first — so this suite's outcome depended on what ran before it.
   async function certificate(versionId: number, courseId: number, userId: number) {
     const certificateRef = `ACAD-CERT-${rnd()}`;
+    const [asg] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO academyAssignments (assignmentRef, userId, courseVersionId, status, assignedByUserId) VALUES (?,?,?,'completed',1)",
+      [`ACAD-ASG-${rnd()}`, userId, versionId]);
+    lastAssignmentId = asg.insertId;
     await pool.execute(
       `INSERT INTO academyCertificates (certificateRef, userId, courseId, courseVersionId, assignmentId, qualificationCode, credentialBoundary, issuedByUserId, issuedAt, sourceSnapshotRef, policySnapshotHash, certificateHash, retentionUntil)
        VALUES (?,?,?,?,?,?,?,?,NOW(),?,?,?,?)`,
-      [certificateRef, userId, courseId, versionId, 1, "TDG_ROAD", "employer_certificate", 1, "S1", "p", "c", new Date("2031-01-01")]);
+      [certificateRef, userId, courseId, versionId, asg.insertId, "TDG_ROAD", "employer_certificate", 1, "S1", "p", "c", new Date("2031-01-01")]);
     return certificateRef;
   }
+  let lastAssignmentId = 0;
 
   it("runs the clock from the request and stores the deadline", async () => {
     const office = await person("safety");
@@ -181,13 +188,17 @@ d("an inspector's fifteen days", () => {
     const learner = await person("driver");
     const certificateRef = await certificate(f.versionId, f.courseId, learner);
     // The record of training: an assessment attempt behind the certificate's assignment.
+    // 0172: a real row. The previous insert named columns this table does not have and swallowed the error,
+    // so there was never a record of training and the "complete" branch below never ran.
     await pool.execute(
-      "INSERT INTO academyAssessmentAttempts (attemptRef, assignmentId, courseVersionId, userId, status, presentedJson, responsesJson, scorePercent, passed, startedAt) VALUES (?,?,?,?,?,?,?,?,?,NOW())",
-      [`ACAD-ATT-${rnd()}`, 1, f.versionId, learner, "submitted", "[]", "[]", 100, 1]).catch(() => undefined);
+      "INSERT INTO academyAssessmentAttempts (attemptRef, assessmentId, assignmentId, userId, courseVersionId, status, attemptNumber, scorePercent, policySnapshotJson, questionSetJson, questionSetHash, assessmentKind) VALUES (?,?,?,?,?,?,?,?,?,?,?,'FINAL_INTERNAL')",
+      [`ACAD-ATT-${rnd()}`, 1, lastAssignmentId, learner, f.versionId, "passed", 1, 100, "{}", "[]", "h"]);
     const created = await callerFor(office).academy.inspectorRequestCreate({ certificateRef, issuingAuthority: "Transport Canada", requestDatedAt: new Date() });
     const a = await callerFor(office).academy.inspectorRequestAssemble({ requestRef: created.requestRef });
     expect(a.parts).toContain("training_certificate");
     expect(a.parts).toContain("training_material_description");
+    expect(a.parts).toContain("record_of_training");
+    expect(a.complete).toBe(true);
     // Complete only when nothing is missing; the shape never lies.
     expect(a.complete).toBe(a.missing.length === 0);
     if (a.complete) expect(a.packageHash).toMatch(/^[0-9a-f]+$/);

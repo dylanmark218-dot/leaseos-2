@@ -1,13 +1,29 @@
 import { stableHash, type AcademyQuestion, type AssessmentPolicy, type CredentialBoundary } from "./trainingAcademy";
+import { STUDY_CENTRE_COURSES, STUDY_LIBRARY_SOURCES } from "./studyCentreCatalog";
 
 export type AcademyContentBlockSeed = { code: string; kind: "lesson" | "callout" | "procedure" | "scenario" | "knowledge_check" | "source_note"; title: string; body: string[] };
-export type AcademyModuleSeed = { code: string; title: string; domain: string; minutes: number; practical?: boolean; blocks: AcademyContentBlockSeed[] };
+export type AcademyModuleSeed = { code: string; title: string; domain: string; minutes: number; practical?: boolean; blocks: AcademyContentBlockSeed[]; sourceRef?: string; sourceSection?: string; companySpecific?: boolean };
 export type AcademyCourseSeed = {
   code: string; title: string; category: "whmis" | "tdg" | "erg" | "commercial_driver" | "air_brake" | "load_securement" | "company" | "external_track";
   jurisdiction: string; credentialBoundary: CredentialBoundary; qualificationCode?: string; regulated?: boolean; requiresPractical?: boolean;
   sourceRef?: string; policy: AssessmentPolicy; modules: AcademyModuleSeed[]; questions: AcademyQuestion[];
+  /** 0172 — published version. A new number publishes a new version; older attempts stay on theirs. */
+  version?: number;
+  /** 0172 — practice/mock settings for study tracks. */
+  practice?: { mockQuestionCount: number; mockPassingPercent: number };
+  /** 0172 — Study Centre grouping and the boundary warning shown on every lesson. */
+  studyCentre?: { track: "commercial_driver" | "company" | "external_credential"; jurisdiction: string; boundaryNotice: string };
 };
-export type AcademySourceSeed = { sourceRef: string; authority: string; sourceTier: "authority" | "industry_association" | "vendor" | "unknown"; title: string; sourceUrl: string; jurisdiction: string; edition: string; notes: string };
+export type AcademySourceSeed = {
+  sourceRef: string; authority: string; sourceTier: "authority" | "industry_association" | "vendor" | "unknown"; title: string; sourceUrl: string; jurisdiction: string; edition: string; notes: string;
+  /** 0172 — Study Library fields. */
+  sourceKind?: "study_source" | "provider_directory" | "regulatory_reference";
+  licenceStatus?: "unknown" | "link_only" | "open_licence_stated" | "redistribution_prohibited";
+  licenceNote?: string;
+  retrievedOn?: string;
+  contentHash?: string | null;
+  capabilityCodes?: string[];
+};
 
 const block = (code: string, kind: AcademyContentBlockSeed["kind"], title: string, ...body: string[]): AcademyContentBlockSeed => ({ code, kind, title, body });
 const module = (code: string, title: string, domain: string, minutes: number, blocks: AcademyContentBlockSeed[], practical = false): AcademyModuleSeed => ({ code, title, domain, minutes, blocks, practical });
@@ -121,6 +137,7 @@ export const ACADEMY_SOURCES: AcademySourceSeed[] = [
   { sourceRef: "SRC-WHMIS-AB-2026", authority: "Alberta OHS / CCOHS", sourceTier: "authority", title: "WHMIS employer education and workplace-specific training source set", sourceUrl: "https://www.alberta.ca/whmis", jurisdiction: "CA-AB", edition: "review-required snapshot 2026-09", notes: "Seeded unreviewed. A safety/authorized reviewer must review the company's governing snapshot before LeaseOS may issue the employer certificate." },
   { sourceRef: "SRC-TDG-ROAD-2026", authority: "Transport Canada", sourceTier: "authority", title: "TDG road training / documentation / dangerous-goods marks source set", sourceUrl: "https://tc.canada.ca/en/dangerous-goods", jurisdiction: "CA", edition: "review-required snapshot 2026-09", notes: "Road scope only. Does not authorize air/marine training certificates." },
   { sourceRef: "SRC-ERG-2024", authority: "Transport Canada CANUTEC", sourceTier: "authority", title: "Emergency Response Guidebook 2024", sourceUrl: "https://tc.canada.ca/en/dangerous-goods/canutec/emergency-response-guidebook", jurisdiction: "CA", edition: "ERG 2024", notes: "Knowledge/reference source; ERG course remains knowledge-only." },
+  ...STUDY_LIBRARY_SOURCES,
   { sourceRef: "SRC-COMPANY-POLICY-TEMPLATE", authority: "Employer", sourceTier: "authority", title: "Company policy template — requires company review before certification", sourceUrl: "internal://leaseos/academy/company-policy-template", jurisdiction: "COMPANY", edition: "template-1", notes: "May be studied/edited. Cannot govern certificate issuance until reviewed for the employer." },
 ];
 
@@ -176,10 +193,10 @@ export const ACADEMY_COURSES: AcademyCourseSeed[] = [
   { code: "ERG-2024", title: "Emergency Response Guidebook 2024", category: "erg", jurisdiction: "CA", credentialBoundary: "knowledge_only", qualificationCode: "ERG_KNOWLEDGE", regulated: false, requiresPractical: false, sourceRef: "SRC-ERG-2024", policy: { questionCount: 15, passingScorePercent: 80, failOnCriticalMiss: true, maxAttempts: 5 }, modules: ergModules, questions: ERG_QUESTION_BANK },
   { code: "LOAD-SECUREMENT", title: "Commercial Load Securement · Company Competency", category: "load_securement", jurisdiction: "CA", credentialBoundary: "company_certificate", qualificationCode: "LOAD_SECUREMENT_COMPETENT", requiresPractical: true, sourceRef: "SRC-COMPANY-POLICY-TEMPLATE", policy: { questionCount: 1, passingScorePercent: 100, failOnCriticalMiss: true }, modules: [module("SEC-01", "General securement principles, WLL and damaged equipment", "securement", 30, [block("SEC-01-A", "lesson", "General rule plus commodity rules", "LeaseOS may calculate a configured general WLL check, but a commodity-specific rule remains a separate gate.", "Damaged/unmarked tiedowns and unsuitable anchor points are rejected rather than credited.")], true), module("SEC-02", "Commodity-specific securement and inspections", "securement", 30, [block("SEC-02-A", "scenario", "Do not overgeneralize", "Pipe, logs, heavy equipment, vehicles, coils and other commodities may have specific requirements. The AI Secretary identifies the rule family from verified load type and asks for qualified confirmation.")], true)], questions: [{ code: "SEC-01", domain: "securement", prompt: "If a commodity-specific securement rule applies, may the general aggregate-WLL calculation alone clear the load?", options: ["No; the commodity-specific method must also be checked", "Yes", "Only at night", "Only on private roads"], correctIndex: 0, explanation: "Commodity-specific requirements remain an independent gate.", critical: true }] },
   { code: "COMPANY-CORE", title: "Company / Site / Customer Orientation", category: "company", jurisdiction: "COMPANY", credentialBoundary: "company_certificate", qualificationCode: "COMPANY_CORE", requiresPractical: false, sourceRef: "SRC-COMPANY-POLICY-TEMPLATE", policy: { questionCount: 1, passingScorePercent: 100 }, modules: [module("COMP-01", "Company policies, ERP, stop-work and reporting", "company", 30, [block("COMP-01-A", "lesson", "Company-specific by design", "This course is a template until the employer reviews and publishes its own policy snapshot.", "The Academy may let workers study a draft, but certificate issuance remains blocked until the governing source is reviewed.")])], questions: [{ code: "COMP-01", domain: "company", prompt: "May LeaseOS issue a company certificate from an unreviewed generic policy template?", options: ["No; the employer's governing source snapshot must be reviewed", "Yes after any quiz", "Yes for managers", "Yes when offline"], correctIndex: 0, explanation: "Company certificates are version/source controlled.", critical: true }] },
-  genericTrack("CLASS1", "Class 1 commercial driver learning", "commercial_driver", "DRIVER_LICENCE_CLASS_1", ["Class 1 vehicle systems and inspection", "Coupling/uncoupling and backing", "Weights, securement and trip planning", "HOS, fatigue and emergency procedures"]),
-  genericTrack("CLASS2", "Class 2 commercial driver learning", "commercial_driver", "DRIVER_LICENCE_CLASS_2", ["Class 2 inspection and operation", "Passenger loading/unloading and accessibility", "Tail swing, mirrors and emergency evacuation"]),
-  genericTrack("CLASS3", "Class 3 commercial driver learning", "commercial_driver", "DRIVER_LICENCE_CLASS_3", ["Class 3 inspection and braking", "Axle loading, backing and vocational equipment", "Lease/gravel/forestry road operation"]),
-  genericTrack("AIRBRAKE-Q", "Air Brake Q endorsement preparation", "air_brake", "AIR_BRAKE_Q", ["Air supply, compressor, governor and reservoirs", "Service, parking and emergency circuits", "Low-air warnings, spring brakes, leaks and pre-trip practical"]),
+  // 0172 — CLASS1/2/3 and AIRBRAKE-Q were one-question placeholders at version 1; they are now
+  // versioned Study Centre tracks (version 2) with source-grounded modules and original practice banks.
+  // Version 1 stays in the database with its attempts; synchronizeCatalog publishes version 2 beside it.
+  ...STUDY_CENTRE_COURSES,
   genericTrack("H2S-TRACK", "H2S Alive external credential tracking", "external_track", "H2S_ALIVE", ["Company H2S awareness and external-certificate boundary"]),
   genericTrack("FIRSTAID-TRACK", "First Aid external credential tracking", "external_track", "FIRST_AID", ["Company first-aid response roles and external-certificate boundary"]),
 ];

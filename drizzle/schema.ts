@@ -6931,6 +6931,24 @@ export const workerQualifications = mysqlTable("workerQualifications", {
   recordedByUserId: int("recordedByUserId").notNull(),
   recordedAt: timestamp("recordedAt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /* ---- 0172: the wallet. A verified row's facts are frozen by 0173. ---- */
+  displayName: varchar("displayName", { length: 220 }),
+  issuer: varchar("issuer", { length: 220 }),
+  issuingJurisdiction: varchar("issuingJurisdiction", { length: 40 }),
+  endorsementsJson: text("endorsementsJson"),
+  /** e.g. ["PROVINCIAL_RESTRICTION"] on a restricted Alberta Class 1. Read against the job's scope. */
+  restrictionsJson: text("restrictionsJson"),
+  walletBoundary: mysqlEnum("walletBoundary", ["employer_issued", "company_competency", "regulator_issued", "external_provider", "study_only"]),
+  /** How a person checked it. `ocr_extraction` is never accepted as verification. */
+  verificationMethod: varchar("verificationMethod", { length: 40 }),
+  verificationSource: varchar("verificationSource", { length: 300 }),
+  /** `documentRef` is the front/primary document; this is the back or second page. */
+  backDocumentRef: varchar("backDocumentRef", { length: 64 }),
+  /** Safety/HR only. Never returned to dispatch or to the operational view. */
+  privateNotes: text("privateNotes"),
+  supersedesHoldingRef: varchar("supersedesHoldingRef", { length: 64 }),
+  policyRef: varchar("policyRef", { length: 96 }),
+  handoffRef: varchar("handoffRef", { length: 96 }),
 });
 export type WorkerQualificationRow = typeof workerQualifications.$inferSelect;
 
@@ -7271,6 +7289,9 @@ export const academyModules = mysqlTable("academyModules", {
   /** 0123 — which s.6.2 topics this module teaches; the authored truth the version declaration reconciles against. */
   tdgTopicCodesJson: text("tdgTopicCodesJson"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  sourceRef: varchar("sourceRef", { length: 96 }),
+  sourceSection: varchar("sourceSection", { length: 200 }),
+  companySpecific: boolean("companySpecific").default(false).notNull(),
 });
 
 export const academyContentBlocks = mysqlTable("academyContentBlocks", {
@@ -7299,6 +7320,10 @@ export const academyAssignments = mysqlTable("academyAssignments", {
   completionReason: varchar("completionReason", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  /** 0172 — a learner opened a study track for themself. Never a credential. */
+  selfEnrolled: boolean("selfEnrolled").default(false).notNull(),
+  lastModuleCode: varchar("lastModuleCode", { length: 80 }),
+  lastViewedAt: timestamp("lastViewedAt"),
 });
 
 export const academyModuleCompletions = mysqlTable("academyModuleCompletions", {
@@ -7329,6 +7354,8 @@ export const academyQuestions = mysqlTable("academyQuestions", {
   active: boolean("active").default(true).notNull(),
   questionHash: varchar("questionHash", { length: 64 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  sourceRef: varchar("sourceRef", { length: 96 }),
+  sourceSection: varchar("sourceSection", { length: 200 }),
 });
 
 export const academyAssessments = mysqlTable("academyAssessments", {
@@ -7344,6 +7371,8 @@ export const academyAssessments = mysqlTable("academyAssessments", {
   criticalFailurePolicyJson: text("criticalFailurePolicyJson"),
   active: boolean("active").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0172 — only FINAL_INTERNAL can advance an assignment toward a certificate. */
+  assessmentKind: mysqlEnum("assessmentKind", ["FINAL_INTERNAL", "PRACTICE", "MOCK_EXAM", "COMPETENCY_KNOWLEDGE"]).default("FINAL_INTERNAL").notNull(),
 });
 
 export const academyAssessmentAttempts = mysqlTable("academyAssessmentAttempts", {
@@ -7364,6 +7393,7 @@ export const academyAssessmentAttempts = mysqlTable("academyAssessmentAttempts",
   questionSetJson: text("questionSetJson").notNull(),
   questionSetHash: varchar("questionSetHash", { length: 64 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  assessmentKind: mysqlEnum("assessmentKind", ["FINAL_INTERNAL", "PRACTICE", "MOCK_EXAM", "COMPETENCY_KNOWLEDGE"]).default("FINAL_INTERNAL").notNull(),
 });
 
 export const academyAssessmentItems = mysqlTable("academyAssessmentItems", {
@@ -7467,6 +7497,16 @@ export const academySourceRecords = mysqlTable("academySourceRecords", {
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  /* ---- 0172: Study Library ---- */
+  sourceKind: mysqlEnum("sourceKind", ["study_source", "provider_directory", "regulatory_reference"]).default("study_source").notNull(),
+  /** What the publisher states. A LeaseOS reviewer must still confirm before an offline copy is kept. */
+  licenceStatus: mysqlEnum("licenceStatus", ["unknown", "link_only", "open_licence_stated", "redistribution_prohibited"]).default("unknown").notNull(),
+  licenceNote: varchar("licenceNote", { length: 500 }),
+  retrievedAt: timestamp("retrievedAt"),
+  contentHash: varchar("contentHash", { length: 64 }),
+  capabilityCodesJson: text("capabilityCodesJson"),
+  redistributionConfirmedByUserId: int("redistributionConfirmedByUserId"),
+  redistributionConfirmedAt: timestamp("redistributionConfirmedAt"),
 });
 
 export const academyRegulatoryProfiles = mysqlTable("academyRegulatoryProfiles", {
@@ -8785,3 +8825,101 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
+
+
+/* ==================================================================
+ * 0172 — Training wallet, renewal policy, external handoff, practice.
+ * The wallet is `workerQualifications` (above); these are the only
+ * additions it needed.
+ * ================================================================== */
+
+export const credentialRenewalPolicies = mysqlTable("credentialRenewalPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  policyRef: varchar("policyRef", { length: 96 }).notNull().unique(),
+  qualificationCode: varchar("qualificationCode", { length: 100 }).notNull(),
+  displayName: varchar("displayName", { length: 220 }).notNull(),
+  jurisdiction: varchar("jurisdiction", { length: 40 }).notNull(),
+  policyVersion: int("policyVersion").notNull(),
+  boundary: mysqlEnum("boundary", ["employer_issued", "company_competency", "regulator_issued", "external_provider", "study_only"]).notNull(),
+  lifecycle: mysqlEnum("lifecycle", ["actual_expiry", "server_profile_expiry", "no_expiry_endorsement", "employer_review", "unknown"]).notNull(),
+  /** Context only — never added to an issue date. */
+  typicalValidityMonths: int("typicalValidityMonths"),
+  regulatoryProfileRef: varchar("regulatoryProfileRef", { length: 96 }),
+  parentAnyOfJson: text("parentAnyOfJson"),
+  handoffCapabilitiesJson: text("handoffCapabilitiesJson"),
+  sourceRefsJson: text("sourceRefsJson").notNull(),
+  renewalPathwayJson: text("renewalPathwayJson"),
+  reminderTemplate: text("reminderTemplate").notNull(),
+  notes: text("notes").notNull(),
+  policyHash: varchar("policyHash", { length: 64 }).notNull(),
+  effectiveAt: timestamp("effectiveAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const credentialCompanySettings = mysqlTable("credentialCompanySettings", {
+  id: int("id").autoincrement().primaryKey(),
+  tenantId: varchar("tenantId", { length: 40 }).notNull().unique(),
+  /** Notification thresholds — company policy, never a regulatory expiry. */
+  warningThresholdsJson: text("warningThresholdsJson").notNull(),
+  /** { [code]: { employerReviewMonths, recommendedRefresherMonths } } — company policy. */
+  perCodeJson: text("perCodeJson"),
+  updatedByUserId: int("updatedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const trainingProviderCapabilities = mysqlTable("trainingProviderCapabilities", {
+  id: int("id").autoincrement().primaryKey(),
+  capabilityRef: varchar("capabilityRef", { length: 96 }).notNull().unique(),
+  /** Tenant, as `vendors.bookOrgRef`. */
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  vendorId: int("vendorId").notNull(),
+  capabilityCode: varchar("capabilityCode", { length: 60 }).notNull(),
+  preferred: boolean("preferred").default(false).notNull(),
+  bookingUrl: varchar("bookingUrl", { length: 1024 }),
+  serviceArea: varchar("serviceArea", { length: 220 }),
+  notes: varchar("notes", { length: 1000 }),
+  active: boolean("active").default(true).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => [uniqueIndex("trainingProviderCapabilities_vendor_code").on(t.vendorId, t.capabilityCode)]);
+
+export const externalTrainingHandoffs = mysqlTable("externalTrainingHandoffs", {
+  id: int("id").autoincrement().primaryKey(),
+  handoffRef: varchar("handoffRef", { length: 96 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }).notNull(),
+  userId: int("userId").notNull(),
+  qualificationCode: varchar("qualificationCode", { length: 100 }).notNull(),
+  capabilityCode: varchar("capabilityCode", { length: 60 }),
+  triggerKind: mysqlEnum("triggerKind", ["expiring", "expired", "missing_required", "new_hire", "career_development", "employee_request", "admin_initiated"]).notNull(),
+  reason: varchar("reason", { length: 500 }),
+  status: mysqlEnum("status", ["ACTION_REQUIRED", "REQUESTED", "ADMIN_REVIEW", "PROVIDER_SELECTED", "BOOKING_IN_PROGRESS", "BOOKED", "TRAINING_COMPLETED", "DOCUMENT_PENDING", "DOCUMENT_UPLOADED_UNVERIFIED", "VERIFIED", "ACTIVE", "CANCELLED", "EXPIRED", "NOT_REQUIRED", "UNKNOWN"]).default("REQUESTED").notNull(),
+  dueAt: timestamp("dueAt"),
+  currentExpiresAt: timestamp("currentExpiresAt"),
+  preferredArea: varchar("preferredArea", { length: 220 }),
+  providerVendorId: int("providerVendorId"),
+  providerContact: varchar("providerContact", { length: 300 }),
+  officialSourceRef: varchar("officialSourceRef", { length: 96 }),
+  providerUrl: varchar("providerUrl", { length: 1024 }),
+  ownerUserId: int("ownerUserId"),
+  bookingReference: varchar("bookingReference", { length: 120 }),
+  appointmentAt: timestamp("appointmentAt"),
+  appointmentEndsAt: timestamp("appointmentEndsAt"),
+  requestedByUserId: int("requestedByUserId").notNull(),
+  requestedAt: timestamp("requestedAt").notNull(),
+  linkedHoldingRef: varchar("linkedHoldingRef", { length: 64 }),
+  dispatchImpact: varchar("dispatchImpact", { length: 500 }),
+  lastTransitionAt: timestamp("lastTransitionAt").notNull(),
+  closedAt: timestamp("closedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => [index("externalTrainingHandoffs_queue").on(t.tenantId, t.status), index("externalTrainingHandoffs_person").on(t.userId, t.qualificationCode)]);
+export type ExternalTrainingHandoffRow = typeof externalTrainingHandoffs.$inferSelect;
+
+export const academyQuestionBookmarks = mysqlTable("academyQuestionBookmarks", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  questionId: int("questionId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => [uniqueIndex("academyQuestionBookmarks_user_question").on(t.userId, t.questionId)]);

@@ -20,6 +20,9 @@ export type AcademyQuestion = {
   correctIndex: number;
   explanation: string;
   critical?: boolean;
+  /** 0172 — where the fact comes from, so a learner can open the source section. */
+  sourceRef?: string | null;
+  sourceSection?: string | null;
 };
 
 export type AssessmentPolicy = {
@@ -28,7 +31,26 @@ export type AssessmentPolicy = {
   maxAttempts?: number | null;
   domainMinimumPercent?: Record<string, number>;
   failOnCriticalMiss?: boolean;
+  /** 0172 — mock exams: draw across every domain in turn so coverage does not depend on the shuffle. */
+  stratifyByDomain?: boolean;
 };
+
+/**
+ * 0172 — what an attempt is for. Only FINAL_INTERNAL can advance an assignment
+ * toward a LeaseOS certificate; PRACTICE, MOCK_EXAM and COMPETENCY_KNOWLEDGE are
+ * recorded for the learner and never change a credential, an assignment's
+ * completion or dispatch readiness.
+ */
+export type AssessmentKind = "FINAL_INTERNAL" | "PRACTICE" | "MOCK_EXAM" | "COMPETENCY_KNOWLEDGE";
+export function attemptConsequences(kind: AssessmentKind) {
+  return {
+    advancesAssignment: kind === "FINAL_INTERNAL",
+    canLeadToCertificate: kind === "FINAL_INTERNAL",
+    affectsReadiness: false as const,
+    immediateFeedback: kind === "PRACTICE",
+    weakAreaReport: kind === "MOCK_EXAM" || kind === "PRACTICE",
+  };
+}
 
 export type ModuleRequirement = { moduleId?: number; moduleCode: string; moduleHash: string; required: boolean };
 export type ModuleCompletion = { moduleId?: number; moduleCode: string; contentVersionHash: string; status: "started" | "completed" | "invalidated" };
@@ -102,7 +124,20 @@ export function buildAssessment(args: {
 }): { items: PresentedAssessmentItem[]; questionSetHash: string; policySnapshot: AssessmentPolicy } {
   if (args.policy.questionCount < 1) throw new Error("Assessment question count must be positive");
   if (args.questions.length < args.policy.questionCount) throw new Error("Question bank is smaller than the assessment policy");
-  const chosen = seededShuffle(args.questions, `${args.attemptSeed}:questions`).slice(0, args.policy.questionCount);
+  const shuffled = seededShuffle(args.questions, `${args.attemptSeed}:questions`);
+  let chosen = shuffled.slice(0, args.policy.questionCount);
+  if (args.policy.stratifyByDomain) {
+    const byDomain = new Map<string, AcademyQuestion[]>();
+    for (const q of shuffled) byDomain.set(q.domain, [...(byDomain.get(q.domain) ?? []), q]);
+    const lanes = Array.from(byDomain.values());
+    chosen = [];
+    for (let i = 0; chosen.length < args.policy.questionCount; i++) {
+      const lane = lanes[i % lanes.length];
+      const q = lane[Math.floor(i / lanes.length)];
+      if (q) chosen.push(q);
+      if (i > args.questions.length * lanes.length) break;
+    }
+  }
   const items = chosen.map((q, index) => {
     const answerOrder = seededShuffle(q.options.map((_, i) => i), `${args.attemptSeed}:${q.code}:answers`);
     return {
@@ -202,24 +237,41 @@ export function directSupervisionDecision(args: {
   return { permitted: blockers.length === 0, blockers };
 }
 
-export type TrainingRequirement = { code: string; qualificationCode: string; title: string; enforcement: "block" | "review" | "inform"; recoveryPath?: string | null };
+export type TrainingRequirement = { code: string; qualificationCode: string; title: string; enforcement: "block" | "review" | "inform"; recoveryPath?: string | null; requiresInterprovincial?: boolean };
 export type ActiveQualification = { code: string; status: "pending" | "current" | "expired" | "revoked" | "rejected"; expiresAt?: Date | null };
-export function trainingDispatchDecision(requirements: readonly TrainingRequirement[], qualifications: readonly ActiveQualification[], now = new Date()) {
+/**
+ * 0172 — the canonical wallet answer for a requirement, keyed by requirement code. Produced by
+ * `countsAsHeldUnder` over verified `workerQualifications` (never by a handoff, booking or practice
+ * score). When present it can satisfy a requirement the Academy's own qualifications do not, and when
+ * it does not it says why (unverified / expired / restricted …) and how to recover.
+ */
+export type CanonicalRequirementVerdict = { held: boolean; reason: string; code: string | null; recoveryLabel?: string | null };
+export function trainingDispatchDecision(requirements: readonly TrainingRequirement[], qualifications: readonly ActiveQualification[], now = new Date(), canonical?: ReadonlyMap<string, CanonicalRequirementVerdict>) {
   const blockers: string[] = [], review: string[] = [], satisfied: string[] = [];
   const blocking: { code: string; state: string; detail: string }[] = [];
   const reviewing: { code: string; state: string; detail: string }[] = [];
   for (const r of requirements) {
     const q = qualifications.find(x => x.code === r.qualificationCode);
-    const current = q?.status === "current" && (!q.expiresAt || q.expiresAt > now);
-    if (current) { satisfied.push(r.code); continue; }
-    /*
-     * P0.6 — say WHICH of the five states this is.
-     *
-     * "Not on file" for a certificate that was revoked understates the situation materially: one is
-     * paperwork to chase and the other is a decision somebody made about this person. The states
-     * were already carried on the qualification and thrown away at the last step, so the same
-     * sentence covered a driver who never took the course and one whose ticket was pulled.
-     */
+    const c = canonical?.get(r.code);
+    // An Academy qualification row carries no licence restriction, so for work that needs
+    // interprovincial authority only the canonical wallet answer — which reads restrictions — counts.
+    const academyCurrent = !r.requiresInterprovincial && q?.status === "current" && (!q.expiresAt || q.expiresAt > now);
+    if (academyCurrent || c?.held) { satisfied.push(r.code); continue; }
+    if (c && (!q || r.requiresInterprovincial) && c.code && c.code !== "unknown") {
+      // The wallet knows more than "never held": unverified, expired, rejected or restricted.
+      const detail = `${r.title} — ${c.reason}: ${c.recoveryLabel ?? r.recoveryPath ?? `obtain/verify ${r.qualificationCode}`}`;
+      const entry = { code: r.code, state: c.code, detail } as const;
+      if (r.enforcement === "block") { blockers.push(detail); blocking.push(entry); }
+      else if (r.enforcement === "review") { review.push(detail); reviewing.push(entry); }
+      continue;
+    }
+    if (r.requiresInterprovincial && q?.status === "current") {
+      const detail = `${r.title} — interprovincial authority cannot be established without a verified licence record: ${c?.recoveryLabel ?? r.recoveryPath ?? `verify ${r.qualificationCode}`}`;
+      const entry = { code: r.code, state: "unknown", detail } as const;
+      if (r.enforcement === "block") { blockers.push(detail); blocking.push(entry); }
+      else if (r.enforcement === "review") { review.push(detail); reviewing.push(entry); }
+      continue;
+    }
     const state =
       q == null ? "never held"
         : q.status === "current" ? "expired" // current but past expiry — the only way to reach here
@@ -229,7 +281,8 @@ export function trainingDispatchDecision(requirements: readonly TrainingRequirem
         : state === "expired" ? `expired${q?.expiresAt ? ` ${q.expiresAt.toISOString().slice(0, 10)}` : ""}`
         : state === "pending" ? "issued but awaiting signature"
         : `${state}`;
-    const detail = `${r.title} — ${because}: ${r.recoveryPath ?? `obtain/verify ${r.qualificationCode}`}`;
+    const walletWay = c?.recoveryLabel && c.recoveryLabel !== r.recoveryPath ? ` — ${c.recoveryLabel}` : "";
+    const detail = `${r.title} — ${because}: ${r.recoveryPath ?? `obtain/verify ${r.qualificationCode}`}${walletWay}`;
     // The code is the requirement's own, never derived from the title: a code built from label text
     // changes the moment somebody edits a requirement's wording, and every override, exception and
     // report keyed to the old one silently stops matching.
@@ -243,4 +296,9 @@ export function trainingDispatchDecision(requirements: readonly TrainingRequirem
     /** The same findings with their stable requirement code and the state that caused them. */
     blocking, reviewing,
   } as const;
+}
+
+/** 0172 — weak-area report from a graded attempt: domains under the bar, weakest first. */
+export function weakAreas(domainScores: Record<string, number>, barPercent = 80): { domain: string; scorePercent: number }[] {
+  return Object.entries(domainScores).filter(([, v]) => v < barPercent).map(([domain, scorePercent]) => ({ domain, scorePercent })).sort((a, b) => a.scorePercent - b.scorePercent);
 }
