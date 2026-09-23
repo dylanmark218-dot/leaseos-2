@@ -1,15 +1,26 @@
 /**
- * What the Dispatch Detail screen is served, against a real database.
+ * What the Dispatch Detail screen's job read is served, against a real database — and what the
+ * legacy assignment read still returns beside it.
  *
- * The screen reads one job through procedures that were never designed for it: there is no
- * job-by-id read, `jobs.list` returns the hundred most recently updated jobs in scope, and
- * `jobUnits.list` returns the tenant's hundred most recent assignments with no job filter. Those
- * are not incidental — they decide what the screen is allowed to claim, so they are pinned here
- * rather than discovered in production.
+ * The **J series still backs the screen**: there is no job-by-id read, `jobs.list` returns the
+ * hundred most recently updated jobs in scope, and that decides what the header is allowed to
+ * claim. Unchanged by Checkpoint I, because no new procedure reads a job by id.
+ *
+ * The **A series no longer does**. It was written when `jobUnits.list` was the only assignment
+ * read available to a screen, and it pins that procedure's real properties: job-blind, capped at a
+ * hundred, ids without names, NULL operator meaning nobody. Checkpoint I moved the screen onto
+ * `dispatch.listRoles`, which is keyed by job and returns unfilled slots, so these are now a
+ * characterisation of the legacy procedure rather than of anything a dispatcher looks at. They
+ * stay because the procedure stays mounted and its historical rows are still evidence the
+ * exception centre reports on — and because `legacyAssignmentGuard.test.ts` asserts the screens
+ * do not call it, which is only meaningful while its behaviour is pinned.
+ *
+ * The canonical path the screen now walks is covered at this level by
+ * `dispatchRoleAssignment.db.test.ts`, `dispatchRoleStaffing.db.test.ts` and
+ * `dispatchRoleReadiness.db.test.ts`.
  *
  * Job tenant isolation at the `jobs.list` / `jobs.byCode` level is already proved by
- * `tenantScopeJobsTrips.db.test.ts` and is deliberately not repeated. What is new here is the
- * assignment path the detail screen actually walks.
+ * `tenantScopeJobsTrips.db.test.ts` and is deliberately not repeated.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
@@ -113,7 +124,7 @@ d("the job header the detail screen assembles", () => {
   });
 });
 
-d("the assignment the detail screen reads", () => {
+d("the legacy assignment read, pinned because it stays mounted", () => {
   it("A1. an assigned job returns a jobUnits row carrying the unit and operator ids", async () => {
     const a = await org();
     const disp = await member(a, "dispatcher");
@@ -126,7 +137,7 @@ d("the assignment the detail screen reads", () => {
     expect(rows[0]!.role).toBe("operator");
   });
 
-  it("A2. a job with no assignment returns no rows — the screen's unassigned state", async () => {
+  it("A2. a job with no assignment returns no rows — what the legacy read calls unassigned", async () => {
     const a = await org();
     const disp = await member(a, "dispatcher");
     const j = await job(a);
@@ -164,7 +175,7 @@ d("the assignment the detail screen reads", () => {
     expect(ops.find(x => x.id === op.id)?.name).toBe(op.name);
   });
 
-  it("A6. another organization's unit and operator do not resolve — the screen's 'name not resolved'", async () => {
+  it("A6. another organization's unit and operator do not resolve, which is why an id is authoritative and a name is not", async () => {
     const a = await org(), b = await org();
     const dispB = await member(b, "dispatcher");
     await member(a, "dispatcher");
