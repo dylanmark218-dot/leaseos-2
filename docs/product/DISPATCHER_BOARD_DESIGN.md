@@ -1,8 +1,20 @@
 # Dispatcher Board / K-1 Aggregate Query — Design
 
-**Status:** design only. No production code in this branch.
+**Status:** design only, **approved with owner decisions B1–B3 and corrections 1–3 incorporated**. No production code in this branch.
 **Baseline:** `0cd4817cca5ca7cfa66af8984bcf02b7268edbdb` (integrated `main`; gate PASS, parity 410/410).
 **Branch:** `docs/dispatcher-board-design`.
+**Implementation plan:** `DISPATCHER_BOARD_IMPLEMENTATION_PLAN.md` (same directory).
+
+### Revision note — what the owner review changed
+
+| Decision | Effect |
+|---|---|
+| **B1** | `/dispatch/:jobId/posting/:postingId` is canonical; `/dispatch/:jobId` becomes a resolver (§16). |
+| **B2** | Terminal postings excluded by default, terminality **derived** from the state machine (§12). |
+| **B3** | Board freshness reuses the **award's** validity window through one shared constant (§7). |
+| **Correction 1** | Readiness and freshness aggregates are computed over **required slots only**; optional roles reported separately (§6, §7). |
+| **Correction 2** | An empty required set **cannot** reach PASS — proved necessary by execution (§6.1). |
+| **Correction 3** | `scheduledStart` is nullable; the sort key is three-part (§9). |
 
 ---
 
@@ -91,6 +103,7 @@ z.object({
   readiness: z.enum(["PASS", "REVIEW", "BLOCKED", "UNKNOWN", "NOT_EVALUATED"]).array().max(5).optional(),
   freshness: z.enum(["never_evaluated", "superseded", "expired", "unverified"]).array().max(4).optional(),
   planningState: z.enum([...POSTING_STATES]).array().max(14).optional(),
+  includeTerminal: z.boolean().default(false),   // B2 — §12.1
   search: z.string().max(80).optional(),       // jobCode / postingNumber / customer
   scheduledFrom: z.date().nullable().optional(),
   scheduledTo:   z.date().nullable().optional(),
@@ -107,7 +120,8 @@ z.object({
   nextCursor: string | null;   // null = genuinely the end
   hasMore: boolean;            // never a silent truncation
   pageSize: number;            // what was actually applied
-  evaluatedAt: Date;           // when THIS read ran — not a readiness time
+  terminalExcluded: boolean;   // B2 — an empty board is not "no work exists"
+  readAt: Date;                // when THIS read ran — never a readiness time
 }
 
 type BoardRow = {
@@ -138,20 +152,28 @@ type BoardRow = {
     trailerIds: number[];
   };
 
-  readiness: {
-    status: InterEngineStatus;         // combineForConsumer over the slots
-    blockerRecords: number;            // records, NOT root causes — see §6
+  // REQUIRED slots only (Correction 1). Empty required set short-circuits (§6.2).
+  requiredReadiness: {
+    status: InterEngineStatus;         // never "READY"
+    requiredRoleCount: number;         // 0 ⇒ status is NOT_EVALUATED, never PASS
+    blockerRecords: number;            // records, NOT root causes — §6
     rolesNeedingEvaluation: number;
     missingRequired: string[];
     explanation: string;
   };
 
-  freshness: {                 // ALWAYS separate from readiness.status
+  // Reported beside the aggregate, never folded into it (Correction 1).
+  optional: {
+    total: number; evaluated: number; notEvaluated: number; blocked: number;
+  };
+
+  requiredFreshness: {         // ALWAYS a separate axis from status
     state: "never_evaluated" | "superseded" | "expired" | "unverified";
     oldestEvaluatedAt: Date | null;
     newestEvaluatedAt: Date | null;
     supersededRoleIds: number[];
   };
+  optionalFreshness: { state: BoardRow["requiredFreshness"]["state"] } | null;
 
   roleSummaries: {             // one per non-cancelled slot, for the row expander
     roleId: number; roleCode: string; roleLabel: string; required: boolean;
@@ -207,6 +229,46 @@ And the subtler one:
 
 **Blocker counting** follows `boardSemantics.ts`: blockers have no stable identity (`{engine, finding}` prose), so the Board reports `blockerRecords` and **never** a root-cause count. `collectRootCauses` is deliberately absent there for the same reason.
 
+### 6.1 Correction 1 — the aggregate is over REQUIRED slots only
+
+The primary row aggregate is `combineForConsumer` over the **required, non-cancelled** slots. Optional slots are **not** passed as `optional` inputs to that call, because doing so lets an optional role's absence move the required verdict:
+
+> Required A `PASS` · Required B `PASS` · Optional C `NOT_EVALUATED`
+> If C is an input, `decided = {PASS, PASS}` → worst `PASS`, and C lands in `notEvaluated` — but the row's `freshness` and `rolesNeedingEvaluation` would then be driven by a role no required work depends on.
+
+So the Board computes **two independent things**:
+
+| Field | Source |
+|---|---|
+| `requiredReadiness: CombinedVerdict` | `combineForConsumer({ requires: requiredSlotKeys, optional: [] }, requiredSlotResults)` |
+| `optional: { total, evaluated, notEvaluated, blocked, statuses[] }` | a plain count over optional slots — **never** folded into the verdict |
+
+An optional role that is `BLOCKED` is **displayed** (`optional.blocked > 0`, "1 optional role blocked") and does not change `requiredReadiness`. Hiding it would be dishonest; letting it masquerade as a required safety condition would be worse.
+
+### 6.2 Correction 2 — an empty required set, proved by execution
+
+Probed against this baseline rather than read:
+
+| Input | `combineForConsumer` result |
+|---|---|
+| **zero roles** (`requires: []`, `results: []`) | **`PASS`** — *"every capability this consumer reads answered"* |
+| only an optional `NOT_EVALUATED` role | `NOT_EVALUATED` |
+| only an optional `PASS` role | **`PASS`** |
+
+The first line is the vacuous pass the owner flagged, and it is real: with `decided` and `unevaluated` both empty, the guard `decided.length === 0 && unevaluated.length > 0` is false, so control reaches `decided.reduce(..., "PASS")` over an empty array and the seed wins. `combineForConsumer` is correct for its own contract — a consumer that requires nothing genuinely has nothing outstanding — but a *posting* with no required crew is not a dispatch that may proceed.
+
+`assessStaffing` is already safe here and supplies the guard signal: zero roles and only-optional-roles both return `{ state: "unstaffed", requiredTotal: 0 }`.
+
+**The minimum safe rule — one precondition, no second engine:**
+
+```
+if (requiredSlots.length === 0) requiredReadiness = { status: "NOT_EVALUATED", … }   // short-circuit; combineForConsumer is not called
+```
+
+`NOT_EVALUATED` is chosen over `REVIEW` because it is literally what happened — nothing was evaluated, because nothing was required — and because the §7/§15 presentation rules already forbid rounding `NOT_EVALUATED` up to a positive word. The row additionally carries `requiredRoleCount: 0`, so the UI renders *"no required roles defined"* rather than any readiness-shaped phrase.
+
+Freshness agrees independently: with no required slots there are no required checks, so `requiredFreshness = "never_evaluated"` (§7). Both axes therefore refuse a positive rendering, and neither depends on the other being right.
+
 ---
 
 ## 7. Freshness / staleness — the core safety rule
@@ -223,8 +285,34 @@ So the Board is honest about the limit of what it read:
 |---|---|---|
 | `never_evaluated` | no stored check for this slot | absence of a row |
 | `superseded` | the **binding changed after the check** | latest `dispatchRoleAssignmentEvents.occurredAt` for the slot **>** check `evaluatedAt` |
-| `expired` | outside the reuse window | `evaluatedAt` age > 30 min (`assessEligibilityValidity`'s default) |
+| `expired` | outside the reuse window | `evaluatedAt` age > the shared window (§7.1) |
 | `unverified` | a check exists, in-window, binding unchanged — **facts beyond the binding were not re-read** | everything else |
+
+### 7.1 B3 — one shared validity window, not a second copy
+
+`assessEligibilityValidity` takes `maxAgeMinutes = 30` as a **default parameter**, so the award's window is currently an inline literal rather than a named policy. The Board must not add a second one.
+
+**Extraction (Checkpoint BA):** introduce one exported constant beside the validity function — `ELIGIBILITY_REUSE_WINDOW_MINUTES = 30` in `_core/dispatchAward.ts` — and make `assessEligibilityValidity`'s default reference it. The Board imports the same constant. A future change to the award's window moves the Board with it, and a structural guard asserts no numeric literal window appears in Board code.
+
+This is a pure refactor of an existing default, not a behaviour change, and it is the only edit this feature makes to award code.
+
+**What the window does and does not do.** It separates `expired` from `unverified`. It does **not** convert a stored `PASS` into current readiness: inside the window the wording stays historical — *"Last evaluation passed 8 min ago — not re-checked"* — because dependency validity has not been proven (§7 preamble).
+
+### 7.2 Correction 1 — required freshness is not the worst of all slots
+
+Row freshness is the worst across **required** slots only:
+
+```
+requiredFreshness = worst( freshness(s) for s in requiredSlots )       // never_evaluated > superseded > expired > unverified
+optionalFreshness = same computation over optional slots — reported, never mixed in
+```
+
+> Required A `unverified` · Required B `unverified` · Optional C `never_evaluated`
+> → `requiredFreshness = "unverified"`, and separately `optional.notEvaluated = 1`.
+
+An optional role nobody has checked must not make the crew that *is* checked look stale. The optional state stays visible as its own count; it simply cannot masquerade as a required safety condition.
+
+**Zero required slots** ⇒ `requiredFreshness = "never_evaluated"` (§6.2), which is the stale end of the scale, not the fresh end.
 
 **`current` is deliberately not a value this query can emit.** The Board cannot prove it without recomputing, so it does not claim it.
 
@@ -254,8 +342,13 @@ The query performs **no writes of any kind**: no check rows, no `usedForAward`, 
 
 Keyset (seek) pagination. **This is new** — F4 established the repository has no cursor convention, only caps, and adopting the cap-only pattern would reproduce the defect PR #6 had to disclose.
 
-- **Stable sort:** `(scheduledStart ASC NULLS LAST, postingId ASC)`. `postingId` is the tiebreaker, so the order is total and stable under concurrent inserts. `dispatchPostings_queue_idx (planningState, scheduledStart)` already supports the common filtered ordering.
-- **Cursor:** opaque base64 of `{ scheduledStart, postingId }` — the last row of the page, never an offset (offsets skip and duplicate rows under concurrent writes).
+### 9.1 Correction 3 — `scheduledStart` is nullable, so the key is three-part
+
+Proved, not assumed: `drizzle/0013_dispatch_operations.sql:49` declares `` `scheduledStart` timestamp `` with **no `NOT NULL`**, and `schema.ts:1861` is `timestamp("scheduledStart")` with no `.notNull()`. MariaDB sorts `NULL` first on `ASC`, which would put every unscheduled posting ahead of today's work.
+
+- **Stable sort:** `(scheduledStartIsNull ASC, scheduledStart ASC, postingId ASC)` — a computed `scheduledStart IS NULL` leading term puts **scheduled rows before unscheduled**, as the operational board wants, and `postingId` makes the order total so equal timestamps cannot interleave between pages.
+- **No sentinel.** A far-future or far-past stand-in timestamp is rejected outright: it can collide with legitimate data, and a posting genuinely scheduled for that instant would sort as if unscheduled.
+- **Cursor:** opaque base64 of **all three** parts — `{ isNull: 0|1, scheduledStart: string|null, postingId: number }` — so a page resumes exactly, including across the scheduled→unscheduled boundary. A cursor that omitted `isNull` could not tell "resume within scheduled rows" from "resume within unscheduled rows" when `scheduledStart` is null.
 - **Page size:** default **25**, max **100**.
 - **No silent truncation:** the query reads `pageSize + 1` rows; the extra row sets `hasMore` and is dropped. `nextCursor` is `null` only at a genuine end.
 - **Invalid or stale cursor:** refused with `BAD_REQUEST`, never silently reset to page 1 (that would loop a paging client forever).
@@ -296,11 +389,32 @@ Six, all derived from real domain state:
 1. **staffing** — `unstaffed` / `partially_staffed` / `staffed` (from `assessStaffing`).
 2. **readiness** — the five `InterEngineStatus` values.
 3. **freshness** — the four §7 states. *"Show me what needs re-checking"* is the board's main job.
-4. **planningState** — the posting's own lifecycle; default view excludes `completed` and `cancelled`.
+4. **planningState** — the posting's own lifecycle. **B2:** the default view excludes terminal postings (§12.1).
 5. **scheduledFrom / scheduledTo** — the window a dispatcher is working.
 6. **search** — `jobCode`, `postingNumber`, `customer`. Prefix-matched on indexed columns; operator/unit search is **excluded from v1** because it would need a join whose selectivity is unproven.
 
 Deliberately excluded: priority, distribution, pool, blocker-type. They are displayable but not yet filterable — twenty filters is not the ask.
+
+### 12.1 B2 — terminal states, derived rather than listed
+
+The default board answers *"what dispatch work needs operational attention?"*, not *"every dispatch record ever created"*.
+
+**Terminality is derived from the live state machine**, so it cannot drift if a state is added:
+
+```ts
+// _core/dispatchLifecycle.ts — a state with no outgoing transition is terminal.
+export const TERMINAL_POSTING_STATES = Object.entries(POSTING_TRANSITIONS)
+  .filter(([, next]) => next.length === 0).map(([s]) => s);
+```
+
+Against this baseline that yields exactly **`completed`** and **`cancelled`** — `POSTING_TRANSITIONS` gives both `[]` and every other state at least one successor. This matches B2's stated minimum, and it was read off the machine rather than typed from the enum.
+
+Nothing is deleted or permanently hidden. Terminal rows are retrievable two ways:
+
+- naming a terminal state explicitly in the `planningState` filter, **or**
+- `includeTerminal: true` — an explicit input flag for "show history too".
+
+When the default exclusion is in force the response says so (`terminalExcluded: true`), so an empty board is never mistaken for "no work exists".
 
 ---
 
@@ -352,17 +466,35 @@ Row expander shows `roleSummaries` — per slot: label, required/optional, statu
 
 ---
 
-## 16. Detail navigation — a real route defect
+## 16. Detail navigation — B1, approved
 
-`/dispatch/:jobId` is **not sufficient** once a row is a posting.
+**Canonical route: `/dispatch/:jobId/posting/:postingId`.**
 
-`DispatchJobDetail` calls `listRoles({ jobId })`, which returns all postings for the job and then reports the scalar `planningState` of `postings[0]` (F2). Two Board rows for the same job would both link to `/dispatch/<jobId>` and land on the same screen, showing one posting's lifecycle beside both postings' slots.
+A posting owns its own planning lifecycle, role slots, staffing, eligibility checks, overrides and award path, so `jobId` alone is not an identity. Two Board rows for one job must open two different screens.
 
-**Do not paper this over with "first posting for job."**
+### 16.1 `/dispatch/:jobId` is kept as a resolver
 
-Proposal (not implemented here): `/dispatch/:jobId/posting/:postingId`, with the existing `/dispatch/:jobId` retained as a compatibility entry that resolves to the job's single posting and, where there is more than one, **shows a chooser rather than guessing**. `listRoles` already accepts `postingId`, so the detail screen needs a prop, not a new procedure.
+Existing links must not break. The old route resolves, and **never guesses**:
 
-This is recorded as **OD-B1** (§19) because it changes a shipped URL.
+| Visible postings for the job | Behaviour |
+|---|---|
+| exactly one | **redirect** to `/dispatch/:jobId/posting/:postingId` |
+| more than one | render a **posting chooser** — postingNumber, distribution, planning state, staffing summary per option |
+| none | a safe no-dispatch state |
+
+Explicitly forbidden as a resolution rule: first posting, newest posting, the `direct` one, the staffed one. Each of those is a guess that looks like an answer, and each would reproduce F2's `postings[0]` collapse in the URL layer.
+
+**Visibility is tenant-scoped, and the no-posting state is indistinguishable from the out-of-scope state.** A job belonging to another organization and a job with no posting must render the same thing, so the route cannot be used to probe whether another tenant holds a dispatch for a given job id.
+
+### 16.2 Pair validation
+
+The server must verify that `postingId` **belongs to** `jobId` and that both are visible to the caller's tenant. A URL pairing a valid job with a valid posting from a *different* job is **refused** (`NOT_FOUND`), not silently corrected to the posting's real job — correcting it would confirm the foreign posting exists. Pinned by R3/R4 in §18.
+
+### 16.3 The `listRoles` defect is recorded, not fixed here
+
+F2 — `listRoles` reporting `postings[0]?.planningState` for a job query — is **pre-existing and separate**. The Board does not inherit it: `dispatch.board` reads each posting's own `planningState`, and the detail screen is given `postingId`, for which `listRoles` already returns that posting alone.
+
+Recorded as **DEFECT-LR1** for its own slice. Fixing it would mean changing a shipped response shape, which is not BA's business and would broaden this feature without cause.
 
 ---
 
@@ -392,6 +524,20 @@ RED-first. Counts are the minimum.
 
 **Structural / performance (4):** P1 no client loop calling `dispatch.readiness` per row · P2 no `dispatch.evaluate` from the Board · P3 no award/override mutation reachable · P4 bounded access.
 
+**Correction 1 — required vs optional (4):** C1a required PASS + optional `NOT_EVALUATED` leaves `requiredReadiness` at PASS-equivalent, not degraded · C1b optional `never_evaluated` does not make `requiredFreshness` stale · C1c optional state stays visible and counted · C1d an optional **BLOCKED** role is displayed and does **not** block the required aggregate.
+
+**Correction 2 — empty required set (4):** C2a zero roles cannot present as current-ready · C2b only-optional-roles cannot reach a positive verdict by vacuous PASS · C2c adding the first required role changes the aggregate correctly · C2d the guard short-circuits (`combineForConsumer` is not consulted for an empty required set).
+
+**Correction 3 — nullable pagination key (5):** C3a deterministic NULL ordering, scheduled before unscheduled · C3b several rows sharing one `scheduledStart` page without interleaving · C3c the scheduled→unscheduled boundary pages correctly · C3d **no duplicate row** across pages · C3e **no missing row** across pages.
+
+**B1 routing (6):** R1 two postings on one job produce two rows · R2 each opens a different canonical URL · R3 job/posting mismatch refused · R4 cross-tenant posting undiscoverable by either route · R5 legacy route with one posting redirects · R6 legacy route with several renders the chooser and picks nothing.
+
+**B2 terminal scope (2):** T1 terminal postings absent by default and `terminalExcluded` reported · T2 retrievable via explicit filter or `includeTerminal`.
+
+**B3 shared window (1):** W1 Board freshness and `assessEligibilityValidity` read the **same** constant — changing it moves both.
+
+**Total: 51 tests** (29 original + 22 added).
+
 **Enforcing P4 realistically** — three layers, since a unit test cannot count SQL by intuition:
 1. **Query counter** in the DB test: wrap the pool and assert the board call issues **≤ 5** statements for a 50-row × 4-role fixture. This is the real proof.
 2. **Scaling assertion:** the same count for 10 rows and for 50 rows — a constant, not a function of row count.
@@ -418,8 +564,17 @@ RED-first. Counts are the minimum.
 | `MAX_ROLES_PER_POSTING` silently truncates | B5 |
 | client adds a per-row `dispatch.readiness` call | P1 |
 | client calls `dispatch.evaluate` | P2 |
+| optional slots fed into `requires` | C1a |
+| optional freshness folded into `requiredFreshness` | C1b |
+| **empty-required guard removed** (vacuous PASS restored) | C2a/C2b |
+| `isNull` term dropped from the sort key | C3a/C3c |
+| `isNull` dropped from the **cursor** only (sort intact) | C3d/C3e |
+| terminal exclusion removed from the default | T1 |
+| Board inlines its own `30` instead of the shared constant | W1 |
+| resolver picks `postings[0]` instead of a chooser | R6 |
+| job/posting pair validation removed | R3 |
 
-Each restored byte-for-byte and verified by digest. A surviving mutation is a test gap to investigate.
+**Total: 23 mutations.** Each restored byte-for-byte and verified by digest. A surviving mutation is a test gap to investigate, not something to wave through.
 
 ---
 
@@ -431,15 +586,20 @@ Award UI · override request/grant · K-2 `blocking + overridable` policy · For
 
 ---
 
-## 21. Remaining owner decisions
+## 21. Owner decisions — all resolved
 
-Only three, and only because evidence cannot settle them:
+**OD-B1 — Detail route. RESOLVED.** `/dispatch/:jobId/posting/:postingId` is canonical; `/dispatch/:jobId` is kept as a non-guessing resolver with a chooser. §16.
 
-**OD-B1 — Detail route.** `/dispatch/:jobId` is ambiguous for multi-posting jobs (§16). Adopt `/dispatch/:jobId/posting/:postingId` with a chooser fallback, or keep the job route and accept the ambiguity? Changes a shipped URL.
+**OD-B2 — Default board scope. RESOLVED.** Terminal postings excluded by default, terminality derived from `POSTING_TRANSITIONS` (yielding `completed`, `cancelled`), retrievable by explicit filter. §12.1.
 
-**OD-B2 — Default board scope.** Exclude `completed` and `cancelled` postings by default (proposed), or show everything and make the dispatcher filter? Affects what "the board" means operationally.
+**OD-B3 — Freshness window. RESOLVED.** One shared constant with the award; no second literal. Inside the window the wording stays historical. §7.1.
 
-**OD-B3 — Freshness window.** `assessEligibilityValidity` defaults to **30 minutes** for the *award*. Is 30 minutes also the right `expired` threshold for a *display* surface, or should the Board show a longer window with age visible? Not a safety question — `expired` and `unverified` are both non-current — but it changes how much of the board looks stale mid-shift.
+### Genuine blockers remaining
+
+**None.** Every open question raised by this design is now settled by the approved decisions or by evidence read from the baseline. Two items are *recorded work*, not blockers:
+
+- **DEFECT-LR1** — `listRoles` reports `postings[0]?.planningState` for job queries (§16.3). Its own slice; the Board does not inherit it.
+- **Permission introspection** — still absent, so the Board offers no permission-conditional UI. It shows what `dispatch.read` returns; there is no Board action needing a second permission in v1.
 
 ---
 
