@@ -1,5 +1,5 @@
 /**
- * 0170 — the ELD ledger's API.
+ * 0179 — the ELD ledger's API.
  *
  * Two procedures and nothing that decides. `eventsAppend` is the device's push: the same transport
  * discipline as `sync.receivePackage` (enrolled device, P-256 signature over the canonical batch,

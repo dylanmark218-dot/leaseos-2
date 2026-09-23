@@ -1,4 +1,4 @@
-# ELD Checkpoint 1 — the canonical event ledger (migration 0170)
+# ELD Checkpoint 1 — the canonical event ledger (migration 0179, originally 0170)
 
 **Branch:** `claude/eld-compliance-intelligence-ramlrd`. **Design:** `ELD_COMPLIANCE_INTELLIGENCE_DESIGN.md` (commit `ab87f5f`).
 **Scope of this checkpoint:** trustworthy ELD event capture and nothing after it. No HOS mechanics, no
@@ -7,8 +7,12 @@ diagnostics tables, no compliance findings, no dispatch, no analytics, no UI. `s
 
 ## 1. Migration number
 
-`0170_eld_event_ledger.sql`. At implementation time the highest migration on both this branch and
-`origin/main` was `0169_defect_resolution.sql`; `origin/main` had not moved since the design commit.
+Written as `0170_eld_event_ledger.sql`: at implementation time the highest migration on both this branch
+and `origin/main` was `0169_defect_resolution.sql`. Main then merged the dispatch role model, which owns
+0170, 0171 and 0174, and open branches claim 0172–0178 (see `docs/architecture/MIGRATION_COLLISION_REGISTER.md`
+on main). Under the register's rule the merged branch keeps its number and every other claimant takes the
+first number free everywhere, so the hardening checkpoint renumbered this file to **`0179_eld_event_ledger.sql`**
+with no other change.
 The migration is a single file: two tables, indexes, and four single-statement triggers (the 0061/0062
 form, so the runner needs no `DELIMITER` handling).
 
@@ -78,20 +82,26 @@ in this checkpoint.
   "operator", id)`. Two operator rows for one user is a refusal (`operator_ambiguous`), not a guess.
   A duty-status event from a user with no operator record is refused (`operator_unresolved`); a
   non-duty observation (engine power, motion) is recorded with `operatorId = NULL`.
-- A stated `unitId` must exist and be owned by the device's organization (`unit_unknown`,
+- A stated `unitNumber` (a stable, device-visible identifier; the hardening checkpoint replaced the
+  database id) must name a unit that exists and is owned by the device's organization (`unit_unknown`,
   `unit_not_in_organization`).
 - The legacy `eld_duty_status` integration feed, which matches `operators.name`, is left as it is and
   is not connected to the ledger. The ledger has no path that reads a name.
 
 ## 6. Append-only enforcement
 
-Four triggers in 0170, all `SIGNAL SQLSTATE '45000'`:
+Four triggers in the ledger migration, all `SIGNAL SQLSTATE '45000'`:
 `eldEvents_immutable_update`, `eldEvents_immutable_delete`, `eldEventIngestConflicts_immutable_update`,
 `eldEventIngestConflicts_immutable_delete`. The store is the only writer and only inserts. A
 correction is represented today as a `correction` event with `supersedesEventRef`; the accept/reject
 workflow, driver acceptance and recertification are not built.
 
-## 7. Hashing and canonicalization (`eld-h1`)
+## 7. Hashing and canonicalization (`eld-h1`) — SUPERSEDED by the hardening checkpoint
+
+> The definition below was Checkpoint 1's and depended on JavaScript's `JSON.stringify`. The hardening
+> checkpoint (`ELD_CHECKPOINT_1A_HARDENING.md`) redefined `eld-h1` as an implementation-independent
+> canonical form before any row existed outside test databases; the current specification is
+> `ELD_CANONICAL_FORM.md`. What follows is kept as history.
 
 Existing primitives were inspected: `evidenceSeal.canonicalManifest` (explicitly ordered object,
 `JSON.stringify`), `deviceSignature.canonical` (sorted keys, for signatures), `auditPackage.canonicalJson`

@@ -1,5 +1,5 @@
 /**
- * 0170 — the ELD ledger's pure half: validation, hashing, batch preparation, chain assessment.
+ * 0179 — the ELD ledger's pure half: validation, hashing, batch preparation, chain assessment.
  *
  * No database, no network. Everything a device could also run. The store (`eldLedgerStore.ts`)
  * is the only thing that writes; this file decides what a well-formed batch is and what the rows
@@ -14,12 +14,13 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
-  ELD_DUTY_STATUSES, ELD_EVENT_TYPES, ELD_HASH_VERSION, ELD_LOCATION_SOURCES, ELD_RECORD_ORIGINS_DEVICE,
-  canonicalEldEventJson, eldEventHashPreimage, validateEldEventShape,
+  ELD_DUTY_STATUSES, ELD_EVENT_AT_MS_MAX, ELD_EVENT_AT_MS_MIN, ELD_EVENT_TYPES, ELD_HASH_VERSION, ELD_LOCATION_SOURCES, ELD_MAX_INTEGER,
+  ELD_RECORD_ORIGINS_DEVICE, canonicalEldEventJson, eldEventHashPreimage, normalizeUuid, validateEldEventShape,
   type EldEventInput,
 } from "../../../shared/eld/eldEvent";
 
-export const sha256Hex = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
+/** SHA-256 over the UTF-8 bytes of a canonical text, lowercase hex. */
+export const sha256Hex = (s: string) => createHash("sha256").update(Buffer.from(s, "utf8")).digest("hex");
 
 /* ------------------------------------------------------------------ */
 /* Reason codes                                                         */
@@ -50,28 +51,31 @@ export type EldAppendReasonCode = (typeof ELD_APPEND_REASON_CODES)[number];
 /* ------------------------------------------------------------------ */
 
 /**
- * Strict on purpose. There is no `operatorName`, `operatorRef`, `orgRef` or `deviceId` here, and
- * because the object is strict, a client that sends one is refused rather than ignored. Identity
- * comes from the enrolled device; a name in a payload is never identity.
+ * Strict on purpose. There is no `operatorName`, `operatorRef`, `orgRef`, `unitId` or `deviceId`
+ * here, and because the object is strict, a client that sends one is refused rather than ignored.
+ * Identity comes from the enrolled device; a name in a payload is never identity, and a unit is
+ * named by its number and resolved on the server.
  */
 export const ELD_EVENT_INPUT = z.object({
   eventRef: z.string().min(36).max(36),
-  deviceSequence: z.number().int().nonnegative(),
+  deviceSequence: z.number().int().nonnegative().max(ELD_MAX_INTEGER),
   eventType: z.enum(ELD_EVENT_TYPES),
   eventCode: z.string().max(40).nullish(),
   dutyStatus: z.enum(ELD_DUTY_STATUSES).nullish(),
   recordOrigin: z.enum(ELD_RECORD_ORIGINS_DEVICE),
-  eventAt: z.string().min(20).max(40),
-  eventUtcOffsetMinutes: z.number().int().nullish(),
-  unitId: z.number().int().positive().nullish(),
-  latitude: z.number().nullish(),
-  longitude: z.number().nullish(),
-  locationAccuracyM: z.number().nonnegative().nullish(),
+  /** Integer milliseconds since the epoch; the canonical form carries no timestamp text. */
+  eventAtMs: z.number().int().min(ELD_EVENT_AT_MS_MIN).max(ELD_EVENT_AT_MS_MAX),
+  eventUtcOffsetMinutes: z.number().int().min(-840).max(840).nullish(),
+  unitNumber: z.string().min(1).max(40).nullish(),
+  // Fixed-scale integers, never floats: the canonical form forbids them (see shared/eld/eldEvent.ts).
+  latitudeE7: z.number().int().min(-900_000_000).max(900_000_000).nullish(),
+  longitudeE7: z.number().int().min(-1_800_000_000).max(1_800_000_000).nullish(),
+  locationAccuracyMm: z.number().int().nonnegative().max(ELD_MAX_INTEGER).nullish(),
   locationSource: z.enum(ELD_LOCATION_SOURCES).nullish(),
   jurisdiction: z.string().max(8).nullish(),
-  odometerKm: z.number().nonnegative().nullish(),
-  engineHours: z.number().nonnegative().nullish(),
-  vehicleSpeedKph: z.number().nonnegative().nullish(),
+  odometerM: z.number().int().nonnegative().max(ELD_MAX_INTEGER).nullish(),
+  engineHoursMillis: z.number().int().nonnegative().max(ELD_MAX_INTEGER).nullish(),
+  vehicleSpeedKphMillis: z.number().int().nonnegative().max(ELD_MAX_INTEGER).nullish(),
   annotation: z.string().max(500).nullish(),
   supersedesEventRef: z.string().max(64).nullish(),
   previousEventHash: z.string().length(64).nullable(),
@@ -92,7 +96,12 @@ export type HashedEldEvent = {
   hashVersion: typeof ELD_HASH_VERSION;
 };
 
-/** Deterministic: the same device, the same event, the same bytes, the same two hashes. */
+/**
+ * Deterministic: the same device, the same event, the same bytes, the same two hashes — on this
+ * server, on a device, or in any implementation that follows the canonical form's stated rules.
+ * The server ALWAYS computes both hashes itself; a hash the sender declared is compared against
+ * this result and never substituted for it.
+ */
 export function hashEldEvent(deviceRef: string, e: EldEventInput): HashedEldEvent {
   const canonicalJson = canonicalEldEventJson(deviceRef, e);
   const payloadHash = sha256Hex(canonicalJson);
@@ -129,7 +138,7 @@ export function prepareEldBatch(deviceRef: string, raw: unknown[]): PreparedBatc
       problems.push({ eventRef: ref, deviceSequence: null, code: "schema_invalid", detail: `event[${i}]: ${parsed.error.issues.slice(0, 3).map(x => `${x.path.join(".") || "(root)"}: ${x.message}`).join("; ")}` });
       return;
     }
-    const e: EldEventInput = { ...parsed.data, eventRef: parsed.data.eventRef.toLowerCase() };
+    const e: EldEventInput = { ...parsed.data, eventRef: normalizeUuid(parsed.data.eventRef), supersedesEventRef: parsed.data.supersedesEventRef == null ? parsed.data.supersedesEventRef : normalizeUuid(parsed.data.supersedesEventRef) };
     const shape = validateEldEventShape(e);
     if (shape.length) { problems.push({ eventRef: e.eventRef, deviceSequence: e.deviceSequence, code: "schema_invalid", detail: shape.join("; ") }); return; }
     const h = hashEldEvent(deviceRef, e);
@@ -171,7 +180,23 @@ export type ChainRow = {
   eventHash: string;
 };
 
+/**
+ * One event's place in its device's HASH chain. Sequence continuity (gaps) and hash continuity
+ * (links) are different questions: a device can be contiguous in sequence and broken in hash, or
+ * missing a sequence and perfectly linked on either side of the hole.
+ *
+ *   first                 sequence 0 claiming no predecessor: the chain's root
+ *   linked                the claimed predecessor hash equals the stored predecessor's eventHash
+ *   predecessor_missing   the predecessor sequence is not on record yet; unverifiable until it is
+ *   hash_mismatch         both present and the claim differs from the record
+ *   missing_claim         predecessor present, but this event claimed none
+ *   dangling_first        sequence 0 claiming a predecessor it cannot have
+ */
+export type ChainLinkState = "first" | "linked" | "predecessor_missing" | "hash_mismatch" | "missing_claim" | "dangling_first";
+
 export type ChainAssessment = {
+  /** Every event's link state, in sequence order. */
+  links: { eventRef: string; deviceSequence: number; state: ChainLinkState }[];
   eventCount: number;
   lowestSequence: number | null;
   highestSequence: number | null;
@@ -197,6 +222,7 @@ export function assessDeviceChain(rows: readonly ChainRow[]): ChainAssessment {
   const sorted = [...rows].sort((a, b) => a.deviceSequence - b.deviceSequence);
   const bySeq = new Map<number, ChainRow>(sorted.map(r => [r.deviceSequence, r]));
   const a: ChainAssessment = {
+    links: [],
     eventCount: sorted.length, lowestSequence: sorted[0]?.deviceSequence ?? null, highestSequence: sorted.at(-1)?.deviceSequence ?? null,
     gaps: [], chainMismatches: [], unverifiableLinks: [], timingInconsistencies: [], danglingFirstLink: null, verifiedLinks: 0,
   };
@@ -205,16 +231,18 @@ export function assessDeviceChain(rows: readonly ChainRow[]): ChainAssessment {
     if (cur.deviceSequence > prev.deviceSequence + 1) a.gaps.push({ from: prev.deviceSequence + 1, to: cur.deviceSequence - 1 });
     if (cur.eventAt.getTime() < prev.eventAt.getTime()) a.timingInconsistencies.push({ eventRef: cur.eventRef, deviceSequence: cur.deviceSequence, eventAt: cur.eventAt.toISOString(), previousEventAt: prev.eventAt.toISOString() });
   }
+  const link = (r: ChainRow, state: ChainLinkState) => a.links.push({ eventRef: r.eventRef, deviceSequence: r.deviceSequence, state });
   for (const r of sorted) {
     if (r.deviceSequence === 0) {
-      if (r.previousEventHash) a.danglingFirstLink = { eventRef: r.eventRef, deviceSequence: 0, declaredPreviousEventHash: r.previousEventHash };
+      if (r.previousEventHash) { a.danglingFirstLink = { eventRef: r.eventRef, deviceSequence: 0, declaredPreviousEventHash: r.previousEventHash }; link(r, "dangling_first"); }
+      else link(r, "first");
       continue;
     }
     const pred = bySeq.get(r.deviceSequence - 1);
-    if (!pred) { a.unverifiableLinks.push({ eventRef: r.eventRef, deviceSequence: r.deviceSequence, declaredPreviousEventHash: r.previousEventHash }); continue; }
-    if (r.previousEventHash == null) { a.chainMismatches.push({ eventRef: r.eventRef, deviceSequence: r.deviceSequence, declaredPreviousEventHash: "", predecessorEventHash: pred.eventHash }); continue; }
-    if (r.previousEventHash === pred.eventHash) a.verifiedLinks++;
-    else a.chainMismatches.push({ eventRef: r.eventRef, deviceSequence: r.deviceSequence, declaredPreviousEventHash: r.previousEventHash, predecessorEventHash: pred.eventHash });
+    if (!pred) { a.unverifiableLinks.push({ eventRef: r.eventRef, deviceSequence: r.deviceSequence, declaredPreviousEventHash: r.previousEventHash }); link(r, "predecessor_missing"); continue; }
+    if (r.previousEventHash == null) { a.chainMismatches.push({ eventRef: r.eventRef, deviceSequence: r.deviceSequence, declaredPreviousEventHash: "", predecessorEventHash: pred.eventHash }); link(r, "missing_claim"); continue; }
+    if (r.previousEventHash === pred.eventHash) { a.verifiedLinks++; link(r, "linked"); }
+    else { a.chainMismatches.push({ eventRef: r.eventRef, deviceSequence: r.deviceSequence, declaredPreviousEventHash: r.previousEventHash, predecessorEventHash: pred.eventHash }); link(r, "hash_mismatch"); }
   }
   return a;
 }

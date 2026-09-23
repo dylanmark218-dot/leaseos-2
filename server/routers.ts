@@ -338,7 +338,7 @@ export const appRouter = router({
   assistantAsk: assistantAskRouter,
   agent: agentRouter,
   hos: hosRouter,
-  // 0170 — the canonical ELD event ledger; a device appends, the office reads its chain.
+  // 0179 — the canonical ELD event ledger; a device appends, the office reads its chain.
   eld: eldRouter,
   records: recordsRouter,
   payroll: payrollRouter,

@@ -1,5 +1,5 @@
 /**
- * 0170 — the canonical ELD event ledger, against a real database.
+ * 0179 — the canonical ELD event ledger, against a real database.
  *
  * Every case goes through the production door: `device.enroll` + `device.activate` for identity,
  * `eld.eventsAppend` with a real P-256 signature for the push, raw SQL only to inspect rows and to
@@ -67,11 +67,13 @@ async function operatorFor(userId: number, ownerOrgRef: string | null) {
   return operatorId;
 }
 
+/** A unit, returned by the number a device would state; the id stays on the server. */
 async function unitIn(ownerOrgRef: string | null) {
-  const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'vacuum_truck', 'ABC', 'clear')", [key("U").slice(0, 30)]);
+  const unitNumber = key("U").slice(0, 30);
+  const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'vacuum_truck', 'ABC', 'clear')", [unitNumber]);
   const unitId = Number(r.insertId);
   if (ownerOrgRef) await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'unit', ?, 1)", [ownerOrgRef, unitId]);
-  return unitId;
+  return { unitId, unitNumber };
 }
 
 /** An enrolled, activated device for `userId`, whose org is the user's acting scope. */
@@ -93,9 +95,10 @@ async function driverScenario() {
 
 /* ---- events and batches ---- */
 
+const T0 = Date.UTC(2026, 8, 11, 14, 0, 0);
 const ev = (seq: number, o: Partial<EldEventInput> = {}): EldEventInput => ({
   eventRef: randomUUID(), deviceSequence: seq, eventType: "duty_status_change", dutyStatus: "on_duty", recordOrigin: "driver",
-  eventAt: `2026-09-11T14:${String(seq % 60).padStart(2, "0")}:00.000Z`, previousEventHash: null, ...o,
+  eventAtMs: T0 + seq * 60_000, previousEventHash: null, ...o,
 });
 
 function signedBatch(dev: { deviceRef: string; k: DeviceKey }, events: EldEventInput[], o: { claimFingerprint?: string; batchRef?: string } = {}) {
@@ -122,7 +125,8 @@ const accepted = (r: Awaited<ReturnType<ReturnType<typeof callerFor>["eld"]["eve
 d("a device appends its own events, in its own organization", () => {
   it("records a valid event with the device's organization and the device user's operator, and the hash the device can recompute", async () => {
     const s = await driverScenario();
-    const e = ev(0, { unitId: await unitIn(s.orgRef), latitude: 53.5, longitude: -113.5, locationSource: "gps", odometerKm: 120_450.5 });
+    const unit = await unitIn(s.orgRef);
+    const e = ev(0, { unitNumber: unit.unitNumber, latitudeE7: 535000000, longitudeE7: -1135000000, locationAccuracyMm: 4200, locationSource: "gps", odometerM: 120_450_500, engineHoursMillis: 8_123_400, eventUtcOffsetMinutes: -360 });
     const r = accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [e])));
     expect(r.counts).toEqual({ inserted: 1, replayed: 0, conflict: 0 });
     expect(r.orgRef).toBe(s.orgRef);
@@ -134,6 +138,16 @@ d("a device appends its own events, in its own organization", () => {
     expect(row.sourceKind).toBe("field_device");
     expect(row.recordOrigin).toBe("driver");
     expect(row.dutyStatus).toBe("on_duty");
+    // The unit was resolved from its number, and the fixed-scale integers became the derived columns.
+    expect(row.unitId).toBe(unit.unitId);
+    expect(row.latitude).toBeCloseTo(53.5, 9);
+    expect(row.longitude).toBeCloseTo(-113.5, 9);
+    expect(row.locationAccuracyM).toBeCloseTo(4.2, 9);
+    expect(row.odometerKm).toBeCloseTo(120_450.5, 9);
+    expect(row.engineHours).toBeCloseTo(8_123.4, 9);
+    expect(new Date(row.eventAt).getTime()).toBe(T0);
+    expect(row.eventUtcOffsetMinutes).toBe(-360);
+    expect(row.fieldDeviceId).not.toBeNull();
     // Deterministic across the boundary: the device's own computation equals what the server stored.
     const local = hashEldEvent(s.deviceRef, e);
     expect(row.payloadHash).toBe(local.payloadHash);
@@ -157,7 +171,7 @@ d("a device appends its own events, in its own organization", () => {
 
   it("never reads a driver's name as identity: a payload that carries one is refused, and the operator is the device user's", async () => {
     const s = await driverScenario();
-    for (const extra of [{ operatorName: "Somebody Else" }, { operatorRef: "Somebody Else" }, { operatorId: 999_999 }]) {
+    for (const extra of [{ operatorName: "Somebody Else" }, { operatorRef: "Somebody Else" }, { operatorId: 999_999 }, { unitId: 1 }]) {
       const e = { ...ev(0), ...extra } as unknown as EldEventInput;
       const r = await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [e]));
       expect(r.state, JSON.stringify(extra)).toBe("refused");
@@ -201,13 +215,14 @@ d("a device appends its own events, in its own organization", () => {
   it("checks a stated unit against the organization rather than believing it", async () => {
     const s = await driverScenario();
     const foreign = await unitIn(await org());
-    const r1 = await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [ev(0, { unitId: foreign })]));
+    const r1 = await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [ev(0, { unitNumber: foreign.unitNumber })]));
     expect(r1.state === "refused" && r1.code).toBe("unit_not_in_organization");
-    const r2 = await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [ev(0, { unitId: 99_999_999 })]));
+    const r2 = await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [ev(0, { unitNumber: "NO-SUCH-UNIT" })]));
     expect(r2.state === "refused" && r2.code).toBe("unit_unknown");
     const own = await unitIn(s.orgRef);
-    const r3 = accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [ev(0, { unitId: own })])));
+    const r3 = accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [ev(0, { unitNumber: own.unitNumber })])));
     expect(r3.counts.inserted).toBe(1);
+    expect((await rowByRef(r3.events[0]!.eventRef)).unitId).toBe(own.unitId);
   });
 });
 
@@ -310,6 +325,57 @@ d("idempotency and conflict", () => {
   });
 });
 
+d("a declared hash is compared, never believed", () => {
+  it("accepts a correct declaration, refuses a wrong one, and refuses the true hash of other content", async () => {
+    const s = await driverScenario();
+    const e = ev(0);
+    const mine = hashEldEvent(s.deviceRef, e).eventHash;
+    const ok = accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [{ ...e, declaredEventHash: mine }])));
+    expect(ok.events[0]).toMatchObject({ outcome: "inserted", eventHash: mine });
+
+    const forged = { ...ev(1), declaredEventHash: "a".repeat(64) };
+    const r1 = await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [forged]));
+    expect(r1.state === "refused" && r1.code).toBe("declared_hash_mismatch");
+    expect(await countByRef(forged.eventRef)).toBe(0);
+
+    // Content altered after the device hashed it: the declaration is the hash of what it meant to send.
+    const meant = ev(2, { dutyStatus: "off_duty" });
+    const altered = { ...meant, dutyStatus: "driving" as const, declaredEventHash: hashEldEvent(s.deviceRef, meant).eventHash };
+    const r2 = await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [altered]));
+    expect(r2.state === "refused" && r2.code).toBe("declared_hash_mismatch");
+    expect(r2.state === "refused" && r2.problems[0]!.detail).toMatch(/device declared .* its bytes hash to/);
+    expect(await countByRef(altered.eventRef)).toBe(0);
+  });
+});
+
+d("conflict evidence is content evidence, not a counter", () => {
+  it("records the first conflicting payload once, treats its exact repeat as the same evidence, and a different conflicting payload as new evidence", async () => {
+    const s = await driverScenario();
+    const e = ev(0);
+    accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [e])));
+    const before = await rowByRef(e.eventRef);
+    const conflictA = { ...e, dutyStatus: "driving" as const };
+    const first = accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [conflictA])));
+    const again = accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [conflictA])));
+    const third = accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [conflictA])));
+    expect(first.events[0]!.conflictRef).toMatch(/^ELDC-/);
+    expect(again.events[0]!.conflictRef).toBe(first.events[0]!.conflictRef);
+    expect(third.events[0]!.conflictRef).toBe(first.events[0]!.conflictRef);
+    expect(again.events[0]).toMatchObject({ outcome: "conflict", code: "conflict_event_ref", eventId: before.id });
+    expect(await conflictsFor(e.eventRef)).toHaveLength(1);
+
+    const conflictB = { ...e, dutyStatus: "sleeper_berth" as const };
+    const other = accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [conflictB])));
+    expect(other.events[0]!.conflictRef).not.toBe(first.events[0]!.conflictRef);
+    const rows = await conflictsFor(e.eventRef);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(r => r.attemptedEventHash).sort()).toEqual([hashEldEvent(s.deviceRef, conflictA).eventHash, hashEldEvent(s.deviceRef, conflictB).eventHash].sort());
+    // Through all of it the canonical row did not move, and no row carries a count or a last-seen time.
+    expect(await rowByRef(e.eventRef)).toEqual(before);
+    expect(Object.keys(rows[0])).not.toEqual(expect.arrayContaining(["attemptCount", "lastSeenAt"]));
+  });
+});
+
 d("the ledger is append-only at the database", () => {
   it("refuses UPDATE and DELETE of a canonical event, and of a conflict row", async () => {
     const s = await driverScenario();
@@ -389,7 +455,7 @@ d("offline delivery: order is reconstructed, gaps are reported, nothing is inven
 d("a batch is one transaction", () => {
   it("writes nothing when one event in the batch is malformed", async () => {
     const s = await driverScenario();
-    const good = ev(0), bad = { ...ev(1), eventAt: "not a time" };
+    const good = ev(0), bad = { ...ev(1), eventAtMs: 2_147_483_647_001 };   // past the storable range: refused before any write, never a failed insert
     const r = await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [good, bad]));
     expect(r.state === "refused" && r.code).toBe("schema_invalid");
     expect(r.state === "refused" && r.problems.map(p => p.eventRef)).toEqual([bad.eventRef]);

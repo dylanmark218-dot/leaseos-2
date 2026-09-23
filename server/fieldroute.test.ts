@@ -393,9 +393,14 @@ describe("trip operations", () => {
           departedAt: new Date(),
         })
       ).resolves.toBeDefined();
+      // The operator is created here rather than assumed to be row 1: on a fresh gate database the
+      // first operator row belongs to whichever suite vitest happened to schedule first, and when that
+      // suite scopes its operator to an organization, "operator 1" is out of this caller's scope.
+      const operatorId = await caller.fieldRoute.identity.operators.create({ name: "Duty Test Operator", company: "FieldRoute Test Co" });
+      expect(typeof operatorId).toBe("number");
       await expect(
         caller.fieldRoute.dutyRecords.create({
-          operatorId: 1,
+          operatorId: operatorId as number,
           tripId,
           dutyStatus: "driving",
           startedAt: new Date(),

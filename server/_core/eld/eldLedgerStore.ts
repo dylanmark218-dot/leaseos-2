@@ -1,5 +1,5 @@
 /**
- * 0170 — the only writer of `eldEvents`.
+ * 0179 — the only writer of `eldEvents`.
  *
  * Routers do not insert ELD events. They authenticate the transport (signature, nonce, freshness)
  * and hand the enrolled device and the raw batch here. This module decides identity, tenancy,
@@ -8,7 +8,7 @@
  * Identity is the enrolled device's, never the payload's:
  *   the organization is `fieldDevices.orgRef`;
  *   the operator is the device user's operator record, checked against that organization;
- *   a stated `unitId` must exist and belong to that organization.
+ *   a stated `unitNumber` must name a unit that exists and belongs to that organization.
  * There is no field in which a driver's name could arrive, and if there were it would not be read.
  *
  * Idempotency and conflict, per event, inside the transaction:
@@ -25,6 +25,7 @@ import { eldEventIngestConflicts, eldEvents, operators, units, type EldEventRow 
 import type { Db, Tx } from "../dbTypes";
 import { recordBelongsToOrganization } from "../coreRecordOwnership";
 import { assessDeviceChain, prepareEldBatch, type BatchProblem, type ChainAssessment, type EldAppendReasonCode, type HashedEldEvent } from "./ledger";
+import { ELD_SCALE } from "../../../shared/eld/eldEvent";
 
 /** The device as the router loaded it. The store re-checks the facts it depends on; it does not trust the caller to have. */
 export type EldAppendDevice = {
@@ -108,13 +109,15 @@ export async function appendEldEvents(db: Db, args: EldAppendArgs): Promise<EldA
       return refuse("operator_unresolved", `Device ${d.deviceRef} belongs to a user with no operator record; a duty status needs a driver`);
     }
 
-    /* ---- units: stated by the device, checked against the org, never assumed ---- */
-    const unitIds = Array.from(new Set(batch.map(h => h.input.unitId).filter((u): u is number => u != null)));
-    if (unitIds.length) {
-      const known = new Set((await tx.select({ id: units.id }).from(units).where(inArray(units.id, unitIds))).map(r => r.id));
-      for (const u of unitIds) {
-        if (!known.has(u)) return refuse("unit_unknown", `Unit ${u} is not on record`);
-        if (!(await recordBelongsToOrganization(tx, orgRef, "unit", u))) return refuse("unit_not_in_organization", `Unit ${u} is not owned by organization ${orgRef}`);
+    /* ---- units: named by number by the device, resolved and checked against the org, never assumed ---- */
+    const unitNumbers = Array.from(new Set(batch.map(h => h.input.unitNumber).filter((u): u is string => u != null)));
+    const unitIdByNumber = new Map<string, number>();
+    if (unitNumbers.length) {
+      for (const r of await tx.select({ id: units.id, unitNumber: units.unitNumber }).from(units).where(inArray(units.unitNumber, unitNumbers))) unitIdByNumber.set(r.unitNumber, r.id);
+      for (const n of unitNumbers) {
+        const id = unitIdByNumber.get(n);
+        if (id == null) return refuse("unit_unknown", `Unit ${n} is not on record`);
+        if (!(await recordBelongsToOrganization(tx, orgRef, "unit", id))) return refuse("unit_not_in_organization", `Unit ${n} is not owned by organization ${orgRef}`);
       }
     }
 
@@ -178,14 +181,19 @@ export async function appendEldEvents(db: Db, args: EldAppendArgs): Promise<EldA
       const existing = await classifyExisting(h);
       if (existing) { outcomes.push(existing); continue; }
       const e = h.input;
+      // The canonical bytes are the record. The floating columns are derived from the fixed-scale
+      // integers for querying and are never what integrity is checked against.
+      const scaled = (v: number | null | undefined, scale: number) => (v == null ? null : v / scale);
       const values = {
         eventRef: e.eventRef, orgRef, fieldDeviceId: d.id, deviceSequence: e.deviceSequence,
-        operatorId, unitId: e.unitId ?? null,
+        operatorId, unitId: e.unitNumber == null ? null : unitIdByNumber.get(e.unitNumber) ?? null,
         eventType: e.eventType, eventCode: e.eventCode ?? null, dutyStatus: e.dutyStatus ?? null,
         recordOrigin: e.recordOrigin, sourceKind: "field_device" as const, sourceRef: args.sourceRef ?? null,
-        eventAt: new Date(e.eventAt), eventUtcOffsetMinutes: e.eventUtcOffsetMinutes ?? null, receivedAt: args.receivedAt,
-        latitude: e.latitude ?? null, longitude: e.longitude ?? null, locationAccuracyM: e.locationAccuracyM ?? null, locationSource: e.locationSource ?? null,
-        jurisdiction: e.jurisdiction ?? null, odometerKm: e.odometerKm ?? null, engineHours: e.engineHours ?? null, vehicleSpeedKph: e.vehicleSpeedKph ?? null,
+        eventAt: new Date(e.eventAtMs), eventUtcOffsetMinutes: e.eventUtcOffsetMinutes ?? null, receivedAt: args.receivedAt,
+        latitude: scaled(e.latitudeE7, ELD_SCALE.degreesE7), longitude: scaled(e.longitudeE7, ELD_SCALE.degreesE7),
+        locationAccuracyM: scaled(e.locationAccuracyMm, ELD_SCALE.metresToMm), locationSource: e.locationSource ?? null,
+        jurisdiction: e.jurisdiction ?? null, odometerKm: scaled(e.odometerM, ELD_SCALE.kmToM),
+        engineHours: scaled(e.engineHoursMillis, ELD_SCALE.hoursToMillis), vehicleSpeedKph: scaled(e.vehicleSpeedKphMillis, ELD_SCALE.kphToMillis),
         annotation: e.annotation ?? null, supersedesEventRef: e.supersedesEventRef ?? null,
         canonicalJson: h.canonicalJson, payloadHash: h.payloadHash, previousEventHash: e.previousEventHash, eventHash: h.eventHash, hashVersion: h.hashVersion,
         submittedByUserId: args.claimedUserId,

@@ -8797,11 +8797,11 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
 });
 
 /* ==================================================================
- * v23.26 — 0170: the canonical ELD event ledger
+ * v23.26 — 0179: the canonical ELD event ledger
  * ================================================================== */
 
 /**
- * 0170 — exactly one canonical accepted ELD event per device-minted `eventRef` and per
+ * 0179 — exactly one canonical accepted ELD event per device-minted `eventRef` and per
  * (enrolled device, device-local sequence). Append-only: BEFORE UPDATE and BEFORE DELETE triggers
  * refuse every mutation, and a correction is a later row naming this one in `supersedesEventRef`.
  *
@@ -8857,7 +8857,7 @@ export const eldEvents = mysqlTable("eldEvents", {
 }));
 
 /**
- * 0170 — an attempted event that collided with an existing `eventRef` or (device, sequence) while
+ * 0179 — an attempted event that collided with an existing `eventRef` or (device, sequence) while
  * carrying different content. The canonical row is untouched; the attempt is kept whole. Immutable
  * like the ledger itself. Unique per (canonical row, attempted hash) so re-sending the same
  * conflicting copy is recorded once.

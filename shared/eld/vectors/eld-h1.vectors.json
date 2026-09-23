@@ -1,0 +1,488 @@
+{
+  "hashVersion": "eld-h1",
+  "generatedBy": "shared/eld/vectors/eld_h1_reference.py (Python json module as the independent reference)",
+  "eventVectors": [
+    {
+      "name": "minimal event",
+      "description": "the six required fields; every optional field encodes as null",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "engine_power_up",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"engine_power_up\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 510,
+      "payloadHash": "d9ad5daf022ba7cf2fef87e5525501e7391863c7181162e9593a1a51d3aa430e",
+      "eventHash": "29d330b623d54e9e90c032f53586072d01bb0309ec3a20668607ad43e2de57e3"
+    },
+    {
+      "name": "complete event",
+      "description": "every participating field set, with a predecessor hash",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "0a1b2c3d-4e5f-4061-8283-94a5b6c7d8e9",
+        "deviceSequence": 41,
+        "eventType": "duty_status_change",
+        "eventCode": "DS_ON",
+        "dutyStatus": "on_duty",
+        "recordOrigin": "driver",
+        "eventAtMs": 1789135260123,
+        "eventUtcOffsetMinutes": -360,
+        "unitNumber": "VAC-27",
+        "latitudeE7": 535044210,
+        "longitudeE7": -1134909000,
+        "locationAccuracyMm": 4200,
+        "locationSource": "gps",
+        "jurisdiction": "CA-AB",
+        "odometerM": 120450500,
+        "engineHoursMillis": 8123400,
+        "vehicleSpeedKphMillis": 0,
+        "annotation": "Pre-trip complete, leaving yard",
+        "supersedesEventRef": null,
+        "previousEventHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+      },
+      "canonical": "{\"annotation\":\"Pre-trip complete, leaving yard\",\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":41,\"dutyStatus\":\"on_duty\",\"engineHoursMillis\":8123400,\"eventAtMs\":1789135260123,\"eventCode\":\"DS_ON\",\"eventRef\":\"0a1b2c3d-4e5f-4061-8283-94a5b6c7d8e9\",\"eventType\":\"duty_status_change\",\"eventUtcOffsetMinutes\":-360,\"hashVersion\":\"eld-h1\",\"jurisdiction\":\"CA-AB\",\"latitudeE7\":535044210,\"locationAccuracyMm\":4200,\"locationSource\":\"gps\",\"longitudeE7\":-1134909000,\"odometerM\":120450500,\"recordOrigin\":\"driver\",\"supersedesEventRef\":null,\"unitNumber\":\"VAC-27\",\"vehicleSpeedKphMillis\":0}",
+      "canonicalUtf8Length": 573,
+      "payloadHash": "bdd29b7e96f184730716b5b0018af1ad4ee2b80bfd8e6dfc7795c00e1efb40e5",
+      "eventHash": "963a5c212e0bfc128b522baf9cce5f154843b717aa4765a9d6d30263feaab715"
+    },
+    {
+      "name": "explicit nulls equal absence",
+      "description": "optional fields set to null must produce the minimal event's bytes",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "engine_power_up",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "eventCode": null,
+        "dutyStatus": null,
+        "unitNumber": null,
+        "latitudeE7": null,
+        "annotation": null,
+        "supersedesEventRef": null
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"engine_power_up\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 510,
+      "payloadHash": "d9ad5daf022ba7cf2fef87e5525501e7391863c7181162e9593a1a51d3aa430e",
+      "eventHash": "29d330b623d54e9e90c032f53586072d01bb0309ec3a20668607ad43e2de57e3"
+    },
+    {
+      "name": "empty string annotation",
+      "description": "an empty string is a value, distinct from null",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "annotation",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "annotation": ""
+      },
+      "canonical": "{\"annotation\":\"\",\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"annotation\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 503,
+      "payloadHash": "25d56408bff325a146686579541f237b14cb15f9bc7d24f0b006b84d6d733a12",
+      "eventHash": "8b5afe918718a362743c560ea601d6d447795d4b69597a0134aec3f66d31935a"
+    },
+    {
+      "name": "unicode",
+      "description": "accented, BMP symbol and an astral code point, all raw UTF-8",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "annotation",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "annotation": "Départ à Montréal ☃ 🚚"
+      },
+      "canonical": "{\"annotation\":\"Départ à Montréal ☃ 🚚\",\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"annotation\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 532,
+      "payloadHash": "1cada915cc5050bee06457ae1c243c862f0f63430d7292aedbdc2318a672f61a",
+      "eventHash": "1fc6379341310a79fa14aa48991febb95c45c808ef84157eff95eb12f4d91240"
+    },
+    {
+      "name": "quotation mark",
+      "description": "U+0022 escaped as backslash-quote",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "annotation",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "annotation": "He said \"stop\""
+      },
+      "canonical": "{\"annotation\":\"He said \\\"stop\\\"\",\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"annotation\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 519,
+      "payloadHash": "538e860b312e71b521d5e470586da27b10ad16860e18c1150c7ad84f61543e8a",
+      "eventHash": "7fea2882425686f9a462be1c40602533af1c5ec415bbd67bf5ba99fec22ebe32"
+    },
+    {
+      "name": "backslash",
+      "description": "U+005C escaped as two backslashes",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "annotation",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "annotation": "C:\\logs\\eld"
+      },
+      "canonical": "{\"annotation\":\"C:\\\\logs\\\\eld\",\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"annotation\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 516,
+      "payloadHash": "3916606f3dff41a4acd2e65d0765085f72ca6d9f5c473864d1acc9be82fbe90e",
+      "eventHash": "a8ed329cc9fa47ea95566adf90d1c9967f4fcbc6e09f5e9fcaef2f25e5762e87"
+    },
+    {
+      "name": "control characters",
+      "description": "tab, newline, CR, U+0001, U+001F short and \\u escapes; DEL raw",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "annotation",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "annotation": "a\tb\nc\rd\u0001e\u001ffg"
+      },
+      "canonical": "{\"annotation\":\"a\\tb\\nc\\rd\\u0001e\\u001ffg\",\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"annotation\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 529,
+      "payloadHash": "a3251be1a0762e2c6018eabc89dac462967be502e8126e0b8ec4fd7792448c8b",
+      "eventHash": "9708d8e0fe4b61ec008297ccc93f167ebb4eeb9e1a2e672df74f421a60a1ab87"
+    },
+    {
+      "name": "line separators raw",
+      "description": "U+2028 and U+2029 are not escaped",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "annotation",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "annotation": "x y z"
+      },
+      "canonical": "{\"annotation\":\"x y z\",\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"annotation\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 512,
+      "payloadHash": "fa0eeb24152d9b85e1d6e0ec5c951819ac5bc8d3d225295402c799ada30a2e41",
+      "eventHash": "07c3a7bcb19db1b2841a0c9eca8599b3df0e02e753efb58552e18277500b7ac1"
+    },
+    {
+      "name": "negative coordinate",
+      "description": "southern and western hemisphere, fixed scale E7",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "location_observation",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "latitudeE7": -337000000,
+        "longitudeE7": -1512000000,
+        "locationSource": "gps"
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"location_observation\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":-337000000,\"locationAccuracyMm\":null,\"locationSource\":\"gps\",\"longitudeE7\":-1512000000,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 529,
+      "payloadHash": "f997b924f85f4407e8f6fa73a1b5ecfe7337326492058496fa6e2c65a3c797db",
+      "eventHash": "aee3ee240d0429c3472f97f075b4c9b592095e8c5358b2c012bae640ba9af0b1"
+    },
+    {
+      "name": "positive coordinate",
+      "description": "northern and eastern hemisphere, fixed scale E7",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "location_observation",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "latitudeE7": 647500000,
+        "longitudeE7": 1250000000,
+        "locationSource": "network"
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"location_observation\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":647500000,\"locationAccuracyMm\":null,\"locationSource\":\"network\",\"longitudeE7\":1250000000,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 531,
+      "payloadHash": "3b9a93925b5a12047ee8a94a59c541714f5ac0a042404b6a3fbaf148d55ab7cc",
+      "eventHash": "8d8304e0f6441c733a264ba9d2d7f5e26767d697568ad04a52d893707533180f"
+    },
+    {
+      "name": "coordinate bounds",
+      "description": "the extreme legal values encode as plain integers",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "location_observation",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "latitudeE7": 900000000,
+        "longitudeE7": -1800000000,
+        "locationAccuracyMm": 0
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"location_observation\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":900000000,\"locationAccuracyMm\":0,\"locationSource\":null,\"longitudeE7\":-1800000000,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 524,
+      "payloadHash": "775aba5aee8eb7168a0e380dea8c4fd61244c890a779aa48f5a7786aca2e8493",
+      "eventHash": "8e842c9da3480a91b4f341f8438fd2bc6f1cfbd33f87f2c60bcd85ccdd955bbc"
+    },
+    {
+      "name": "timestamp",
+      "description": "eventAtMs is an integer; the offset travels separately",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "engine_power_up",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200999,
+        "previousEventHash": null,
+        "eventUtcOffsetMinutes": 330
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200999,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"engine_power_up\",\"eventUtcOffsetMinutes\":330,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 509,
+      "payloadHash": "887a0bbd3a615fe106b352ec268a3caf109a3569c32ab8c150e92f63134a2d1a",
+      "eventHash": "f65bff778c56cfac5b7592972afe72cc0c359f57348450ecbb18503d9faa21ab"
+    },
+    {
+      "name": "timestamp range edges",
+      "description": "the storable minimum and maximum",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "engine_power_up",
+        "recordOrigin": "automatic",
+        "eventAtMs": 2147483647000,
+        "previousEventHash": null,
+        "eventUtcOffsetMinutes": -840
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":2147483647000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"engine_power_up\",\"eventUtcOffsetMinutes\":-840,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 510,
+      "payloadHash": "402543103f5e7d3aeccc9e6e970abd0cd05f0e52676cecd1f9465dc8361bd6f6",
+      "eventHash": "36af5dda0b9740689116a84967b9a3eb764817a7ccd8f3f33095998771c9ef93"
+    },
+    {
+      "name": "predecessor hash",
+      "description": "the same payload as the minimal event, chained: payloadHash equal, eventHash different",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "engine_power_up",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"engine_power_up\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 510,
+      "payloadHash": "d9ad5daf022ba7cf2fef87e5525501e7391863c7181162e9593a1a51d3aa430e",
+      "eventHash": "df2f8b206cd6877d615564e0d60be120224b7de1d52dd07408dd85114a0351a5"
+    },
+    {
+      "name": "correction",
+      "description": "a correction names the event it supersedes",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "ffffffff-eeee-4ddd-bccc-bbbbbbbbbbbb",
+        "deviceSequence": 42,
+        "eventType": "correction",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+        "supersedesEventRef": "0a1b2c3d-4e5f-4061-8283-94a5b6c7d8e9",
+        "annotation": "on duty began 13:45"
+      },
+      "canonical": "{\"annotation\":\"on duty began 13:45\",\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":42,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"ffffffff-eeee-4ddd-bccc-bbbbbbbbbbbb\",\"eventType\":\"correction\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":\"0a1b2c3d-4e5f-4061-8283-94a5b6c7d8e9\",\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 557,
+      "payloadHash": "3cd2acdf82419365f0c3eaf35d52dbdb29d81ae13dea6baa5fc749b13eb1f786",
+      "eventHash": "3f8158761044b1a036d7a62dca6a992a5827ab6930e8df75f6abd4d8854f5f0e"
+    },
+    {
+      "name": "uppercase uuid normalizes",
+      "description": "an uppercase eventRef and supersedesEventRef hash as lowercase",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "FFFFFFFF-EEEE-4DDD-BCCC-BBBBBBBBBBBB",
+        "deviceSequence": 42,
+        "eventType": "correction",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "supersedesEventRef": "0A1B2C3D-4E5F-4061-8283-94A5B6C7D8E9"
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":42,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"ffffffff-eeee-4ddd-bccc-bbbbbbbbbbbb\",\"eventType\":\"correction\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":\"0a1b2c3d-4e5f-4061-8283-94a5b6c7d8e9\",\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 540,
+      "payloadHash": "6c9af2972d0d17474a7743fe8d892338327ade40048b4943439074e7d28c1325",
+      "eventHash": "15f37ed2ed0122976ca49250f7a67c2404aaa4af12bd64c95d9be885fd2c585d"
+    },
+    {
+      "name": "large integers",
+      "description": "2^53-1 and a maximal sequence encode as plain decimals",
+      "deviceRef": "DEV-MFJ2K1A0-Q7ZP",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 9007199254740991,
+        "eventType": "engine_power_up",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null,
+        "odometerM": 9007199254740991,
+        "engineHoursMillis": 1
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-MFJ2K1A0-Q7ZP\",\"deviceSequence\":9007199254740991,\"dutyStatus\":null,\"engineHoursMillis\":1,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"engine_power_up\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":9007199254740991,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 534,
+      "payloadHash": "73c22e339b0dbf7f713d4547e37ea2ed7d9e4319dd32dac7a6af23c182950650",
+      "eventHash": "8b7c062f685c5421feaefefb59181c2ee11a13df9a9e843a4c2ce1573e226e67"
+    },
+    {
+      "name": "other device",
+      "description": "the same event on another device is another record",
+      "deviceRef": "DEV-OTHER-0001",
+      "input": {
+        "eventRef": "5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d",
+        "deviceSequence": 0,
+        "eventType": "engine_power_up",
+        "recordOrigin": "automatic",
+        "eventAtMs": 1789135200000,
+        "previousEventHash": null
+      },
+      "canonical": "{\"annotation\":null,\"deviceRef\":\"DEV-OTHER-0001\",\"deviceSequence\":0,\"dutyStatus\":null,\"engineHoursMillis\":null,\"eventAtMs\":1789135200000,\"eventCode\":null,\"eventRef\":\"5d3a2b7c-9e1f-4a6b-8c0d-1e2f3a4b5c6d\",\"eventType\":\"engine_power_up\",\"eventUtcOffsetMinutes\":null,\"hashVersion\":\"eld-h1\",\"jurisdiction\":null,\"latitudeE7\":null,\"locationAccuracyMm\":null,\"locationSource\":null,\"longitudeE7\":null,\"odometerM\":null,\"recordOrigin\":\"automatic\",\"supersedesEventRef\":null,\"unitNumber\":null,\"vehicleSpeedKphMillis\":null}",
+      "canonicalUtf8Length": 507,
+      "payloadHash": "075349a09893ed574861ea75d2969c1133f18956a078e6aee956f92dc9f9dde2",
+      "eventHash": "437c5db06af5aaea4b348ededebf5ead8dbcede5633a5d40765a426905d69328"
+    }
+  ],
+  "valueVectors": [
+    {
+      "name": "nested object, unsorted input",
+      "description": "keys sorted by code point at every depth",
+      "value": {
+        "z": 1,
+        "a": {
+          "y": null,
+          "b": [
+            1,
+            2,
+            3
+          ],
+          "c": {
+            "k": true
+          }
+        },
+        "m": "x"
+      },
+      "canonical": "{\"a\":{\"b\":[1,2,3],\"c\":{\"k\":true},\"y\":null},\"m\":\"x\",\"z\":1}",
+      "canonicalUtf8Length": 57,
+      "sha256": "b35d21116d886d6e3c34d4cf69f79c0a84092409153c07052082d8a4cef5bc42"
+    },
+    {
+      "name": "array order preserved",
+      "description": "arrays are semantic order; never sorted",
+      "value": {
+        "list": [
+          3,
+          1,
+          2,
+          null,
+          false,
+          "b",
+          "a",
+          [
+            2,
+            1
+          ],
+          {
+            "y": 0,
+            "x": 0
+          }
+        ]
+      },
+      "canonical": "{\"list\":[3,1,2,null,false,\"b\",\"a\",[2,1],{\"x\":0,\"y\":0}]}",
+      "canonicalUtf8Length": 55,
+      "sha256": "49743ece8d32f8b1d4f9072c37ecb1769443490b4273527c172cb2becbcb5c04"
+    },
+    {
+      "name": "empty containers",
+      "description": "an empty object and an empty array",
+      "value": {
+        "o": {},
+        "a": []
+      },
+      "canonical": "{\"a\":[],\"o\":{}}",
+      "canonicalUtf8Length": 15,
+      "sha256": "9bee7ebfc94b459dacb8cbc72cb2900e61f0aa42189df18329f84f92568f4f89"
+    },
+    {
+      "name": "key ordering by code point",
+      "description": "ASCII digits before uppercase before lowercase; prefix first",
+      "value": {
+        "b": 1,
+        "B": 2,
+        "1": 3,
+        "a": 4,
+        "aa": 5,
+        "A": 6
+      },
+      "canonical": "{\"1\":3,\"A\":6,\"B\":2,\"a\":4,\"aa\":5,\"b\":1}",
+      "canonicalUtf8Length": 38,
+      "sha256": "5b0233f90bef625f4943e8e8c4652103f015fd5ae35a092a39c311e3c79afa14"
+    },
+    {
+      "name": "booleans and null",
+      "description": "the three literals",
+      "value": [
+        true,
+        false,
+        null
+      ],
+      "canonical": "[true,false,null]",
+      "canonicalUtf8Length": 17,
+      "sha256": "4d0f18de2133118249c26acc481838d4f6bb6bc1de882d99abbd19ae9397e8df"
+    },
+    {
+      "name": "integers",
+      "description": "zero, negative, and the largest magnitude",
+      "value": [
+        0,
+        -1,
+        9007199254740991,
+        -9007199254740991
+      ],
+      "canonical": "[0,-1,9007199254740991,-9007199254740991]",
+      "canonicalUtf8Length": 41,
+      "sha256": "d1f4b91349edc7ebd49ff1de73304f618c38a7456b5e36df82573d372466fff6"
+    },
+    {
+      "name": "escapes",
+      "description": "every short escape, a \\u escape, DEL and non-ASCII raw",
+      "value": "\"\\\b\t\n\f\r\u0000\u001fé€🚚",
+      "canonical": "\"\\\"\\\\\\b\\t\\n\\f\\r\\u0000\\u001fé€🚚\"",
+      "canonicalUtf8Length": 38,
+      "sha256": "010e0db08bd38002d68a1b014bafe849c3721369bd79e6bba8a3d970f3330c9f"
+    },
+    {
+      "name": "empty string",
+      "description": "two quotation marks",
+      "value": "",
+      "canonical": "\"\"",
+      "canonicalUtf8Length": 2,
+      "sha256": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+    }
+  ]
+}
