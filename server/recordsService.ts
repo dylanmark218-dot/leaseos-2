@@ -7,7 +7,7 @@
  * asking about can name itself.
  */
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { getDb } from "./db";
 import {
   evidenceAccessEvents,
@@ -511,6 +511,76 @@ export async function appendWorkOrderRelease(
   // what was signed, and by whom, is the point.
   const r = await db.insert(workOrderReleases).values(values);
   return r[0]?.insertId;
+}
+
+/* ------------------------------------------------------------------ */
+/* Defect resolution                                                   */
+/* ------------------------------------------------------------------ */
+
+export type DefectForResolution = {
+  id: number;
+  unitId: number;
+  severity: "advisory" | "inspection_required" | "critical";
+  status: "open" | "in_progress" | "resolved";
+  title: string;
+};
+
+export async function loadDefect(defectId: number): Promise<DefectForResolution | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({ id: maintenanceDefects.id, unitId: maintenanceDefects.unitId, severity: maintenanceDefects.severity, status: maintenanceDefects.status, title: maintenanceDefects.title })
+    .from(maintenanceDefects)
+    .where(eq(maintenanceDefects.id, defectId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** One release row, for validating the evidence a resolution cites. */
+export async function loadRelease(releaseId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(workOrderReleases).where(eq(workOrderReleases.id, releaseId)).limit(1);
+  return rows[0] ?? null;
+}
+
+/** Every release recorded against a unit, newest first. */
+export async function releasesForUnit(unitId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(workOrderReleases).where(eq(workOrderReleases.unitId, unitId)).orderBy(desc(workOrderReleases.releasedAt));
+}
+
+/**
+ * Move one named defect to `resolved`.
+ *
+ * Scoped to a single id on purpose. The failure this replaces cleared every critical defect on a
+ * unit at once, from a release that named none of them, so "resolve this defect" is the whole
+ * operation and there is deliberately no bulk form of it.
+ *
+ * The `status <> 'resolved'` predicate makes the transition idempotent at the database rather than
+ * in a read-then-write race: two callers resolving at once produce one change and one refusal.
+ */
+export async function resolveMaintenanceDefect(args: {
+  defectId: number;
+  resolvedByUserId: number;
+  resolvedByReleaseId: number | null;
+  note: string;
+  at: Date;
+}): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const r = await db
+    .update(maintenanceDefects)
+    .set({
+      status: "resolved",
+      resolvedAt: args.at,
+      resolvedByUserId: args.resolvedByUserId,
+      resolvedByReleaseId: args.resolvedByReleaseId,
+      resolutionNote: args.note.slice(0, 400),
+    })
+    .where(and(eq(maintenanceDefects.id, args.defectId), ne(maintenanceDefects.status, "resolved")));
+  return (r[0]?.affectedRows ?? 0) > 0;
 }
 
 export async function latestRelease(unitId: number) {
