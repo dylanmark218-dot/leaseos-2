@@ -65,9 +65,11 @@ certificates would give a second answer to "does this person hold H2S".
 - **Severity.**
   - Missing, rejected, expired, lapsing mid-job, wrong class, or not authorized
     on the equipment: **blocking**, overridable by no one.
-  - Unverified, no expiry recorded, or class not recorded: **unknown**, and a
-    manager may override with a reason. This is the base gate's treatment of an
-    unknown expiry.
+  - Unverified, no expiry recorded, or class not recorded: **unknown**. Under
+    owner decision D-02 (merged from main with C1a), the classification registers
+    these as `driver.portfolio.unknown`: an UNKNOWN that BLOCKS and is releasable
+    only by an owner-approved policy (`APPROVED_POLICY_ONLY`). The model's own
+    "manager" override hint is tightened by `classifyBlocker`, never loosened.
 - **Licence classes.** Alberta's hierarchy (1 ⊇ 2–5, 2 ⊇ 3–5, 3 and 4 ⊇ 5). A
   class string outside it is compared for equality, never guessed.
 - **Expiry warnings** at 90, 60, 30, 14 and 7 days, which never block.
@@ -105,6 +107,22 @@ certificates would give a second answer to "does this person hold H2S".
     dispatch use.
 - **`0176`.** Makes `driverPortfolioEvents` append-only in the database.
   Triggers refuse an UPDATE or DELETE that bypasses the router.
+
+## Integration with main (C1a)
+
+The branch merged `main` at `42c454f` (C1a readiness contract):
+
+- Migrations renumbered **0169 → 0175** and **0170 → 0176**; main owns 0169 and
+  0174, and 0170–0173 are claimed by open branches (see
+  `docs/architecture/MIGRATION_COLLISION_REGISTER.md`).
+- Portfolio codes registered in `CLASSIFICATION` (`driver.portfolio.unlinked`,
+  `.unknown`, `.unsatisfied`); `CLASSIFICATION_VERSION` bumped to `c1a.3`, which
+  stales every stored check by design.
+- Equipment authorization expiries and binding start/end times (same
+  organization only) enter C1a's `governingExpiries`, so time passing moves the
+  fingerprint even when no row changes.
+- Consistent with owner decision D-05: `complianceDocuments` is the canonical
+  document-backed credential store, which is what the portfolio reads.
 
 ## Tests
 
