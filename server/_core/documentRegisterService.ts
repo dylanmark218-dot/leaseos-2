@@ -15,11 +15,12 @@
  */
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { MySql2Database } from "drizzle-orm/mysql2";
-import { commercialDocumentLinks, commercialDocuments, disposalTickets, documentControlEvents, documentDefinitions, documentExternalReferences, evidenceRecords, facilities, fieldTicketDocuments, fieldTickets, jobs, loads, recordAmendments, retentionPolicies, trips, units } from "../../drizzle/schema";
+import { commercialDocumentLinks, commercialDocuments, disposalTickets, documentControlEvents, documentDefinitions, documentExternalReferences, evidenceRecords, facilities, fieldTicketDocuments, fieldTickets, jobs, loads, numberAllocations, recordAmendments, retentionPolicies, trackingReferences, trips, units } from "../../drizzle/schema";
 import { SINGLE_TENANT_ID } from "./actingScope";
 import { applyOverlay, rowToDefinition, type DocumentDefinitionRow, type DocumentLinkKind, type EffectiveDefinition, type ExternalReferenceType, type IssuerKind, type OriginKind } from "./documentDefinitions";
 import { factsMutable, issuerScopeKey, nextControlState, normaliseReferenceValue, provenanceSentence, referenceDuplicateVerdict, registerRefusals, type ControlState, type DocumentEventType, type ImportChannel, type IssuerInput, type LinkRole, type LinkSource, type ReferenceSource } from "./documentRegister";
-import { nextTrackingNumber } from "./trackingNumbers";
+import { consumeFromBlock, ensureSeriesRow, mintNumberInTx, NumberSeriesRefusal, voidNumber } from "./numberSeries";
+import { MINTING_POLICIES } from "./documentDefinitions";
 
 type Db = MySql2Database<Record<string, unknown>>;
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -157,6 +158,8 @@ export async function registerControlledDocument(db: Db, args: RegisterArgs): Pr
   const links = args.links ?? [];
   const problems = registerRefusals({ definition, originKind: args.originKind, issuer: args.issuer, templateRevisionRef: args.templateRevisionRef ?? null, controlNumber: args.controlNumber ?? null, requestedState: args.requestedState, externalReferences: refs, links, evidenceRecordId: args.evidenceRecordId ?? null, fieldTicketDocumentId: args.fieldTicketDocumentId ?? null, storageKey: args.storageKey ?? null });
   if (problems.length) refuse("PRECONDITION_FAILED", `BLOCKED — ${problems.join("; ")}`);
+  await ensureSeriesRow(db, { orgRef: null, sequenceType: "DOC" }, args.occurredAt);
+  if (!args.controlNumber && args.requestedState === "issued" && MINTING_POLICIES.includes(definition.numberingPolicy) && definition.numberSeriesType) await ensureSeriesRow(db, { orgRef: args.book.bookOrgRef, sequenceType: definition.numberSeriesType }, args.occurredAt);
 
   return db.transaction(async tx => {
     if (args.evidenceRecordId) {
@@ -197,22 +200,38 @@ export async function registerControlledDocument(db: Db, args: RegisterArgs): Pr
       const taken = (await tx.select({ id: commercialDocuments.id }).from(commercialDocuments).where(and(eq(commercialDocuments.bookScopeKey, scopeKey), eq(commercialDocuments.controlNumber, args.controlNumber))).limit(1))[0];
       if (taken) refuse("CONFLICT", `Control number ${args.controlNumber} is already on document #${taken.id}`);
     }
-    // The archival identity. Minted outside this transaction by the counter's own; Checkpoint C binds it.
-    const documentRef = (await nextTrackingNumber(db, { sequenceType: "DOC" })).trackingNumber;
+    // The series rows must exist before the transaction (INSERT IGNORE inside it deadlocks under contention).
     const now = args.occurredAt ?? new Date();
+    // The archival identity, minted in this transaction with its ledger row: a failed insert rolls the counter back.
+    const docMint = await mintNumberInTx(tx, { orgRef: null, sequenceType: "DOC" }, { recordType: "commercialDocument", recordId: null, actor: { userId: args.actor.userId, deviceRef: args.actor.deviceRef ?? null }, at: now });
+    const documentRef = docMint.number;
+    // A control number, where the definition's series mints one and none was handed in.
+    let controlNumber = args.controlNumber ?? null;
+    let controlMint: { allocationRef: string } | null = null;
+    if (!controlNumber && args.requestedState === "issued" && MINTING_POLICIES.includes(definition.numberingPolicy)) {
+      if (definition.numberSeriesType) {
+        const m = await mintNumberInTx(tx, { orgRef: args.book.bookOrgRef, sequenceType: definition.numberSeriesType }, { recordType: "commercialDocument", recordId: null, actor: { userId: args.actor.userId, deviceRef: args.actor.deviceRef ?? null }, at: now });
+        controlNumber = m.number; controlMint = m;
+      } else if (definition.numberingPolicy === "leaseos_series") {
+        throw new DocumentControlRefusal("PRECONDITION_FAILED", `BLOCKED — ${definition.definitionKey} requires a control number and names no series; set one on the definition`);
+      }
+    }
     const ins = await tx.insert(commercialDocuments).values({
       documentRef, bookOrgRef: args.book.bookOrgRef, bookScopeKey: scopeKey, documentType: definition.definitionKey, definitionKey: definition.definitionKey, definitionRef: definition.definitionRef, title: args.title,
       contentHash: args.contentHash, sourceSnapshotHash: args.sourceSnapshotHash ?? null, byteLength: args.byteLength ?? null, mimeType: args.mimeType ?? null,
       evidenceRecordId: args.evidenceRecordId ?? null, fieldTicketDocumentId: args.fieldTicketDocumentId ?? null, storageKey: args.storageKey ?? null, counterpartyOrgRef: args.counterpartyOrgRef ?? null, issuedAt: args.issuedAt ?? null,
       retentionPolicyId: definition.retentionPolicyId, retentionClass: definition.retentionPolicyId ? (await tx.select({ policyKey: retentionPolicies.policyKey }).from(retentionPolicies).where(eq(retentionPolicies.id, definition.retentionPolicyId)).limit(1))[0]?.policyKey ?? null : null,
       registeredByUserId: args.actor.userId, originKind: args.originKind, issuerKind: args.issuer.issuerKind, issuerOrgRef: args.issuer.issuerOrgRef ?? null, issuerFacilityId: args.issuer.issuerFacilityId ?? null, issuerName: args.issuer.issuerName ?? null,
-      controlNumber: args.controlNumber ?? null, controlNumberIssuedAt: args.controlNumber ? now : null, controlState: args.requestedState, templateRevisionRef: args.templateRevisionRef ?? null, renderManifestHash: args.renderManifestHash ?? null,
+      controlNumber, controlNumberIssuedAt: controlNumber ? now : null, controlState: args.requestedState, templateRevisionRef: args.templateRevisionRef ?? null, renderManifestHash: args.renderManifestHash ?? null,
       capturedByUserId: args.actor.userId, capturedByDeviceRef: args.actor.deviceRef ?? null, importChannel: args.importChannel ?? null,
       confirmedByUserId: args.requestedState === "confirmed" || args.requestedState === "issued" ? args.actor.userId : null, confirmedAt: args.requestedState === "confirmed" || args.requestedState === "issued" ? now : null,
       issuedByUserId: args.requestedState === "issued" ? args.actor.userId : null,
     });
     const documentId = Number(ins[0]?.insertId ?? 0);
     if (!documentId) refuse("PRECONDITION_FAILED", "Document insert returned no id");
+    await tx.update(numberAllocations).set({ recordId: documentId }).where(eq(numberAllocations.allocationRef, docMint.allocationRef));
+    if (controlMint) await tx.update(numberAllocations).set({ recordId: documentId }).where(eq(numberAllocations.allocationRef, controlMint.allocationRef));
+    await tx.insert(trackingReferences).values({ trackingNumber: documentRef, entityType: "commercialDocument", entityId: documentId, issuedAt: now, issuedByUserId: args.actor.userId, deviceId: args.actor.deviceRef ?? null });
     for (const l of resolvedLinks) await tx.insert(commercialDocumentLinks).values({ documentId, recordType: l.recordType, recordRef: l.recordRef, recordId: l.recordId, role: l.role, source: l.source, confirmationStatus: l.confirmed ? "confirmed" : "proposed", linkedByUserId: args.actor.userId, linkedByDeviceRef: args.actor.deviceRef ?? null });
     const referenceRefs: string[] = [];
     for (const r of preparedRefs) {
@@ -221,9 +240,9 @@ export async function registerControlledDocument(db: Db, args: RegisterArgs): Pr
       referenceRefs.push(referenceRef);
     }
     const first: DocumentEventType = args.requestedState === "issued" ? "document.issued" : args.requestedState === "confirmed" ? "document.confirmed" : args.requestedState === "proposed" ? "document.proposed" : "document.captured";
-    await appendDocumentEvent(tx, { documentId, eventType: first, actor: args.actor, previousState: null, newState: args.requestedState, occurredAt: now, detail: { documentRef, definitionKey: definition.definitionKey, originKind: args.originKind, issuerKind: args.issuer.issuerKind, controlNumber: args.controlNumber ?? null, contentHash: args.contentHash, links: resolvedLinks.length, references: referenceRefs.length, templateRevisionRef: args.templateRevisionRef ?? null } });
-    if (args.controlNumber) await appendDocumentEvent(tx, { documentId, eventType: "document.number_issued", actor: args.actor, occurredAt: now, detail: { controlNumber: args.controlNumber, series: definition.numberSeriesType, policy: definition.numberingPolicy } });
-    return { documentId, documentRef, controlState: args.requestedState, controlNumber: args.controlNumber ?? null, definitionRef: definition.definitionRef, references: referenceRefs, provenance: provenanceSentence({ originKind: args.originKind, issuerKind: args.issuer.issuerKind, issuerName: args.issuer.issuerName ?? null, templateRevisionRef: args.templateRevisionRef ?? null, controlNumber: args.controlNumber ?? null }) };
+    await appendDocumentEvent(tx, { documentId, eventType: first, actor: args.actor, previousState: null, newState: args.requestedState, occurredAt: now, detail: { documentRef, definitionKey: definition.definitionKey, originKind: args.originKind, issuerKind: args.issuer.issuerKind, controlNumber, contentHash: args.contentHash, links: resolvedLinks.length, references: referenceRefs.length, templateRevisionRef: args.templateRevisionRef ?? null } });
+    if (controlNumber) await appendDocumentEvent(tx, { documentId, eventType: "document.number_issued", actor: args.actor, occurredAt: now, detail: { controlNumber, series: definition.numberSeriesType, policy: definition.numberingPolicy, minted: controlMint ? "leaseos_series" : "domain_managed" } });
+    return { documentId, documentRef, controlState: args.requestedState, controlNumber, definitionRef: definition.definitionRef, references: referenceRefs, provenance: provenanceSentence({ originKind: args.originKind, issuerKind: args.issuer.issuerKind, issuerName: args.issuer.issuerName ?? null, templateRevisionRef: args.templateRevisionRef ?? null, controlNumber }) };
   });
 }
 
@@ -305,7 +324,11 @@ export async function confirmDocument(db: Db, args: { book: Book; actor: Actor; 
 }
 
 /** Issue a document the tenant produced: it takes its control number (minted by the caller through the series) and leaves the mutable states for good. */
-export async function issueDocument(db: Db, args: { book: Book; actor: Actor; documentRef: string; controlNumber: string | null; occurredAt?: Date }): Promise<{ documentRef: string; controlState: ControlState; controlNumber: string | null }> {
+export async function issueDocument(db: Db, args: { book: Book; actor: Actor; documentRef: string; controlNumber: string | null; deviceNumber?: { blockRef: string; sequence: number; deviceRef: string; idempotencyKey: string } | null; occurredAt?: Date }): Promise<{ documentRef: string; controlState: ControlState; controlNumber: string | null; minted: "leaseos_series" | "device_block" | "domain_managed" | "none" }> {
+  const pre = await documentInBook(db, args.book, args.documentRef);
+  const preDef = await definitionFor(db, args.book, pre.definitionKey ?? pre.documentType);
+  const willMint = !args.controlNumber && !pre.controlNumber && !args.deviceNumber && MINTING_POLICIES.includes(preDef.numberingPolicy) && !!preDef.numberSeriesType;
+  if (willMint) await ensureSeriesRow(db, { orgRef: args.book.bookOrgRef, sequenceType: preDef.numberSeriesType! }, args.occurredAt);
   return db.transaction(async tx => {
     const doc = await documentInBook(tx, args.book, args.documentRef);
     const transition = nextControlState(doc.controlState, "issue");
@@ -313,7 +336,23 @@ export async function issueDocument(db: Db, args: { book: Book; actor: Actor; do
     const originKind = doc.originKind;
     if (!originKind) throw new DocumentControlRefusal("PRECONDITION_FAILED", "BLOCKED — a document with no recorded origin cannot be issued");
     const definition = await definitionFor(tx, args.book, doc.definitionKey ?? doc.documentType);
-    const controlNumber = args.controlNumber ?? doc.controlNumber;
+    let controlNumber = args.controlNumber ?? doc.controlNumber;
+    let minted: "leaseos_series" | "device_block" | "domain_managed" | "none" = args.controlNumber ? "domain_managed" : "none";
+    const now0 = args.occurredAt ?? new Date();
+    if (!controlNumber && MINTING_POLICIES.includes(definition.numberingPolicy)) {
+      if (args.deviceNumber) {
+        if (args.actor.deviceRef && args.actor.deviceRef !== args.deviceNumber.deviceRef) throw new DocumentControlRefusal("PRECONDITION_FAILED", "BLOCKED — the number's device is not the device making the request");
+        try {
+          const m = await consumeFromBlock(tx, { scopeKey: scopeKeyOf(args.book), blockRef: args.deviceNumber.blockRef, sequence: args.deviceNumber.sequence, deviceRef: args.deviceNumber.deviceRef, recordType: "commercialDocument", recordId: doc.id, idempotencyKey: args.deviceNumber.idempotencyKey, actor: { userId: args.actor.userId, deviceRef: args.deviceNumber.deviceRef }, at: now0 });
+          controlNumber = m.number; minted = "device_block";
+        } catch (e) { if (e instanceof NumberSeriesRefusal) throw new DocumentControlRefusal(e.code, `BLOCKED — ${e.message}`); throw e; }
+      } else if (definition.numberSeriesType) {
+        const m = await mintNumberInTx(tx, { orgRef: args.book.bookOrgRef, sequenceType: definition.numberSeriesType }, { recordType: "commercialDocument", recordId: doc.id, actor: { userId: args.actor.userId, deviceRef: args.actor.deviceRef ?? null }, at: now0, idempotencyKey: `issue:${doc.documentRef}` });
+        controlNumber = m.number; minted = "leaseos_series";
+      }
+    } else if (args.deviceNumber) {
+      throw new DocumentControlRefusal("PRECONDITION_FAILED", `BLOCKED — ${definition.definitionKey} (${definition.numberingPolicy}) does not take a device-issued number`);
+    }
     const refs = await tx.select({ referenceType: documentExternalReferences.referenceType, referenceValueRaw: documentExternalReferences.referenceValueRaw }).from(documentExternalReferences).where(and(eq(documentExternalReferences.documentId, doc.id), eq(documentExternalReferences.confirmationStatus, "confirmed")));
     const problems = registerRefusals({ definition, originKind, issuer: { issuerKind: doc.issuerKind ?? "unknown", issuerOrgRef: doc.issuerOrgRef, issuerFacilityId: doc.issuerFacilityId, issuerName: doc.issuerName }, templateRevisionRef: doc.templateRevisionRef, controlNumber, requestedState: "issued", externalReferences: refs.map(r => ({ referenceType: r.referenceType, referenceValue: r.referenceValueRaw })), links: [], evidenceRecordId: doc.evidenceRecordId, fieldTicketDocumentId: doc.fieldTicketDocumentId, storageKey: doc.storageKey });
     if (problems.length) refuse("PRECONDITION_FAILED", `BLOCKED — ${problems.join("; ")}`);
@@ -323,9 +362,9 @@ export async function issueDocument(db: Db, args: { book: Book; actor: Actor; do
     }
     const now = args.occurredAt ?? new Date();
     await tx.update(commercialDocuments).set({ controlState: "issued", controlNumber, controlNumberIssuedAt: controlNumber ? (doc.controlNumberIssuedAt ?? now) : null, issuedByUserId: args.actor.userId, confirmedByUserId: doc.confirmedByUserId ?? args.actor.userId, confirmedAt: doc.confirmedAt ?? now }).where(eq(commercialDocuments.id, doc.id));
-    if (controlNumber && controlNumber !== doc.controlNumber) await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.number_issued", actor: args.actor, occurredAt: now, detail: { controlNumber, series: definition.numberSeriesType, policy: definition.numberingPolicy } });
-    await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.issued", actor: args.actor, occurredAt: now, previousState: doc.controlState, newState: "issued", detail: { controlNumber } });
-    return { documentRef: doc.documentRef, controlState: "issued", controlNumber };
+    if (controlNumber && controlNumber !== doc.controlNumber) await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.number_issued", actor: args.actor, occurredAt: now, detail: { controlNumber, series: definition.numberSeriesType, policy: definition.numberingPolicy, minted } });
+    await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.issued", actor: args.actor, occurredAt: now, previousState: doc.controlState, newState: "issued", detail: { controlNumber, minted } });
+    return { documentRef: doc.documentRef, controlState: "issued", controlNumber, minted };
   });
 }
 
@@ -338,7 +377,11 @@ export async function voidDocument(db: Db, args: { book: Book; actor: Actor; doc
     const now = args.occurredAt ?? new Date();
     await tx.update(commercialDocuments).set({ controlState: "void", voidedByUserId: args.actor.userId, voidedAt: now, voidReason: args.reason, statusReason: `voided by user ${args.actor.userId}: ${args.reason}` }).where(eq(commercialDocuments.id, doc.id));
     await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.voided", actor: args.actor, occurredAt: now, previousState: doc.controlState, newState: "void", detail: { reason: args.reason, controlNumber: doc.controlNumber } });
-    if (doc.controlNumber) await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.number_voided", actor: args.actor, occurredAt: now, detail: { controlNumber: doc.controlNumber, reason: args.reason } });
+    if (doc.controlNumber) {
+      const ledger = (await tx.select({ id: numberAllocations.id }).from(numberAllocations).where(and(eq(numberAllocations.scopeKey, scopeKeyOf(args.book)), eq(numberAllocations.formattedNumber, doc.controlNumber), eq(numberAllocations.state, "issued"))).limit(1))[0];
+      if (ledger) await voidNumber(tx, { scopeKey: scopeKeyOf(args.book), formattedNumber: doc.controlNumber, reasonCode: "cancelled_before_issue", reasonText: args.reason.slice(0, 300), actor: { userId: args.actor.userId }, at: now });
+      await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.number_voided", actor: args.actor, occurredAt: now, detail: { controlNumber: doc.controlNumber, reason: args.reason, ledgered: !!ledger } });
+    }
     return { documentRef: doc.documentRef, controlState: "void" };
   });
 }
@@ -358,8 +401,9 @@ export async function supersedeDocument(db: Db, args: { book: Book; actor: Actor
   if (old.originKind && ["leaseos_generated", "organization_template", "customer_template", "external_form_rendered"].includes(old.originKind) && !(args.templateRevisionRef ?? old.templateRevisionRef)) refuse("PRECONDITION_FAILED", "BLOCKED — a templated document's new version names the template revision it was rendered from");
   const definition = await definitionFor(db, args.book, old.definitionKey ?? old.documentType);
   if (definition.revisionPolicy === "reference_versioned" && !args.evidenceRecordId && !args.storageKey) refuse("BAD_REQUEST", "A reference document's new version is the publisher's new file");
-  const documentRef = (await nextTrackingNumber(db, { sequenceType: "DOC" })).trackingNumber;
+  await ensureSeriesRow(db, { orgRef: null, sequenceType: "DOC" }, args.occurredAt);
   return db.transaction(async tx => {
+    const documentRef = (await mintNumberInTx(tx, { orgRef: null, sequenceType: "DOC" }, { recordType: "commercialDocument", recordId: null, actor: { userId: args.actor.userId, deviceRef: args.actor.deviceRef ?? null }, at: args.occurredAt })).number;
     const links = await tx.select().from(commercialDocumentLinks).where(eq(commercialDocumentLinks.documentId, old.id));
     const refs = await tx.select().from(documentExternalReferences).where(and(eq(documentExternalReferences.documentId, old.id), eq(documentExternalReferences.confirmationStatus, "confirmed")));
     const now = args.occurredAt ?? new Date();
