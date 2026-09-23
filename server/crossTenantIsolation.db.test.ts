@@ -813,3 +813,99 @@ d("F4 — unknown ownership is not shared ownership in the commercial book", () 
     expect(refusal).not.toContain(bookB);
   }, 30_000);
 });
+
+/**
+ * F6 — a refusal must not confirm that somebody else's record exists.
+ *
+ * The repo's rule, stated in db.ts and followed by the records API, is that a
+ * record outside the caller's scope is NOT_FOUND: "no such id" and "an id that
+ * is another organization's" must be the same answer, because any difference
+ * between them is an oracle. Walk the id space, keep the ones that answer
+ * differently, and you have enumerated another company's fleet without ever
+ * being allowed to read one of its rows.
+ *
+ * The device router answered FORBIDDEN instead, and only on SOME procedures —
+ * which is what makes this worth pinning rather than obvious. `activate` and
+ * `rotateKey` check `userId` first, so a foreign device already fell out as
+ * NOT_FOUND. `revoke` deliberately does NOT check `userId` (revoking is an
+ * administrative act over the organization's fleet, not over your own handset),
+ * and `sync.receivePackage` never did either, so on exactly those two a foreign
+ * deviceRef was distinguishable from a fictional one.
+ *
+ * These tests compare the two answers rather than asserting one message, so
+ * they keep holding if the wording changes.
+ */
+d("F6 — a device refusal does not tell you whether the device exists", () => {
+  /** Enrol a device that genuinely belongs to `orgRef`, via the product's own path. */
+  async function deviceIn(orgRef: string, userId: number): Promise<string> {
+    const [res] = await pool.execute<mysql.ResultSetHeader>(
+      `INSERT INTO fieldDevices (deviceRef, userId, orgRef, platform, keyFingerprint, publicKeySpkiBase64, keystoreAttestation, encryptedStorageAttested, status, enrolledAt, enrolledByUserId)
+       VALUES (?,?,?,'android',?,?, 'hardware', 1, 'active', NOW(), ?)`,
+      [`DEV-${rnd()}-${rnd()}`, userId, orgRef, `fp${rnd()}${rnd()}`, `spki${rnd()}`, userId],
+    );
+    const [rows] = await pool.execute<mysql.RowDataPacket[]>("SELECT deviceRef FROM fieldDevices WHERE id = ?", [res.insertId]);
+    return String(rows[0]!.deviceRef);
+  }
+
+  /** The error a call produced, reduced to what a caller can actually observe. */
+  const observable = async (p: Promise<unknown>) =>
+    p.then(() => ({ code: "OK", message: "" }), (e: { code?: string; message: string }) => ({ code: String(e.code), message: e.message }));
+
+  it("answers a revoke for another organization's device exactly as for no device at all", async () => {
+    const orgA = await org(), orgB = await org();
+    const safetyA = await member(orgA, ["safety"]);
+    const ownerB = await member(orgB, ["safety"]);
+    const bsDevice = await deviceIn(orgB, ownerB);
+
+    const foreign = await observable(callerFor(safetyA).device.revoke({ deviceRef: bsDevice, reason: "probing another tenant" }));
+    const fictional = await observable(callerFor(safetyA).device.revoke({ deviceRef: `DEV-${rnd()}-${rnd()}`, reason: "probing another tenant" }));
+
+    expect(foreign.code).toBe("NOT_FOUND");
+    expect(foreign).toEqual(fictional);
+
+    // And the refusal was not a partial success.
+    const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+      "SELECT status, revokedAt, revokedByUserId FROM fieldDevices WHERE deviceRef = ?", [bsDevice],
+    );
+    expect(rows[0]!.status).toBe("active");
+    expect(rows[0]!.revokedAt).toBeNull();
+    expect(rows[0]!.revokedByUserId).toBeNull();
+  }, 30_000);
+
+  it("answers a sync package for another organization's device exactly as for no device at all", async () => {
+    const orgA = await org(), orgB = await org();
+    const driverA = await member(orgA, ["driver"]);
+    const ownerB = await member(orgB, ["safety"]);
+    const bsDevice = await deviceIn(orgB, ownerB);
+
+    const hash = () => "a".repeat(64);
+    const pkg = (deviceRef: string) => ({
+      deviceRef, signedWithFingerprint: hash(), signedAt: new Date(), nonce: `n-${rnd()}${rnd()}`,
+      signatureP1363Base64: "s".repeat(96), packageRef: `PKG-${rnd()}`, queuedAt: new Date(),
+      items: [{
+        evidenceRecordId: 1, declaredContentHash: hash(), declaredManifestHash: hash(),
+        computedContentHash: hash(), computedManifestHash: hash(),
+        captureAuthorizationClaim: "authorized" as const,
+      }],
+      recordUpdates: [],
+    });
+    const foreign = await observable(callerFor(driverA).sync.receivePackage(pkg(bsDevice) as never));
+    const fictional = await observable(callerFor(driverA).sync.receivePackage(pkg(`DEV-${rnd()}-${rnd()}`) as never));
+
+    expect(foreign.code).toBe("NOT_FOUND");
+    expect(foreign).toEqual(fictional);
+  }, 30_000);
+
+  it("keeps activate and rotateKey indistinguishable too, which they already were", async () => {
+    const orgA = await org(), orgB = await org();
+    const safetyA = await member(orgA, ["safety"]);
+    const ownerB = await member(orgB, ["safety"]);
+    const bsDevice = await deviceIn(orgB, ownerB);
+    const nothing = `DEV-${rnd()}-${rnd()}`;
+
+    expect(await observable(callerFor(safetyA).device.activate({ deviceRef: bsDevice })))
+      .toEqual(await observable(callerFor(safetyA).device.activate({ deviceRef: nothing })));
+    expect(await observable(callerFor(safetyA).device.rotateKey({ deviceRef: bsDevice, newPublicKeySpkiBase64: "k".repeat(120) })))
+      .toEqual(await observable(callerFor(safetyA).device.rotateKey({ deviceRef: nothing, newPublicKeySpkiBase64: "k".repeat(120) })));
+  }, 30_000);
+});

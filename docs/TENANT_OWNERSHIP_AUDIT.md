@@ -423,6 +423,48 @@ match the active organization", where the `db.ts` convention is `NOT_FOUND`. A
 caller can distinguish "this device exists and is another organization's" from
 "no such device". Inconsistent with §12 and with the repo's own stated rule.
 
+#### Resolution
+
+Confirmed on two of the four procedures, and **not** on the other two — the
+difference is the part worth recording, because it shows why the fix had to be
+structural rather than a find-and-replace of the error code:
+
+| procedure | foreign device | nonexistent device | leaked? |
+| --- | --- | --- | --- |
+| `device.activate` | NOT_FOUND | NOT_FOUND | no |
+| `device.rotateKey` | NOT_FOUND | NOT_FOUND | no |
+| `device.revoke` | **FORBIDDEN** | NOT_FOUND | **yes** |
+| `sync.receivePackage` | **FORBIDDEN** | PRECONDITION_FAILED | **yes** |
+
+`activate` and `rotateKey` escaped only because they check `userId` before the
+organization, so a foreign device fell out as "not found for this user" — an
+accident of ordering, not a rule, and one a refactor could undo. `revoke` has no
+`userId` check on purpose: revoking is an administrative act over the
+organization's fleet, which is precisely why the organization was the only
+boundary left and why its mismatch became observable.
+
+`sync.receivePackage` was doubly wrong: a `deviceRef` that exists nowhere was
+told "Legacy device has no organization binding and must be re-enrolled", which
+is both an oracle and untrue.
+
+So the scope moved **into** the lookup — `loadDevice` now takes the acting scope
+and applies `orgScopeWhere`, the same helper as the rest of the checkpoint — and
+every call site gets a row it is allowed to see or nothing at all. The refusal
+cannot be a partial success either: the row is never loaded, so nothing
+downstream can act on it by mistake. The legacy "must be re-enrolled" message is
+kept for the case it actually describes, a real row with no binding, which only
+the caller with no organization can now reach; for a member an unbound device is
+unattributed, and unattributed is not shared.
+
+The tests compare the two answers to each other rather than asserting a message,
+so they survive rewording, and they also assert the code is `NOT_FOUND` so a
+shared-but-wrong answer does not pass. `activate` and `rotateKey` are pinned
+too, although they already held, so the ordering that protects them cannot be
+silently reversed.
+
+Mutations, all killed: MUT-F6a (`loadDevice` unscoped again), MUT-F6b (missing
+device answers FORBIDDEN), MUT-F6c (sync falls through to the legacy message).
+
 ### F7 — two encodings of "unowned" (**low, but a trap**)
 
 `NULL` in `orgRef`, the string `"default"` in `tenantId`. `orgScopeWhere`
