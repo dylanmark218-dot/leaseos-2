@@ -8,6 +8,7 @@ import { NEEDS_A_RENDERER, VIEWPORTS, describeRun, runAxe, setViewport } from ".
 import { DisposalFinderView, type DisposalFinderViewProps } from "../pages/DisposalFinderView";
 import { CommercialOfficeView, type CommercialOfficeViewProps } from "../pages/CommercialOfficeView";
 import { DispatchReadinessView, type DispatchReadinessViewProps } from "../dispatch/DispatchReadinessView";
+import { DispatchJobDetailView, type DispatchJobDetailViewProps } from "../dispatch/DispatchJobDetailView";
 import { SourcedPanel } from "../showcase/SourcedPanel";
 import { WidgetBoard } from "../widgets/WidgetBoard";
 import { WidgetTileShell } from "../widgets/WidgetTileShell";
@@ -84,6 +85,25 @@ const readinessBlocked: DispatchReadinessViewProps["state"] = {
   },
 };
 
+/** The dispatch detail screen: a loaded job with an assignment, and the two states that say less. */
+const jobDetail = (o: Partial<DispatchJobDetailViewProps> = {}): DispatchJobDetailViewProps => ({
+  jobId: 41,
+  job: { kind: "loaded", job: {
+    id: 41, jobCode: "WH-2291", type: "water_haul", mode: "transport", customer: "Northgate Energy",
+    location: "04-12-052-09W5", status: "dispatched", progress: 0, eta: "14:30",
+    vehicleText: "the blue vac", driverText: "Dana",
+  } },
+  assignments: { kind: "loaded", rows: [
+    { jobUnitId: 900, unitId: 512, unitName: "HV-0031", operatorId: 77, operatorName: "J. Mercer",
+      role: "operator", joinedAt: new Date("2026-09-21T13:00:00Z"), departedAt: null },
+    { jobUnitId: 901, unitId: 513, unitName: null, operatorId: null, operatorName: null,
+      role: "support unit", joinedAt: new Date("2026-09-21T13:05:00Z"), departedAt: null },
+  ] },
+  namesResolved: true,
+  readiness: <DispatchReadinessView {...readinessPanel(readinessBlocked)} as="panel" />,
+  onRefresh: () => {}, refreshing: false, ...o,
+});
+
 const A11Y_NOW = new Date("2026-09-12T14:00:00Z");
 const a11yProv: Provenance = { source: "measured", verification: "verified", exact: true, observedAt: A11Y_NOW };
 const a11yTiles: BoardTileView[] = [
@@ -104,6 +124,9 @@ const surfaces = [
   { name: "dispatch readiness — blocked", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked)} />) },
   { name: "dispatch readiness — query failed", render: () => render(<DispatchReadinessView {...readinessPanel({ kind: "failed", message: "Database unavailable" })} />) },
   { name: "dispatch readiness — capability picture", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked, readinessCapabilities, { status: "BLOCKED", explanation: "1 capability blocked; 1 was not evaluated.", missingRequired: [] })} />) },
+  { name: "dispatch detail — job with assignments", render: () => render(<DispatchJobDetailView {...jobDetail()} />) },
+  { name: "dispatch detail — unassigned job", render: () => render(<DispatchJobDetailView {...jobDetail({ assignments: { kind: "loaded", rows: [] } })} />) },
+  { name: "dispatch detail — job outside the readable window", render: () => render(<DispatchJobDetailView {...jobDetail({ job: { kind: "outside_window" } })} />) },
   { name: "commercial office — organizations", render: () => render(<CommercialOfficeView {...office("organizations")} />) },
   { name: "commercial office — documents", render: () => render(<CommercialOfficeView {...office("documents")} />) },
   { name: "commercial office — disposal", render: () => render(<CommercialOfficeView {...office("disposal")} />) },
