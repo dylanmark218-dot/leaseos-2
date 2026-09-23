@@ -155,3 +155,18 @@ describe("readFieldManifest says whether the whole manifest was readable", () =>
     expect(read.evidence[0].committedAt.getTime()).toBe(T1.getTime());
   });
 });
+
+describe("an exact tie never depends on the order evidence arrives in", () => {
+  // The contract's tie case feeds the weaker verdict last. A resolver where the last
+  // row at the newest instant wins would pass it and manufacture "confirmed" here.
+  const confirmed = ev({ fieldKey: "arrivedAt", status: "confirmed", committedAt: T2 });
+  const proposed = ev({ fieldKey: "arrivedAt", status: "proposed", committedAt: T2 });
+
+  it("resolves to the weaker verdict with the weaker one first", () => {
+    expect(boundaryConfirmations([proposed, confirmed]).arrivedAt).toBe("unconfirmed");
+  });
+
+  it("resolves to the weaker verdict with the weaker one last", () => {
+    expect(boundaryConfirmations([confirmed, proposed]).arrivedAt).toBe("unconfirmed");
+  });
+});
