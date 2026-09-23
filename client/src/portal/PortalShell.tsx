@@ -9,9 +9,11 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useRoute } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { composeMyDayView, composeOfficeView, contextRibbon, defaultPortal, exceptionIndicator, switcherModel, type PortalKey } from "./viewModels";
+import { composeMyDayView, composeOfficeView, contextRibbon, exceptionIndicator, switcherModel, PORTAL_LABELS, type PortalKey } from "./viewModels";
+import { isHeldPortal, resolvePortalEntry } from "./entryModel";
+import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser, type ChooserOption } from "./PortalChooser";
 import { MyDayPanel } from "./panels/MyDayPanel";
 import { ExceptionsPanel } from "./panels/ExceptionsPanel";
 import { InboxPanel } from "./panels/InboxPanel";
@@ -44,8 +46,39 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
   const inbox = trpc.surfaces.inbox.useQuery(undefined, { refetchInterval: 60_000 });
 
   const held = useMemo(() => (session.data?.portals ?? []).map(p => p.portal as PortalKey), [session.data]);
-  const portal = portalOverride ?? defaultPortal(held);
+
+  // The `:portal` segment of /portal/:portal. It used to be routed and never
+  // read, so a deep link silently landed people wherever defaultPortal chose.
+  // It is an input like any other: checked against the held set, never trusted.
+  const [, routeParams] = useRoute("/portal/:portal/*?");
+  const requested = routeParams?.portal ?? null;
+
+  const organization = session.data?.organization ?? null;
+  const savedDefault =
+    organization && organization.state !== "ambiguous" && organization.state !== "unresolved"
+      ? organization.defaultWorkspace
+      : null;
+
+  const entry = useMemo(
+    () => resolvePortalEntry({ held, savedDefault, requested, notReached: session.data?.notReached ?? [] }),
+    [held, savedDefault, requested, session.data]
+  );
+
+  // An override can only ever name a portal this session holds: it is set from
+  // the switcher, which is built from `held`, and re-checked here so that stays
+  // true however the switcher changes.
+  const overridden = isHeldPortal(portalOverride, held) ? portalOverride : null;
+  const portal = overridden ?? (entry.kind === "enter" ? entry.portal : null);
   const switcher = switcherModel(held, portal);
+
+  const describe = (key: string): ChooserOption => {
+    const surface = (session.data?.portals ?? []).find(p => p.portal === key);
+    return {
+      portal: key,
+      displayName: surface?.displayName ?? PORTAL_LABELS[key as PortalKey] ?? key,
+      purpose: surface?.purpose ?? "",
+    };
+  };
 
   const view = useMemo(() => {
     if (!portal || !myDay.data) return null;
@@ -58,7 +91,30 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
   const go = (link: { portal: string; route: string }) => navigate(`/portal/${link.portal}${link.route}`);
 
   if (session.isLoading) return <div className="p-8 text-sm text-[#5b6b82]">Composing your portal…</div>;
-  if (!portal) return <div className="p-8 text-sm text-[#5b6b82]">No portal is open to this session — you do not hold a role that composes one. Ask your administrator for the role you need.</div>;
+
+  // Two live memberships and no way to choose. resolveActingScope refuses this
+  // rather than picking one; the screen says so rather than rendering a fault.
+  if (organization?.state === "ambiguous") {
+    return <OrganizationSelectionRequired detail={organization.detail} />;
+  }
+
+  if (entry.kind === "none" && !overridden) {
+    return <NoPortalAvailable notReached={entry.notReached.map(describe)} />;
+  }
+
+  if (!portal && entry.kind === "choose") {
+    return (
+      <PortalChooser
+        options={entry.options.map(describe)}
+        notReached={(session.data?.notReached ?? []).map(describe)}
+        rejectedDefault={entry.rejectedDefault}
+        rejectedRequest={entry.rejectedRequest ?? null}
+        onChoose={key => { setPortalOverride(key as PortalKey); navigate(`/portal/${key}`); }}
+      />
+    );
+  }
+
+  if (!portal) return <NoPortalAvailable notReached={(session.data?.notReached ?? []).map(describe)} />;
 
   return (
     <div className="min-h-screen bg-[#f6f8fb] text-[#172033]">
