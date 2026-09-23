@@ -108,6 +108,10 @@ gate "6. Test suite (includes column-level parity and reserved-word audit)"
 # separated by an escape sequence and `(✓|❯) *server/<name>` stops matching.
 # The gate failed on a run where all 312 files passed and every pinned suite
 # had executed. Red that means nothing is worse than no check at all.
+# Removed first: if vitest dies before writing the report, a file left by an
+# earlier run would be read as this run's result — a green gate describing a
+# suite that never executed, which is the whole failure mode being closed here.
+rm -f /tmp/vitest-gate.json
 LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run \
   --reporter=basic --reporter=json --outputFile.json=/tmp/vitest-gate.json 2>&1 | tee /tmp/vitest-gate.out
 # pipefail is on, so a failing vitest still fails the gate through the pipe.
