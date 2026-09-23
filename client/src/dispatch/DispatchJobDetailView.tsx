@@ -244,6 +244,7 @@ function Slot(props: {
   const [editing, setEditing] = useState<"assign" | "unassign" | null>(null);
   const [operatorId, setOperatorId] = useState<string>(row.operatorId != null ? String(row.operatorId) : "");
   const [unitId, setUnitId] = useState<string>(row.unitId != null ? String(row.unitId) : "");
+  const [trailerId, setTrailerId] = useState<string>(row.trailerId != null ? String(row.trailerId) : "");
   const [reason, setReason] = useState("");
   const [complaint, setComplaint] = useState<string | null>(null);
 
@@ -277,7 +278,8 @@ function Slot(props: {
     }
     setComplaint(null);
     props.onAssign({
-      roleId: row.roleId, operatorId: op, unitId: un, trailerId: row.trailerId,
+      roleId: row.roleId, operatorId: op, unitId: un,
+      trailerId: trailerId === "" ? null : Number(trailerId),
       expectedLastEventId: row.lastEventId,
       reason: reason.trim() === "" ? null : reason.trim(),
     });
@@ -391,6 +393,14 @@ function Slot(props: {
             Unit
             <select data-testid={`assign-unit-${row.roleId}`} value={unitId}
               onChange={e => setUnitId(e.target.value)} className="mt-1 block w-full rounded border p-1 text-xs">
+              <option value="">— none —</option>
+              {unitChoices.map(u => <option key={u.id} value={String(u.id)}>{u.label} (#{u.id})</option>)}
+            </select>
+          </label>
+          <label className="block text-xs">
+            Trailer — a unit record; the server checks it exists and is yours, not that it is a trailer
+            <select data-testid={`assign-trailer-${row.roleId}`} value={trailerId}
+              onChange={e => setTrailerId(e.target.value)} className="mt-1 block w-full rounded border p-1 text-xs">
               <option value="">— none —</option>
               {unitChoices.map(u => <option key={u.id} value={String(u.id)}>{u.label} (#{u.id})</option>)}
             </select>

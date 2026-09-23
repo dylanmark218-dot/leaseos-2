@@ -349,6 +349,51 @@ describe("I2c — assign, change and unassign", () => {
     expect(onAssign).toHaveBeenCalledTimes(1);
   });
 
+  /*
+   * The backend binds a trailer, so leaving it visible-but-uneditable would be a shipped capability
+   * with no door — the same shape as the slot model itself before Checkpoint C.
+   */
+  it("can set a trailer on a slot", () => {
+    const onAssign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onAssign, slots: {
+      kind: "loaded", rows: [slot({ status: "open", operatorId: null, unitId: null, lastEventId: null })],
+      staffing: staffing({ state: "unstaffed", filled: 0, requiredTotal: 1, unfilledRoles: ["Primary unit"], message: "0 of 1." }),
+      planningState: "direct", history: [],
+    } })} />);
+    fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /assign/i }));
+    fireEvent.change(screen.getByTestId("assign-operator-900"), { target: { value: "77" } });
+    fireEvent.change(screen.getByTestId("assign-trailer-900"), { target: { value: "513" } });
+    fireEvent.click(screen.getByTestId("assign-submit-900"));
+    expect(onAssign.mock.calls[0][0].trailerId).toBe(513);
+  });
+
+  it("keeps a trailer already on the slot when only the crew is changed", () => {
+    const onAssign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onAssign, slots: {
+      kind: "loaded", rows: [slot({ trailerId: 640, trailerName: "TR-640" })],
+      staffing: staffing(), planningState: "staffed", history: [],
+    } })} />);
+    fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /change/i }));
+    fireEvent.change(screen.getByTestId("assign-operator-900"), { target: { value: "78" } });
+    fireEvent.change(screen.getByTestId("assign-reason-900"), { target: { value: "Hours" } });
+    fireEvent.click(screen.getByTestId("assign-submit-900"));
+    expect(onAssign.mock.calls[0][0].trailerId).toBe(640);
+  });
+
+  it("can take a trailer off a slot without standing the crew down", () => {
+    const onAssign = vi.fn();
+    render(<DispatchJobDetailView {...props({ onAssign, slots: {
+      kind: "loaded", rows: [slot({ trailerId: 640, trailerName: "TR-640" })],
+      staffing: staffing(), planningState: "staffed", history: [],
+    } })} />);
+    fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /change/i }));
+    fireEvent.change(screen.getByTestId("assign-trailer-900"), { target: { value: "" } });
+    fireEvent.change(screen.getByTestId("assign-reason-900"), { target: { value: "Dropped the trailer" } });
+    fireEvent.click(screen.getByTestId("assign-submit-900"));
+    expect(onAssign.mock.calls[0][0].trailerId).toBeNull();
+    expect(onAssign.mock.calls[0][0].operatorId).toBe(77);
+  });
+
   it("never offers an eligibility check as something to attach to an assignment", () => {
     render(<DispatchJobDetailView {...props()} />);
     fireEvent.click(within(screen.getByTestId("slot-900")).getByRole("button", { name: /change/i }));
