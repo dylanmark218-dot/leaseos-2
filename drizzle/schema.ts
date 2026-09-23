@@ -9112,3 +9112,67 @@ export const numberAllocations = mysqlTable("numberAllocations", {
 
 export type InsertNumberBlock = typeof numberBlocks.$inferInsert;
 export type InsertNumberAllocation = typeof numberAllocations.$inferInsert;
+
+/* ==================================================================
+ * DC-D (0181) — template families and immutable released revisions. A
+ * template is one way of producing a document under a definition; it is
+ * never the record. A PDF and a DOCX of one form are two artifacts of one
+ * revision. Released revisions are immutable at the database (trigger).
+ * ================================================================== */
+
+export const documentTemplates = mysqlTable("documentTemplates", {
+  id: int("id").autoincrement().primaryKey(),
+  templateRef: varchar("templateRef", { length: 40 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  /** The family's own key: the package key for a seeded standard, a tenant-chosen key for its own. */
+  templateKey: varchar("templateKey", { length: 80 }).notNull(),
+  definitionKey: varchar("definitionKey", { length: 40 }).notNull(),
+  sourceKind: mysqlEnum("sourceKind", ["leaseos_standard", "organization_custom", "customer_supplied", "external_form"]).notNull(),
+  ownerKind: mysqlEnum("ownerKind", ["leaseos", "tenant", "customer", "regulator", "facility", "other_third_party"]).notNull(),
+  ownerOrgRef: varchar("ownerOrgRef", { length: 64 }),
+  ownerName: varchar("ownerName", { length: 220 }),
+  name: varchar("name", { length: 200 }).notNull(),
+  sourcePackageKey: varchar("sourcePackageKey", { length: 80 }),
+  status: mysqlEnum("status", ["active", "retired"]).default("active").notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+}, (t) => ({ scopeKeyUnique: uniqueIndex("documentTemplates_scope_key_unique").on(t.scopeKey, t.templateKey), definition: index("documentTemplates_definition").on(t.definitionKey, t.status) }));
+
+export const documentTemplateRevisions = mysqlTable("documentTemplateRevisions", {
+  id: int("id").autoincrement().primaryKey(),
+  revisionRef: varchar("revisionRef", { length: 40 }).notNull().unique(),
+  templateId: int("templateId").notNull(),
+  revision: int("revision").notNull(),
+  status: mysqlEnum("status", ["draft", "released", "retired"]).default("draft").notNull(),
+  layoutKind: mysqlEnum("layoutKind", ["leaseos_layout", "markdown_text", "pdf_overlay", "docx_source", "html_layout"]).notNull(),
+  layoutArtifactId: int("layoutArtifactId"),
+  layoutStorageKey: varchar("layoutStorageKey", { length: 512 }),
+  layoutContentHash: varchar("layoutContentHash", { length: 64 }).notNull(),
+  fieldMappingJson: text("fieldMappingJson").notNull(),
+  fieldMappingHash: varchar("fieldMappingHash", { length: 64 }).notNull(),
+  rendererKey: varchar("rendererKey", { length: 40 }).notNull(),
+  rendererVersion: varchar("rendererVersion", { length: 20 }).notNull(),
+  releaseManifestHash: varchar("releaseManifestHash", { length: 64 }),
+  notes: varchar("notes", { length: 500 }),
+  supersedesRevisionId: int("supersedesRevisionId"),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  releasedByUserId: int("releasedByUserId"),
+  releasedAt: timestamp("releasedAt"),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+}, (t) => ({ templateRevision: uniqueIndex("documentTemplateRevisions_template_revision_unique").on(t.templateId, t.revision) }));
+
+export const documentTemplateArtifacts = mysqlTable("documentTemplateArtifacts", {
+  id: int("id").autoincrement().primaryKey(),
+  revisionId: int("revisionId").notNull(),
+  artifactId: int("artifactId").notNull(),
+  role: mysqlEnum("role", ["printable", "printable_alternate", "editable_source", "render_source", "reference"]).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ unique: uniqueIndex("documentTemplateArtifacts_unique").on(t.revisionId, t.artifactId) }));
+
+export type InsertDocumentTemplate = typeof documentTemplates.$inferInsert;
+export type InsertDocumentTemplateRevision = typeof documentTemplateRevisions.$inferInsert;

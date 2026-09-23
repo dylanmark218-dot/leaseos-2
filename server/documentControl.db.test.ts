@@ -244,3 +244,83 @@ d("the register keeps origin, issuer and number apart", () => {
     await expect(c.documentControl.documents.issue({ documentRef: legacy.documentRef, controlNumber: "INV-X" })).rejects.toThrow(/no recorded origin/);
   }, 60_000);
 });
+
+/* ===================== Checkpoint D (0181) — template families and immutable revisions ===================== */
+
+d("standard template families are seeded once, released, and immutable", () => {
+  it("seeds 46 families with revision 1 released, PDF/DOCX pairs under one revision, four renderable now; a rerun changes nothing; the database refuses a change to a released revision", async () => {
+    const a = await org(); const mgr = await member(a, ["management"]); const office = await member(a, ["office"]);
+    const first = await callerFor(mgr).documentControl.definitions.catalogSeed();
+    expect(first.templates.families.skipped).toEqual([]);
+    expect(first.templates.families.created.length + first.templates.families.unchanged).toBe(46);
+    expect(first.templates.revisions.released.length + first.templates.revisions.unchanged).toBe(46);
+    const renderableFamilies = ["dot_fmcsa_registration_and_authority_record", "environmental_compliance_spill_reporting_form", "norm_survey_and_handling_record", "oilfield_waste_tracking_generator_compliance_form"];
+    expect(first.templates.renderableNow.every(k => renderableFamilies.includes(k))).toBe(true);
+    if (first.templates.revisions.released.length) expect(first.templates.renderableNow.sort()).toEqual(renderableFamilies);
+    const second = await callerFor(mgr).documentControl.definitions.catalogSeed();
+    expect(second.templates.families.created).toEqual([]);
+    expect(second.templates.revisions.released).toEqual([]);
+    expect(second.templates.artifactsLinked).toBe(0);
+    const [[counts]] = await pool.query<mysql.RowDataPacket[]>("SELECT (SELECT COUNT(*) FROM documentTemplates WHERE scopeKey='platform') AS fams, (SELECT COUNT(*) FROM documentTemplateRevisions WHERE status='released') AS revs, (SELECT COUNT(*) FROM documentTemplateArtifacts) AS arts");
+    expect(Number(counts!.fams)).toBe(46);
+    expect(Number(counts!.revs)).toBeGreaterThanOrEqual(46);
+    expect(Number(counts!.arts)).toBe(66 + 4);   // 66 canonical PDF/DOCX artifacts + 4 markdown render sources
+    const lib = await callerFor(office).documentControl.templates.list();
+    const bol = lib.find(t => t.templateKey === "bill_of_lading")!;
+    expect(bol).toMatchObject({ definitionKey: "bill_of_lading", sourceKind: "leaseos_standard", ownerKind: "leaseos", layer: "platform" });
+    expect(bol.currentRevision).toMatchObject({ revision: 1, layoutKind: "pdf_overlay", renderable: false });
+    const bolFull = await callerFor(office).documentControl.templates.get({ templateRef: bol.templateRef });
+    expect(bolFull.revisions[0]!.artifacts.map(x => [x.role, x.extension]).sort()).toEqual([["editable_source", "docx"], ["printable", "pdf"]]);
+    expect(bolFull.revisions[0]!.artifacts.every(x => /^[a-f0-9]{64}$/.test(x.sha256) && x.sourceCollection === "LeaseOS-Freight-and-Transportation-Templates")).toBe(true);
+    // The invoice family attaches to the existing `invoice` definition; the DOT family has two PDF variants under one revision.
+    expect(lib.find(t => t.templateKey === "commercial_invoice")!.definitionKey).toBe("invoice");
+    const dot = await callerFor(office).documentControl.templates.get({ templateRef: lib.find(t => t.templateKey === "dot_fmcsa_registration_and_authority_record")!.templateRef });
+    expect(dot.revisions[0]!.artifacts.map(x => x.role).sort()).toEqual(["printable", "printable_alternate", "render_source"]);
+    expect(dot.revisions[0]!).toMatchObject({ layoutKind: "markdown_text", rendererKey: "leaseos_text_v1", renderable: true });
+    // Released is immutable at the database.
+    await expect(pool.execute("UPDATE documentTemplateRevisions SET fieldMappingJson = '{\"version\":1,\"fields\":[{\"printedField\":\"x\",\"semanticKey\":null}]}' WHERE revisionRef = ?", [bol.currentRevision!.revisionRef])).rejects.toThrow(/immutable; a change is a new revision/);
+    await expect(pool.execute("UPDATE documentTemplateRevisions SET rendererVersion = '9' WHERE revisionRef = ?", [bol.currentRevision!.revisionRef])).rejects.toThrow(/immutable/);
+    await expect(pool.execute("UPDATE documentTemplateRevisions SET status = 'draft' WHERE revisionRef = ?", [bol.currentRevision!.revisionRef])).rejects.toThrow(/immutable/);
+    // A platform standard cannot be drafted from inside a business.
+    await expect(callerFor(mgr).documentControl.templates.revisionDraft({ templateRef: bol.templateRef, fieldMapping: { version: 1, fields: [{ printedField: "Shipper", semanticKey: "organization.legalName" }] } })).rejects.toThrow(/revised by a release/);
+  }, 90_000);
+
+  it("a business uploads its own form, maps it, releases it, renders a document on it, then releases revision 2 — and the document stays on revision 1", async () => {
+    const a = await org(), b = await org(); const mgr = await member(a, ["management"]); const office = await member(a, ["office"]); const officeB = await member(b, ["office"]); const driver = await member(a, ["driver"]);
+    await callerFor(mgr).documentControl.definitions.catalogSeed();
+    const c = callerFor(office); const m = callerFor(mgr);
+    const pdfHash = sha("PrideVac_DisposalTicket_2026.pdf"); const ev = await evidence(office, pdfHash);
+    await expect(m.documentControl.templates.createCustom({ definitionKey: "disposal_ticket", templateKey: "pridevac_disposal_ticket", name: "PrideVac disposal ticket", sourceKind: "organization_custom", evidenceRecordId: ev, contentHash: pdfHash, byteLength: 90_000, fileName: "PrideVac_DisposalTicket_2026.html", mimeType: "text/html" })).rejects.toThrow(/PDF or a DOCX/);
+    const tpl = await m.documentControl.templates.createCustom({ definitionKey: "disposal_ticket", templateKey: "pridevac_disposal_ticket", name: "PrideVac disposal ticket", sourceKind: "organization_custom", evidenceRecordId: ev, contentHash: pdfHash, byteLength: 90_000, fileName: "PrideVac_DisposalTicket_2026.pdf", mimeType: "application/pdf" });
+    expect(tpl).toMatchObject({ layoutKind: "pdf_overlay", renderable: false });
+    expect(tpl.rendererNote).toMatch(/D-DC-05/);
+    // A driver may not manage templates; a draft renders nothing.
+    await expect(callerFor(driver).documentControl.templates.revisionRelease({ revisionRef: tpl.revisionRef })).rejects.toThrow(/template.manage|Requires|FORBIDDEN/);
+    await expect(c.documentControl.documents.registerRendered({ definitionKey: "disposal_ticket", title: "DSP on draft", originKind: "organization_template", contentHash: sha("dsp-x"), storageKey: "dsp/x.pdf", templateRevisionRef: tpl.revisionRef, controlNumber: `DSP-${rnd()}` })).rejects.toThrow(/is a draft/);
+    const r1 = await m.documentControl.templates.revisionRelease({ revisionRef: tpl.revisionRef });
+    expect(r1.releaseManifestHash).toMatch(/^[a-f0-9]{64}$/);
+    // Wrong origin for the template's source is refused; the right one is issued and bound.
+    await expect(c.documentControl.documents.registerRendered({ definitionKey: "disposal_ticket", title: "DSP wrong origin", originKind: "leaseos_generated", contentHash: sha("dsp-1"), storageKey: "dsp/1.pdf", templateRevisionRef: tpl.revisionRef, controlNumber: `DSP-${rnd()}` })).rejects.toThrow(/renders as organization_template/);
+    const doc = await c.documentControl.documents.registerRendered({ definitionKey: "disposal_ticket", title: "DSP on PrideVac form", originKind: "organization_template", contentHash: sha("dsp-1"), storageKey: "dsp/1.pdf", templateRevisionRef: tpl.revisionRef, renderManifestHash: sha("render-1"), controlNumber: `DSP-${rnd()}` });
+    const v1 = await c.documentControl.documents.get({ documentRef: doc.documentRef });
+    expect(v1.document.templateRevisionRef).toBe(tpl.revisionRef);
+    expect(v1.timeline.map(e => e.eventType)).toEqual(["document.issued", "document.template_bound", "document.number_issued"]);
+    expect(v1.timeline[1]!.detail).toMatchObject({ templateRef: tpl.templateRef, releaseManifestHash: r1.releaseManifestHash, sourceKind: "organization_custom" });
+    expect(v1.provenance).toMatch(new RegExp(`from template revision ${tpl.revisionRef}`));
+    // Revision 2: a mapping change is a new revision; releasing it retires revision 1 for new records only.
+    const draft2 = await m.documentControl.templates.revisionDraft({ templateRef: tpl.templateRef, fieldMapping: { version: 1, fields: [{ printedField: "Driver Name", semanticKey: "operator.name" }, { printedField: "Ticket #", semanticKey: "document.controlNumber", required: true }] } });
+    expect(draft2).toMatchObject({ revision: 2, status: "draft", supersedes: tpl.revisionRef });
+    await expect(m.documentControl.templates.revisionDraft({ templateRef: tpl.templateRef, fieldMapping: { version: 1, fields: [] } })).rejects.toThrow(/still a draft/);
+    await m.documentControl.templates.revisionRelease({ revisionRef: draft2.revisionRef });
+    const full = await c.documentControl.templates.get({ templateRef: tpl.templateRef });
+    expect(full.revisions.map(r => [r.revision, r.status])).toEqual([[2, "released"], [1, "retired"]]);
+    expect((await c.documentControl.documents.get({ documentRef: doc.documentRef })).document.templateRevisionRef).toBe(tpl.revisionRef);   // still revision 1
+    await expect(c.documentControl.documents.registerRendered({ definitionKey: "disposal_ticket", title: "DSP on retired r1", originKind: "organization_template", contentHash: sha("dsp-2"), storageKey: "dsp/2.pdf", templateRevisionRef: tpl.revisionRef, controlNumber: `DSP-${rnd()}` })).rejects.toThrow(/is retired; the records already on it stay/);
+    const onR2 = await c.documentControl.documents.registerRendered({ definitionKey: "disposal_ticket", title: "DSP on r2", originKind: "organization_template", contentHash: sha("dsp-2"), storageKey: "dsp/2.pdf", templateRevisionRef: draft2.revisionRef, controlNumber: `DSP-${rnd()}` });
+    expect((await c.documentControl.documents.get({ documentRef: onR2.documentRef })).document.templateRevisionRef).toBe(draft2.revisionRef);
+    // Another business sees neither the template nor may it render on it; the unchanged mapping is refused as a new revision.
+    expect((await callerFor(officeB).documentControl.templates.list()).some(t => t.templateRef === tpl.templateRef)).toBe(false);
+    await expect(callerFor(officeB).documentControl.templates.get({ templateRef: tpl.templateRef })).rejects.toThrow(/not in this business's library/);
+    await expect(m.documentControl.templates.revisionDraft({ templateRef: tpl.templateRef, fieldMapping: { version: 1, fields: [{ printedField: "Ticket #", semanticKey: "document.controlNumber", required: true }, { printedField: "Driver Name", semanticKey: "operator.name" }] } })).rejects.toThrow(/Nothing changed/);
+  }, 90_000);
+});

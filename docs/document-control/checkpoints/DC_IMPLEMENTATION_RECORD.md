@@ -202,3 +202,63 @@ cannot cut blocks.
 **Gates.** See the commit: `tsc` clean, test-file type errors 0, parity 416/416, census 657,
 reachability, reserved-word, migration-ledger, tracking-number coverage, commercial-office and
 Document Control suites green, current state regenerated, build clean.
+
+---
+
+## Checkpoint D — template families and immutable released revisions (migration 0181)
+
+**What it adds.** `documentTemplates` (a family: definition, source — `leaseos_standard |
+organization_custom | customer_supplied | external_form` — owner, key; platform or one business),
+`documentTemplateRevisions` (what a document is rendered from: layout kind and hash, field-mapping
+JSON and hash, renderer key and version, one release manifest over all of them; `draft | released
+| retired`), `documentTemplateArtifacts` (a PDF and a DOCX of one form are two artifacts of one
+revision, never two definitions and never two templates). **Released is immutable at the
+database**: a BEFORE UPDATE trigger refuses any change to a released revision's layout, mapping,
+renderer, manifest or release columns, and permits only released → retired.
+
+**Seeded standards.** The catalog seed now creates one platform family per supplied package family
+(46), revision 1 released, every artifact attached with its role (66 canonical PDF/DOCX + the four
+markdown render sources = 70 links; the two DOT/FMCSA PDF variants are `printable` and
+`printable_alternate` under one revision). Layout: `markdown_text` where the package supplies a
+render source (four families, renderable by the present `renderPdf` text renderer as
+`leaseos_text_v1`), else `pdf_overlay` (forty-two families, registered and printable as supplied,
+**not renderable** until the PDF library decision D-DC-05 — `RENDERERS` says so by name). Revision 1
+mappings are empty; Checkpoint E releases mapped revisions. A rerun creates nothing.
+
+**Register binding.** A rendered document naming a `templateRevisionRef` is refused unless the
+revision exists, is released (a draft renders nothing; a retired revision takes no new records — the
+records already on it stay), belongs to the document's definition, and is the platform's or this
+business's own; the template's source must agree with the origin (a customer's form renders as
+`customer_template`, never as LeaseOS's). The binding is a timeline event carrying the release
+manifest hash.
+
+**Custom forms (foundation).** `templates.createCustom` takes a business's or a customer's form as
+uploaded into the evidence vault — a PDF or a DOCX under the evidence size cap with a plain file
+name, hashed and registered untouched, never executed — and opens revision 1 as a draft with no
+fields mapped. `revisionDraft` makes revision N+1 from a new layout, a new mapping or both (the
+unchanged pair is refused; one draft at a time); `revisionRelease` computes the manifest, makes it
+current and retires the previous released one for new records; `retire` closes the family. A
+platform standard cannot be drafted from inside a business. Arbitrary-PDF field detection is not
+built; a mapping is typed by a person against the semantic registry (E).
+
+**Reused.** `documentSourceArtifacts` (A) as the artifact store; `renderPdf` (`ticketPdf.ts`) as the
+one renderer; `evidenceRecords` + `evidence.upload` for custom-form bytes; the register (B) for the
+binding. Not built: a second renderer, a PDF library, an AcroForm reader, a per-format definition.
+
+**Surface.** Six procedures: `templates.list/get` (`document.read`); `createCustom`,
+`revisionDraft`, `revisionRelease`, `retire` (`document.template.manage`: management and office).
+Census 663 (+6).
+
+**Tests.** `server/_core/documentTemplates.test.ts` (6): enum mirror, renderer honesty, mapping
+hash independent of field order, manifests change with every input, the four markdown sources
+fill and render to PDF 1.4 through the present renderer with no invented values, untrusted-upload
+refusals. `server/documentControl.db.test.ts` (+2): 46 families / ≥46 released revisions / 70
+artifact links, PDF+DOCX under one revision with source collection and hash, invoice family on the
+existing definition, DOT variants under one revision, database refuses mapping/renderer/status
+changes on a released revision, platform standard not draftable; a business uploads a PDF form
+(HTML refused), a driver cannot release, a draft renders nothing, wrong origin refused, document
+issued and bound on revision 1, revision 2 drafted from a mapping change and released, revision 1
+retired for new records and refused, the earlier document still on revision 1, another business
+sees nothing, unchanged mapping refused.
+
+**Gates.** See the commit.

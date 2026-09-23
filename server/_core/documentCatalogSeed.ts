@@ -87,6 +87,7 @@ function toInsert(d: DocumentDefinitionSeed, extra: { orgRef: string | null; def
 
 export type CatalogSeedReport = {
   importBatchRef: string;
+  templates: TemplateSeedReport;
   definitions: { created: string[]; updated: string[]; unchanged: number; aliased: Record<string, string>; refused: string[] };
   categories: { created: string[]; unchanged: number };
   artifacts: { registered: number; unchanged: number; verified: number; missingOnDisk: string[]; refused: string[] };
@@ -155,6 +156,7 @@ export async function seedDocumentCatalog(db: Db, args: { importedByUserId: numb
     definitions: { created: [], updated: [], unchanged: 0, aliased: plan.aliased, refused: plan.refused },
     categories: { created: [], unchanged: 0 },
     artifacts: { registered: 0, unchanged: 0, verified: 0, missingOnDisk: [], refused: [] },
+    templates: { families: { created: [], unchanged: 0, skipped: [] }, revisions: { released: [], unchanged: 0 }, artifactsLinked: 0, renderableNow: [] },
   };
 
   // Definitions: platform scope only. Tenant overlays are never touched by a seed.
@@ -216,6 +218,7 @@ export async function seedDocumentCatalog(db: Db, args: { importedByUserId: numb
     if (verified) report.artifacts.verified++;
     known.add(m.sha256);
   }
+  report.templates = await seedStandardTemplates(db, { importedByUserId: args.importedByUserId, entries });
   return report;
 }
 
@@ -224,4 +227,66 @@ export async function systemDefinitionsPresent(db: Db): Promise<boolean> {
   const rows = await db.select({ definitionKey: documentDefinitions.definitionKey }).from(documentDefinitions).where(and(eq(documentDefinitions.scopeKey, PLATFORM_SCOPE), sql`${documentDefinitions.status} = 'active'`));
   const have = new Set(rows.map(r => r.definitionKey));
   return SYSTEM_DEFINITIONS.every(d => have.has(d.definitionKey));
+}
+
+/* ===================== DC-D (0181) — the supplied families as standard templates ===================== */
+
+import { documentTemplateArtifacts, documentTemplateRevisions, documentTemplates } from "../../drizzle/schema";
+import { EMPTY_MAPPING, MARKDOWN_RENDER_SOURCES, mappingHash, releaseManifestHash, rendererFor, templateKeyForPackage, type LayoutKind } from "./documentTemplates";
+
+export type TemplateSeedReport = { families: { created: string[]; unchanged: number; skipped: string[] }; revisions: { released: string[]; unchanged: number }; artifactsLinked: number; renderableNow: string[] };
+
+/**
+ * One standard family per supplied package family, revision 1 released, every
+ * artifact of the family attached with its role. Idempotent: a family or
+ * revision that exists is left exactly as it is — a released revision could
+ * not be changed even if the seeder wanted to. Layout: a markdown render
+ * source where the package has one (renderable by the present renderer),
+ * else the printable PDF under `pdf_overlay` (registered, not renderable
+ * until D-DC-05).
+ */
+export async function seedStandardTemplates(db: Db, args: { importedByUserId: number | null; entries: PackageDefinitionEntry[] }): Promise<TemplateSeedReport> {
+  const report: TemplateSeedReport = { families: { created: [], unchanged: 0, skipped: [] }, revisions: { released: [], unchanged: 0 }, artifactsLinked: 0, renderableNow: [] };
+  const artifacts = await db.select().from(documentSourceArtifacts);
+  const mdByStem = new Map<string, (typeof artifacts)[number]>();
+  for (const a of artifacts) if (a.role === "render_template_source" && a.extension === "md") mdByStem.set(a.fileName.replace(/\.md$/, ""), a);
+  const existingFamilies = await db.select().from(documentTemplates).where(eq(documentTemplates.scopeKey, PLATFORM_SCOPE));
+  const byKey = new Map(existingFamilies.map(f => [f.templateKey, f]));
+  for (const e of args.entries) {
+    const templateKey = templateKeyForPackage(e.document_definition_key);
+    const definitionKey = resolvePackageKey(e.document_definition_key);
+    const family = artifacts.filter(a => a.sourcePackageKey === e.document_definition_key);
+    if (!family.length) { report.families.skipped.push(`${templateKey}: no registered artifacts`); continue; }
+    let fam = byKey.get(templateKey);
+    if (!fam) {
+      const templateRef = `TPL-P-${templateKey}`.slice(0, 40);
+      await db.insert(documentTemplates).values({ templateRef, orgRef: null, scopeKey: PLATFORM_SCOPE, templateKey, definitionKey, sourceKind: "leaseos_standard", ownerKind: "leaseos", name: e.display_name, sourcePackageKey: e.document_definition_key, createdByUserId: args.importedByUserId });
+      fam = (await db.select().from(documentTemplates).where(eq(documentTemplates.templateRef, templateRef)).limit(1))[0]!;
+      report.families.created.push(templateKey);
+    } else report.families.unchanged++;
+    const rev1 = (await db.select().from(documentTemplateRevisions).where(and(eq(documentTemplateRevisions.templateId, fam.id), eq(documentTemplateRevisions.revision, 1))).limit(1))[0];
+    if (rev1) { report.revisions.unchanged++; continue; }
+    // Layout: the markdown render source when the package supplies one, else the first printable PDF (variant 1).
+    const mdStem = Object.entries(MARKDOWN_RENDER_SOURCES).find(([, defKey]) => defKey === definitionKey)?.[0];
+    const md = mdStem ? mdByStem.get(mdStem) ?? null : null;
+    const printables = family.filter(a => a.role === "printable_template").sort((a, b) => (a.variantNo ?? 0) - (b.variantNo ?? 0));
+    const editable = family.find(a => a.role === "editable_template_source") ?? null;
+    const layoutKind: LayoutKind = md ? "markdown_text" : "pdf_overlay";
+    const layoutArtifact = md ?? printables[0] ?? null;
+    if (!layoutArtifact) { report.families.skipped.push(`${templateKey}: no layout artifact`); continue; }
+    const renderer = rendererFor(layoutKind);
+    const fieldMappingHash = mappingHash(EMPTY_MAPPING);
+    const manifest = releaseManifestHash({ layoutContentHash: layoutArtifact.sha256, fieldMappingHash, rendererKey: renderer.rendererKey, rendererVersion: renderer.rendererVersion, editableSourceHash: editable?.sha256 ?? null });
+    const revisionRef = `TPLR-P-${templateKey}-r1`.slice(0, 40);
+    const ins = await db.insert(documentTemplateRevisions).values({ revisionRef, templateId: fam.id, revision: 1, status: "released", layoutKind, layoutArtifactId: layoutArtifact.id, layoutStorageKey: null, layoutContentHash: layoutArtifact.sha256, fieldMappingJson: JSON.stringify(EMPTY_MAPPING), fieldMappingHash, rendererKey: renderer.rendererKey, rendererVersion: renderer.rendererVersion, releaseManifestHash: manifest, notes: `seeded from ${CATALOG_ROOT} (${e.document_definition_key}); fields unmapped until Checkpoint E`, createdByUserId: args.importedByUserId, releasedByUserId: args.importedByUserId, releasedAt: new Date() });
+    const revisionId = Number(ins[0]?.insertId ?? 0);
+    const roles: { artifactId: number; role: "printable" | "printable_alternate" | "editable_source" | "render_source" | "reference" }[] = [];
+    printables.forEach((p, i) => roles.push({ artifactId: p.id, role: i === 0 ? "printable" : "printable_alternate" }));
+    if (editable) roles.push({ artifactId: editable.id, role: "editable_source" });
+    if (md) roles.push({ artifactId: md.id, role: "render_source" });
+    for (const r of roles) { await db.insert(documentTemplateArtifacts).values({ revisionId, artifactId: r.artifactId, role: r.role }); report.artifactsLinked++; }
+    report.revisions.released.push(revisionRef);
+    if (renderer.renderable) report.renderableNow.push(templateKey);
+  }
+  return report;
 }

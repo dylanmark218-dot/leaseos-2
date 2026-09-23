@@ -15,7 +15,7 @@
  */
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { MySql2Database } from "drizzle-orm/mysql2";
-import { commercialDocumentLinks, commercialDocuments, disposalTickets, documentControlEvents, documentDefinitions, documentExternalReferences, evidenceRecords, facilities, fieldTicketDocuments, fieldTickets, jobs, loads, numberAllocations, recordAmendments, retentionPolicies, trackingReferences, trips, units } from "../../drizzle/schema";
+import { commercialDocumentLinks, commercialDocuments, disposalTickets, documentControlEvents, documentDefinitions, documentExternalReferences, documentTemplateRevisions, documentTemplates, evidenceRecords, facilities, fieldTicketDocuments, fieldTickets, jobs, loads, numberAllocations, recordAmendments, retentionPolicies, trackingReferences, trips, units } from "../../drizzle/schema";
 import { SINGLE_TENANT_ID } from "./actingScope";
 import { applyOverlay, rowToDefinition, type DocumentDefinitionRow, type DocumentLinkKind, type EffectiveDefinition, type ExternalReferenceType, type IssuerKind, type OriginKind } from "./documentDefinitions";
 import { factsMutable, issuerScopeKey, nextControlState, normaliseReferenceValue, provenanceSentence, referenceDuplicateVerdict, registerRefusals, type ControlState, type DocumentEventType, type ImportChannel, type IssuerInput, type LinkRole, type LinkSource, type ReferenceSource } from "./documentRegister";
@@ -104,6 +104,25 @@ export async function linkTargetInScope(db: Db | Tx, book: Book, link: { recordT
   }
 }
 
+/**
+ * DC-D: the template revision a document says it was rendered from must exist,
+ * be released (a draft renders nothing; a retired one takes no new records —
+ * the records already on it stay), belong to this definition, and be the
+ * platform's or this business's own. Returns the revision's release manifest
+ * so the document can prove what it was rendered from.
+ */
+export async function templateRevisionForRender(db: Db | Tx, book: Book, definitionKey: string, revisionRef: string): Promise<{ revisionId: number; templateRef: string; releaseManifestHash: string | null; sourceKind: string }> {
+  const rev = (await db.select().from(documentTemplateRevisions).where(eq(documentTemplateRevisions.revisionRef, revisionRef)).limit(1))[0];
+  if (!rev) return refuse("NOT_FOUND", `Template revision ${revisionRef} does not exist`);
+  const tpl = (await db.select().from(documentTemplates).where(eq(documentTemplates.id, rev.templateId)).limit(1))[0];
+  if (!tpl || (tpl.orgRef !== null && tpl.orgRef !== book.bookOrgRef)) return refuse("NOT_FOUND", `Template revision ${revisionRef} is not in this business's library`);
+  if (tpl.definitionKey !== definitionKey) return refuse("PRECONDITION_FAILED", `BLOCKED — template ${tpl.templateRef} renders ${tpl.definitionKey}, not ${definitionKey}`);
+  if (rev.status === "draft") return refuse("PRECONDITION_FAILED", `BLOCKED — revision ${revisionRef} is a draft; release it before rendering from it`);
+  if (rev.status === "retired") return refuse("PRECONDITION_FAILED", `BLOCKED — revision ${revisionRef} is retired; the records already on it stay, new ones take the current revision`);
+  if (tpl.status !== "active") return refuse("PRECONDITION_FAILED", `BLOCKED — template ${tpl.templateRef} is retired`);
+  return { revisionId: rev.id, templateRef: tpl.templateRef, releaseManifestHash: rev.releaseManifestHash, sourceKind: tpl.sourceKind };
+}
+
 async function nextEventSequence(tx: Tx, documentId: number): Promise<number> {
   const last = (await tx.select({ sequence: documentControlEvents.sequence }).from(documentControlEvents).where(eq(documentControlEvents.documentId, documentId)).orderBy(desc(documentControlEvents.sequence)).limit(1))[0];
   return (last?.sequence ?? 0) + 1;
@@ -175,6 +194,14 @@ export async function registerControlledDocument(db: Db, args: RegisterArgs): Pr
       const f = (await tx.select({ id: facilities.id }).from(facilities).where(eq(facilities.id, args.issuer.issuerFacilityId)).limit(1))[0];
       if (!f) refuse("NOT_FOUND", `Facility ${args.issuer.issuerFacilityId} does not exist`);
     }
+    let templateBinding: { templateRef: string; releaseManifestHash: string | null; sourceKind: string } | null = null;
+    if (args.templateRevisionRef) {
+      const t = await templateRevisionForRender(tx, args.book, definition.definitionKey, args.templateRevisionRef);
+      templateBinding = t;
+      // The source of the form and the origin must agree: a customer's form is a customer_template rendering, not a LeaseOS one.
+      const expected: Record<string, OriginKind> = { leaseos_standard: "leaseos_generated", organization_custom: "organization_template", customer_supplied: "customer_template", external_form: "external_form_rendered" };
+      if (expected[t.sourceKind] !== args.originKind) refuse("PRECONDITION_FAILED", `BLOCKED — a ${t.sourceKind} template renders as ${expected[t.sourceKind]}, not ${args.originKind}`);
+    }
     // Every link is resolved inside the transaction; a record another business owns is not found.
     const resolvedLinks: { recordType: string; recordRef: string; recordId: number | null; role: string | null; source: LinkSource; confirmed: boolean }[] = [];
     for (const l of links) {
@@ -241,6 +268,7 @@ export async function registerControlledDocument(db: Db, args: RegisterArgs): Pr
     }
     const first: DocumentEventType = args.requestedState === "issued" ? "document.issued" : args.requestedState === "confirmed" ? "document.confirmed" : args.requestedState === "proposed" ? "document.proposed" : "document.captured";
     await appendDocumentEvent(tx, { documentId, eventType: first, actor: args.actor, previousState: null, newState: args.requestedState, occurredAt: now, detail: { documentRef, definitionKey: definition.definitionKey, originKind: args.originKind, issuerKind: args.issuer.issuerKind, controlNumber, contentHash: args.contentHash, links: resolvedLinks.length, references: referenceRefs.length, templateRevisionRef: args.templateRevisionRef ?? null } });
+    if (templateBinding) await appendDocumentEvent(tx, { documentId, eventType: "document.template_bound", actor: args.actor, occurredAt: now, detail: { templateRef: templateBinding.templateRef, templateRevisionRef: args.templateRevisionRef, releaseManifestHash: templateBinding.releaseManifestHash, renderManifestHash: args.renderManifestHash ?? null, sourceKind: templateBinding.sourceKind } });
     if (controlNumber) await appendDocumentEvent(tx, { documentId, eventType: "document.number_issued", actor: args.actor, occurredAt: now, detail: { controlNumber, series: definition.numberSeriesType, policy: definition.numberingPolicy, minted: controlMint ? "leaseos_series" : "domain_managed" } });
     return { documentId, documentRef, controlState: args.requestedState, controlNumber, definitionRef: definition.definitionRef, references: referenceRefs, provenance: provenanceSentence({ originKind: args.originKind, issuerKind: args.issuer.issuerKind, issuerName: args.issuer.issuerName ?? null, templateRevisionRef: args.templateRevisionRef ?? null, controlNumber }) };
   });
@@ -401,6 +429,7 @@ export async function supersedeDocument(db: Db, args: { book: Book; actor: Actor
   if (old.originKind && ["leaseos_generated", "organization_template", "customer_template", "external_form_rendered"].includes(old.originKind) && !(args.templateRevisionRef ?? old.templateRevisionRef)) refuse("PRECONDITION_FAILED", "BLOCKED — a templated document's new version names the template revision it was rendered from");
   const definition = await definitionFor(db, args.book, old.definitionKey ?? old.documentType);
   if (definition.revisionPolicy === "reference_versioned" && !args.evidenceRecordId && !args.storageKey) refuse("BAD_REQUEST", "A reference document's new version is the publisher's new file");
+  if (args.templateRevisionRef) await templateRevisionForRender(db, args.book, definition.definitionKey, args.templateRevisionRef);
   await ensureSeriesRow(db, { orgRef: null, sequenceType: "DOC" }, args.occurredAt);
   return db.transaction(async tx => {
     const documentRef = (await mintNumberInTx(tx, { orgRef: null, sequenceType: "DOC" }, { recordType: "commercialDocument", recordId: null, actor: { userId: args.actor.userId, deviceRef: args.actor.deviceRef ?? null }, at: args.occurredAt })).number;

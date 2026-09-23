@@ -12,7 +12,7 @@
  * overlay or own definition is visible only inside that tenant's book.
  */
 import { TRPCError } from "@trpc/server";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { documentDefinitions, documentSourceArtifacts } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
@@ -21,7 +21,9 @@ import { CONTROL_STATES, IMPORT_CHANNELS, LINK_ROLES, LINK_SOURCES, REFERENCE_SO
 import { amendDocument, confirmDocument, DocumentControlRefusal, documentView, issueDocument, listDocuments, registerControlledDocument, supersedeDocument, voidDocument, withdrawDocument, type Actor } from "./_core/documentRegisterService";
 import { storageKeyInput } from "./_core/storageKey";
 import { allocateDeviceBlock, gapReport, listSeries, NumberSeriesRefusal, retireBlock, SERIES_TYPE_PATTERN, voidNumber } from "./_core/numberSeries";
-import { numberBlocks } from "../drizzle/schema";
+import { documentSourceArtifacts as artifactsTable, documentTemplateArtifacts, documentTemplateRevisions, documentTemplates, evidenceRecords, numberBlocks } from "../drizzle/schema";
+import { customTemplateRefusals, EMPTY_MAPPING, layoutKindForMime, mappingHash, releaseManifestHash, rendererFor, RENDERERS, TEMPLATE_SOURCE_KINDS, type FieldMapping } from "./_core/documentTemplates";
+import { desc } from "drizzle-orm";
 import {
   applyOverlay, DEFINITION_KEY_PATTERN, definitionRefusals, DOCUMENT_CLASSES, DOCUMENT_LINK_KINDS, EXTERNAL_REFERENCE_POLICIES, EXTERNAL_REFERENCE_TYPES, ORIGIN_KINDS,
   EXTERNAL_ORIGINS, ISSUER_KINDS, PRINT_POLICIES, READ_CATEGORIES, RENDERED_ORIGINS, representationLabel, REVISION_POLICIES, rowToDefinition, SIGNATURE_POLICIES, TENANT_AUTHORABLE_NUMBERING, TENANT_OVERRIDABLE_COLUMNS,
@@ -342,6 +344,133 @@ export const documentControlRouter = router({
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         if (!input.allocationRef && !input.formattedNumber) throw new TRPCError({ code: "BAD_REQUEST", message: "Name the allocation or the number" });
         return guarded(() => voidNumber(db, { scopeKey: bookOrgRef ?? "default", allocationRef: input.allocationRef, formattedNumber: input.formattedNumber, sequenceType: input.sequenceType, reasonCode: input.reasonCode, reasonText: input.reasonText, actor: { userId: ctx.user.id } }));
+      }),
+  }),
+  /**
+   * DC-D — the template library: the seeded standard families, and a
+   * business's own or a customer's forms as uploaded, hashed, mapped once and
+   * released. A released revision is immutable at the database; a change is
+   * a new revision, and the records already on the old one stay there.
+   */
+  templates: router({
+    list: roleProcedure("documentControl.templatesList")
+      .input(z.object({ definitionKey: z.string().regex(DEFINITION_KEY_PATTERN).optional(), sourceKind: z.enum(TEMPLATE_SOURCE_KINDS).optional(), includeRetired: z.boolean().default(false) }).optional())
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const conds = [bookOrgRef ? or(isNull(documentTemplates.orgRef), eq(documentTemplates.orgRef, bookOrgRef)) : isNull(documentTemplates.orgRef)];
+        if (input?.definitionKey) conds.push(eq(documentTemplates.definitionKey, input.definitionKey));
+        if (input?.sourceKind) conds.push(eq(documentTemplates.sourceKind, input.sourceKind));
+        if (!input?.includeRetired) conds.push(eq(documentTemplates.status, "active"));
+        const fams = await db.select().from(documentTemplates).where(and(...conds));
+        const out = [];
+        for (const f of fams) {
+          const revs = await db.select().from(documentTemplateRevisions).where(eq(documentTemplateRevisions.templateId, f.id)).orderBy(desc(documentTemplateRevisions.revision));
+          const current = revs.find(r => r.status === "released") ?? null;
+          out.push({ templateRef: f.templateRef, templateKey: f.templateKey, definitionKey: f.definitionKey, name: f.name, sourceKind: f.sourceKind, ownerKind: f.ownerKind, ownerName: f.ownerName, status: f.status, layer: f.orgRef ? "tenant" : "platform", currentRevision: current ? { revisionRef: current.revisionRef, revision: current.revision, layoutKind: current.layoutKind, rendererKey: current.rendererKey, renderable: RENDERERS[current.rendererKey]?.present ?? false, releasedAt: current.releasedAt, releaseManifestHash: current.releaseManifestHash } : null, revisions: revs.map(r => ({ revisionRef: r.revisionRef, revision: r.revision, status: r.status })) });
+        }
+        return out;
+      }),
+    get: roleProcedure("documentControl.templateGet")
+      .input(z.object({ templateRef: z.string().max(40) }))
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const f = (await db.select().from(documentTemplates).where(eq(documentTemplates.templateRef, input.templateRef)).limit(1))[0];
+        if (!f || (f.orgRef !== null && f.orgRef !== bookOrgRef)) throw new TRPCError({ code: "NOT_FOUND", message: "Template not in this business's library" });
+        const revs = await db.select().from(documentTemplateRevisions).where(eq(documentTemplateRevisions.templateId, f.id)).orderBy(desc(documentTemplateRevisions.revision));
+        const revisions = [];
+        for (const r of revs) {
+          const links = await db.select({ role: documentTemplateArtifacts.role, artifactRef: artifactsTable.artifactRef, sha256: artifactsTable.sha256, fileName: artifactsTable.fileName, extension: artifactsTable.extension, sourceCollection: artifactsTable.sourceCollection, repositoryPath: artifactsTable.repositoryPath }).from(documentTemplateArtifacts).innerJoin(artifactsTable, eq(artifactsTable.id, documentTemplateArtifacts.artifactId)).where(eq(documentTemplateArtifacts.revisionId, r.id));
+          revisions.push({ ...r, fieldMapping: JSON.parse(r.fieldMappingJson) as FieldMapping, renderable: RENDERERS[r.rendererKey]?.present ?? false, rendererNote: RENDERERS[r.rendererKey]?.note ?? "unknown renderer", artifacts: links });
+        }
+        return { template: { ...f, layer: f.orgRef ? "tenant" : "platform" }, revisions };
+      }),
+    /**
+     * A business's own form, or a customer's, as uploaded into the evidence
+     * vault: the bytes are hashed and registered untouched, and revision 1 is
+     * a draft with no fields mapped. Nothing about the file is trusted; it is
+     * a PDF or a DOCX under the size cap and it is never executed.
+     */
+    createCustom: roleProcedure("documentControl.templateCreateCustom")
+      .input(z.object({ definitionKey: z.string().regex(DEFINITION_KEY_PATTERN), templateKey: z.string().regex(/^[a-z][a-z0-9_]{1,79}$/), name: z.string().min(1).max(200), sourceKind: z.enum(["organization_custom", "customer_supplied", "external_form"]), ownerName: z.string().max(220).nullable().optional(), ownerOrgRef: z.string().max(64).nullable().optional(), evidenceRecordId: z.number().int().positive(), contentHash: z.string().regex(/^[a-f0-9]{64}$/), byteLength: z.number().int().positive(), fileName: z.string().max(220), mimeType: z.string().max(120), notes: z.string().max(500).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        if (!bookOrgRef) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "BLOCKED — a custom template belongs to an organization" });
+        const problems = customTemplateRefusals({ mimeType: input.mimeType, byteLength: input.byteLength, fileName: input.fileName });
+        if (problems.length) throw new TRPCError({ code: "BAD_REQUEST", message: `BLOCKED — ${problems.join("; ")}` });
+        const ev = (await db.select({ id: evidenceRecords.id, mimeType: evidenceRecords.mimeType }).from(evidenceRecords).where(eq(evidenceRecords.id, input.evidenceRecordId)).limit(1))[0];
+        if (!ev) throw new TRPCError({ code: "NOT_FOUND", message: "The uploaded form's evidence record does not exist" });
+        await guarded(async () => { const { definitionFor } = await import("./_core/documentRegisterService"); const d = await definitionFor(db, { bookOrgRef }, input.definitionKey); if (!d.customTemplateAllowed) throw new DocumentControlRefusal("PRECONDITION_FAILED", `BLOCKED — ${d.definitionKey} does not allow custom templates`); });
+        const clash = (await db.select({ id: documentTemplates.id }).from(documentTemplates).where(and(eq(documentTemplates.scopeKey, bookOrgRef), eq(documentTemplates.templateKey, input.templateKey))).limit(1))[0];
+        if (clash) throw new TRPCError({ code: "CONFLICT", message: `Template key "${input.templateKey}" is already in this business's library` });
+        const templateRef = `TPL-T-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+        const ownerKind = input.sourceKind === "organization_custom" ? "tenant" : input.sourceKind === "customer_supplied" ? "customer" : "regulator";
+        const layoutKind = layoutKindForMime(input.mimeType);
+        const renderer = rendererFor(layoutKind);
+        const fieldMappingHash = mappingHash(EMPTY_MAPPING);
+        const revisionRef = `${templateRef.replace("TPL-", "TPLR-")}-r1`;
+        await db.transaction(async tx => {
+          const ins = await tx.insert(documentTemplates).values({ templateRef, orgRef: bookOrgRef, scopeKey: bookOrgRef, templateKey: input.templateKey, definitionKey: input.definitionKey, sourceKind: input.sourceKind, ownerKind, ownerOrgRef: input.ownerOrgRef ?? (ownerKind === "tenant" ? bookOrgRef : null), ownerName: input.ownerName ?? null, name: input.name, createdByUserId: ctx.user.id });
+          await tx.insert(documentTemplateRevisions).values({ revisionRef, templateId: Number(ins[0]?.insertId ?? 0), revision: 1, status: "draft", layoutKind, layoutArtifactId: null, layoutStorageKey: `evidence:${input.evidenceRecordId}`, layoutContentHash: input.contentHash, fieldMappingJson: JSON.stringify(EMPTY_MAPPING), fieldMappingHash, rendererKey: renderer.rendererKey, rendererVersion: renderer.rendererVersion, releaseManifestHash: null, notes: input.notes ?? null, createdByUserId: ctx.user.id });
+        });
+        return { templateRef, revisionRef, layoutKind, renderable: renderer.renderable, rendererNote: RENDERERS[renderer.rendererKey]?.note };
+      }),
+    /** A new draft revision of a family: a new layout, a new mapping, or both. The current released revision is untouched until this one is released. */
+    revisionDraft: roleProcedure("documentControl.templateRevisionDraft")
+      .input(z.object({ templateRef: z.string().max(40), fieldMapping: z.object({ version: z.literal(1), fields: z.array(z.object({ printedField: z.string().min(1).max(120), semanticKey: z.string().max(120).nullable(), transform: z.string().max(60).nullable().optional(), required: z.boolean().optional() })).max(300) }).optional(), layout: z.object({ evidenceRecordId: z.number().int().positive(), contentHash: z.string().regex(/^[a-f0-9]{64}$/), byteLength: z.number().int().positive(), fileName: z.string().max(220), mimeType: z.string().max(120) }).optional(), notes: z.string().max(500).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const f = (await db.select().from(documentTemplates).where(eq(documentTemplates.templateRef, input.templateRef)).limit(1))[0];
+        if (!f || (f.orgRef !== null && f.orgRef !== bookOrgRef)) throw new TRPCError({ code: "NOT_FOUND", message: "Template not in this business's library" });
+        if (f.orgRef === null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "BLOCKED — a platform standard is revised by a release, not from inside a business; create a custom template from it instead" });
+        if (f.status !== "active") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "BLOCKED — the template is retired" });
+        const revs = await db.select().from(documentTemplateRevisions).where(eq(documentTemplateRevisions.templateId, f.id)).orderBy(desc(documentTemplateRevisions.revision));
+        if (revs.some(r => r.status === "draft")) throw new TRPCError({ code: "CONFLICT", message: `Revision ${revs.find(r => r.status === "draft")!.revisionRef} is still a draft; release or retire it first` });
+        const base = revs[0];
+        if (!base) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The template has no revision to build on" });
+        if (!input.fieldMapping && !input.layout) throw new TRPCError({ code: "BAD_REQUEST", message: "A new revision changes the layout, the mapping, or both" });
+        let layoutKind = base.layoutKind, layoutContentHash = base.layoutContentHash, layoutStorageKey = base.layoutStorageKey;
+        if (input.layout) {
+          const problems = customTemplateRefusals({ mimeType: input.layout.mimeType, byteLength: input.layout.byteLength, fileName: input.layout.fileName });
+          if (problems.length) throw new TRPCError({ code: "BAD_REQUEST", message: `BLOCKED — ${problems.join("; ")}` });
+          layoutKind = layoutKindForMime(input.layout.mimeType); layoutContentHash = input.layout.contentHash; layoutStorageKey = `evidence:${input.layout.evidenceRecordId}`;
+        }
+        const mapping = input.fieldMapping ?? (JSON.parse(base.fieldMappingJson) as FieldMapping);
+        const fieldMappingHash = mappingHash(mapping);
+        if (layoutContentHash === base.layoutContentHash && fieldMappingHash === base.fieldMappingHash) throw new TRPCError({ code: "BAD_REQUEST", message: "Nothing changed: the layout and the mapping hash to the current revision's" });
+        const renderer = rendererFor(layoutKind);
+        const revisionRef = `${f.templateRef.replace("TPL-", "TPLR-")}-r${base.revision + 1}`;
+        await db.insert(documentTemplateRevisions).values({ revisionRef, templateId: f.id, revision: base.revision + 1, status: "draft", layoutKind, layoutArtifactId: input.layout ? null : base.layoutArtifactId, layoutStorageKey, layoutContentHash, fieldMappingJson: JSON.stringify(mapping), fieldMappingHash, rendererKey: renderer.rendererKey, rendererVersion: renderer.rendererVersion, releaseManifestHash: null, notes: input.notes ?? null, supersedesRevisionId: base.id, createdByUserId: ctx.user.id });
+        return { revisionRef, revision: base.revision + 1, status: "draft" as const, supersedes: base.revisionRef };
+      }),
+    /** Release a draft: its manifest is computed, it becomes the current revision, the previous released one is retired for new records, and the database refuses any later change to it. */
+    revisionRelease: roleProcedure("documentControl.templateRevisionRelease")
+      .input(z.object({ revisionRef: z.string().max(40) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const r = (await db.select().from(documentTemplateRevisions).where(eq(documentTemplateRevisions.revisionRef, input.revisionRef)).limit(1))[0];
+        if (!r) throw new TRPCError({ code: "NOT_FOUND", message: "Revision not found" });
+        const f = (await db.select().from(documentTemplates).where(eq(documentTemplates.id, r.templateId)).limit(1))[0];
+        if (!f || (f.orgRef !== null && f.orgRef !== bookOrgRef) || f.orgRef === null) throw new TRPCError({ code: "NOT_FOUND", message: "Revision not in this business's library" });
+        if (r.status !== "draft") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Revision is ${r.status}` });
+        if (r.createdByUserId === ctx.user.id) { /* the same person may release their own draft; a second-person rule is the owner's to add through the approval ladder */ }
+        const manifest = releaseManifestHash({ layoutContentHash: r.layoutContentHash, fieldMappingHash: r.fieldMappingHash, rendererKey: r.rendererKey, rendererVersion: r.rendererVersion });
+        await db.transaction(async tx => {
+          await tx.update(documentTemplateRevisions).set({ status: "released", releaseManifestHash: manifest, releasedByUserId: ctx.user.id, releasedAt: new Date() }).where(eq(documentTemplateRevisions.id, r.id));
+          await tx.update(documentTemplateRevisions).set({ status: "retired", retiredByUserId: ctx.user.id, retiredAt: new Date() }).where(and(eq(documentTemplateRevisions.templateId, f.id), eq(documentTemplateRevisions.status, "released"), sql`${documentTemplateRevisions.id} <> ${r.id}`));
+        });
+        return { revisionRef: r.revisionRef, revision: r.revision, status: "released" as const, releaseManifestHash: manifest };
+      }),
+    retire: roleProcedure("documentControl.templateRetire")
+      .input(z.object({ templateRef: z.string().max(40), reason: z.string().min(5).max(300) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const f = (await db.select().from(documentTemplates).where(eq(documentTemplates.templateRef, input.templateRef)).limit(1))[0];
+        if (!f || f.orgRef === null || f.orgRef !== bookOrgRef) throw new TRPCError({ code: "NOT_FOUND", message: "Template not in this business's library" });
+        await db.transaction(async tx => {
+          await tx.update(documentTemplates).set({ status: "retired", retiredByUserId: ctx.user.id, retiredAt: new Date() }).where(eq(documentTemplates.id, f.id));
+          await tx.update(documentTemplateRevisions).set({ status: "retired", retiredByUserId: ctx.user.id, retiredAt: new Date() }).where(and(eq(documentTemplates.id, f.id), sql`${documentTemplateRevisions.templateId} = ${f.id}`, sql`${documentTemplateRevisions.status} <> 'retired'`));
+        });
+        return { templateRef: f.templateRef, status: "retired" as const };
       }),
   }),
   artifacts: router({

@@ -2365,6 +2365,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "documentControl.seriesAllocateDeviceBlock": "document.series.manage",
   "documentControl.seriesRetireDeviceBlock": "document.series.manage",
   "documentControl.seriesVoidNumber": "document.series.manage",
+  // DC-D (0181) — the template library. Reading is a read; uploading, drafting, releasing and retiring change what every later rendering is judged by.
+  "documentControl.templatesList": "document.read",
+  "documentControl.templateGet": "document.read",
+  "documentControl.templateCreateCustom": "document.template.manage",
+  "documentControl.templateRevisionDraft": "document.template.manage",
+  "documentControl.templateRevisionRelease": "document.template.manage",
+  "documentControl.templateRetire": "document.template.manage",
   "commercialOffice.glAccountSet": "commercial.policy",
   "commercialOffice.glMappingSet": "commercial.policy",
   "commercialOffice.glList": "commercial.read",
