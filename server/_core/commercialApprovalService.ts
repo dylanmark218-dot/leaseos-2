@@ -6,7 +6,7 @@
  * rows, and reports whether the requirement is now satisfied. The caller flips
  * its subject's status only on `satisfied`. Nothing here edits the subject.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { MySql2Database } from "drizzle-orm/mysql2";
 import { commercialApprovalPolicies, commercialApprovalSignatures, commercialApprovals, userRoleAssignments } from "../../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./actingScope";
@@ -29,8 +29,22 @@ export async function decide(db: Db, args: { actorUserId: number; category: stri
   const bookOrgRef = scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId;
   const roles = (await db.select({ role: userRoleAssignments.role }).from(userRoleAssignments).where(eq(userRoleAssignments.userId, args.actorUserId))).map(r => r.role as string);
 
-  // The ledger row for this subject, created on first contact with the requirement snapshotted.
-  let row = (await db.select().from(commercialApprovals).where(and(eq(commercialApprovals.subjectType, args.subjectType), eq(commercialApprovals.subjectRef, args.subjectRef))).limit(1))[0];
+  /*
+   * The ledger row for this subject, IN THIS BOOK, created on first contact
+   * with the requirement snapshotted.
+   *
+   * 0172 — the book was written on the row but not read back. Subject
+   * references are minted per organization now, so two books both hold
+   * CR-2026-000001 and this lookup found whichever the database yielded: one
+   * business's manager approving their own credit would satisfy the other
+   * business's, on a subject they have never seen. The book belongs in the
+   * query, not only in the INSERT.
+   */
+  let row = (await db.select().from(commercialApprovals).where(and(
+    eq(commercialApprovals.subjectType, args.subjectType),
+    eq(commercialApprovals.subjectRef, args.subjectRef),
+    bookOrgRef ? eq(commercialApprovals.bookOrgRef, bookOrgRef) : isNull(commercialApprovals.bookOrgRef),
+  )).limit(1))[0];
   if (!row) {
     const policies = (await db.select().from(commercialApprovalPolicies)) as ApprovalPolicyRow[];
     const scoped = policies.filter(p => p.bookOrgRef === null || p.bookOrgRef === bookOrgRef).map(p => ({ ...p, maxAmountCents: p.maxAmountCents === null ? null : Number(p.maxAmountCents) }));

@@ -33,7 +33,7 @@ d("the sequence under contention", () => {
   it("mints 150 distinct, contiguous numbers across six concurrent callers", async () => {
     const db = drizzle(pool);
     const sequenceType = `TF${rnd()}`;
-    const runs = await Promise.all(Array.from({ length: 6 }, () => Promise.all(Array.from({ length: 25 }, () => nextTrackingNumber(db, { sequenceType })))));
+    const runs = await Promise.all(Array.from({ length: 6 }, () => Promise.all(Array.from({ length: 25 }, () => nextTrackingNumber(db, { sequenceType, orgRef: null, orgRef: null })))));
     const all = runs.flat();
     expect(new Set(all.map(a => a.trackingNumber)).size).toBe(150);
     const seqs = all.map(a => a.sequence).sort((a, b) => a - b);
@@ -45,11 +45,11 @@ d("the sequence under contention", () => {
   it("restarts at 1 in a new period and keeps branches apart", async () => {
     const db = drizzle(pool);
     const sequenceType = `TP${rnd()}`;
-    const a = await nextTrackingNumber(db, { sequenceType, at: new Date("2025-12-31T23:59:00Z") });
-    const b = await nextTrackingNumber(db, { sequenceType, at: new Date("2026-01-01T00:01:00Z") });
+    const a = await nextTrackingNumber(db, { sequenceType, orgRef: null, at: new Date("2025-12-31T23:59:00Z") });
+    const b = await nextTrackingNumber(db, { sequenceType, orgRef: null, at: new Date("2026-01-01T00:01:00Z") });
     expect(a.sequence).toBe(1); expect(a.periodKey).toBe("2025");
     expect(b.sequence).toBe(1); expect(b.periodKey).toBe("2026");
-    const edm = await nextTrackingNumber(db, { sequenceType, branch: "EDM", at: new Date("2026-01-01T00:01:00Z") });
+    const edm = await nextTrackingNumber(db, { sequenceType, orgRef: null, branch: "EDM", at: new Date("2026-01-01T00:01:00Z") });
     expect(edm.sequence).toBe(1);
     expect(edm.trackingNumber).toBe(`${sequenceType}-EDM-2026-000001`);
   });
@@ -57,9 +57,9 @@ d("the sequence under contention", () => {
   it("uses the stored format once one exists — a later caller cannot change it in passing", async () => {
     const db = drizzle(pool);
     const sequenceType = `TS${rnd()}`;
-    const first = await nextTrackingNumber(db, { sequenceType, format: { separator: "/", sequenceDigits: 3 }, at: new Date("2026-09-17T00:00:00Z") });
+    const first = await nextTrackingNumber(db, { sequenceType, orgRef: null, format: { separator: "/", sequenceDigits: 3 }, at: new Date("2026-09-17T00:00:00Z") });
     expect(first.trackingNumber).toBe(`${sequenceType}/2026/001`);
-    const second = await nextTrackingNumber(db, { sequenceType, format: { separator: "-", sequenceDigits: 8 }, at: new Date("2026-09-17T00:00:00Z") });
+    const second = await nextTrackingNumber(db, { sequenceType, orgRef: null, format: { separator: "-", sequenceDigits: 8 }, at: new Date("2026-09-17T00:00:00Z") });
     expect(second.trackingNumber).toBe(`${sequenceType}/2026/002`);
   });
 });

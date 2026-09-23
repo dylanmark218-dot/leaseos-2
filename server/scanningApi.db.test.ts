@@ -29,11 +29,16 @@ async function withRole(role: DomainRole) {
 const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 
 /** One configured sequence, as the office would have it. */
-async function sequenceRow(sequenceType: string, prefix: string, over: Partial<{ sequenceDigits: number; separator: string; yearDigits: number }> = {}) {
+/**
+ * A configured sequence. 0172 — a sequence row belongs to an organization, and
+ * `orgRef` defaults to null here because most of this suite runs as the
+ * historical single tenant; the cross-tenant cases pass their own.
+ */
+async function sequenceRow(sequenceType: string, prefix: string, over: Partial<{ sequenceDigits: number; separator: string; yearDigits: number }> = {}, orgRef: string | null = null) {
   await pool.execute(
-    `INSERT INTO trackingSequences (sequenceType, branch, periodKey, nextNumber, prefix, \`separator\`, yearDigits, includeMonth, sequenceDigits, resetPeriod, updatedAt)
-     VALUES (?,?,?,?,?,?,?,?,?,?,NOW())`,
-    [sequenceType, null, "2026", 1, prefix, over.separator ?? "-", over.yearDigits ?? 4, 0, over.sequenceDigits ?? 6, "yearly"],
+    `INSERT INTO trackingSequences (sequenceType, orgRef, branch, periodKey, nextNumber, prefix, \`separator\`, yearDigits, includeMonth, sequenceDigits, resetPeriod, updatedAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,NOW())`,
+    [sequenceType, orgRef, null, "2026", 1, prefix, over.separator ?? "-", over.yearDigits ?? 4, 0, over.sequenceDigits ?? 6, "yearly"],
   );
 }
 
@@ -179,32 +184,41 @@ d("the surface decides nothing it is not allowed to decide", () => {
 
 d("a tracking token cannot carry a record across a tenant boundary", () => {
   /*
-   * The boundary this schema cannot prove, and the honest response to that.
+   * The boundary, and what changed when it became provable.
    *
-   * `trackingReferences` is unique on trackingNumber and carries NO organization column, and
-   * `trackingSequences` carries none either. So when tenant B scans a page bearing a number that
-   * tenant A's record is registered under, LeaseOS genuinely cannot say whose it is. Naming it —
-   * "already linked to disposal DSP-2026-000123" — would answer a cross-tenant question with a
-   * guess, and it is exactly the association the scanner must refuse to make.
+   * This block used to record a limitation: `trackingReferences` carried no organization column,
+   * so when tenant B scanned a page bearing a number tenant A's record was registered under,
+   * LeaseOS could not say whose it was and answered REVIEW with nothing disclosed. The comment
+   * ended "if the tracking tables ever gain an organization column, these tests should be
+   * tightened, not relaxed". 0171 gave them one and 0172 made a number tenant-relative, so they
+   * are tightened here.
    *
-   * The verdict is therefore REVIEW with nothing disclosed: no target, no number, and no
-   * confirmation that any record exists. If the tracking tables ever gain an organization column,
-   * `existingLinkFor` can establish ownership and these tests should be tightened, not relaxed.
+   * B's lookup is now scoped, so A's reference is not merely unattributable to B — it is not
+   * visible to B at all. That is stronger: the old answer still confirmed that the number on the
+   * paper was registered SOMEWHERE, which is a fact about A. Nothing about A reaches B now.
+   *
+   * `ownership_unverifiable` is not gone and must not be: it is still the answer for a reference
+   * the caller does own whose subject will not resolve. crossTenantIsolation.db.test.ts pins that.
    */
   it("refuses to associate tenant B's scan with tenant A's registered token, and names nothing", async () => {
     const tenantA = await withRole("office");
-    await membership(tenantA, await organization(`A ${rnd()}`));
+    const orgA = await organization(`A ${rnd()}`);
+    await membership(tenantA, orgA);
     const tenantB = await withRole("office");
-    await membership(tenantB, await organization(`B ${rnd()}`));
+    const orgB = await organization(`B ${rnd()}`);
+    await membership(tenantB, orgB);
 
     const prefix = `X${rnd().slice(0, 3)}`;
-    await sequenceRow("DSP", prefix);
+    // Both tenants configure the same sequence — 0172 lets them, and tenant B
+    // needs its own row or the matcher would not recognise the token at all.
+    await sequenceRow("DSP", prefix, {}, orgA);
+    await sequenceRow("DSP", prefix, {}, orgB);
     const token = formatTrackingNumber({ ...DEFAULT_FORMAT, prefix }, new Date("2026-09-21T00:00:00Z"), 42);
 
     // Tenant A's authoritative record, registered under that exact token.
     await pool.execute(
-      "INSERT INTO trackingReferences (trackingNumber, entityType, entityId, issuedAt) VALUES (?,?,?,NOW())",
-      [token, "DSP", 987654],
+      "INSERT INTO trackingReferences (trackingNumber, orgRef, entityType, entityId, issuedAt) VALUES (?,?,?,?,NOW())",
+      [token, orgA, "DSP", 987654],
     );
 
     // Tenant B scans a page carrying the identical raw text.
@@ -214,16 +228,13 @@ d("a tracking token cannot carry a record across a tenant boundary", () => {
       observations: [],
     });
 
-    expect(r.links.disposition).toBe("requires_review");
-    expect(r.links.best).toBeNull();
-    // Nothing about tenant A's record is revealed — not the target, not the entity, not even
-    // that a reference exists.
+    // Nothing about tenant A's record is revealed — not the target, not the entity, and no
+    // longer even the fact that a reference exists.
     expect(r.links.alreadyLinked).toBeNull();
-    expect(r.links.ownershipUnverifiable).toBe(true);
     const body = JSON.stringify(r);
     expect(body).not.toContain("987654");
     expect(body).not.toContain("already linked");
-    expect(r.links.reasons.join(" ")).toContain("cannot establish which organization owns");
+    expect(body).not.toContain(orgA);
   });
 
   it("proposes normally for a token no record is registered under, since nothing can be crossed", async () => {

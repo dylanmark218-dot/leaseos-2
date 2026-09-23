@@ -53,35 +53,63 @@ export function formatTrackingNumber(fmt: SequenceFormat, at: Date, sequence: nu
 export type Allocation = { trackingNumber: string; sequence: number; periodKey: string; format: SequenceFormat };
 
 /**
- * Mint the next number for a sequence type. The stored row's format wins;
- * `format` only seeds a type that has never been used. `branch` scopes the
- * counter (a null branch is stored as "" so the unique index sees one row).
+ * Mint the next number for a sequence type, for one organization.
+ *
+ * 0172 — the counter and the format are per-organization. Before, one row per
+ * `(sequenceType, branch, periodKey)` served every company on the deployment,
+ * which meant two things that were both wrong once there was more than one:
+ * Tenant A's tickets consumed numbers out of Tenant B's run, so each could read
+ * the other's volume from the gaps; and "the stored row's format wins" meant
+ * whichever company used a sequence type FIRST fixed the prefix, separator and
+ * width for everybody else, silently ignoring what the next one configured.
+ *
+ * `orgRef` is now part of the counter's identity. `null` is the historical
+ * single tenant — the caller with no organization membership — and it keeps its
+ * own run, as every other organization does. It is passed explicitly rather
+ * than defaulted so a new call site has to say which organization it is minting
+ * for; a number minted into the wrong company's run cannot be taken back.
+ *
+ * Numbers are no longer globally unique, deliberately: A and B may both hold
+ * FT-000001, and they are different records because their ownership differs.
+ * The unique index is on (orgKey, number), so a duplicate WITHIN one
+ * organization is still refused.
  */
 export async function nextTrackingNumber(
   db: MySql2Database<Record<string, unknown>>,
-  args: { sequenceType: string; branch?: string | null; at?: Date; format?: Partial<SequenceFormat> },
+  args: { sequenceType: string; orgRef: string | null; branch?: string | null; at?: Date; format?: Partial<SequenceFormat> },
 ): Promise<Allocation> {
   const at = args.at ?? new Date();
   const branch = args.branch ?? "";
   const seed: SequenceFormat = { prefix: args.sequenceType, ...DEFAULT_FORMAT, ...(args.format ?? {}) } as SequenceFormat;
   const periodKey = periodKeyFor(seed.resetPeriod, at);
+  // The generated column the unique index is on: NULL and '~unattributed' are
+  // the same counter, so the single tenant cannot mint a number twice either.
+  const orgKey = args.orgRef ?? "~unattributed";
+  /*
+   * Normalised, because `undefined` and `null` are not the same to the query
+   * builder: an undefined bind is dropped from the template entirely and the
+   * statement goes out as `VALUES (?, , ?, ...)` — invalid SQL rather than an
+   * error naming the missing argument. A caller that omits the organization is
+   * a type error, but the runtime should not answer it with a syntax error.
+   */
+  const owner: string | null = args.orgRef ?? null;
 
   await db.execute(sql`
-    INSERT IGNORE INTO trackingSequences (sequenceType, branch, periodKey, nextNumber, prefix, \`separator\`, yearDigits, includeMonth, sequenceDigits, resetPeriod)
-    VALUES (${args.sequenceType}, ${branch}, ${periodKey}, 1, ${seed.prefix}, ${seed.separator}, ${seed.yearDigits}, ${seed.includeMonth}, ${seed.sequenceDigits}, ${seed.resetPeriod})`);
+    INSERT IGNORE INTO trackingSequences (sequenceType, orgRef, branch, periodKey, nextNumber, prefix, \`separator\`, yearDigits, includeMonth, sequenceDigits, resetPeriod)
+    VALUES (${args.sequenceType}, ${owner}, ${branch}, ${periodKey}, 1, ${seed.prefix}, ${seed.separator}, ${seed.yearDigits}, ${seed.includeMonth}, ${seed.sequenceDigits}, ${seed.resetPeriod})`);
 
   return db.transaction(async (tx) => {
     const updated = await tx.execute(sql`
       UPDATE trackingSequences SET nextNumber = LAST_INSERT_ID(nextNumber) + 1
-      WHERE sequenceType = ${args.sequenceType} AND branch = ${branch} AND periodKey = ${periodKey}`);
+      WHERE orgKey = ${orgKey} AND sequenceType = ${args.sequenceType} AND branch = ${branch} AND periodKey = ${periodKey}`);
     const affected = (Array.isArray(updated) ? (updated[0] as { affectedRows?: number }) : (updated as { affectedRows?: number })).affectedRows ?? 0;
-    if (affected !== 1) throw new Error(`trackingSequences: expected one counter row for ${args.sequenceType}/${branch || "-"}/${periodKey}, matched ${affected}`);
+    if (affected !== 1) throw new Error(`trackingSequences: expected one counter row for ${orgKey}/${args.sequenceType}/${branch || "-"}/${periodKey}, matched ${affected}`);
     const [seqRows] = await tx.execute(sql`SELECT LAST_INSERT_ID() AS sequence`);
     const sequence = Number((seqRows as unknown as { sequence: unknown }[])[0]?.sequence);
     if (!Number.isInteger(sequence) || sequence < 1) throw new Error("trackingSequences: LAST_INSERT_ID did not carry the counter back");
     const [fmtRows] = await tx.execute(sql`
       SELECT prefix, \`separator\`, yearDigits, includeMonth, sequenceDigits, resetPeriod FROM trackingSequences
-      WHERE sequenceType = ${args.sequenceType} AND branch = ${branch} AND periodKey = ${periodKey}`);
+      WHERE orgKey = ${orgKey} AND sequenceType = ${args.sequenceType} AND branch = ${branch} AND periodKey = ${periodKey}`);
     const row = (fmtRows as unknown as Record<string, unknown>[])[0]!;
     const format: SequenceFormat = {
       prefix: String(row.prefix), separator: String(row.separator), yearDigits: Number(row.yearDigits) as 0 | 2 | 4,

@@ -158,7 +158,7 @@ export const closeoutRouter = router({
       const acct = input.customerAccountRef ? (await db.select({ id: customerAccounts.id }).from(customerAccounts).where(eq(customerAccounts.accountRef, input.customerAccountRef)).limit(1))[0] : undefined;
       if (input.customerAccountRef && !acct) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
       // Configured, transactional sequence (rule §18): FT-<year>-<000001>, format from trackingSequences.
-      const ticketNumber = (await nextTrackingNumber(db, { sequenceType: "FT" })).trackingNumber;
+      const ticketNumber = (await nextTrackingNumber(db, { sequenceType: "FT", orgRef: ownerFor(scope) })).trackingNumber;
       const job = (await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, input.jobId)).limit(1))[0];
       if (!job) throw new TRPCError({ code: "NOT_FOUND", message: "Job not found — a field ticket always belongs to a job" });
       await db.insert(fieldTickets).values({ ticketNumber, orgRef: ownerFor(scope), scope: input.scope, jobId: input.jobId, tripId: input.tripId ?? null, customerAccountId: acct?.id ?? null, unitId: input.unitId ?? null, operatorId: input.operatorId ?? null, serviceDescription: input.serviceDescription ?? null, afeNumber: input.afeNumber ?? null, postSiteRequired: input.postSiteRequired, status: "draft", signatureStatus: "unsigned", updatedAt: new Date() });
@@ -242,7 +242,7 @@ export const closeoutRouter = router({
       const x = input.ticketNumber ? await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) }) : null;
       const rules = x?.account?.delayBillingRulesJson ? (JSON.parse(x.account.delayBillingRulesJson) as DelayRules) : null;
       const c = classifyDelay(input.kind, rules);
-      const delayRef = (await nextTrackingNumber(db, { sequenceType: "DLY" })).trackingNumber;
+      const delayRef = (await nextTrackingNumber(db, { sequenceType: "DLY", orgRef: ownerFor(scope) })).trackingNumber;
       await db.insert(delayEvents).values({ delayRef, orgRef: ownerFor(scope), jobId: input.jobId ?? x?.t.jobId ?? null, tripId: input.tripId ?? x?.t.tripId ?? null, unitId: input.unitId ?? x?.t.unitId ?? null, fieldTicketId: x?.t.id ?? null, kind: input.kind, hazardType: input.hazardType ?? null, severity: input.severity, observedAt: input.observedAt, endedAt: input.endedAt ?? null, observedByOperatorId: input.observedByOperatorId ?? null, observation: input.observation, latitude: input.latitude ?? null, longitude: input.longitude ?? null, externalSourceStatus: input.externalSourceStatus, externalSourceNote: input.externalSourceNote ?? null, billingClassification: c.classification, classificationRuleRef: c.ruleRef, broadcast: input.kind === "road_hazard", evidenceRecordId: input.evidenceRecordId ?? null });
       return { delayRef, billingClassification: c.classification, ruleRef: c.ruleRef, broadcast: input.kind === "road_hazard" };
     }),
@@ -257,7 +257,7 @@ export const closeoutRouter = router({
       if (!acct) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
       let externalIdentityId: number | null = null;
       if (input.externalIdentityRef) { const { externalIdentities } = await import("../drizzle/schema"); const ei = (await db.select({ id: externalIdentities.id, customerAccountId: externalIdentities.customerAccountId }).from(externalIdentities).where(eq(externalIdentities.identityRef, input.externalIdentityRef)).limit(1))[0]; if (!ei || ei.customerAccountId !== acct.id) throw new TRPCError({ code: "BAD_REQUEST", message: "External identity is not this account's" }); externalIdentityId = ei.id; }
-      const authorityRef = (await nextTrackingNumber(db, { sequenceType: "SIG" })).trackingNumber;
+      const authorityRef = (await nextTrackingNumber(db, { sequenceType: "SIG", orgRef: ownerFor(scope) })).trackingNumber;
       await db.insert(signatoryAuthorities).values({ authorityRef, orgRef: ownerFor(scope), customerAccountId: acct.id, signatoryName: input.signatoryName, signatoryRole: input.signatoryRole ?? null, externalIdentityId, mayConfirmWork: input.mayConfirmWork, maySignTicket: input.maySignTicket, mayApproveStandby: input.mayApproveStandby, extraWorkLimitCents: input.extraWorkLimitCents ?? null, mayApproveInvoice: input.mayApproveInvoice, mayChangeRates: input.mayChangeRates, mayAcceptQuotes: input.mayAcceptQuotes, mayAnswerRfis: input.mayAnswerRfis, validTo: input.validTo ?? null, recordedByUserId: ctx.user.id });
       return { authorityRef };
     }),

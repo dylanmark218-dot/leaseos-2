@@ -107,7 +107,7 @@ export const invoicingRouter = router({
     if (!res.permitted) return { resolved: false as const, refusals: res.refusals };
     let creditRef: string | null = null;
     if (res.creditCents > 0) {
-      creditRef = (await nextTrackingNumber(d, { sequenceType: "CR" })).trackingNumber;
+      creditRef = (await nextTrackingNumber(d, { sequenceType: "CR", orgRef: ownerFor(scope) })).trackingNumber;
       if (inv.financialEntityId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The invoice carries no financial entity — assign it before a credit is requested against it" });
       await d.insert(customerCredits).values({ creditRef, orgRef: ownerFor(scope), financialEntityId: inv.financialEntityId, customer: inv.customer, customerAccountId: inv.customerAccountId, invoiceId: inv.id, amountCents: res.creditCents, reason: `Dispute ${c.caseNumber}: ${input.narrative}`.slice(0, 400), requestedByUserId: ctx.user.id, status: "requested" });
     }
@@ -156,11 +156,11 @@ export const invoicingRouter = router({
       // the job's billing book, opened if absent
       let book = (await d.select().from(billingBooks).where(eq(billingBooks.jobId, x.t.jobId)).limit(1))[0];
       if (!book) {
-        const ins = await d.insert(billingBooks).values({ orgRef: ownerFor(scope), bookNumber: (await nextTrackingNumber(d, { sequenceType: "BB" })).trackingNumber, jobId: x.t.jobId, customer: x.account.name, afeNumber: input.afeNumber ?? null, purchaseOrder: input.purchaseOrder ?? null, billingState: "billing_review", openedAt: new Date() });
+        const ins = await d.insert(billingBooks).values({ orgRef: ownerFor(scope), bookNumber: (await nextTrackingNumber(d, { sequenceType: "BB", orgRef: ownerFor(scope) })).trackingNumber, jobId: x.t.jobId, customer: x.account.name, afeNumber: input.afeNumber ?? null, purchaseOrder: input.purchaseOrder ?? null, billingState: "billing_review", openedAt: new Date() });
         book = (await d.select().from(billingBooks).where(eq(billingBooks.id, Number(ins[0]?.insertId ?? 0))).limit(1))[0]!;
       }
       // Configured, transactional sequence (rule §18): INV-<year>-<000001>, format from trackingSequences.
-      const invoiceNumber = (await nextTrackingNumber(d, { sequenceType: "INV" })).trackingNumber;
+      const invoiceNumber = (await nextTrackingNumber(d, { sequenceType: "INV", orgRef: ownerFor(scope) })).trackingNumber;
       const ins = await d.insert(invoices).values({ invoiceNumber, orgRef: ownerFor(scope), financialEntityId: x.account.financialEntityId, billingBookId: book.id, jobId: x.t.jobId, customer: x.account.name, customerAccountId: x.account.id, afeNumber: input.afeNumber ?? null, purchaseOrder: input.purchaseOrder ?? null, subtotalCents: draft.subtotalCents, taxCents: 0, gstTreatment: "unknown", gstTreatmentSource: null, totalCents: draft.subtotalCents, currency: "CAD", status: "draft" });
       const invoiceId = Number(ins[0]?.insertId ?? 0);
       await d.insert(invoiceLines).values(draft.lines.map(l => ({ invoiceId, lineNo: l.lineNo, fieldTicketLineId: l.fieldTicketLineId, pricingDecisionRef: l.pricingDecisionRef, serviceCode: l.serviceCode, description: l.description, quantityMillis: l.quantityMillis, billableQuantityMillis: l.billableQuantityMillis, unit: l.unit, rateMillis: l.rateMillis, amountCents: l.amountCents, basis: l.basis })));

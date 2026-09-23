@@ -156,7 +156,7 @@ export const portalAdminRouter = router({
           resultRef = billRef;
         } else if (sub.kind === "disposal_ticket") {
           const p = JSON.parse(sub.payloadJson) as DisposalTicketPayload & { scaleInAt: string; confidence?: "low" | "medium" | "high" };
-          const ticketNumber = (await nextTrackingNumber(db, { sequenceType: "DSP" })).trackingNumber;
+          const ticketNumber = (await nextTrackingNumber(db, { sequenceType: "DSP", orgRef: ownerFor(scope) })).trackingNumber;
           await db.insert(disposalTickets).values({ ticketNumber, orgRef: ownerFor(scope), loadId: input.loadId ?? null, facilityId: identity.facilityId!, facilityTicketNumber: p.facilityTicketNumber, scaleInAt: new Date(p.scaleInAt), grossKg: p.grossKg, tareKg: p.tareKg, netKg: p.netKg, quantity: p.quantity, quantityUnit: p.quantityUnit, verificationStatus: "needs_review", source: "facility_portal", confidence: p.confidence ?? "medium", evidenceRefs: p.scaleRecordHash ? JSON.stringify({ scaleRecordHash: p.scaleRecordHash }) : null });
           resultRef = ticketNumber;
         } else if (sub.kind === "invoice_dispute") {

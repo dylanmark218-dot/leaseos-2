@@ -869,7 +869,17 @@ export async function jobInScope(jobId: number, scope: TenantScope): Promise<{ i
 export async function fieldTicketInScope(ticketNumber: string, scope: TenantScope): Promise<{ id: number; jobId: number | null; unitId: number | null } | null> {
   const db = await getDb();
   if (!db) return null;
-  const t = (await db.select({ id: fieldTickets.id, jobId: fieldTickets.jobId, unitId: fieldTickets.unitId }).from(fieldTickets).where(eq(fieldTickets.ticketNumber, ticketNumber)).limit(1))[0];
+  /*
+   * 0172 — scoped in the QUERY, not after it. A ticket number is tenant-relative
+   * now, so two organizations may both hold FT-2026-000001: fetching by number
+   * alone and then checking the row's job returned whichever row the database
+   * yielded, and the caller's own ticket came back "not found" because somebody
+   * else's was picked first. The ownership column narrows it to one row; the job
+   * and unit checks below stay as defence in depth, because orgRef is an
+   * assertion and the parent's ownership is derived.
+   */
+  const t = (await db.select({ id: fieldTickets.id, jobId: fieldTickets.jobId, unitId: fieldTickets.unitId }).from(fieldTickets)
+    .where(and(eq(fieldTickets.ticketNumber, ticketNumber), orgScopeWhere(fieldTickets, scope))).limit(1))[0];
   if (!t) return null;
   if (t.jobId != null) return (await jobInScope(t.jobId, scope)) ? t : null;
   if (t.unitId != null) return (await unitInScope(t.unitId, scope)) ? t : null;

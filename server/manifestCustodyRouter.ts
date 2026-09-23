@@ -15,7 +15,7 @@ import { reconcileManifestFacts, type ManifestFactKey } from "./_core/manifestFa
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq } from "drizzle-orm";
 import { router, roleProcedure } from "./_core/trpc";
-import { actingScopeFor, getDb, manifestInScope } from "./db";
+import { actingScopeFor, getDb, manifestInScope, ownerFor } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
 import { recordBelongsToOrganization } from "./_core/coreRecordOwnership";
 import { evidenceRecords, facilities, manifestAmendments, manifestReconciliationOverrides, manifestCustodyEvents, manifestEvidenceLinks, manifestEvidenceProfiles, manifestPartySnapshots, manifests, operators, units } from "../drizzle/schema";
@@ -162,10 +162,17 @@ export const manifestCustodyRouter = router({
       if (!finding) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `NOTHING_TO_OVERRIDE: ${input.factKey} does not contradict the record.` });
 
       const pair = { driver: { p: m.driver, r: m.operatorId }, trailer: { p: m.trailer, r: m.trailerUnitId }, facility: { p: m.facility, r: m.destinationFacilityId } }[input.factKey];
-      const overrideRef = (await nextTrackingNumber(db, { sequenceType: "MRO" })).trackingNumber;
+      /*
+       * One owner for both. The number comes out of THIS organization's
+       * counter, so the row has to carry the same organization: minting from
+       * one and writing the other leaves every organization's numbers piled
+       * into the unattributed bucket, where the second one collides.
+       */
+      const owner = ownerFor(await actingScopeFor(ctx.user.id));
+      const overrideRef = (await nextTrackingNumber(db, { sequenceType: "MRO", orgRef: owner })).trackingNumber;
       // Both facts, verbatim; neither corrected. Append-only — a withdrawal would be a second row.
       await db.insert(manifestReconciliationOverrides).values({
-        overrideRef, manifestId: m.id, manifestRevisionHash: m.currentHash ?? null, amendmentCountAtOverride: m.amendmentCount ?? 0,
+        overrideRef, orgRef: owner, manifestId: m.id, manifestRevisionHash: m.currentHash ?? null, amendmentCountAtOverride: m.amendmentCount ?? 0,
         factKey: input.factKey, canonicalValue: finding.detail.match(/resolves to "([^"]*)"/)?.[1] ?? null,
         printedValue: pair.p ?? null, referenceId: pair.r ?? null,
         requestedByUserId: ctx.user.id, authorizedByUserId: ctx.user.id,

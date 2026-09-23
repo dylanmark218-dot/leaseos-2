@@ -30,7 +30,7 @@ beforeAll(async () => {
   pool = mysql.createPool({ uri: URL, connectionLimit: 4 });
 });
 
-type LiveColumn = { table: string; column: string; nullable: boolean; hasDefault: boolean };
+type LiveColumn = { table: string; column: string; nullable: boolean; hasDefault: boolean; generated: boolean };
 
 async function liveColumns(): Promise<Map<string, LiveColumn>> {
   const [rows] = await pool.execute<mysql.RowDataPacket[]>(
@@ -45,6 +45,9 @@ async function liveColumns(): Promise<Map<string, LiveColumn>> {
       column: String(r.c),
       nullable: String(r.n) === "YES",
       hasDefault: r.dflt !== null || /auto_increment|DEFAULT_GENERATED/i.test(String(r.extra ?? "")),
+      // STORED GENERATED / VIRTUAL GENERATED. The database computes it; no
+      // INSERT may name it.
+      generated: /GENERATED/i.test(String(r.extra ?? "")) && !/DEFAULT_GENERATED/i.test(String(r.extra ?? "")),
     });
   }
   return out;
@@ -96,7 +99,38 @@ d("column-level parity between schema.ts and the applied migrations", () => {
       const name = getTableName(table);
       for (const col of Object.values(getTableColumns(table))) known.add(`${name}.${col.name}`);
     }
-    const orphans = Array.from(live.keys()).filter(k => !known.has(k));
+    /*
+     * A GENERATED column is deliberately absent from schema.ts.
+     *
+     * MySQL accepts a generated column in an INSERT column list only when the
+     * value is DEFAULT; an explicit value is error 1906. Declaring one is
+     * therefore safe right up until somebody sets it, which is a trap rather
+     * than a contract — and nothing in the application has a reason to read or
+     * write these: they exist to carry a unique index the database enforces.
+     * `userRoleAssignments.activeGrantKey` predates this and IS declared, which
+     * is why the exclusion is by the database's own GENERATED flag rather than
+     * by a name list.
+     *
+     * They are listed rather than merely skipped, so a new one is a decision
+     * somebody makes in a diff.
+     */
+    const generated = Array.from(live.values()).filter(c => c.generated).map(c => `${c.table}.${c.column}`).sort();
+    expect(generated, "a new generated column appeared").toEqual([
+      // 0172 — COALESCE(orgRef, '~unattributed'), the column the tenant-relative
+      // unique indexes are built on. NULLs are distinct inside a unique index,
+      // so keying on the nullable owner directly would drop the constraint
+      // exactly where there is one tenant to protect.
+      "billingBooks.orgKey", "calibrationSweeps.orgKey", "commercialApprovals.orgKey",
+      "commercialDocuments.orgKey", "customerCredits.orgKey", "delayEvents.orgKey",
+      "disposalTickets.orgKey", "fieldTickets.orgKey", "invoices.orgKey",
+      "manifestReconciliationOverrides.orgKey", "signatoryAuthorities.orgKey",
+      "trackingReferences.orgKey", "trackingSequences.orgKey",
+      // Predates this work: the partial-uniqueness key for a live role grant.
+      "userRoleAssignments.activeGrantKey",
+      "writeOffRequests.orgKey",
+    ]);
+
+    const orphans = Array.from(live.values()).filter(c => !c.generated).map(c => `${c.table}.${c.column}`).filter(k => !known.has(k));
     expect(
       orphans,
       "The database has a column schema.ts does not declare. It exists but nothing can read or write it typed."

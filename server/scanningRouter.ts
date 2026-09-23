@@ -23,11 +23,13 @@
  * rows at all: they are the same answer for every organization, and `printing.assess` — the one
  * pure procedure on the sibling router — resolves no scope for exactly this reason.
  *
- * Neither `trackingSequences` nor `trackingReferences` carries an organization column, so a row in
- * either cannot be attributed on its own. Ownership is therefore taken from the SUBJECT a number
- * names — trip, job, manifest, field ticket or load — each of which has a real owner, rather than
- * from the reference row. A number naming no such subject stays unattributable and the scanner
- * says so instead of guessing. See `existingLinkFor`.
+ * 0171/0172 — both tracking tables now carry `orgRef`, and a minted number is tenant-relative:
+ * two organizations may hold the same one. So every read here is scoped, and ownership is
+ * established TWICE before anything is named — once from the reference row's own organization and
+ * once from the SUBJECT the number resolves to (trip, job, manifest, field ticket or load), which
+ * derives its owner from the record rather than asserting it. Both must agree. A number naming no
+ * resolvable subject stays unattributable and the scanner says so instead of guessing. See
+ * `existingLinkFor`.
  *
  * ## Everything returned is unverified guidance
  *
@@ -37,9 +39,9 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb, resolveTrackingSubject, type ResolvedSubject } from "./db";
+import { getDb, orgScopeWhere, resolveTrackingSubject, type ResolvedSubject } from "./db";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { trackingReferences, trackingSequences } from "../drizzle/schema";
 import { guidanceFor, toPrintFields, type PaperworkKind } from "@shared/paperworkGuidance";
@@ -116,7 +118,7 @@ async function scopeFor(userId: number) {
  * is malformed is NOT filtered out here: it is passed through so `proposeLinks` can refuse it by
  * name, because a sequence that silently stops being searched is how auto-linking dies quietly.
  */
-async function configuredBindings(db: Awaited<ReturnType<typeof getDb>>): Promise<TrackingBinding[]> {
+async function configuredBindings(db: Awaited<ReturnType<typeof getDb>>, scope: { tenantId: string }): Promise<TrackingBinding[]> {
   if (!db) return [];
   /*
    * `updatedAt` is a second-granularity timestamp, so "most recently updated" ties whenever two
@@ -125,7 +127,14 @@ async function configuredBindings(db: Awaited<ReturnType<typeof getDb>>): Promis
    * what "most recent" means when the clock cannot tell them apart. Without it the matcher picks
    * a format at random from the tied rows, and a scan silently stops recognizing its own tickets.
    */
+  /*
+   * 0172 — the caller's OWN formats. A sequence row belongs to an organization
+   * now, and reading them all would let one business's prefix decide how
+   * another's tickets are recognized — the same imposition the shared counter
+   * used to cause, arriving through the matcher instead.
+   */
   const rows = await db.select().from(trackingSequences)
+    .where(orgScopeWhere(trackingSequences, scope))
     .orderBy(desc(trackingSequences.updatedAt), desc(trackingSequences.id));
   const seen: Record<string, true> = {};
   const bindings: TrackingBinding[] = [];
@@ -184,8 +193,27 @@ async function existingLinkFor(
 ): Promise<ExistingLinkState> {
   if (!db || numbers.length === 0) return { kind: "none" };
   for (const n of numbers) {
-    const rows = await db.select().from(trackingReferences).where(eq(trackingReferences.trackingNumber, n)).limit(1);
+    /*
+     * 0172 — the reference is looked up WITHIN the caller's organization, not
+     * by number alone. Two organizations may now hold the same number, so an
+     * unscoped lookup would return whichever row the database yields: the other
+     * company's record, surfaced by the number printed on the paper in this
+     * caller's hand. That is precisely the disclosure this function exists to
+     * refuse.
+     *
+     * `orgScopeWhere` is strict for a member — its own rows, never the
+     * unattributed ones — so a legacy reference nobody could attribute stays
+     * invisible here rather than being shared with everybody.
+     */
+    const rows = await db.select().from(trackingReferences)
+      .where(and(eq(trackingReferences.trackingNumber, n), orgScopeWhere(trackingReferences, scope))).limit(1);
     if (!rows[0]) continue;
+    /*
+     * Defence in depth, and the reason the column alone is not trusted. The
+     * reference now says which organization it belongs to, but a backfilled or
+     * hand-written orgRef is an assertion; the SUBJECT's ownership is derived
+     * from the record itself. Both must agree before anything is named.
+     */
     const resolved = await resolveTrackingSubject(n, scope);
     /*
      * The `in_scope` narrowing is the guard, and it is deliberately the ONLY
@@ -271,7 +299,7 @@ export const scanningRouter = router({
     .query(async ({ ctx, input }) => {
       const { db, scope } = await scopeFor(ctx.user.id);
       const pages = input.pages as ScannedPageSummary[];
-      const bindings = await configuredBindings(db);
+      const bindings = await configuredBindings(db, scope);
       const existing = await existingLinkFor(db, scope, candidateNumbers(pages));
       return reviewScan({
         kind: input.kind as PaperworkKind,

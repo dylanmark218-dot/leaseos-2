@@ -8,7 +8,7 @@ import { sweepSuspectReadings } from "./_core/calibrationEvidence";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, ownerFor } from "./db";
 import {
   calibrationEvents, calibrationSweepFindings, calibrationSweeps, companyPackActivations, complianceDocuments, disposalTickets, invoices, loadSenseWeightSnapshots, loads,
   measurementDevices, operatorEquipmentAuthorizations,
@@ -73,11 +73,13 @@ export const requirementRouter = router({
       );
       if (!result.window) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `NO_SUSPECT_WINDOW: ${result.explanation}` });
 
-      const sweepRef = (await nextTrackingNumber(db, { sequenceType: "CSW" })).trackingNumber;
+      // One owner for both: the counter it came from and the row it lands in.
+      const owner = ownerFor(await actingScopeFor(ctx.user.id));
+      const sweepRef = (await nextTrackingNumber(db, { sequenceType: "CSW", orgRef: owner })).trackingNumber;
       const byRef = new Map(snaps.map(s => [s.snapshotRef, s]));
       const sweepId = await db.transaction(async (tx) => {
         const ins = await tx.insert(calibrationSweeps).values({
-          sweepRef, measurementDeviceId: ev.measurementDeviceId, calibrationEventId: ev.id,
+          sweepRef, orgRef: owner, measurementDeviceId: ev.measurementDeviceId, calibrationEventId: ev.id,
           suspectFrom: result.window!.from, suspectTo: result.window!.to, eventType: ev.eventType,
           errorFound: ev.errorFound, determinationsInQuestion: result.determinationsInQuestion.length,
           measurementsInQuestion: result.measurementsInQuestion.length,

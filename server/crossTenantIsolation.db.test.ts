@@ -5,18 +5,15 @@
  * one question asked of every path: does ownership decide, or does the
  * identifier?
  *
- * **Why the collisions are not the ones the brief asked for.** The brief asks
- * for the same ticket number, unit number and job number in both tenants. That
- * is not expressible: `drizzle/schema.ts` carries 243 `.unique()` declarations
- * and not one unique index anywhere includes `orgRef` or `tenantId`, so every
- * business identifier is unique across the whole installation and the database
- * refuses the fixture. See docs/TENANT_OWNERSHIP_AUDIT.md §8. This suite
- * therefore collides on every value that is NOT constrained — customer,
- * location, operator name, vendor name, unit description — and pins the
- * uniqueness property itself so it cannot change without a reader noticing.
+ * **The collisions, and which ones are expressible.** 0172 made a minted
+ * number tenant-relative: Tenant A and Tenant B may both hold FT-000001, and
+ * this suite proves it. The identifiers that are still installation-wide —
+ * jobCode, unitNumber, and the ~230 other `.unique()` columns nothing mints —
+ * cannot collide yet, so the fixtures also collide on every value that is not
+ * constrained at all: customer, location, operator name, vendor name, company.
  *
- * A global identifier namespace is not the defect. Inferring ownership FROM an
- * identifier is, and that is what these tests hunt.
+ * A shared identifier is not the defect. Inferring OWNERSHIP from an identifier
+ * is, and that is what these tests hunt.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
@@ -107,30 +104,133 @@ async function seedTenant(orgRef: string, ownerUserId: number) {
   return { tag, jobId, unitId, operatorId, vendorId, jobCode: `JOB-${tag}`, unitNumber: `UNIT-${tag}` };
 }
 
-d("the identifier namespace is global, and that is the premise of everything below", () => {
-  it("has no unique index anywhere that includes an organization column", () => {
-    // If this ever stops being true, the fixtures above become expressible and
-    // this whole suite should be rewritten to use genuinely colliding numbers.
-    const schema = readFileSync("drizzle/schema.ts", "utf8");
-    const uniques = (schema.match(/\.unique\(\)/g) ?? []).length;
-    expect(uniques).toBeGreaterThan(200);
+d("a minted number is tenant-relative, not global", () => {
+  /**
+   * The rule the owner decided: Tenant A / FT-000001 and Tenant B / FT-000001
+   * may both exist, and they are different records because their ownership
+   * differs. LeaseOS must not depend on a human-readable number being unique
+   * across every company using the platform.
+   */
+  const NUMBER = `FT-${rnd()}`;   // the same number in both books; unique per run so the suite is re-runnable
 
-    const migrations = readFileSync("drizzle/0010_billing_records_chain.sql", "utf8");
-    expect(migrations).toContain("trackingReferences_trackingNumber_unique");
-  });
-
-  it("refuses two organizations the same job code, which is why ownership has to carry the boundary", async () => {
+  it("lets two organizations hold the same tracking number, and keeps them apart", async () => {
     const a = await org(), b = await org();
-    const ua = await member(a, ["office"]), ub = await member(b, ["office"]);
-    const seeded = await seedTenant(a, ua);
-    await expect(
-      pool.execute(
-        "INSERT INTO jobs (jobCode, type, customer, location, orgRef) VALUES (?,?,?,?,?)",
-        [seeded.jobCode, "hydrovac", COLLIDING.customer, COLLIDING.location, b],
-      ),
-    ).rejects.toThrow(/Duplicate|ER_DUP/i);
-    void ub;
+    const ua = await member(a, ["office", "management", "safety"]);
+    const ub = await member(b, ["office", "management", "safety"]);
+    const A = await seedTenant(a, ua), B = await seedTenant(b, ub);
+
+    // The identical visible number, in both books. Both inserts must succeed.
+    for (const [o, t] of [[a, A], [b, B]] as const) {
+      await pool.execute(
+        "INSERT INTO trackingReferences (trackingNumber, orgRef, entityType, entityId, jobId, issuedAt) VALUES (?,?,?,?,?,NOW())",
+        [NUMBER, o, "JOB", t.jobId, t.jobId],
+      );
+    }
+    const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+      "SELECT orgRef, entityId FROM trackingReferences WHERE trackingNumber = ? ORDER BY orgRef", [NUMBER]);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(r => r.orgRef).sort()).toEqual([a, b].sort());
+
+    // A lookup resolves to the caller's own record, never the other's.
+    const forA = rows.find(r => r.orgRef === a)!;
+    const forB = rows.find(r => r.orgRef === b)!;
+    expect(forA.entityId).toBe(A.jobId);
+    expect(forB.entityId).toBe(B.jobId);
+    expect(forA.entityId).not.toBe(forB.entityId);
+  }, 30_000);
+
+  it("still refuses one organization the same number twice", async () => {
+    const a = await org();
+    const ua = await member(a, ["office"]);
+    const A = await seedTenant(a, ua);
+    const n = `FT-DUP-${rnd()}`;
+    await pool.execute(
+      "INSERT INTO trackingReferences (trackingNumber, orgRef, entityType, entityId, jobId, issuedAt) VALUES (?,?,?,?,?,NOW())",
+      [n, a, "JOB", A.jobId, A.jobId]);
+    await expect(pool.execute(
+      "INSERT INTO trackingReferences (trackingNumber, orgRef, entityType, entityId, jobId, issuedAt) VALUES (?,?,?,?,?,NOW())",
+      [n, a, "JOB", A.jobId, A.jobId])).rejects.toThrow(/Duplicate|ER_DUP/i);
   }, 20_000);
+
+  it("still refuses the unattributed pool the same number twice", async () => {
+    // The single-tenant case. orgRef is NULL there, and NULLs are distinct
+    // inside a unique index — so without the generated orgKey column this
+    // constraint would vanish exactly where there is one tenant to protect.
+    const n = `FT-NULLDUP-${rnd()}`;
+    await pool.execute(
+      "INSERT INTO trackingReferences (trackingNumber, orgRef, entityType, entityId, issuedAt) VALUES (?,NULL,?,?,NOW())",
+      [n, "DSP", 1]);
+    await expect(pool.execute(
+      "INSERT INTO trackingReferences (trackingNumber, orgRef, entityType, entityId, issuedAt) VALUES (?,NULL,?,?,NOW())",
+      [n, "DSP", 2])).rejects.toThrow(/Duplicate|ER_DUP/i);
+  }, 20_000);
+
+  it("gives each organization its own counter, which the other cannot advance", async () => {
+    const { getDb } = await import("./db");
+    const { nextTrackingNumber } = await import("./_core/trackingNumbers");
+    const db = (await getDb())!;
+    const a = await org(), b = await org();
+    // The same sequence, branch and period in both — the collision the owner
+    // asked for: "type = disposal_ticket, branch = HINTON, period = 2026".
+    const seq = `DSP${rnd().slice(0, 4)}`;
+    const args = { sequenceType: seq, branch: "HINTON", at: new Date("2026-06-01T00:00:00Z") };
+
+    const a1 = await nextTrackingNumber(db, { ...args, orgRef: a });
+    const b1 = await nextTrackingNumber(db, { ...args, orgRef: b });
+    expect(a1.sequence).toBe(1);
+    expect(b1.sequence).toBe(1);
+    expect(a1.trackingNumber).toBe(b1.trackingNumber);   // identical, and legal
+
+    // A minting again advances A only.
+    const a2 = await nextTrackingNumber(db, { ...args, orgRef: a });
+    const b2 = await nextTrackingNumber(db, { ...args, orgRef: b });
+    expect(a2.sequence).toBe(2);
+    expect(b2.sequence).toBe(2);
+
+    // And three more from A leave B exactly where it was.
+    for (let i = 0; i < 3; i++) await nextTrackingNumber(db, { ...args, orgRef: a });
+    const b3 = await nextTrackingNumber(db, { ...args, orgRef: b });
+    expect(b3.sequence).toBe(3);
+  }, 30_000);
+
+  it("lets each organization set its own format without imposing it on the other", async () => {
+    const { getDb } = await import("./db");
+    const { nextTrackingNumber } = await import("./_core/trackingNumbers");
+    const db = (await getDb())!;
+    const a = await org(), b = await org();
+    const seq = `FMT${rnd().slice(0, 4)}`;
+    const at = new Date("2026-06-01T00:00:00Z");
+
+    // A goes first and used to fix the format for everybody — "the stored row's
+    // format wins" read one installation-wide row.
+    const a1 = await nextTrackingNumber(db, { sequenceType: seq, orgRef: a, at, format: { prefix: "AAA", sequenceDigits: 3 } });
+    const b1 = await nextTrackingNumber(db, { sequenceType: seq, orgRef: b, at, format: { prefix: "BBB", sequenceDigits: 5 } });
+    expect(a1.trackingNumber).toMatch(/^AAA-2026-001$/);
+    expect(b1.trackingNumber).toMatch(/^BBB-2026-00001$/);
+  }, 30_000);
+
+  it("holds under two workers minting in one organization, and does not contend across two", async () => {
+    const { getDb } = await import("./db");
+    const { nextTrackingNumber } = await import("./_core/trackingNumbers");
+    const db = (await getDb())!;
+    const a = await org(), b = await org();
+    const seq = `RACE${rnd().slice(0, 4)}`;
+    const at = new Date("2026-06-01T00:00:00Z");
+
+    // Same organization, concurrent: every number distinct.
+    const mine = await Promise.all(Array.from({ length: 8 }, () =>
+      nextTrackingNumber(db, { sequenceType: seq, orgRef: a, at })));
+    expect(new Set(mine.map(m => m.trackingNumber)).size).toBe(8);
+    expect(new Set(mine.map(m => m.sequence)).size).toBe(8);
+
+    // Two organizations at once: each gets its own run, and they overlap.
+    const [ax, bx] = await Promise.all([
+      Promise.all(Array.from({ length: 4 }, () => nextTrackingNumber(db, { sequenceType: `${seq}X`, orgRef: a, at }))),
+      Promise.all(Array.from({ length: 4 }, () => nextTrackingNumber(db, { sequenceType: `${seq}X`, orgRef: b, at }))),
+    ]);
+    expect(new Set(ax.map(m => m.sequence))).toEqual(new Set([1, 2, 3, 4]));
+    expect(new Set(bx.map(m => m.sequence))).toEqual(new Set([1, 2, 3, 4]));
+  }, 40_000);
 });
 
 d("Tenant A cannot reach Tenant B through the scoped read paths", () => {
@@ -354,8 +454,8 @@ d("the scanner names a record only when it can prove whose it is", () => {
     // A tracking reference registered under the job's own code, which is what
     // makes the number resolvable at all.
     await pool.execute(
-      "INSERT INTO trackingReferences (trackingNumber, entityType, entityId, issuedAt) VALUES (?,?,?,NOW())",
-      [A.jobCode, "JOB", A.jobId],
+      "INSERT INTO trackingReferences (trackingNumber, orgRef, entityType, entityId, issuedAt) VALUES (?,?,?,?,NOW())",
+      [A.jobCode, a, "JOB", A.jobId],
     );
 
     const r = await callerFor(ua).scanning.reviewScan({
@@ -371,6 +471,37 @@ d("the scanner names a record only when it can prove whose it is", () => {
     expect(r.links.alreadyLinked).toMatchObject({ target: "job", trackingNumber: A.jobCode });
   }, 30_000);
 
+  it("still answers ownership_unverifiable when the chain inside its OWN organization breaks", async () => {
+    /*
+     * §12 — `ownership_unverifiable` must not disappear just because references
+     * gained an orgRef. It is still the answer for a reference the caller DOES
+     * own whose subject cannot be resolved: a dangling target, an unsupported
+     * subject type, a migration anomaly. The column is an assertion; the
+     * subject's ownership is derived. When they disagree, unknown wins.
+     */
+    const a = await org();
+    const ua = await member(a, ["office", "management", "safety"]);
+    const A = await seedTenant(a, ua);
+    void A;
+    const token = `DSP-${rnd()}`;
+    await pool.execute(
+      "INSERT INTO trackingReferences (trackingNumber, orgRef, entityType, entityId, issuedAt) VALUES (?,?,?,?,NOW())",
+      [token, a, "DSP", 987_654],    // a disposal id the subject chain cannot resolve
+    );
+    const r = await callerFor(ua).scanning.reviewScan({
+      kind: "disposal_ticket",
+      pages: [{
+        pageIndex: 0, contentHash: `h-${rnd()}`, qualityVerdict: "acceptable", qualityFailures: [],
+        acceptedOverObjection: false, ocrAttempted: true, ocrMeanConfidence: 95,
+        ocrText: `Facility ticket ${token}`, barcodes: null,
+      }],
+      observations: [],
+    });
+    expect(r.links.ownershipUnverifiable).toBe(true);
+    expect(r.links.alreadyLinked).toBeNull();
+    expect(r.links.best).toBeNull();
+  }, 30_000);
+
   it("withholds everything when the number resolves to another organization's job", async () => {
     const a = await org(), b = await org();
     const ua = await member(a, ["office", "management", "safety"]);
@@ -378,8 +509,8 @@ d("the scanner names a record only when it can prove whose it is", () => {
     const B = await seedTenant(b, ub);
 
     await pool.execute(
-      "INSERT INTO trackingReferences (trackingNumber, entityType, entityId, issuedAt) VALUES (?,?,?,NOW())",
-      [B.jobCode, "JOB", B.jobId],
+      "INSERT INTO trackingReferences (trackingNumber, orgRef, entityType, entityId, issuedAt) VALUES (?,?,?,?,NOW())",
+      [B.jobCode, b, "JOB", B.jobId],
     );
 
     // Tenant A scans a page bearing tenant B's job code — the exact text is on
@@ -393,9 +524,15 @@ d("the scanner names a record only when it can prove whose it is", () => {
       }],
       observations: [],
     });
-    expect(r.links.ownershipUnverifiable).toBe(true);
+    /*
+     * 0172 made this STRONGER than it was. Tenant B's scoped lookup does not
+     * find tenant A's reference at all, so the answer is not even "something
+     * exists but I cannot attribute it" — which was itself a small disclosure,
+     * since it confirmed the number on the paper was registered somewhere.
+     * Nothing about A reaches the response, and `alreadyLinked` stays null
+     * because no link of B's was found.
+     */
     expect(r.links.alreadyLinked).toBeNull();
-    expect(r.links.best).toBeNull();
     // Distinctive values only: a bare integer id appears in ordinary JSON by
     // coincidence (a page index, a count), so asserting on one tests nothing.
     const body = JSON.stringify(r);

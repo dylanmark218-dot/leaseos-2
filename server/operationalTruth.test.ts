@@ -95,12 +95,21 @@ d("an authorized caller cannot establish a trusted state through a create", () =
   });
   it("scans: the access role is the caller's, not the caller's claim", async () => {
     const driver = await withRole("driver");
-    await expect(callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: 1, scannedAt: new Date(), accessRole: "admin" } as never)).rejects.toThrow(REFUSED);
-    const id = await callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: 1, scannedAt: new Date() });
+    /*
+     * A real, unowned unit of this suite's own. `subjectId: 1` worked only
+     * while nothing else in the database owned unit 1; the cross-tenant matrix
+     * now assigns owned units, and a scan on somebody else's unit is correctly
+     * refused. The same fix fieldroute.test.ts needed, for the same reason.
+     */
+    const [unit] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [`U-OT-${Math.random().toString(36).slice(2, 9).toUpperCase()}`, "hydrovac"]);
+    const subjectId = unit.insertId;
+    await expect(callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId, scannedAt: new Date(), accessRole: "admin" } as never)).rejects.toThrow(REFUSED);
+    const id = await callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId, scannedAt: new Date() });
     const [row] = await pool.execute<mysql.RowDataPacket[]>("SELECT accessRole FROM scanAudits WHERE id = ?", [id]);
     expect(row[0].accessRole).toBe("driver");
     const management = await withRole("management");
-    const mid = await callerFor(management).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: 1, scannedAt: new Date() });
+    const mid = await callerFor(management).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId, scannedAt: new Date() });
     const [mrow] = await pool.execute<mysql.RowDataPacket[]>("SELECT accessRole FROM scanAudits WHERE id = ?", [mid]);
     expect(mrow[0].accessRole).toBe("admin");
   });

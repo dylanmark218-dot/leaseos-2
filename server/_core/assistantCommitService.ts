@@ -12,26 +12,7 @@ import { toCents } from "./money";
 import type { Tx } from "./dbTypes";
 import { createHash } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
-import {
-  assistantCommitReceipts,
-  assistantProposals,
-  authorizationDecisions,
-  maintenanceDefects,
-  proposalFields,
-  tripStops,
-  units,
-  userRoleAssignments,
-  expenseRecords,
-  financialEntities,
-  loads,
-  facilities,
-  disposalTickets,
-  documentFingerprints,
-  documentExtractions,
-  evidenceRelationships,
-  fuelTransactions,
-  fleetFuelCards,
-} from "../../drizzle/schema";
+import { assistantCommitReceipts, assistantProposals, authorizationDecisions, disposalTickets, documentExtractions, documentFingerprints, evidenceRelationships, expenseRecords, facilities, financialEntities, fleetFuelCards, fuelTransactions, jobs, loads, maintenanceDefects, proposalFields, tripStops, units, userRoleAssignments } from "../../drizzle/schema";
 import { classifyFuelEvent, fuelHosContext, type FuelConsumer, type FuelPayer } from "./fuelLedger";
 import {
   assessDuplicate,
@@ -609,8 +590,22 @@ async function applyIntent(
     }
 
     const ticketNumber = `DSP-AI-${proposalRow.proposalId.slice(0, 40)}`;
+    /*
+     * 0171 — ownership comes from the job this load belongs to, which is the
+     * authoritative record, rather than from the acting scope. This path
+     * commits a proposal that may have been raised in one session and approved
+     * in another, so "who is asking right now" is the wrong question; "whose
+     * load is this" is the right one. A load on an unattributed job stays
+     * unattributed.
+     *
+     * The number is built from the proposal id rather than minted from a
+     * counter, so it cannot collide with another organization's run.
+     */
+    const ticketOrgRef = load.jobId == null ? null
+      : ((await tx.select({ orgRef: jobs.orgRef }).from(jobs).where(eq(jobs.id, load.jobId)).limit(1))[0]?.orgRef ?? null);
     const inserted = await tx.insert(disposalTickets).values({
       ticketNumber,
+      orgRef: ticketOrgRef,
       loadId: intent.values.loadId,
       jobId: load.jobId,
       tripId: load.tripId,

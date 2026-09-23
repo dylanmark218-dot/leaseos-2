@@ -387,12 +387,36 @@ d("management bootstrap", () => {
   });
 
   it("grants management and nothing else when it does run", async () => {
-    // Proven against a clean slate: revoke every management grant, bootstrap,
-    // then confirm exactly one role landed and the event was recorded.
+    /*
+     * A bootstrap only runs when nobody holds the role, so proving it needs a
+     * globally clean slate — and this database is shared with every other
+     * suite. Revoking every management grant therefore took other suites'
+     * callers down with it: fieldroute.test.ts grants management to its user in
+     * beforeAll and then fails, three tests later and in another file, with
+     * "None of [office, safety] grants dispatch.assign". Nothing in either file
+     * suggests they are connected.
+     *
+     * The rows are put back. That narrows the window to this test's own
+     * duration rather than the rest of the run. It does not close it — the only
+     * thing that would is a database of its own, which is worth doing if this
+     * ever bites again.
+     */
+    const [before] = await pool.execute<mysql.RowDataPacket[]>(
+      "SELECT id FROM userRoleAssignments WHERE role = 'management' AND revokedAt IS NULL"
+    );
+    const suspended = before.map(r => Number(r.id));
     await pool.execute(
       "UPDATE userRoleAssignments SET revokedAt = NOW(), revokedByUserId = 1, revokeReason = 'test reset' WHERE role = 'management' AND revokedAt IS NULL"
     );
     expect(await countActiveManagementGrants()).toBe(0);
+    const restore = async () => {
+      if (!suspended.length) return;
+      await pool.query(
+        "UPDATE userRoleAssignments SET revokedAt = NULL, revokedByUserId = NULL, revokeReason = NULL WHERE id IN (?)",
+        [suspended],
+      );
+    };
+    try {
 
     const target = newUserId();
     const result = await bootstrapManagementRole({
@@ -411,12 +435,15 @@ d("management bootstrap", () => {
     expect(events[0].activeManagementCountBefore).toBe(0);
 
     // And it is closed again immediately.
-    const second = await bootstrapManagementRole({
-      targetUserId: newUserId(),
-      performedByUserId: 1,
-      reason: "again",
-    });
-    expect(second.ok).toBe(false);
+      const second = await bootstrapManagementRole({
+        targetUserId: newUserId(),
+        performedByUserId: 1,
+        reason: "again",
+      });
+      expect(second.ok).toBe(false);
+    } finally {
+      await restore();
+    }
   });
 });
 
