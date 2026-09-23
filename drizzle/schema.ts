@@ -933,6 +933,9 @@ export type InsertZoneEvent = typeof zoneEvents.$inferInsert;
 
 export const trackingSequences = mysqlTable("trackingSequences", {
   id: int("id").autoincrement().primaryKey(),
+  /** DC-C (0180) — the business the counter belongs to; NULL and scopeKey 'default' for the historical single tenant and every legacy series. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  scopeKey: varchar("scopeKey", { length: 64 }).default("default").notNull(),
   sequenceType: varchar("sequenceType", { length: 24 }).notNull(),
   branch: varchar("branch", { length: 12 }),
   periodKey: varchar("periodKey", { length: 16 }).notNull(),
@@ -9053,3 +9056,59 @@ export const documentControlEvents = mysqlTable("documentControlEvents", {
 
 export type InsertDocumentExternalReference = typeof documentExternalReferences.$inferInsert;
 export type InsertDocumentControlEvent = typeof documentControlEvents.$inferInsert;
+
+/* ==================================================================
+ * DC-C (0180) — controlled numbering: the ledger around the one counter.
+ * trackingSequences gains orgRef/scopeKey (declared on that table); these two
+ * tables hold device blocks and one row per minted number.
+ * ================================================================== */
+
+/** A contiguous range cut from the row-locked counter for one enrolled device to issue offline. Never recycled. */
+export const numberBlocks = mysqlTable("numberBlocks", {
+  id: int("id").autoincrement().primaryKey(),
+  allocationRef: varchar("allocationRef", { length: 40 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  sequenceType: varchar("sequenceType", { length: 24 }).notNull(),
+  branch: varchar("branch", { length: 12 }).default("").notNull(),
+  periodKey: varchar("periodKey", { length: 16 }).notNull(),
+  firstSequence: bigint("firstSequence", { mode: "number" }).notNull(),
+  lastSequence: bigint("lastSequence", { mode: "number" }).notNull(),
+  count: int("count").notNull(),
+  deviceRef: varchar("deviceRef", { length: 64 }).notNull(),
+  allocatedByUserId: int("allocatedByUserId").notNull(),
+  state: mysqlEnum("state", ["active", "exhausted", "retired", "device_lost"]).default("active").notNull(),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+  retireReason: varchar("retireReason", { length: 300 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ range: uniqueIndex("numberBlocks_range_unique").on(t.scopeKey, t.sequenceType, t.branch, t.periodKey, t.firstSequence), device: index("numberBlocks_device").on(t.deviceRef, t.state) }));
+
+/** One row per minted number, written in the same transaction as the counter bump and the record. Every gap is a row with a reason. */
+export const numberAllocations = mysqlTable("numberAllocations", {
+  id: int("id").autoincrement().primaryKey(),
+  allocationRef: varchar("allocationRef", { length: 40 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  sequenceType: varchar("sequenceType", { length: 24 }).notNull(),
+  branch: varchar("branch", { length: 12 }).default("").notNull(),
+  periodKey: varchar("periodKey", { length: 16 }).notNull(),
+  sequence: bigint("sequence", { mode: "number" }).notNull(),
+  formattedNumber: varchar("formattedNumber", { length: 64 }).notNull(),
+  blockId: int("blockId"),
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  state: mysqlEnum("state", ["reserved", "issued", "voided", "damaged", "lost", "unused_retired"]).notNull(),
+  recordType: varchar("recordType", { length: 40 }),
+  recordId: int("recordId"),
+  idempotencyKey: varchar("idempotencyKey", { length: 120 }),
+  reservedByUserId: int("reservedByUserId"),
+  reservedAt: timestamp("reservedAt").defaultNow().notNull(),
+  issuedAt: timestamp("issuedAt"),
+  closedByUserId: int("closedByUserId"),
+  closedAt: timestamp("closedAt"),
+  reasonCode: mysqlEnum("reasonCode", ["record_insert_failed", "cancelled_before_issue", "duplicate_issue", "printed_and_spoiled", "device_lost", "device_retired", "damaged_in_field", "migration_gap", "other"]),
+  reasonText: varchar("reasonText", { length: 300 }),
+}, (t) => ({ sequence: uniqueIndex("numberAllocations_sequence_unique").on(t.scopeKey, t.sequenceType, t.branch, t.periodKey, t.sequence), idempotency: uniqueIndex("numberAllocations_idempotency_unique").on(t.scopeKey, t.sequenceType, t.idempotencyKey), record: index("numberAllocations_record").on(t.recordType, t.recordId), state: index("numberAllocations_state").on(t.scopeKey, t.sequenceType, t.periodKey, t.state) }));
+
+export type InsertNumberBlock = typeof numberBlocks.$inferInsert;
+export type InsertNumberAllocation = typeof numberAllocations.$inferInsert;

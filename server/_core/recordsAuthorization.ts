@@ -2358,6 +2358,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "documentControl.documentAmend": "document.confirm",
   "documentControl.documentGet": "document.read",
   "documentControl.documentsList": "document.read",
+  // DC-C (0180) — the series ledger. Reading what was handed out is a read; cutting blocks and voiding numbers is series management.
+  "documentControl.seriesList": "document.read",
+  "documentControl.seriesGapReport": "document.read",
+  "documentControl.seriesBlocks": "document.read",
+  "documentControl.seriesAllocateDeviceBlock": "document.series.manage",
+  "documentControl.seriesRetireDeviceBlock": "document.series.manage",
+  "documentControl.seriesVoidNumber": "document.series.manage",
   "commercialOffice.glAccountSet": "commercial.policy",
   "commercialOffice.glMappingSet": "commercial.policy",
   "commercialOffice.glList": "commercial.read",

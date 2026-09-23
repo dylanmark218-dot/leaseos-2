@@ -20,6 +20,8 @@ import { seedDocumentCatalog } from "./_core/documentCatalogSeed";
 import { CONTROL_STATES, IMPORT_CHANNELS, LINK_ROLES, LINK_SOURCES, REFERENCE_SOURCES } from "./_core/documentRegister";
 import { amendDocument, confirmDocument, DocumentControlRefusal, documentView, issueDocument, listDocuments, registerControlledDocument, supersedeDocument, voidDocument, withdrawDocument, type Actor } from "./_core/documentRegisterService";
 import { storageKeyInput } from "./_core/storageKey";
+import { allocateDeviceBlock, gapReport, listSeries, NumberSeriesRefusal, retireBlock, SERIES_TYPE_PATTERN, voidNumber } from "./_core/numberSeries";
+import { numberBlocks } from "../drizzle/schema";
 import {
   applyOverlay, DEFINITION_KEY_PATTERN, definitionRefusals, DOCUMENT_CLASSES, DOCUMENT_LINK_KINDS, EXTERNAL_REFERENCE_POLICIES, EXTERNAL_REFERENCE_TYPES, ORIGIN_KINDS,
   EXTERNAL_ORIGINS, ISSUER_KINDS, PRINT_POLICIES, READ_CATEGORIES, RENDERED_ORIGINS, representationLabel, REVISION_POLICIES, rowToDefinition, SIGNATURE_POLICIES, TENANT_AUTHORABLE_NUMBERING, TENANT_OVERRIDABLE_COLUMNS,
@@ -39,7 +41,7 @@ const tenantRef = () => `DEF-T-${Date.now().toString(36).toUpperCase()}-${Math.r
 
 /** A service refusal becomes the TRPC code it names; anything else is rethrown untouched. */
 async function guarded<T>(fn: () => Promise<T>): Promise<T> {
-  try { return await fn(); } catch (e) { if (e instanceof DocumentControlRefusal) throw new TRPCError({ code: e.code, message: e.message }); throw e; }
+  try { return await fn(); } catch (e) { if (e instanceof DocumentControlRefusal || e instanceof NumberSeriesRefusal) throw new TRPCError({ code: e.code, message: e.message }); throw e; }
 }
 const actorOf = (ctx: { user: { id: number } }, deviceRef?: string | null): Actor => ({ userId: ctx.user.id, source: "human", deviceRef: deviceRef ?? null });
 const issuerInput = z.object({ issuerKind: z.enum(ISSUER_KINDS), issuerOrgRef: z.string().max(64).nullable().optional(), issuerFacilityId: z.number().int().positive().nullable().optional(), issuerName: z.string().max(220).nullable().optional() });
@@ -252,10 +254,10 @@ export const documentControlRouter = router({
       }),
     /** Issue a tenant-produced document. The control number, where the definition mints one, comes from the series (Checkpoint C); a domain-managed number is handed in. */
     issue: roleProcedure("documentControl.documentIssue")
-      .input(z.object({ documentRef: z.string().min(1).max(64), controlNumber: z.string().max(64).nullable().optional() }))
+      .input(z.object({ documentRef: z.string().min(1).max(64), controlNumber: z.string().max(64).nullable().optional(), deviceNumber: z.object({ blockRef: z.string().max(40), sequence: z.number().int().positive(), deviceRef: z.string().max(64), idempotencyKey: z.string().min(8).max(120) }).nullable().optional() }))
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
-        return guarded(() => issueDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx), documentRef: input.documentRef, controlNumber: input.controlNumber ?? null }));
+        return guarded(() => issueDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx, input.deviceNumber?.deviceRef ?? null), documentRef: input.documentRef, controlNumber: input.controlNumber ?? null, deviceNumber: input.deviceNumber ?? null }));
       }),
     void: roleProcedure("documentControl.documentVoid")
       .input(z.object({ documentRef: z.string().min(1).max(64), reason: z.string().min(10).max(500) }))
@@ -293,6 +295,53 @@ export const documentControlRouter = router({
       .query(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         return listDocuments(db, { bookOrgRef }, input ?? {});
+      }),
+  }),
+  /**
+   * DC-C — the series: what each has handed out, every gap explained, blocks
+   * cut for devices, and the void that keeps a number on the books.
+   */
+  series: router({
+    list: roleProcedure("documentControl.seriesList").query(async ({ ctx }) => {
+      const { db, bookOrgRef } = await bookFor(ctx.user.id);
+      return listSeries(db, bookOrgRef);
+    }),
+    gapReport: roleProcedure("documentControl.seriesGapReport")
+      .input(z.object({ sequenceType: z.string().regex(SERIES_TYPE_PATTERN), periodKey: z.string().min(2).max(16), branch: z.string().max(12).nullable().optional() }))
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return gapReport(db, { orgRef: bookOrgRef, sequenceType: input.sequenceType, branch: input.branch ?? null }, input.periodKey);
+      }),
+    blocks: roleProcedure("documentControl.seriesBlocks")
+      .input(z.object({ deviceRef: z.string().max(64).optional(), sequenceType: z.string().regex(SERIES_TYPE_PATTERN).optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const conds = [eq(numberBlocks.scopeKey, bookOrgRef ?? "default")];
+        if (input?.deviceRef) conds.push(eq(numberBlocks.deviceRef, input.deviceRef));
+        if (input?.sequenceType) conds.push(eq(numberBlocks.sequenceType, input.sequenceType));
+        return db.select().from(numberBlocks).where(and(...conds));
+      }),
+    /** Cut a range for an enrolled, active device to issue offline. Management: it hands out numbers the office will have to account for. */
+    allocateDeviceBlock: roleProcedure("documentControl.seriesAllocateDeviceBlock")
+      .input(z.object({ sequenceType: z.string().regex(SERIES_TYPE_PATTERN), deviceRef: z.string().min(1).max(64), count: z.number().int().positive().max(1000), branch: z.string().max(12).nullable().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => allocateDeviceBlock(db, { orgRef: bookOrgRef, sequenceType: input.sequenceType, branch: input.branch ?? null }, { count: input.count, deviceRef: input.deviceRef, allocatedByUserId: ctx.user.id }));
+      }),
+    /** A lost tablet, a device out of service, blanks returned: every unissued number in the block is explained and none is reissued. */
+    retireDeviceBlock: roleProcedure("documentControl.seriesRetireDeviceBlock")
+      .input(z.object({ blockRef: z.string().max(40), reasonCode: z.enum(["device_lost", "device_retired", "damaged_in_field", "other"]), reasonText: z.string().min(10).max(300) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => retireBlock(db, { scopeKey: bookOrgRef ?? "default", blockRef: input.blockRef, reasonCode: input.reasonCode, reasonText: input.reasonText, actor: { userId: ctx.user.id } }));
+      }),
+    /** A reserved or issued number that will not stand. Its row stays with the reason; the sequence never returns to the pool. */
+    voidNumber: roleProcedure("documentControl.seriesVoidNumber")
+      .input(z.object({ allocationRef: z.string().max(40).optional(), formattedNumber: z.string().max(64).optional(), sequenceType: z.string().regex(SERIES_TYPE_PATTERN).optional(), reasonCode: z.enum(["record_insert_failed", "cancelled_before_issue", "duplicate_issue", "printed_and_spoiled", "damaged_in_field", "other"]), reasonText: z.string().min(10).max(300) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        if (!input.allocationRef && !input.formattedNumber) throw new TRPCError({ code: "BAD_REQUEST", message: "Name the allocation or the number" });
+        return guarded(() => voidNumber(db, { scopeKey: bookOrgRef ?? "default", allocationRef: input.allocationRef, formattedNumber: input.formattedNumber, sequenceType: input.sequenceType, reasonCode: input.reasonCode, reasonText: input.reasonText, actor: { userId: ctx.user.id } }));
       }),
   }),
   artifacts: router({

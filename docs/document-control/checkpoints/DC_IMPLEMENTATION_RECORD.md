@@ -138,3 +138,67 @@ and cannot be issued.
 **Gates.** See the commit: `tsc` clean, test-file type errors 0, parity 414/414, census 651,
 reachability, reserved-word, migration-ledger, commercial-office, audit-package and portal
 suites green, current state regenerated, build clean.
+
+---
+
+## Checkpoint C — controlled numbering with a ledger (migration 0180)
+
+**What it adds.** Nothing replaces the counter. `trackingSequences` gains `orgRef`/`scopeKey`
+(COALESCE(orgRef,'default')) and its unique index gains the scope, so a business's `JSA` series is
+its own while the archival `DOC` series and every legacy caller (FT, INV, DSP, CR, …) stay on the
+default scope untouched. Around the counter: `numberAllocations` (one row per minted number, written
+in the SAME transaction as the counter bump and the record — a failed insert rolls the counter back
+and leaves no gap; `reserved | issued | voided | damaged | lost | unused_retired` with a reason code
+and text; unique on (scope, series, branch, period, sequence), which is the database's own refusal
+to issue a number twice; unique idempotency key per scope and series) and `numberBlocks` (a
+contiguous range cut from the same row-locked counter for one enrolled, active device to issue
+offline; `active | exhausted | retired | device_lost`; unique first sequence; CHECK on the range).
+
+**Engine.** `server/_core/numberSeries.ts`: `ensureSeriesRow` (INSERT IGNORE outside the transaction
+— inside it deadlocks under contention, as the sheet-serial allocator found), `mintNumberInTx`
+(inside the caller's transaction, idempotent on a key), `reserveNumber` / `issueReserved`
+(two-phase for drafts), `voidNumber`, `allocateDeviceBlock`, `consumeFromBlock` (block must be the
+device's and active, sequence inside the range, replay on the device's capture reference, the unique
+index refuses a second consumption), `retireBlock` (every unissued number of a lost or retired device
+gets a row saying why; the counter never moves back; nothing is reissued), `gapReport` (every
+sequence handed out with its state: issued, explained, `held_by_device` for a live block, or
+`unexplained` — zero for anything minted through this module; a non-zero count on FT/INV/DSP is the
+legacy path's burn, reported honestly), `listSeries`. Formats come from the business's
+`commercialNumberingPolicies` row when it wrote one, else prefix = series type in the standard
+shape, and are frozen on the counter row per period. `MAX(number)+1` appears nowhere.
+
+**Register integration.** The archival `DOC-` ref and any `leaseos_series*` control number are now
+minted inside the register's transaction with their ledger rows; `documents.issue` mints from the
+business's series, or consumes a device-issued number from the device's block; voiding a document
+that carries a series number explains the number in the ledger; `trackingReferences` (unique per
+number) is written only for the global default scope — a business-scoped series has the same shape
+in every book and is indexed by the ledger and the register's (book, controlNumber) index.
+
+**Reused.** `trackingSequences` + the `LAST_INSERT_ID` discipline and `assertExactlyOneRowUpdated` /
+`affectedRowsFrom` / `singleNumberFrom` from `sheetSerialAllocator`; `formatTrackingNumber` /
+`periodKeyFor` / `DEFAULT_FORMAT` from `trackingNumbers`; `commercialNumberingPolicies` +
+`numberingPolicyFor` for per-business formats (configured through the existing
+`commercialOffice.numbering.set`); `fieldDevices` for enrolment and status; `trackingReferences`
+as the global index. Not built: a second counter, a second allocator, a per-tenant fork of the
+legacy series (D-DC-03: historical counters stay), a device-side minting path (a device only ever
+holds a range the server cut).
+
+**Surface.** Six procedures: `series.list`, `series.gapReport`, `series.blocks` (`document.read`);
+`series.allocateDeviceBlock`, `series.retireDeviceBlock`, `series.voidNumber`
+(`document.series.manage`, management). `documents.issue` gains `deviceNumber`. Census 657 (+6).
+
+**Tests.** `server/numberSeries.db.test.ts` (7): eight workers × fifteen mints → 120 distinct, 120
+ledger rows, no gap; six concurrent device blocks → disjoint contiguous ranges from one counter and
+a server mint beyond them; consume outside the block / from another device refused, retried capture
+replayed, second consumption refused by the database; lost tablet → six lost rows with the reason,
+two issued kept, consumption refused after loss, replacement block starts after, report explains
+all; void keeps the row and the counter, a rolled-back mint leaves no gap, a retried key mints
+nothing; series independent, businesses isolated (both mint 000001), the legacy default-scope
+counter untouched, another business cannot void; the register mints JSA-…-000001/000002 for
+rendered JSAs, a proposed one takes a device-block number at issue, the gap report reads
+1..6 with the two unconsumed block numbers held then `unused_retired` after retirement, office
+cannot cut blocks.
+
+**Gates.** See the commit: `tsc` clean, test-file type errors 0, parity 416/416, census 657,
+reachability, reserved-word, migration-ledger, tracking-number coverage, commercial-office and
+Document Control suites green, current state regenerated, build clean.
