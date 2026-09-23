@@ -93,3 +93,55 @@ describe("the legacy direct-award path is not the assignment API", () => {
     }
   });
 });
+
+/*
+ * ── Checkpoint I: the dispatcher's screen reads the canonical model ──────────────────────────
+ *
+ * The container is where the UI's half of this can regress, and it is the one piece of the screen
+ * no DOM test reaches: this repository tests views, which take props, and containers, which call
+ * tRPC, have no harness. What they do is still load-bearing, so it is asserted structurally —
+ * the same trade `clientTruth.test.ts` makes for the same reason.
+ */
+describe("the dispatcher's detail screen is wired to the canonical model", () => {
+  const detail = () => codeOf("client/src/dispatch/DispatchJobDetail.tsx");
+  const readiness = () => codeOf("client/src/dispatch/DispatchReadiness.tsx");
+
+  it("reads slots from dispatch.listRoles, not from the legacy worklog table", () => {
+    expect(detail()).toContain("dispatch.listRoles");
+    expect(
+      /jobUnits/.test(detail()),
+      "the detail container must not read jobUnits — two sources for 'who is on this job' is the " +
+      "condition this subsystem exists to end",
+    ).toBe(false);
+  });
+
+  /*
+   * The readiness subject is the sharper case. A verdict computed from whoever last filed hours,
+   * while assignments are written to slots, is not stale — it is about a different crew, and it
+   * looks exactly like a current answer.
+   */
+  it("resolves the readiness subject from the slot binding, not from jobUnits", () => {
+    expect(readiness()).toContain("dispatch.listRoles");
+    expect(/jobUnits/.test(readiness()), "one canonical current-assignment source").toBe(false);
+  });
+
+  it("invalidates readiness after every slot write, through the one policy that says so", () => {
+    const src = detail();
+    expect(src).toContain("invalidateAfterSlotMutation");
+    // onSettled, not onSuccess: a conflict means somebody else moved the slot, which is precisely
+    // when the readiness on screen is about the wrong crew.
+    const settled = (src.match(/onSettled/g) ?? []).length;
+    expect(settled, "both mutations must re-read on settle").toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not hand the assignment mutation an award credential", () => {
+    expect(/eligibilityCheckId/.test(detail())).toBe(false);
+    expect(/usedForAward|awardPosting|dispatch\.award/.test(detail())).toBe(false);
+  });
+
+  it("offers no client path to the legacy mutation from the dispatch screens", () => {
+    for (const f of ["client/src/dispatch/DispatchJobDetail.tsx", "client/src/dispatch/DispatchJobDetailView.tsx"]) {
+      expect(/jobUnits\.create/.test(codeOf(f)), f).toBe(false);
+    }
+  });
+});
