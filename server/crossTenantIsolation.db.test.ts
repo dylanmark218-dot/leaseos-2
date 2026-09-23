@@ -195,6 +195,67 @@ d("Tenant A cannot reach Tenant B through the scoped read paths", () => {
   }, 20_000);
 });
 
+d("the scanner names a record only when it can prove whose it is", () => {
+  /**
+   * The chain: scan session tenant → the number names a subject → the subject
+   * has an owner → owner is the caller. Only then may a link be named.
+   */
+  it("names the caller's own job when the number on the page resolves to it", async () => {
+    const a = await org();
+    const ua = await member(a, ["office", "management", "safety"]);
+    const A = await seedTenant(a, ua);
+
+    // A tracking reference registered under the job's own code, which is what
+    // makes the number resolvable at all.
+    await pool.execute(
+      "INSERT INTO trackingReferences (trackingNumber, entityType, entityId, issuedAt) VALUES (?,?,?,NOW())",
+      [A.jobCode, "JOB", A.jobId],
+    );
+
+    const r = await callerFor(ua).scanning.reviewScan({
+      kind: "load_ticket",
+      pages: [{
+        pageIndex: 0, contentHash: `h-${rnd()}`, qualityVerdict: "acceptable", qualityFailures: [],
+        acceptedOverObjection: false, ocrAttempted: true, ocrMeanConfidence: 95,
+        ocrText: `Job ${A.jobCode} completed`, barcodes: null,
+      }],
+      observations: [],
+    });
+    expect(r.links.ownershipUnverifiable).toBe(false);
+    expect(r.links.alreadyLinked).toMatchObject({ target: "job", trackingNumber: A.jobCode });
+  }, 30_000);
+
+  it("withholds everything when the number resolves to another organization's job", async () => {
+    const a = await org(), b = await org();
+    const ua = await member(a, ["office", "management", "safety"]);
+    const ub = await member(b, ["office", "management", "safety"]);
+    const B = await seedTenant(b, ub);
+
+    await pool.execute(
+      "INSERT INTO trackingReferences (trackingNumber, entityType, entityId, issuedAt) VALUES (?,?,?,NOW())",
+      [B.jobCode, "JOB", B.jobId],
+    );
+
+    // Tenant A scans a page bearing tenant B's job code — the exact text is on
+    // the paper in their hand, and it still must not name B's record.
+    const r = await callerFor(ua).scanning.reviewScan({
+      kind: "load_ticket",
+      pages: [{
+        pageIndex: 0, contentHash: `h-${rnd()}`, qualityVerdict: "acceptable", qualityFailures: [],
+        acceptedOverObjection: false, ocrAttempted: true, ocrMeanConfidence: 95,
+        ocrText: `Job ${B.jobCode} completed`, barcodes: null,
+      }],
+      observations: [],
+    });
+    expect(r.links.ownershipUnverifiable).toBe(true);
+    expect(r.links.alreadyLinked).toBeNull();
+    expect(r.links.best).toBeNull();
+    const body = JSON.stringify(r);
+    expect(body).not.toContain(String(B.jobId));
+    expect(body).not.toContain(b);
+  }, 30_000);
+});
+
 d("Tenant A cannot dispatch Tenant B's people or fleet", () => {
   it("refuses to read another organization's operator readiness, which is their compliance record", async () => {
     const a = await org(), b = await org();

@@ -959,20 +959,48 @@ const scanSubjectOwnerOrg = sql<string | null>`(
     WHEN 'job' THEN (SELECT j.orgRef FROM jobs j WHERE j.id = ${scanAudits.subjectId} LIMIT 1)
     ELSE NULL
   END)`;
+/**
+ * What a tracking number resolves to, and whether it is the caller's.
+ *
+ * Three answers, not two, because "this number names nothing I can attribute"
+ * and "this number names a record in another organization" are different facts
+ * and a caller is owed different behaviour for each. `trackingSubjectInScope`
+ * flattens them for the readers that only need a predicate; the scanner needs
+ * the distinction, because it may only say "already linked" about a subject it
+ * positively resolved to the caller.
+ */
+export type ResolvedSubject = "trip" | "job" | "manifest" | "field_ticket" | "load";
+export type TrackingSubjectResolution =
+  | { kind: "in_scope"; subject: ResolvedSubject }
+  | { kind: "out_of_scope" }
+  | { kind: "no_subject" };
+
+export async function resolveTrackingSubject(trackingNumber: string, scope: TenantScope): Promise<TrackingSubjectResolution> {
+  const db = await getDb();
+  if (!db) return { kind: "no_subject" };
+  const inOrOut = (ok: boolean, subject: ResolvedSubject): TrackingSubjectResolution =>
+    ok ? { kind: "in_scope", subject } : { kind: "out_of_scope" };
+
+  const t = (await db.select({ id: trips.id }).from(trips).where(eq(trips.tripNumber, trackingNumber)).limit(1))[0];
+  if (t) return inOrOut(!!(await tripInScope(t.id, scope)), "trip");
+  const j = (await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.jobCode, trackingNumber)).limit(1))[0];
+  if (j) return inOrOut(!!(await jobInScope(j.id, scope)), "job");
+  if ((await db.select({ id: manifests.id }).from(manifests).where(eq(manifests.manifestNumber, trackingNumber)).limit(1))[0]) {
+    return inOrOut(!!(await manifestInScope(trackingNumber, scope)), "manifest");
+  }
+  const ft = (await db.select({ id: fieldTickets.id }).from(fieldTickets).where(eq(fieldTickets.ticketNumber, trackingNumber)).limit(1))[0];
+  if (ft) return inOrOut(!!(await fieldTicketInScope(trackingNumber, scope)), "field_ticket");
+  const ld = (await db.select({ jobId: loads.jobId }).from(loads).where(eq(loads.loadNumber, trackingNumber)).limit(1))[0];
+  // A load attached to no job carries no owner of its own; it belongs to the
+  // historical single tenant and to nobody else.
+  if (ld) return inOrOut(ld.jobId != null ? !!(await jobInScope(ld.jobId, scope)) : scope.tenantId === SINGLE_TENANT_ID, "load");
+  return { kind: "no_subject" };
+}
+
 /** A tracking number's subject in scope: a trip, job, manifest, field ticket or load by its number; a number naming none is unowned. */
 export async function trackingSubjectInScope(trackingNumber: string, scope: TenantScope): Promise<boolean> {
-  const db = await getDb();
-  if (!db) return false;
-  const t = (await db.select({ id: trips.id }).from(trips).where(eq(trips.tripNumber, trackingNumber)).limit(1))[0];
-  if (t) return !!(await tripInScope(t.id, scope));
-  const j = (await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.jobCode, trackingNumber)).limit(1))[0];
-  if (j) return !!(await jobInScope(j.id, scope));
-  if ((await db.select({ id: manifests.id }).from(manifests).where(eq(manifests.manifestNumber, trackingNumber)).limit(1))[0]) return !!(await manifestInScope(trackingNumber, scope));
-  const ft = (await db.select({ id: fieldTickets.id }).from(fieldTickets).where(eq(fieldTickets.ticketNumber, trackingNumber)).limit(1))[0];
-  if (ft) return !!(await fieldTicketInScope(trackingNumber, scope));
-  const ld = (await db.select({ jobId: loads.jobId }).from(loads).where(eq(loads.loadNumber, trackingNumber)).limit(1))[0];
-  if (ld) return ld.jobId != null ? !!(await jobInScope(ld.jobId, scope)) : scope.tenantId === SINGLE_TENANT_ID;
-  return scope.tenantId === SINGLE_TENANT_ID;
+  const r = await resolveTrackingSubject(trackingNumber, scope);
+  return r.kind === "in_scope" || (r.kind === "no_subject" && scope.tenantId === SINGLE_TENANT_ID);
 }
 /** Subquery of tracking numbers the scope may see, for filtering rows keyed only by a tracking number. */
 function trackingScopeSubqueries(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: TenantScope) {
