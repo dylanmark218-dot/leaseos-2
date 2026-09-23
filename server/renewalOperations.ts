@@ -19,11 +19,11 @@
  * credential — its state stays whatever the canonical rule says.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
-import { crewMembers, crews, credentialCompanySettings, externalTrainingHandoffs, scheduledJobRuns, workerQualifications } from "../drizzle/schema";
+import { and, eq, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
+import { academyRequirements, crewMembers, crews, credentialCompanySettings, externalTrainingHandoffs, scheduledJobRuns, workerQualifications, workflowNotifications } from "../drizzle/schema";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
-import { categoryOf, escalationFor, type SweepFailure } from "./_core/complianceOperations";
-import { crossedThreshold, planRenewalReminders, policyFor, type PlannedReminder, type WalletHolding } from "./_core/credentialLifecycle";
+import { categoryOf, escalationFor, nextEscalation, thresholdsOf, type SweepFailure } from "./_core/complianceOperations";
+import { crossedThreshold, lifecycleFacts, planRenewalReminders, policyFor, type PlannedReminder, type WalletHolding } from "./_core/credentialLifecycle";
 import { TERMINAL } from "./_core/externalTrainingHandoff";
 import { academyAudit, academyHoldingsFor, asHolding, deliverReminders, settingsFor, syncCredentialPolicies, tenantSettings, tenantsForUsers } from "./trainingWalletService";
 import type { getDb } from "./db";
@@ -230,4 +230,69 @@ export async function recentSweepFailures(db: Db, since: Date) {
     try { fs = JSON.parse(r.failuresJson ?? "[]"); } catch { fs = [{ kind: "SWEEP_ABORTED", tenantId: null, subjectRef: null, detail: "failure record unreadable" }]; }
     return fs.map(f => ({ ...f, runRef: r.runRef, at: r.completedAt ?? r.startedAt }));
   });
+}
+
+/** Recent scheduled runs, newest first — what the Compliance Operations view shows as the sweep's own health. */
+export async function recentSweepRuns(db: Db, limit = 20) {
+  const rows = await db.select().from(scheduledJobRuns).where(eq(scheduledJobRuns.jobKey, RENEWAL_SWEEP_JOB)).orderBy(sql`${scheduledJobRuns.startedAt} DESC`).limit(limit);
+  return rows.map(r => ({ runRef: r.runRef, slotKey: r.slotKey, ownerId: r.ownerId, status: r.status, startedAt: r.startedAt, completedAt: r.completedAt, leaseUntil: r.leaseUntil, inspected: r.inspected, actionable: r.actionable, notificationsCreated: r.notificationsCreated, suppressed: r.suppressed, failureCount: r.failureCount, errorSummary: r.errorSummary }));
+}
+
+export type RenewalQueueRow = {
+  userId: number; holdingRef: string; code: string; displayName: string; source: "wallet" | "academy";
+  basis: string; targetDate: Date | null; daysRemaining: number | null; targetKind: "legal_expiry" | "company_review" | "none";
+  readinessImpact: string[]; handoff: { handoffRef: string; status: string } | null;
+  lastReminder: { at: Date; title: string } | null;
+  nextEscalation: { threshold: number | "expired"; inDays: number | null; recipients: string[] } | null;
+  policyLabel: string;
+};
+
+/**
+ * The Renewal Queue: every current credential (wallet and Academy-issued) in the
+ * organization whose expiry or company review date is inside the escalation
+ * ladder's widest threshold, or already past. Read-only — it reuses the same
+ * lifecycle facts the sweep acts on, and the notification table for "last reminder".
+ */
+export async function renewalQueueFor(db: Db, tenantId: string, now: Date): Promise<RenewalQueueRow[]> {
+  const settings = await tenantSettings(db, tenantId);
+  const tenantWhere = tenantId === SINGLE_TENANT_ID ? or(isNull(workerQualifications.tenantId), eq(workerQualifications.tenantId, SINGLE_TENANT_ID)) : eq(workerQualifications.tenantId, tenantId);
+  const rows = await db.select().from(workerQualifications).where(and(tenantWhere, eq(workerQualifications.verificationState, "verified"))).limit(5000);
+  const byUser = new Map<number, WalletHolding[]>();
+  for (const r of rows) byUser.set(r.userId, [...(byUser.get(r.userId) ?? []), asHolding(r)]);
+  const academy = await academyHoldingsFor(db);
+  const academyTenants = await tenantsForUsers(db, academy.map(a => a.userId!));
+  const academyRefs = new Set<string>();
+  for (const a of academy) if (academyTenants.get(a.userId!) === tenantId) { byUser.set(a.userId!, [...(byUser.get(a.userId!) ?? []), a]); academyRefs.add(a.holdingRef); }
+  const userIds = Array.from(byUser.keys());
+  const handoffs = userIds.length ? await db.select().from(externalTrainingHandoffs).where(and(eq(externalTrainingHandoffs.tenantId, tenantId), inArray(externalTrainingHandoffs.userId, userIds))).limit(5000) : [];
+  const requirements = await db.select({ code: academyRequirements.qualificationCode, title: academyRequirements.title }).from(academyRequirements).where(eq(academyRequirements.active, true)).limit(2000);
+  const out: RenewalQueueRow[] = [];
+  for (const [userId, hs] of Array.from(byUser.entries())) {
+    for (const code of Array.from(new Set(hs.map(h => h.code)))) {
+      const policy = policyFor(code);
+      const facts = lifecycleFacts({ code, holdings: hs, policy, settings: settingsFor(settings, code), now });
+      const escalation = escalationFor(settings.escalation, categoryOf(code, policy?.lifecycle ?? null));
+      const widest = Math.max(...thresholdsOf(escalation), 0);
+      const target = facts.legalExpiry ?? facts.employerReviewAt ?? null;
+      const daysRemaining = target ? Math.ceil((target.getTime() - now.getTime()) / 86_400_000) : null;
+      if (daysRemaining == null || daysRemaining > widest) continue;
+      const current = hs.filter(h => h.code === code && !h.supersededByHoldingRef).sort((a, b) => b.recordedAt.getTime() - a.recordedAt.getTime())[0]!;
+      const open = handoffs.filter(h => h.userId === userId && h.qualificationCode === code && !TERMINAL.has(h.status)).sort((a, b) => b.id - a.id)[0] ?? null;
+      out.push({
+        userId, holdingRef: current.holdingRef, code, displayName: policy?.displayName ?? code, source: academyRefs.has(current.holdingRef) ? "academy" : "wallet",
+        basis: facts.basis, targetDate: target, daysRemaining, targetKind: facts.legalExpiry ? "legal_expiry" : "company_review",
+        readinessImpact: requirements.filter(r => r.code === code).map(r => r.title),
+        handoff: open ? { handoffRef: open.handoffRef, status: open.status } : null,
+        lastReminder: null, nextEscalation: nextEscalation(escalation, daysRemaining), policyLabel: escalation.label,
+      });
+    }
+  }
+  // Last reminder per holding, from the one notification table (keys are `cred-renew:{holdingRef}:…`).
+  for (const row of out) {
+    const last = (await db.select({ at: workflowNotifications.queuedAt, title: workflowNotifications.title }).from(workflowNotifications)
+      .where(and(eq(workflowNotifications.tenantId, tenantId), like(workflowNotifications.notificationKey, `cred-renew:${row.holdingRef}:%`)))
+      .orderBy(sql`${workflowNotifications.queuedAt} DESC`).limit(1))[0];
+    row.lastReminder = last?.at ? { at: last.at, title: last.title } : null;
+  }
+  return out.sort((a, b) => (a.daysRemaining ?? 0) - (b.daysRemaining ?? 0));
 }

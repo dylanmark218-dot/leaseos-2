@@ -68,8 +68,20 @@ export type WalletCredential = {
   holdingRef: string; code: string; displayName: string; issuer: string | null; issuingJurisdiction: string | null; certificateNumber: string | null;
   issuedAt: Date | string | null; expiresAt: Date | string | null; endorsements: string[]; restrictions: string[];
   verificationState: string; verifiedAt: Date | string | null; boundary: string | null; lifecycle: string; current: boolean; supersededByHoldingRef: string | null;
+  correction?: { requestedAt: Date | string; note: string | null } | null;
 };
-export type WalletExpiring = { code: string; basis: string; legalExpiry: Date | string | null; employerReviewAt: Date | string | null; labels: string[]; held: boolean; heldReason: string; canRequestTraining: boolean };
+/** 0174 — the credential's own status and the renewal in motion are separate fields; a request never extends validity. */
+export type WalletStatusCode = "VALID" | "EXPIRING" | "EXPIRED" | "UNVERIFIED" | "COMPANY_REVIEW_DUE" | "UNKNOWN";
+export type RenewalStatusCode = "RENEWAL_REQUESTED" | "BOOKED" | "AWAITING_DOCUMENT" | "NONE";
+export type WalletExpiring = {
+  code: string; basis: string; legalExpiry: Date | string | null; employerReviewAt: Date | string | null; labels: string[]; held: boolean; heldReason: string; canRequestTraining: boolean;
+  walletStatus?: WalletStatusCode; renewalStatus?: RenewalStatusCode; statusLine?: string; renewalSteps?: { label: string; done: boolean }[]; validityNote?: string; correctionRequested?: boolean;
+};
+const WALLET_STATUS: Record<WalletStatusCode, { tone: string; label: string }> = {
+  VALID: { tone: "held", label: "Valid" }, EXPIRING: { tone: "unverified", label: "Expiring" }, EXPIRED: { tone: "expired", label: "Expired" },
+  UNVERIFIED: { tone: "unverified", label: "Uploaded — verification required" }, COMPANY_REVIEW_DUE: { tone: "unverified", label: "Company review due" }, UNKNOWN: { tone: "unknown", label: "Unknown" },
+};
+const RENEWAL_LABEL: Record<RenewalStatusCode, string> = { RENEWAL_REQUESTED: "Renewal requested", BOOKED: "Booked", AWAITING_DOCUMENT: "Awaiting certificate", NONE: "" };
 export type WalletHandoff = { handoffRef: string; code: string; status: string; worker: { label: string; step: number }; appointmentAt: Date | string | null; bookingReference: string | null; requestedAt: Date | string };
 export type WalletData = {
   disclaimer: string;
@@ -85,7 +97,7 @@ const BOUNDARY_LABEL: Record<string, string> = {
   external_provider: "External provider certificate", study_only: "Study / preparation only",
 };
 
-export type UploadForm = { code: string; boundary: string; issuer: string; certificateNumber: string; issuedAt: string; expiresAt: string; documentRef: string; backDocumentRef: string; restrictions: string };
+export type UploadForm = { code: string; boundary: string; issuer: string; certificateNumber: string; issuedAt: string; expiresAt: string; documentRef: string; backDocumentRef: string; restrictions: string; correctsHoldingRef?: string };
 
 export function WalletPanel(props: {
   wallet: WalletData | null;
@@ -97,7 +109,7 @@ export function WalletPanel(props: {
   onHandoffDone: (handoffRef: string) => void;
 }) {
   const w = props.wallet;
-  const [form, setForm] = useState<UploadForm>({ code: "", boundary: "external_provider", issuer: "", certificateNumber: "", issuedAt: "", expiresAt: "", documentRef: "", backDocumentRef: "", restrictions: "" });
+  const [form, setForm] = useState<UploadForm>({ code: "", boundary: "external_provider", issuer: "", certificateNumber: "", issuedAt: "", expiresAt: "", documentRef: "", backDocumentRef: "", restrictions: "", correctsHoldingRef: "" });
   const policy = props.policies.find(p => p.qualificationCode === form.code);
   const set = (k: keyof UploadForm) => (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value, ...(k === "code" ? { boundary: props.policies.find(p => p.qualificationCode === e.target.value)?.boundary ?? f.boundary } : {}) }));
   if (!w) return <p className={muted}>Loading your wallet…</p>;
@@ -118,8 +130,26 @@ export function WalletPanel(props: {
               <li key={c.holdingRef} className="rounded-xl border border-border p-3" data-testid={`credential-${c.code}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-semibold">{c.displayName}</p>
-                  <Pill tone={tone}>{c.verificationState === "verified" ? (tone === "expired" ? "Expired" : "Verified") : "Uploaded — verification required"}</Pill>
+                  <span className="flex flex-wrap gap-1">
+                    {c.verificationState === "verified" && exp?.walletStatus
+                      ? <Pill tone={WALLET_STATUS[exp.walletStatus].tone}>{WALLET_STATUS[exp.walletStatus].label}</Pill>
+                      : <Pill tone={tone}>{c.verificationState === "verified" ? (tone === "expired" ? "Expired" : "Verified") : c.correction ? "Correction requested" : "Uploaded — verification required"}</Pill>}
+                    {c.verificationState === "verified" && exp?.renewalStatus && exp.renewalStatus !== "NONE" && <Pill tone="unknown">{RENEWAL_LABEL[exp.renewalStatus]}</Pill>}
+                  </span>
                 </div>
+                {c.verificationState === "verified" && exp?.statusLine && <p className="mt-1 text-sm font-medium">{exp.statusLine}</p>}
+                {c.correction && (
+                  <div className="mt-2 rounded-lg border border-amber-400/60 p-2 text-sm" role="note">
+                    <p>Safety/admin asked for a correction: {c.correction.note}</p>
+                    <button type="button" className={`${secondary} mt-2`} onClick={() => setForm(f => ({ ...f, code: c.code, boundary: c.boundary ?? f.boundary, correctsHoldingRef: c.holdingRef }))}>Upload a corrected record</button>
+                  </div>
+                )}
+                {c.verificationState === "verified" && !!exp?.renewalSteps?.length && (
+                  <ol className="mt-2 space-y-1 text-xs" aria-label="Renewal progress">
+                    {exp.renewalSteps.map((st, i) => <li key={i} className={st.done ? "font-medium" : "text-muted-foreground"}>{st.done ? "✓" : "○"} {st.label}</li>)}
+                  </ol>
+                )}
+                {c.verificationState === "verified" && exp?.validityNote && <p className="mt-1 text-xs text-muted-foreground">{exp.validityNote}</p>}
                 <p className="mt-1 text-xs text-muted-foreground">{BOUNDARY_LABEL[c.boundary ?? ""] ?? "Boundary not recorded"}{c.issuer ? ` · ${c.issuer}` : ""}{c.issuingJurisdiction ? ` · ${c.issuingJurisdiction}` : ""}{c.certificateNumber ? ` · No. ${c.certificateNumber}` : ""}</p>
                 <p className="mt-1 text-sm">Issued {fmt(c.issuedAt)} · {c.lifecycle === "no_expiry_endorsement" ? "No renewal by rule (held while your licence is valid)" : `Expires ${fmt(c.expiresAt)}`}</p>
                 {!!c.restrictions.length && <p className="mt-1 text-sm font-medium text-orange-800 dark:text-orange-200">Restrictions: {c.restrictions.join(", ")}</p>}
@@ -148,7 +178,8 @@ export function WalletPanel(props: {
       </section>
 
       <section className={card} aria-labelledby="wallet-upload">
-        <h2 id="wallet-upload" className="text-lg font-semibold">Add a certificate or licence</h2>
+        <h2 id="wallet-upload" className="text-lg font-semibold">{form.correctsHoldingRef ? "Upload a corrected record" : "Add a certificate or licence"}</h2>
+        {form.correctsHoldingRef && <p className="text-sm" role="status">Correcting {form.code.replaceAll("_", " ")}. The earlier upload is kept in history; the corrected one is checked again.</p>}
         <p className={muted}>It is recorded as unverified. OCR or a photo is never verification — safety/admin checks it against the document or the issuer.</p>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="grid gap-1 text-sm">Credential

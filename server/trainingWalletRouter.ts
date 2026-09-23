@@ -21,7 +21,7 @@
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb, listActiveUserRoles, listRoleNamesAnyScope, userInScope } from "./db";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
@@ -37,7 +37,10 @@ import {
 } from "./_core/credentialLifecycle";
 import { ADMIN_MARKS, HANDOFF_STATUSES, TERMINAL, handoffTransition, openDuplicate, providerOptions, requestAuthority, workerFacingStatus, type HandoffStatus } from "./_core/externalTrainingHandoff";
 import { CAREER_PATHWAYS, evaluatePathway } from "./_core/careerPathway";
-import { runRenewalSweepForTenant } from "./renewalOperations";
+import { recentSweepRuns, renewalQueueFor, runRenewalSweepForTenant } from "./renewalOperations";
+import { COMPANY_POLICY_LABEL, DEFAULT_ESCALATION, handoffRecoveryNote, validateEscalation, walletStatus, type EscalationPolicy } from "./_core/complianceOperations";
+
+const ESCALATION_CATEGORIES = ["safety_ticket", "driver_licence", "company_review", "regulated_employer", "medical", "other"] as const;
 import { academyAudit, academyHoldingsFor, asHolding, tenantsForUsers, deliverReminders, holdingRowsFor, isCurrentVerified, parseList, settingsFor, syncCredentialPolicies, tenantSettings } from "./trainingWalletService";
 
 const ref = (p: string) => `${p}-${randomUUID().toUpperCase()}`;
@@ -78,7 +81,44 @@ const recordInput = z.object({
   evidenceKind: z.enum(["uploaded_document", "issuer_record"]).default("uploaded_document"),
 }).strict();
 
-async function recordHolding(db: Db, args: { callerId: number; subjectId: number; tenantId: string; input: z.infer<typeof recordInput> }) {
+/** The one open handoff for this person and code that is waiting on a certificate, if exactly one is. */
+const AWAITING_CERTIFICATE: HandoffStatus[] = ["TRAINING_COMPLETED", "DOCUMENT_PENDING", "DOCUMENT_UPLOADED_UNVERIFIED"];
+async function awaitingCertificate(db: Db, userId: number, code: string) {
+  const open = await db.select().from(externalTrainingHandoffs).where(and(eq(externalTrainingHandoffs.userId, userId), eq(externalTrainingHandoffs.qualificationCode, code), inArray(externalTrainingHandoffs.status, AWAITING_CERTIFICATE))).limit(5);
+  return open.length === 1 ? open[0]! : null;
+}
+
+/** A date read off a document is a calendar day; the verifier's reading and the claim agree when the day agrees. */
+const dayOf = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
+
+/**
+ * 0174 — handoff → certificate closure, run when a holding is verified.
+ * Steps the handoff through the transition rule (never by assertion):
+ * TRAINING_COMPLETED / DOCUMENT_PENDING → DOCUMENT_UPLOADED_UNVERIFIED → VERIFIED → ACTIVE
+ * (ACTIVE only when the canonical rule now counts the credential as held).
+ * Handoff completion alone never creates or verifies a credential; this runs
+ * only after the wallet verified one.
+ */
+async function closeHandoffForVerified(db: Db, actorUserId: number, row: typeof workerQualifications.$inferSelect, now: Date) {
+  const h = row.handoffRef
+    ? (await db.select().from(externalTrainingHandoffs).where(and(eq(externalTrainingHandoffs.handoffRef, row.handoffRef), eq(externalTrainingHandoffs.userId, row.userId))).limit(1))[0]
+    : await awaitingCertificate(db, row.userId, row.code);
+  if (!h || !AWAITING_CERTIFICATE.includes(h.status)) return null;
+  const heldNow = heldForWork((await holdingRowsFor(db, [row.userId])).map(asHolding), h.qualificationCode, now).held;
+  const linkedHolding = { verificationState: "verified", code: row.code };
+  const path: HandoffStatus[] = [...(h.status === "DOCUMENT_UPLOADED_UNVERIFIED" ? [] : ["DOCUMENT_UPLOADED_UNVERIFIED" as const]), "VERIFIED", ...(heldNow ? ["ACTIVE" as const] : [])];
+  let from = h.status;
+  for (const to of path) {
+    const t = handoffTransition({ from, to, actor: "admin", linkedHolding, qualificationCode: h.qualificationCode, heldNow });
+    if (!t.permitted) break;
+    await db.update(externalTrainingHandoffs).set({ status: to, linkedHoldingRef: row.holdingRef, lastTransitionAt: now, closedAt: TERMINAL.has(to) ? now : null }).where(eq(externalTrainingHandoffs.id, h.id));
+    await academyAudit(db, actorUserId, "training_handoff", h.handoffRef, `handoff.${to.toLowerCase()}`, { from, holdingRef: row.holdingRef, via: "credential_verified" });
+    from = to;
+  }
+  return { handoffRef: h.handoffRef, status: from };
+}
+
+async function recordHolding(db: Db, args: { callerId: number; subjectId: number; tenantId: string; input: z.infer<typeof recordInput>; correctsHoldingRef?: string }) {
   const policy = policyFor(args.input.code);
   const boundary = args.input.boundary as WalletBoundary;
   const decision = walletRecordDecision({ boundary, evidenceKind: args.input.evidenceKind });
@@ -87,6 +127,9 @@ async function recordHolding(db: Db, args: { callerId: number; subjectId: number
   if (policy?.lifecycle === "no_expiry_endorsement" && args.input.expiresAt) throw new TRPCError({ code: "BAD_REQUEST", message: `${policy.displayName} has no renewal by rule; do not record a fabricated expiry` });
   const holdingRef = ref("WQ");
   const now = new Date();
+  // 0174: an upload for a code with exactly one handoff waiting on its certificate links to it,
+  // so the credential can be traced back to the request that produced it.
+  const handoffRef = args.input.handoffRef ?? (await awaitingCertificate(db, args.subjectId, args.input.code))?.handoffRef;
   await db.insert(workerQualifications).values({
     holdingRef, tenantId: args.tenantId, userId: args.subjectId, code: args.input.code, certificateNumber: args.input.certificateNumber ?? null,
     issuedAt: args.input.issuedAt ?? null, expiresAt: args.input.expiresAt ?? null, verificationState: "unverified",
@@ -95,11 +138,12 @@ async function recordHolding(db: Db, args: { callerId: number; subjectId: number
     displayName: args.input.displayName ?? policy?.displayName ?? null, issuer: args.input.issuer ?? null, issuingJurisdiction: args.input.issuingJurisdiction ?? null,
     endorsementsJson: args.input.endorsements ? JSON.stringify(args.input.endorsements) : null,
     restrictionsJson: args.input.restrictions ? JSON.stringify(args.input.restrictions) : null,
-    walletBoundary: boundary, policyRef: policy?.policyRef ?? null, handoffRef: args.input.handoffRef ?? null,
+    walletBoundary: boundary, policyRef: policy?.policyRef ?? null, handoffRef: handoffRef ?? null,
+    correctsHoldingRef: args.correctsHoldingRef ?? null,
   });
-  await academyAudit(db, args.callerId, "wallet_holding", holdingRef, "holding.recorded_unverified", { userId: args.subjectId, code: args.input.code, boundary, evidenceKind: args.input.evidenceKind, documentRef: args.input.documentRef ?? null });
-  if (args.input.handoffRef) {
-    const h = (await db.select().from(externalTrainingHandoffs).where(and(eq(externalTrainingHandoffs.handoffRef, args.input.handoffRef), eq(externalTrainingHandoffs.userId, args.subjectId))).limit(1))[0];
+  await academyAudit(db, args.callerId, "wallet_holding", holdingRef, "holding.recorded_unverified", { userId: args.subjectId, code: args.input.code, boundary, evidenceKind: args.input.evidenceKind, documentRef: args.input.documentRef ?? null, handoffRef: handoffRef ?? null, correctsHoldingRef: args.correctsHoldingRef ?? null });
+  if (handoffRef) {
+    const h = (await db.select().from(externalTrainingHandoffs).where(and(eq(externalTrainingHandoffs.handoffRef, handoffRef), eq(externalTrainingHandoffs.userId, args.subjectId))).limit(1))[0];
     if (h && !TERMINAL.has(h.status) && ["TRAINING_COMPLETED", "DOCUMENT_PENDING"].includes(h.status)) {
       await db.update(externalTrainingHandoffs).set({ status: "DOCUMENT_UPLOADED_UNVERIFIED", linkedHoldingRef: holdingRef, lastTransitionAt: now }).where(eq(externalTrainingHandoffs.id, h.id));
       await academyAudit(db, args.callerId, "training_handoff", h.handoffRef, "handoff.document_uploaded_unverified", { holdingRef });
@@ -137,6 +181,8 @@ async function walletFor(db: Db, userId: number, includePrivate: boolean, now: D
         supersededByHoldingRef: r.supersededByHoldingRef, supersedesHoldingRef: r.supersedesHoldingRef,
         boundary: r.walletBoundary ?? policy?.boundary ?? null, lifecycle: policy?.lifecycle ?? "unknown",
         current: isCurrentVerified(r),
+        correction: r.correctionRequestedAt && (r.verificationState === "unverified" || r.verificationState === "extracted") ? { requestedAt: r.correctionRequestedAt, note: r.correctionNote } : null,
+        correctsHoldingRef: r.correctsHoldingRef,
         privateNotes: includePrivate ? r.privateNotes : undefined,
       };
     }),
@@ -144,7 +190,11 @@ async function walletFor(db: Db, userId: number, includePrivate: boolean, now: D
     expiring: codes.map(code => {
       const f = lifecycleFacts({ code, holdings, policy: policyFor(code), settings: settingsFor(settings, code), now });
       const v = heldForWork(holdings, code, now);
-      return { code, basis: f.basis, legalExpiry: f.legalExpiry, employerReviewAt: f.employerReviewAt, recommendedRefresherAt: f.recommendedRefresherAt, renewalWindow: f.renewalWindow, labels: f.labels, held: v.held, heldReason: v.reason, canRequestTraining: !!policyFor(code)?.handoffCapabilities?.length };
+      const open = handoffs.filter(h => h.qualificationCode === code && !TERMINAL.has(h.status)).sort((a, b) => b.id - a.id)[0] ?? null;
+      const w = walletStatus({ facts: f, verdict: v, handoff: open ? { status: open.status, requestedAt: open.requestedAt, appointmentAt: open.appointmentAt } : null, now });
+      const pendingCorrection = rows.some(r => r.code === code && r.correctionRequestedAt && (r.verificationState === "unverified" || r.verificationState === "extracted"));
+      return { code, basis: f.basis, legalExpiry: f.legalExpiry, employerReviewAt: f.employerReviewAt, recommendedRefresherAt: f.recommendedRefresherAt, renewalWindow: f.renewalWindow, labels: f.labels, held: v.held, heldReason: v.reason, canRequestTraining: !!policyFor(code)?.handoffCapabilities?.length,
+        walletStatus: w.status, renewalStatus: w.renewal, statusLine: w.line, renewalSteps: w.renewalSteps, validityNote: w.validityNote, correctionRequested: pendingCorrection };
     }),
     arranged: handoffs.map(h => ({ handoffRef: h.handoffRef, code: h.qualificationCode, status: h.status, worker: workerFacingStatus(h.status), appointmentAt: h.appointmentAt, bookingReference: h.bookingReference, requestedAt: h.requestedAt, dueAt: h.dueAt })),
   };
@@ -194,6 +244,13 @@ export const trainingWalletRouter = router({
       await requirePerson(ctx.user.id, row.userId);
       if (row.userId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Nobody may verify their own credential" });
       if (row.verificationState !== "unverified" && row.verificationState !== "extracted") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Credential is already ${row.verificationState}` });
+      if (row.correctionRequestedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A correction was requested on this upload; verify the corrected record the employee submits" });
+      // 0174: the verifier confirms what was uploaded; they cannot edit it into validity. A claimed
+      // date the document does not bear is a correction request, not a verifier's edit. A date the
+      // upload left blank is read off the document by the verifier (and audited as such).
+      for (const [k, claimed, read] of [["issue date", row.issuedAt, input.issuedAt], ["expiry date", row.expiresAt, input.expiresAt]] as const) {
+        if (claimed && dayOf(claimed) !== dayOf(read)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The ${k} on the document (${dayOf(read) ?? "none"}) differs from the uploaded claim (${dayOf(claimed)}); request a correction instead of changing it` });
+      }
       const policy = policyFor(row.code);
       const boundary = (row.walletBoundary ?? policy?.boundary ?? "external_provider") as WalletBoundary;
       const decision = walletVerificationDecision({
@@ -217,19 +274,8 @@ export const trainingWalletRouter = router({
       }
       await academyAudit(db, ctx.user.id, "wallet_holding", row.holdingRef, "holding.verified", { userId: row.userId, code: row.code, method: input.method, issuedAt: input.issuedAt, expiresAt: input.expiresAt, superseded: plan.map(p => p.holdingRef) });
       // A linked handoff may now close — through the same transition rule, never by assertion.
-      if (row.handoffRef) {
-        const h = (await db.select().from(externalTrainingHandoffs).where(eq(externalTrainingHandoffs.handoffRef, row.handoffRef)).limit(1))[0];
-        if (h && h.status === "DOCUMENT_UPLOADED_UNVERIFIED") {
-          const t = handoffTransition({ from: h.status, to: "VERIFIED", actor: "admin", linkedHolding: { verificationState: "verified", code: row.code }, qualificationCode: h.qualificationCode });
-          if (t.permitted) {
-            const heldNow = heldForWork((await holdingRowsFor(db, [row.userId])).map(asHolding), h.qualificationCode, now).held;
-            const final = heldNow ? "ACTIVE" : "VERIFIED";
-            await db.update(externalTrainingHandoffs).set({ status: final, linkedHoldingRef: row.holdingRef, lastTransitionAt: now, closedAt: final === "ACTIVE" ? now : null }).where(eq(externalTrainingHandoffs.id, h.id));
-            await academyAudit(db, ctx.user.id, "training_handoff", h.handoffRef, `handoff.${final.toLowerCase()}`, { holdingRef: row.holdingRef });
-          }
-        }
-      }
-      return { holdingRef: row.holdingRef, verificationState: "verified" as const, superseded: plan.map(p => p.holdingRef) };
+      const handoff = await closeHandoffForVerified(db, ctx.user.id, { ...row, verificationState: "verified" }, now);
+      return { holdingRef: row.holdingRef, verificationState: "verified" as const, superseded: plan.map(p => p.holdingRef), handoff };
     }),
 
   reject: roleProcedure("trainingWallet.reject")
@@ -244,6 +290,92 @@ export const trainingWalletRouter = router({
       await db.update(workerQualifications).set({ verificationState: "rejected", verifiedByUserId: ctx.user.id, verifiedAt: new Date(), privateNotes: `${row.privateNotes ? `${row.privateNotes}\n` : ""}Rejected: ${input.reason}` }).where(eq(workerQualifications.id, row.id));
       await academyAudit(db, ctx.user.id, "wallet_holding", row.holdingRef, "holding.rejected", { reason: input.reason });
       return { holdingRef: row.holdingRef, verificationState: "rejected" as const };
+    }),
+
+  /**
+   * 0174 — "Uploaded — Verification Required". Everything the verifier needs to decide
+   * without leaving the screen, scoped to the caller's organization at the query.
+   */
+  verificationQueue: roleProcedure("trainingWallet.verificationQueue").query(async ({ ctx }) => {
+    const db = await dbOrThrow();
+    const tenantId = await tenantOf(db, ctx.user.id);
+    const tenantWhere = tenantId === SINGLE_TENANT_ID ? or(isNull(workerQualifications.tenantId), eq(workerQualifications.tenantId, SINGLE_TENANT_ID)) : eq(workerQualifications.tenantId, tenantId);
+    const pending = await db.select().from(workerQualifications).where(and(tenantWhere, inArray(workerQualifications.verificationState, ["unverified", "extracted"]))).orderBy(workerQualifications.recordedAt).limit(300);
+    const userIds = Array.from(new Set(pending.map(r => r.userId)));
+    const people = userIds.length ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, userIds)) : [];
+    const all = await holdingRowsFor(db, userIds);
+    const handoffRefs = Array.from(new Set(pending.map(r => r.handoffRef).filter((x): x is string => !!x)));
+    const handoffs = handoffRefs.length ? await db.select().from(externalTrainingHandoffs).where(inArray(externalTrainingHandoffs.handoffRef, handoffRefs)) : [];
+    const codes = Array.from(new Set(pending.map(r => r.code)));
+    const bound = codes.length ? await db.select({ code: academyRequirements.qualificationCode, title: academyRequirements.title }).from(academyRequirements).where(and(inArray(academyRequirements.qualificationCode, codes), eq(academyRequirements.active, true))) : [];
+    const now = new Date();
+    return pending.map(r => {
+      const policy = policyFor(r.code);
+      const mine = all.filter(x => x.userId === r.userId);
+      const previous = mine.filter(x => x.code === r.code && isCurrentVerified(x)).sort((a, b) => b.id - a.id)[0] ?? null;
+      const heldNow = heldForWork(mine.map(asHolding), r.code, now);
+      const ifVerified = heldForWork([...mine.filter(x => x.id !== r.id).map(asHolding), { ...asHolding(r), verificationState: "verified" as const }], r.code, now);
+      const h = handoffs.find(x => x.handoffRef === r.handoffRef) ?? null;
+      return {
+        holdingRef: r.holdingRef, employee: { userId: r.userId, name: people.find(p => p.id === r.userId)?.name ?? null },
+        code: r.code, displayName: r.displayName ?? policy?.displayName ?? r.code, issuer: r.issuer, issuingJurisdiction: r.issuingJurisdiction,
+        certificateNumber: r.certificateNumber, issuedAt: r.issuedAt, expiresAt: r.expiresAt, documentRef: r.documentRef, backDocumentRef: r.backDocumentRef,
+        endorsements: parseList(r.endorsementsJson), restrictions: parseList(r.restrictionsJson), recordedAt: r.recordedAt, recordedByUserId: r.recordedByUserId,
+        verificationState: r.verificationState, correctsHoldingRef: r.correctsHoldingRef,
+        correction: r.correctionRequestedAt ? { requestedAt: r.correctionRequestedAt, byUserId: r.correctionRequestedByUserId, note: r.correctionNote } : null,
+        previousVerified: previous ? { holdingRef: previous.holdingRef, issuedAt: previous.issuedAt, expiresAt: previous.expiresAt, verifiedAt: previous.verifiedAt } : null,
+        implications: {
+          heldNow: heldNow.held, heldNowReason: heldNow.reason, heldIfVerified: ifVerified.held,
+          requirements: bound.filter(b => b.code === r.code).map(b => b.title),
+          note: "Verification is what makes this count. Until then dispatch reads it as UNVERIFIED.",
+        },
+        handoff: h ? { handoffRef: h.handoffRef, status: h.status, requestedAt: h.requestedAt, bookingReference: h.bookingReference } : null,
+        callerMayAct: r.userId !== ctx.user.id && r.recordedByUserId !== ctx.user.id,
+        callerBlockedBecause: r.userId === ctx.user.id ? "This is your own credential" : r.recordedByUserId === ctx.user.id ? "You recorded this credential" : null,
+      };
+    });
+  }),
+
+  /**
+   * The verifier found something wrong with the upload. The upload is not edited:
+   * the employee is asked for a corrected record, which is a new holding.
+   */
+  requestCorrection: roleProcedure("trainingWallet.requestCorrection")
+    .input(z.object({ holdingRef: z.string().min(1).max(64), note: z.string().min(10).max(1000) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const row = (await db.select().from(workerQualifications).where(eq(workerQualifications.holdingRef, input.holdingRef)).limit(1))[0];
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Credential not found" });
+      await requirePerson(ctx.user.id, row.userId);
+      if (row.userId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Nobody may review their own credential" });
+      if (row.verificationState !== "unverified" && row.verificationState !== "extracted") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Credential is already ${row.verificationState}` });
+      if (row.correctionRequestedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A correction has already been requested" });
+      const now = new Date();
+      await db.update(workerQualifications).set({ correctionRequestedAt: now, correctionRequestedByUserId: ctx.user.id, correctionNote: input.note }).where(eq(workerQualifications.id, row.id));
+      await academyAudit(db, ctx.user.id, "wallet_holding", row.holdingRef, "holding.correction_requested", { userId: row.userId, code: row.code, note: input.note });
+      const tenantId = row.tenantId ?? SINGLE_TENANT_ID;
+      await deliverReminders(db, tenantId, [{
+        notificationKey: `wallet-correction:${row.holdingRef}`, recipient: { kind: "user" as const, userId: row.userId }, holdingRef: row.holdingRef, code: row.code,
+        threshold: 0, targetKind: "legal_expiry" as const, escalation: "employee" as const,
+        title: `Correction needed: ${row.displayName ?? row.code}`, body: `Safety/admin could not verify your upload: ${input.note} Upload a corrected record from your wallet. Until then it does not count for any work.`,
+      }], now);
+      return { holdingRef: row.holdingRef, correctionRequested: true as const };
+    }),
+
+  /** The employee's corrected record: a new UNVERIFIED holding that names the one it corrects. */
+  submitCorrection: roleProcedure("trainingWallet.submitCorrection")
+    .input(recordInput.extend({ correctsHoldingRef: z.string().min(1).max(64) }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const { correctsHoldingRef, ...rest } = input;
+      const old = (await db.select().from(workerQualifications).where(and(eq(workerQualifications.holdingRef, correctsHoldingRef), eq(workerQualifications.userId, ctx.user.id))).limit(1))[0];
+      if (!old) throw new TRPCError({ code: "NOT_FOUND", message: "Credential not found" });
+      if (!old.correctionRequestedAt || (old.verificationState !== "unverified" && old.verificationState !== "extracted")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No correction is outstanding on that record" });
+      if (rest.code !== old.code) throw new TRPCError({ code: "BAD_REQUEST", message: `A correction is for the same credential (${old.code}); record a different credential separately` });
+      const created = await recordHolding(db, { callerId: ctx.user.id, subjectId: ctx.user.id, tenantId: old.tenantId ?? await tenantOf(db, ctx.user.id), input: { ...rest, handoffRef: rest.handoffRef ?? old.handoffRef ?? undefined }, correctsHoldingRef });
+      await db.update(workerQualifications).set({ verificationState: "rejected", privateNotes: `${old.privateNotes ? `${old.privateNotes}\n` : ""}Replaced by corrected record ${created.holdingRef}` }).where(eq(workerQualifications.id, old.id));
+      await academyAudit(db, ctx.user.id, "wallet_holding", old.holdingRef, "holding.corrected", { by: created.holdingRef });
+      return { ...created, correctsHoldingRef };
     }),
 
   /** Safety/HR/management view of one person, including private notes. */
@@ -262,7 +394,10 @@ export const trainingWalletRouter = router({
       await requirePerson(ctx.user.id, input.userId);
       const db = await dbOrThrow();
       const holdings = (await holdingRowsFor(db, [input.userId])).map(asHolding);
-      return { userId: input.userId, results: operationalView({ holdings, codes: input.codes, at: input.at ?? new Date(), scope: { interprovincial: !!input.interprovincial } }) };
+      const open = await db.select({ code: externalTrainingHandoffs.qualificationCode, status: externalTrainingHandoffs.status, appointmentAt: externalTrainingHandoffs.appointmentAt }).from(externalTrainingHandoffs).where(and(eq(externalTrainingHandoffs.userId, input.userId), inArray(externalTrainingHandoffs.qualificationCode, input.codes))).limit(100);
+      const results = operationalView({ holdings, codes: input.codes, at: input.at ?? new Date(), scope: { interprovincial: !!input.interprovincial } });
+      // 0174: the renewal in motion is explanation only; `state` is the canonical rule's answer, unchanged.
+      return { userId: input.userId, results: results.map(r => ({ ...r, renewalProgress: r.state === "held" ? null : handoffRecoveryNote(open.find(h => h.code === r.code && !TERMINAL.has(h.status))) })) };
     }),
 
   policies: roleProcedure("trainingWallet.policies").query(async () => ({
@@ -274,13 +409,21 @@ export const trainingWalletRouter = router({
   settingsGet: roleProcedure("trainingWallet.settingsGet").query(async ({ ctx }) => {
     const db = await dbOrThrow();
     const s = await tenantSettings(db, await tenantOf(db, ctx.user.id));
-    return { thresholds: s.thresholds ?? [...DEFAULT_WARNING_THRESHOLDS], perCode: s.perCode, notice: "Notification thresholds and review intervals here are company policy — never a regulatory expiry." };
+    return {
+      thresholds: s.thresholds ?? [...DEFAULT_WARNING_THRESHOLDS], perCode: s.perCode,
+      escalation: s.escalation ?? {}, defaultEscalation: DEFAULT_ESCALATION, categories: ESCALATION_CATEGORIES, malformed: s.malformed,
+      notice: "Notification thresholds, escalation ladders and review intervals here are company policy — never a regulatory expiry.",
+    };
   }),
 
   settingsSet: roleProcedure("trainingWallet.settingsSet")
     .input(z.object({
       thresholds: z.array(z.number().int().min(1).max(730)).min(1).max(12),
       perCode: z.record(z.string().regex(/^[A-Z0-9_]+$/), z.object({ employerReviewMonths: z.number().int().min(1).max(120).nullable().optional(), recommendedRefresherMonths: z.number().int().min(1).max(120).nullable().optional() })).optional(),
+      /** 0174 — escalation ladders by credential category (or "default"). Omitted = unchanged; {} = LeaseOS defaults. */
+      escalation: z.record(z.enum(["default", ...ESCALATION_CATEGORIES] as [string, ...string[]]), z.object({
+        steps: z.array(z.object({ threshold: z.union([z.number().int(), z.literal("expired")]), recipients: z.array(z.enum(["employee", "supervisor", "safety", "hr", "management"])).min(1).max(5), urgency: z.enum(["awareness", "notice", "urgent", "critical", "exception"]) }).strict()).min(1).max(12),
+      }).strict()).optional(),
     }).strict())
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
@@ -290,10 +433,18 @@ export const trainingWalletRouter = router({
         if (v.employerReviewMonths != null && p && p.lifecycle !== "employer_review") throw new TRPCError({ code: "BAD_REQUEST", message: `${code} is governed by ${p.lifecycle.replaceAll("_", " ")}; a company review interval would read as an expiry it does not have` });
       }
       const thresholds = normalizeThresholds(input.thresholds);
+      const ladders: Record<string, EscalationPolicy> = {};
+      for (const [category, p] of Object.entries(input.escalation ?? {})) {
+        const policy: EscalationPolicy = { label: COMPANY_POLICY_LABEL, steps: p.steps as EscalationPolicy["steps"] };
+        const problems = validateEscalation(policy);
+        if (problems.length) throw new TRPCError({ code: "BAD_REQUEST", message: `${category}: ${problems.join("; ")}` });
+        ladders[category] = policy;
+      }
+      const escalationJson = input.escalation === undefined ? undefined : Object.keys(ladders).length ? JSON.stringify(ladders) : null;
       const existing = (await db.select().from(credentialCompanySettings).where(eq(credentialCompanySettings.tenantId, tenantId)).limit(1))[0];
-      if (existing) await db.update(credentialCompanySettings).set({ warningThresholdsJson: JSON.stringify(thresholds), perCodeJson: JSON.stringify(input.perCode ?? {}), updatedByUserId: ctx.user.id }).where(eq(credentialCompanySettings.id, existing.id));
-      else await db.insert(credentialCompanySettings).values({ tenantId, warningThresholdsJson: JSON.stringify(thresholds), perCodeJson: JSON.stringify(input.perCode ?? {}), updatedByUserId: ctx.user.id });
-      await academyAudit(db, ctx.user.id, "credential_settings", tenantId, "settings.updated", { thresholds, perCode: input.perCode ?? {} });
+      if (existing) await db.update(credentialCompanySettings).set({ warningThresholdsJson: JSON.stringify(thresholds), perCodeJson: JSON.stringify(input.perCode ?? {}), updatedByUserId: ctx.user.id, ...(escalationJson !== undefined ? { escalationPolicyJson: escalationJson } : {}) }).where(eq(credentialCompanySettings.id, existing.id));
+      else await db.insert(credentialCompanySettings).values({ tenantId, warningThresholdsJson: JSON.stringify(thresholds), perCodeJson: JSON.stringify(input.perCode ?? {}), updatedByUserId: ctx.user.id, escalationPolicyJson: escalationJson ?? null });
+      await academyAudit(db, ctx.user.id, "credential_settings", tenantId, "settings.updated", { thresholds, perCode: input.perCode ?? {}, escalation: input.escalation === undefined ? "unchanged" : ladders });
       return { thresholds };
     }),
 
@@ -308,6 +459,22 @@ export const trainingWalletRouter = router({
     // 0174: the same engine call the production worker makes on its schedule.
     const r = await runRenewalSweepForTenant(db, tenantId, input?.at ?? new Date(), ctx.user.id);
     return { planned: r.planned, sent: r.notificationsCreated, suppressed: r.suppressed, sentKeys: r.sentKeys, inspected: r.inspected, actionable: r.actionable, failures: r.failures };
+  }),
+
+  /** 0174 — the Renewal Queue: who, what, when, readiness impact, handoff, last reminder, next escalation. */
+  renewalQueue: roleProcedure("trainingWallet.renewalQueue").input(z.object({ at: z.coerce.date().optional() }).optional()).query(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const tenantId = await tenantOf(db, ctx.user.id);
+    const rows = await renewalQueueFor(db, tenantId, input?.at ?? new Date());
+    const ids = Array.from(new Set(rows.map(r => r.userId)));
+    const people = ids.length ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids)) : [];
+    return { rows: rows.map(r => ({ ...r, employeeName: people.find(p => p.id === r.userId)?.name ?? null })), notice: COMPANY_POLICY_LABEL };
+  }),
+
+  /** 0174 — the scheduled sweep's own health: recent runs and whether any failed. */
+  sweepRuns: roleProcedure("trainingWallet.sweepRuns").query(async () => {
+    const db = await dbOrThrow();
+    return { runs: await recentSweepRuns(db, 20), notice: "A failed or partial run is a SYSTEM FAILURE — it says nothing about whether any credential is valid." };
   }),
 
   /** "Request Training / Renewal" — for yourself, or for someone else with workforce authority. */

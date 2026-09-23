@@ -17,8 +17,9 @@ import {
   type CompanyCredentialSettings, type PlannedReminder, type WalletHolding,
 } from "./_core/credentialLifecycle";
 import type { HeldVerdict, RequirementScope } from "./_core/qualificationValidity";
-import { validateEscalation, type CredentialCategory, type EscalationPolicy } from "./_core/complianceOperations";
+import { deliverAcross, handoffRecoveryNote, validateEscalation, type CredentialCategory, type DeliveryAdapter, type DeliveryChannel, type DeliveryOutcome, type EscalationPolicy } from "./_core/complianceOperations";
 import type { getDb } from "./db";
+import { TERMINAL, type HandoffStatus } from "./_core/externalTrainingHandoff";
 
 type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 type Row = typeof workerQualifications.$inferSelect;
@@ -58,6 +59,8 @@ export function canonicalVerdicts(
   holdings: readonly WalletHolding[],
   requirements: readonly { requirementCode: string; qualificationCode: string; conditionsJson?: string | null }[],
   at: Date,
+  /** 0174 — open training handoffs, for the explanation only. They never change a verdict. */
+  handoffs: readonly { qualificationCode: string; status: HandoffStatus; appointmentAt: Date | null }[] = [],
 ): Map<string, HeldVerdict & { recoveryLabel: string | null; scope: RequirementScope }> {
   const out = new Map<string, HeldVerdict & { recoveryLabel: string | null; scope: RequirementScope }>();
   for (const r of requirements) {
@@ -65,7 +68,9 @@ export function canonicalVerdicts(
     const v = heldForWork(holdings, r.qualificationCode, at, scope);
     const upload = holdings.some(h => h.code === r.qualificationCode && (h.verificationState === "unverified" || h.verificationState === "extracted"));
     const recovery = recoveryFor(v, r.qualificationCode, policyFor(r.qualificationCode), upload && !v.held);
-    out.set(r.requirementCode, { ...v, scope, recoveryLabel: recovery.length ? recovery.map(x => x.label).join(" → ") : null });
+    const progress = v.held ? null : handoffRecoveryNote(handoffs.find(h => h.qualificationCode === r.qualificationCode && !TERMINAL.has(h.status)));
+    const label = [progress, ...recovery.map(x => x.label)].filter((x): x is string => !!x);
+    out.set(r.requirementCode, { ...v, scope, recoveryLabel: label.length ? label.join(" → ") : null });
   }
   return out;
 }
@@ -122,27 +127,44 @@ export function settingsFor(s: TenantSettings, code: string): Partial<CompanyCre
  * the guard: a key already on file is suppressed, and a concurrent duplicate
  * insert is caught and counted as suppressed rather than sent twice.
  */
-export async function deliverReminders(db: Db, tenantId: string, planned: readonly PlannedReminder[], now: Date): Promise<{ sent: PlannedReminder[]; suppressed: PlannedReminder[] }> {
-  if (!planned.length) return { sent: [], suppressed: [] };
+export async function deliverReminders(
+  db: Db, tenantId: string, planned: readonly PlannedReminder[], now: Date,
+  opts: { channels?: readonly DeliveryChannel[]; adapters?: Partial<Record<Exclude<DeliveryChannel, "IN_APP">, DeliveryAdapter>> } = {},
+): Promise<{ sent: PlannedReminder[]; suppressed: PlannedReminder[]; external: DeliveryOutcome[] }> {
+  if (!planned.length) return { sent: [], suppressed: [], external: [] };
+  // 0174: in-app is the canonical record. External channels (EMAIL/SMS) go through
+  // adapters; none is configured in this codebase, so they report not_configured and
+  // their failure never removes or blocks the in-app notification.
+  const channels = opts.channels ?? ["IN_APP"];
+  const external: DeliveryOutcome[] = [];
   const keys = planned.map(p => p.notificationKey);
   const existing = await db.select({ k: workflowNotifications.notificationKey }).from(workflowNotifications).where(inArray(workflowNotifications.notificationKey, keys));
   const { send, suppressed } = suppressDelivered(planned, new Set(existing.map(e => e.k)));
   const sent: PlannedReminder[] = [];
   for (const p of send) {
-    try {
-      await db.insert(workflowNotifications).values({
-        notificationKey: p.notificationKey, tenantId,
-        recipientUserId: p.recipient.kind === "user" ? p.recipient.userId : null,
-        recipientRole: p.recipient.kind === "role" ? p.recipient.role : null,
-        title: p.title.slice(0, 220), body: p.body, deepLink: `/training/wallet?code=${encodeURIComponent(p.code)}`,
-        channel: "in_app", status: "queued", queuedAt: now,
-      });
-      sent.push(p);
-    } catch {
-      suppressed.push(p);
-    }
+    const r = await deliverAcross({
+      channels,
+      adapters: opts.adapters ?? {},
+      message: { recipient: p.recipient.kind === "user" ? `user:${p.recipient.userId}` : `role:${p.recipient.role}`, title: p.title, body: p.body },
+      inApp: async () => {
+        try {
+          await db.insert(workflowNotifications).values({
+            notificationKey: p.notificationKey, tenantId,
+            recipientUserId: p.recipient.kind === "user" ? p.recipient.userId : null,
+            recipientRole: p.recipient.kind === "role" ? p.recipient.role : null,
+            title: p.title.slice(0, 220), body: p.body, deepLink: `/training/wallet?code=${encodeURIComponent(p.code)}`,
+            channel: "in_app", status: "queued", queuedAt: now,
+          });
+          return "recorded";
+        } catch {
+          return "suppressed";
+        }
+      },
+    });
+    (r.inApp === "recorded" ? sent : suppressed).push(p);
+    external.push(...r.external);
   }
-  return { sent, suppressed };
+  return { sent, suppressed, external };
 }
 
 /**

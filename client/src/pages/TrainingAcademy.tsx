@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RenewalQueuePanel, SourceReviewPanel, SystemExceptionsPanel, VerificationQueuePanel } from "./ComplianceOperationsView";
 import { CompliancePanel, LibraryPanel, PathwayPanel, StudyCentrePanel, TutorPanel, WalletPanel, type PracticeFeedback, type PracticeResult, type TutorResult, type UploadForm } from "./TrainingWalletView";
 
 function BoundaryBadge({ value }: { value: string }) {
@@ -83,6 +84,19 @@ export default function TrainingAcademy() {
   const pathway = trpc.trainingWallet.pathway.useQuery();
   const dashboard = trpc.trainingWallet.complianceDashboard.useQuery(undefined, { retry: false });
   const queue = trpc.trainingWallet.handoffQueue.useQuery(undefined, { retry: false, enabled: dashboard.isSuccess });
+  // 0174 — Compliance Operations queues. Each query is permission-gated server-side; a 403 just hides its panel.
+  const ops = { enabled: dashboard.isSuccess, retry: false } as const;
+  const renewalQueue = trpc.trainingWallet.renewalQueue.useQuery(undefined, ops);
+  const verificationQueue = trpc.trainingWallet.verificationQueue.useQuery(undefined, ops);
+  const sourceQueue = trpc.academy.sourceReviewQueue.useQuery(undefined, ops);
+  const sweepRuns = trpc.trainingWallet.sweepRuns.useQuery(undefined, ops);
+  const systemExceptions = trpc.surfaces.exceptions.useQuery({ category: "workforce" }, ops);
+  const refreshOps = async () => { await Promise.all([verificationQueue.refetch(), renewalQueue.refetch(), dashboard.refetch(), queue.refetch()]); };
+  const verify = trpc.trainingWallet.verify.useMutation({ onSuccess: async () => { toast.success("Verified. It now counts through the canonical rule."); await refreshOps(); }, onError: e => toast.error(e.message) });
+  const reject = trpc.trainingWallet.reject.useMutation({ onSuccess: async () => { toast.success("Rejected."); await refreshOps(); }, onError: e => toast.error(e.message) });
+  const requestCorrection = trpc.trainingWallet.requestCorrection.useMutation({ onSuccess: async () => { toast.success("Correction requested — the employee has been told."); await refreshOps(); }, onError: e => toast.error(e.message) });
+  const submitCorrection = trpc.trainingWallet.submitCorrection.useMutation({ onSuccess: async r => { toast.success(r.notice); await wallet.refetch(); }, onError: e => toast.error(e.message) });
+  const sourceAct = trpc.academy.sourceAct.useMutation({ onSuccess: async r => { toast.success(`Source is now ${r.reviewStatus.replaceAll("_", " ")}.`); await sourceQueue.refetch(); }, onError: e => toast.error(e.message) });
   const [practice, setPractice] = useState<null | { assignmentRef: string; attemptRef: string; kind: "PRACTICE" | "MOCK_EXAM"; notice: string; questions: { questionCode: string; domain: string; prompt: string; options: string[]; sourceSection: string | null }[] }>(null);
   const [practiceAnswers, setPracticeAnswers] = useState<Record<string, number>>({});
   const [feedback, setFeedback] = useState<Record<string, PracticeFeedback>>({});
@@ -102,12 +116,17 @@ export default function TrainingAcademy() {
   const handoffUpdate = trpc.trainingWallet.handoffUpdate.useMutation({ onSuccess: async () => { toast.success("Updated. Dispatch readiness is unchanged until a certificate is verified."); await Promise.all([queue.refetch(), dashboard.refetch()]); }, onError: e => toast.error(e.message) });
   const sweep = trpc.trainingWallet.renewalSweep.useMutation({ onSuccess: r => setSweepResult(r), onError: e => toast.error(e.message) });
   const resume = trpc.academy.moduleResume.useMutation();
-  const onUpload = (f: UploadForm) => recordOwn.mutate({
-    code: f.code, boundary: f.boundary as never, issuer: f.issuer || undefined, certificateNumber: f.certificateNumber || undefined,
-    issuedAt: f.issuedAt ? new Date(f.issuedAt) : null, expiresAt: f.expiresAt ? new Date(f.expiresAt) : null,
-    documentRef: f.documentRef || undefined, backDocumentRef: f.backDocumentRef || undefined,
-    restrictions: f.restrictions ? f.restrictions.split(",").map(x => x.trim()).filter(Boolean) : undefined,
-  });
+  const onUpload = (f: UploadForm) => {
+    const record = {
+      code: f.code, boundary: f.boundary as never, issuer: f.issuer || undefined, certificateNumber: f.certificateNumber || undefined,
+      issuedAt: f.issuedAt ? new Date(f.issuedAt) : null, expiresAt: f.expiresAt ? new Date(f.expiresAt) : null,
+      documentRef: f.documentRef || undefined, backDocumentRef: f.backDocumentRef || undefined,
+      restrictions: f.restrictions ? f.restrictions.split(",").map(x => x.trim()).filter(Boolean) : undefined,
+    };
+    // 0174: a correction is a new record naming the one it corrects; the earlier upload is not edited.
+    if (f.correctsHoldingRef) submitCorrection.mutate({ ...record, correctsHoldingRef: f.correctsHoldingRef });
+    else recordOwn.mutate(record);
+  };
   const openPractice = async (assignmentRef: string, kind: "PRACTICE" | "MOCK_EXAM") => {
     const data = await practiceOpen.mutateAsync({ assignmentRef, kind });
     setPractice({ ...data, assignmentRef }); setPracticeAnswers({}); setFeedback({}); setPracticeResult(null);
@@ -176,7 +195,15 @@ export default function TrainingAcademy() {
           <TabsContent value="library"><LibraryPanel sources={library.data ?? []} /></TabsContent>
           <TabsContent value="pathway"><PathwayPanel pathways={pathway.data ?? []} /></TabsContent>
           {dashboard.isSuccess && <TabsContent value="compliance">
-            <CompliancePanel dashboard={dashboard.data ?? null} queue={queue.data ?? []} onMark={(ref, mark) => handoffUpdate.mutate({ handoffRef: ref, mark })} onSweep={() => sweep.mutate()} sweeping={sweep.isPending} sweepResult={sweepResult} />
+            <div className="space-y-5">
+              <CompliancePanel dashboard={dashboard.data ?? null} queue={queue.data ?? []} onMark={(ref, mark) => handoffUpdate.mutate({ handoffRef: ref, mark })} onSweep={() => sweep.mutate()} sweeping={sweep.isPending} sweepResult={sweepResult} />
+              {renewalQueue.data && <RenewalQueuePanel rows={renewalQueue.data.rows} notice={renewalQueue.data.notice} />}
+              {verificationQueue.data && <VerificationQueuePanel items={verificationQueue.data} busy={verify.isPending || reject.isPending || requestCorrection.isPending}
+                onVerify={v => verify.mutate(v)} onReject={(holdingRef, reason) => reject.mutate({ holdingRef, reason })} onRequestCorrection={(holdingRef, note) => requestCorrection.mutate({ holdingRef, note })} />}
+              {sourceQueue.data && <SourceReviewPanel sources={sourceQueue.data} busy={sourceAct.isPending} onAct={(sourceRef, action, note, successorRef) => sourceAct.mutate({ sourceRef, action, note, successorRef })} />}
+              {sweepRuns.data && <SystemExceptionsPanel runs={sweepRuns.data.runs} notice={sweepRuns.data.notice}
+                exceptions={(systemExceptions.data?.items ?? []).filter(x => x.key.startsWith("sweep-failure:")).map(x => ({ key: x.key, title: x.title, reason: x.reason }))} />}
+            </div>
           </TabsContent>}
 
           <TabsContent value="mine" className="space-y-5">

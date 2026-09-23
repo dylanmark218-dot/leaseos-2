@@ -144,6 +144,23 @@ export function walletStatus(args: {
   return { status, renewal, line, renewalSteps, validityNote };
 }
 
+/**
+ * Dispatch's explanation of a renewal already in motion. Explanation only: it is
+ * appended to a NOT-held verdict's recovery text and never changes the verdict —
+ * a request, a booking or an upload does not make anyone READY.
+ */
+export function handoffRecoveryNote(h: { status: HandoffStatus; appointmentAt: Date | null } | null | undefined): string | null {
+  if (!h) return null;
+  switch (h.status) {
+    case "ACTION_REQUIRED": case "REQUESTED": case "ADMIN_REVIEW": case "UNKNOWN": return "Renewal requested — awaiting booking";
+    case "PROVIDER_SELECTED": case "BOOKING_IN_PROGRESS": return "Renewal requested — office booking with provider";
+    case "BOOKED": return `Renewal booked${h.appointmentAt ? ` for ${h.appointmentAt.toISOString().slice(0, 10)}` : ""} — does not count until the new certificate is verified`;
+    case "TRAINING_COMPLETED": case "DOCUMENT_PENDING": return "Training reported complete — certificate not yet uploaded";
+    case "DOCUMENT_UPLOADED_UNVERIFIED": return "Certificate uploaded — Safety verification required";
+    default: return null;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Delivery boundary                                                    */
 /* ------------------------------------------------------------------ */
@@ -173,6 +190,8 @@ export async function deliverAcross(args: {
 }): Promise<{ inApp: "recorded" | "suppressed"; external: DeliveryOutcome[] }> {
   const inApp = await args.inApp();
   const external: DeliveryOutcome[] = [];
+  // A suppressed in-app notice was already delivered earlier; its external copies were attempted then.
+  if (inApp === "suppressed") return { inApp, external };
   for (const ch of args.channels) {
     if (ch === "IN_APP") continue;
     const adapter = args.adapters[ch] ?? NOT_CONFIGURED(ch);

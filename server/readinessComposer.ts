@@ -23,7 +23,7 @@ import { entitlementToEvaluation, snapshotOf, type PolicySnapshot } from "./_cor
 import { resolveCapabilities } from "./_core/automationPolicyStore";
 import { destinationAcceptanceForJob } from "./_core/destinationAcceptance";
 import { and, desc, eq, inArray, isNull, or as sqlOr } from "drizzle-orm";
-import { hosAttestations } from "../drizzle/schema";
+import { externalTrainingHandoffs, hosAttestations } from "../drizzle/schema";
 import { faultDispatchEffect } from "./_core/telematics";
 import { getDb } from "./db";
 import {
@@ -385,7 +385,9 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
         // 0172 — verified wallet credentials through the canonical rule. Handoffs, bookings and practice
         // results are never read here; only a verified holding can change this answer.
         const walletRows = await holdingRowsFor(db, [op.userId]);
-        const canonical = canonicalVerdicts(walletRows.map(asHolding), applicable, now);
+        // 0174: open handoffs feed the explanation text only ("renewal requested — awaiting booking").
+        const openHandoffs = await db.select({ qualificationCode: externalTrainingHandoffs.qualificationCode, status: externalTrainingHandoffs.status, appointmentAt: externalTrainingHandoffs.appointmentAt }).from(externalTrainingHandoffs).where(eq(externalTrainingHandoffs.userId, op.userId)).limit(100);
+        const canonical = canonicalVerdicts(walletRows.map(asHolding), applicable, now, openHandoffs);
         const decision = trainingDispatchDecision(applicable.map(r => ({ code: r.requirementCode, title: r.title, qualificationCode: r.qualificationCode, enforcement: r.enforcement, recoveryPath: r.recoveryPath, requiresInterprovincial: scopeOf(r.conditionsJson).interprovincial })), accepted, now, canonical);
         // P0.6: the code is the requirement's own. A code derived from the title changes the moment
         // somebody edits the wording, and every override keyed to the old one stops matching.
