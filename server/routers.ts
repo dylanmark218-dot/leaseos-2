@@ -100,6 +100,7 @@ import { auditRouter } from "./auditRouter";
 import { spatialRouter } from "./spatialRouter";
 import { closeoutRouter } from "./closeoutRouter";
 import { insuranceRouter } from "./insuranceRouter";
+import { eldRouter } from "./eldRouter";
 import { publicProcedure, roleProcedure, router } from "./_core/trpc";
 import { storagePut } from "./storage";
 import {
@@ -337,6 +338,8 @@ export const appRouter = router({
   assistantAsk: assistantAskRouter,
   agent: agentRouter,
   hos: hosRouter,
+  // 0170 — the canonical ELD event ledger; a device appends, the office reads its chain.
+  eld: eldRouter,
   records: recordsRouter,
   payroll: payrollRouter,
   contractors: contractorRouter,

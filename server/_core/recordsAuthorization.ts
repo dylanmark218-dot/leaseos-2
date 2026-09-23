@@ -176,6 +176,9 @@ export type Permission =
   /* P1.2 — running the seal's third leg against the stored object. */
   | "device.verifySeal"
   | "sync.push_own" | "sync.resolve_conflict"
+  /* 0170 — the ELD event ledger. A device appends its own events (self-scoped in code: the device
+     must be enrolled to the session user); reading a device's chain is an office act. */
+  | "eld.event.record_own" | "eld.read"
   // v20.21 — compliance master registry. Reading a passport is broad
   // verifying evidence, loading requirements and reading private credential
   // detail are not.
@@ -459,6 +462,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "enforcement.panel.view",
     "enforcement.latch",
     "enforcement.read",
+    "eld.read",
     "hos.read",
     "comms.package.build",
     "comms.package.fetch",
@@ -734,6 +738,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "enforcement.finding.record",
     "enforcement.release",
     "oos.policy.manage",
+    "eld.read",
     "hos.read",
     "comms.package.build",
     "comms.policy.manage",
@@ -840,6 +845,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "timeOff.schedulingRead",
     "enforcement.latch",
     "enforcement.read",
+    "eld.read",
     "hos.read",
     "comms.package.build",
     /* v22.17 — communications */
@@ -1037,6 +1043,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "oos.policy.manage",
     "oos.policy.approve",
     "geo.source.review",
+    "eld.read",
     "hos.read",
     "hos.rule.manage",
     "hos.rule.verify",
@@ -1309,6 +1316,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "delivery.read",
     "fleet.read",
     "inspection.read",
+    "eld.read",
     "hos.read",
     "gps.read",
     "route.read",
@@ -1688,6 +1696,8 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // 0170 — an ELD batch is admitted only for a device enrolled to `ctx.user.id`; the store re-checks it.
+  "eld.event.record_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -2476,6 +2486,10 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "device.revoke": "device.manage",
   "sync.receivePackage": "sync.push_own",
   "sync.resolveConflict": "sync.resolve_conflict",
+
+  /* ---- 0170: the ELD event ledger ---- */
+  "eld.eventsAppend": "eld.event.record_own",
+  "eld.deviceIntegrity": "eld.read",
 
   /* ---- v20.21: compliance master registry ---- */
   "compliance.passport": "compliance.passport.read",

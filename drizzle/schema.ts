@@ -1,4 +1,4 @@
-import { bigint, boolean, date, decimal, double, index, int, json, mysqlEnum, mysqlTable, text, timestamp, tinyint, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { bigint, boolean, date, decimal, double, index, int, json, mysqlEnum, mysqlTable, smallint, text, timestamp, tinyint, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -8795,3 +8795,102 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
+
+/* ==================================================================
+ * v23.26 — 0170: the canonical ELD event ledger
+ * ================================================================== */
+
+/**
+ * 0170 — exactly one canonical accepted ELD event per device-minted `eventRef` and per
+ * (enrolled device, device-local sequence). Append-only: BEFORE UPDATE and BEFORE DELETE triggers
+ * refuse every mutation, and a correction is a later row naming this one in `supersedesEventRef`.
+ *
+ * Nothing derived lives here — no hours remaining, no verdict, no review state. `orgRef` is the
+ * enrolled device's organization, never a client value. The two hashes are computable on the device
+ * from what the device knows (see `shared/eld/eldEvent.ts`), so a device can verify what the server
+ * holds. `previousEventHash` is the device's claim about its predecessor; the server compares it to
+ * the stored predecessor when one exists and reports the verdict rather than storing it.
+ */
+export const eldEvents = mysqlTable("eldEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  /** Null only for rows that did not come from an enrolled field device (integration, office, migration — none written yet). */
+  fieldDeviceId: int("fieldDeviceId"),
+  deviceSequence: bigint("deviceSequence", { mode: "number" }),
+  /** Resolved on the server from the enrolled device's user. Null = no operator identity (unidentified). */
+  operatorId: int("operatorId"),
+  unitId: int("unitId"),
+  eventType: varchar("eventType", { length: 40 }).notNull(),
+  eventCode: varchar("eventCode", { length: 40 }),
+  dutyStatus: mysqlEnum("dutyStatus", ["driving", "on_duty", "sleeper_berth", "off_duty"]),
+  recordOrigin: mysqlEnum("recordOrigin", ["automatic", "driver", "office_edit", "assumed_unidentified", "integration", "legacy"]).notNull(),
+  sourceKind: mysqlEnum("sourceKind", ["field_device", "integration_client", "office", "migration"]).notNull(),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  /** The device's clock, kept even when it is wrong. `receivedAt` is the server's. */
+  eventAt: timestamp("eventAt", { fsp: 3 }).notNull(),
+  eventUtcOffsetMinutes: smallint("eventUtcOffsetMinutes"),
+  receivedAt: timestamp("receivedAt", { fsp: 3 }).notNull(),
+  latitude: double("latitude"),
+  longitude: double("longitude"),
+  locationAccuracyM: double("locationAccuracyM"),
+  locationSource: mysqlEnum("locationSource", ["gps", "network", "manual", "ecm", "none"]),
+  jurisdiction: varchar("jurisdiction", { length: 8 }),
+  odometerKm: double("odometerKm"),
+  engineHours: double("engineHours"),
+  vehicleSpeedKph: double("vehicleSpeedKph"),
+  annotation: varchar("annotation", { length: 500 }),
+  supersedesEventRef: varchar("supersedesEventRef", { length: 64 }),
+  canonicalJson: text("canonicalJson").notNull(),
+  payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
+  previousEventHash: varchar("previousEventHash", { length: 64 }),
+  eventHash: varchar("eventHash", { length: 64 }).notNull(),
+  hashVersion: varchar("hashVersion", { length: 16 }).default("eld-h1").notNull(),
+  submittedByUserId: int("submittedByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  deviceSequenceUnique: uniqueIndex("eldEvents_device_sequence_unique").on(t.fieldDeviceId, t.deviceSequence),
+  operatorTime: index("eldEvents_operator_time").on(t.operatorId, t.eventAt),
+  unitTime: index("eldEvents_unit_time").on(t.unitId, t.eventAt),
+  orgTime: index("eldEvents_org_time").on(t.orgRef, t.eventAt),
+  supersedes: index("eldEvents_supersedes").on(t.supersedesEventRef),
+}));
+
+/**
+ * 0170 — an attempted event that collided with an existing `eventRef` or (device, sequence) while
+ * carrying different content. The canonical row is untouched; the attempt is kept whole. Immutable
+ * like the ledger itself. Unique per (canonical row, attempted hash) so re-sending the same
+ * conflicting copy is recorded once.
+ */
+export const eldEventIngestConflicts = mysqlTable("eldEventIngestConflicts", {
+  id: int("id").autoincrement().primaryKey(),
+  conflictRef: varchar("conflictRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  fieldDeviceId: int("fieldDeviceId"),
+  collisionKind: mysqlEnum("collisionKind", ["event_ref", "device_sequence"]).notNull(),
+  canonicalEventId: int("canonicalEventId").notNull(),
+  canonicalEventRef: varchar("canonicalEventRef", { length: 64 }).notNull(),
+  canonicalPayloadHash: varchar("canonicalPayloadHash", { length: 64 }).notNull(),
+  canonicalEventHash: varchar("canonicalEventHash", { length: 64 }).notNull(),
+  attemptedEventRef: varchar("attemptedEventRef", { length: 64 }).notNull(),
+  attemptedDeviceSequence: bigint("attemptedDeviceSequence", { mode: "number" }),
+  attemptedCanonicalJson: text("attemptedCanonicalJson").notNull(),
+  attemptedPayloadHash: varchar("attemptedPayloadHash", { length: 64 }).notNull(),
+  attemptedPreviousEventHash: varchar("attemptedPreviousEventHash", { length: 64 }),
+  attemptedEventHash: varchar("attemptedEventHash", { length: 64 }).notNull(),
+  hashVersion: varchar("hashVersion", { length: 16 }).default("eld-h1").notNull(),
+  sourceKind: mysqlEnum("sourceKind", ["field_device", "integration_client", "office", "migration"]).notNull(),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  submittedByUserId: int("submittedByUserId"),
+  receivedAt: timestamp("receivedAt", { fsp: 3 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  attemptUnique: uniqueIndex("eldEventIngestConflicts_attempt_unique").on(t.canonicalEventId, t.attemptedEventHash),
+  device: index("eldEventIngestConflicts_device").on(t.fieldDeviceId, t.receivedAt),
+  org: index("eldEventIngestConflicts_org").on(t.orgRef, t.receivedAt),
+}));
+
+export type EldEventRow = typeof eldEvents.$inferSelect;
+export type InsertEldEvent = typeof eldEvents.$inferInsert;
+export type EldEventIngestConflictRow = typeof eldEventIngestConflicts.$inferSelect;
+export type InsertEldEventIngestConflict = typeof eldEventIngestConflicts.$inferInsert;

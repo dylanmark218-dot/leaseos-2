@@ -49,6 +49,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/workforceRouter.ts` | `ROLE_AUTHORIZED` | **16** |
 | `server/auditRouter.ts` | `ROLE_AUTHORIZED` | **6** |
 | `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **11** |
+| `server/eldRouter.ts` | `ROLE_AUTHORIZED` (0170: `eld.eventsAppend` self-scoped to the enrolled device; `eld.deviceIntegrity` an office read) | **2** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
