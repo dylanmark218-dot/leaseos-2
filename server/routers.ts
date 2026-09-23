@@ -129,7 +129,6 @@ import {
   listFacilities,
   listMaintenanceDefects,
   listDeliveries,
-  createJobUnit,
   listJobUnits,
   createInspection,
   listInspections,
