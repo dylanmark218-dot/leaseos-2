@@ -29,7 +29,13 @@ type Finding = { code: string; label: string; severity: string; overridable: boo
  * warning-grade only, so an award is possible after acknowledgement — which is the baseline each
  * test then disturbs.
  */
-async function establishedSubject() {
+/**
+ * RI-0.6 — an established subject's transport job carries a verified, non-dangerous load
+ * classification. Without one the job's dangerous-goods state is UNKNOWN and dispatch is refused,
+ * which is the rule, not the baseline. Tests about the missing-classification case ask for
+ * `{ classifiedLoad: false }` explicitly.
+ */
+async function establishedSubject(opts: { classifiedLoad?: boolean } = {}) {
   const dispatcher = await withRole("dispatcher");
   const manager = await withRole("management");
   const driverUser = await withRole("driver");
@@ -49,6 +55,9 @@ async function establishedSubject() {
   const customer = key("Cust").slice(0, 40);
   const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', ?, 'LSD 04-12-052-09W5', 'dispatched', 0)", [key("JOB").slice(0, 40), customer]);
   const jobId = Number(j.insertId);
+  if (opts.classifiedLoad !== false) {
+    await pool.execute("INSERT INTO loadProfiles (jobId, material, classificationStatus, verifiedAt) VALUES (?, 'Produced water', 'verified', NOW())", [jobId]);
+  }
   const [p] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO dispatchPostings (postingNumber, jobId, distribution, planningState, planningBlocker, priority, crewSize, rateVisible, createdByUserId) VALUES (?, ?, 'direct_assignment', 'direct', 'none', 'normal', 1, 0, ?)", [key("POST").slice(0, 40), jobId, dispatcher]);
   const postingId = Number(p.insertId);
   const approvalRef = key("RA").slice(0, 60);
@@ -325,7 +334,7 @@ d("review fix: time itself stales a check — an expiry passing between check an
 
 d("C1a-7: the composer reads dangerous goods from verified load classification, never from the job's wording", () => {
   it("10–11. a job typed 'hazard …' with no loads is UNKNOWN; a verified UN load under 'water_haul' requires TDG", async () => {
-    const s = await establishedSubject();
+    const s = await establishedSubject({ classifiedLoad: false });
     await pool.execute("UPDATE jobs SET type = 'hazard_tree_removal' WHERE id = ?", [s.jobId]);
     const r1 = await caller(s.dispatcher).dispatch.readiness(s.subject);
     expect((r1.blockers as Finding[]).find(b => b.code === "dg_classification_missing")).toMatchObject({ result: "UNKNOWN", dispatchEffect: "BLOCK" });
@@ -340,7 +349,7 @@ d("C1a-7: the composer reads dangerous goods from verified load classification, 
   });
 
   it("free text never clears: 'hazard' in the job over a verified non-DG load is not DG, and an unverified load is UNKNOWN", async () => {
-    const s = await establishedSubject();
+    const s = await establishedSubject({ classifiedLoad: false });
     await pool.execute("UPDATE jobs SET type = 'hazard_tree_removal' WHERE id = ?", [s.jobId]);
     const [lp] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO loadProfiles (jobId, material, classificationStatus, verifiedAt) VALUES (?, 'Wood chips', 'verified', NOW())", [s.jobId]);
     const r1 = await caller(s.dispatcher).dispatch.readiness(s.subject);
@@ -348,6 +357,58 @@ d("C1a-7: the composer reads dangerous goods from verified load classification, 
     await pool.execute("UPDATE loadProfiles SET classificationStatus = 'needs_verification' WHERE id = ?", [Number(lp.insertId)]);
     const r2 = await caller(s.dispatcher).dispatch.readiness(s.subject);
     expect((r2.blockers as Finding[]).find(b => b.code === "dg_classification_unverified")).toMatchObject({ result: "UNKNOWN", dispatchEffect: "BLOCK" });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* RI-0.6 — structured dangerous-goods readiness, in the composer      */
+/* ------------------------------------------------------------------ */
+
+d("RI-0.6: readiness reads dangerous goods from structured loads only, and says why when it cannot", () => {
+  const dgCodes = (r: { blockers: readonly { code: string }[] }) => r.blockers.map(b => b.code).filter(c => c.startsWith("dg_") || c.startsWith("tdg_") || c.includes("tdg_certificate"));
+
+  it("D. a job with no load record is UNKNOWN with the reason on the record, however innocent its wording — and the established baseline is a classified load, not the absence of one", async () => {
+    const s = await establishedSubject({ classifiedLoad: false });
+    await pool.execute("UPDATE jobs SET type = 'water_haul' WHERE id = ?", [s.jobId]);
+    const r = await caller(s.dispatcher).dispatch.readiness(s.subject);
+    expect((r.blockers as Finding[]).find(b => b.code === "dg_classification_missing")).toMatchObject({ result: "UNKNOWN", dispatchEffect: "BLOCK" });
+    expect(r.verdict).not.toBe("eligible");
+    const dg = r.contributions.find(c => c.engine === "dangerous_goods");
+    expect(dg?.finding).toMatch(/^unknown \(no_load\)/);
+    // The same job with its load classified and non-DG raises nothing.
+    await pool.execute("INSERT INTO loadProfiles (jobId, material, classificationStatus, verifiedAt) VALUES (?, 'Produced water', 'verified', NOW())", [s.jobId]);
+    expect(dgCodes(await caller(s.dispatcher).dispatch.readiness(s.subject))).toEqual([]);
+  });
+
+  it("E. one verified dangerous-goods load beside an unverified one: TDG requirements apply, and the unverified load is still on the record", async () => {
+    const s = await establishedSubject();
+    await pool.execute("INSERT INTO loadProfiles (jobId, material, unNumber, dgClass, classificationStatus, verifiedAt) VALUES (?, 'Gasoline', 'UN1203', '3', 'verified', NOW())", [s.jobId]);
+    await pool.execute("INSERT INTO loadProfiles (jobId, material, classificationStatus) VALUES (?, 'Unknown drums', 'needs_verification')", [s.jobId]);
+    const r = await caller(s.dispatcher).dispatch.readiness(s.subject);
+    const codes = dgCodes(r);
+    expect(codes).toContain("operator_tdg_certificate_missing");
+    expect(codes).toContain("tdg_document_unknown");
+    expect(codes).toContain("dg_classification_unverified");
+    expect(r.contributions.find(c => c.engine === "dangerous_goods")?.finding).toMatch(/^dg \(verified_dg\)/);
+  });
+
+  it("A/B. the job's wording moves nothing: 'hazmat cleanup' over a verified non-DG load is not DG, and 'water_haul' over a verified UN load is", async () => {
+    const s = await establishedSubject();
+    await pool.execute("UPDATE jobs SET type = 'hazmat cleanup' WHERE id = ?", [s.jobId]);
+    expect(dgCodes(await caller(s.dispatcher).dispatch.readiness(s.subject))).toEqual([]);
+    await pool.execute("UPDATE jobs SET type = 'water_haul' WHERE id = ?", [s.jobId]);
+    await pool.execute("INSERT INTO loadProfiles (jobId, material, unNumber, dgClass, classificationStatus, verifiedAt) VALUES (?, 'Gasoline', 'UN1203', '3', 'verified', NOW())", [s.jobId]);
+    expect(dgCodes(await caller(s.dispatcher).dispatch.readiness(s.subject))).toContain("operator_tdg_certificate_missing");
+  });
+
+  it("the eligibility fingerprint moves when a load's classification moves, and not when the job is renamed", async () => {
+    const s = await establishedSubject();
+    const fp = async () => (await composeReadiness(s.subject)).fingerprint;
+    const before = await fp();
+    await pool.execute("UPDATE jobs SET type = 'hazardous waste run' WHERE id = ?", [s.jobId]);
+    expect(await fp()).toBe(before);
+    await pool.execute("UPDATE loadProfiles SET classificationStatus = 'needs_verification', verifiedAt = NULL WHERE jobId = ?", [s.jobId]);
+    expect(await fp()).not.toBe(before);
   });
 });
 
