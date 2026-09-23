@@ -14,7 +14,7 @@ import { resolveActingScope } from "./_core/actingScope";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { chargeDefinitions, commercialSetupProfiles, customerAccounts, customerContractTerms, customerPurchaseOrders, fieldTicketLines, fieldTickets, pricingDecisions, units, vendorBillLines, vendorBills, vendors } from "../drizzle/schema";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, mintedIn } from "./db";
 import { roleProcedure, router } from "./_core/trpc";
 import { goLiveReadiness, poExposure, priceQuantity, projectDecision, rateSheetGaps, resolveRate, simulateMargin, type ChargeDefinition, type Guardrails, type ResolutionContext } from "./_core/rateResolution";
 
@@ -237,9 +237,10 @@ export const commercialSetupRouter = router({
     }),
 
   /** What a ticket is priced at, line by line, and what is not — unknown rates, conflicts, reviews and lines that named no service. */
-  ticketPricing: roleProcedure("commercialSetup.ticketPricing").input(z.object({ ticketNumber: z.string().min(1).max(64) })).query(async ({ input }) => {
+  ticketPricing: roleProcedure("commercialSetup.ticketPricing").input(z.object({ ticketNumber: z.string().min(1).max(64) })).query(async ({ ctx, input }) => {
     const d = await db();
-    const t = (await d.select().from(fieldTickets).where(eq(fieldTickets.ticketNumber, input.ticketNumber)).limit(1))[0];
+    const scope = await actingScopeFor(ctx.user.id);
+    const t = (await d.select().from(fieldTickets).where(mintedIn(fieldTickets, fieldTickets.ticketNumber, input.ticketNumber, scope)).limit(1))[0];
     if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket" });
     const lines = await d.select().from(fieldTicketLines).where(eq(fieldTicketLines.fieldTicketId, t.id));
     const refs = lines.map(l => l.pricingDecisionRef).filter((r): r is string => !!r);

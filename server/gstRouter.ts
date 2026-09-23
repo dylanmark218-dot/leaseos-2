@@ -8,7 +8,7 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, lt } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, mintedIn } from "./db";
 import { expenseRecords, fuelTransactions, gstAdjustments, gstReturns, invoices, taxRegistrations, vendorBills } from "../drizzle/schema";
 import { buildGstReturn, finalizeDecision, gstPeriodBounds, type Adjustment, type PurchaseRecord, type SaleRecord } from "./_core/gstReturn";
 import { determine } from "./_core/taxRuleEngine";
@@ -57,11 +57,12 @@ export const gstRouter = router({
   /** Classify a sale or a purchase. A closed period refuses — it changes a filed figure. */
   treatmentSet: roleProcedure("gst.treatmentSet")
     .input(z.object({ kind: z.enum(["invoice", "vendor_bill"]), ref: z.string().min(1).max(64), treatment: z.enum(["taxable", "zero_rated", "exempt"]), source: z.enum(["invoice_terms", "customer_status", "review"]) }))
-    .mutation(async ({ input }) => {
-      const db = await getDb();
+    .mutation(async ({ ctx, input }) => {
+      const scope = await actingScopeFor(ctx.user.id);
+        const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (input.kind === "invoice") {
-        const row = (await db.select().from(invoices).where(eq(invoices.invoiceNumber, input.ref)).limit(1))[0];
+        const row = (await db.select().from(invoices).where(mintedIn(invoices, invoices.invoiceNumber, input.ref, scope)).limit(1))[0];
         if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Invoice not found" });
         if (row.financialEntityId != null) await assertPeriodOpen(row.financialEntityId, row.issuedAt ?? row.createdAt, "Invoice tax treatment");
         await db.update(invoices).set({ gstTreatment: input.treatment, gstTreatmentSource: input.source }).where(eq(invoices.id, row.id));

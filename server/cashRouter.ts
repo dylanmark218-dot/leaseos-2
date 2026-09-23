@@ -9,7 +9,7 @@ import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, mintedIn, ownerFor, type TenantScope } from "./db";
 import { bankAccounts, bankStatementLines, bankStatements, collectionEvents, customerAccounts, customerCredits, customerPayments, fuelStatementLines, fuelStatements, invoices, paymentAllocations, vendorBills, writeOffRequests } from "../drizzle/schema";
 import { sql } from "drizzle-orm";
 import { reconcileBank, reconciliationStatement, type BankLine, type Movement } from "./_core/bankReconciliation";
@@ -102,10 +102,10 @@ export const bankRouter = router({
     }),
 });
 
-async function invoiceByNumber(n: string): Promise<ArInvoice & { financialEntityId: number | null }> {
+async function invoiceByNumber(n: string, scope: TenantScope): Promise<ArInvoice & { financialEntityId: number | null }> {
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-  const i = (await db.select().from(invoices).where(eq(invoices.invoiceNumber, n)).limit(1))[0];
+  const i = (await db.select().from(invoices).where(mintedIn(invoices, invoices.invoiceNumber, n, scope)).limit(1))[0];
   if (!i) throw new TRPCError({ code: "NOT_FOUND", message: "Invoice not found" });
   return { id: i.id, invoiceNumber: i.invoiceNumber, customer: i.customer, totalCents: i.totalCents, dueAt: i.dueAt, issuedAt: i.issuedAt ?? i.createdAt, status: i.status, disputed: i.status === "disputed" || i.disputedAt != null, financialEntityId: i.financialEntityId, customerAccountId: i.customerAccountId };
 }
@@ -144,11 +144,12 @@ export const arRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const scope = await actingScopeFor(ctx.user.id);
       return db.transaction(async tx => {
         const p = (await tx.select().from(customerPayments).where(eq(customerPayments.paymentRef, input.paymentRef)).for("update").limit(1))[0];
         if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Payment not found" });
         if (p.status === "reversed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Payment was reversed" });
-        const i = (await tx.select().from(invoices).where(eq(invoices.invoiceNumber, input.invoiceNumber)).for("update").limit(1))[0];
+        const i = (await tx.select().from(invoices).where(mintedIn(invoices, invoices.invoiceNumber, input.invoiceNumber, scope)).for("update").limit(1))[0];
         if (!i) throw new TRPCError({ code: "NOT_FOUND", message: "Invoice not found" });
         // An invoice that predates customer accounts takes the payment's account on first application — same entity, same name — and keeps it.
         let invoiceAccountId = i.customerAccountId;
@@ -173,8 +174,9 @@ export const arRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const scope = await actingScopeFor(ctx.user.id);
       // v21.9.1 — a credit against an invoice takes its entity and customer FROM the invoice; the caller does not say whose it is.
-      const inv = input.invoiceNumber ? await invoiceByNumber(input.invoiceNumber) : null;
+      const inv = input.invoiceNumber ? await invoiceByNumber(input.invoiceNumber, await actingScopeFor(ctx.user.id)) : null;
       let financialEntityId: number, customer: string, customerAccountId: number | null;
       if (inv) {
         if (inv.financialEntityId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invoice ${inv.invoiceNumber} carries no financial entity — assign it before crediting` });
@@ -184,7 +186,7 @@ export const arRouter = router({
         financialEntityId = input.financialEntityId; customer = input.customer; customerAccountId = await resolveCustomerAccount(financialEntityId, customer);
       }
       const creditRef = (await nextTrackingNumber(db, { sequenceType: "CR" })).trackingNumber;
-      await db.insert(customerCredits).values({ creditRef, financialEntityId, customer, customerAccountId, invoiceId: inv?.id ?? null, amountCents: input.amountCents, reason: input.reason, requestedByUserId: ctx.user.id, evidenceRecordId: input.evidenceRecordId ?? null });
+      await db.insert(customerCredits).values({ creditRef, orgRef: ownerFor(scope), financialEntityId, customer, customerAccountId, invoiceId: inv?.id ?? null, amountCents: input.amountCents, reason: input.reason, requestedByUserId: ctx.user.id, evidenceRecordId: input.evidenceRecordId ?? null });
       return { creditRef, status: "requested" as const, financialEntityId, customer };
     }),
 
@@ -193,7 +195,8 @@ export const arRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const c = (await db.select().from(customerCredits).where(eq(customerCredits.creditRef, input.creditRef)).limit(1))[0];
+      const scope = await actingScopeFor(ctx.user.id);
+      const c = (await db.select().from(customerCredits).where(mintedIn(customerCredits, customerCredits.creditRef, input.creditRef, scope)).limit(1))[0];
       if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "Credit not found" });
       if (c.status !== "requested") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Credit is ${c.status}` });
       if (c.requestedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The requester may not decide their own credit" });
@@ -210,7 +213,8 @@ export const arRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const inv = await invoiceByNumber(input.invoiceNumber);
+      const scope = await actingScopeFor(ctx.user.id);
+      const inv = await invoiceByNumber(input.invoiceNumber, await actingScopeFor(ctx.user.id));
       if (input.eventType === "promise_to_pay" && (input.promisedAmountCents == null || !input.promisedAt)) throw new TRPCError({ code: "BAD_REQUEST", message: "A promise to pay needs an amount and a date" });
       await db.insert(collectionEvents).values({ invoiceId: inv.id, eventType: input.eventType, note: input.note ?? null, promisedAmountCents: input.promisedAmountCents ?? null, promisedAt: input.promisedAt ?? null, byUserId: ctx.user.id, at: new Date() });
       return { invoiceNumber: inv.invoiceNumber, eventType: input.eventType };
@@ -221,9 +225,10 @@ export const arRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const inv = await invoiceByNumber(input.invoiceNumber);
+      const scope = await actingScopeFor(ctx.user.id);
+      const inv = await invoiceByNumber(input.invoiceNumber, await actingScopeFor(ctx.user.id));
       const requestRef = (await nextTrackingNumber(db, { sequenceType: "WO" })).trackingNumber;
-      await db.insert(writeOffRequests).values({ requestRef, invoiceId: inv.id, amountCents: input.amountCents, reason: input.reason, requestedByUserId: ctx.user.id, requestedAt: new Date() });
+      await db.insert(writeOffRequests).values({ requestRef, orgRef: ownerFor(scope), invoiceId: inv.id, amountCents: input.amountCents, reason: input.reason, requestedByUserId: ctx.user.id, requestedAt: new Date() });
       await db.insert(collectionEvents).values({ invoiceId: inv.id, eventType: "write_off_requested", note: input.reason, byUserId: ctx.user.id, at: new Date() });
       return { requestRef, status: "requested" as const };
     }),
@@ -234,7 +239,8 @@ export const arRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const w = (await db.select().from(writeOffRequests).where(eq(writeOffRequests.requestRef, input.requestRef)).limit(1))[0];
+      const scope = await actingScopeFor(ctx.user.id);
+      const w = (await db.select().from(writeOffRequests).where(mintedIn(writeOffRequests, writeOffRequests.requestRef, input.requestRef, scope)).limit(1))[0];
       if (!w) throw new TRPCError({ code: "NOT_FOUND", message: "Write-off request not found" });
       if (w.status !== "requested") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Request is ${w.status}` });
       const invRow = (await db.select().from(invoices).where(eq(invoices.id, w.invoiceId)).limit(1))[0]!;
@@ -255,7 +261,7 @@ export const arRouter = router({
       await db.insert(collectionEvents).values({ invoiceId: w.invoiceId, eventType: "write_off_decided", note: `${input.decision}: ${input.reason}`, byUserId: ctx.user.id, at: new Date() });
       if (input.decision === "approved") {
         const creditRef = (await nextTrackingNumber(db, { sequenceType: "CR" })).trackingNumber;
-        await db.insert(customerCredits).values({ creditRef, financialEntityId: invRow.financialEntityId, customer: invRow.customer, customerAccountId: invRow.customerAccountId, invoiceId: invRow.id, amountCents: w.amountCents, reason: `Write-off ${w.requestRef}: ${w.reason}`, requestedByUserId: w.requestedByUserId, approvedByUserId: ctx.user.id, approvedAt: new Date(), status: "approved" });
+        await db.insert(customerCredits).values({ creditRef, orgRef: ownerFor(scope), financialEntityId: invRow.financialEntityId, customer: invRow.customer, customerAccountId: invRow.customerAccountId, invoiceId: invRow.id, amountCents: w.amountCents, reason: `Write-off ${w.requestRef}: ${w.reason}`, requestedByUserId: w.requestedByUserId, approvedByUserId: ctx.user.id, approvedAt: new Date(), status: "approved" });
         if (balance - w.amountCents === 0) await db.update(invoices).set({ status: "paid" }).where(eq(invoices.id, invRow.id));
         return { requestRef: w.requestRef, status: "approved" as const, creditRef, invoiceBalanceAfterCents: balance - w.amountCents };
       }

@@ -11,7 +11,7 @@ import { queueCustomerAlert } from "./customerAlertService";
 import { MEASUREMENT_BASIS, normaliseUnit, priceLineAndRecord } from "./_core/linePricing";
 import { approvalDecision, decideBillable, termsInEffect, type Terms } from "./_core/contractTerms";
 import { storagePut } from "./storage";
-import { actingScopeFor, fieldTicketInScope, getDb, jobInScope, unitInScope } from "./db";
+import { actingScopeFor, fieldTicketInScope, getDb, jobInScope, mintedIn, ownerFor, unitInScope, type TenantScope } from "./db";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { fieldDevices } from "../drizzle/schema";
 import { canonicalSignaturePayload, checkSignatureAttestation } from "./_core/deviceSignature";
@@ -23,10 +23,30 @@ const EVENT_TYPES = Object.keys(EVENT_CLOCK) as [EventType, ...EventType[]];
 const AUTHORITIES = z.enum(["work_confirmation", "time_confirmation", "quantity_confirmation", "standby_approval", "change_order_authorization", "invoice_approval"]);
 const POST_SITE_AUTH = z.object({ disposalRequired: z.boolean(), travelToDisposal: z.boolean(), disposalWait: z.boolean(), disposalUnload: z.boolean(), returnTravel: z.enum(["yes", "no", "per_contract"]), capRule: z.enum(["none", "per_contract"]), restockingBillable: z.literal(false), postTripBillable: z.literal(false) });
 
-export async function loadTicket(ticketNumber: string) {
+/**
+ * Which boundary a ticket lookup is bounded by.
+ *
+ * `loadTicket` serves two callers on two different axes: internal procedures,
+ * where the boundary is the acting organization, and the customer portal, where
+ * it is the account the external identity is bound to. Once a ticket number
+ * stops being globally unique (0172) a lookup with NO boundary returns
+ * whichever row the database yields, so the axis is a required argument rather
+ * than an optional one somebody can forget.
+ */
+export type TicketAccess =
+  | { by: "organization"; scope: TenantScope }
+  | { by: "customer_account"; accountId: number };
+
+export async function loadTicket(ticketNumber: string, access: TicketAccess) {
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-  const t = (await db.select().from(fieldTickets).where(eq(fieldTickets.ticketNumber, ticketNumber)).limit(1))[0];
+  const where = access.by === "organization"
+    ? mintedIn(fieldTickets, fieldTickets.ticketNumber, ticketNumber, access.scope)
+    : and(eq(fieldTickets.ticketNumber, ticketNumber), eq(fieldTickets.customerAccountId, access.accountId));
+  const t = (await db.select().from(fieldTickets).where(where).limit(1))[0];
+  // Same answer either way: "not yours" must not be distinguishable from
+  // "no such ticket", which is why the portal's account check now lives in the
+  // query rather than after it.
   if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Field ticket not found" });
   const [events, lines, sigs, revisions, job, account] = await Promise.all([
     db.select().from(fieldTicketEvents).where(eq(fieldTicketEvents.fieldTicketId, t.id)).orderBy(asc(fieldTicketEvents.occurredAt)),
@@ -53,8 +73,8 @@ export async function recordSignature(args: { ticketNumber: string; signer: { na
  * `device_auth`: a method that names a device without proving one is a label, which is what this
  * replaces.
  */
-deviceAttestation?: { deviceRef: string; keyFingerprint: string; signatureP1363Base64: string; signedAt: Date } | null; requested: Authority[]; extraWorkCents: number; postSiteAuthorization: PostSiteAuthorization | null; snapshotHash: string; authority: { signatoryName: string; mayConfirmWork: boolean; maySignTicket: boolean; mayApproveStandby: boolean; extraWorkLimitCents: number | null; mayApproveInvoice: boolean; mayChangeRates: boolean; validTo: Date | null; status: "active" | "revoked" } | null; gps: { latitude: number; longitude: number } | null; offline: boolean; witnessedByOperatorId: number | null; externalIdentityId: number | null; paperScanEvidenceRecordId: number | null; generatedByUserId: number | null }) {
-  const x = await loadTicket(args.ticketNumber);
+deviceAttestation?: { deviceRef: string; keyFingerprint: string; signatureP1363Base64: string; signedAt: Date } | null; requested: Authority[]; extraWorkCents: number; postSiteAuthorization: PostSiteAuthorization | null; snapshotHash: string; authority: { signatoryName: string; mayConfirmWork: boolean; maySignTicket: boolean; mayApproveStandby: boolean; extraWorkLimitCents: number | null; mayApproveInvoice: boolean; mayChangeRates: boolean; validTo: Date | null; status: "active" | "revoked" } | null; gps: { latitude: number; longitude: number } | null; offline: boolean; witnessedByOperatorId: number | null; externalIdentityId: number | null; paperScanEvidenceRecordId: number | null; generatedByUserId: number | null; access: TicketAccess }) {
+  const x = await loadTicket(args.ticketNumber, args.access);
   if (x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Ticket already signed (revision ${x.signature.revision}); a later change is a new revision, not a second signature` });
   if (!x.t.completedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Site work has not been marked complete — prepare the ticket first" });
   if (args.method === "paper_scan" && !args.paperScanEvidenceRecordId) throw new TRPCError({ code: "BAD_REQUEST", message: "A paper signature needs the scan in the evidence vault — the original is preserved, OCR never replaces it" });
@@ -96,9 +116,10 @@ deviceAttestation?: { deviceRef: string; keyFingerprint: string; signatureP1363B
   return { documentRef, revision: 1, snapshotHash: hash, exercised: d.exercised, refused: d.refused, withinAuthority: d.withinAuthority, signedAt: now };
 }
 
-export async function decideLine(args: { ticketNumber: string; lineId: number; disposition: "accepted" | "disputed"; customerQuantity: number | null; customerStatement: string | null; customerAccountIdMustMatch: number | null }) {
-  const x = await loadTicket(args.ticketNumber);
-  if (args.customerAccountIdMustMatch != null && x.t.customerAccountId !== args.customerAccountIdMustMatch) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket on this account" });
+export async function decideLine(args: { ticketNumber: string; lineId: number; disposition: "accepted" | "disputed"; customerQuantity: number | null; customerStatement: string | null; access: TicketAccess }) {
+  // `customerAccountIdMustMatch` used to express the portal boundary as a check
+  // AFTER an unbounded lookup. It is the access axis now, so it is in the query.
+  const x = await loadTicket(args.ticketNumber, args.access);
   if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Lines are decided against a signed ticket" });
   const line = x.lines.find(l => l.id === args.lineId);
   if (!line) throw new TRPCError({ code: "NOT_FOUND", message: "Line not found" });
@@ -127,8 +148,8 @@ export const closeoutRouter = router({
     .input(z.object({ scope: z.enum(["job", "trip", "load", "service_event"]).default("job"), jobId: z.number().int().positive(), tripId: z.number().int().positive().nullable().optional(), customerAccountRef: z.string().max(64).nullable().optional(), unitId: z.number().int().positive().nullable().optional(), operatorId: z.number().int().positive().nullable().optional(), serviceDescription: z.string().max(220).nullable().optional(), afeNumber: z.string().max(80).nullable().optional(), postSiteRequired: z.boolean().default(false) }))
     .mutation(async ({ ctx, input }) => {
       // P4.1: a ticket opens only on a job or unit in the caller's scope.
+      const scope = await actingScopeFor(ctx.user.id);
       {
-        const scope = await actingScopeFor(ctx.user.id);
         if (input.jobId != null && !(await jobInScope(input.jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
         if (input.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
       }
@@ -140,7 +161,7 @@ export const closeoutRouter = router({
       const ticketNumber = (await nextTrackingNumber(db, { sequenceType: "FT" })).trackingNumber;
       const job = (await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, input.jobId)).limit(1))[0];
       if (!job) throw new TRPCError({ code: "NOT_FOUND", message: "Job not found — a field ticket always belongs to a job" });
-      await db.insert(fieldTickets).values({ ticketNumber, scope: input.scope, jobId: input.jobId, tripId: input.tripId ?? null, customerAccountId: acct?.id ?? null, unitId: input.unitId ?? null, operatorId: input.operatorId ?? null, serviceDescription: input.serviceDescription ?? null, afeNumber: input.afeNumber ?? null, postSiteRequired: input.postSiteRequired, status: "draft", signatureStatus: "unsigned", updatedAt: new Date() });
+      await db.insert(fieldTickets).values({ ticketNumber, orgRef: ownerFor(scope), scope: input.scope, jobId: input.jobId, tripId: input.tripId ?? null, customerAccountId: acct?.id ?? null, unitId: input.unitId ?? null, operatorId: input.operatorId ?? null, serviceDescription: input.serviceDescription ?? null, afeNumber: input.afeNumber ?? null, postSiteRequired: input.postSiteRequired, status: "draft", signatureStatus: "unsigned", updatedAt: new Date() });
       return { ticketNumber };
     }),
 
@@ -149,7 +170,7 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
-      const x = await loadTicket(input.ticketNumber);
+      const x = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       if (x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Ticket is signed — a later addition is a supplement, not an edit" });
       const ins = await x.db.insert(fieldTicketLines).values({ fieldTicketId: x.t.id, lineKind: input.lineKind, serviceCode: input.serviceCode ?? null, description: input.description, quantity: input.quantity ?? null, quantityUnit: input.quantityUnit ?? null, measurementMethod: input.measurementMethod, sourceTrackingNumber: input.sourceTrackingNumber ?? null, disposition: "not_presented", operatorStatement: input.operatorStatement ?? null });
       const lineId = Number(ins[0]?.insertId ?? 0);
@@ -174,7 +195,7 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
-      const x = await loadTicket(input.ticketNumber);
+      const x = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       const meta = EVENT_CLOCK[input.eventType];
       if (x.signature && meta.phase === "site") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The site is signed — site events are frozen in the signed revision" });
       if (input.endedAt && input.endedAt < input.occurredAt) throw new TRPCError({ code: "BAD_REQUEST", message: "An event cannot end before it starts" });
@@ -200,7 +221,7 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
-      const x = await loadTicket(input.ticketNumber);
+      const x = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       const e = x.events.find(v => v.id === input.eventId);
       if (!e) throw new TRPCError({ code: "NOT_FOUND", message: "Event not found" });
       if (e.endedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Event already ended — a correction is a new event with source human_corrected" });
@@ -214,14 +235,15 @@ export const closeoutRouter = router({
   /** Observed weather, a road hazard, a hold: contemporaneous evidence, classified by the contract or held at REVIEW. */
   delayRecord: roleProcedure("closeout.delayRecord")
     .input(z.object({ ticketNumber: z.string().max(64).nullable().optional(), jobId: z.number().int().positive().nullable().optional(), tripId: z.number().int().positive().nullable().optional(), unitId: z.number().int().positive().nullable().optional(), kind: z.enum(["customer_hold", "disposal_queue", "weather", "road_hazard", "collision", "driver_break", "breakdown", "other"]), hazardType: z.string().max(60).nullable().optional(), severity: z.enum(["low", "medium", "high"]).default("medium"), observedAt: z.coerce.date(), endedAt: z.coerce.date().nullable().optional(), observedByOperatorId: z.number().int().positive().nullable().optional(), observation: z.string().min(3).max(600), latitude: z.number().nullable().optional(), longitude: z.number().nullable().optional(), externalSourceStatus: z.enum(["available", "unavailable", "not_checked"]).default("not_checked"), externalSourceNote: z.string().max(300).nullable().optional(), evidenceRecordId: z.number().int().positive().nullable().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const x = input.ticketNumber ? await loadTicket(input.ticketNumber) : null;
+      const scope = await actingScopeFor(ctx.user.id);
+      const x = input.ticketNumber ? await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) }) : null;
       const rules = x?.account?.delayBillingRulesJson ? (JSON.parse(x.account.delayBillingRulesJson) as DelayRules) : null;
       const c = classifyDelay(input.kind, rules);
       const delayRef = (await nextTrackingNumber(db, { sequenceType: "DLY" })).trackingNumber;
-      await db.insert(delayEvents).values({ delayRef, jobId: input.jobId ?? x?.t.jobId ?? null, tripId: input.tripId ?? x?.t.tripId ?? null, unitId: input.unitId ?? x?.t.unitId ?? null, fieldTicketId: x?.t.id ?? null, kind: input.kind, hazardType: input.hazardType ?? null, severity: input.severity, observedAt: input.observedAt, endedAt: input.endedAt ?? null, observedByOperatorId: input.observedByOperatorId ?? null, observation: input.observation, latitude: input.latitude ?? null, longitude: input.longitude ?? null, externalSourceStatus: input.externalSourceStatus, externalSourceNote: input.externalSourceNote ?? null, billingClassification: c.classification, classificationRuleRef: c.ruleRef, broadcast: input.kind === "road_hazard", evidenceRecordId: input.evidenceRecordId ?? null });
+      await db.insert(delayEvents).values({ delayRef, orgRef: ownerFor(scope), jobId: input.jobId ?? x?.t.jobId ?? null, tripId: input.tripId ?? x?.t.tripId ?? null, unitId: input.unitId ?? x?.t.unitId ?? null, fieldTicketId: x?.t.id ?? null, kind: input.kind, hazardType: input.hazardType ?? null, severity: input.severity, observedAt: input.observedAt, endedAt: input.endedAt ?? null, observedByOperatorId: input.observedByOperatorId ?? null, observation: input.observation, latitude: input.latitude ?? null, longitude: input.longitude ?? null, externalSourceStatus: input.externalSourceStatus, externalSourceNote: input.externalSourceNote ?? null, billingClassification: c.classification, classificationRuleRef: c.ruleRef, broadcast: input.kind === "road_hazard", evidenceRecordId: input.evidenceRecordId ?? null });
       return { delayRef, billingClassification: c.classification, ruleRef: c.ruleRef, broadcast: input.kind === "road_hazard" };
     }),
 
@@ -230,12 +252,13 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const scope = await actingScopeFor(ctx.user.id);
       const acct = (await db.select({ id: customerAccounts.id }).from(customerAccounts).where(eq(customerAccounts.accountRef, input.customerAccountRef)).limit(1))[0];
       if (!acct) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
       let externalIdentityId: number | null = null;
       if (input.externalIdentityRef) { const { externalIdentities } = await import("../drizzle/schema"); const ei = (await db.select({ id: externalIdentities.id, customerAccountId: externalIdentities.customerAccountId }).from(externalIdentities).where(eq(externalIdentities.identityRef, input.externalIdentityRef)).limit(1))[0]; if (!ei || ei.customerAccountId !== acct.id) throw new TRPCError({ code: "BAD_REQUEST", message: "External identity is not this account's" }); externalIdentityId = ei.id; }
       const authorityRef = (await nextTrackingNumber(db, { sequenceType: "SIG" })).trackingNumber;
-      await db.insert(signatoryAuthorities).values({ authorityRef, customerAccountId: acct.id, signatoryName: input.signatoryName, signatoryRole: input.signatoryRole ?? null, externalIdentityId, mayConfirmWork: input.mayConfirmWork, maySignTicket: input.maySignTicket, mayApproveStandby: input.mayApproveStandby, extraWorkLimitCents: input.extraWorkLimitCents ?? null, mayApproveInvoice: input.mayApproveInvoice, mayChangeRates: input.mayChangeRates, mayAcceptQuotes: input.mayAcceptQuotes, mayAnswerRfis: input.mayAnswerRfis, validTo: input.validTo ?? null, recordedByUserId: ctx.user.id });
+      await db.insert(signatoryAuthorities).values({ authorityRef, orgRef: ownerFor(scope), customerAccountId: acct.id, signatoryName: input.signatoryName, signatoryRole: input.signatoryRole ?? null, externalIdentityId, mayConfirmWork: input.mayConfirmWork, maySignTicket: input.maySignTicket, mayApproveStandby: input.mayApproveStandby, extraWorkLimitCents: input.extraWorkLimitCents ?? null, mayApproveInvoice: input.mayApproveInvoice, mayChangeRates: input.mayChangeRates, mayAcceptQuotes: input.mayAcceptQuotes, mayAnswerRfis: input.mayAnswerRfis, validTo: input.validTo ?? null, recordedByUserId: ctx.user.id });
       return { authorityRef };
     }),
 
@@ -245,10 +268,10 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
-      const x = await loadTicket(input.ticketNumber);
+      const x = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       if (x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Ticket is signed" });
       await x.db.update(fieldTickets).set({ completedAt: input.siteWorkCompleteAt, status: "presented", ...(input.postSiteRequired != null ? { postSiteRequired: input.postSiteRequired } : {}), updatedAt: new Date() }).where(eq(fieldTickets.id, x.t.id));
-      const y = await loadTicket(input.ticketNumber);
+      const y = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       const { snapshot, hash, findings } = snapshotFor(y);
       await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "signoff_ready", ticketNumber: x.t.ticketNumber, subjectRef: `${x.t.ticketNumber}:${hash.slice(0, 12)}` });
       return { snapshot, snapshotHash: hash, findings };
@@ -260,15 +283,15 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
-      const x = await loadTicket(input.ticketNumber);
+      const x = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       const auth = x.t.customerAccountId ? (await x.db.select().from(signatoryAuthorities).where(and(eq(signatoryAuthorities.customerAccountId, x.t.customerAccountId), eq(signatoryAuthorities.signatoryName, input.signer.name))).orderBy(desc(signatoryAuthorities.id)).limit(1))[0] : undefined;
-      return recordSignature({ ticketNumber: input.ticketNumber, signer: { name: input.signer.name, company: input.signer.company, role: input.signer.role ?? null, phone: input.signer.phone ?? null }, method: input.method, requested: input.authorities, extraWorkCents: input.extraWorkCents, postSiteAuthorization: input.postSiteAuthorization ?? null, snapshotHash: input.snapshotHash, authority: auth ? { signatoryName: auth.signatoryName, mayConfirmWork: auth.mayConfirmWork, maySignTicket: auth.maySignTicket, mayApproveStandby: auth.mayApproveStandby, extraWorkLimitCents: auth.extraWorkLimitCents, mayApproveInvoice: auth.mayApproveInvoice, mayChangeRates: auth.mayChangeRates, validTo: auth.validTo, status: auth.status } : null, gps: input.gps ?? null, offline: input.offline, witnessedByOperatorId: input.witnessedByOperatorId ?? null, externalIdentityId: null, paperScanEvidenceRecordId: input.paperScanEvidenceRecordId ?? null, generatedByUserId: ctx.user.id });
+      return recordSignature({ ticketNumber: input.ticketNumber, signer: { name: input.signer.name, company: input.signer.company, role: input.signer.role ?? null, phone: input.signer.phone ?? null }, method: input.method, requested: input.authorities, extraWorkCents: input.extraWorkCents, postSiteAuthorization: input.postSiteAuthorization ?? null, snapshotHash: input.snapshotHash, authority: auth ? { signatoryName: auth.signatoryName, mayConfirmWork: auth.mayConfirmWork, maySignTicket: auth.maySignTicket, mayApproveStandby: auth.mayApproveStandby, extraWorkLimitCents: auth.extraWorkLimitCents, mayApproveInvoice: auth.mayApproveInvoice, mayChangeRates: auth.mayChangeRates, validTo: auth.validTo, status: auth.status } : null, gps: input.gps ?? null, offline: input.offline, witnessedByOperatorId: input.witnessedByOperatorId ?? null, externalIdentityId: null, paperScanEvidenceRecordId: input.paperScanEvidenceRecordId ?? null, generatedByUserId: ctx.user.id, access: { by: "organization", scope: await actingScopeFor(ctx.user.id) } });
     }),
 
   /** The office records the customer's per-line position from a paper ticket. Both sides stay. */
   lineDecide: roleProcedure("closeout.lineDecide")
     .input(z.object({ ticketNumber: z.string().min(1).max(64), lineId: z.number().int().positive(), disposition: z.enum(["accepted", "disputed"]), customerQuantity: z.number().nullable().optional(), customerStatement: z.string().max(220).nullable().optional() }))
-    .mutation(async ({ input }) => decideLine({ ticketNumber: input.ticketNumber, lineId: input.lineId, disposition: input.disposition, customerQuantity: input.customerQuantity ?? null, customerStatement: input.customerStatement ?? null, customerAccountIdMustMatch: null })),
+    .mutation(async ({ ctx, input }) => decideLine({ ticketNumber: input.ticketNumber, lineId: input.lineId, disposition: input.disposition, customerQuantity: input.customerQuantity ?? null, customerStatement: input.customerStatement ?? null, access: { by: "organization", scope: await actingScopeFor(ctx.user.id) } })),
 
   /** Stage 2: what happened after the lease, under what was signed, with the disposal ticket and GPS beside each other. */
   supplementPrepare: roleProcedure("closeout.supplementPrepare")
@@ -278,11 +301,12 @@ export const closeoutRouter = router({
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
-      const x = await loadTicket(input.ticketNumber);
+      const x = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A supplement follows a signed site ticket" });
       if (!x.t.completedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Site work completion is not recorded" });
       const authorization = x.signature.postSiteAuthorizationJson ? (JSON.parse(x.signature.postSiteAuthorizationJson) as PostSiteAuthorization) : null;
-      const dt = input.disposalTicketNumber ? (await x.db.select().from(disposalTickets).where(eq(disposalTickets.ticketNumber, input.disposalTicketNumber)).limit(1))[0] : undefined;
+      const scope = await actingScopeFor(ctx.user.id);
+      const dt = input.disposalTicketNumber ? (await x.db.select().from(disposalTickets).where(mintedIn(disposalTickets, disposalTickets.ticketNumber, input.disposalTicketNumber, scope)).limit(1))[0] : undefined;
       const stop = input.facilityTripStopId ? (await x.db.select().from(tripStops).where(eq(tripStops.id, input.facilityTripStopId)).limit(1))[0] : undefined;
       // v22.2 — approved terms decide return travel where the signatory wrote "per contract"; the v21.11 JSON placeholder is the fallback.
       const contract = x.terms ? { returnTravel: x.terms.returnTravelBillable } : x.account?.postSiteBillingRuleJson ? (JSON.parse(x.account.postSiteBillingRuleJson) as { returnTravel?: "yes" | "no" }) : null;
@@ -301,7 +325,7 @@ export const closeoutRouter = router({
     .query(async ({ ctx, input }) => {
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
-      const x = await loadTicket(input.ticketNumber);
+      const x = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       const supplement = await latestSupplement(x);
       const loads = x.lines.filter(l => l.lineKind === "load").length;
       const withEvidence = x.lines.filter(l => l.lineKind === "load" && l.sourceTrackingNumber).length;
@@ -313,7 +337,7 @@ export const closeoutRouter = router({
     .query(async ({ ctx, input }) => {
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
-      const x = await loadTicket(input.ticketNumber);
+      const x = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       const snap = x.revisions[0] ? (JSON.parse(x.revisions[0].snapshotJson) as SiteSnapshot) : snapshotFor(x).snapshot;
       return whyTheseHours(snap, x.signature?.signerName ?? null, await latestSupplement(x));
     }),
@@ -336,7 +360,7 @@ export const closeoutRouter = router({
       const existing = (await db.select().from(fieldTicketDocuments).where(and(eq(fieldTicketDocuments.revisionId, rev.id), eq(fieldTicketDocuments.kind, kind))).limit(1))[0];
       if (existing) return { documentRef: existing.documentRef, contentHash: existing.contentHash, byteLength: existing.byteLength, alreadyRendered: true as const };
       const t = (await db.select().from(fieldTickets).where(eq(fieldTickets.id, rev.fieldTicketId)).limit(1))[0]!;
-      const x = await loadTicket(t.ticketNumber);
+      const x = await loadTicket(t.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       const r1 = x.revisions.find(r => r.revision === 1) ?? x.revisions[0]!;
       const snap = JSON.parse(r1.snapshotJson) as SiteSnapshot;
       const body = rev.kind === "site_signed" ? null : JSON.parse(rev.snapshotJson) as { supplement: Supplement };
@@ -380,8 +404,10 @@ export const closeoutRouter = router({
     .input(z.object({ ticketNumber: z.string().max(64).optional(), jobId: z.number().int().positive().optional(), unitId: z.number().int().positive().optional(), observedAt: z.coerce.date(), observerType: z.enum(["worker", "supervisor", "external_source"]), externalSourceName: z.string().max(120).optional(), conditions: z.array(z.string().min(1).max(40)).min(1).max(12), visibility: z.enum(["good", "reduced", "poor", "nil", "unknown"]).default("unknown"), roadState: z.enum(["dry", "wet", "snow", "ice", "mud", "flooded", "unknown"]).default("unknown"), severity: z.enum(["minor", "moderate", "severe"]), operationalEffect: z.string().max(400).optional(), gps: z.object({ latitude: z.number(), longitude: z.number() }).optional(), evidenceRecordId: z.number().int().positive().optional() }))
     .mutation(async ({ ctx, input }) => {
       // P4.1: whichever anchor the observation names must be in the caller's scope.
+      // Hoisted out of the guard block: the same scope now also bounds the
+      // ticket lookup below, which used to address a ticket by number alone.
+      const scope = await actingScopeFor(ctx.user.id);
       {
-        const scope = await actingScopeFor(ctx.user.id);
         if (input.ticketNumber && !(await fieldTicketInScope(input.ticketNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
         if (input.jobId != null && !(await jobInScope(input.jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
         if (input.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
@@ -389,7 +415,7 @@ export const closeoutRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (input.observerType === "external_source" && !input.externalSourceName) throw new TRPCError({ code: "BAD_REQUEST", message: "An external source must be named — it is never recorded as a worker's observation" });
-      const t = input.ticketNumber ? (await db.select({ id: fieldTickets.id, jobId: fieldTickets.jobId }).from(fieldTickets).where(eq(fieldTickets.ticketNumber, input.ticketNumber)).limit(1))[0] : undefined;
+      const t = input.ticketNumber ? (await db.select({ id: fieldTickets.id, jobId: fieldTickets.jobId }).from(fieldTickets).where(mintedIn(fieldTickets, fieldTickets.ticketNumber, input.ticketNumber, scope)).limit(1))[0] : undefined;
       if (input.ticketNumber && !t) throw new TRPCError({ code: "NOT_FOUND", message: "Ticket not found" });
       const observationRef = `WX-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
       await db.insert(weatherObservations).values({ observationRef, jobId: input.jobId ?? t?.jobId ?? null, unitId: input.unitId ?? null, fieldTicketId: t?.id ?? null, observedAt: input.observedAt, observerType: input.observerType, observerUserId: input.observerType === "external_source" ? null : ctx.user.id, externalSourceName: input.externalSourceName ?? null, conditionsJson: JSON.stringify(input.conditions), visibility: input.visibility, roadState: input.roadState, severity: input.severity, operationalEffect: input.operationalEffect ?? null, latitude: input.gps?.latitude ?? null, longitude: input.gps?.longitude ?? null, evidenceRecordId: input.evidenceRecordId ?? null });
@@ -400,15 +426,17 @@ export const closeoutRouter = router({
     .input(z.object({ ticketNumber: z.string().max(64).optional(), jobId: z.number().int().positive().optional(), unitId: z.number().int().positive().optional(), observedAt: z.coerce.date(), hazard: z.enum(["snow_ice", "mud", "flooding", "washout", "poor_visibility", "high_wind", "construction", "road_closure", "restricted_access", "soft_road", "steep_grade", "chain_up", "traffic", "collision_ahead", "wildlife", "bridge_restriction", "lease_road_damage", "locked_gate", "customer_traffic_control", "other"]), severity: z.enum(["minor", "moderate", "severe"]), direction: z.string().max(40).optional(), routeRef: z.string().max(120).optional(), description: z.string().max(600).optional(), gps: z.object({ latitude: z.number(), longitude: z.number() }).optional(), evidenceRecordId: z.number().int().positive().optional() }))
     .mutation(async ({ ctx, input }) => {
       // P4.1: whichever anchor the observation names must be in the caller's scope.
+      // Hoisted out of the guard block: the same scope now also bounds the
+      // ticket lookup below, which used to address a ticket by number alone.
+      const scope = await actingScopeFor(ctx.user.id);
       {
-        const scope = await actingScopeFor(ctx.user.id);
         if (input.ticketNumber && !(await fieldTicketInScope(input.ticketNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
         if (input.jobId != null && !(await jobInScope(input.jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
         if (input.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
       }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const t = input.ticketNumber ? (await db.select({ id: fieldTickets.id, jobId: fieldTickets.jobId }).from(fieldTickets).where(eq(fieldTickets.ticketNumber, input.ticketNumber)).limit(1))[0] : undefined;
+      const t = input.ticketNumber ? (await db.select({ id: fieldTickets.id, jobId: fieldTickets.jobId }).from(fieldTickets).where(mintedIn(fieldTickets, fieldTickets.ticketNumber, input.ticketNumber, scope)).limit(1))[0] : undefined;
       if (input.ticketNumber && !t) throw new TRPCError({ code: "NOT_FOUND", message: "Ticket not found" });
       const observationRef = `RH-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
       await db.insert(roadHazardObservations).values({ observationRef, jobId: input.jobId ?? t?.jobId ?? null, unitId: input.unitId ?? null, fieldTicketId: t?.id ?? null, observedAt: input.observedAt, reportedByUserId: ctx.user.id, hazard: input.hazard, severity: input.severity, direction: input.direction ?? null, routeRef: input.routeRef ?? null, description: input.description ?? null, latitude: input.gps?.latitude ?? null, longitude: input.gps?.longitude ?? null, evidenceRecordId: input.evidenceRecordId ?? null });
@@ -453,7 +481,7 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
-      const x = await loadTicket(input.ticketNumber);
+      const x = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       if (x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The ticket is signed — its snapshot stands; a supplement carries later decisions" });
       let decided = 0; const results: { eventId: number; customerBillable: string; ruleRef: string | null }[] = [];
       for (const e of x.events) {
@@ -479,7 +507,7 @@ export const closeoutRouter = router({
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const x = await loadTicket(input.ticketNumber);
+      const x = await loadTicket(input.ticketNumber, { by: "organization", scope: await actingScopeFor(ctx.user.id) });
       if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A completion package needs a signed ticket" });
       const latest = [...x.revisions].sort((a, b) => b.revision - a.revision)[0]!;
       const [docs, adj, jobLoads] = await Promise.all([

@@ -66,9 +66,9 @@ async function authorityFor(e: ExternalContext): Promise<Authority> {
 
 /** A customer's ticket, or "no such ticket on this account". The binding decides. */
 async function ownTicket(e: ExternalContext, ticketNumber: string) {
-  const x = await loadTicket(ticketNumber);
-  if (x.t.customerAccountId !== e.accountId) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket on this account" });
-  return x;
+  // The account IS the boundary here — the portal has no acting organization —
+  // so it goes into the query rather than being checked after the fact.
+  return loadTicket(ticketNumber, { by: "customer_account", accountId: e.accountId });
 }
 
 export const portalRouter = router({
@@ -184,7 +184,7 @@ export const portalRouter = router({
     const toSign: { ticketNumber: string; siteWorkCompleteAt: Date | null }[] = [];
     const toDecide: { ticketNumber: string; lineId: number; description: string; operatorStatement: string | null }[] = [];
     for (const t of tickets) {
-      const x = await loadTicket(t.ticketNumber);
+      const x = await loadTicket(t.ticketNumber, { by: "customer_account", accountId: e.accountId });
       if (t.completedAt && !x.signature) toSign.push({ ticketNumber: t.ticketNumber, siteWorkCompleteAt: t.completedAt });
       for (const l of x.lines) if (l.disposition === "not_presented") toDecide.push({ ticketNumber: t.ticketNumber, lineId: l.id, description: l.description, operatorStatement: l.operatorStatement });
     }
@@ -265,7 +265,7 @@ export const portalRouter = router({
     const tickets = await db.select().from(fieldTickets).where(eq(fieldTickets.customerAccountId, e.accountId)).orderBy(desc(fieldTickets.id)).limit(100);
     const rows = [];
     for (const t of tickets) {
-      const x = await loadTicket(t.ticketNumber);
+      const x = await loadTicket(t.ticketNumber, { by: "customer_account", accountId: e.accountId });
       const jobRow = t.jobId ? (await db.select({ jobCode: jobs.jobCode, location: jobs.location }).from(jobs).where(eq(jobs.id, t.jobId)).limit(1))[0] : undefined;
       const safety = t.jobId ? await db.select({ eventType: safetyEvents.eventType, severity: safetyEvents.severity, status: safetyEvents.status, occurredAt: safetyEvents.occurredAt }).from(safetyEvents).where(eq(safetyEvents.jobId, t.jobId)) : [];
       const events = x.events.map(ev => ({ eventType: ev.eventType as EventType, occurredAt: ev.occurredAt, endedAt: ev.endedAt }));
@@ -571,7 +571,7 @@ export const portalRouter = router({
       if (!input.ticketNumber) return { tickets, detail: null };
       const t = tickets.find(x => x.ticketNumber === input.ticketNumber);
       if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket on this account" });
-      const x = await loadTicket(t.ticketNumber);
+      const x = await loadTicket(t.ticketNumber, { by: "customer_account", accountId: e.accountId });
       const revisions = x.revisions.map(r => ({ documentRef: r.documentRef, revision: r.revision, kind: r.kind, snapshotHash: r.snapshotHash, generatedAt: r.generatedAt }));
       const snap = x.revisions[0] ? (JSON.parse(x.revisions[0].snapshotJson) as SiteSnapshot) : snapshotFor(x).snapshot;
       const supp = [...x.revisions].reverse().find(r => r.kind === "post_site_supplement");
@@ -592,12 +592,12 @@ export const portalRouter = router({
       const acct = (await db.select({ name: customerAccounts.name }).from(customerAccounts).where(eq(customerAccounts.id, e.accountId)).limit(1))[0];
       return recordSignature({ ticketNumber: input.ticketNumber, signer: { name: e.displayName, company: acct?.name ?? "", role: auth?.signatoryRole ?? null }, // 0158: what actually happened — identity proved through the signed portal link, paired with
         // externalIdentityId. device_auth would claim an enrolled device the customer never had.
-        method: "portal_link" as const, requested: input.authorities, extraWorkCents: input.extraWorkCents, postSiteAuthorization: (input.postSiteAuthorization as PostSiteAuthorization | null | undefined) ?? null, snapshotHash: input.snapshotHash, authority: auth ? { signatoryName: auth.signatoryName, mayConfirmWork: auth.mayConfirmWork, maySignTicket: auth.maySignTicket, mayApproveStandby: auth.mayApproveStandby, extraWorkLimitCents: auth.extraWorkLimitCents, mayApproveInvoice: auth.mayApproveInvoice, mayChangeRates: auth.mayChangeRates, validTo: auth.validTo, status: auth.status } : null, gps: input.gps ?? null, offline: false, witnessedByOperatorId: null, externalIdentityId: e.identityId, paperScanEvidenceRecordId: null, generatedByUserId: null });
+        method: "portal_link" as const, requested: input.authorities, extraWorkCents: input.extraWorkCents, postSiteAuthorization: (input.postSiteAuthorization as PostSiteAuthorization | null | undefined) ?? null, snapshotHash: input.snapshotHash, authority: auth ? { signatoryName: auth.signatoryName, mayConfirmWork: auth.mayConfirmWork, maySignTicket: auth.maySignTicket, mayApproveStandby: auth.mayApproveStandby, extraWorkLimitCents: auth.extraWorkLimitCents, mayApproveInvoice: auth.mayApproveInvoice, mayChangeRates: auth.mayChangeRates, validTo: auth.validTo, status: auth.status } : null, gps: input.gps ?? null, offline: false, witnessedByOperatorId: null, externalIdentityId: e.identityId, paperScanEvidenceRecordId: null, generatedByUserId: null, access: { by: "customer_account", accountId: e.accountId } });
     }),
 
   fieldTicketLineDecide: externalProcedure("portal.fieldTicketLineDecide")
     .input(z.object({ ticketNumber: z.string().min(1).max(64), lineId: z.number().int().positive(), disposition: z.enum(["accepted", "disputed"]), customerQuantity: z.number().nullable().optional(), customerStatement: z.string().max(220).nullable().optional() }))
-    .mutation(async ({ ctx, input }) => decideLine({ ticketNumber: input.ticketNumber, lineId: input.lineId, disposition: input.disposition, customerQuantity: input.customerQuantity ?? null, customerStatement: input.customerStatement ?? null, customerAccountIdMustMatch: ext(ctx).accountId })),
+    .mutation(async ({ ctx, input }) => decideLine({ ticketNumber: input.ticketNumber, lineId: input.lineId, disposition: input.disposition, customerQuantity: input.customerQuantity ?? null, customerStatement: input.customerStatement ?? null, access: { by: "customer_account", accountId: ext(ctx).accountId } })),
 
   /** What this vendor has submitted and what LeaseOS did with it, bill by bill, to payment. Scoped by the binding. */
   vendorStatement: externalProcedure("portal.vendorStatement").query(async ({ ctx }) => {

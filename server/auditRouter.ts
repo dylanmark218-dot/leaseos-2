@@ -6,7 +6,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, mintedIn, type TenantScope } from "./db";
 import { dispatchEligibilityChecks } from "../drizzle/schema";
 import { type SQL } from "drizzle-orm";
 import { type CapabilityResult } from "./_core/interEngineStatus";
@@ -87,7 +87,7 @@ async function capabilityPictureItems(
   return items;
 }
 
-async function gather(kind: PackageKind, subjectRef: string, from: Date | null, to: Date | null): Promise<{ subjectType: string; items: RawItem[] }> {
+async function gather(kind: PackageKind, subjectRef: string, from: Date | null, to: Date | null, scope: TenantScope): Promise<{ subjectType: string; items: RawItem[] }> {
   const db = await dbOrThrow();
   const items: RawItem[] = [];
   if (kind === "vehicle") {
@@ -143,7 +143,7 @@ async function gather(kind: PackageKind, subjectRef: string, from: Date | null, 
     return { subjectType: "vendor", items };
   }
   if (kind === "job" || kind === "customer") {
-    const t = (await db.select().from(fieldTickets).where(eq(fieldTickets.ticketNumber, subjectRef)).limit(1))[0];
+    const t = (await db.select().from(fieldTickets).where(mintedIn(fieldTickets, fieldTickets.ticketNumber, subjectRef, scope)).limit(1))[0];
     if (!t) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${subjectRef} not found` });
     if (t.jobId) items.push(...await capabilityPictureItems(db, eq(dispatchEligibilityChecks.jobId, t.jobId)));
     items.push({ itemKind: "field_ticket", sourceTable: "fieldTickets", sourceId: t.id, sourceRef: t.ticketNumber, title: `Field ticket ${t.ticketNumber}`, row: row(t) });
@@ -206,7 +206,7 @@ export const auditRouter = router({
     .input(z.object({ kind: z.enum(["vehicle", "driver", "job", "customer", "incident", "tax", "cor", "insurance", "vendor"]), subjectRef: z.string().min(1).max(80), periodFrom: z.coerce.date().nullable().optional(), periodTo: z.coerce.date().nullable().optional(), recipient: z.string().min(2).max(200), purpose: z.string().min(5).max(400) }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
-      const g = await gather(input.kind, input.subjectRef, input.periodFrom ?? null, input.periodTo ?? null);
+      const g = await gather(input.kind, input.subjectRef, input.periodFrom ?? null, input.periodTo ?? null, await actingScopeFor(ctx.user.id));
       const a = assemble(input.kind, g.items);
       const packageRef = ref("PKG");
       const lines = [`Audit package ${packageRef} — ${input.kind} — subject ${g.subjectType} ${input.subjectRef}`, `For: ${input.recipient}`, `Purpose: ${input.purpose}`, `Period: ${input.periodFrom?.toISOString().slice(0, 10) ?? "open"} to ${input.periodTo?.toISOString().slice(0, 10) ?? "open"}`, `Manifest sha256 ${a.manifestHash}`, `Redaction policy ${a.manifest.policy}: ${a.manifest.redactionCount} redaction(s), ${a.manifest.withheld.length} item(s) withheld`, "", "ITEMS", "-----", ...a.manifest.items.map(i => `${String(i.seq).padStart(3)}  ${i.itemKind.padEnd(22)} ${(i.sourceRef ?? "").padEnd(24)} ${i.contentHash.slice(0, 16)}  ${i.title}${i.redactions.length ? `  [${i.redactions.length} redaction(s)]` : ""}`), "", "WITHHELD", "--------", ...(a.manifest.withheld.length ? a.manifest.withheld.map(w => `${w.itemKind} ${w.sourceRef ?? ""}: ${w.reason}`) : ["(none)"]), "", "MISSING", "-------", ...(a.manifest.missing.length ? a.manifest.missing.map(m => `${m.label} — not on file`) : ["(nothing required is missing)"]), "", "This package asserts nothing beyond the records it names. Each item's hash is over the record as released."];

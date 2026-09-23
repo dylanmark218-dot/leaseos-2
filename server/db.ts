@@ -163,6 +163,34 @@ export function orgScopeWhere<T extends { orgRef: MySqlColumn }>(table: T, scope
     : eq(table.orgRef, scope.tenantId);
 }
 
+/**
+ * A record addressed by the number printed on it, within the caller's organization.
+ *
+ * 0171/0172 — a minted number stops being globally unique. Two organizations
+ * may both hold `INV-2026-000001`, so `eq(invoices.invoiceNumber, n).limit(1)`
+ * returns whichever row the database happens to yield: a cross-tenant read AND
+ * the wrong invoice. Every lookup that addresses a record by its minted number
+ * goes through this.
+ *
+ * `orgScopeWhere` is deliberately strict for a member: it matches the
+ * organization's own rows and NOT the unattributed ones. Unknown ownership is
+ * not shared ownership — a legacy row nobody could attribute stays reachable
+ * only from the historical single-tenant scope, never from every organization
+ * at once.
+ */
+export function mintedIn<T extends { orgRef: MySqlColumn }>(table: T, column: MySqlColumn, value: string, scope: TenantScope) {
+  return and(eq(column, value), orgScopeWhere(table, scope));
+}
+
+/**
+ * The owner a newly created record gets: the acting organization, or none under
+ * the historical single-tenant scope. The same ternary every writer in this
+ * tree already spells out by hand, named once so a new writer cannot invent a
+ * third answer.
+ */
+export const ownerFor = (scope: TenantScope): string | null =>
+  scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId;
+
 export async function listJobs(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];

@@ -195,10 +195,15 @@ d("P7.3 — a facility statement is matched, never used to edit a ticket", () =>
 });
 
 d("P7.4 — receivables through the approval ladder, and by organization", () => {
-  async function invoice(entityId: number, customer: string, totalCents: number, accountId: number | null, dueAt: string) {
+  /**
+   * 0171 — an invoice belongs to a book. It used to be inserted unattributed,
+   * which a member caller can no longer see: unknown ownership is not shared
+   * ownership. The fixture says who owns it, as the router now does.
+   */
+  async function invoice(entityId: number, customer: string, totalCents: number, accountId: number | null, dueAt: string, orgRef: string | null = null) {
     const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO billingBooks (bookNumber, jobId, customer, billingState, openedAt, createdAt, updatedAt) VALUES (?, 1, ?, 'invoiced', NOW(), NOW(), NOW())", [`BB-${rnd()}`, customer]);
     const invoiceNumber = `INV-${rnd()}`;
-    await pool.execute("INSERT INTO invoices (invoiceNumber, financialEntityId, issuedAt, billingBookId, jobId, customer, customerAccountId, subtotalCents, taxCents, totalCents, currency, status, dueAt) VALUES (?, ?, '2026-08-05 00:00:00', ?, 1, ?, ?, ?, 0, ?, 'CAD', 'sent', ?)", [invoiceNumber, entityId, book.insertId, customer, accountId, totalCents, totalCents, dueAt]);
+    await pool.execute("INSERT INTO invoices (invoiceNumber, financialEntityId, issuedAt, billingBookId, jobId, customer, customerAccountId, subtotalCents, taxCents, totalCents, currency, status, dueAt, orgRef) VALUES (?, ?, '2026-08-05 00:00:00', ?, 1, ?, ?, ?, 0, ?, 'CAD', 'sent', ?, ?)", [invoiceNumber, entityId, book.insertId, customer, accountId, totalCents, totalCents, dueAt, orgRef]);
     return invoiceNumber;
   }
 
@@ -206,7 +211,7 @@ d("P7.4 — receivables through the approval ladder, and by organization", () =>
     const book = await org();
     const requester = await member(book, ["controller"]), controller = await member(book, ["controller"]), mgr1 = await member(book, ["management"]), mgr2 = await member(book, ["management"]);
     const entityId = 1_700_000 + Math.floor(Math.random() * 90_000);
-    const invoiceNumber = await invoice(entityId, "Fixture Energy", 3_500_000, null, "2026-09-04 00:00:00");
+    const invoiceNumber = await invoice(entityId, "Fixture Energy", 3_500_000, null, "2026-09-04 00:00:00", book);
     const req = await callerFor(requester).ar.creditRequest({ financialEntityId: entityId, invoiceNumber, amountCents: 3_000_000, reason: "standby disputed and conceded after the site log review" });
     await expect(callerFor(requester).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" })).rejects.toThrow(/own credit/);
     await expect(callerFor(controller).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" })).rejects.toThrow(/requires role management/);
@@ -230,7 +235,7 @@ d("P7.4 — receivables through the approval ladder, and by organization", () =>
     const requester = await member(book, ["bookkeeper"]), mgr = await member(book, ["management"]);
     await callerFor(mgr).commercialOffice.approvals.policySet({ category: "write_off", maxAmountCents: 50_000, approverRole: "management" });   // the business covers write-offs only to $500
     const entityId = 1_700_000 + Math.floor(Math.random() * 90_000);
-    const invoiceNumber = await invoice(entityId, "Fixture Energy", 800_000, null, "2026-05-01 00:00:00");
+    const invoiceNumber = await invoice(entityId, "Fixture Energy", 800_000, null, "2026-05-01 00:00:00", book);
     const w = await callerFor(requester).ar.writeOffRequest({ invoiceNumber, amountCents: 80_000, reason: "customer insolvent; trustee confirmed no distribution" });
     await expect(callerFor(mgr).ar.writeOffDecide({ requestRef: w.requestRef, decision: "approved", reason: "trustee letter on file" })).rejects.toThrow(/REVIEW — no business tier covers \$800\.00/);
     const [row] = await pool.query<mysql.RowDataPacket[]>("SELECT status FROM writeOffRequests WHERE requestRef = ?", [w.requestRef]);

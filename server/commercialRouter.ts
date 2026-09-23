@@ -11,7 +11,7 @@ import { queueCustomerAlert } from "./customerAlertService";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { toCents } from "./_core/money";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, mintedIn, ownerFor } from "./db";
 import { customerAccounts, customerCredits, customerPurchaseOrders, customerRateCardLines, customerRateCards, disposalTickets, disputeCases, externalIdentities, facilities, invoices, paymentAllocations, portalSubmissions, vendorBills, vendorBillLines, vendors } from "../drizzle/schema";
 import { commercialBillingCheck, priceLines, type PurchaseOrder } from "./_core/commercial";
 import { invoiceBalanceCents } from "./_core/accountsReceivable";
@@ -138,6 +138,7 @@ export const portalAdminRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const scope = await actingScopeFor(ctx.user.id);
       const sub = (await db.select().from(portalSubmissions).where(eq(portalSubmissions.submissionRef, input.submissionRef)).limit(1))[0];
       if (!sub) throw new TRPCError({ code: "NOT_FOUND", message: "Submission not found" });
       if (sub.status !== "submitted") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Submission is ${sub.status}` });
@@ -156,11 +157,11 @@ export const portalAdminRouter = router({
         } else if (sub.kind === "disposal_ticket") {
           const p = JSON.parse(sub.payloadJson) as DisposalTicketPayload & { scaleInAt: string; confidence?: "low" | "medium" | "high" };
           const ticketNumber = (await nextTrackingNumber(db, { sequenceType: "DSP" })).trackingNumber;
-          await db.insert(disposalTickets).values({ ticketNumber, loadId: input.loadId ?? null, facilityId: identity.facilityId!, facilityTicketNumber: p.facilityTicketNumber, scaleInAt: new Date(p.scaleInAt), grossKg: p.grossKg, tareKg: p.tareKg, netKg: p.netKg, quantity: p.quantity, quantityUnit: p.quantityUnit, verificationStatus: "needs_review", source: "facility_portal", confidence: p.confidence ?? "medium", evidenceRefs: p.scaleRecordHash ? JSON.stringify({ scaleRecordHash: p.scaleRecordHash }) : null });
+          await db.insert(disposalTickets).values({ ticketNumber, orgRef: ownerFor(scope), loadId: input.loadId ?? null, facilityId: identity.facilityId!, facilityTicketNumber: p.facilityTicketNumber, scaleInAt: new Date(p.scaleInAt), grossKg: p.grossKg, tareKg: p.tareKg, netKg: p.netKg, quantity: p.quantity, quantityUnit: p.quantityUnit, verificationStatus: "needs_review", source: "facility_portal", confidence: p.confidence ?? "medium", evidenceRefs: p.scaleRecordHash ? JSON.stringify({ scaleRecordHash: p.scaleRecordHash }) : null });
           resultRef = ticketNumber;
         } else if (sub.kind === "invoice_dispute") {
           const p = JSON.parse(sub.payloadJson) as { invoiceNumber: string; disputedAmountCents: number; reason: string };
-          const inv = (await db.select().from(invoices).where(eq(invoices.invoiceNumber, p.invoiceNumber)).limit(1))[0];
+          const inv = (await db.select().from(invoices).where(mintedIn(invoices, invoices.invoiceNumber, p.invoiceNumber, scope)).limit(1))[0];
           if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "Invoice not found" });
           const caseNumber = ref("DISP");
           await db.insert(disputeCases).values({ caseNumber, invoiceNumber: inv.invoiceNumber, jobId: inv.jobId, customer: inv.customer, raisedByName: identity.displayName, raisedByCompany: inv.customer, disputedAmountCents: p.disputedAmountCents, reasonStated: p.reason, status: "raised", raisedAt: sub.submittedAt });

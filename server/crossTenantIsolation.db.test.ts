@@ -396,9 +396,12 @@ d("the scanner names a record only when it can prove whose it is", () => {
     expect(r.links.ownershipUnverifiable).toBe(true);
     expect(r.links.alreadyLinked).toBeNull();
     expect(r.links.best).toBeNull();
+    // Distinctive values only: a bare integer id appears in ordinary JSON by
+    // coincidence (a page index, a count), so asserting on one tests nothing.
     const body = JSON.stringify(r);
-    expect(body).not.toContain(String(B.jobId));
     expect(body).not.toContain(b);
+    expect(body).not.toContain(B.jobCode);
+    expect(body).not.toContain(B.unitNumber);
   }, 30_000);
 });
 

@@ -169,7 +169,22 @@ d("the customer's live view, through the gate", () => {
     const other = await callerFor(controller).portalAdmin.identityInvite({ kind: "customer", accountRef: otherRef, email: "x@bravo.example", displayName: "Bravo" });
     const otherToken = (await portalCaller(other.invitationToken).portal.invitationAccept()).token;
     expect((await portalCaller(otherToken).portal.jobBoard()).tickets).toEqual([]);
-    await expect(portalCaller(otherToken).portal.preClearance({ ticketNumber: t.ticketNumber })).rejects.toThrow(/No such ticket on this account/);
+    /*
+     * 0171 — this used to assert "No such ticket on this account", which was a
+     * DIFFERENT message from the "Field ticket not found" a nonexistent ticket
+     * produced. Two messages is an existence oracle: it told another account's
+     * holder that the number they guessed is real. The account is now part of
+     * the query rather than a check after it, so both answer identically, and
+     * that indistinguishability is what this pins.
+     */
+    const foreign = portalCaller(otherToken).portal.preClearance({ ticketNumber: t.ticketNumber });
+    const absent = portalCaller(otherToken).portal.preClearance({ ticketNumber: `FT-NO-SUCH-${Date.now()}` });
+    const [fErr, aErr] = await Promise.all([
+      foreign.then(() => null, (e: Error) => e.message),
+      absent.then(() => null, (e: Error) => e.message),
+    ]);
+    expect(fErr).toBe(aErr);
+    expect(fErr).toMatch(/not found/i);
     expect((await portalCaller(otherToken).portal.notices()).notices).toEqual([]);
     const [log] = await pool.execute<mysql.RowDataPacket[]>("SELECT recordType FROM externalAccessLog WHERE externalIdentityId = (SELECT id FROM externalIdentities WHERE identityRef = ?) AND action = 'view' ORDER BY id", [inv.identityRef]);
     expect(log.map(l => l.recordType)).toEqual(["jobBoard", "jobBoard", "preClearance", "preClearance", "notices"]);

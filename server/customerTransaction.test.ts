@@ -150,7 +150,15 @@ d("the customer's transaction, end to end", () => {
     const otherToken = (await portalCaller(other.invitationToken).portal.invitationAccept()).token;
     expect((await portalCaller(otherToken).portal.alerts()).alerts).toEqual([]);
     expect((await portalCaller(otherToken).portal.approvalQueue()).toSign).toEqual([]);
-    await expect(portalCaller(otherToken).portal.chainOfCustody({ ticketNumber: t.ticketNumber })).rejects.toThrow(/No such ticket on this account/);
-    await expect(portalCaller(otherToken).portal.jobTimeline({ ticketNumber: t.ticketNumber })).rejects.toThrow(/No such ticket on this account/);
+    // 0171 — a ticket on another account and a ticket that does not exist must
+    // answer the same, or the difference tells the caller their guess was real.
+    for (const call of ["chainOfCustody", "jobTimeline"] as const) {
+      const [fErr, aErr] = await Promise.all([
+        portalCaller(otherToken).portal[call]({ ticketNumber: t.ticketNumber }).then(() => null, (e: Error) => e.message),
+        portalCaller(otherToken).portal[call]({ ticketNumber: `FT-NO-SUCH-${Date.now()}` }).then(() => null, (e: Error) => e.message),
+      ]);
+      expect(fErr, call).toBe(aErr);
+      expect(fErr, call).toMatch(/not found/i);
+    }
   });
 });
