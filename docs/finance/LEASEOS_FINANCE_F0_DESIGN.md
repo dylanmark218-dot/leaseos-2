@@ -5,6 +5,16 @@
 **Stops here by design**: section 5's first slice is proposed, not built. It needs an owner's approval,
 and so does the moratorium question in §2 (G15), before any code lands.
 
+> **Owner decisions, 2026-09-23.**
+> 1. F1 (the tenant-isolation slice) is approved. It is implemented; see
+>    `LEASEOS_FINANCE_F1_TENANT_ISOLATION.md`.
+> 2. The new-engine freeze stands for the financial-event, journal, export and generalized-inventory
+>    work until the one-driver / one-job gate passes. Security repairs are not frozen.
+> 3. PR #9 keeps `0170`/`0171`; the auth-workspace branch renumbers. Finance takes numbers only when
+>    a migration PR is prepared, never early.
+> 4. For P6.7, the spending limit and the approval ladder must both be satisfied. See the brief.
+> 5. No-book rows fail closed at runtime and are remediated from evidence, never assigned on read.
+
 The request was to design a Finance domain that serves three operating models: LeaseOS as a
 subledger feeding QuickBooks or similar, LeaseOS as the operational workspace with an outside
 accountant, and a future LeaseOS-native ledger. **The main survey finding changes the premise.**

@@ -3,7 +3,14 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 
-const t = initTRPC.context<TrpcContext>().create({
+/**
+ * Procedure metadata. `moneyScoped` marks a procedure whose handler receives the caller's money
+ * boundary (`ctx.money`); `financeScopeCoverage.test.ts` reads the mark from the live router, so a
+ * finance procedure added without it fails CI rather than a code review.
+ */
+export type ProcedureMeta = { moneyScoped?: true };
+
+const t = initTRPC.context<TrpcContext>().meta<ProcedureMeta>().create({
   transformer: superjson,
 });
 
@@ -133,6 +140,31 @@ export function roleProcedure(procedureName: ProcedureName) {
       });
     })
   );
+}
+
+/* ==================================================================
+ * F1 — the money boundary on a role-authorized procedure
+ * ================================================================== */
+
+import { financeScopeFor, type FinanceScope } from "./entityScope";
+import { getDb } from "../db";
+
+/**
+ * `roleProcedure` answers "may this person do this kind of thing"; this answers "in which books".
+ * The caller's organization, and the financial entities (books) it owns, are resolved from the
+ * membership — never from input — and handed to the handler as `ctx.money`. Every record the handler
+ * reads or writes is proved against it (`server/financeScope.ts`); one that fails is "not found".
+ *
+ * Wraps rather than replaces `roleProcedure(...)` so the permission map, the authorization trail and
+ * the pinned procedure counts are untouched.
+ */
+export function moneyScoped(procedure: ReturnType<typeof roleProcedure>) {
+  return procedure.meta({ moneyScoped: true }).use(async ({ ctx, next }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const money: FinanceScope = await financeScopeFor(db, ctx.user.id);
+    return next({ ctx: { ...ctx, money } });
+  });
 }
 
 /* ==================================================================

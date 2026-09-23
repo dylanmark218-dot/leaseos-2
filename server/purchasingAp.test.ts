@@ -321,9 +321,12 @@ d("the flat tire, end to end", () => {
     expect(after[0].status).toBe("open");
 
     // Recovery: the customer's site condition caused the delay. Review, not an invoice.
-    const rec = await callerFor(bookkeeper).recovery.propose({ billRef: bill.billRef, jobId: 24198, contract: { passThroughAllowed: false }, category: "labour", causedByCustomer: true });
+    // F1 — the job is a real one in the caller's scope; a made-up job id is "not found".
+    const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, createdAt) VALUES (?, 'hydrovac', 'Recovery fixture', 'LSD 04-12-055-20W4', 'on_site', NOW())", [key("JOB").slice(0, 40)]);
+    const jobId = Number(job.insertId);
+    const rec = await callerFor(bookkeeper).recovery.propose({ billRef: bill.billRef, jobId, contract: { passThroughAllowed: false }, category: "labour", causedByCustomer: true });
     expect(rec.status).toBe("review_required");
-    const [invoices] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM invoices WHERE jobId = 24198");
+    const [invoices] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM invoices WHERE jobId = ?", [jobId]);
     expect(Number(invoices[0].n)).toBe(0);
   });
 

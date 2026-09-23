@@ -666,6 +666,8 @@ export const financeRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // F1 — the book must be the caller's organization's; any other id is "not found".
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
       const allocations = buildAllocations({
         total: input.total,
         businessUsePercent: input.businessUsePercent,
@@ -746,7 +748,9 @@ export const financeRouter = router({
         transactionDate: z.coerce.date(),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      // F1 — another book's expenses are not duplicate candidates; they are not found.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
       const existing = await svc.listExpenses(input.financialEntityId);
       // Candidates, never an automatic merge — merging the wrong pair loses a
       // real cost silently.
