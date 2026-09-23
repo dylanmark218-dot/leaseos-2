@@ -17,6 +17,7 @@ import {
   type CompanyCredentialSettings, type PlannedReminder, type WalletHolding,
 } from "./_core/credentialLifecycle";
 import type { HeldVerdict, RequirementScope } from "./_core/qualificationValidity";
+import { validateEscalation, type CredentialCategory, type EscalationPolicy } from "./_core/complianceOperations";
 import type { getDb } from "./db";
 
 type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
@@ -89,17 +90,31 @@ export async function syncCredentialPolicies(db: Db): Promise<{ created: number;
   return { created, mismatched };
 }
 
-export type TenantSettings = { thresholds: number[] | null; perCode: Record<string, Partial<CompanyCredentialSettings>> };
+export type TenantSettings = {
+  thresholds: number[] | null;
+  perCode: Record<string, Partial<CompanyCredentialSettings>>;
+  /** 0174 — the company's escalation ladders by credential category (company policy). */
+  escalation: Partial<Record<CredentialCategory | "default", EscalationPolicy>> | null;
+  /** 0174 — settings that could not be read. Reported as a system failure, never silently defaulted away. */
+  malformed: string[];
+};
 export async function tenantSettings(db: Db, tenantId: string): Promise<TenantSettings> {
   const row = (await db.select().from(credentialCompanySettings).where(eq(credentialCompanySettings.tenantId, tenantId)).limit(1))[0];
-  if (!row) return { thresholds: null, perCode: {} };
+  if (!row) return { thresholds: null, perCode: {}, escalation: null, malformed: [] };
+  const malformed: string[] = [];
   let thresholds: number[] | null = null, perCode: Record<string, Partial<CompanyCredentialSettings>> = {};
-  try { thresholds = (JSON.parse(row.warningThresholdsJson) as unknown[]).map(Number); } catch { thresholds = null; }
-  try { perCode = row.perCodeJson ? JSON.parse(row.perCodeJson) : {}; } catch { perCode = {}; }
-  return { thresholds, perCode };
+  let escalation: TenantSettings["escalation"] = null;
+  try { thresholds = (JSON.parse(row.warningThresholdsJson) as unknown[]).map(Number); if (thresholds.some(n => !Number.isFinite(n))) throw new Error("non-numeric"); } catch { thresholds = null; malformed.push("warningThresholdsJson"); }
+  try { perCode = row.perCodeJson ? JSON.parse(row.perCodeJson) : {}; } catch { perCode = {}; malformed.push("perCodeJson"); }
+  try {
+    escalation = row.escalationPolicyJson ? JSON.parse(row.escalationPolicyJson) : null;
+    for (const [k, p] of Object.entries(escalation ?? {})) if (!p || validateEscalation(p as EscalationPolicy).length) { malformed.push(`escalationPolicyJson.${k}`); delete (escalation as Record<string, unknown>)[k]; }
+  } catch { escalation = null; malformed.push("escalationPolicyJson"); }
+  return { thresholds, perCode, escalation, malformed };
 }
 export function settingsFor(s: TenantSettings, code: string): Partial<CompanyCredentialSettings> {
-  return { warningThresholdDays: s.thresholds ?? undefined, ...(s.perCode[code] ?? {}) };
+  // With an escalation ladder configured, the ladder's own thresholds govern; the flat list is the older setting.
+  return { warningThresholdDays: s.escalation ? undefined : s.thresholds ?? undefined, ...(s.perCode[code] ?? {}) };
 }
 
 /**

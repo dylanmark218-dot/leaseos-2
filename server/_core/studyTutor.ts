@@ -23,7 +23,7 @@ export type TutorPassage = {
   sourceTitle: string;
   sourceUrl: string | null;
   sourceEdition: string | null;
-  sourceReviewStatus: "unreviewed" | "reviewed" | "superseded" | "rejected";
+  sourceReviewStatus: "unreviewed" | "under_review" | "reviewed" | "superseded" | "rejected";
   section: string | null;
   jurisdiction: string | null;
   text: string;

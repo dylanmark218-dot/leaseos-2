@@ -24,7 +24,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { getDb, ownershipScopeWhere, userInScope } from "./db";
 import { crewMembers, crews, leaveRequests, operators, shiftPosts, workerQualifications } from "../drizzle/schema";
 import { resolveActingScope } from "./_core/actingScope";
 import type { DbOrTx } from "./_core/dbTypes";
@@ -41,11 +41,24 @@ const OWNER_OF: Record<string, Owner> = {
 const ownerOf = (check: ReadinessCheck): Owner =>
   OWNER_OF[check.key.split(":")[0]] ?? (check.key.startsWith("qualification") ? "safety" : "office");
 
-async function checksFor(d: DbOrTx, args: { userId: number; startsAt: Date; requiredQualifications: readonly string[] }): Promise<ReadinessCheck[]> {
+/**
+ * 0174 — the operator record for a person. This used to read `operators.id = userId`, matching a user id
+ * against an operator primary key: whichever operator happened to have that number — possibly another
+ * company's, possibly a different person — supplied the licence check. The link is `operators.userId`.
+ * Rows written before that link existed kept id = userId by convention, so an unlinked row with that id is
+ * still accepted, but only when the caller's organization owns it.
+ */
+async function operatorForUser(d: DbOrTx, userId: number, tenantId: string) {
+  const linked = (await d.select().from(operators).where(eq(operators.userId, userId)).limit(1))[0];
+  if (linked) return linked;
+  return (await d.select().from(operators).where(and(eq(operators.id, userId), isNull(operators.userId), ownershipScopeWhere("operator", operators.id, { tenantId }))).limit(1))[0];
+}
+
+async function checksFor(d: DbOrTx, args: { userId: number; tenantId: string; startsAt: Date; requiredQualifications: readonly string[] }): Promise<ReadinessCheck[]> {
   const checks: ReadinessCheck[] = [];
 
   /* Licence — the one credential operators store inline. */
-  const person = (await d.select().from(operators).where(eq(operators.id, args.userId)).limit(1))[0];
+  const person = await operatorForUser(d, args.userId, args.tenantId);
   if (!person) {
     checks.push({ key: "licence", label: "Driver record", state: "unknown", blocksShift: true, reason: "No operator record for this person — nothing about them can be established" });
   } else if (!person.licenseExpiresAt) {
@@ -88,6 +101,12 @@ async function checksFor(d: DbOrTx, args: { userId: number; startsAt: Date; requ
   return checks;
 }
 
+/** The subject must be the caller, or a person in the caller's organization. Otherwise the person does not exist here. */
+async function requireSamePerson(callerUserId: number, subjectUserId: number, tenantId: string) {
+  if (subjectUserId === callerUserId) return;
+  if (!(await userInScope(subjectUserId, { tenantId }))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${subjectUserId} not found` });
+}
+
 export const readinessRouter = router({
   /**
    * Readiness for a posted shift.
@@ -102,16 +121,15 @@ export const readinessRouter = router({
       const d = await db();
       const acting = await resolveActingScope(d, ctx.user.id);
       const userId = input.userId ?? ctx.user.id;
-      if (userId !== ctx.user.id) {
-        // Reading somebody else's readiness is a scheduling act.
-        const scope = await resolveActingScope(d, ctx.user.id);
-        if (!scope.tenantId) throw new TRPCError({ code: "FORBIDDEN", message: "No organization" });
-      }
+      // Reading somebody else's readiness is a scheduling act, and only for a person in the caller's
+      // organization. 0174: this used to check only that the caller had a tenant, so any guessed user
+      // id in any company was read — licence, qualifications, leave and crew. Not found, never forbidden.
+      await requireSamePerson(ctx.user.id, userId, acting.tenantId);
       const post = (await d.select().from(shiftPosts).where(eq(shiftPosts.postRef, input.postRef)).limit(1))[0];
       if (!post || post.tenantId !== acting.tenantId) throw new TRPCError({ code: "NOT_FOUND", message: "No such shift post" });
 
       const required = JSON.parse(post.requiredQualificationsJson) as string[];
-      const checks = await checksFor(d, { userId, startsAt: post.startsAt, requiredQualifications: required });
+      const checks = await checksFor(d, { userId, tenantId: acting.tenantId, startsAt: post.startsAt, requiredQualifications: required });
       const readiness = readyForShift({ shiftStartsAt: post.startsAt, checks });
       const routed = routeByOwner(readiness, ownerOf);
 
@@ -141,9 +159,11 @@ export const readinessRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const d = await db();
-      await resolveActingScope(d, ctx.user.id);
+      const acting = await resolveActingScope(d, ctx.user.id);
       const userId = input.userId ?? ctx.user.id;
-      const checks = await checksFor(d, { userId, startsAt: input.startsAt, requiredQualifications: input.requiredQualifications });
+      // 0174: forTime had no scope check at all. The person is checked before anything about them is read.
+      await requireSamePerson(ctx.user.id, userId, acting.tenantId);
+      const checks = await checksFor(d, { userId, tenantId: acting.tenantId, startsAt: input.startsAt, requiredQualifications: input.requiredQualifications });
       const readiness = readyForShift({ shiftStartsAt: input.startsAt, checks });
       const routed = routeByOwner(readiness, ownerOf);
       return {

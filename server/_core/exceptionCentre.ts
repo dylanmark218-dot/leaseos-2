@@ -24,6 +24,7 @@
  */
 
 import { authorize, type Permission, type RoleGrant } from "./recordsAuthorization";
+import { describeFailure, type SweepFailure } from "./complianceOperations";
 
 export type ExceptionCategory =
   | "critical" | "dispatch" | "billing" | "purchasing" | "workforce" | "fleet"
@@ -99,6 +100,12 @@ export type ExceptionSources = {
    */
   walletRenewals?: { tenantId: string; holdingRef: string; userId: number; code: string; displayName: string; targetAt: Date; targetKind: "legal_expiry" | "employer_review"; boundToDispatch: boolean }[];
   walletUnverified?: { tenantId: string; holdingRef: string; userId: number; code: string; recordedAt: Date }[];
+  /**
+   * 0174 — renewal-sweep failures. A SYSTEM failure: the sweep could not evaluate or notify. It says
+   * nothing about whether the credential is valid, and is never presented as expiry or as unknown
+   * qualification.
+   */
+  trainingSweepFailures?: { tenantId: string | null; runRef: string; failureKind: string; subjectRef: string | null; detail: string; at: Date }[];
   trainingHandoffs?: { tenantId: string; handoffRef: string; userId: number; code: string; status: string; requestedAt: Date; dueAt: Date | null }[];
   /** The disposal-facility directory's open items: sources that disagree, regulator evidence nobody reviewed, same-LSD duplicates nobody resolved. */
   facilityDirectory?: {
@@ -451,6 +458,16 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
       });
     }
   }
+  // 0174 — the renewal machinery failed. SYSTEM FAILURE: it says nothing about the credential.
+  for (const f of s.trainingSweepFailures ?? []) {
+    out.push({
+      key: `sweep-failure:${f.runRef}:${f.failureKind}:${f.subjectRef ?? "-"}`, ...(f.tenantId ? { tenantId: f.tenantId } : {}), category: "workforce", severity: "high",
+      title: `SYSTEM FAILURE — renewal sweep: ${f.failureKind.replaceAll("_", " ").toLowerCase()}`,
+      reason: describeFailure({ kind: f.failureKind as SweepFailure["kind"], tenantId: f.tenantId, subjectRef: f.subjectRef, detail: f.detail }),
+      subjectType: "scheduled_job_run", subjectId: f.runRef, action: "Investigate the failed step; the next scheduled run retries it",
+      deepLink: { portal: "training_academy", route: `/training/compliance?run=${f.runRef}` }, requiredPermission: "training.wallet.manage", since: f.at, dueAt: null,
+    });
+  }
   for (const u of s.walletUnverified ?? []) {
     out.push({
       key: `wallet:${u.holdingRef}:verify`, tenantId: u.tenantId, category: "workforce", severity: "low",
@@ -555,3 +572,45 @@ export function automationPolicyExceptions(
     dueAt: null,
   }));
 }
+
+/* ------------------------------------------------------------------ */
+/* 0174 — tenancy of every source, stated rather than inferred         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How each Exception Centre source is bounded to an organization. `loadExceptionSources(scope)` applies
+ * the rule named here in the query itself; `exceptionSourceTenancy.test.ts` fails if a source is added
+ * to `ExceptionSources` without an entry. Absence of an organization column is never read as "global":
+ * a source is global only when it says so here, with the reason.
+ */
+export type SourceTenancy =
+  | { kind: "org_scoped"; via: string }
+  | { kind: "user_scoped"; via: string }
+  | { kind: "global_reference"; reason: string };
+
+export const EXCEPTION_SOURCE_TENANCY: Record<Exclude<keyof ExceptionSources, "now">, SourceTenancy> = {
+  criticalDefects: { kind: "org_scoped", via: "maintenanceDefects.unitId → coreRecordOwnership(unit)" },
+  roadsideOpen: { kind: "org_scoped", via: "roadsideServiceEvents.unitId → coreRecordOwnership(unit)" },
+  vendorBills: { kind: "org_scoped", via: "vendorBills.financialEntityId → financialEntities.orgRef" },
+  purchaseRequests: { kind: "org_scoped", via: "purchaseAuthorizations.financialEntityId → financialEntities.orgRef" },
+  credentials: { kind: "org_scoped", via: "complianceDocuments owner (operator/unit ownership, job orgRef; carrier/user documents: single tenant only)" },
+  aiProposals: { kind: "org_scoped", via: "assistantProposals job → trip → unit ownership; none of those: single tenant only" },
+  aiQuestions: { kind: "user_scoped", via: "assistantQuestions.askedToUserId is a member of the organization" },
+  syncConflicts: { kind: "org_scoped", via: "syncConflicts.fieldDeviceId → fieldDevices.orgRef" },
+  revokedDevicesWithQueue: { kind: "org_scoped", via: "fieldDevices.orgRef" },
+  measurementDevices: { kind: "org_scoped", via: "measurementDevices.financialEntityId → financialEntities.orgRef" },
+  openCalibrationSweeps: { kind: "org_scoped", via: "calibrationSweeps → measurementDevices.financialEntityId" },
+  insurancePolicies: { kind: "org_scoped", via: "insurancePolicies.financialEntityId → financialEntities.orgRef" },
+  carrierProfileReviews: { kind: "org_scoped", via: "carrierProfileReviews.financialEntityId → financialEntities.orgRef (before the limit)" },
+  ungatedAssignments: { kind: "org_scoped", via: "jobUnits.jobId → jobs.orgRef" },
+  statementsWithFindings: { kind: "org_scoped", via: "fuelStatements.financialEntityId → financialEntities.orgRef" },
+  tanksOutOfTolerance: { kind: "org_scoped", via: "bulkFuelTanks.financialEntityId → financialEntities.orgRef" },
+  periodsSoftClosed: { kind: "org_scoped", via: "periodCloses.financialEntityId → financialEntities.orgRef" },
+  inspectorRequests: { kind: "user_scoped", via: "academyInspectorRequests.subjectUserId is a member of the organization" },
+  securityIncidents: { kind: "org_scoped", via: "securityIncidents.orgRef" },
+  facilityDirectory: { kind: "global_reference", reason: "the disposal-facility directory is shared regulatory reference data (AER/OGL licences); it names facilities, not any company's employees, jobs or money, and is gated by facility.directory.review" },
+  walletRenewals: { kind: "org_scoped", via: "workerQualifications.tenantId; Academy certificates by the holder's membership" },
+  walletUnverified: { kind: "org_scoped", via: "workerQualifications.tenantId" },
+  trainingHandoffs: { kind: "org_scoped", via: "externalTrainingHandoffs.tenantId" },
+  trainingSweepFailures: { kind: "org_scoped", via: "each failure carries the tenant it was evaluated for; a failure with no resolvable tenant is shown without personal detail" },
+};

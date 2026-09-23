@@ -9,7 +9,8 @@
 
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
-import { getDb } from "./db";
+import { complianceDocumentScopeWhere, getDb, jobScopeSubquery, memberUserScopeWhere, orgScopeWhere, ownershipScopeWhere, tripScopeSubquery, type TenantScope } from "./db";
+import { entityIdsInScope } from "./_core/entityScope";
 import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
   billingBooks, calibrationSweeps, complianceDocuments, disposalTickets, fieldTickets, manifests, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
@@ -21,6 +22,7 @@ import { academyRequirements, externalTrainingHandoffs, workerQualifications } f
 import { lifecycleFacts, policyFor } from "./_core/credentialLifecycle";
 import { academyHoldingsFor, asHolding, isCurrentVerified, settingsFor, tenantsForUsers, tenantSettings, type TenantSettings } from "./trainingWalletService";
 import { loadUngatedAssignments } from "./dispatchEnforcementService";
+import { recentSweepFailures } from "./renewalOperations";
 import { loadFuelLineFindings } from "./periodCloseService";
 
 const DAY = 86_400_000;
@@ -48,7 +50,16 @@ async function loadFacilityDirectoryExceptions(db: Awaited<ReturnType<typeof get
   };
 }
 
-export async function loadExceptionSources(now = new Date()): Promise<ExceptionSources> {
+/**
+ * 0174 — every source is read inside the caller's organization. Before this the loader took no scope
+ * and every exception (security incidents, financial exceptions, defects, credentials…) reached every
+ * organization, filtered only by role. The scope is applied in the query, before any LIMIT, so another
+ * company's rows are never fetched. Per source (see EXCEPTION_SOURCE_TENANCY):
+ *   unit-owned (coreRecordOwnership) · money (financialEntities.orgRef) · job (jobs.orgRef) ·
+ *   person (organization membership) · device (fieldDevices.orgRef) · tenantId columns ·
+ *   and one intentionally global source, the regulatory facility directory.
+ */
+export async function loadExceptionSources(scope: TenantScope, now = new Date()): Promise<ExceptionSources> {
   const db = await getDb();
   const empty: ExceptionSources = {
     now, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [],
@@ -56,35 +67,44 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   };
   if (!db) return empty;
   const horizon = new Date(now.getTime() + 90 * DAY);
+  const entities = await entityIdsInScope(db as never, scope);
+  const inEntities = (col: Parameters<typeof inArray>[0]) => entities.length ? inArray(col, entities) : sql`FALSE`;
+  // A proposal belongs where its job, else its trip, else its unit belongs; with none of those, to the single tenant only.
+  const proposalScope = or(
+    inArray(assistantProposals.jobId, jobScopeSubquery(db, scope)),
+    and(isNull(assistantProposals.jobId), inArray(assistantProposals.tripId, tripScopeSubquery(db, scope))),
+    and(isNull(assistantProposals.jobId), isNull(assistantProposals.tripId), isNotNull(assistantProposals.unitId), ownershipScopeWhere("unit", assistantProposals.unitId, scope)),
+    scope.tenantId === SINGLE_TENANT_ID ? and(isNull(assistantProposals.jobId), isNull(assistantProposals.tripId), isNull(assistantProposals.unitId)) : sql`FALSE`,
+  );
 
   const [defects, roadside, bills, pas, creds, proposals, questions, conflicts, revoked, devices, policies, reviews] = await Promise.all([
     db.select({ id: maintenanceDefects.id, unitId: maintenanceDefects.unitId, title: maintenanceDefects.title, reportedAt: maintenanceDefects.reportedAt, status: maintenanceDefects.status, unitNumber: units.unitNumber })
       .from(maintenanceDefects).leftJoin(units, eq(units.id, maintenanceDefects.unitId))
-      .where(and(eq(maintenanceDefects.severity, "critical"), inArray(maintenanceDefects.status, ["open", "in_progress"]))).limit(500),
+      .where(and(eq(maintenanceDefects.severity, "critical"), inArray(maintenanceDefects.status, ["open", "in_progress"]), ownershipScopeWhere("unit", maintenanceDefects.unitId, scope))).limit(500),
     db.select({ id: roadsideServiceEvents.id, eventRef: roadsideServiceEvents.eventRef, eventType: roadsideServiceEvents.eventType, occurredAt: roadsideServiceEvents.occurredAt, assignedVendorId: roadsideServiceEvents.assignedVendorId, unitNumber: units.unitNumber })
       .from(roadsideServiceEvents).leftJoin(units, eq(units.id, roadsideServiceEvents.unitId))
-      .where(inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"])).limit(500),
+      .where(and(inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"]), ownershipScopeWhere("unit", roadsideServiceEvents.unitId, scope))).limit(500),
     db.select({ id: vendorBills.id, billRef: vendorBills.billRef, totalCents: vendorBills.totalCents, status: vendorBills.status, matchOutcome: vendorBills.matchOutcome, receivedAt: vendorBills.receivedAt, dueAt: vendorBills.dueAt, vendorName: vendors.name })
       .from(vendorBills).leftJoin(vendors, eq(vendors.id, vendorBills.vendorId))
-      .where(inArray(vendorBills.status, ["needs_coding", "needs_approval", "missing_receipt", "mismatch", "duplicate_suspected"])).limit(500),
-    db.select().from(purchaseAuthorizations).where(eq(purchaseAuthorizations.status, "requested")).limit(500),
+      .where(and(inArray(vendorBills.status, ["needs_coding", "needs_approval", "missing_receipt", "mismatch", "duplicate_suspected"]), inEntities(vendorBills.financialEntityId))).limit(500),
+    db.select().from(purchaseAuthorizations).where(and(eq(purchaseAuthorizations.status, "requested"), inEntities(purchaseAuthorizations.financialEntityId))).limit(500),
     db.select({ id: complianceDocuments.id, ownerType: complianceDocuments.ownerType, ownerId: complianceDocuments.ownerId, docType: complianceDocuments.docType, title: complianceDocuments.title, expiresAt: complianceDocuments.expiresAt, verificationStatus: complianceDocuments.verificationStatus })
       .from(complianceDocuments)
-      .where(or(eq(complianceDocuments.verificationStatus, "needs_review"), and(lte(complianceDocuments.expiresAt, horizon), eq(complianceDocuments.verificationStatus, "verified")))).limit(2000),
+      .where(and(or(eq(complianceDocuments.verificationStatus, "needs_review"), and(lte(complianceDocuments.expiresAt, horizon), eq(complianceDocuments.verificationStatus, "verified"))), complianceDocumentScopeWhere(scope))).limit(2000),
     db.select({ proposalId: assistantProposals.proposalId, formKey: assistantProposals.formKey, title: assistantProposals.title, createdAt: assistantProposals.createdAt, commitState: assistantProposals.commitState })
-      .from(assistantProposals).where(eq(assistantProposals.commitState, "awaiting_readback")).limit(500),
+      .from(assistantProposals).where(and(eq(assistantProposals.commitState, "awaiting_readback"), proposalScope)).limit(500),
     db.select({ askedToUserId: assistantQuestions.askedToUserId, count: sql<number>`count(*)`, oldest: sql<Date | null>`min(${assistantQuestions.createdAt})` })
-      .from(assistantQuestions).where(eq(assistantQuestions.status, "pending")).groupBy(assistantQuestions.askedToUserId),
+      .from(assistantQuestions).where(and(eq(assistantQuestions.status, "pending"), memberUserScopeWhere(assistantQuestions.askedToUserId, scope))).groupBy(assistantQuestions.askedToUserId),
     db.select({ id: syncConflicts.id, conflictRef: syncConflicts.conflictRef, recordType: syncConflicts.recordType, recordRef: syncConflicts.recordRef, material: syncConflicts.material, detectedAt: syncConflicts.detectedAt })
-      .from(syncConflicts).where(eq(syncConflicts.status, "unresolved")).limit(500),
+      .from(syncConflicts).innerJoin(fieldDevices, eq(fieldDevices.id, syncConflicts.fieldDeviceId)).where(and(eq(syncConflicts.status, "unresolved"), orgScopeWhere(fieldDevices, scope))).limit(500),
     db.select({ deviceRef: fieldDevices.deviceRef, userId: fieldDevices.userId, revokedAt: fieldDevices.revokedAt, queued: sql<number>`count(${syncPackages.id})` })
       .from(fieldDevices).innerJoin(syncPackages, and(eq(syncPackages.fieldDeviceId, fieldDevices.id), eq(syncPackages.state, "queued")))
-      .where(eq(fieldDevices.status, "revoked")).groupBy(fieldDevices.id),
-    db.select().from(measurementDevices).where(inArray(measurementDevices.status, ["active", "out_of_service"])).limit(500),
+      .where(and(eq(fieldDevices.status, "revoked"), orgScopeWhere(fieldDevices, scope))).groupBy(fieldDevices.id),
+    db.select().from(measurementDevices).where(and(inArray(measurementDevices.status, ["active", "out_of_service"]), inEntities(measurementDevices.financialEntityId))).limit(500),
     db.select({ policyRef: insurancePolicies.policyRef, policyType: insurancePolicies.policyType, expiresAt: insurancePolicies.expiresAt, status: insurancePolicies.status })
-      .from(insurancePolicies).where(lte(insurancePolicies.expiresAt, horizon)).limit(500),
+      .from(insurancePolicies).where(and(lte(insurancePolicies.expiresAt, horizon), inEntities(insurancePolicies.financialEntityId))).limit(500),
     db.select({ reviewRef: carrierProfileReviews.reviewRef, unmatchedExternalEvents: carrierProfileReviews.unmatchedExternalEvents, reviewedAt: carrierProfileReviews.reviewedAt, nextReviewDueAt: carrierProfileReviews.nextReviewDueAt })
-      .from(carrierProfileReviews).orderBy(desc(carrierProfileReviews.profileObtainedAt)).limit(50),
+      .from(carrierProfileReviews).where(inEntities(carrierProfileReviews.financialEntityId)).orderBy(desc(carrierProfileReviews.profileObtainedAt)).limit(50),
   ]);
 
   // Owner labels for credentials: operator names where the owner is an operator.
@@ -113,14 +133,14 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
     suspectFrom: calibrationSweeps.suspectFrom, runAt: calibrationSweeps.runAt,
   }).from(calibrationSweeps)
     .leftJoin(measurementDevices, eq(measurementDevices.id, calibrationSweeps.measurementDeviceId))
-    .where(eq(calibrationSweeps.state, "open")).limit(200);
+    .where(and(eq(calibrationSweeps.state, "open"), inEntities(measurementDevices.financialEntityId))).limit(200);
   const inspector = await db.select({ requestRef: academyInspectorRequests.requestRef, issuingAuthority: academyInspectorRequests.issuingAuthority, dueAt: academyInspectorRequests.dueAt, state: academyInspectorRequests.state, irrecoverable: academyInspectorRequests.irrecoverable })
-    .from(academyInspectorRequests).where(inArray(academyInspectorRequests.state, ["received", "assembling", "incomplete"])).limit(200);
+    .from(academyInspectorRequests).where(and(inArray(academyInspectorRequests.state, ["received", "assembling", "incomplete"]), memberUserScopeWhere(academyInspectorRequests.subjectUserId, scope))).limit(200);
   return {
     now,
     openCalibrationSweeps: sweeps,
     inspectorRequests: inspector.map(r => ({ requestRef: r.requestRef, issuingAuthority: r.issuingAuthority, dueAt: r.dueAt, state: r.state, irrecoverable: !!r.irrecoverable })),
-    securityIncidents: await loadOpenSecurityIncidents(db),
+    securityIncidents: await loadOpenSecurityIncidents(db, scope),
     facilityDirectory: await loadFacilityDirectoryExceptions(db),
     criticalDefects: defects.map(d => ({ id: d.id, unitId: d.unitId, unitNumber: d.unitNumber ?? null, title: d.title, reportedAt: d.reportedAt, status: d.status })),
     roadsideOpen: roadside.map(r => ({ id: r.id, eventRef: r.eventRef, unitNumber: r.unitNumber ?? null, eventType: r.eventType, occurredAt: r.occurredAt, vendorAssigned: r.assignedVendorId != null })),
@@ -134,9 +154,9 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
     measurementDevices: devices.map(d => { const st = calibrationStatus({ events: evByDevice.get(d.id) ?? [], intervalDays: d.calibrationIntervalDays, now }); return { deviceRef: d.deviceRef, deviceType: d.deviceType, status: d.status, calibrationState: st.status, daysRemaining: st.daysRemaining }; }),
     insurancePolicies: policies,
     carrierProfileReviews: Array.from(latestReviews.values()),
-    ungatedAssignments: await loadUngatedAssignments(),
-    ...(await loadFuelLineFindings()),
-    ...(await loadTrainingWalletExceptions(db, now)),
+    ungatedAssignments: await loadUngatedAssignments(200, scope),
+    ...(await loadFuelLineFindings(scope)),
+    ...(await loadTrainingWalletExceptions(db, now, scope)),
   };
 }
 
@@ -146,9 +166,10 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
  * uploads waiting on a verifier; training requests waiting on the office. Q-style endorsements with no
  * renewal by rule never appear. Derived at read time, like everything else here.
  */
-async function loadTrainingWalletExceptions(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, now: Date): Promise<Pick<ExceptionSources, "walletRenewals" | "walletUnverified" | "trainingHandoffs">> {
+async function loadTrainingWalletExceptions(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, now: Date, scope: TenantScope): Promise<Pick<ExceptionSources, "walletRenewals" | "walletUnverified" | "trainingHandoffs" | "trainingSweepFailures">> {
   const soon = new Date(now.getTime() + 30 * DAY);
-  const rows = await db.select().from(workerQualifications).where(inArray(workerQualifications.verificationState, ["verified", "unverified", "extracted"])).limit(5000);
+  const tenantCol = (col: Parameters<typeof eq>[0]) => scope.tenantId === SINGLE_TENANT_ID ? or(isNull(col), eq(col, SINGLE_TENANT_ID)) : eq(col, scope.tenantId);
+  const rows = await db.select().from(workerQualifications).where(and(inArray(workerQualifications.verificationState, ["verified", "unverified", "extracted"]), tenantCol(workerQualifications.tenantId))).limit(5000);
   const bound = new Set((await db.select({ code: academyRequirements.qualificationCode }).from(academyRequirements).where(eq(academyRequirements.active, true))).map(r => r.code));
   const renewals: NonNullable<ExceptionSources["walletRenewals"]> = [];
   const settingsCache = new Map<string, TenantSettings>();
@@ -169,14 +190,18 @@ async function loadTrainingWalletExceptions(db: NonNullable<Awaited<ReturnType<t
   const academy = await academyHoldingsFor(db);
   const academyTenant = await tenantsForUsers(db, academy.map(a => a.userId!));
   for (const a of academy) {
+    if ((academyTenant.get(a.userId!) ?? SINGLE_TENANT_ID) !== scope.tenantId) continue;
     const policy = policyFor(a.code);
     if (!policy || policy.lifecycle === "no_expiry_endorsement" || !a.expiresAt || a.expiresAt > soon) continue;
     const t = academyTenant.get(a.userId!) ?? SINGLE_TENANT_ID;
     if (t === "ambiguous") continue;
     renewals.push({ tenantId: t, holdingRef: a.holdingRef, userId: a.userId!, code: a.code, displayName: policy.displayName, targetAt: a.expiresAt, targetKind: "legal_expiry", boundToDispatch: bound.has(a.code) });
   }
-  const handoffs = await db.select().from(externalTrainingHandoffs).where(inArray(externalTrainingHandoffs.status, ["REQUESTED", "ADMIN_REVIEW", "DOCUMENT_UPLOADED_UNVERIFIED", "UNKNOWN"])).limit(1000);
+  const handoffs = await db.select().from(externalTrainingHandoffs).where(and(inArray(externalTrainingHandoffs.status, ["REQUESTED", "ADMIN_REVIEW", "DOCUMENT_UPLOADED_UNVERIFIED", "UNKNOWN"]), eq(externalTrainingHandoffs.tenantId, scope.tenantId))).limit(1000);
+  // 0174 — renewal-sweep failures from the last two days, this organization's and the ones no tenant could be named for.
+  const failures = (await recentSweepFailures(db, new Date(now.getTime() - 2 * DAY))).filter(f => f.tenantId == null || f.tenantId === scope.tenantId);
   return {
+    trainingSweepFailures: failures.map(f => ({ tenantId: f.tenantId, runRef: f.runRef, failureKind: f.kind, subjectRef: f.tenantId == null ? null : f.subjectRef, detail: f.detail.slice(0, 300), at: f.at })),
     walletRenewals: renewals,
     walletUnverified: rows.filter(r => r.verificationState === "unverified" || r.verificationState === "extracted").map(r => ({ tenantId: r.tenantId ?? SINGLE_TENANT_ID, holdingRef: r.holdingRef, userId: r.userId, code: r.code, recordedAt: r.recordedAt })),
     trainingHandoffs: handoffs.map(h => ({ tenantId: h.tenantId, handoffRef: h.handoffRef, userId: h.userId, code: h.qualificationCode, status: h.status, requestedAt: h.requestedAt, dueAt: h.dueAt })),
@@ -352,9 +377,9 @@ export async function loadTimeline(args: { entityType: "unit" | "job" | "trip" |
 
 
 /** 0131 — open security incidents with what the exception centre needs to know about them. */
-async function loadOpenSecurityIncidents(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
+async function loadOpenSecurityIncidents(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: TenantScope) {
   const open = await db.select({ id: securityIncidents.id, incidentRef: securityIncidents.incidentRef, title: securityIncidents.title, severity: securityIncidents.severity, personalInformationSuspected: securityIncidents.personalInformationSuspected })
-    .from(securityIncidents).where(inArray(securityIncidents.status, ["open", "triaging", "contained", "investigating", "recovering", "monitoring"])).limit(200);
+    .from(securityIncidents).where(and(inArray(securityIncidents.status, ["open", "triaging", "contained", "investigating", "recovering", "monitoring"]), orgScopeWhere(securityIncidents, scope))).limit(200);
   if (!open.length) return [];
   const ids = open.map(o => o.id);
   const [assessed, unsent] = await Promise.all([

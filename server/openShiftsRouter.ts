@@ -20,7 +20,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { getDb, userInScope } from "./db";
 import { leaveRequests, operators, shiftInterests, shiftPosts, workerQualifications } from "../drizzle/schema";
 import { resolveActingScope } from "./_core/actingScope";
 import { isAbsent, type LeaveRequest } from "./_core/timeOff";
@@ -101,6 +101,8 @@ export const openShiftsRouter = router({
       const userId = input.userId ?? ctx.user.id;
       const post = (await d.select().from(shiftPosts).where(eq(shiftPosts.postRef, input.postRef)).limit(1))[0];
       if (!post || post.tenantId !== acting.tenantId) throw new TRPCError({ code: "NOT_FOUND", message: "No such shift post" });
+      // 0174: the post was scoped but the person was not — any user id's leave, licence and tickets were read.
+      if (userId !== ctx.user.id && !(await userInScope(userId, { tenantId: acting.tenantId }))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${userId} not found` });
 
       const reasons: EligibilityReason[] = [];
 

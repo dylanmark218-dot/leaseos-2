@@ -7,10 +7,13 @@
  *  3. assessments and practical evidence are bound to one immutable course version;
  *  4. certificate issuance fails closed until the governing source snapshot is reviewed.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { isSha256HexV1, sha256HexV1 } from "./_core/integrityHash";
+import { impactStatus, sourceReviewDecision, type SourceReviewAction } from "./_core/complianceOperations";
+import { CREDENTIAL_POLICIES } from "./_core/credentialLifecycle";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { certificateContentDecision, deriveTrainingAspects, TDG_6_2_TOPICS, type Tdg62TopicCode, type TdgMode } from "./_core/tdgCertificateContents";
 import { canIssueCertificateFromCoverage, coverageFingerprint, parseTopicCodes, reconcileCoverage, type CoverageRow } from "./_core/tdgTopicCoverage";
 import { assembleInspectorPackage, responseDeadline, inspectorRequestSummary } from "./_core/inspectorRequest";
@@ -260,6 +263,52 @@ async function synchronizeCatalog(db: Awaited<ReturnType<typeof dbOrThrow>>, act
   return created;
 }
 
+
+/* ---- 0174: source review, applied through the pure two-person decision ---- */
+async function sourceImpactOf(db: Awaited<ReturnType<typeof dbOrThrow>>, sourceRef: string) {
+  const status = impactStatus((await db.select({ s: academySourceRecords.reviewStatus }).from(academySourceRecords).where(eq(academySourceRecords.sourceRef, sourceRef)).limit(1))[0]?.s);
+  const versions = await db.select({ id: academyCourseVersions.id, versionRef: academyCourseVersions.versionRef, status: academyCourseVersions.status, title: academyCourses.title })
+    .from(academyCourseVersions).innerJoin(academyCourses, eq(academyCourses.id, academyCourseVersions.courseId)).where(eq(academyCourseVersions.sourceSnapshotRef, sourceRef));
+  const moduleRows = await db.select({ versionId: academyModules.courseVersionId, n: sql<number>`COUNT(*)` }).from(academyModules).where(eq(academyModules.sourceRef, sourceRef)).groupBy(academyModules.courseVersionId);
+  const questionRows = await db.select({ versionId: academyQuestions.courseVersionId, n: sql<number>`COUNT(*)` }).from(academyQuestions).where(eq(academyQuestions.sourceRef, sourceRef)).groupBy(academyQuestions.courseVersionId);
+  const versionIds = Array.from(new Set([...versions.map(v => v.id), ...moduleRows.map(m => m.versionId), ...questionRows.map(q => q.versionId)]));
+  const allVersions = versionIds.length ? await db.select({ id: academyCourseVersions.id, versionRef: academyCourseVersions.versionRef, status: academyCourseVersions.status }).from(academyCourseVersions).where(inArray(academyCourseVersions.id, versionIds)) : [];
+  const attempts = versionIds.length ? await db.select({ versionId: academyAssessmentAttempts.courseVersionId, n: sql<number>`COUNT(*)` }).from(academyAssessmentAttempts).where(inArray(academyAssessmentAttempts.courseVersionId, versionIds)).groupBy(academyAssessmentAttempts.courseVersionId) : [];
+  const policies = CREDENTIAL_POLICIES.filter(p => p.sourceRefs.includes(sourceRef)).map(p => ({ policyRef: p.policyRef, qualificationCode: p.qualificationCode, status }));
+  const profiles = (await db.select({ profileRef: academyRegulatoryProfiles.profileRef, qualificationCode: academyRegulatoryProfiles.qualificationCode }).from(academyRegulatoryProfiles).where(eq(academyRegulatoryProfiles.sourceSnapshotRef, sourceRef))).map(p => ({ ...p, status }));
+  return {
+    status,
+    courseVersions: allVersions.map(v => ({ versionRef: v.versionRef, versionStatus: v.status, governing: versions.some(g => g.id === v.id), modules: Number(moduleRows.find(m => m.versionId === v.id)?.n ?? 0), questions: Number(questionRows.find(q => q.versionId === v.id)?.n ?? 0), historicalAttempts: Number(attempts.find(a => a.versionId === v.id)?.n ?? 0), status })),
+    modules: moduleRows.reduce((n, m) => n + Number(m.n), 0),
+    questions: questionRows.reduce((n, q) => n + Number(q.n), 0),
+    policies, regulatoryProfiles: profiles,
+    requirements: "Qualification requirements carry no source link; they name qualification codes, whose renewal policies are listed above.",
+    notice: "Nothing is rewritten. Historical attempts stay bound to the version they were taken on; content governed by a superseded source needs review.",
+  };
+}
+
+async function applySourceAction(db: Awaited<ReturnType<typeof dbOrThrow>>, actorUserId: number, args: { sourceRef: string; action: SourceReviewAction; note: string; successorRef: string | null }) {
+  const src = (await db.select().from(academySourceRecords).where(eq(academySourceRecords.sourceRef, args.sourceRef)).limit(1))[0];
+  if (!src) throw new TRPCError({ code: "NOT_FOUND", message: "Academy source record not found" });
+  const successor = args.successorRef ? (await db.select().from(academySourceRecords).where(eq(academySourceRecords.sourceRef, args.successorRef)).limit(1))[0] ?? null : null;
+  if (args.successorRef && !successor) throw new TRPCError({ code: "NOT_FOUND", message: "Successor source not found" });
+  const view = (r: typeof src) => ({ sourceRef: r.sourceRef, reviewStatus: r.reviewStatus, proposedByUserId: r.proposedByUserId, firstReviewedByUserId: r.firstReviewedByUserId, sourceUrl: r.sourceUrl, edition: r.edition, sourceTier: r.sourceTier });
+  const d = sourceReviewDecision({ action: args.action, source: view(src), actorUserId, successor: successor ? view(successor) : null, note: args.note });
+  if (!d.permitted) throw new TRPCError({ code: args.action === "APPROVE" && d.blockers.some(b => /second person|may not/.test(b)) ? "FORBIDDEN" : "PRECONDITION_FAILED", message: d.blockers.join("; ") });
+  const now = new Date();
+  const notes = `${src.notes ?? ""}\n${args.action} by ${actorUserId}: ${args.note}`.trim();
+  if (args.action === "REVIEW") await db.update(academySourceRecords).set({ reviewStatus: "under_review", firstReviewedByUserId: actorUserId, firstReviewedAt: now, firstReviewNote: args.note, notes }).where(eq(academySourceRecords.id, src.id));
+  if (args.action === "APPROVE") await db.update(academySourceRecords).set({ reviewStatus: "reviewed", approvedByUserId: actorUserId, approvedAt: now, reviewedByUserId: actorUserId, reviewedAt: now, notes }).where(eq(academySourceRecords.id, src.id));
+  if (args.action === "REJECT") await db.update(academySourceRecords).set({ reviewStatus: "rejected", rejectionReason: args.note, reviewedByUserId: actorUserId, reviewedAt: now, notes }).where(eq(academySourceRecords.id, src.id));
+  if (args.action === "MARK_SUPERSEDED") {
+    await db.update(academySourceRecords).set({ reviewStatus: "superseded", supersededBySourceRef: successor!.sourceRef, reviewedByUserId: actorUserId, reviewedAt: now, notes }).where(eq(academySourceRecords.id, src.id));
+    if (!successor!.supersedesSourceRef) await db.update(academySourceRecords).set({ supersedesSourceRef: src.sourceRef }).where(eq(academySourceRecords.id, successor!.id));
+  }
+  await audit(db, actorUserId, "academy_source", src.sourceRef, `source.${args.action.toLowerCase()}`, { from: src.reviewStatus, to: d.next, note: args.note, successor: successor?.sourceRef ?? null, snapshotHash: src.snapshotHash, contentHash: src.contentHash });
+  const impact = args.action === "MARK_SUPERSEDED" ? await sourceImpactOf(db, src.sourceRef) : null;
+  return { sourceRef: src.sourceRef, reviewStatus: d.next!, impact };
+}
+
 export const trainingAcademyRouter = router({
   catalog: roleProcedure("academy.catalog").query(async () => {
     const db = await dbOrThrow();
@@ -453,16 +502,69 @@ export const trainingAcademyRouter = router({
       return { evaluationRef, status: input.status };
     }),
 
+  /**
+   * The original single-step review, kept for callers, now bound by the two-person rule (0174): "reviewed"
+   * takes an unreviewed source into review, and only a different person's second "reviewed" approves it.
+   */
   sourceReview: roleProcedure("academy.sourceReview")
-    .input(z.object({ sourceRef: z.string().min(1).max(96), decision: z.enum(["reviewed", "rejected", "superseded"]), note: z.string().min(3).max(2000) }))
+    .input(z.object({ sourceRef: z.string().min(1).max(96), decision: z.enum(["reviewed", "rejected", "superseded"]), note: z.string().min(3).max(2000), supersededBy: z.string().min(1).max(96).optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const src = (await db.select().from(academySourceRecords).where(eq(academySourceRecords.sourceRef, input.sourceRef)).limit(1))[0];
       if (!src) throw new TRPCError({ code: "NOT_FOUND", message: "Academy source record not found" });
-      await db.update(academySourceRecords).set({ reviewStatus: input.decision, reviewedByUserId: ctx.user.id, reviewedAt: new Date(), notes: `${src.notes ?? ""}\nReview: ${input.note}`.trim() }).where(eq(academySourceRecords.id, src.id));
-      await audit(db, ctx.user.id, "academy_source", src.sourceRef, "source.reviewed", { decision: input.decision, note: input.note, snapshotHash: src.snapshotHash });
-      return { sourceRef: src.sourceRef, reviewStatus: input.decision };
+      const action = input.decision === "reviewed" ? (src.reviewStatus === "under_review" ? "APPROVE" : "REVIEW") : input.decision === "rejected" ? "REJECT" : "MARK_SUPERSEDED";
+      return applySourceAction(db, ctx.user.id, { sourceRef: input.sourceRef, action, note: input.note.length >= 10 ? input.note : `${input.note} (legacy review)`, successorRef: input.supersededBy ?? null });
     }),
+
+  /** 0174 — the Source Review queue: every source version with its state, reviewers, successor and what it governs. */
+  sourceReviewQueue: roleProcedure("academy.sourceReviewQueue").query(async () => {
+    const db = await dbOrThrow();
+    const rows = await db.select().from(academySourceRecords).limit(500);
+    const out = [];
+    for (const r of rows) {
+      const impact = await sourceImpactOf(db, r.sourceRef);
+      out.push({
+        sourceRef: r.sourceRef, authority: r.authority, title: r.title, jurisdiction: r.jurisdiction, edition: r.edition, url: r.sourceUrl, tier: r.sourceTier,
+        retrievedAt: r.retrievedAt, fingerprint: r.contentHash ?? r.snapshotHash, fingerprintKind: r.contentHash ? (isSha256HexV1(r.contentHash) ? "sha256" : "recorded") : "legacy-stableHash",
+        reviewStatus: r.reviewStatus, impactStatus: impactStatus(r.reviewStatus), proposedByUserId: r.proposedByUserId,
+        firstReviewedByUserId: r.firstReviewedByUserId, firstReviewedAt: r.firstReviewedAt, lastReviewedByUserId: r.approvedByUserId ?? r.reviewedByUserId ?? r.firstReviewedByUserId,
+        lastReviewedAt: r.approvedAt ?? r.reviewedAt ?? r.firstReviewedAt, supersededBySourceRef: r.supersededBySourceRef, supersedesSourceRef: r.supersedesSourceRef, rejectionReason: r.rejectionReason,
+        affected: { courseVersions: impact.courseVersions.length, modules: impact.modules, questions: impact.questions, policies: impact.policies.length, regulatoryProfiles: impact.regulatoryProfiles.length },
+      });
+    }
+    return out;
+  }),
+
+  /** 0174 — REVIEW, APPROVE, REJECT or MARK_SUPERSEDED. Two people make a source trusted. */
+  sourceAct: roleProcedure("academy.sourceAct")
+    .input(z.object({ sourceRef: z.string().min(1).max(96), action: z.enum(["REVIEW", "APPROVE", "REJECT", "MARK_SUPERSEDED"]), note: z.string().min(10).max(2000), successorRef: z.string().min(1).max(96).nullable().optional() }).strict())
+    .mutation(async ({ ctx, input }) => applySourceAction(await dbOrThrow(), ctx.user.id, { sourceRef: input.sourceRef, action: input.action, note: input.note, successorRef: input.successorRef ?? null })),
+
+  /** 0174 — a new edition is a new source version; the old one is never edited. It starts unreviewed. */
+  sourceProposeVersion: roleProcedure("academy.sourceProposeVersion")
+    .input(z.object({ supersedesSourceRef: z.string().min(1).max(96), edition: z.string().min(2).max(120), sourceUrl: z.string().url().max(1024), retrievedAt: z.coerce.date(), contentHash: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(), note: z.string().min(10).max(2000) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const prior = (await db.select().from(academySourceRecords).where(eq(academySourceRecords.sourceRef, input.supersedesSourceRef)).limit(1))[0];
+      if (!prior) throw new TRPCError({ code: "NOT_FOUND", message: "Source not found" });
+      const versions = await db.select({ ref: academySourceRecords.sourceRef }).from(academySourceRecords).where(sql`${academySourceRecords.sourceRef} LIKE ${`${input.supersedesSourceRef.split("@")[0]}@v%`}`);
+      const sourceRef = `${input.supersedesSourceRef.split("@")[0]}@v${versions.length + 2}`.slice(0, 96);
+      const record = { sourceRef, authority: prior.authority, sourceTier: prior.sourceTier, title: prior.title, sourceUrl: input.sourceUrl, jurisdiction: prior.jurisdiction, edition: input.edition };
+      await db.insert(academySourceRecords).values({
+        ...record, reviewStatus: "unreviewed", snapshotHash: sha256HexV1(record), contentHash: input.contentHash ?? null, notes: `Proposed as the successor of ${prior.sourceRef}: ${input.note}`,
+        sourceKind: prior.sourceKind, licenceStatus: "unknown", retrievedAt: input.retrievedAt, capabilityCodesJson: prior.capabilityCodesJson, proposedByUserId: ctx.user.id, supersedesSourceRef: prior.sourceRef,
+      });
+      await audit(db, ctx.user.id, "academy_source", sourceRef, "source.version_proposed", { supersedes: prior.sourceRef, edition: input.edition, url: input.sourceUrl, contentHash: input.contentHash ?? null });
+      return { sourceRef, reviewStatus: "unreviewed" as const, notice: "Unreviewed. Nothing uses it until two people have reviewed it; the prior version stays exactly as it was." };
+    }),
+
+  /** 0174 — what a source governs. Nothing is rewritten; each item is told the source's status. */
+  sourceImpact: roleProcedure("academy.sourceImpact").input(z.object({ sourceRef: z.string().min(1).max(96) }).strict()).query(async ({ input }) => {
+    const db = await dbOrThrow();
+    const src = (await db.select().from(academySourceRecords).where(eq(academySourceRecords.sourceRef, input.sourceRef)).limit(1))[0];
+    if (!src) throw new TRPCError({ code: "NOT_FOUND", message: "Source not found" });
+    return { sourceRef: src.sourceRef, reviewStatus: src.reviewStatus, impactStatus: impactStatus(src.reviewStatus), supersededBySourceRef: src.supersededBySourceRef, ...(await sourceImpactOf(db, src.sourceRef)) };
+  }),
 
   certificateIssue: roleProcedure("academy.certificateIssue")
     .input(z.object({
@@ -810,10 +912,9 @@ export const trainingAcademyRouter = router({
         contentBlockCount: blocks.length, courseVersionPresent: !!version, predatesRetentionGuards: !!cert && cert.issuedAt < guardsInstalledAt,
       });
       const producedAt = new Date();
-      // 0172 — SHA-256 hex. `stableHash` can emit '-' in a chunk (a signed XOR stringified before `>>> 0`) and so
-      // is not a fixed-format digest; it cannot be corrected in place because persisted profile hashes were made
-      // with it. The package hash is produced once and stored, never recomputed against a seed, so it can move.
-      const packageHash = createHash("sha256").update(JSON.stringify({ requestRef: r.requestRef, certificateRef: cert?.certificateRef ?? null, parts: pkg.parts, attemptIds: attempts.map(a => a.id), blockIds: blocks.map(b => b.id), producedAt: producedAt.toISOString() })).digest("hex");
+      // Integrity hash (class B/C): sha256HexV1 — see server/_core/integrityHash.ts and docs/HASH_CLASSIFICATION.md.
+      // `stableHash` is a frozen legacy fingerprint and is not used for new integrity values.
+      const packageHash = sha256HexV1({ requestRef: r.requestRef, certificateRef: cert?.certificateRef ?? null, parts: pkg.parts, attemptIds: attempts.map(a => a.id), blockIds: blocks.map(b => b.id), producedAt: producedAt.toISOString() });
       await db.update(academyInspectorRequests).set({ state: pkg.complete ? "produced" : "incomplete", producedAt: pkg.complete ? producedAt : null, producedByUserId: pkg.complete ? ctx.user.id : null, packageHash: pkg.complete ? packageHash : null, packagePartsJson: JSON.stringify(pkg.parts), missingPartsJson: JSON.stringify(pkg.missing), irrecoverable: pkg.irrecoverable }).where(eq(academyInspectorRequests.id, r.id));
       await audit(db, ctx.user.id, "academy_inspector_request", r.requestRef, pkg.complete ? "inspector_request.produced" : "inspector_request.incomplete", { parts: pkg.parts, missing: pkg.missing.map(m => m.code), irrecoverable: pkg.irrecoverable });
       const summary = inspectorRequestSummary({ requestRef: r.requestRef, requestDatedAt: r.requestDatedAt, requestReceivedAt: r.requestReceivedAt, subjectUserId: r.subjectUserId, certificateRef: cert?.certificateRef ?? "" }, { certificatePresent: !!cert, recordOfTrainingPresent: attempts.length > 0, statementOfExperiencePresent: !!cert?.statementOfExperienceId, contentBlockCount: blocks.length, courseVersionPresent: !!version, predatesRetentionGuards: !!cert && cert.issuedAt < guardsInstalledAt }, new Date());

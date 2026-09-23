@@ -25,6 +25,7 @@
  */
 import { stableHash } from "./trainingAcademy";
 import { addCalendarMonths, ACADEMY_REGULATORY_PROFILES } from "./trainingAcademyRegulatory";
+import { DEFAULT_ESCALATION, stepAt, thresholdsOf, type EscalationPolicy, type EscalationUrgency } from "./complianceOperations";
 import { countsAsHeldUnder, type HeldPolicy, type HeldVerdict, type QualificationHolding, type RequirementScope } from "./qualificationValidity";
 
 /* ------------------------------------------------------------------ */
@@ -355,6 +356,8 @@ export type PlannedReminder = {
   threshold: number | "expired";
   targetKind: "legal_expiry" | "employer_review";
   escalation: "employee" | "supervisor_safety_admin";
+  /** 0174 — from the company's escalation ladder. */
+  urgency?: EscalationUrgency;
   title: string;
   body: string;
 };
@@ -377,33 +380,45 @@ export function planRenewalReminders(args: {
   policy: CredentialPolicySeed | null;
   settings?: Partial<CompanyCredentialSettings> | null;
   now: Date;
-  /** Days at or under which safety/admin is told as well as the worker. */
-  escalateAtDays?: number;
+  /**
+   * 0174 — the company's notification ladder for this credential's category. Defaults to
+   * DEFAULT_ESCALATION. Company policy: it says who is told when, never when anything expires.
+   */
+  escalation?: EscalationPolicy | null;
+  /** The worker's supervisor, when one is on record (crew supervisor). Without one, a supervisor step is not sent. */
+  supervisorUserId?: number | null;
 }): PlannedReminder[] {
   const facts = lifecycleFacts(args);
   if (!facts.reminderTarget || !args.policy) return [];
   if (args.policy.lifecycle === "no_expiry_endorsement" || args.policy.boundary === "study_only") return [];
   const holding = currentVerified(args.holdings, args.code);
   if (!holding) return [];
-  const hit = crossedThreshold(facts.reminderTarget.at, args.now, normalizeThresholds(args.settings?.warningThresholdDays));
+  const ladder = args.escalation ?? DEFAULT_ESCALATION;
+  const thresholds = args.settings?.warningThresholdDays?.length ? args.settings.warningThresholdDays : thresholdsOf(ladder);
+  const hit = crossedThreshold(facts.reminderTarget.at, args.now, normalizeThresholds(thresholds));
   if (!hit) return [];
-  const escalateAt = args.escalateAtDays ?? 30;
+  // The step that governs this threshold: its own, else the nearest wider one on the ladder.
+  const step = stepAt(ladder, hit.threshold) ?? (hit.threshold === "expired" ? ladder.steps[ladder.steps.length - 1] : ladder.steps.filter(x => x.threshold !== "expired" && (x.threshold as number) >= (hit.threshold as number)).pop()) ?? { threshold: hit.threshold, recipients: ["employee"], urgency: "notice" as const };
   const kind = facts.reminderTarget.kind;
   const date = fmt(facts.reminderTarget.at);
   const template = args.policy.reminderTemplate || `${args.policy.displayName}: {DATE}`;
-  const title = hit.threshold === "expired"
+  const prefix = step.urgency === "critical" ? "CRITICAL: " : step.urgency === "urgent" ? "URGENT: " : "";
+  const title = prefix + (hit.threshold === "expired"
     ? (kind === "legal_expiry" ? `${args.policy.displayName} expired ${date}` : `Company policy review overdue: ${args.policy.displayName}`)
-    : (kind === "legal_expiry" ? `${args.policy.displayName} expires in ${hit.daysRemaining} day(s)` : `Company policy review in ${hit.daysRemaining} day(s): ${args.policy.displayName}`);
+    : (kind === "legal_expiry" ? `${args.policy.displayName} expires in ${hit.daysRemaining} day(s)` : `Company policy review in ${hit.daysRemaining} day(s): ${args.policy.displayName}`));
   const body = template.replaceAll("{DATE}", date);
   const keyOf = (r: ReminderRecipient) => `cred-renew:${holding.holdingRef}:${kind}:${hit.threshold}:${r.kind === "user" ? `u${r.userId}` : `r:${r.role}`}`.slice(0, 200);
   const out: PlannedReminder[] = [];
-  const employee: ReminderRecipient = { kind: "user", userId: args.userId };
-  out.push({ notificationKey: keyOf(employee), recipient: employee, holdingRef: holding.holdingRef, code: args.code, threshold: hit.threshold, targetKind: kind, escalation: "employee", title, body });
-  if (hit.threshold === "expired" || hit.threshold <= escalateAt) {
-    for (const role of ["safety", "hr"] as const) {
-      const r: ReminderRecipient = { kind: "role", role };
-      out.push({ notificationKey: keyOf(r), recipient: r, holdingRef: holding.holdingRef, code: args.code, threshold: hit.threshold, targetKind: kind, escalation: "supervisor_safety_admin", title: `${title} — employee ${args.userId}`, body });
+  const push = (r: ReminderRecipient, escalation: PlannedReminder["escalation"], t: string) =>
+    out.push({ notificationKey: keyOf(r), recipient: r, holdingRef: holding.holdingRef, code: args.code, threshold: hit.threshold, targetKind: kind, escalation, urgency: step.urgency, title: t, body });
+  push({ kind: "user", userId: args.userId }, "employee", title);
+  for (const who of step.recipients) {
+    if (who === "employee") continue;
+    if (who === "supervisor") {
+      if (args.supervisorUserId != null && args.supervisorUserId !== args.userId) push({ kind: "user", userId: args.supervisorUserId }, "supervisor_safety_admin", `${title} — employee ${args.userId}`);
+      continue;
     }
+    push({ kind: "role", role: who }, "supervisor_safety_admin", `${title} — employee ${args.userId}`);
   }
   return out;
 }

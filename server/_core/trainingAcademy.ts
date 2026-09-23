@@ -198,7 +198,7 @@ export function certificateDecision(args: {
   assessmentPassed: boolean;
   practicalReady: boolean;
   sourceSnapshotRef: string | null;
-  sourceReviewStatus: "unreviewed" | "reviewed" | "superseded" | "rejected" | null;
+  sourceReviewStatus: "unreviewed" | "under_review" | "reviewed" | "superseded" | "rejected" | null;
   sourceTier?: "authority" | "industry_association" | "vendor" | "unknown" | null;
 }) {
   const blockers: string[] = [];

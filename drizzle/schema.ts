@@ -6959,6 +6959,11 @@ export const workerQualifications = mysqlTable("workerQualifications", {
   supersedesHoldingRef: varchar("supersedesHoldingRef", { length: 64 }),
   policyRef: varchar("policyRef", { length: 96 }),
   handoffRef: varchar("handoffRef", { length: 96 }),
+  /* ---- 0174: a verifier asks for a correction; the owner re-submits a new holding that corrects this one ---- */
+  correctionRequestedAt: timestamp("correctionRequestedAt"),
+  correctionRequestedByUserId: int("correctionRequestedByUserId"),
+  correctionNote: varchar("correctionNote", { length: 1000 }),
+  correctsHoldingRef: varchar("correctsHoldingRef", { length: 64 }),
 });
 export type WorkerQualificationRow = typeof workerQualifications.$inferSelect;
 
@@ -7500,7 +7505,8 @@ export const academySourceRecords = mysqlTable("academySourceRecords", {
   jurisdiction: varchar("jurisdiction", { length: 80 }).notNull(),
   edition: varchar("edition", { length: 120 }),
   effectiveAt: timestamp("effectiveAt"),
-  reviewStatus: mysqlEnum("reviewStatus", ["unreviewed", "reviewed", "superseded", "rejected"]).default("unreviewed").notNull(),
+  /** 0174: `under_review` = one person has checked it; `reviewed` (trusted) needs a second, different person. */
+  reviewStatus: mysqlEnum("reviewStatus", ["unreviewed", "under_review", "reviewed", "superseded", "rejected"]).default("unreviewed").notNull(),
   reviewedByUserId: int("reviewedByUserId"),
   reviewedAt: timestamp("reviewedAt"),
   snapshotHash: varchar("snapshotHash", { length: 64 }).notNull(),
@@ -7517,6 +7523,16 @@ export const academySourceRecords = mysqlTable("academySourceRecords", {
   capabilityCodesJson: text("capabilityCodesJson"),
   redistributionConfirmedByUserId: int("redistributionConfirmedByUserId"),
   redistributionConfirmedAt: timestamp("redistributionConfirmedAt"),
+  /* ---- 0174: two-person review and version lineage (0175 freezes a decided version) ---- */
+  proposedByUserId: int("proposedByUserId"),
+  firstReviewedByUserId: int("firstReviewedByUserId"),
+  firstReviewedAt: timestamp("firstReviewedAt"),
+  firstReviewNote: varchar("firstReviewNote", { length: 2000 }),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  rejectionReason: varchar("rejectionReason", { length: 1000 }),
+  supersedesSourceRef: varchar("supersedesSourceRef", { length: 96 }),
+  supersededBySourceRef: varchar("supersededBySourceRef", { length: 96 }),
 });
 
 export const academyRegulatoryProfiles = mysqlTable("academyRegulatoryProfiles", {
@@ -8873,6 +8889,8 @@ export const credentialCompanySettings = mysqlTable("credentialCompanySettings",
   warningThresholdsJson: text("warningThresholdsJson").notNull(),
   /** { [code]: { employerReviewMonths, recommendedRefresherMonths } } — company policy. */
   perCodeJson: text("perCodeJson"),
+  /** 0174 — { [category | "default"]: EscalationPolicy }. Company policy: who is told when, never when anything expires. */
+  escalationPolicyJson: text("escalationPolicyJson"),
   updatedByUserId: int("updatedByUserId").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -8933,3 +8951,29 @@ export const academyQuestionBookmarks = mysqlTable("academyQuestionBookmarks", {
   questionId: int("questionId").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, t => [uniqueIndex("academyQuestionBookmarks_user_question").on(t.userId, t.questionId)]);
+
+/* ==================================================================
+ * 0174 — scheduled job runs: ownership (unique slot), lease and run record
+ * for periodic jobs, safe under several application instances. Spans all
+ * organizations by design; each failure names its own tenant.
+ * ================================================================== */
+export const scheduledJobRuns = mysqlTable("scheduledJobRuns", {
+  id: int("id").autoincrement().primaryKey(),
+  runRef: varchar("runRef", { length: 96 }).notNull().unique(),
+  jobKey: varchar("jobKey", { length: 80 }).notNull(),
+  slotKey: varchar("slotKey", { length: 160 }).notNull().unique(),
+  ownerId: varchar("ownerId", { length: 120 }).notNull(),
+  status: mysqlEnum("status", ["running", "completed", "partial", "failed"]).default("running").notNull(),
+  startedAt: timestamp("startedAt").notNull(),
+  leaseUntil: timestamp("leaseUntil").notNull(),
+  completedAt: timestamp("completedAt"),
+  inspected: int("inspected").default(0).notNull(),
+  actionable: int("actionable").default(0).notNull(),
+  notificationsCreated: int("notificationsCreated").default(0).notNull(),
+  suppressed: int("suppressed").default(0).notNull(),
+  failureCount: int("failureCount").default(0).notNull(),
+  failuresJson: text("failuresJson"),
+  errorSummary: varchar("errorSummary", { length: 1000 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => [index("scheduledJobRuns_job").on(t.jobKey, t.startedAt)]);
+export type ScheduledJobRunRow = typeof scheduledJobRuns.$inferSelect;

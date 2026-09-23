@@ -37,6 +37,7 @@ import {
 } from "./_core/credentialLifecycle";
 import { ADMIN_MARKS, HANDOFF_STATUSES, TERMINAL, handoffTransition, openDuplicate, providerOptions, requestAuthority, workerFacingStatus, type HandoffStatus } from "./_core/externalTrainingHandoff";
 import { CAREER_PATHWAYS, evaluatePathway } from "./_core/careerPathway";
+import { runRenewalSweepForTenant } from "./renewalOperations";
 import { academyAudit, academyHoldingsFor, asHolding, tenantsForUsers, deliverReminders, holdingRowsFor, isCurrentVerified, parseList, settingsFor, syncCredentialPolicies, tenantSettings } from "./trainingWalletService";
 
 const ref = (p: string) => `${p}-${randomUUID().toUpperCase()}`;
@@ -304,24 +305,9 @@ export const trainingWalletRouter = router({
     const db = await dbOrThrow();
     await syncCredentialPolicies(db);
     const tenantId = await tenantOf(db, ctx.user.id);
-    const now = input?.at ?? new Date();
-    const settings = await tenantSettings(db, tenantId);
-    const rows = await db.select().from(workerQualifications).where(and(eq(workerQualifications.tenantId, tenantId), eq(workerQualifications.verificationState, "verified"))).limit(5000);
-    const byUser = new Map<number, WalletHolding[]>();
-    for (const r of rows) byUser.set(r.userId, [...(byUser.get(r.userId) ?? []), asHolding(r)]);
-    // Academy-issued certificates (e.g. TDG road, server-computed expiry) for people in this organization.
-    const academy = await academyHoldingsFor(db);
-    const academyTenants = await tenantsForUsers(db, academy.map(a => a.userId!));
-    for (const a of academy) if (academyTenants.get(a.userId!) === tenantId) byUser.set(a.userId!, [...(byUser.get(a.userId!) ?? []), a]);
-    const planned = [];
-    for (const [userId, hs] of Array.from(byUser.entries())) {
-      for (const code of Array.from(new Set(hs.map(h => h.code)))) {
-        planned.push(...planRenewalReminders({ userId, code, holdings: hs, policy: policyFor(code), settings: settingsFor(settings, code), now }));
-      }
-    }
-    const { sent, suppressed } = await deliverReminders(db, tenantId, planned, now);
-    await academyAudit(db, ctx.user.id, "renewal_sweep", tenantId, "sweep.run", { at: now, planned: planned.length, sent: sent.length, suppressed: suppressed.length });
-    return { planned: planned.length, sent: sent.length, suppressed: suppressed.length, sentKeys: sent.map(s => s.notificationKey) };
+    // 0174: the same engine call the production worker makes on its schedule.
+    const r = await runRenewalSweepForTenant(db, tenantId, input?.at ?? new Date(), ctx.user.id);
+    return { planned: r.planned, sent: r.notificationsCreated, suppressed: r.suppressed, sentKeys: r.sentKeys, inspected: r.inspected, actionable: r.actionable, failures: r.failures };
   }),
 
   /** "Request Training / Renewal" — for yourself, or for someone else with workforce authority. */

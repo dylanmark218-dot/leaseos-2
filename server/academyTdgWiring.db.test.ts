@@ -276,7 +276,9 @@ d("the inspector clock reaches the exception centre", () => {
     const late = await callerFor(office).academy.inspectorRequestCreate({ certificateRef, issuingAuthority: "Transport Canada", requestDatedAt: new Date(Date.now() - 20 * 86_400_000) });
     const { deriveExceptions } = await import("./_core/exceptionCentre");
     const { loadExceptionSources } = await import("./surfacesService");
-    const all = deriveExceptions(await loadExceptionSources());
+    // 0174: the loader reads inside one organization — the certificate holder's.
+    const [[m]] = await pool.execute<mysql.RowDataPacket[]>("SELECT i.subjectUserId, om.orgRef FROM academyInspectorRequests i JOIN organizationMemberships om ON om.userId = i.subjectUserId AND om.status = 'active' WHERE i.requestRef = ?", [soon.requestRef]) as unknown as [mysql.RowDataPacket[]];
+    const all = deriveExceptions(await loadExceptionSources({ tenantId: String(m!.orgRef) }));
     const a = all.find(x => x.key === `inspector:${soon.requestRef}`);
     const b = all.find(x => x.key === `inspector:${late.requestRef}`);
     expect(a?.severity).toBe("high");

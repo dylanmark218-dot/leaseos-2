@@ -722,6 +722,23 @@ const documentOwnerOrg = sql<string | null>`(
     ELSE NULL
   END)`;
 
+/** 0174 — the same owner rule as a WHERE clause, for readers outside this file (the Exception Centre). */
+export function complianceDocumentScopeWhere(scope: TenantScope) {
+  return scope.tenantId === SINGLE_TENANT_ID
+    ? or(sql`${documentOwnerOrg} IS NULL`, sql`${documentOwnerOrg} = ${SINGLE_TENANT_ID}`)
+    : sql`${documentOwnerOrg} = ${scope.tenantId}`;
+}
+
+/**
+ * 0174 — rows keyed to a person: the person is in scope under the same rule as `userInScope` — an
+ * active member of the organization, or (the single tenant) a person with no active membership anywhere.
+ */
+export function memberUserScopeWhere(userIdColumn: MySqlColumn, scope: TenantScope) {
+  return scope.tenantId === SINGLE_TENANT_ID
+    ? sql`${userIdColumn} NOT IN (SELECT m.userId FROM organizationMemberships m WHERE m.status = 'active')`
+    : sql`${userIdColumn} IN (SELECT m.userId FROM organizationMemberships m WHERE m.status = 'active' AND m.orgRef = ${scope.tenantId})`;
+}
+
 export async function listComplianceDocuments(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];

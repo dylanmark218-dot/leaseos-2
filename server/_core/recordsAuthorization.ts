@@ -2922,6 +2922,11 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "academy.studyLibrary": "academy.read_own",
   "academy.tutor": "academy.read_own",
   "academy.sourceConfirmRedistribution": "academy.source.review",
+  // 0174 — two-person source review, versions and impact.
+  "academy.sourceReviewQueue": "academy.source.review",
+  "academy.sourceAct": "academy.source.review",
+  "academy.sourceProposeVersion": "academy.source.review",
+  "academy.sourceImpact": "academy.source.review",
   // 0172 — the training wallet (workerQualifications), renewal and external handoff.
   "trainingWallet.myWallet": "training.wallet.read_own",
   "trainingWallet.recordOwn": "training.wallet.record_own",

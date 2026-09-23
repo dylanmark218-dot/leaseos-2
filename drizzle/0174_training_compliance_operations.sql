@@ -1,0 +1,68 @@
+-- 0174 — Training compliance hardening + automatic renewal operations.
+--
+-- Slot: 0169 is on main (defect_resolution) and on driver-portfolio; 0170-0171 are
+-- claimed by active dispatch/auth branches; 0172 is claimed twice (this line's
+-- training wallet, and feat/compliance-c1a's dispatch_override_provenance —
+-- different names, both applied by the ledger); 0173 is this line's. 0174 is free.
+--
+-- One new table. There was no lease, lock or job-run table in LeaseOS — the drain
+-- worker's heartbeat runs the webhook retry sweep on every instance with no
+-- ownership at all. `scheduledJobRuns` is the minimum that makes a periodic job
+-- safe under several application instances: one row per job per time slot, its
+-- unique `slotKey` is the ownership (an INSERT that loses the race owns nothing),
+-- `leaseUntil` lets another instance take over a slot whose owner died, and the
+-- row is the run record (started, completed, inspected, actionable, created,
+-- suppressed, failures). It carries no tenant column on purpose: a run spans every
+-- organization; each failure inside `failuresJson` names the tenant it concerns.
+
+CREATE TABLE `scheduledJobRuns` (
+  `id` int AUTO_INCREMENT NOT NULL,
+  `runRef` varchar(96) NOT NULL,
+  `jobKey` varchar(80) NOT NULL,
+  `slotKey` varchar(160) NOT NULL,
+  `ownerId` varchar(120) NOT NULL,
+  `status` enum('running','completed','partial','failed') NOT NULL DEFAULT 'running',
+  `startedAt` timestamp NOT NULL,
+  `leaseUntil` timestamp NOT NULL,
+  `completedAt` timestamp NULL,
+  `inspected` int NOT NULL DEFAULT 0,
+  `actionable` int NOT NULL DEFAULT 0,
+  `notificationsCreated` int NOT NULL DEFAULT 0,
+  `suppressed` int NOT NULL DEFAULT 0,
+  `failureCount` int NOT NULL DEFAULT 0,
+  `failuresJson` text NULL,
+  `errorSummary` varchar(1000) NULL,
+  `createdAt` timestamp NOT NULL DEFAULT (now()),
+  CONSTRAINT `scheduledJobRuns_id` PRIMARY KEY(`id`),
+  CONSTRAINT `scheduledJobRuns_ref_unique` UNIQUE(`runRef`),
+  CONSTRAINT `scheduledJobRuns_slot_unique` UNIQUE(`slotKey`)
+);
+--> statement-breakpoint
+CREATE INDEX `scheduledJobRuns_job` ON `scheduledJobRuns` (`jobKey`, `startedAt`);
+--> statement-breakpoint
+
+-- ---- credential correction: a verifier asks, the owner re-submits; nothing is edited into validity
+ALTER TABLE `workerQualifications`
+  ADD COLUMN `correctionRequestedAt` timestamp NULL,
+  ADD COLUMN `correctionRequestedByUserId` int NULL,
+  ADD COLUMN `correctionNote` varchar(1000) NULL,
+  ADD COLUMN `correctsHoldingRef` varchar(64) NULL;
+--> statement-breakpoint
+
+-- ---- source review: two people, versioned, immutable once decided -----------
+ALTER TABLE `academySourceRecords`
+  MODIFY COLUMN `reviewStatus` enum('unreviewed','under_review','reviewed','superseded','rejected') NOT NULL DEFAULT 'unreviewed',
+  ADD COLUMN `proposedByUserId` int NULL,
+  ADD COLUMN `firstReviewedByUserId` int NULL,
+  ADD COLUMN `firstReviewedAt` timestamp NULL,
+  ADD COLUMN `firstReviewNote` varchar(2000) NULL,
+  ADD COLUMN `approvedByUserId` int NULL,
+  ADD COLUMN `approvedAt` timestamp NULL,
+  ADD COLUMN `rejectionReason` varchar(1000) NULL,
+  ADD COLUMN `supersedesSourceRef` varchar(96) NULL,
+  ADD COLUMN `supersededBySourceRef` varchar(96) NULL;
+--> statement-breakpoint
+
+-- ---- escalation ladders per credential category: company policy -------------
+ALTER TABLE `credentialCompanySettings`
+  ADD COLUMN `escalationPolicyJson` text NULL;
