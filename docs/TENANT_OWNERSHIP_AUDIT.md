@@ -338,6 +338,71 @@ reference tables (`commercialRoleTypes`, where unowned means built-in) that is
 intended. It is applied uniformly, including to `organizationCommercialRoles`
 and `organizationRecordLinks`, which hold real tenant data.
 
+#### Resolution
+
+**One helper served two opposite meanings of the same nullable column.** The
+finding's framing — "make it strict like `orgScopeWhere`" — turned out to be
+half right, and acting on it uniformly would have broken the product. Which
+half is decided by the migrations, not by judgement:
+
+| `bookOrgRef IS NULL` means | tables | read |
+| --- | --- | --- |
+| the **seeded platform default** (0133 inserts it) | `commercialRoleTypes`, `commercialNumberingPolicies`, `commercialSettings`, `commercialApprovalPolicies`, `commercialCategoryTypes` | both layers — `seededConfigLayer` |
+| **ownership was never established** (nothing seeds it) | `vendors`, `organizationCommercialRoles`, `facilityStatements`, `commercialGlAccounts`, `commercialGlMappings` | one layer — `myBookOnly` |
+
+`layerFor` and `numberingPolicyFor` *require* both layers in hand for the first
+group; a business that has configured nothing must still inherit role types,
+document types and approval tiers. Making that group strict fails 17 tests in
+`commercialOffice.db.test.ts` — recorded as MUT-F4e, and the reason this is a
+split rather than a tightening.
+
+The second group had no default layer to lose. `commercialGlAccounts` and
+`commercialGlMappings` are the sharpest case: the schema comment at 0138 says
+"nothing seeded", so every NULL row is one company's chart of accounts, and it
+was readable by every member and reachable as a posting target for their
+revenue.
+
+Two corrections to the finding as written:
+
+- `organizationRecordLinks` was **already** strict at `links.list`; the audit
+  named it in error. Its real defect was elsewhere, below.
+- `vendors` was the *inconsistency*, not the rule: `server/db.ts:525`
+  (`vendorBookWhere`, feeding `listVendors`/`createVendor`) has read and written
+  vendors strictly since 0132. The commercial office was the only reader
+  disagreeing with the table's own owner. Closing F4 made them agree, and the
+  four fixtures that broke were inserting vendors by raw SQL without a book —
+  a state `createVendor` cannot produce.
+
+**A second, sharper leak was found while fixing this one.** `links.set` checks
+link exclusivity installation-wide, which is correct — a record may carry one
+active link, and a per-book check would let two books both claim the same
+facility. But the refusal named the *other book's* counterparty and link
+reference:
+
+```
+facility 2 is already linked to ORG-MFO20KR (OLINK-MUELK22B-UXFS); end that link first
+```
+
+Since the facility directory is deliberately shared, a caller could walk the
+facility ids, collect a refusal for each, and read another company's disposal
+relationships without ever holding one of their records. The conflict is
+inherent to exclusivity and is still reported; the identity behind it is now
+given only when the open link is the caller's own.
+
+**Guarded against recurrence.** `server/commercialBookScope.test.ts` derives the
+classification from the migrations — does any migration insert a
+`bookOrgRef IS NULL` row for this table? — and fails if a table is read through
+the wrong helper, if a table is read through both, or if a general-purpose
+`bookWhere` returns. It parses the SQL with string literals stripped first,
+because the seed prose contains both `;` and unbalanced-looking parens
+(`'QuickBooks Online (first export target; core is accounting-neutral)'`) and a
+naive scan misclassified three seeded tables.
+
+Mutations, all killed: MUT-F4a (vendors overlaid again), MUT-F4b (GL accounts),
+MUT-F4c (facility statements), MUT-F4d (conflict always names the foreign
+counterparty), MUT-F4e (seeded layer made strict), MUT-F4f (GL mapping falls
+back to an unowned account).
+
 ### F5 — no way to *select* an acting organization (**medium, blocks multi-org**)
 
 `resolveActingScope` throws `AmbiguousOrganization` for a user with two live

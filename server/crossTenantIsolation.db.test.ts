@@ -671,3 +671,145 @@ d("Tenant A cannot mutate or link Tenant B by guessing an id", () => {
     expect(rows[0].customerOrgRef).toBeNull();
   }, 30_000);
 });
+
+/**
+ * F4 — the commercial book's unowned pool.
+ *
+ * `bookWhere` read a member's own rows AND every row whose `bookOrgRef` is
+ * NULL. On the five SEEDED configuration tables that is the product's design:
+ * NULL is the platform default layer (0133 inserts it), a business's own row
+ * wins, and `layerFor`/`numberingPolicyFor` need both layers in hand — take the
+ * defaults away and a new organization has no role types, no document types and
+ * no approval tier, which is a functional break, not a security fix.
+ *
+ * On the tables nothing seeds — vendors, organization roles, facility
+ * statements, and the chart of accounts and its GL mappings — NULL means
+ * something entirely different: ownership was never established. Those rows are
+ * one business's real commercial data, and the checkpoint's rule is that
+ * unknown ownership is not shared ownership. A member must not read them.
+ *
+ * The two kinds were indistinguishable at the call site, which is how one
+ * helper came to serve both. These tests pin the difference.
+ */
+d("F4 — unknown ownership is not shared ownership in the commercial book", () => {
+  it("keeps a member out of an unowned chart of accounts, and keeps the seeded defaults", async () => {
+    const bookA = await org();
+    const officeA = await member(bookA, ["office", "management"]);
+
+    // A legacy chart nobody's ownership was ever established for.
+    const legacyCode = `9${String(seq++).slice(-5)}`;
+    await pool.execute(
+      "INSERT INTO commercialGlAccounts (bookOrgRef, code, name, kind, source) VALUES (NULL,?,?,'revenue','legacy import')",
+      [legacyCode, "Unattributed legacy revenue"],
+    );
+
+    const gl = await callerFor(officeA).commercialOffice.gl.list();
+    expect(gl.accounts.map(a => a.code)).not.toContain(legacyCode);
+    expect(gl.accounts.every(a => a.bookOrgRef === bookA)).toBe(true);
+
+    // The same caller still gets the SEEDED default layer, which is not
+    // ownership data and must survive the tightening.
+    const types = await callerFor(officeA).commercialOffice.roleTypes.list();
+    expect(types.some(t => t.bookOrgRef === null && t.builtIn)).toBe(true);
+    const cats = await callerFor(officeA).commercialOffice.categories.list({ kind: "document_type" });
+    expect(cats.some(c => c.bookOrgRef === null)).toBe(true);
+  }, 30_000);
+
+  it("will not map a book's GL key onto an account the book cannot see", async () => {
+    const bookA = await org();
+    const officeA = await member(bookA, ["office", "management"]);
+    const legacyCode = `9${String(seq++).slice(-5)}`;
+    await pool.execute(
+      "INSERT INTO commercialGlAccounts (bookOrgRef, code, name, kind, source) VALUES (NULL,?,?,'revenue','legacy import')",
+      [legacyCode, "Unattributed legacy revenue"],
+    );
+
+    await expect(
+      callerFor(officeA).commercialOffice.gl.mappingSet({
+        mappingKind: "service_code", mappingKey: `svc-${rnd()}`, glAccountCode: legacyCode,
+      }),
+    ).rejects.toThrow(/not in this business's chart/i);
+  }, 30_000);
+
+  it("keeps a member out of an unowned vendor, by list and by id", async () => {
+    const bookA = await org();
+    const officeA = await member(bookA, ["office", "management"]);
+    const [venRes] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO vendors (name, category, bookOrgRef) VALUES (?,?,NULL)",
+      [`Legacy Vac ${rnd()}`, "disposal"],
+    );
+    const legacyVendorId = venRes.insertId;
+
+    const counterparty = await org();
+    await callerFor(officeA).commercialOffice.roles.assign({ orgRef: counterparty, roleKey: "vendor" });
+
+    // Linking is the reachable write: it may name only what the book can see.
+    await expect(
+      callerFor(officeA).commercialOffice.links.set({
+        recordType: "vendor", recordId: legacyVendorId, orgRef: counterparty,
+      }),
+    ).rejects.toThrow(/does not exist/i);
+
+    const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+      "SELECT bookOrgRef, orgRef FROM vendors WHERE id = ?", [legacyVendorId],
+    );
+    expect(rows[0].bookOrgRef).toBeNull();
+    expect(rows[0].orgRef).toBeNull();
+  }, 30_000);
+
+  it("keeps a member out of another book's imported facility statements", async () => {
+    const bookA = await org(), bookB = await org();
+    const officeA = await member(bookA, ["office", "management"]);
+    const officeB = await member(bookB, ["office", "management"]);
+    void officeB;
+
+    const [facRes] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO facilities (name, status) VALUES (?,'open')", [`Facility ${rnd()}`],
+    );
+    const facilityId = facRes.insertId;
+    const mk = async (book: string | null, ref: string) => pool.execute(
+      "INSERT INTO facilityStatements (statementRef, bookOrgRef, facilityId, periodStart, periodEnd, contentHash, importedByUserId) VALUES (?,?,?,'2026-01-01','2026-01-31',?,1)",
+      [ref, book, facilityId, rnd()],
+    );
+    const legacyRef = `FSTMT-LEGACY-${rnd()}`, foreignRef = `FSTMT-B-${rnd()}`;
+    await mk(null, legacyRef);      // ownership never established
+    await mk(bookB, foreignRef);    // plainly another book's
+
+    const seen = await callerFor(officeA).commercialOffice.disposal.statements({});
+    const refs = seen.map((s: { statementRef: string }) => s.statementRef);
+    expect(refs).not.toContain(legacyRef);
+    expect(refs).not.toContain(foreignRef);
+  }, 30_000);
+
+  it("does not name the other book's counterparty when a shared record is already linked", async () => {
+    const bookA = await org(), bookB = await org();
+    const officeA = await member(bookA, ["office", "management"]);
+    const officeB = await member(bookB, ["office", "management"]);
+
+    // A facility: the directory is shared reference data on purpose, so the
+    // first-come link rule IS observable here. What must not be observable is
+    // WHO holds it.
+    const [facRes] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO facilities (name, status) VALUES (?,'open')", [`Facility ${rnd()}`],
+    );
+    const facilityId = facRes.insertId;
+
+    const bsCounterparty = await org();
+    await callerFor(officeB).commercialOffice.roles.assign({ orgRef: bsCounterparty, roleKey: "disposal_facility" });
+    const bsLink = await callerFor(officeB).commercialOffice.links.set({
+      recordType: "facility", recordId: facilityId, orgRef: bsCounterparty,
+    });
+
+    const asCounterparty = await org();
+    await callerFor(officeA).commercialOffice.roles.assign({ orgRef: asCounterparty, roleKey: "disposal_facility" });
+    const refusal = await callerFor(officeA).commercialOffice.links.set({
+      recordType: "facility", recordId: facilityId, orgRef: asCounterparty,
+    }).then(() => null, (e: Error) => e.message);
+
+    expect(refusal).toBeTruthy();
+    // The conflict may be stated. B's counterparty and B's link reference may not.
+    expect(refusal).not.toContain(bsCounterparty);
+    expect(refusal).not.toContain(bsLink.linkRef);
+    expect(refusal).not.toContain(bookB);
+  }, 30_000);
+});

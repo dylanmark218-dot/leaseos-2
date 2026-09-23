@@ -39,7 +39,31 @@ async function bookFor(userId: number) {
 const myBookOnly = <T extends { bookOrgRef: any }>(t: T, bookOrgRef: string | null) =>
   bookOrgRef ? eq(t.bookOrgRef, bookOrgRef) : isNull(t.bookOrgRef);
 
-const bookWhere = <T extends { bookOrgRef: any }>(t: T, bookOrgRef: string | null) => bookOrgRef ? or(isNull(t.bookOrgRef), eq(t.bookOrgRef, bookOrgRef)) : isNull(t.bookOrgRef);
+/**
+ * The two layers of SEEDED configuration: the platform default and this
+ * business's own answer.
+ *
+ * F4 — this used to be `bookWhere`, and every read in the router used it. On
+ * the five tables 0133 seeds it is right: `bookOrgRef IS NULL` is the platform
+ * default the owner decided on 2026-09-17, `layerFor`/`numberingPolicyFor` need
+ * BOTH layers in hand to let a business's own row win, and a business that has
+ * written nothing must still get role types, document types and approval tiers.
+ * Take the default layer away and a new organization can assign no role, file
+ * no document and approve no amount.
+ *
+ * On every other table NULL means the opposite — ownership was never
+ * established — and those rows use `myBookOnly`. The two readings were
+ * indistinguishable at the call site, which is how one helper came to serve
+ * both and let a member read the unowned pool as if it were shared.
+ *
+ * So this is deliberately NOT the general-purpose helper. Use it only where the
+ * NULL row is seeded installation configuration, never where it is data
+ * somebody entered. The distinction is checked by
+ * `commercialBookScope.test.ts`, which reads the migrations to decide which
+ * tables are seeded rather than trusting this comment.
+ */
+const seededConfigLayer = <T extends { bookOrgRef: any }>(t: T, bookOrgRef: string | null) =>
+  bookOrgRef ? or(isNull(t.bookOrgRef), eq(t.bookOrgRef, bookOrgRef)) : isNull(t.bookOrgRef);
 /**
  * The record a link may name: one this book can already see, or nothing.
  *
@@ -50,21 +74,22 @@ const bookWhere = <T extends { bookOrgRef: any }>(t: T, bookOrgRef: string | nul
  * cross-tenant link, reachable by guessing an id.
  *
  * The rule is "you may link what you can already see", so each type reuses the
- * visibility its own reads use rather than a new, stricter one. Tightening
- * beyond that would break a real flow: an unowned legacy vendor or customer
- * account is visible to every book and is routinely the thing being linked for
- * the first time.
+ * visibility its own reads use rather than a new, stricter one — which is why
+ * closing F4 needed no edit here: `myBookOnly` replaced `bookWhere` in the
+ * vendor read and this function tightened with it, as its previous note said it
+ * would.
  *
- *   vendor           `bookWhere` — this book's rows, or unowned ones
- *   customer_account its financial entity is in scope, or unowned
+ *   vendor           `myBookOnly` — this book's rows, and no others
+ *   customer_account its financial entity is in scope
  *                    (`entityScope` is the tenant boundary for money)
  *   job_customer     `orgScopeWhere` — which, for a member, is strict
  *
- * Jobs being stricter than vendors here is the existing inconsistency, not a
- * new one: `bookWhere` lets a member see the unowned pool where `orgScopeWhere`
- * does not. That fail-open is recorded as F4 in
- * docs/TENANT_OWNERSHIP_AUDIT.md; when it is closed, vendors tighten with it
- * and this function needs no change.
+ * All three are now strict for a member, so the inconsistency this note used to
+ * record is gone. A legacy vendor whose ownership was never established is no
+ * longer linkable by a member: that is the intended cost of the rule that
+ * unknown ownership is not shared ownership. Attributing such a record is an
+ * administrative act on the record itself, not a side effect of one book
+ * happening to link it first.
  *
  * Facilities are deliberately not scoped. They carry no book ownership because
  * the facility directory is shared reference data — a regulator-approved
@@ -83,7 +108,7 @@ async function linkableRecord(
 ): Promise<{ id: number } | undefined> {
   if (recordType === "vendor") {
     return (await db.select({ id: vendors.id }).from(vendors)
-      .where(and(eq(vendors.id, recordId), bookWhere(vendors, bookOrgRef))).limit(1))[0];
+      .where(and(eq(vendors.id, recordId), myBookOnly(vendors, bookOrgRef))).limit(1))[0];
   }
   if (recordType === "job_customer") {
     return (await db.select({ id: jobs.id }).from(jobs)
@@ -135,7 +160,7 @@ export const commercialOfficeRouter = router({
       .input(z.object({ roleKey: z.string().max(40).optional(), q: z.string().max(120).optional(), status: z.enum(["active", "suspended", "closed"]).optional() }).optional())
       .query(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
-        const roles = await db.select().from(organizationCommercialRoles).where(and(bookWhere(organizationCommercialRoles, bookOrgRef), eq(organizationCommercialRoles.status, "active")));
+        const roles = await db.select().from(organizationCommercialRoles).where(and(myBookOnly(organizationCommercialRoles, bookOrgRef), eq(organizationCommercialRoles.status, "active")));
         const byOrg = new Map<string, typeof roles>();
         for (const r of roles) byOrg.set(r.orgRef, [...(byOrg.get(r.orgRef) ?? []), r]);
         const conds = [];
@@ -152,7 +177,7 @@ export const commercialOfficeRouter = router({
   roleTypes: router({
     list: roleProcedure("commercialOffice.roleTypesList").query(async ({ ctx }) => {
       const { db, bookOrgRef } = await bookFor(ctx.user.id);
-      return db.select().from(commercialRoleTypes).where(bookWhere(commercialRoleTypes, bookOrgRef));
+      return db.select().from(commercialRoleTypes).where(seededConfigLayer(commercialRoleTypes, bookOrgRef));
     }),
     create: roleProcedure("commercialOffice.roleTypeCreate")
       .input(z.object({ roleKey: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), label: z.string().min(1).max(120) }))
@@ -171,7 +196,7 @@ export const commercialOfficeRouter = router({
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         const org = (await db.select({ orgRef: organizations.orgRef, status: organizations.status }).from(organizations).where(eq(organizations.orgRef, input.orgRef)).limit(1))[0];
         if (!org) throw new TRPCError({ code: "NOT_FOUND", message: `Organization ${input.orgRef} does not exist` });
-        const types = await db.select().from(commercialRoleTypes).where(bookWhere(commercialRoleTypes, bookOrgRef));
+        const types = await db.select().from(commercialRoleTypes).where(seededConfigLayer(commercialRoleTypes, bookOrgRef));
         const type = layerFor(types.map(t => ({ ...t, category: t.roleKey })), bookOrgRef, input.roleKey).rows[0];
         if (!type) throw new TRPCError({ code: "BAD_REQUEST", message: `BLOCKED — "${input.roleKey}" is not an active role type for this business` });
         const existing = (await db.select({ id: organizationCommercialRoles.id }).from(organizationCommercialRoles)
@@ -180,7 +205,7 @@ export const commercialOfficeRouter = router({
         if (existing) throw new TRPCError({ code: "CONFLICT", message: `${input.orgRef} already holds the ${input.roleKey} role` });
         // A number only where a numbering policy exists for the role's sequence; the business's own format wins.
         const sequenceType = input.roleKey === "client" ? "CLI" : input.roleKey === "vendor" ? "VEN" : input.roleKey.toUpperCase().slice(0, 12);
-        const policies = await db.select().from(commercialNumberingPolicies).where(bookWhere(commercialNumberingPolicies, bookOrgRef));
+        const policies = await db.select().from(commercialNumberingPolicies).where(seededConfigLayer(commercialNumberingPolicies, bookOrgRef));
         const policy = numberingPolicyFor(policies, bookOrgRef, sequenceType);
         let commercialNumber: string | null = null;
         if (policy) {
@@ -229,7 +254,7 @@ export const commercialOfficeRouter = router({
   settings: router({
     get: roleProcedure("commercialOffice.settingsGet").query(async ({ ctx }) => {
       const { db, bookOrgRef } = await bookFor(ctx.user.id);
-      const rows = await db.select().from(commercialSettings).where(bookWhere(commercialSettings, bookOrgRef));
+      const rows = await db.select().from(commercialSettings).where(seededConfigLayer(commercialSettings, bookOrgRef));
       const own = bookOrgRef ? rows.find(r => r.bookOrgRef === bookOrgRef) : undefined;
       const row = own ?? rows.find(r => r.bookOrgRef === null) ?? null;
       return row ? { ...row, layer: own ? ("business" as const) : ("default" as const) } : null;
@@ -250,7 +275,7 @@ export const commercialOfficeRouter = router({
   numbering: router({
     list: roleProcedure("commercialOffice.numberingList").query(async ({ ctx }) => {
       const { db, bookOrgRef } = await bookFor(ctx.user.id);
-      return db.select().from(commercialNumberingPolicies).where(bookWhere(commercialNumberingPolicies, bookOrgRef));
+      return db.select().from(commercialNumberingPolicies).where(seededConfigLayer(commercialNumberingPolicies, bookOrgRef));
     }),
     set: roleProcedure("commercialOffice.numberingSet")
       .input(z.object({ sequenceType: z.string().regex(/^[A-Z][A-Z0-9]{1,11}$/), prefix: z.string().min(1).max(12), separator: z.string().max(3).default("-"), yearDigits: z.union([z.literal(0), z.literal(2), z.literal(4)]).default(4), includeMonth: z.boolean().default(false), sequenceDigits: z.number().int().min(3).max(9).default(6), resetPeriod: z.enum(["never", "yearly", "monthly"]).default("yearly") }))
@@ -268,7 +293,7 @@ export const commercialOfficeRouter = router({
   approvals: router({
     policies: roleProcedure("commercialOffice.approvalPoliciesList").query(async ({ ctx }) => {
       const { db, bookOrgRef } = await bookFor(ctx.user.id);
-      return db.select().from(commercialApprovalPolicies).where(bookWhere(commercialApprovalPolicies, bookOrgRef));
+      return db.select().from(commercialApprovalPolicies).where(seededConfigLayer(commercialApprovalPolicies, bookOrgRef));
     }),
     policySet: roleProcedure("commercialOffice.approvalPolicySet")
       .input(z.object({ category: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), maxAmountCents: z.number().int().nonnegative().nullable(), approverRole: z.string().min(2).max(40), secondPersonRequired: z.boolean().default(false), separationOfDuties: z.boolean().default(true) }))
@@ -291,7 +316,7 @@ export const commercialOfficeRouter = router({
       .input(z.object({ category: z.string().min(2).max(40), amountCents: z.number().int(), preparedByUserId: z.number().int().nullable().default(null) }))
       .query(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
-        const rows = (await db.select().from(commercialApprovalPolicies).where(bookWhere(commercialApprovalPolicies, bookOrgRef))) as ApprovalPolicyRow[];
+        const rows = (await db.select().from(commercialApprovalPolicies).where(seededConfigLayer(commercialApprovalPolicies, bookOrgRef))) as ApprovalPolicyRow[];
         const requirement = approvalRequirementFor(rows.map(r => ({ ...r, maxAmountCents: r.maxAmountCents === null ? null : Number(r.maxAmountCents) })), { bookOrgRef, category: input.category, amountCents: input.amountCents });
         const roles = (await db.select({ role: userRoleAssignments.role }).from(userRoleAssignments).where(eq(userRoleAssignments.userId, ctx.user.id))).map(r => r.role as string);
         return { requirement, couldApprove: approvalDecision(requirement, { userId: ctx.user.id, roles }, input.preparedByUserId) };
@@ -304,7 +329,7 @@ export const commercialOfficeRouter = router({
       .input(z.object({ kind: z.enum(["document_type", "load_category", "profitability_dimension"]).optional() }).optional())
       .query(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
-        const conds = [bookWhere(commercialCategoryTypes, bookOrgRef)];
+        const conds = [seededConfigLayer(commercialCategoryTypes, bookOrgRef)];
         if (input?.kind) conds.push(eq(commercialCategoryTypes.kind, input.kind));
         return db.select().from(commercialCategoryTypes).where(and(...conds));
       }),
@@ -335,9 +360,32 @@ export const commercialOfficeRouter = router({
         if (!role) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${input.orgRef} does not hold the ${roleKeyRequired} role in this book; assign it first` });
         const record = await linkableRecord(db, input.recordType, input.recordId, bookOrgRef);
         if (!record) throw new TRPCError({ code: "NOT_FOUND", message: `${input.recordType} ${input.recordId} does not exist` });
-        const open = (await db.select({ linkRef: organizationRecordLinks.linkRef, orgRef: organizationRecordLinks.orgRef }).from(organizationRecordLinks)
+        /*
+         * The exclusivity check stays installation-wide on purpose: a record
+         * may carry one active link, and a per-book check would let two books
+         * both claim the same facility. Only the facility directory is actually
+         * reachable here across books — every other record type is now scoped by
+         * `linkableRecord` and answers NOT_FOUND long before this line.
+         *
+         * F4 — but the refusal used to name `open.orgRef` and `open.linkRef`,
+         * which are the OTHER book's counterparty and its link reference. That
+         * turned a shared directory into a directory of who does business with
+         * whom: walk the facility ids, collect a refusal for each, and you have
+         * read another company's disposal relationships without ever holding one
+         * of their records. The conflict itself is inherent to exclusivity and
+         * is still stated; the identity behind it is not this caller's to see.
+         */
+        const open = (await db.select({ linkRef: organizationRecordLinks.linkRef, orgRef: organizationRecordLinks.orgRef, bookOrgRef: organizationRecordLinks.bookOrgRef }).from(organizationRecordLinks)
           .where(and(eq(organizationRecordLinks.recordType, input.recordType), eq(organizationRecordLinks.recordId, input.recordId), eq(organizationRecordLinks.status, "active"))).limit(1))[0];
-        if (open) throw new TRPCError({ code: "CONFLICT", message: `${input.recordType} ${input.recordId} is already linked to ${open.orgRef} (${open.linkRef}); end that link first` });
+        if (open) {
+          const mine = bookOrgRef ? open.bookOrgRef === bookOrgRef : open.bookOrgRef === null;
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: mine
+              ? `${input.recordType} ${input.recordId} is already linked to ${open.orgRef} (${open.linkRef}); end that link first`
+              : `${input.recordType} ${input.recordId} is already linked in another book; it cannot be linked again until that link is ended by the book that holds it`,
+          });
+        }
         const linkRef = ref("OLINK");
         await db.transaction(async tx => {
           await tx.insert(organizationRecordLinks).values({ linkRef, bookOrgRef, orgRef: input.orgRef, recordType: input.recordType, recordId: input.recordId, roleKeyRequired, note: input.note ?? null, linkedByUserId: ctx.user.id });
@@ -448,7 +496,7 @@ export const commercialOfficeRouter = router({
       .input(z.object({ status: z.enum(["open", "closed"]).optional(), facilityOrgRef: z.string().max(64).optional() }).optional())
       .query(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
-        const conds = [bookWhere(facilityStatements, bookOrgRef)];
+        const conds = [myBookOnly(facilityStatements, bookOrgRef)];
         if (input?.status) conds.push(eq(facilityStatements.status, input.status));
         if (input?.facilityOrgRef) conds.push(eq(facilityStatements.facilityOrgRef, input.facilityOrgRef));
         const rows = await db.select().from(facilityStatements).where(and(...conds)).orderBy(desc(facilityStatements.importedAt)).limit(200);
@@ -592,7 +640,7 @@ export const commercialOfficeRouter = router({
       .input(z.object({ mappingKind: z.enum(["service_code", "coding_category", "gst_output", "gst_input"]), mappingKey: z.string().min(1).max(80), glAccountCode: z.string().min(1).max(32) }))
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
-        const acct = (await db.select({ id: commercialGlAccounts.id, status: commercialGlAccounts.status }).from(commercialGlAccounts).where(and(eq(commercialGlAccounts.code, input.glAccountCode), bookWhere(commercialGlAccounts, bookOrgRef))).limit(1))[0];
+        const acct = (await db.select({ id: commercialGlAccounts.id, status: commercialGlAccounts.status }).from(commercialGlAccounts).where(and(eq(commercialGlAccounts.code, input.glAccountCode), myBookOnly(commercialGlAccounts, bookOrgRef))).limit(1))[0];
         if (!acct) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — GL account ${input.glAccountCode} is not in this business's chart; add it first` });
         if (acct.status === "retired") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — GL account ${input.glAccountCode} is retired` });
         const existing = (await db.select({ id: commercialGlMappings.id }).from(commercialGlMappings).where(and(eq(commercialGlMappings.mappingKind, input.mappingKind), eq(commercialGlMappings.mappingKey, input.mappingKey), bookOrgRef ? eq(commercialGlMappings.bookOrgRef, bookOrgRef) : isNull(commercialGlMappings.bookOrgRef))).limit(1))[0];
@@ -602,7 +650,7 @@ export const commercialOfficeRouter = router({
       }),
     list: roleProcedure("commercialOffice.glList").query(async ({ ctx }) => {
       const { db, bookOrgRef } = await bookFor(ctx.user.id);
-      const [accounts, mappings] = await Promise.all([db.select().from(commercialGlAccounts).where(bookWhere(commercialGlAccounts, bookOrgRef)), db.select().from(commercialGlMappings).where(bookWhere(commercialGlMappings, bookOrgRef))]);
+      const [accounts, mappings] = await Promise.all([db.select().from(commercialGlAccounts).where(myBookOnly(commercialGlAccounts, bookOrgRef)), db.select().from(commercialGlMappings).where(myBookOnly(commercialGlMappings, bookOrgRef))]);
       return { accounts, mappings };
     }),
     /** What an export of this period could not post: every unmapped key, by name and count. Nothing is exported here. */
@@ -610,8 +658,12 @@ export const commercialOfficeRouter = router({
       .input(z.object({ financialEntityId: z.number().int().positive(), from: z.coerce.date(), to: z.coerce.date() }))
       .query(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
-        const mappings = await db.select().from(commercialGlMappings).where(bookWhere(commercialGlMappings, bookOrgRef));
-        const mapped = (kind: string, key: string) => mappings.find(m => m.mappingKind === kind && m.mappingKey === key && m.bookOrgRef === bookOrgRef) ?? mappings.find(m => m.mappingKind === kind && m.mappingKey === key && m.bookOrgRef === null) ?? null;
+        const mappings = await db.select().from(commercialGlMappings).where(myBookOnly(commercialGlMappings, bookOrgRef));
+        // F4 — the fallback to a `bookOrgRef IS NULL` mapping is gone with the
+        // query that could return one. Nothing seeds this table, so a NULL row
+        // is some business's own GL mapping that was never attributed, and
+        // posting this book's revenue to an account out of it was never right.
+        const mapped = (kind: string, key: string) => mappings.find(m => m.mappingKind === kind && m.mappingKey === key) ?? null;
         const inv = await db.select({ serviceCode: invoiceLines.serviceCode, gst: invoices.gstTreatment, n: sql<number>`COUNT(*)` }).from(invoiceLines).innerJoin(invoices, eq(invoices.id, invoiceLines.invoiceId))
           .where(and(eq(invoices.financialEntityId, input.financialEntityId), gte(invoices.issuedAt, input.from), lte(invoices.issuedAt, input.to), notInArray(invoices.status, ["draft", "void"]))).groupBy(invoiceLines.serviceCode, invoices.gstTreatment);
         const bills = await db.select({ codingCategory: vendorBills.codingCategory, gst: vendorBills.gstTreatment, n: sql<number>`COUNT(*)` }).from(vendorBills)
@@ -623,7 +675,7 @@ export const commercialOfficeRouter = router({
         };
         for (const r of inv) { tally("service_code", r.serviceCode, r.n, "invoice lines"); if (r.gst === "unknown") blockers.push({ kind: "gst_output", key: "unknown", count: Number(r.n), reason: "invoice lines whose GST treatment is unknown cannot be posted" }); else tally("gst_output", r.gst, r.n, "invoice lines"); }
         for (const r of bills) { tally("coding_category", r.codingCategory, r.n, "vendor bills"); if (r.gst === "unknown") blockers.push({ kind: "gst_input", key: "unknown", count: Number(r.n), reason: "vendor bills whose GST treatment is unknown cannot be posted" }); else tally("gst_input", r.gst, r.n, "vendor bills"); }
-        const chartLoaded = (await db.select({ n: sql<number>`COUNT(*)` }).from(commercialGlAccounts).where(bookWhere(commercialGlAccounts, bookOrgRef)))[0]?.n ?? 0;
+        const chartLoaded = (await db.select({ n: sql<number>`COUNT(*)` }).from(commercialGlAccounts).where(myBookOnly(commercialGlAccounts, bookOrgRef)))[0]?.n ?? 0;
         if (!Number(chartLoaded)) blockers.unshift({ kind: "chart", key: "(none)", count: 0, reason: "no chart of accounts loaded for this book" });
         return { state: blockers.length ? ("BLOCKED" as const) : ("READY" as const), blockers, exported: false as const };
       }),
@@ -645,7 +697,7 @@ export const commercialOfficeRouter = router({
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         if (!input.evidenceRecordId && !input.fieldTicketDocumentId && !input.storageKey) throw new TRPCError({ code: "BAD_REQUEST", message: "BLOCKED — a document needs a pointer to its bytes: an evidence record, a generated field-ticket document, or a storage key" });
-        const types = await db.select().from(commercialCategoryTypes).where(and(eq(commercialCategoryTypes.kind, "document_type"), bookWhere(commercialCategoryTypes, bookOrgRef)));
+        const types = await db.select().from(commercialCategoryTypes).where(and(eq(commercialCategoryTypes.kind, "document_type"), seededConfigLayer(commercialCategoryTypes, bookOrgRef)));
         if (!layerFor(types.map(t => ({ ...t, category: t.categoryKey })), bookOrgRef, input.documentType).rows[0]) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — "${input.documentType}" is not an active document type for this business` });
         if (input.evidenceRecordId) {
           const ev = (await db.select({ id: evidenceRecords.id }).from(evidenceRecords).where(eq(evidenceRecords.id, input.evidenceRecordId)).limit(1))[0];
@@ -779,7 +831,7 @@ export const commercialOfficeRouter = router({
       .input(z.object({ financialEntityId: z.number().int().positive(), dimension: z.enum(["client", "job", "load", "unit", "driver", "branch", "contractor"]), from: z.coerce.date(), to: z.coerce.date() }))
       .query(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
-        const dims = await db.select().from(commercialCategoryTypes).where(and(eq(commercialCategoryTypes.kind, "profitability_dimension"), bookWhere(commercialCategoryTypes, bookOrgRef)));
+        const dims = await db.select().from(commercialCategoryTypes).where(and(eq(commercialCategoryTypes.kind, "profitability_dimension"), seededConfigLayer(commercialCategoryTypes, bookOrgRef)));
         const active = layerFor(dims.map(d => ({ ...d, category: d.categoryKey })), bookOrgRef, input.dimension).rows[0];
         if (!active) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — dimension "${input.dimension}" is not active in this business's book` });
         const d = derivability(input.dimension as Dimension);
