@@ -11,7 +11,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, gte, inArray, isNull, lte, notInArray, or, sql, like, desc } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries, evidenceRecords, fieldTicketDocuments, retentionPolicies } from "../drizzle/schema";
+import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, financialEntities, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries, evidenceRecords, fieldTicketDocuments, retentionPolicies } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
@@ -19,7 +19,7 @@ import { matchFacilityStatementLine, type DisposalTicketLite } from "./_core/fac
 import { aging, type ArInvoice } from "./_core/accountsReceivable";
 import { derivability, empty, finish, type Dimension, type Figures } from "./_core/profitability";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { getDb, orgScopeWhere } from "./db";
 
 async function bookFor(userId: number) {
   const db = await getDb();
@@ -28,6 +28,71 @@ async function bookFor(userId: number) {
   return { db, bookOrgRef: scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId };
 }
 const bookWhere = <T extends { bookOrgRef: any }>(t: T, bookOrgRef: string | null) => bookOrgRef ? or(isNull(t.bookOrgRef), eq(t.bookOrgRef, bookOrgRef)) : isNull(t.bookOrgRef);
+/**
+ * The record a link may name: one this book can already see, or nothing.
+ *
+ * It used to be fetched by primary key alone. The counterparty organization was
+ * checked — it had to hold the right role in the caller's book — but the record
+ * never was, so a caller in book A could pass the integer id of a book-B vendor,
+ * job or customer account and rewrite it. That is a cross-tenant write and a
+ * cross-tenant link, reachable by guessing an id.
+ *
+ * The rule is "you may link what you can already see", so each type reuses the
+ * visibility its own reads use rather than a new, stricter one. Tightening
+ * beyond that would break a real flow: an unowned legacy vendor or customer
+ * account is visible to every book and is routinely the thing being linked for
+ * the first time.
+ *
+ *   vendor           `bookWhere` — this book's rows, or unowned ones
+ *   customer_account its financial entity is in scope, or unowned
+ *                    (`entityScope` is the tenant boundary for money)
+ *   job_customer     `orgScopeWhere` — which, for a member, is strict
+ *
+ * Jobs being stricter than vendors here is the existing inconsistency, not a
+ * new one: `bookWhere` lets a member see the unowned pool where `orgScopeWhere`
+ * does not. That fail-open is recorded as F4 in
+ * docs/TENANT_OWNERSHIP_AUDIT.md; when it is closed, vendors tighten with it
+ * and this function needs no change.
+ *
+ * Facilities are deliberately not scoped. They carry no book ownership because
+ * the facility directory is shared reference data — a regulator-approved
+ * disposal site is not one business's record — so they keep the first-come rule
+ * the active-link check already enforces. Whether that is the right product
+ * answer is an open question, recorded in the same audit §9.
+ *
+ * Returns undefined for both "no such record" and "not this book's", so the
+ * caller answers NOT_FOUND to each without telling them apart.
+ */
+async function linkableRecord(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  recordType: "vendor" | "facility" | "job_customer" | "customer_account",
+  recordId: number,
+  bookOrgRef: string | null,
+): Promise<{ id: number } | undefined> {
+  if (recordType === "vendor") {
+    return (await db.select({ id: vendors.id }).from(vendors)
+      .where(and(eq(vendors.id, recordId), bookWhere(vendors, bookOrgRef))).limit(1))[0];
+  }
+  if (recordType === "job_customer") {
+    return (await db.select({ id: jobs.id }).from(jobs)
+      .where(and(eq(jobs.id, recordId), orgScopeWhere(jobs, { tenantId: bookOrgRef ?? SINGLE_TENANT_ID }))).limit(1))[0];
+  }
+  if (recordType === "customer_account") {
+    const a = (await db.select({ id: customerAccounts.id, financialEntityId: customerAccounts.financialEntityId })
+      .from(customerAccounts).where(eq(customerAccounts.id, recordId)).limit(1))[0];
+    if (!a) return undefined;
+    const owner = (await db.select({ orgRef: financialEntities.orgRef }).from(financialEntities)
+      .where(eq(financialEntities.id, a.financialEntityId)).limit(1))[0];
+    // No entity row at all — `financialEntityId` is NOT NULL but carries no
+    // foreign key, so dangling ids exist. A missing entity asserts no owner,
+    // which puts the account in the unowned pool rather than out of reach. It
+    // cannot be another organization's, because no row claims it.
+    const orgRef = owner ? owner.orgRef : null;
+    return orgRef === null || orgRef === (bookOrgRef ?? SINGLE_TENANT_ID) ? { id: a.id } : undefined;
+  }
+  return (await db.select({ id: facilities.id }).from(facilities).where(eq(facilities.id, recordId)).limit(1))[0];
+}
+
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const hash8 = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 8);
 /** MariaDB returns JSON columns as text; read them as the arrays they are. */
@@ -243,8 +308,7 @@ export const commercialOfficeRouter = router({
           .where(and(eq(organizationCommercialRoles.orgRef, input.orgRef), eq(organizationCommercialRoles.roleKey, roleKeyRequired), eq(organizationCommercialRoles.status, "active"),
             bookOrgRef ? eq(organizationCommercialRoles.bookOrgRef, bookOrgRef) : isNull(organizationCommercialRoles.bookOrgRef))).limit(1))[0];
         if (!role) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${input.orgRef} does not hold the ${roleKeyRequired} role in this book; assign it first` });
-        const table = input.recordType === "vendor" ? vendors : input.recordType === "facility" ? facilities : input.recordType === "customer_account" ? customerAccounts : jobs;
-        const record = (await db.select({ id: table.id }).from(table).where(eq(table.id, input.recordId)).limit(1))[0];
+        const record = await linkableRecord(db, input.recordType, input.recordId, bookOrgRef);
         if (!record) throw new TRPCError({ code: "NOT_FOUND", message: `${input.recordType} ${input.recordId} does not exist` });
         const open = (await db.select({ linkRef: organizationRecordLinks.linkRef, orgRef: organizationRecordLinks.orgRef }).from(organizationRecordLinks)
           .where(and(eq(organizationRecordLinks.recordType, input.recordType), eq(organizationRecordLinks.recordId, input.recordId), eq(organizationRecordLinks.status, "active"))).limit(1))[0];
