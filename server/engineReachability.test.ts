@@ -135,6 +135,125 @@ function reachableSet(srcs: Record<string, string>): Set<string> {
   return reached;
 }
 
+/* ------------------------------------------------------------------ */
+/* shared/ — the engines both runtimes use                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The same question, asked of `shared/`.
+ *
+ * `coreEngines` walks `server/_core` only, so an engine written under `shared/`
+ * — which is where the rules both the server and the device have to agree on
+ * live — could be created, tested, and reached by nothing. That is precisely
+ * the shape the compliance, scanner, routing and AI engines are being written
+ * in, so the gap matters more than its current size suggests.
+ *
+ * **Not every shared module is an engine, and demanding that every one be
+ * imported somewhere would be noise.** The repository already separates them by
+ * what they export:
+ *
+ *   engine       exports something callable — a decision, taken the same way on
+ *                both sides of the wire. `printability.assessPrintability`,
+ *                `captureQuality.assessPageQuality`, `paperworkGuidance.guidanceFor`.
+ *   declaration  exports only types, zod schemas or constants. `types.ts` is one
+ *                type; `facilities.ts` is eight zod schemas and no behaviour.
+ *
+ * Only engines are enforced. Declarations are counted and named, because an
+ * unused type is worth seeing and is not worth failing a gate over.
+ *
+ * **Reached means reached from either runtime.** A shared engine the device
+ * calls and the server does not is correctly wired — that is what `shared/` is
+ * for — so the walk covers `client/src` as well as `server`.
+ */
+const SHARED_DECLARED_UNWIRED: Record<string, string> = {};
+
+function sharedModules(): { name: string; path: string; body: string }[] {
+  const out: { name: string; path: string; body: string }[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const p = join(dir, entry);
+      if (statSync(p).isDirectory()) { walk(p); continue; }
+      if (!p.endsWith(".ts") || p.endsWith(".test.ts")) continue;
+      out.push({ name: p.slice("shared/".length, -3), path: p, body: readFileSync(p, "utf8") });
+    }
+  };
+  walk("shared");
+  return out;
+}
+
+/** Exports something callable: a function declaration, or a const bound to an arrow. */
+const exportsBehaviour = (body: string): boolean =>
+  /^export\s+(async\s+)?function\s/m.test(body) ||
+  /^export\s+const\s+\w+\s*(:[^=]+)?=\s*(async\s*)?(<[^>]*>\s*)?\(/m.test(body);
+
+/** Every production file in either runtime, tests excluded. */
+function bothRuntimeSources(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const p = join(dir, entry);
+      if (statSync(p).isDirectory()) { walk(p); continue; }
+      if (!/\.tsx?$/.test(p) || /\.(test|spec)\.tsx?$/.test(p)) continue;
+      out.push(readFileSync(p, "utf8"));
+    }
+  };
+  walk("server");
+  walk("client/src");
+  walk("shared");
+  return out;
+}
+
+describe("every shared engine is reached, or says why not", () => {
+  const mods = sharedModules();
+  const engines = mods.filter(m => exportsBehaviour(m.body));
+  const declarations = mods.filter(m => !exportsBehaviour(m.body));
+
+  /** An importer that is not the module itself. */
+  const importedBy = (name: string, sources: string[]) =>
+    sources.filter(s => s.includes(`@shared/${name}"`) || s.includes(`shared/${name}"`)).length;
+
+  it("classifies every shared module as an engine or a declaration, and neither list is empty", () => {
+    // If this ever reads zero engines the walk has broken and the rest of this
+    // block would pass vacuously.
+    expect(engines.length).toBeGreaterThan(0);
+    expect(engines.length + declarations.length).toBe(mods.length);
+    expect(engines.map(m => m.name).sort()).toEqual(["_core/errors", "captureQuality", "const", "paperworkGuidance", "printability"]);
+    // `const.ts` qualifies on its two OAuth-state codecs and `_core/errors` on
+    // its HttpError factories, rather than on either being a rule. Both are
+    // reached, so the classification costs nothing; narrowing the test to
+    // "looks like a rule" would mean guessing at intent.
+    expect(declarations.map(m => m.name).sort()).toEqual(["facilities", "types"]);
+  });
+
+  it("has no shared engine that is unreached and undeclared", () => {
+    const sources = bothRuntimeSources();
+    const surprises = engines
+      .filter(m => importedBy(m.name, sources) === 0 && !(m.name in SHARED_DECLARED_UNWIRED))
+      .map(m => m.name);
+    // A compliance, scanner, routing or AI engine written under shared/ and
+    // wired to nothing is the case this exists to catch, before somebody
+    // reimplements its rule inline on one side of the wire.
+    expect(surprises).toEqual([]);
+  });
+
+  it("has no shared engine declared unwired that is actually wired", () => {
+    const sources = bothRuntimeSources();
+    const stale = Object.keys(SHARED_DECLARED_UNWIRED).filter(n => importedBy(n, sources) > 0);
+    expect(stale).toEqual([]);
+  });
+
+  it("names the declarations nothing imports, without failing on them", () => {
+    const sources = bothRuntimeSources();
+    const unused = declarations.filter(m => importedBy(m.name, sources) === 0).map(m => m.name);
+    // Recorded rather than enforced: an exported type nobody imports is dead
+    // weight worth seeing, not a broken contract. `facilities.ts` is NOT on
+    // this list, which is worth saying because a narrower search for
+    // `@shared/facilities` said it was — its consumers import it by relative
+    // path. Matching only the alias would have reported live code as dead.
+    expect(unused.sort()).toEqual(["types"]);
+  });
+});
+
 describe("every engine is reached, or says why not", () => {
   const engines = coreEngines();
   const srcs = productionSources();
