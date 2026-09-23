@@ -190,3 +190,27 @@ owner answers to the D-05 questions in `docs/compliance/credential-store-reconci
   * Safety-critical UNKNOWN stays non-green.
 * **D-05 approved:** see `docs/compliance/credential-store-reconciliation.md`.
 * **Merge order:** PR #5, then C1a, then restack #6 and #9.
+
+## Review round on PR #12 (before merge)
+
+An independent review of the rebased diff found no bypass of the OOS, grant-provenance,
+tighten-only or legacy-path invariants. It did find these, all fixed before merge, each with a test:
+
+| Finding | Severity | Fix | Test |
+|---|---|---|---|
+| `dispatch.evaluate` read the posting before any scope check: another tenant's posting could be attached to a check, and "Posting not found" was an existence oracle | blocking | the posting's job must be in scope ("not found" otherwise); a posting paired with a different `jobId` is refused; `award` re-scopes the posting | DB "review fixes" |
+| `dispatch.whatAmIMissing` did not scope the `unitId`/`jobId` it was given | blocking | scoped like `readiness` | DB "review fixes" |
+| `dispatch.enforcementSet/Get` let any organization read or write the **global** setting the legacy path uses (pre-existing) | blocking | only the historical single tenant may touch the global row; entity rows must be in scope | DB "review fixes" |
+| The legacy path compared job and unit before checking scope, which leaked a foreign check's job; `actingScope` was optional | should-fix | scope first; `actingScope` required | DB "review fixes" (mutation-checked: removing the fixes turns it red) |
+| **Time-driven expiry was outside the fingerprint:** a policy valid at 23:50 and lapsed at 00:10 left every row unchanged, so an award inside the reuse window went through on the old answer | should-fix (safety) | new fact `expiryStateVersion`: whether each governing expiry had passed **at the evaluation instant**; calibration status in `calibrationVersion` | DB "time itself stales a check" |
+| `lone_worker_satellite_unknown` (WARN) was easier to release than `lone_worker_no_satellite` | should-fix | UNKNOWN / BLOCK / APPROVED_POLICY_ONLY (`CLASSIFICATION_VERSION` → `c1a.2`) | pure |
+| Strictest-wins tied on label only, so the dispatcher-grade duplicate could win over the manager-grade one by arrival order | should-fix | acknowledgement authority and subject join the order | pure |
+| An approved-policy grant was not re-checked against the policy's current grantor role; the second approver could be blank | nit | re-checked at award; both approvers must be named | pure |
+| The legacy recompute dropped the check's trailer | nit | carried through | covered by existing suites |
+
+CI on the first PR head (`47b8a43`) failed once in `server/b20WorkflowWiring.test.ts` (sealed incident →
+tasks); the other run on the same commit passed. **Root cause:** that suite's `drainAll` ran the
+outbox worker for a fixed 300 ms over the whole outbox in id order, so events other suites enqueued
+concurrently (C1a's OOS end-to-end among them) could push this test's event past the window. **Fix:**
+drain until every event that existed at the start is processed, dead-lettered or deferred, with a
+15 s ceiling. No assertion was loosened.
