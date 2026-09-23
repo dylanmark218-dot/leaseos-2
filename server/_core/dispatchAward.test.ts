@@ -31,6 +31,9 @@ const FACTS: EligibilityFacts = {
   routeProfileId: "RP-1a2b3c4d",
   routeDecisionVersion: "v1",
   communicationPlanVersion: "none",
+  unitCredentialVersion: "none", insuranceVersion: "none", enforcementVersion: "none", roadsideVersion: "none",
+  telematicsFaultVersion: "none", calibrationVersion: "none", medicalVersion: "none", hosVersion: "none",
+  deviceVersion: "none", ruleSetHash: "rules-v1", policyVersion: "policy-v1",
 };
 
 const eligible = (
@@ -212,8 +215,11 @@ describe("decideAward", () => {
         grantedOverrides: [
           {
             blockerCode: "destination_acceptance_unverified",
+            requestedByUserId: 3,
             grantedByUserId: 8,
             grantedByRole: "manager",
+            policyRef: null,
+            expiresAt: null,
             reason: "Confirmed by phone, ref 88214",
             grantedAt: minsAgo(2),
           },
@@ -239,8 +245,11 @@ describe("decideAward", () => {
         grantedOverrides: [
           {
             blockerCode: "critical_defect",
+            requestedByUserId: 3,
             grantedByUserId: 1,
             grantedByRole: "administrator",
+            policyRef: null,
+            expiresAt: null,
             reason: "Customer waiting",
             grantedAt: minsAgo(1),
           },
