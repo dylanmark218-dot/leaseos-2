@@ -127,7 +127,15 @@ describe("the dispatcher's detail screen is wired to the canonical model", () =>
 
   it("invalidates readiness after every slot write, through the one policy that says so", () => {
     const src = detail();
-    expect(src).toContain("invalidateAfterSlotMutation");
+    /*
+     * Matched as a call, not as a name. `toContain` alone is satisfied by the import line, so a
+     * container that imported the policy and never invoked it passed this test — found by planting
+     * exactly that and watching nothing fail.
+     */
+    expect(
+      /invalidateAfterSlotMutation\s*\(/.test(src),
+      "importing the policy is not applying it — this must be a call",
+    ).toBe(true);
     // onSettled, not onSuccess: a conflict means somebody else moved the slot, which is precisely
     // when the readiness on screen is about the wrong crew.
     const settled = (src.match(/onSettled/g) ?? []).length;
