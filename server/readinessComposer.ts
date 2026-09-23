@@ -519,9 +519,13 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
    * one gate, not two. Informational requirements produce no blocker at all.
    */
   const unitForDriver = subject.unitId ? (await db.select({ vehicleType: units.vehicleType }).from(units).where(eq(units.id, subject.unitId)).limit(1))[0] ?? null : null;
+  // The organization whose work this is: the job's; without a job, the organization that owns the
+  // operator (coreRecordOwnership), so a company's own requirements reach its own driver's check.
+  // Neither: the historical single tenant.
+  const operatorOwner = (await db.select({ orgRef: coreRecordOwnership.orgRef }).from(coreRecordOwnership)
+    .where(and(eq(coreRecordOwnership.recordType, "operator"), eq(coreRecordOwnership.recordId, op.id))).limit(1))[0]?.orgRef ?? null;
   const driverFacts: BindingFacts = {
-    // The job's organization; without a job, the historical single tenant (the same rule as the policy tenant below).
-    orgRef: (job as { orgRef?: string | null } | null)?.orgRef ?? null,
+    orgRef: job ? ((job as { orgRef?: string | null }).orgRef ?? null) : operatorOwner,
     customer: job ? [job.customer] : [],
     site: job ? [job.location] : [],
     job_type: job ? [job.type, job.mode] : [],

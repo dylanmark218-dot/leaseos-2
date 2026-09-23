@@ -8822,6 +8822,8 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
 export const driverRequirementBindings = mysqlTable("driverRequirementBindings", {
   id: int("id").autoincrement().primaryKey(),
   bindingRef: varchar("bindingRef", { length: 96 }).notNull().unique(),
+  /** 0177 — an update retires a binding and creates this successor, which names what it replaced. */
+  supersedesBindingRef: varchar("supersedesBindingRef", { length: 96 }),
   /** NULL = the historical single tenant. Applies only to work of the same organization. */
   orgRef: varchar("orgRef", { length: 64 }),
   subjectType: mysqlEnum("subjectType", ["company", "customer", "site", "job_type", "equipment", "job"]).notNull(),
@@ -8843,14 +8845,41 @@ export const driverRequirementBindings = mysqlTable("driverRequirementBindings",
 export const driverPortfolioEvents = mysqlTable("driverPortfolioEvents", {
   id: int("id").autoincrement().primaryKey(),
   eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
-  operatorId: int("operatorId").notNull(),
+  /** 0177 — the organization the event belongs to. NULL = the historical single tenant. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  /** NULL for an organization-level event (a requirement bound, changed or retired). */
+  operatorId: int("operatorId"),
   credentialId: int("credentialId"),
   actorUserId: int("actorUserId"),
   eventType: mysqlEnum("eventType", [
-    "credential_uploaded", "credential_verified", "credential_rejected", "requirement_bound", "requirement_retired",
-    "wallet_viewed", "portfolio_viewed", "credential_shared", "share_verified", "used_for_dispatch",
+    "credential_uploaded", "credential_verified", "credential_rejected", "credential_superseded",
+    "requirement_bound", "requirement_modified", "requirement_retired",
+    "wallet_viewed", "portfolio_viewed", "credential_shared", "share_revoked", "share_verified", "used_for_dispatch",
   ]).notNull(),
   detail: varchar("detail", { length: 400 }),
   occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * 0177 — a one-credential share. The token is `newToken()` and only its SHA-256
+ * is stored; redeeming re-reads the credential, so a share never outlives the
+ * credential being valid. Revocation is `revokedAt`; the audit is in
+ * `driverPortfolioEvents`.
+ */
+export const driverCredentialShares = mysqlTable("driverCredentialShares", {
+  id: int("id").autoincrement().primaryKey(),
+  shareRef: varchar("shareRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  operatorId: int("operatorId").notNull(),
+  credentialId: int("credentialId").notNull(),
+  credentialCode: varchar("credentialCode", { length: 160 }).notNull(),
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  audience: varchar("audience", { length: 160 }).notNull(),
+  issuedByUserId: int("issuedByUserId").notNull(),
+  issuedAt: timestamp("issuedAt").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokedByUserId: int("revokedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

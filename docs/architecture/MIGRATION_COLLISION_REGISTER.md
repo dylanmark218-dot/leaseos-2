@@ -31,6 +31,7 @@ and `0157` is historically used twice. None of those is reused.
 | 0169 | `0169_defect_resolution.sql` | *(main)* | #4 (merged) | — | **on main** | vs `0169_driver_portfolio` | main owns 0169 |
 | ~~0169~~ → **0175** | `0175_driver_portfolio.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | driver-portfolio PR | merged main `42c454f` | PR open | none | **renumbered 0169 → 0175** at its merge of main |
 | ~~0170~~ → **0176** | `0176_driver_portfolio_events_append_only.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | driver-portfolio PR | merged main `42c454f` | PR open | none | **renumbered 0170 → 0176** at its merge of main |
+| 0177 | `0177_driver_portfolio_api.sql` | `claude/driver-portfolio-api-ya8928` (stacked on the driver-portfolio PR #16) | none yet | driver-portfolio `613e837` | open branch | none | first number free on main and every open branch at 2026-09-23 |
 | 0170 | `0170_dispatch_role_types.sql` | `feature/dispatch-role-assignment-backend` | #9 | `e6b65f2` | PR open, stacked; CI green | with auth-workspace, driver-portfolio | #9 is nearest to merge, so it **proposes to keep 0170/0171**. Owner to confirm |
 | 0170 | `0170_dispatch_role_types.sql` | `feature/dispatch-assignment-ui` | #11 | `e6b65f2` | PR open, stacked on #9 | same file as #9 (inherited), not a separate claim | follows #9 |
 | 0170 | `0170_organization_scoped_role_grants.sql` | `claude/leaseos-auth-workspace-system-t008ad` | none | `f21cd1b` | open branch, no PR | with #9, driver-portfolio | renumber at rebase |
@@ -49,3 +50,4 @@ and `0157` is historically used twice. None of those is reused.
   `0170 → 0176`, the first two numbers held by neither `main` nor any open branch (0170–0173 are
   claimed by #9/#11 and the training-academy branch; 0174 is on main). `claude/leaseos-auth-workspace-system-t008ad`
   still claims 0170 and should take the next free number at its own rebase.
+* **2026-09-23**: `claude/driver-portfolio-api-ya8928` claims **0177** (Driver Portfolio API), stacked on PR #16.

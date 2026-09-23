@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bindingApplies, bindingProblem, requirementFromBinding,
   consolidateRequirements, credentialHistory, credentialType, dispatchView, evaluateDriverReadiness, expiryAlerts, expiryWarningTier,
-  issueCredentialShare, licenceClassCovers, orientationCode, readCredentialShare, sharedCredentialView, ShareRefused, walletHeadlineAt, walletView,
+  licenceClassCovers, orientationCode, shareLifetimeHours, sharedCredentialView, walletHeadlineAt, walletView, SHARE_MAX_HOURS,
   type DriverPortfolio, type DriverRequirement, type PortfolioCredential, type RequirementBinding,
 } from "./driverPortfolio";
 
@@ -153,7 +153,8 @@ describe("the wallet", () => {
     expect(w.headline).toBe("READY FOR WORK");
     expect(w.validUntil.toISOString()).toBe(days(5).toISOString());
     expect(walletHeadlineAt(w, days(4))).toBe("READY FOR WORK");
-    expect(walletHeadlineAt(w, days(5))).toBe("STALE — RECONNECT TO CONFIRM");
+    expect(walletHeadlineAt(w, days(5))).toBe("STALE");
+    expect(w.freshness).toMatchObject({ limitedBy: "credential_expiry", limitingCredential: { code: "h2s_alive" } });
   });
 
   it("is bounded by the offline allowance even when nothing is lapsing", () => {
@@ -219,41 +220,36 @@ describe("the expiry dashboard and the history", () => {
 });
 
 describe("sharing one credential", () => {
-  const SECRET = "s".repeat(40);
-  const at = Math.floor(NOW.getTime() / 1000);
-
-  it("round-trips, and is re-evaluated when scanned rather than frozen when issued", () => {
-    const c = cred("h2s_alive", { expiresAt: days(2) });
-    const token = issueCredentialShare({ credentialId: c.id, operatorId: 7, code: "h2s_alive", audience: "Christina Lake gate", issuedAt: at, expiresAt: at + 3600 * 24 * 5 }, SECRET);
-    const read = readCredentialShare(token, SECRET, NOW);
-    expect(read.ok).toBe(true);
-    if (!read.ok) return;
-    expect(sharedCredentialView({ claims: read.claims, holderName: "Dylan Hutchings", credentials: [c], at: NOW })).toMatchObject({ label: "H2S Alive", valid: true, identifier: c.identifier });
-    // Two days on the share is still inside its window, but the ticket is not.
-    const later = readCredentialShare(token, SECRET, days(3));
-    expect(later.ok && sharedCredentialView({ claims: later.claims, holderName: "D", credentials: [c], at: days(3) })?.valid).toBe(false);
+  it("lasts a day by default and never more than seven", () => {
+    expect(shareLifetimeHours(undefined)).toBe(24);
+    expect(shareLifetimeHours(2)).toBe(2);
+    expect(shareLifetimeHours(SHARE_MAX_HOURS)).toBe(168);
+    expect(() => shareLifetimeHours(169)).toThrow(/at most 168/);
+    expect(() => shareLifetimeHours(0)).toThrow(RangeError);
   });
 
-  it("refuses a tampered, expired, over-long or unsigned share, and never shows a private credential", () => {
-    const c = cred("h2s_alive");
-    const token = issueCredentialShare({ credentialId: c.id, operatorId: 7, code: "h2s_alive", audience: "x", issuedAt: at, expiresAt: at + 60 }, SECRET);
-    const [p, s] = token.split(".");
-    const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(p!, "base64url").toString()), expiresAt: at + 999999 })).toString("base64url");
-    expect(readCredentialShare(`${forged}.${s}`, SECRET, NOW)).toEqual({ ok: false, reason: "bad_signature" });
-    expect(readCredentialShare(token, SECRET, new Date(NOW.getTime() + 61_000))).toEqual({ ok: false, reason: "expired" });
-    expect(readCredentialShare(token, "", NOW)).toEqual({ ok: false, reason: "not_configured" });
-    expect(readCredentialShare("garbage", SECRET, NOW)).toEqual({ ok: false, reason: "malformed" });
-    expect(() => issueCredentialShare({ credentialId: 1, operatorId: 7, code: "h2s_alive", audience: "x", issuedAt: at, expiresAt: at + 8 * 86400 }, SECRET)).toThrow(ShareRefused);
-    expect(() => issueCredentialShare({ credentialId: 1, operatorId: 7, code: "h2s_alive", audience: "x", issuedAt: at, expiresAt: at + 60 }, "short")).toThrow(/not configured/);
+  it("is evaluated when redeemed, not frozen when issued", () => {
+    const c = cred("h2s_alive", { expiresAt: days(2) });
+    expect(sharedCredentialView({ credentialId: c.id, code: "h2s_alive", holderName: "Dylan Hutchings", credentials: [c], at: NOW })).toMatchObject({ label: "H2S Alive", valid: true, identifier: c.identifier });
+    expect(sharedCredentialView({ credentialId: c.id, code: "h2s_alive", holderName: "D", credentials: [c], at: days(3) })).toMatchObject({ valid: false, state: "expired" });
+    const rejected = { ...c, verificationStatus: "rejected" as const };
+    expect(sharedCredentialView({ credentialId: c.id, code: "h2s_alive", holderName: "D", credentials: [rejected], at: NOW })).toMatchObject({ valid: false, state: "rejected" });
+  });
 
-    const read = readCredentialShare(token, SECRET, NOW);
-    const privateRow = { ...c, privateDetail: true };
-    expect(read.ok && sharedCredentialView({ claims: read.claims, holderName: "D", credentials: [privateRow], at: NOW })).toBeNull();
-    // A token naming one ticket cannot be pointed at a row of another type.
+  it("stops representing a credential once a verified renewal has replaced it", () => {
+    const old = cred("h2s_alive", { expiresAt: days(30), capturedAt: days(-900) });
+    const renewal = cred("h2s_alive", { expiresAt: days(1000), capturedAt: days(-1) });
+    expect(sharedCredentialView({ credentialId: old.id, code: "h2s_alive", holderName: "D", credentials: [old], at: NOW })?.valid).toBe(true);
+    expect(sharedCredentialView({ credentialId: old.id, code: "h2s_alive", holderName: "D", credentials: [old, renewal], at: NOW })).toMatchObject({ state: "superseded", valid: false });
+  });
+
+  it("never shows a private credential, another type's row, or anything outside the catalogue", () => {
+    const c = cred("h2s_alive");
+    expect(sharedCredentialView({ credentialId: c.id, code: "h2s_alive", holderName: "D", credentials: [{ ...c, privateDetail: true }], at: NOW })).toBeNull();
     const other = cred("whmis");
-    const wrong = issueCredentialShare({ credentialId: other.id, operatorId: 7, code: "h2s_alive", audience: "x", issuedAt: at, expiresAt: at + 60 }, SECRET);
-    const wr = readCredentialShare(wrong, SECRET, NOW);
-    expect(wr.ok && sharedCredentialView({ claims: wr.claims, holderName: "D", credentials: [other], at: NOW })).toBeNull();
+    expect(sharedCredentialView({ credentialId: other.id, code: "h2s_alive", holderName: "D", credentials: [other], at: NOW })).toBeNull();
+    const medical = cred("medical_fitness");
+    expect(sharedCredentialView({ credentialId: medical.id, code: "medical_fitness", holderName: "D", credentials: [medical], at: NOW })).toBeNull();
   });
 });
 
@@ -297,5 +293,26 @@ describe("requirement bindings", () => {
     expect(bindingProblem(binding({ subjectType: "company", subjectCode: "Cenovus" }))).toMatch(/subject code is \*/);
     expect(bindingProblem(binding({ requirementKind: "licence_class", requirementCode: "Class 1" }))).toBeNull();
     expect(bindingProblem(binding({ requirementKind: "licence_class", requirementCode: "A" }))).toMatch(/1 to 6/);
+  });
+});
+
+describe("the offline freshness rule the phone shares", () => {
+  it("never lets a cached READY outlive validUntil, and never softens NOT READY", async () => {
+    const { walletStatusAt } = await import("../../shared/driverWallet");
+    const until = days(1);
+    expect(walletStatusAt({ headline: "READY FOR WORK", validUntil: until }, NOW)).toBe("READY FOR WORK");
+    expect(walletStatusAt({ headline: "READY FOR WORK", validUntil: until }, until)).toBe("STALE");
+    expect(walletStatusAt({ headline: "READY FOR WORK", validUntil: until.toISOString() }, days(2))).toBe("STALE");
+    expect(walletStatusAt({ headline: "ACTION REQUIRED", validUntil: until }, days(2))).toBe("STALE");
+    expect(walletStatusAt({ headline: "NOT READY", validUntil: until }, days(2))).toBe("NOT READY");
+    expect(walletStatusAt({ headline: "READY FOR WORK", validUntil: "not a date" }, NOW)).toBe("STALE");
+  });
+});
+
+describe("the expiry dashboard names unverified uploads that are themselves lapsing", () => {
+  it("reports verification state and the row", () => {
+    const p = portfolio([cred("whmis", { verificationStatus: "needs_review", expiresAt: days(10) })]);
+    const [a] = expiryAlerts([p], NOW);
+    expect(a).toMatchObject({ code: "whmis", verification: "unverified", tier: 14 });
   });
 });
