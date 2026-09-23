@@ -2215,6 +2215,16 @@ export function authorizeRecordScope(args: {
   permission: Permission;
   subject: RecordScopeSubject;
   resourceBranch?: string | null;
+  /**
+   * B23.1A — forwarded to `authorize`, and callers must supply it.
+   *
+   * Omitting it is not "unscoped", it is "organization unresolved", which
+   * makes every organization-confined grant inapplicable — i.e. every grant
+   * 0170 leaves behind. This wrapper spreads `args` straight through, so the
+   * axis was silently dropped at all three call sites until a fixture stopped
+   * writing platform-global grants.
+   */
+  organization?: string | null;
 }): AuthorizationResult {
   const base = authorize(args);
   if (!base.allowed) return base;
@@ -2251,6 +2261,8 @@ export function authorizeMechanicRelease(args: {
   grants?: readonly RoleGrant[];
   technicianUserId: number;
   resourceBranch?: string | null;
+  /** B23.1A — see `authorizeRecordScope`. Forwarded to `authorize`. */
+  organization?: string | null;
 }): AuthorizationResult {
   const base = authorize({ ...args, permission: "maintenance.record_release" });
   if (!base.allowed) return base;
@@ -2296,6 +2308,10 @@ export const RECORDS_PROCEDURE_PERMISSIONS = {
   // at all: the only path that revoked anything was offboarding, which revoked
   // every grant the account held in every organization.
   "records.roles.revoke": "roles.grant",
+  // B23.1A — resolving a grant 0170 quarantined is issuing one: same authority,
+  // same permission, and the organization comes from the actor's scope either
+  // way.
+  "records.roles.resolveLegacy": "roles.grant",
 } as const satisfies Record<string, Permission>;
 
 export type RecordsProcedure = keyof typeof RECORDS_PROCEDURE_PERMISSIONS;

@@ -81,7 +81,7 @@ import {
   integrationClients,
   coreRecordOwnership, organizationMemberships, organizations, fieldTickets, incidentReports, loads } from "../drizzle/schema";
 import { ENV } from "./_core/env";
-import type { MembershipFact } from "./_core/workspaceAccess";
+import { membershipIsLive, type MembershipFact } from "./_core/workspaceAccess";
 import { grantsInOrganization, type RoleGrant } from "./_core/recordsAuthorization";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -1317,16 +1317,53 @@ export async function listActiveUserRoleNames(userId: number): Promise<string[]>
  * one branch is still a driver, and still needs the driver's training — dropping
  * confined roles there would silently stop demanding a required course, which is
  * the same class of failure as over-granting, pointed the other way.
+ *
+ * B23.1A — the one reader deliberately left unscoped, and the reasoning is the
+ * same one level out: a driver at one company is a driver, and a grant this
+ * deployment quarantined as `unscoped_legacy` still describes work that person
+ * was doing. Demanding the training is the safe direction; withholding it is
+ * not. `readinessComposer` is its only caller and consumes it as a training
+ * requirement, never as permission. It DOES exclude revoked grants, because a
+ * grant that ended is not a duty anybody still has.
+ *
+ * If a second caller ever appears, check it against that sentence before
+ * reusing this: everything about authorization wants
+ * `listRoleGrantsInActingOrganization` instead.
  */
 export async function listRoleNamesAnyScope(userId: number): Promise<string[]> {
   return (await listActiveUserRoles(userId)).map(r => r.role);
 }
 
 /**
- * Count of users currently holding management. Used only by the bootstrap
- * path, which must refuse to run once anybody holds it.
+ * Count of users currently holding management IN ONE ORGANIZATION.
+ *
+ * B23.1A — the organization argument is required and is what makes the bootstrap
+ * usable in a multi-tenant deployment at all. Counted across every organization,
+ * as this did, the first company to bootstrap would close the door on every
+ * company created afterwards: they could never appoint a first administrator,
+ * because somebody somewhere else already held management.
+ *
+ * `null` means the historical single tenant, written explicitly so "count
+ * everywhere" cannot be reached by omitting an argument.
+ *
+ * It counts grants belonging to THIS organization, and deliberately not
+ * platform-wide (`scopeType='global'`) ones. That looks like the unsafe
+ * direction and is not, for a specific reason: a platform-wide management
+ * holder cannot appoint anybody here. `records.roles.grant` takes its
+ * organization from the ACTOR's acting scope, which comes from the actor's own
+ * membership — so a platform-wide admin with no membership in this company
+ * grants into the historical single tenant, never into it. Counting their
+ * grant as "this company already has an administrator" would close the only
+ * door into a company nobody can otherwise enter, permanently, for every
+ * organization created after the one legacy global grant.
+ *
+ * The population is not ignored: `bootstrapManagementRole` returns it,
+ * `records.roles.bootstrapStatus` reports it, and `role-grant-diagnostic.sh`
+ * exits 3 while any exist.
  */
-export async function countActiveManagementGrants(): Promise<number> {
+export async function countActiveManagementGrants(
+  organization: string | null
+): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
   const rows = await db
@@ -1335,6 +1372,32 @@ export async function countActiveManagementGrants(): Promise<number> {
     .where(
       and(
         eq(userRoleAssignments.role, "management"),
+        organization === null
+          ? isNull(userRoleAssignments.orgRef)
+          : eq(userRoleAssignments.orgRef, organization),
+        isNull(userRoleAssignments.revokedAt)
+      )
+    );
+  return rows.length;
+}
+
+/**
+ * Count of PLATFORM-WIDE grants of any role.
+ *
+ * B23.1A — `global` crosses every organization. After 0170 the backfill creates
+ * none, and no ordinary path writes one, so this number should be zero forever.
+ * It exists so the deployment check and the bootstrap can both say "nobody holds
+ * cross-tenant authority" as a measured fact rather than an assumption.
+ */
+export async function countPlatformWideGrants(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const rows = await db
+    .select({ id: userRoleAssignments.id })
+    .from(userRoleAssignments)
+    .where(
+      and(
+        eq(userRoleAssignments.scopeType, "global"),
         isNull(userRoleAssignments.revokedAt)
       )
     );
@@ -1346,17 +1409,40 @@ export async function countActiveManagementGrants(): Promise<number> {
  *
  * Fail-closed authorization means nobody can grant a role until somebody holds
  * `roles.grant`, and nobody holds it while the table is empty. This is the only
- * path across that gap, and it closes behind itself: it refuses once any active
- * management grant exists, it grants exactly `management` and nothing else, and
- * it requires a platform admin. Platform admin is not itself a domain role —
- * an admin is not automatically a mechanic, HR or legal.
+ * path across that gap, and it closes behind itself: it refuses once an active
+ * management grant exists in that organization, it grants exactly `management`
+ * and nothing else, and it requires a platform admin. Platform admin is not
+ * itself a domain role — an admin is not automatically a mechanic, HR or legal.
+ *
+ * ## B23.1A — bootstrap no longer creates platform authority
+ *
+ * It wrote `scopeType: 'global'`. Before 0170 that was the only value an
+ * ordinary grant could have and meant nothing in particular; after 0170 it
+ * means *reaches every organization in the deployment*. So the convenience path
+ * for appointing a company's first administrator had quietly become the one
+ * remaining way to mint a cross-tenant authority — exactly the distinction this
+ * checkpoint exists to draw.
+ *
+ * It now writes an ORGANIZATION-scoped grant, and the organization is derived
+ * from the target's own membership rather than named by the caller:
+ *
+ *   exactly one live membership -> management in that company
+ *   none at all                 -> management in the historical single tenant
+ *   more than one               -> REFUSED. Which company is being bootstrapped
+ *                                  is not a thing to guess, and a platform
+ *                                  admin guessing it is how one company's first
+ *                                  administrator ends up administering another.
+ *
+ * There is no path here to platform-wide authority any more, deliberately. If
+ * this deployment ever needs a genuine cross-tenant operator, that is its own
+ * mechanism with its own review — not a side effect of onboarding.
  */
 export async function bootstrapManagementRole(args: {
   targetUserId: number;
   performedByUserId: number;
   reason: string;
 }): Promise<
-  | { ok: true; grantId: number | undefined }
+  | { ok: true; grantId: number | undefined; organization: string; platformWideGrants: number }
   | { ok: false; reason: string }
 > {
   const db = await getDb();
@@ -1365,11 +1451,28 @@ export async function bootstrapManagementRole(args: {
     return { ok: false, reason: "Bootstrap requires a stated reason" };
   }
 
-  const existing = await countActiveManagementGrants();
+  // Which company is being opened. Read from the target's membership, never
+  // from the caller — a platform admin may perform the bootstrap, but may not
+  // choose whose company it lands in.
+  const memberships = (await listMembershipFacts(args.targetUserId)).filter(m =>
+    membershipIsLive(m, new Date())
+  );
+  const orgs = Array.from(new Set(memberships.map(m => m.orgRef)));
+  if (orgs.length > 1) {
+    return {
+      ok: false,
+      reason:
+        `Bootstrap refused — this user is a live member of ${orgs.length} organizations. ` +
+        "Which one is being bootstrapped has to be established, not guessed.",
+    };
+  }
+  const organization = orgs[0] ?? SINGLE_TENANT_ID;
+
+  const existing = await countActiveManagementGrants(organization);
   if (existing > 0) {
     return {
       ok: false,
-      reason: `Bootstrap is closed — ${existing} active management grant(s) already exist`,
+      reason: `Bootstrap is closed — ${existing} active management grant(s) already exist in this organization`,
     };
   }
 
@@ -1377,7 +1480,9 @@ export async function bootstrapManagementRole(args: {
   const grantId = await grantUserRole({
     userId: args.targetUserId,
     role: "management",
-    scopeType: "global",
+    // Organization-scoped, never platform-wide. See the note above.
+    scopeType: "organization",
+    orgRef: organization,
     grantedByUserId: args.performedByUserId,
     grantedAt: now,
   });
@@ -1390,7 +1495,10 @@ export async function bootstrapManagementRole(args: {
     occurredAt: now,
   });
 
-  return { ok: true, grantId };
+  // B23.1A — reported, not counted against the bootstrap. See
+  // `countActiveManagementGrants` for why a platform-wide holder does not close
+  // this door, and why pretending otherwise would lock the company out.
+  return { ok: true, grantId, organization, platformWideGrants: await countPlatformWideGrants() };
 }
 
 /* ==================================================================
@@ -1502,6 +1610,89 @@ export async function revokeUserRole(args: {
     })
     .where(target);
   return matched.length;
+}
+
+/**
+ * B23.1A — one quarantined grant, by the id the diagnostic prints.
+ *
+ * Returns it only while it is BOTH quarantined and live, so a resolved grant is
+ * indistinguishable from one that never existed. That is what makes resolution
+ * safely repeatable: a second attempt with the same id finds nothing rather
+ * than issuing a second grant.
+ */
+export async function findUnresolvedLegacyGrant(
+  grantId: number
+): Promise<{ id: number; userId: number; role: string } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const row = (
+    await db
+      .select({
+        id: userRoleAssignments.id,
+        userId: userRoleAssignments.userId,
+        role: userRoleAssignments.role,
+      })
+      .from(userRoleAssignments)
+      .where(
+        and(
+          eq(userRoleAssignments.id, grantId),
+          eq(userRoleAssignments.scopeType, "unscoped_legacy"),
+          isNull(userRoleAssignments.revokedAt)
+        )
+      )
+      .limit(1)
+  )[0];
+  return row ? { id: row.id, userId: row.userId, role: row.role as string } : null;
+}
+
+/**
+ * Revoke exactly one grant, by id.
+ *
+ * Distinct from `revokeUserRole`, which matches on (user, role, organization),
+ * because a quarantined grant has NO organization — so the ordinary revoke
+ * would match every organization-less grant that person holds, platform-wide
+ * ones included. Resolving one legacy row must touch one legacy row.
+ */
+export async function revokeGrantById(args: {
+  grantId: number;
+  revokedByUserId: number;
+  reason: string;
+}): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db
+    .update(userRoleAssignments)
+    .set({
+      revokedAt: new Date(),
+      revokedByUserId: args.revokedByUserId,
+      revokeReason: args.reason,
+    })
+    .where(
+      and(eq(userRoleAssignments.id, args.grantId), isNull(userRoleAssignments.revokedAt))
+    );
+  return true;
+}
+
+/** Whether this person already holds this role in this organization. */
+export async function holdsRoleInOrganization(args: {
+  userId: number;
+  role: string;
+  organization: string;
+}): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db
+    .select({ id: userRoleAssignments.id })
+    .from(userRoleAssignments)
+    .where(
+      and(
+        eq(userRoleAssignments.userId, args.userId),
+        eq(userRoleAssignments.role, args.role as never),
+        eq(userRoleAssignments.orgRef, args.organization),
+        isNull(userRoleAssignments.revokedAt)
+      )
+    );
+  return rows.length > 0;
 }
 
 /**

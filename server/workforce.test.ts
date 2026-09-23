@@ -7,6 +7,7 @@ import { appRouter } from "./routers";
 // calendar passes it (which is how this was found, at 01:25 UTC on the 17th).
 const START = new Date(Math.floor(Date.now() / 86_400_000) * 86_400_000 + 7 * 86_400_000);
 import { grantUserRole } from "./db";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { authorize, type DomainRole } from "./_core/recordsAuthorization";
 
 const at = (iso: string) => new Date(iso);
@@ -79,7 +80,13 @@ let userSeq = 3_400_000 + Math.floor(Math.random() * 50_000);
 const nextUser = () => userSeq++;
 beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 6 }); });
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
-async function withRole(role: DomainRole) { const id = nextUser(); await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
+// B23.1A: organization-scoped, which is the shape 0170 leaves behind and the
+// only shape `records.roles.grant` now writes. These fixtures have no
+// membership row, so their acting scope is the historical single tenant —
+// exactly what `resolveActingScope` resolves such callers to. Granting
+// `scopeType: "global"` here would hand every test actor platform-wide
+// authority and hide any organization boundary the procedures apply.
+async function withRole(role: DomainRole) { const id = nextUser(); await grantUserRole({ userId: id, role, scopeType: "organization", orgRef: SINGLE_TENANT_ID, grantedByUserId: 1, grantedAt: new Date() }); return id; }
 
 d("a person, hired to offboarded", () => {
   it("is screened with evidence, refused a hire while a screening is pending, hired into a plan, credentialed into the registry by a second person, signed off, decided by two people on probation, and offboarded only when every door is shut", async () => {
@@ -145,7 +152,7 @@ d("a person, hired to offboarded", () => {
     expect((await callerFor(hr).workforce.onboardingStatus({ planRef: hire.planRef! })).probationEndsAt?.toISOString().slice(0, 10)).toBe("2027-01-15");
 
     // Offboarding: opened; the driver still holds a role, a device and a tool; close is refused with each door named; access revoked as one act; the tool returned; then closed.
-    await grantUserRole({ userId: newUser, role: "driver", scopeType: "global", grantedByUserId: hr, grantedAt: new Date() });
+    await grantUserRole({ userId: newUser, role: "driver", scopeType: "organization", orgRef: SINGLE_TENANT_ID, grantedByUserId: hr, grantedAt: new Date() });
     await pool.execute("INSERT INTO fieldDevices (deviceRef, userId, platform, keyFingerprint, keystoreAttestation, encryptedStorageAttested, status, enrolledAt, enrolledByUserId, createdAt) VALUES (?, ?, 'ios', ?, 'unknown', 0, 'active', NOW(), ?, NOW())", [`DEV-${newUser}`, newUser, `fp-${newUser}`, hr]);
     const mech = await withRole("mechanic");
     const toolSerial = `T-${newUser}`;
@@ -159,7 +166,11 @@ d("a person, hired to offboarded", () => {
     expect(st.toolsOut).toEqual([toolSerial]);
     await expect(callerFor(hr).workforce.offboardingClose({ offboardingRef: off.offboardingRef, finalPayProposed: true })).rejects.toThrow(/Cannot close: 1 role grant\(s\) still active/);
     const rev = await callerFor(hr).workforce.offboardingRevokeAccess({ offboardingRef: off.offboardingRef });
-    expect(rev).toEqual({ offboardingRef: off.offboardingRef, rolesRevoked: 1, devicesRevoked: 1 });
+    // B23.1A: the revoke reports what it could not shut. Zero here, and it has
+    // to be asserted rather than omitted — a platform-wide grant survives an
+    // offboarding untouched, and a number nobody looks at is the same as no
+    // number at all.
+    expect(rev).toEqual({ offboardingRef: off.offboardingRef, rolesRevoked: 1, devicesRevoked: 1, platformWideGrantsUntouched: 0 });
     expect(authorize({ userId: newUser, roles: [], permission: "dispatch.read" }).allowed).toBe(false);
     const [rr] = await pool.execute<mysql.RowDataPacket[]>("SELECT revokeReason FROM userRoleAssignments WHERE userId = ? AND role = 'driver'", [newUser]);
     expect(rr[0].revokeReason).toContain(off.offboardingRef);

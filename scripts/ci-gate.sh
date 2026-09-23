@@ -6,6 +6,21 @@
 #
 # The database named in DATABASE_URL is DROPPED and recreated. Point this at a
 # disposable database. It fails at the first gate that fails, and prints which.
+#
+# RUN THE GATE, NOT `vitest run` AGAINST A DATABASE YOU KEEP.
+#
+# B23.1A — the first full run with a real database produced 26 failures that
+# were not real. `enforcementApi.test.ts` and its neighbours name fixed record
+# ids (`unitId: 127`); the tenant-scope suites create units from the
+# auto-increment and claim them for an organization in `coreRecordOwnership`.
+# On a fresh database the ids never meet. On a database kept across runs they
+# eventually do, and every suite that reaches a hardcoded id then reports
+# "Work order N not found" — a tenant-scope refusal that is completely correct
+# about a row another suite took ownership of two runs ago.
+#
+# Gate 1 is what makes the suite honest, so it is not optional and not slow.
+# If you are debugging one suite, re-run gate 1 first or expect to chase a
+# refusal that belongs to the database rather than to the code.
 set -euo pipefail
 
 : "${DATABASE_URL:?DATABASE_URL is required}"
@@ -47,6 +62,14 @@ bash scripts/apply-migrations.sh
 
 gate "3. Table parity"
 bash scripts/verify-parity.sh
+
+# B23.1A — 0170 decides, per existing grant, which company that grant speaks
+# for from now on. Reading the SQL proves its syntax; only this proves the
+# classification. It builds the pre-0170 world in a scratch database, seeds a
+# row of every legacy shape, applies 0170 alone, and asserts what each became —
+# including that NO category gained cross-company authority.
+gate "3b. Migration 0170 backfill, verified against this database"
+bash scripts/verify-migration-0170.sh
 
 gate "4. Typecheck"
 pnpm exec tsc --noEmit
@@ -97,6 +120,18 @@ if [ -n "$skipped_db" ]; then
   exit 1
 fi
 echo "no database-backed suite skipped"
+
+# B23.1A — the inverse check. "Nothing skipped" is also true of a tree where
+# somebody deleted the file. These are the suites that carry the tenant and
+# cross-organization boundaries; if they are not in the run, the gate has not
+# tested the thing it exists to test.
+for suite in organizationScopedRoles.db.test.ts sessionWorkspace.db.test.ts legacyGrantHardening.db.test.ts; do
+  grep -qE "(✓|❯) *server/$suite" /tmp/vitest-gate.out || {
+    echo "FAIL: $suite did not run. The authorization boundary is untested in this gate."
+    exit 1
+  }
+done
+echo "authorization suites present and executed"
 
 gate "7. Production build"
 pnpm build

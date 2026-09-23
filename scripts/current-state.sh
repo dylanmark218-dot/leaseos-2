@@ -72,7 +72,11 @@ here can be added rather than read.
 ## Implemented on the server (each with schema, authorization, audit, tests)
 
 Records vault · roles and server-side authorization, scoped to the
-organization that granted them: a role issued by one company authorizes
+organization that granted them — with the migration that scoped them verified
+against a real MariaDB (pre-state, legacy rows of every shape, apply, assert),
+a read-only diagnostic that counts the quarantine before and after deployment,
+a bootstrap that can no longer mint cross-tenant authority, and a resolution
+procedure for the grants the migration refused to guess at: a role issued by one company authorizes
 nothing in another, capabilities and workspaces are computed from the acting
 organization's grants rather than filtered afterwards, branch grants name
 their organization explicitly because branch identifiers have no owner, grant
