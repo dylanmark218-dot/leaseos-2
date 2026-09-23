@@ -3,8 +3,24 @@
 B23.1 scoped role grants to the organization that issued them. This checkpoint
 does not extend that work; it tries to break it, and reports what broke.
 
-The headline: **B23.1 as committed failed 26 tests against a real database.**
-Nobody had seen that, because the suites that would have said so were skipping.
+The headline: **B23.1 as committed failed against a real database**, and every
+handler that authorizes twice was refusing everybody.
+
+> **Corrected by B23.1B, 2026-09-23.** Two claims in the original version of
+> this document were wrong, and the corrections matter more than the claims did.
+>
+> **"The CI workflow does not run the database tests."** It does, and always
+> has. `.github/workflows/ci.yml` has carried a `mariadb:10.11` service,
+> `DATABASE_URL` and `bash scripts/ci-gate.sh` since the repository's first
+> commit. That sentence was not checked before it was written.
+>
+> **"26 failures."** 26 is what a *local* run produced against a database reused
+> across runs, and most of them were the fixture-collision artefact described in
+> §3 rather than anything B23.1 did. On a clean database — which is what CI uses
+> — B23.1 failed **11 tests in 6 files**, and all 11 were the authorization
+> regressions below. CI ran, went red, and said so at the time; nobody was
+> watching, and no branch protection required it. See
+> `LEASEOS_B23_1B_CI_ENFORCEMENT.md`.
 
 ---
 
@@ -12,7 +28,7 @@ Nobody had seen that, because the suites that would have said so were skipping.
 
 | # | Risk as stated | What was actually true |
 |---|---|---|
-| 1 | The 20-case adversarial DB suite skipped locally | It skipped **everywhere**. No database had ever been attached to this work. Attaching one surfaced 26 failures. |
+| 1 | The 20-case adversarial DB suite skipped locally | It skipped **locally only**. CI had been running it against MariaDB 10.11 all along and had been red since B23.0; see the correction above. |
 | 2 | Unknown `unscoped_legacy` production population | Unknowable from here, so a read-only diagnostic was built to count it **before** the window rather than after. |
 | 3 | `bootstrapManagementRole` wrote a global grant | Confirmed, and fixed: organization-scoped, refuses a multi-organization target, and reports the platform-wide population it declines to count. |
 | 4 | Zero-membership grants assigned literal `orgRef='default'` | Correct as designed, and now pinned: `'default'` is the historical single tenant this deployment already acts as for such people, not an invented organization. |

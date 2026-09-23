@@ -6,7 +6,7 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **v23.28** | `LEASEOS_RELEASE` (or explicit argument 1) |
+| Release | **v23.29** | `LEASEOS_RELEASE` (or explicit argument 1) |
 | Tables | **408** | `mysqlTable(` declarations in `drizzle/schema.ts` |
 | Migrations | **166** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
 | Role-authorized procedures | **648** | `roleProcedure(` call sites across all routers |
@@ -16,7 +16,7 @@ here can be added rather than read.
 | Permissions | **355** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **125** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **303 / 4130** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **304 / 4143** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -25,8 +25,10 @@ Records vault · roles and server-side authorization, scoped to the
 organization that granted them — with the migration that scoped them verified
 against a real MariaDB (pre-state, legacy rows of every shape, apply, assert),
 a read-only diagnostic that counts the quarantine before and after deployment,
-a bootstrap that can no longer mint cross-tenant authority, and a resolution
-procedure for the grants the migration refused to guess at: a role issued by one company authorizes
+a bootstrap that can no longer mint cross-tenant authority, a resolution
+procedure for the grants the migration refused to guess at, and a CI gate that
+now proves which suites ran from vitest's own report rather than by grepping
+coloured output: a role issued by one company authorizes
 nothing in another, capabilities and workspaces are computed from the acting
 organization's grants rather than filtered afterwards, branch grants name
 their organization explicitly because branch identifiers have no owner, grant

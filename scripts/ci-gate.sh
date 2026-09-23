@@ -100,38 +100,40 @@ if [ "$count" != "0" ]; then echo "FAIL: $count bare protectedProcedure"; exit 1
 echo "0"
 
 gate "6. Test suite (includes column-level parity and reserved-word audit)"
-LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run --reporter=basic 2>&1 | tee /tmp/vitest-gate.out
+# Two reporters: `basic` for a human reading the job log, `json` for the gate.
+#
+# B23.1B — the gate used to grep the human output, and that is why this block
+# was rewritten. Locally vitest writes ` ✓ server/x.db.test.ts`; in CI it
+# detects the runner and colours the line, so the tick and the path end up
+# separated by an escape sequence and `(✓|❯) *server/<name>` stops matching.
+# The gate failed on a run where all 312 files passed and every pinned suite
+# had executed. Red that means nothing is worse than no check at all.
+LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run \
+  --reporter=basic --reporter=json --outputFile.json=/tmp/vitest-gate.json 2>&1 | tee /tmp/vitest-gate.out
 # pipefail is on, so a failing vitest still fails the gate through the pipe.
 
-# A suite that needs a database and skips anyway reports as "↓", which is
-# indistinguishable from one correctly standing down because no database is
-# configured. Here one is, so a skipped .db.test.ts is a suite that is not
-# running and looks like it chose not to.
+# The verdict, read from the report written for machines. It checks three
+# things the human output cannot be trusted to show:
 #
-# This is why the check exists: widgetPersistence.db.test.ts (24 cases) and
-# widgetConflict.db.test.ts (10 cases) gate on WIDGET_DB_URL, nothing set it,
-# and they had never run — in CI or anywhere. The first of them exists to guard
-# a cross-tenant board overwrite, and it reported "skipped" the whole time.
-skipped_db=$(grep -E '^ *↓ .*\.db\.test\.ts' /tmp/vitest-gate.out || true)
-if [ -n "$skipped_db" ]; then
-  echo "FAIL: a .db.test.ts suite skipped while a database is configured:"
-  echo "$skipped_db"
-  echo "Either its guard reads an environment variable this gate does not set, or the gate stopped setting one."
-  exit 1
-fi
-echo "no database-backed suite skipped"
+#   - every pinned authorization suite is in the run (not deleted, not renamed,
+#     not filtered out) AND executed at least one case;
+#   - no .db.test.ts stood down while a database is configured — the original
+#     false green, in which widgetPersistence.db.test.ts (24 cases guarding a
+#     cross-tenant board overwrite) had never run anywhere;
+#   - at least one database-backed case actually executed, because "nothing
+#     failed" is also true of a run where nothing ran.
+#
+# The list and the logic live in server/_core/requiredSuites.ts, and
+# server/requiredSuites.test.ts exercises them against synthetic reports
+# containing each failure — so the guard is tested without breaking the repo.
+pnpm exec tsx scripts/verify-gate-run.ts /tmp/vitest-gate.json
 
-# B23.1A — the inverse check. "Nothing skipped" is also true of a tree where
-# somebody deleted the file. These are the suites that carry the tenant and
-# cross-organization boundaries; if they are not in the run, the gate has not
-# tested the thing it exists to test.
-for suite in organizationScopedRoles.db.test.ts sessionWorkspace.db.test.ts legacyGrantHardening.db.test.ts; do
-  grep -qE "(✓|❯) *server/$suite" /tmp/vitest-gate.out || {
-    echo "FAIL: $suite did not run. The authorization boundary is untested in this gate."
-    exit 1
-  }
-done
-echo "authorization suites present and executed"
+# B23.1B — gate 1's clean database is what makes the suite above honest, and it
+# also hides a defect: a test that names a record id it did not create passes
+# on a database nobody else has touched. This causes the collision on purpose
+# in a scratch database, so the class cannot come back silently.
+gate "6b. Fixture isolation: no suite depends on a record id it did not create"
+bash scripts/verify-fixture-isolation.sh
 
 gate "7. Production build"
 pnpm build
