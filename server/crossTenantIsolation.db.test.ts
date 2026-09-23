@@ -195,6 +195,83 @@ d("Tenant A cannot reach Tenant B through the scoped read paths", () => {
   }, 20_000);
 });
 
+d("Tenant A cannot dispatch Tenant B's people or fleet", () => {
+  it("refuses to read another organization's operator readiness, which is their compliance record", async () => {
+    const a = await org(), b = await org();
+    const ua = await member(a, ["dispatcher", "management"]);
+    const ub = await member(b, ["dispatcher", "management"]);
+    const A = await seedTenant(a, ua), B = await seedTenant(b, ub);
+
+    // A dispatcher's own fleet answers.
+    await expect(
+      callerFor(ua).dispatch.readiness({ operatorId: A.operatorId, unitId: A.unitId }),
+    ).resolves.toBeTruthy();
+
+    // Another organization's operator is the licence, medical and hours-of-service
+    // record of a person who does not work for this caller.
+    await expect(
+      callerFor(ua).dispatch.readiness({ operatorId: B.operatorId, unitId: null }),
+    ).rejects.toThrow(/not found/i);
+
+    // And the unit, and the pair, and the trailer.
+    await expect(
+      callerFor(ua).dispatch.readiness({ operatorId: A.operatorId, unitId: B.unitId }),
+    ).rejects.toThrow(/not found/i);
+    await expect(
+      callerFor(ua).dispatch.readiness({ operatorId: A.operatorId, unitId: null, trailerId: B.unitId }),
+    ).rejects.toThrow(/not found/i);
+    await expect(
+      callerFor(ua).dispatch.readiness({ operatorId: A.operatorId, unitId: null, jobId: B.jobId }),
+    ).rejects.toThrow(/not found/i);
+  }, 30_000);
+
+  it("refuses to record an eligibility check about another organization's operator", async () => {
+    const a = await org(), b = await org();
+    const ua = await member(a, ["dispatcher", "management"]);
+    const ub = await member(b, ["dispatcher", "management"]);
+    const A = await seedTenant(a, ua), B = await seedTenant(b, ub);
+    void A;
+    await expect(
+      callerFor(ua).dispatch.evaluate({ operatorId: B.operatorId, unitId: B.unitId, jobId: B.jobId }),
+    ).rejects.toThrow(/not found/i);
+  }, 30_000);
+
+  it("refuses to act on an eligibility check recorded in another organization", async () => {
+    const a = await org(), b = await org();
+    const ua = await member(a, ["dispatcher", "management", "controller"]);
+    const ub = await member(b, ["dispatcher", "management"]);
+    const A = await seedTenant(a, ua), B = await seedTenant(b, ub);
+    void A;
+
+    // B records a check about its own people — legitimately.
+    const check = await callerFor(ub).dispatch.evaluate({
+      operatorId: B.operatorId, unitId: B.unitId, jobId: B.jobId,
+    });
+    expect(check.checkId).toBeGreaterThan(0);
+
+    // A knows the integer. That must not be enough for any of the three.
+    await expect(
+      callerFor(ua).dispatch.overrideRequest({ checkId: check.checkId, blockerCode: "any", reason: "a plausible sounding reason" }),
+    ).rejects.toThrow(/not found/i);
+    await expect(
+      callerFor(ua).dispatch.overrideGrant({ checkId: check.checkId, blockerCode: "any", reason: "a plausible sounding reason" }),
+    ).rejects.toThrow(/not found/i);
+    await expect(
+      callerFor(ua).dispatch.award({ checkId: check.checkId, startsAt: new Date(), endsAt: new Date(Date.now() + 3_600_000) }),
+    ).rejects.toThrow(/not found/i);
+  }, 30_000);
+
+  it("refuses one organization the installation-wide enforcement mode", async () => {
+    // Turning the gate off globally would turn it off for every other
+    // organization on the deployment.
+    const a = await org();
+    const mgr = await member(a, ["management", "controller"]);
+    await expect(
+      callerFor(mgr).dispatch.enforcementSet({ mode: "off", reason: "Would disable every other organization's gate" }),
+    ).rejects.toThrow(/not one organization's to set/i);
+  }, 20_000);
+});
+
 d("Tenant A cannot mutate or link Tenant B by guessing an id", () => {
   it("refuses to link a record the caller's book does not own", async () => {
     const bookA = await org(), bookB = await org();
