@@ -12,6 +12,7 @@
  */
 
 import { assessEligibilityValidity, type EligibilityFacts, type GrantedOverride, type StoredEligibilityCheck } from "./dispatchAward";
+import { asFinding, uncoveredFindings } from "./complianceFinding";
 
 export type EnforcementMode = "off" | "advisory" | "enforced";
 
@@ -63,15 +64,8 @@ export function decideLegacyAssignment(args: {
       const v = assessEligibilityValidity(c, args.currentFacts, args.now, args.maxAgeMinutes ?? 30);
       if (!v.valid) findings.push(v.reason);
     }
-    for (const b of c.blockers) {
-      if (b.severity === "blocking") { findings.push(`BLOCKED — ${b.label}`); continue; }
-      const covered = b.overridable && args.grantedOverrides.some(o => o.blockerCode === b.code);
-      if (!covered) findings.push(`${b.severity === "unknown" ? "UNKNOWN" : "REVIEW"} — ${b.label} (no authorised override)`);
-    }
-    for (const o of args.grantedOverrides) {
-      const b = c.blockers.find(x => x.code === o.blockerCode);
-      if (b && !b.overridable) findings.push(`Override of ${b.code} is not permitted for any role`);
-    }
+    // C1a — the same coverage rule as the posting award: by override class, grantor ≠ requester.
+    findings.push(...uncoveredFindings(c.blockers.map(b => asFinding(b, c.evaluatedAt)), args.grantedOverrides, args.now));
   }
 
   if (args.mode === "advisory") return { allowed: true, mode: "advisory", exceptions: findings, checkId: args.check?.checkId ?? null };
