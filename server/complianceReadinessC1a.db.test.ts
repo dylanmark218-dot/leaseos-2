@@ -205,7 +205,7 @@ d("C1a-3: the grantor is recorded, and is never the requester", () => {
     expect(JSON.parse(r.scopeJson)).toMatchObject({ checkId: c.checkId, blockerCode: w.code });
   });
 
-  it("a pre-0172 granted row with no recorded grantor is not a grant — the award refuses", async () => {
+  it("a pre-0174 granted row with no recorded grantor is not a grant — the award refuses", async () => {
     const s = await establishedSubject();
     const c = await caller(s.dispatcher).dispatch.evaluate({ ...s.subject, postingId: s.postingId });
     // Exactly what the old code wrote: `granted = 1`, and only the requester on record.

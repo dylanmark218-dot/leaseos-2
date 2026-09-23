@@ -109,7 +109,7 @@ export const dispatchGateRouter = router({
         // 0153: and the policy each capability was decided under, for the same reason.
         automationPolicyJson: JSON.stringify(r.automationPolicy), evaluatedAt: now, evaluatedByUserId: ctx.user.id,
         routeApprovalRef: input.routeApprovalRef ?? null,
-        // 0172: the rules these findings were decided under, and whose check this is.
+        // 0174: the rules these findings were decided under, and whose check this is.
         ruleSetHash: r.ruleSetHash, orgRef: scope.tenantId,
       });
       return { checkId: Number(ins[0]?.insertId ?? 0), verdict: r.eligibility.verdict, explanation: r.eligibility.explanation, blockers: r.eligibility.blockers, fingerprint: r.fingerprint, evaluatedAt: now, contributions: r.contributions };
@@ -164,7 +164,7 @@ export const dispatchGateRouter = router({
       const outcome = requestOverride(blocker, { blockerCode: input.blockerCode, requestedByUserId: ctx.user.id, requestedByRole: role, reason: input.reason, policyRef: pending.policyRef }, now);
       /*
        * C1a-3 — the grant is recorded as the grantor's act: who, in what role, when, why, under which
-       * policy, for which check and code, and until when. Before 0172 only `granted` flipped, and the
+       * policy, for which check and code, and until when. Before 0174 only `granted` flipped, and the
        * award path then named the REQUESTER as the grantor.
        */
       await db.update(dispatchOverrides).set(outcome.granted

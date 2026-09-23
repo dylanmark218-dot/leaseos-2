@@ -36,7 +36,7 @@ type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
 /**
  * The granted overrides on a check, as the award reads them: the GRANTOR's identity, never the
- * requester's. A granted row with no recorded grantor (every row written before 0172) is not a
+ * requester's. A granted row with no recorded grantor (every row written before 0174) is not a
  * grant — it cannot show that anyone other than the requester approved it.
  */
 export async function loadGrantedOverrides(db: Db, checkId: number): Promise<GrantedOverride[]> {

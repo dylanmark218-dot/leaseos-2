@@ -1,8 +1,10 @@
--- 0172 — C1a: an override says who GRANTED it, under what, for how long; a check says whose it is.
+-- 0174 — C1a: an override says who GRANTED it, under what, for how long; a check says whose it is.
 --
--- Slot: main ends at 0169 after PR #4. 0170 is claimed twice on open branches
--- (0170_dispatch_role_types on PR #9, 0170_organization_scoped_role_grants on the auth-workspace
--- branch) and 0171 by PR #9, so this takes the first number no open branch holds.
+-- Slot: main ends at 0169 (PR #4; PR #5 added none). Claims on open branches at integration time
+-- (2026-09-23): 0169 and 0170 by the driver-portfolio branch; 0170 by PR #9, feature/dispatch-assignment-ui
+-- and the auth-workspace branch; 0171 by PR #9 and feature/dispatch-assignment-ui; 0172 and 0173 by the
+-- training-academy-workforce branch. This takes 0174, the first number no branch holds, rather than
+-- renumbering anyone else's work. docs/architecture/MIGRATION_COLLISION_REGISTER.md tracks the rest.
 --
 -- dispatchOverrides recorded only the REQUESTER. `overrideGrant` flipped `granted` on the request row,
 -- and the award path then rebuilt the grant with `grantedByUserId = requestedByUserId` — so every
