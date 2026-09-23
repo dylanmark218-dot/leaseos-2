@@ -1,6 +1,9 @@
 # LeaseOS Route Intelligence — gap analysis (T0)
 
-Read against `main` = `0060690` (v23.25). See `CURRENT_ARCHITECTURE.md` for the tree this classifies.
+Read against `main` = `0060690` (v23.25) at T0; **re-read at RI-0.5 against `origin/main` = `6b01a0e`** (PR #4 and #5
+merged: `0169_defect_resolution`, readiness defect repair, readiness panel) and against the two later lines
+described in `LINEAGE_RECONCILIATION.md`. §0 below is the lineage-aware status; the T0 rows follow it
+unchanged except where marked **RI-0.5**.
 
 **Classes**
 
@@ -16,6 +19,46 @@ Read against `main` = `0060690` (v23.25). See `CURRENT_ARCHITECTURE.md` for the 
 
 "New schema?" answers whether the capability can be delivered without a migration. "No — extend X"
 means a column or enum value on an existing table, which is still a migration but not a new table.
+
+---
+
+## 0. Lineage-aware status (RI-0.5)
+
+The T0 classes said *whether* something is built. After RI-0.5 the status also says *where*. Four
+answers are possible, and only the first two are on canonical `main`:
+
+| Status | Meaning |
+|---|---|
+| **WIRED ON MAIN** | on `origin/main`, reachable from a procedure or the worker |
+| **IDLE ON MAIN** | on `origin/main`, declared in `engineReachability.test.ts` `DECLARED_UNWIRED` |
+| **LATER LINEAGE** | not on `main`; implemented on the v23.26–v23.29 line and/or `leaseos` main — **port, do not recreate** (`LATER_FEATURE_PORT_MANIFEST.md`) |
+| **MISSING EVERYWHERE** | on no line |
+
+| Capability (T0 row) | T0 class | RI-0.5 status | Where / manifest item |
+|---|---|---|---|
+| movement permits, permit effective dates, permit route binding (rows) | 2 (portfolio) / 6 (main) | **LATER LINEAGE** | v2327 `82b2f18`, `6cbd1b4`, `f50b704` — manifest A3 |
+| permit structured conditions | 6 | MISSING EVERYWHERE | — |
+| OSM/Geofabrik graph: ice-road/seasonal crossing handling | (part of 1.2) | **LATER LINEAGE** | v2327 `dcc72fd` — manifest A1; on `main` an ice road still imports as `gravel` |
+| OSM loader: `osmLoadPlan`/`osmLoad` duplication | overlap #11 | **LATER LINEAGE** (resolved there) | v2327 `ea19db9`, `f0fa33f` — manifest A2 |
+| OSM loader, topology, extract format, source standing | 2 | IDLE ON MAIN | unchanged since v23.24 on every line |
+| route candidates, evidence, approvals, fingerprints, structures, restrictions, LSD, entrances, comms, HOS, LoadSense, facilities, GPS boundary | 1 / 3 | WIRED ON MAIN | identical on every line since `6b4b232` |
+| source precedence, jurisdiction, approval policy, truck-router adapter, feeds/advisories, pre-departure cache, offline capability, phone-location gate, B23 modules | 2 | IDLE ON MAIN | same census on every line |
+| trip-stop provenance (`recordedBy…` on `tripStops`) — not a T0 row, but RI-10's deviation proposals and PR #10's boundary resolver write `tripStops` | — | **LATER LINEAGE** | `leaseos` `9e1a75f` — manifest C1 |
+| tenant-first webhook dispatch (integration gateway) — not a T0 row | — | **LATER LINEAGE** (security) | v2327 `3c4f997` — manifest B1 |
+| release-marker truth test | — | LATER LINEAGE | v2327 `ec9b427` — manifest B2 |
+| production-config boot refusal | — | **conflicting implementations** | `leaseos` `850ad84` vs main `env.ts`/`index.ts` — manifest C2 |
+| page scanner / printing (native runtime contracts) | 5 | **two divergent implementations**, neither on main | v2327 `8ef5233`/`af213ee` vs `claude/mobile-hardware-scanner-mzp1e1` — manifest B4/B5; blocks the HS1 `capabilities()` design RI-11 needs |
+| readiness: critical-defect explicit resolution, enforcement read, `dispatch.readiness` capability picture, readiness panel | (not in T0; T0 predates PR #4/#5) | **WIRED ON MAIN since 2026-09-23** | `38d2677`, `6b01a0e`; `0169_defect_resolution` |
+| dangerous-goods readiness flag from `loadProfiles` | 3 (defect) | MISSING EVERYWHERE — the regex is on every line (`readinessComposer.ts:333` on `origin/main`) | isolated task, `IMPLEMENTATION_PLAN.md` §RI-0.6 |
+| `permitRequired: false` literal | 3 (defect) | fixed on the **LATER LINEAGE** only (`readinessComposer.ts:544-545` on `origin/main` still reads `false`) | closed by manifest A3, see `IMPLEMENTATION_PLAN.md` §RI-0.7 |
+| everything the T0 tables marked 6 (alternatives, map matching, deviation, reroute, route package, log amendments, sleeper capability, TDG lines, POI layer, tiles, dispatch map, native GPS) | 6 / 5 | MISSING EVERYWHERE | confirmed on all three lines |
+
+**Correction to T0 §2 item 1 and §1.5.** The permit implementation is not an "orphan" artefact; it is
+the original development history continuing past the point `leaseos-2` main was imported from. The
+T0 resolution rule stands (port it, never as `0168`), with the mechanics now in the manifest.
+
+**Correction to T0 §1 (CURRENT_ARCHITECTURE).** `0169` is no longer free on `main`; the slot picture
+is in `MIGRATION_RECONCILIATION.md` §2 and §5.
 
 ---
 
