@@ -22,7 +22,7 @@ import { CAPABILITY, dispatchContractFor, pictureFor, type EvaluationMap } from 
 import { entitlementToEvaluation, snapshotOf, type PolicySnapshot } from "./_core/automationPolicy";
 import { resolveCapabilities } from "./_core/automationPolicyStore";
 import { destinationAcceptanceForJob } from "./_core/destinationAcceptance";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or as sqlOr } from "drizzle-orm";
 import { hosAttestations } from "../drizzle/schema";
 import { faultDispatchEffect } from "./_core/telematics";
 import { getDb } from "./db";
@@ -30,12 +30,16 @@ import {
   complianceDocuments, dispatchPostings, fieldDevices, insuranceCoveredEntities, insurancePolicies, insurancePolicyCoverages,
   jobs, maintenanceDefects, measurementDeviceAssignments, measurementDevices, calibrationEvents, operators, roadsideServiceEvents,
   units, workOrderReleases,
+  coreRecordOwnership, enforcementEvents, outOfServiceOrders,
   faultCodes,
   communicationCoverage, communicationPolicies, companyRadioAuthorizations, radioChannels,
   roadGraphEdges, roadRadioAssignments, routeApprovals, unitRadioCapabilities,
   academyQualifications, academyRequirements, academyRequirementBindings, academyDirectSupervisionRecords,
   driverRequirementBindings, operatorEquipmentAuthorizations,
+  loadProfiles,
 } from "../drizzle/schema";
+import { APPROVED_OVERRIDE_POLICIES, CLASSIFICATION_VERSION, classifyBlocker, mergeFindings, type ComplianceFinding } from "./_core/complianceFinding";
+import { canonicalJson, sha256 } from "./_core/auditPackage";
 import {
   evaluateDispatchReadiness, type CredentialState, type DispatchBlocker, type DispatchEligibility, type EligibilityVerdict, type ReadinessInput,
 } from "./_core/dispatchReadiness";
@@ -48,6 +52,8 @@ import { bindingApplies, evaluateDriverReadiness, requirementFromBinding, type B
 import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
+import { currentReleaseEvidenceFor, type StoredRelease } from "./_core/mechanicRelease";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import {
   ADVISORY_POLICY, communicationBlockers, planCommunications,
   type CommunicationPolicy, type CoverageObservation, type GeoCondition, type PathSegment,
@@ -102,6 +108,117 @@ export async function currentCommunicationPolicy(db: NonNullable<Awaited<ReturnT
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Enforcement state, read from the canonical table                    */
+/* ------------------------------------------------------------------ */
+
+/** The refs the evaluator matches on. Synthesized from entity ids, never from free text. */
+const subjectRefForUnit = (id: number) => `unit:${id}`;
+const subjectRefForTrailer = (id: number) => `trailer:${id}`;
+const subjectRefForOperator = (id: number) => `operator:${id}`;
+
+/**
+ * Active out-of-service orders and unestablished inspections covering this readiness subject.
+ *
+ * **Matched structurally, not by string.** `outOfServiceOrders.subjectRef` is free text the
+ * confirming caller supplies ("UNIT-127"), so matching a unit against it would be guesswork.
+ * `enforcementEvents` — the order's parent, one per stop — carries real `unitId`, `trailerId` and
+ * `operatorId` columns and an index on them, so the event is what says whose order this is. The
+ * refs handed to the evaluator are synthesized from those ids and the order keeps its own scope,
+ * which is what decides whether a prohibited driver can be replaced on a clear truck.
+ *
+ * **Tenant scoping is not optional.** An order recorded against another organization must not
+ * ground this one's truck. The unit's owning organization comes from `coreRecordOwnership`, the
+ * same source `ownershipScopeWhere` uses, and an unowned record is this deployment's single tenant
+ * — which is what `enforcementEvents.tenantId` already stores for it.
+ *
+ * One query for the events, one for their orders. No per-subject round trip.
+ */
+async function loadEnforcementState(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  ids: { unitId: number | null; trailerId: number | null; operatorId: number },
+): Promise<NonNullable<ReadinessSubject["enforcement"]> & { version: string }> {
+  const subjects: { subjectRef: string; scope: OosScope }[] = [];
+  if (ids.unitId != null) subjects.push({ subjectRef: subjectRefForUnit(ids.unitId), scope: "vehicle" });
+  if (ids.trailerId != null) subjects.push({ subjectRef: subjectRefForTrailer(ids.trailerId), scope: "trailer" });
+  subjects.push({ subjectRef: subjectRefForOperator(ids.operatorId), scope: "driver" });
+
+  // The organization this readiness belongs to, from the unit when there is one.
+  let orgRef: string | null = null;
+  if (ids.unitId != null) {
+    const owner = await db.select({ orgRef: coreRecordOwnership.orgRef }).from(coreRecordOwnership)
+      .where(and(eq(coreRecordOwnership.recordType, "unit"), eq(coreRecordOwnership.recordId, ids.unitId))).limit(1);
+    orgRef = owner[0]?.orgRef ?? null;
+  }
+  const tenantOf = (t: string | null) => t ?? SINGLE_TENANT_ID;
+  const ourTenant = tenantOf(orgRef);
+
+  const eventFilters = [
+    ids.unitId != null ? eq(enforcementEvents.unitId, ids.unitId) : null,
+    ids.trailerId != null ? eq(enforcementEvents.trailerId, ids.trailerId) : null,
+    eq(enforcementEvents.operatorId, ids.operatorId),
+  ].filter((f): f is NonNullable<typeof f> => f != null);
+
+  const events = (await db.select().from(enforcementEvents).where(sqlOr(...eventFilters)))
+    .filter(e => e.status !== "rescinded" && tenantOf(e.tenantId) === ourTenant);
+  if (!events.length) return { subjects, orders: [], unresolvedInspections: [], version: "none" };
+
+  /** The ref this event's order should be attributed to, preferring the most specific subject. */
+  const refFor = (e: typeof events[number]): string | null =>
+    ids.unitId != null && e.unitId === ids.unitId ? subjectRefForUnit(ids.unitId)
+      : ids.trailerId != null && e.trailerId === ids.trailerId ? subjectRefForTrailer(ids.trailerId)
+        : e.operatorId === ids.operatorId ? subjectRefForOperator(ids.operatorId)
+          : null;
+
+  const byRef = new Map(events.map(e => [e.eventRef, e] as const));
+  const rows = await db.select().from(outOfServiceOrders).where(and(
+    inArray(outOfServiceOrders.eventRef, Array.from(byRef.keys())),
+    eq(outOfServiceOrders.status, "active"),
+  ));
+
+  const orders: OosOrder[] = [];
+  for (const o of rows) {
+    const e = byRef.get(o.eventRef);
+    const ref = e ? refFor(e) : null;
+    if (!ref) continue;
+    // The order keeps its own scope; only the ref is normalized. A vehicle order and a cargo order
+    // on the same stop are different prohibitions and stay different here.
+    subjects.push({ subjectRef: ref, scope: o.scope });
+    orders.push({
+      orderRef: o.orderRef, scope: o.scope, subjectRef: ref, issuedAt: o.issuedAt,
+      issuingAgency: o.issuingAgency, releaseCondition: o.releaseCondition,
+      releasedAt: o.releasedAt, releasedByUserId: o.releasedByUserId,
+      releaseEvidenceRef: o.releaseEvidenceRef, rescindedAt: o.rescindedAt,
+    });
+  }
+
+  /*
+   * An inspection whose result was never established denies authorization for what it covered —
+   * the evaluator's own rule, and "we could not read the document" is not a pass.
+   */
+  const unresolvedInspections = events
+    .filter(e => e.inspectionResult === "unknown")
+    .map(e => ({ inspectionRef: e.inspectionReportNumber ?? e.eventRef, coversSubjectRefs: [refFor(e)].filter((r): r is string => r != null) }))
+    .filter(i => i.coversSubjectRefs.length > 0);
+
+  const seen = new Set<string>();
+  const uniqueSubjects = subjects.filter(s => {
+    const k = `${s.subjectRef}|${s.scope}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  /*
+   * C1a-6 — what the fingerprint sees of enforcement: every event and order that could govern this
+   * subject, by identity and state. An order issued, released or rescinded after a check changes it.
+   */
+  const version = sha256(canonicalJson({
+    events: events.map(e => [e.eventRef, e.status, e.inspectionResult]).sort(),
+    orders: rows.map(o => [o.orderRef, o.status, o.scope, o.releasedAt, o.rescindedAt]).sort(),
+  }));
+  return { subjects: uniqueSubjects, orders, unresolvedInspections, version };
+}
+
 export type ComposedReadiness = {
   eligibility: DispatchEligibility;
   facts: EligibilityFacts;
@@ -129,6 +246,8 @@ export type ComposedReadiness = {
    * the explanation, not a second verdict.
    */
   driverReadiness: DriverReadiness;
+  /** C1a-6 — hash of the rules the findings were decided under; also inside `facts`. */
+  ruleSetHash: string;
 };
 
 /* ------------------------------------------------------------------ */
@@ -166,6 +285,64 @@ export type AcademyBindingFacts = {
 export function academyBindingMatches(binding: Pick<AcademyBindingRow, "subjectType" | "subjectCode">, facts: AcademyBindingFacts): boolean {
   if (binding.subjectType === "jurisdiction" || binding.subjectType === "cargo") return false;
   return facts[binding.subjectType].map(academyCode).includes(academyCode(binding.subjectCode));
+}
+
+/* ------------------------------------------------------------------ */
+/* Dangerous goods: structured authority only (C1a-7)                  */
+/* ------------------------------------------------------------------ */
+
+type LoadClassificationRow = Pick<typeof loadProfiles.$inferSelect, "id" | "unNumber" | "dgClass" | "packingGroup" | "classificationStatus" | "verifiedAt">;
+
+export type DangerousGoodsAuthority = {
+  /** dg: verified DG on a load · not_dg: every load verified and none carries a UN number or class ·
+   *  unknown: a load may be DG and its classification is not verified, or there is no load record
+   *  and something says it may be DG · blocked: a load's classification was refused ·
+   *  not_applicable: no load recorded and no DG signal at all. */
+  state: "dg" | "not_dg" | "unknown" | "blocked" | "not_applicable";
+  blockers: DispatchBlocker[];
+  version: string;
+  explanation: string;
+};
+
+/**
+ * Whether a job moves dangerous goods, from the loads' STRUCTURED classification — `loadProfiles`,
+ * whose `classificationStatus` a person verifies. Before C1a the composer decided this with
+ * `/tdg|dangerous|hazard/i` over the job's free-text type and mode, so "Hazard tree removal" was a
+ * TDG shipment and a verified UN1203 load under a job typed "water_haul" was not.
+ *
+ * Free text is now only ever a reason for suspicion: `freeTextSuggestsDg` can turn "no load
+ * recorded" into UNKNOWN, but it can never establish that a load is, or is not, dangerous goods.
+ * No language model is asked either.
+ */
+export function dangerousGoodsAuthority(loads: readonly LoadClassificationRow[], freeTextSuggestsDg: boolean): DangerousGoodsAuthority {
+  const version = sha256(canonicalJson(loads.map(l => [l.id, l.classificationStatus, l.unNumber ?? null, l.dgClass ?? null, l.packingGroup ?? null, l.verifiedAt ?? null]).sort()));
+  if (loads.length === 0) {
+    return freeTextSuggestsDg
+      ? {
+          state: "unknown", version,
+          explanation: "No load is recorded for this job, and its description suggests dangerous goods — classification is missing",
+          blockers: [{ code: "dg_classification_missing", label: "The job's description suggests dangerous goods and no load classification is on record", severity: "unknown", subject: "job", overridable: true }],
+        }
+      : { state: "not_applicable", version, blockers: [], explanation: "No load recorded for this job and no dangerous-goods signal" };
+  }
+  const refused = loads.filter(l => l.classificationStatus === "blocked");
+  if (refused.length) {
+    return {
+      state: "blocked", version, explanation: `${refused.length} load classification(s) were refused`,
+      blockers: [{ code: "dg_classification_blocked", label: `${refused.length} load classification(s) refused — the material cannot be moved until it is classified`, severity: "blocking", subject: "job", overridable: false }],
+    };
+  }
+  const unverified = loads.filter(l => l.classificationStatus !== "verified");
+  if (unverified.length) {
+    return {
+      state: "unknown", version, explanation: `${unverified.length} load classification(s) not verified`,
+      blockers: [{ code: "dg_classification_unverified", label: `${unverified.length} load(s) on this job have no verified classification — whether they are dangerous goods is unknown`, severity: "unknown", subject: "job", overridable: true }],
+    };
+  }
+  const dg = loads.filter(l => (l.unNumber ?? "").trim() !== "" || (l.dgClass ?? "").trim() !== "");
+  return dg.length
+    ? { state: "dg", version, blockers: [], explanation: `${dg.length} verified dangerous-goods load(s): ${dg.map(l => l.unNumber ?? l.dgClass).join(", ")}` }
+    : { state: "not_dg", version, blockers: [], explanation: `${loads.length} load(s), all verified, none classified as dangerous goods` };
 }
 
 function bindingHasUnevaluatedConditions(conditionsJson: string | null): boolean {
@@ -224,11 +401,20 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
    * difference, which is why the map is filled here rather than inferred downstream.
    */
   const evaluation: EvaluationMap = {};
+  /*
+   * C1a (review) — every expiry that governs a finding, so the fingerprint records whether each had
+   * passed AT THE EVALUATION INSTANT. Hashing only `expiresAt` missed time itself: a policy valid at
+   * 23:50 and lapsed at 00:10 left every row unchanged, and an award inside the reuse window went
+   * through on the 23:50 answer.
+   */
+  const governingExpiries: { what: string; at: Date | null | undefined }[] = [];
 
   /* ---- operator ---- */
   const op = (await db.select().from(operators).where(eq(operators.id, subject.operatorId)).limit(1))[0];
   if (!op) throw new Error(`Operator ${subject.operatorId} not found`);
   const opCreds = await credentialsFor("operator", op.id);
+  for (const c of opCreds) governingExpiries.push({ what: `operatorDoc:${c.id}`, at: c.expiresAt });
+  governingExpiries.push({ what: "legacyLicence", at: op.licenseExpiresAt });
   let licence = credentialState(opCreds, ["driver_licence"], "Driver licence");
   if (!licence.present && op.licenseExpiresAt) {
     // The flat legacy field is a weak signal: present, unverified. It keeps an
@@ -238,7 +424,20 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     contributions.push({ engine: "compliance", finding: "Licence read from the legacy operator record — no structured credential yet" });
   }
   const job = subject.jobId ? (await db.select().from(jobs).where(eq(jobs.id, subject.jobId)).limit(1))[0] ?? null : null;
-  const dangerousGoods = /tdg|dangerous|hazard/i.test(`${job?.type ?? ""} ${job?.mode ?? ""}`);
+  /*
+   * C1a-7 — dangerous goods from the loads' verified classification, never from the job's wording.
+   * The regex survives only as a suspicion signal (see dangerousGoodsAuthority).
+   */
+  const jobLoads = job ? await db.select({
+    id: loadProfiles.id, unNumber: loadProfiles.unNumber, dgClass: loadProfiles.dgClass, packingGroup: loadProfiles.packingGroup,
+    classificationStatus: loadProfiles.classificationStatus, verifiedAt: loadProfiles.verifiedAt,
+  }).from(loadProfiles).where(eq(loadProfiles.jobId, job.id)) : [];
+  const dgAuthority = dangerousGoodsAuthority(jobLoads, job ? /tdg|dangerous|hazard/i.test(`${job.type ?? ""} ${job.mode ?? ""}`) : false);
+  const dangerousGoods = dgAuthority.state === "dg";
+  /** For rules that only tighten (communications): a load that may be DG is treated as DG there. */
+  const possiblyDangerousGoods = dgAuthority.state === "dg" || dgAuthority.state === "unknown";
+  extra.push(...dgAuthority.blockers);
+  if (job) contributions.push({ engine: "dangerous_goods", finding: `${dgAuthority.state}: ${dgAuthority.explanation}` });
   const required: CredentialState[] = [];
 
   /* ---- Training Academy bindings ----
@@ -247,6 +446,8 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
    * and no province/cargo guesses from free text.
    */
   let academyVersion = "none";
+  /** C1a-6 — the training RULES that applied (bindings and requirement definitions), for the rule-set hash. */
+  let academyRuleVersion = "none";
   if (job) {
     // Every role, confined ones included: a driver confined to one branch is
     // still a driver and still owes the driver's courses.
@@ -265,6 +466,10 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     const matchedRequirementIds = Array.from(new Set(matchedBindings.map(b => b.requirementId)));
     if (matchedRequirementIds.length) {
       const reqs = (await db.select().from(academyRequirements).where(inArray(academyRequirements.id, matchedRequirementIds))).filter(r => r.active);
+      academyRuleVersion = sha256(canonicalJson({
+        bindings: matchedBindings.map(b => [b.id, b.requirementId, b.subjectType, b.subjectCode, b.active, b.effectiveAt ?? null, b.expiresAt ?? null, b.conditionsJson ?? null]).sort(),
+        requirements: reqs.map(r => [r.id, r.requirementCode, r.qualificationCode, r.enforcement, r.active, r.updatedAt]).sort(),
+      }));
       if (!op.userId) {
         extra.push({ code: "academy_operator_unlinked", label: "Training requirements apply to this job, but the operator is not linked to a user qualification record", severity: "unknown", subject: "operator", overridable: true, overrideAuthority: "dispatcher" });
         contributions.push({ engine: "academy", finding: `${reqs.length} bound training requirement(s) apply, but operator ${op.id} has no user link` });
@@ -277,6 +482,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
         const conditionlessRequirementIds = new Set(matchedBindings.filter(b => !bindingHasUnevaluatedConditions(b.conditionsJson)).map(b => b.requirementId));
         const applicable = reqs.filter(r => conditionlessRequirementIds.has(r.id));
         const quals = await db.select().from(academyQualifications).where(eq(academyQualifications.userId, op.userId));
+        for (const q of quals) governingExpiries.push({ what: `academyQual:${q.id}`, at: q.expiresAt });
         const accepted = quals.filter(q => q.status === "current" && (!q.expiresAt || q.expiresAt > now)).map(q => ({ code: q.qualificationCode, status: q.status, expiresAt: q.expiresAt }));
         const supers = await db.select().from(academyDirectSupervisionRecords).where(and(
           eq(academyDirectSupervisionRecords.traineeUserId, op.userId),
@@ -284,6 +490,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
           eq(academyDirectSupervisionRecords.status, "active"),
           eq(academyDirectSupervisionRecords.physicalPresenceAttested, true),
         ));
+        for (const sup of supers) governingExpiries.push({ what: `supervisionStart:${sup.id}`, at: sup.startsAt }, { what: `supervisionEnd:${sup.id}`, at: sup.endsAt });
         for (const sup of supers) {
           if (sup.startsAt <= now && sup.endsAt > now && !accepted.some(q => q.code === sup.qualificationCode)) {
             accepted.push({ code: sup.qualificationCode, status: "current" as const, expiresAt: sup.endsAt });
@@ -348,6 +555,9 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     validThrough: subject.workEndsAt ?? null,
   });
   for (const b of driverReadiness.blockers) extra.push(b);
+  // Time moves these without any row changing: an authorization lapsing, a binding starting or ending.
+  for (const e of equipmentRows) governingExpiries.push({ what: `equipmentAuth:${e.id}`, at: e.expiresAt });
+  for (const b of driverBindingRows.filter(x => (x.orgRef ?? null) === driverFacts.orgRef)) governingExpiries.push({ what: `driverBindingStart:${b.id}`, at: b.effectiveAt }, { what: `driverBindingEnd:${b.id}`, at: b.expiresAt });
   if (driverRequirements.length) {
     contributions.push({ engine: "portfolio", finding: `${driverReadiness.items.length} driver requirement(s): ${driverReadiness.verdict}; ${driverReadiness.items.filter(i => i.satisfied).length} satisfied${driverReadiness.notices.length ? `; ${driverReadiness.notices.length} informational not met (not blocking)` : ""}` });
   }
@@ -365,40 +575,85 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   if (med.eligible === "no") extra.push({ code: "medical_fitness_not_current", label: "Commercial medical fitness not current", severity: "blocking", subject: "operator", overridable: false });
   else if (med.eligible === "unknown") extra.push({ code: "medical_fitness_unknown", label: "Commercial medical fitness not verified", severity: "unknown", subject: "operator", overridable: true, overrideAuthority: "manager" });
   contributions.push({ engine: "compliance", finding: `Medical fitness: ${med.eligible}` });
+  const medicalVersion = medRow ? versionOf([medRow.id, medRow.verificationStatus, medRow.expiresAt?.toISOString()]) : "none";
 
   const device = (await db.select({ status: fieldDevices.status }).from(fieldDevices).where(eq(fieldDevices.userId, op.userId ?? -1)).orderBy(desc(fieldDevices.enrolledAt)).limit(1))[0];
+  const deviceVersion = device ? device.status : "none";
   if (device && device.status === "revoked") extra.push({ code: "field_device_revoked", label: "Operator's field device is revoked — evidence cannot be captured", severity: "review", subject: "operator", overridable: true, overrideAuthority: "dispatcher" });
 
   /* ---- unit ---- */
   let truck: ReadinessInput["truck"] = { unitNumber: "—", inspection: { label: "Inspection", present: false, expiresAt: null }, registration: { label: "Registration", present: false, expiresAt: null }, insurance: { label: "Insurance", present: false, expiresAt: null }, maintenanceOverdue: false, criticalDefectOpen: false, mechanicReleaseRequired: false, mechanicReleaseGiven: false };
   let unitVersion = "none", releaseVersion = "none", criticalCount = 0;
+  let unitCredentialVersion = "none", insuranceVersion = "none", roadsideVersion = "none", calibrationVersion = "none";
+  const credentialVersionOf = (rows: readonly CredRow[]) => versionOf(rows.map(c => `${c.id}:${c.docType}:${c.verificationStatus}:${c.expiresAt?.toISOString() ?? "∅"}`).sort());
+  const insuranceVersionOf = (pols: readonly PolicyRecord[]) => versionOf(pols.map(p => `${p.policyRef}:${p.status}:${p.coverageVerificationStatus}:${p.expiresAt.toISOString()}:${p.document?.verificationStatus ?? "∅"}:${p.document?.expiresAt?.toISOString() ?? "∅"}`).sort());
   if (subject.unitId) {
     const unit = (await db.select().from(units).where(eq(units.id, subject.unitId)).limit(1))[0];
     if (!unit) throw new Error(`Unit ${subject.unitId} not found`);
     const [uCreds, defects, releases, roadside, pols, assignments] = await Promise.all([
       credentialsFor("unit", unit.id),
-      db.select().from(maintenanceDefects).where(and(eq(maintenanceDefects.unitId, unit.id), inArray(maintenanceDefects.status, ["open", "in_progress"]))),
-      db.select().from(workOrderReleases).where(eq(workOrderReleases.unitId, unit.id)).orderBy(desc(workOrderReleases.releasedAt)).limit(5),
+      /*
+       * Open defects, AND every critical one whatever its status. A resolved critical defect still
+       * matters: the release that evidenced its resolution can be revoked afterwards, and readiness
+       * has to be able to notice that.
+       */
+      db.select().from(maintenanceDefects).where(and(
+        eq(maintenanceDefects.unitId, unit.id),
+        sqlOr(inArray(maintenanceDefects.status, ["open", "in_progress"]), eq(maintenanceDefects.severity, "critical")),
+      )),
+      /*
+       * Every release on the unit, not the newest five. Under the old timestamp rule a window was
+       * harmless because only the newest row could ever matter; matching by defect identity, an
+       * older release is the one that names a given defect, and a window would silently drop it.
+       */
+      db.select().from(workOrderReleases).where(eq(workOrderReleases.unitId, unit.id)).orderBy(desc(workOrderReleases.releasedAt)),
       db.select().from(roadsideServiceEvents).where(and(eq(roadsideServiceEvents.unitId, unit.id), inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"]))),
       policiesCovering("unit", unit.id, now),
       db.select().from(measurementDeviceAssignments).where(and(eq(measurementDeviceAssignments.assignedToType, "unit"), eq(measurementDeviceAssignments.assignedToId, unit.id))),
     ]);
+    /*
+     * Two conditions, kept apart — the manifest has always listed them separately ("unresolved
+     * critical defects" and "critical work-order mechanic release") and collapsing them into one
+     * timestamp comparison is what let a revocation read as an approval.
+     *
+     *   the DEFECT  — is there a critical defect nobody has resolved?
+     *   the RELEASE — does the release evidence for each critical defect still stand?
+     *
+     * Neither is inferred from the other, and neither is inferred from chronology. A release is
+     * evidence about the defects it NAMES; `records.maintenance.resolveDefect` is what closes a
+     * defect, and it is a separate, recorded act by a named person.
+     */
     const critical = defects.filter(d => d.severity === "critical");
-    criticalCount = critical.length;
-    const releasedAfter = (d: (typeof critical)[number]) => releases.some(r => r.releasedAt > d.reportedAt);
-    const unreleased = critical.filter(d => !releasedAfter(d));
+    const storedReleases: StoredRelease[] = releases.map(r => ({
+      id: r.id, workOrderId: r.workOrderId, releaseType: r.releaseType,
+      testResult: r.testResult, resolvedDefectIds: r.resolvedDefectIds, releasedAt: r.releasedAt,
+    }));
+    const unresolvedCritical = critical.filter(d => d.status !== "resolved");
+    criticalCount = unresolvedCritical.length;
+    /*
+     * Which critical defects owe standing release evidence: the unresolved ones, and the ones that
+     * were resolved ON a release — because revoking that release withdraws the evidence the
+     * resolution rested on, and readiness must get worse, never better, when that happens.
+     */
+    const owingEvidence = critical.filter(d => d.status !== "resolved" || d.resolvedByReleaseId != null);
+    const withoutEvidence = owingEvidence.filter(d => currentReleaseEvidenceFor(d.id, storedReleases) == null);
     truck = {
       unitNumber: unit.unitNumber,
       inspection: credentialState(uCreds, ["cvip_certificate", "annual_inspection"], "Annual inspection"),
       registration: credentialState(uCreds, ["vehicle_registration"], "Registration"),
       insurance: { label: "Insurance", present: pols.length > 0, expiresAt: pols.length ? new Date(Math.max(...pols.map(p => p.expiresAt.getTime()))) : null },
       maintenanceOverdue: unit.maintenanceStatus === "blocked",
-      criticalDefectOpen: unreleased.length > 0,
-      mechanicReleaseRequired: critical.length > 0,
-      mechanicReleaseGiven: critical.length > 0 && unreleased.length === 0,
+      criticalDefectOpen: unresolvedCritical.length > 0,
+      mechanicReleaseRequired: owingEvidence.length > 0,
+      mechanicReleaseGiven: owingEvidence.length > 0 && withoutEvidence.length === 0,
     };
-    unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}`)]);
-    releaseVersion = versionOf(releases.map(r => r.id));
+    unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}:${d.resolvedByReleaseId ?? "∅"}`)]);
+    releaseVersion = versionOf(releases.map(r => `${r.id}:${r.releaseType}:${r.testResult ?? "∅"}:${r.resolvedDefectIds ?? "∅"}`));
+    unitCredentialVersion = credentialVersionOf(uCreds);
+    for (const c of uCreds) governingExpiries.push({ what: `unitDoc:${c.id}`, at: c.expiresAt });
+    for (const p of pols) governingExpiries.push({ what: `unitPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `unitPolicyProof:${p.policyRef}`, at: p.document?.expiresAt });
+    insuranceVersion = `unit=${insuranceVersionOf(pols)}`;
+    roadsideVersion = versionOf(roadside.map(r => `${r.id}:${r.status}`).sort());
 
     // Insurance: the six statuses, in B12's vocabulary. Policy expiry blocks and
     // is overridable by no one; missing paper is review.
@@ -419,9 +674,11 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       const devIds = assignments.filter(a => !a.assignedUntil || a.assignedUntil > now).map(a => a.measurementDeviceId);
       const devs = devIds.length ? await db.select().from(measurementDevices).where(inArray(measurementDevices.id, devIds)) : [];
       const evs = devIds.length ? await db.select().from(calibrationEvents).where(inArray(calibrationEvents.measurementDeviceId, devIds)) : [];
+      calibrationVersion = versionOf([...devs.map(d => `${d.id}:${d.calibrationIntervalDays}`), ...evs.map(e => `${e.id}:${e.measurementDeviceId}`)].sort());
       for (const dv of devs) {
         const st = calibrationStatus({ events: evs.filter(e => e.measurementDeviceId === dv.id) as CalibrationEvent[], intervalDays: dv.calibrationIntervalDays, now });
         const eff = calibrationEffectOnUse(st, "dispatch_availability");
+        calibrationVersion = `${calibrationVersion};${dv.id}=${st.status}`; // status moves with time (due → expired)
         contributions.push({ engine: "calibration", finding: `${dv.deviceRef}: ${st.status} — dispatch ${eff.effect}` });
         if (eff.effect !== "ok") extra.push({ code: "measurement_device_uncalibrated", label: `${dv.deviceType.replace(/_/g, " ")} ${dv.deviceRef}: ${st.reason} — billing measurements on hold`, severity: "review", subject: "truck", overridable: true, overrideAuthority: "manager" });
       }
@@ -431,8 +688,12 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   /* ---- trailer ---- */
   // v21.19 — telematics faults on the truck: undetermined severity is UNKNOWN (a mechanic decides); an acknowledged
   // critical fault blocks; an acknowledged inspection-required one is REVIEW.
+  let telematicsFaultVersion = "none";
   if (subject.unitId) {
-    for (const f of await db.select().from(faultCodes).where(and(eq(faultCodes.unitId, subject.unitId), inArray(faultCodes.status, ["active", "acknowledged"])))) {
+    const faults = await db.select().from(faultCodes).where(and(eq(faultCodes.unitId, subject.unitId), inArray(faultCodes.status, ["active", "acknowledged"])));
+    // Identity, status and severity determination only — never last-seen time or counts (high-frequency).
+    telematicsFaultVersion = versionOf(faults.map(f => `${f.id}:${f.status}:${f.severityDetermination}`).sort());
+    for (const f of faults) {
       const eff = faultDispatchEffect(f);
       contributions.push({ engine: "telematics", finding: `${f.protocol.toUpperCase()} ${f.code}: ${f.status}, severity ${f.severityDetermination}` });
       if (eff.severity === "blocking") extra.push({ code: `fault_${f.code.toLowerCase()}_critical`, label: eff.label, severity: "blocking", subject: "truck", overridable: false });
@@ -456,7 +717,11 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       maintenanceOverdue: false,
       compatibleWithTruck: null,
     };
-    trailerVersion = versionOf([tr.id, tCreds.length]);
+    // C1a-6 — was [id, number of documents]: a trailer inspection replaced by an expired one read as unchanged.
+    trailerVersion = versionOf([tr.id, credentialVersionOf(tCreds)]);
+    insuranceVersion = `${insuranceVersion};trailer=${insuranceVersionOf(pols)}`;
+    for (const c of tCreds) governingExpiries.push({ what: `trailerDoc:${c.id}`, at: c.expiresAt });
+    for (const p of pols) governingExpiries.push({ what: `trailerPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `trailerPolicyProof:${p.policyRef}`, at: p.document?.expiresAt });
   }
 
   /* ---- job ---- */
@@ -477,11 +742,45 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   if (!job) contributions.push({ engine: "dispatch", finding: "No job supplied — job requirements not evaluated" });
 
   /* ---- enforcement: an order from outside this company ---- */
-  if (subject.enforcement?.subjects.length) {
+  /*
+   * The composer loads this itself.
+   *
+   * It used to take enforcement only from `subject.enforcement`, and not one production caller
+   * supplied it — `dispatchRouter`'s input schema has no field for it. So the capability that this
+   * very file calls overridable by nobody ("a manager may override a company rule; an inspector's
+   * order is not a company rule") reported PASS on every dispatch, from an input nothing provided,
+   * while active orders sat in `outOfServiceOrders`. A caller forgetting to pass an optional object
+   * is not evidence that enforcement was checked and found clear.
+   *
+   * The caller-supplied form is kept as a seam for tests and for a caller that has already
+   * resolved the state, but it is now an override of a real read rather than the only source.
+   */
+  let enforcementSubject = subject.enforcement ?? null;
+  let enforcementVersion = enforcementSubject ? `supplied:${sha256(canonicalJson(enforcementSubject))}` : "none";
+  if (!enforcementSubject) {
+    try {
+      const loaded = await loadEnforcementState(db, { unitId: subject.unitId, trailerId: subject.trailerId, operatorId: op.id });
+      enforcementVersion = loaded.version;
+      enforcementSubject = loaded;
+    } catch (error) {
+      /*
+       * A read that failed is NOT a clear result. It travels as NOT_EVALUATED in P8.1's own
+       * vocabulary, which the contract turns into an `unknown` blocker — never silence.
+       */
+      evaluation[CAPABILITY.enforcementOrders] = {
+        evaluated: false, reason: "no_data_source_loaded",
+        detail: `Enforcement orders could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      };
+      contributions.push({ engine: "enforcement", finding: "Enforcement state could not be read — reported as not evaluated, not as clear" });
+      enforcementSubject = null;
+      enforcementVersion = "unreadable";
+    }
+  }
+  if (enforcementSubject?.subjects.length) {
     const enf = enforcementReadiness({
-      subjects: subject.enforcement.subjects,
-      orders: subject.enforcement.orders,
-      unresolvedInspections: subject.enforcement.unresolvedInspections,
+      subjects: enforcementSubject.subjects,
+      orders: enforcementSubject.orders,
+      unresolvedInspections: enforcementSubject.unresolvedInspections,
       at: now,
     });
     for (const b of enf.blockers) {
@@ -517,6 +816,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
         statement: attRow.statement, minutesStated: attRow.hoursAvailableMinutesStated ?? null,
       }
     : null;
+  const hosVersion = attRow ? versionOf([attRow.id, attRow.method, attRow.hoursAvailableMinutesStated, attRow.supersededAt?.toISOString()]) : `none:${dutyDate}`;
   if (hoursAttestation) {
     contributions.push({ engine: "hos", finding: `Hours attested for ${dutyDate} by user ${hoursAttestation.attestedByUserId} — stated, not computed` });
   }
@@ -526,6 +826,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   let routeProfileId: string | null = null;
   let routeDecisionVersion = "not_evaluated";
   let communicationPlanVersion = "none";
+  let communicationPolicyRef: string | null = null;
 
   if (!subject.routeApprovalRef) {
     // Unchanged, and still true: without a named route there is nothing to read. What is new is
@@ -539,7 +840,9 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       contributions.push({ engine: "routing", finding: `Route approval ${subject.routeApprovalRef} not found` });
     } else {
       routeProfileId = approval.approvalRef;
-      routeDecisionVersion = approval.fingerprintHash.slice(0, 16);
+      // C1a-6 — the whole dependency hash (permits, restrictions, structures, vehicle and load are all
+      // inside it) and the approval's status: a revocation used to leave the fingerprint unchanged.
+      routeDecisionVersion = `${approval.status}:${approval.fingerprintHash}`;
       const status = approval.dispatchStatus as ReadinessInput["route"]["dispatchStatus"];
       route.dispatchStatus = status === "clear" || status === "warning" || status === "review" || status === "blocked" ? status : null;
       // The approval records a verdict, not the confidence behind it, so this
@@ -553,6 +856,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       /* The communication plan over that route's segments, under the company's own policy. */
       const segmentIds = JSON.parse(approval.segmentIdsJson) as string[];
       const { policy, policyRef } = await currentCommunicationPolicy(db, now);
+      communicationPolicyRef = policyRef;
       const [edgeRows, assignRows, coverRows, channelRows, authRows] = await Promise.all([
         segmentIds.length ? db.select({ segmentId: roadGraphEdges.segmentId, lengthMetres: roadGraphEdges.lengthMetres }).from(roadGraphEdges).where(inArray(roadGraphEdges.segmentId, segmentIds)) : Promise.resolve([]),
         segmentIds.length ? db.select().from(roadRadioAssignments).where(inArray(roadRadioAssignments.segmentId, segmentIds)) : Promise.resolve([]),
@@ -581,7 +885,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
         unit: cap ? { unitId: cap.unitId, vhf: cap.vhf, uhf: cap.uhf, cb: cap.cb, satellite: cap.satellite, cellular: cap.cellular, programmingProfileRef: cap.programmingProfileRef, programmedChannelKeys: cap.programmedChannelKeysJson ? (JSON.parse(cap.programmedChannelKeysJson) as string[]) : null, verificationStatus: cap.verificationStatus } : null,
         at: now,
       });
-      for (const b of communicationBlockers(plan, policy, { loneWorker: subject.loneWorker === true, dangerousGoods, unitHasSatellite: cap ? cap.satellite : null })) extra.push(b);
+      for (const b of communicationBlockers(plan, policy, { loneWorker: subject.loneWorker === true, unitHasSatellite: cap ? cap.satellite : null, dangerousGoods: possiblyDangerousGoods })) extra.push(b);
       if (unmeasured.length) {
         // A segment with no measured length contributes nothing to the plan's
         // kilometres, which would quietly understate a gap. Say so instead.
@@ -601,7 +905,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     truck, trailer, job: jobInput, route,
   };
   const base = evaluateDispatchReadiness(input);
-  const eligibilityBeforeCapabilities = mergeBlockers(base, extra);
+  const eligibilityBeforeCapabilities = mergeBlockers(base, extra, now);
 
   /*
    * P8.1, per the owner decision of 2026-09-18. Routing, a destination and a mechanic release are
@@ -655,13 +959,33 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
    * vocabulary rather than around it in a second verdict.
    */
   const eligibility = picture.extraBlockers.length
-    ? mergeBlockers(eligibilityBeforeCapabilities, picture.extraBlockers)
+    ? mergeBlockers(eligibilityBeforeCapabilities, picture.extraBlockers, now)
     : eligibilityBeforeCapabilities;
+
+  /*
+   * C1a-6 — the rules these findings were decided under. A change to any of them makes every check
+   * taken under the old rules stale, even though no fact about the truck or the driver moved.
+   */
+  const ruleSetHash = sha256(canonicalJson({
+    classification: CLASSIFICATION_VERSION,
+    overridePolicies: APPROVED_OVERRIDE_POLICIES.map(p => `${p.policyRef}@${p.version}`).sort(),
+    academyRules: academyRuleVersion,
+    communicationPolicy: communicationPolicyRef,
+    dispatchContract: [...contract.requires].sort(),
+  }));
+  // Decision-bearing fields only: `decidedAt`, `trace` and `reason` change on every call.
+  const policyVersion = sha256(canonicalJson({
+    automation: automationPolicy.map(a => [a.capability, a.entitled, a.winningPolicyVersionId, a.resolvedMode, a.safetyCeiling, a.clamped]).sort(),
+    communicationPolicy: communicationPolicyRef,
+  }));
 
   const facts: EligibilityFacts = {
     operatorId: op.id,
     operatorCredentialVersion: versionOf([
       ...opCreds.map(c => `${c.id}:${c.verificationStatus}:${c.expiresAt?.toISOString() ?? "∅"}`),
+      // C1a-6 — the legacy licence field feeds the licence check when no structured record exists,
+      // so a change to it must move the fingerprint too.
+      `legacyLicence:${op.licenseExpiresAt?.toISOString() ?? "∅"}`,
       `academy:${academyVersion}`,
       `portfolio:${portfolioVersion}`,
     ]),
@@ -669,14 +993,21 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     unitId: subject.unitId, unitStatusVersion: unitVersion, criticalDefectCount: criticalCount, mechanicReleaseVersion: releaseVersion,
     trailerId: subject.trailerId, trailerStatusVersion: trailerVersion,
     jobClassificationVersion: job ? versionOf([job.id, job.type, job.mode, job.status]) : "none",
-    materialClassificationVersion: "none",
-    permitVersion: "none",
-    destinationAcceptanceVersion: "none",
+    materialClassificationVersion: dgAuthority.version,
+    // Permits reach dispatch only inside a route approval's dependency hash (there is no permit
+    // record yet — C6); `routeDecisionVersion` carries that hash in full.
+    permitVersion: subject.routeApprovalRef ? `via-route:${routeDecisionVersion}` : "none",
+    destinationAcceptanceVersion: sha256(canonicalJson({ verified: destination.verified, assessments: (destination.assessments ?? []).map(a => [a.loadNumber, a.facilityKey, a.outcome, a.blocking, a.assessedAt]).sort() })),
     routeProfileId, routeDecisionVersion, communicationPlanVersion,
+    unitCredentialVersion, insuranceVersion, enforcementVersion, roadsideVersion, telematicsFaultVersion,
+    calibrationVersion, medicalVersion, hosVersion, deviceVersion, ruleSetHash, policyVersion,
+    expiryStateVersion: sha256(canonicalJson(governingExpiries
+      .map(e => [e.what, e.at ? e.at.getTime() <= now.getTime() : null])
+      .sort((a, b) => String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0))),
   };
   return {
     eligibility, facts, fingerprint: computeEligibilityFingerprint(facts), contributions,
-    capabilities: picture.capabilities, capabilityVerdict: picture.verdict, automationPolicy, driverReadiness,
+    capabilities: picture.capabilities, capabilityVerdict: picture.verdict, automationPolicy, ruleSetHash, driverReadiness,
   };
 }
 
@@ -686,20 +1017,26 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
 
 const RANK: Record<EligibilityVerdict, number> = { eligible: 0, eligible_review: 1, unknown: 2, blocked: 3 };
 
-/** The newer engines' findings, merged in B12's vocabulary. Blocking beats unknown beats review; unknown never rounds up. */
-export function mergeBlockers(base: DispatchEligibility, extra: readonly DispatchBlocker[]): DispatchEligibility {
-  const seen = new Set(base.blockers.map(b => b.code));
-  const blockers = [...base.blockers, ...extra.filter(b => !seen.has(b.code))];
-  const worst = blockers.reduce<EligibilityVerdict>((w, b) => {
+/**
+ * The newer engines' findings, merged with the base engine's, in one vocabulary.
+ *
+ * C1a — every blocker is classified into a `ComplianceFinding` (complianceFinding.ts) and duplicates
+ * of one code keep the STRICTEST, not the first seen: before C1a a later, non-overridable duplicate
+ * was silently dropped if an overridable one with the same code arrived first. The outcome does not
+ * depend on arrival order. Blocking beats unknown beats review; unknown never rounds up.
+ */
+export function mergeBlockers(base: DispatchEligibility, extra: readonly DispatchBlocker[], at: Date = base.evaluatedAt): DispatchEligibility {
+  const findings: ComplianceFinding[] = mergeFindings([...base.blockers, ...extra].map(b => classifyBlocker(b, at)));
+  const worst = findings.reduce<EligibilityVerdict>((w, b) => {
     const v: EligibilityVerdict = b.severity === "blocking" ? "blocked" : b.severity === "unknown" ? "unknown" : "eligible_review";
     return RANK[v] > RANK[w] ? v : w;
   }, "eligible");
-  const named = blockers.filter(b => b.severity === "blocking").map(b => b.label);
+  const named = findings.filter(b => b.severity === "blocking").map(b => b.label);
   const explanation = worst === "blocked" ? `BLOCKED — ${named.join("; ")}`
-    : worst === "unknown" ? `UNKNOWN — ${blockers.filter(b => b.severity === "unknown").map(b => b.label).join("; ")}`
-    : worst === "eligible_review" ? `REVIEW — ${blockers.map(b => b.label).join("; ")}`
+    : worst === "unknown" ? `UNKNOWN — ${findings.filter(b => b.severity === "unknown").map(b => b.label).join("; ")}`
+    : worst === "eligible_review" ? `REVIEW — ${findings.map(b => b.label).join("; ")}`
     : "READY";
-  return { ...base, verdict: worst, blockers, explanation };
+  return { ...base, verdict: worst, blockers: findings, explanation };
 }
 
 /** The AI Secretary's "What am I missing?" — the blockers as a checklist, with nothing private on it. */
@@ -708,7 +1045,22 @@ export function asChecklist(e: DispatchEligibility): { verdict: EligibilityVerdi
     verdict: e.verdict,
     items: e.blockers.map(b => ({
       code: b.code, label: b.label, state: b.severity,
-      fixable: b.overridable ? (b.severity === "unknown" ? `Needs verification, or a ${b.overrideAuthority ?? "manager"} override with a reason` : `Resolve, or a ${b.overrideAuthority ?? "dispatcher"} may override with a reason`) : "Must be resolved — no override",
+      fixable: fixableText(b),
     })),
   };
+}
+
+/** What the person can legitimately do next, in the finding's own terms. */
+function fixableText(b: DispatchBlocker): string {
+  const f = classifyBlocker(b, new Date(0));
+  switch (f.overrideClass) {
+    case "NEVER_OVERRIDABLE": return "Must be resolved — no override";
+    case "APPROVED_POLICY_ONLY": return f.result === "UNKNOWN"
+      ? "Needs verification — released only under an owner-approved override policy"
+      : "Must be resolved — released only under an owner-approved override policy";
+    case "WARNING_ONLY": return f.result === "UNKNOWN"
+      ? `Needs verification, or acknowledgement by a ${f.overrideAuthority ?? "manager"} with a reason`
+      : `Resolve, or acknowledgement by a ${f.overrideAuthority ?? "dispatcher"} with a reason`;
+    default: return "Informational";
+  }
 }

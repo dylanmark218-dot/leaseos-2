@@ -152,6 +152,88 @@ export function evaluateMechanicRelease(a: ReleaseAttempt): ReleaseDecision {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Release evidence, read back                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A stored release, as a reader sees it.
+ *
+ * `evaluateMechanicRelease` guards the moment a release is *written*. This half guards every later
+ * read of one, and it exists because the two were not the same guard: `records.maintenance
+ * .revokeRelease` appends a `revoked` row without consulting the evaluator at all, and readiness
+ * matched releases to defects by comparing timestamps — so revoking a release made a unit look
+ * released, and a release for one defect answered for every other defect on the truck.
+ *
+ * A release is evidence about *named* defects. Chronology is not identity.
+ */
+export type StoredRelease = {
+  id: number;
+  workOrderId: number;
+  releaseType: ReleaseType;
+  testResult: TestResult | null;
+  /** JSON array of defect ids, as `shop.workOrderRelease` writes it. */
+  resolvedDefectIds: string | null;
+  releasedAt: Date;
+};
+
+/**
+ * The defect ids a release names.
+ *
+ * Unparseable or non-array content names *nothing*. A release whose linkage cannot be read is not
+ * evidence for a defect it cannot identify, and guessing here would restore the failure by a
+ * different route.
+ */
+export function defectIdsNamedBy(release: Pick<StoredRelease, "resolvedDefectIds">): number[] {
+  if (!release.resolvedDefectIds) return [];
+  try {
+    const parsed: unknown = JSON.parse(release.resolvedDefectIds);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((n): n is number => typeof n === "number" && Number.isInteger(n) && n > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Whether a release is positive evidence on its own face.
+ *
+ * A revocation is the record of a release being withdrawn; a failed test is the record of a repair
+ * that did not work. Both are releases in the table and neither is a release in the ordinary sense,
+ * which is exactly the confusion that let a revocation read as an approval.
+ */
+export function releaseIsPositiveEvidence(r: Pick<StoredRelease, "releaseType" | "testResult">): boolean {
+  return r.releaseType !== "revoked" && r.testResult !== "fail";
+}
+
+/** A later revocation on the same work order withdraws an earlier release on it. */
+function supersededByRevocation(r: StoredRelease, all: readonly StoredRelease[]): boolean {
+  return all.some(x =>
+    x.releaseType === "revoked" &&
+    x.workOrderId === r.workOrderId &&
+    (x.releasedAt.getTime() > r.releasedAt.getTime() ||
+      (x.releasedAt.getTime() === r.releasedAt.getTime() && x.id > r.id)));
+}
+
+/**
+ * The release that currently stands as evidence for one specific defect, or null.
+ *
+ * Four things must hold, and each one of them was a separate confirmed defect when it did not:
+ * the release names this defect; it is not a revocation; its test did not fail; and it has not been
+ * withdrawn by a later revocation on its own work order.
+ */
+export function currentReleaseEvidenceFor(
+  defectId: number,
+  releases: readonly StoredRelease[]
+): StoredRelease | null {
+  const candidates = releases
+    .filter(r => releaseIsPositiveEvidence(r))
+    .filter(r => defectIdsNamedBy(r).includes(defectId))
+    .filter(r => !supersededByRevocation(r, releases))
+    .sort((a, b) => b.releasedAt.getTime() - a.releasedAt.getTime() || b.id - a.id);
+  return candidates[0] ?? null;
+}
+
 export type MaintenanceStage =
   | "driver_reported"
   | "management_review"

@@ -1491,8 +1491,10 @@ export const appRouter = router({
           // records findings, enforced refuses without a valid check.
           .mutation(async ({ ctx, input }) => {
         // P4.1: scope guard
-        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
-         const r = await createJobUnitGated(input); return r.id; }),
+        const actingScope = await scopeFor(ctx.user.id);
+        if (input?.jobId != null && !(await jobInScope(input.jobId, actingScope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+         // C1a — the check relied on must belong to the caller's organization too.
+         const r = await createJobUnitGated({ ...input, actingScope }); return r.id; }),
       }),
       inspections: router({
         list: roleProcedure("inspections.list").query(async ({ ctx }) => listInspections(await scopeFor(ctx.user.id))),

@@ -99,7 +99,7 @@ describe("records surface is fully role-authorized", () => {
   it("uses roleProcedure for every records procedure", () => {
     const roleCount = (recordsRouter.match(/roleProcedure\(/g) ?? []).length;
     expect(roleCount).toBe(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length);
-    expect(roleCount).toBe(17);
+    expect(roleCount).toBe(18);
   });
 
   it("has no protectedProcedure fallback in the records router", () => {
@@ -112,7 +112,7 @@ describe("records surface is fully role-authorized", () => {
     const names = Array.from(
       recordsRouter.matchAll(/roleProcedure\("([^"]+)"\)/g)
     ).map(m => m[1]);
-    expect(names.length).toBe(17);
+    expect(names.length).toBe(18);
     for (const n of names) {
       expect(
         Object.prototype.hasOwnProperty.call(RECORDS_PROCEDURE_PERMISSIONS, n),

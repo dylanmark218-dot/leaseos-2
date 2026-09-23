@@ -335,6 +335,16 @@ export const maintenanceDefects = mysqlTable("maintenanceDefects", {
   reportedBy: int("reportedBy"),
   workOrderNumber: varchar("workOrderNumber", { length: 80 }),
   completedAt: timestamp("completedAt"),
+  /* 0169 — the resolution act, recorded on the row it changes. */
+  resolvedAt: timestamp("resolvedAt"),
+  resolvedByUserId: int("resolvedByUserId"),
+  /**
+   * The release that evidenced this resolution, when one was required. Readiness reads it so that
+   * revoking that release is visible as the loss of evidence it is, rather than leaving a defect
+   * resolved on a release that no longer stands.
+   */
+  resolvedByReleaseId: int("resolvedByReleaseId"),
+  resolutionNote: varchar("resolutionNote", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -1962,7 +1972,8 @@ export const dispatchEligibilityChecks = mysqlTable(
     // Hash of the facts this verdict depended on. A check is reusable only if
     // it is both recent AND still describes the world — freshness alone is
     // worthless if a defect was raised four minutes after the check ran.
-    fingerprint: varchar("fingerprint", { length: 32 }).notNull(),
+    // 0174 (C1a): widened to 80 for `EF2-` + SHA-256.
+    fingerprint: varchar("fingerprint", { length: 80 }).notNull(),
     // v22.18 — the route this check asked about, so the award-time recompute
     // asks the same question rather than a smaller one.
     // 0152: the capability picture this decision was made on, including what was not evaluated.
@@ -1972,6 +1983,9 @@ export const dispatchEligibilityChecks = mysqlTable(
   automationPolicyJson: text("automationPolicyJson"),
   capabilityVerdict: varchar("capabilityVerdict", { length: 16 }),
   routeApprovalRef: varchar("routeApprovalRef", { length: 64 }),
+  // 0174 (C1a): the rules the findings were decided under, and the acting organization. NULL = legacy / single tenant.
+  ruleSetHash: varchar("ruleSetHash", { length: 64 }),
+  orgRef: varchar("orgRef", { length: 64 }),
     evaluatedAt: timestamp("evaluatedAt").notNull(),
     evaluatedByUserId: int("evaluatedByUserId"),
     usedForAward: boolean("usedForAward").default(false).notNull(),
@@ -1993,6 +2007,17 @@ export const dispatchOverrides = mysqlTable("dispatchOverrides", {
   granted: boolean("granted").notNull(),
   refusalReason: varchar("refusalReason", { length: 400 }),
   requestedAt: timestamp("requestedAt").notNull(),
+  // 0174 (C1a-3): the GRANTOR, separately from the requester. NULL on a granted row = not provably granted.
+  grantedByUserId: int("grantedByUserId"),
+  grantedByRole: varchar("grantedByRole", { length: 40 }),
+  grantedAt: timestamp("grantedAt"),
+  grantReason: text("grantReason"),
+  overrideClass: varchar("overrideClass", { length: 32 }),
+  policyRef: varchar("policyRef", { length: 120 }),
+  policyVersion: int("policyVersion"),
+  scopeJson: text("scopeJson"),
+  expiresAt: timestamp("expiresAt"),
+  orgRef: varchar("orgRef", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
