@@ -10,7 +10,8 @@ import { authorize, type DomainRole } from "./_core/recordsAuthorization";
 const NOW = new Date("2026-09-10T12:00:00Z");
 const mins = (n: number) => new Date(NOW.getTime() + n * 60_000);
 const blk = (over: Partial<DispatchBlocker> & { code: string }): DispatchBlocker => ({ label: over.code, severity: "blocking", subject: "truck", overridable: false, ...over });
-const facts = { operatorId: 1, operatorCredentialVersion: "a", hoursAvailableMinutes: null, unitId: 2, unitStatusVersion: "b", criticalDefectCount: 0, mechanicReleaseVersion: "c", trailerId: null, trailerStatusVersion: "none", jobClassificationVersion: "d", materialClassificationVersion: "none", permitVersion: "none", destinationAcceptanceVersion: "none", routeProfileId: null, routeDecisionVersion: "not_evaluated" , communicationPlanVersion: "none" };
+const facts = { operatorId: 1, operatorCredentialVersion: "a", hoursAvailableMinutes: null, unitId: 2, unitStatusVersion: "b", criticalDefectCount: 0, mechanicReleaseVersion: "c", trailerId: null, trailerStatusVersion: "none", jobClassificationVersion: "d", materialClassificationVersion: "none", permitVersion: "none", destinationAcceptanceVersion: "none", routeProfileId: null, routeDecisionVersion: "not_evaluated" , communicationPlanVersion: "none",
+  unitCredentialVersion: "none", insuranceVersion: "none", enforcementVersion: "none", roadsideVersion: "none", telematicsFaultVersion: "none", calibrationVersion: "none", medicalVersion: "none", hosVersion: "none", deviceVersion: "none", ruleSetHash: "r", policyVersion: "p", expiryStateVersion: "e" };
 const check = (over: Partial<StoredEligibilityCheck> = {}): StoredEligibilityCheck => ({ checkId: 10, fingerprint: "EF-x", operatorId: 1, verdict: "eligible", blockers: [], evaluatedAt: mins(-5), explanation: "", ...over });
 const subject = { operatorId: 1, unitId: 2, jobId: 3 };
 
@@ -89,13 +90,21 @@ describe("off assigns; advisory assigns and reports; enforced refuses by name", 
     if (!moved.allowed) expect(moved.refusals.join(" ")).toMatch(/changed/i);
   });
 
-  it("enforced: an overridable unknown is covered by a granted override; a non-overridable one never is", () => {
-    const route = blk({ code: "route_not_evaluated", label: "Route not evaluated", severity: "unknown", subject: "route", overridable: true, overrideAuthority: "manager" });
-    const c = check({ verdict: "unknown", blockers: [route] });
+  it("enforced: an administrative unknown is covered by an acknowledgement; a safety unknown is not (D-02); a non-overridable one never is", () => {
+    const g = (blockerCode: string, over: Record<string, unknown> = {}) => ({ blockerCode, requestedByUserId: 4, grantedByUserId: 5, grantedByRole: "manager", reason: "r", grantedAt: NOW, policyRef: null, expiresAt: null, ...over });
+    // An incomplete communication plan is the company's own policy question: acknowledged, it is covered.
+    const comms = blk({ code: "communication_plan_unknown", label: "Communication plan incomplete", severity: "unknown", subject: "route", overridable: true, overrideAuthority: "manager" });
+    const c = check({ verdict: "unknown", blockers: [comms] });
     expect(decideLegacyAssignment({ mode: "enforced", check: c, currentFacts: null, grantedOverrides: [], subject, now: NOW }).allowed).toBe(false);
-    expect(decideLegacyAssignment({ mode: "enforced", check: c, currentFacts: null, grantedOverrides: [{ blockerCode: "route_not_evaluated", grantedByUserId: 5, grantedByRole: "manager", reason: "r", grantedAt: NOW }], subject, now: NOW }).allowed).toBe(true);
+    expect(decideLegacyAssignment({ mode: "enforced", check: c, currentFacts: null, grantedOverrides: [g("communication_plan_unknown")], subject, now: NOW }).allowed).toBe(true);
+    // A requester cannot be their own grantor, whatever the row says.
+    expect(decideLegacyAssignment({ mode: "enforced", check: c, currentFacts: null, grantedOverrides: [g("communication_plan_unknown", { grantedByUserId: 4 })], subject, now: NOW }).allowed).toBe(false);
+    // Route legality unknown: a manager's grant does not release it without an approved policy.
+    const route = blk({ code: "route_not_evaluated", label: "Route not evaluated", severity: "unknown", subject: "route", overridable: true, overrideAuthority: "manager" });
+    const r = decideLegacyAssignment({ mode: "enforced", check: check({ verdict: "unknown", blockers: [route] }), currentFacts: null, grantedOverrides: [g("route_not_evaluated")], subject, now: NOW });
+    expect(r.allowed).toBe(false);
     const hard = check({ verdict: "blocked", blockers: [blk({ code: "insurance_coverage_expired" })] });
-    const d = decideLegacyAssignment({ mode: "enforced", check: hard, currentFacts: null, grantedOverrides: [{ blockerCode: "insurance_coverage_expired", grantedByUserId: 5, grantedByRole: "administrator", reason: "r", grantedAt: NOW }], subject, now: NOW });
+    const d = decideLegacyAssignment({ mode: "enforced", check: hard, currentFacts: null, grantedOverrides: [g("insurance_coverage_expired", { grantedByRole: "administrator" })], subject, now: NOW });
     expect(d.allowed).toBe(false);
     if (!d.allowed) expect(d.refusals.join(" ")).toContain("not permitted for any role");
   });
@@ -168,13 +177,25 @@ d("jobUnits.create under off, advisory and enforced", () => {
     expect(ex.items.some(x => x.key === `ungated:${id2}` && x.title.includes("without a readiness check"))).toBe(true);
     expect(ex.items.some(x => x.key === `ungated:${id1}`)).toBe(false); // made under "off" — not an exception
 
-    // ENFORCED: refuses without a check; refuses on an unknown check; assigns once the unknowns are overridden.
-    await callerFor(manager).dispatch.enforcementSet({ mode: "enforced", reason: "Routing source and HOS rule not yet loaded; we accept manager overrides as the record" });
+    // ENFORCED: refuses without a check; refuses on an unknown check; a manager cannot override the
+    // safety unknowns away (C1a / D-02); assigns once the facts are ESTABLISHED and only warnings remain.
+    await callerFor(manager).dispatch.enforcementSet({ mode: "enforced", reason: "Enforce the readiness gate; safety unknowns must be established, not overridden" });
     await expect(identity(dispatcher).create({ jobId, unitId, operatorId, role: "operator", joinedAt: new Date() })).rejects.toThrow(/without a readiness check/);
-    const c = await callerFor(dispatcher).dispatch.evaluate({ operatorId, unitId, trailerId: null, jobId, postingId: null });
-    expect(c.verdict).toBe("unknown");
-    await expect(identity(dispatcher).create({ jobId, unitId, operatorId, role: "operator", joinedAt: new Date(), eligibilityCheckId: c.checkId })).rejects.toThrow(/UNKNOWN/);
+    const c0 = await callerFor(dispatcher).dispatch.evaluate({ operatorId, unitId, trailerId: null, jobId, postingId: null });
+    expect(c0.verdict).toBe("unknown");
+    await expect(identity(dispatcher).create({ jobId, unitId, operatorId, role: "operator", joinedAt: new Date(), eligibilityCheckId: c0.checkId })).rejects.toThrow(/UNKNOWN/);
+    for (const code of ["hos_unknown", "route_not_evaluated"]) {
+      expect(c0.blockers.map(b => b.code)).toContain(code);
+      await callerFor(dispatcher).dispatch.overrideRequest({ checkId: c0.checkId, blockerCode: code, reason: `Verified by phone — ${code}` });
+      expect((await callerFor(manager).dispatch.overrideGrant({ checkId: c0.checkId, blockerCode: code, reason: `Accepted on record — ${code}` })).granted, code).toBe(false);
+    }
+    const approvalRef = key("RA").slice(0, 60);
+    await pool.execute("INSERT INTO routeApprovals (approvalRef, jobId, unitId, originRef, destinationRef, dispatchStatus, segmentIdsJson, fingerprintJson, fingerprintHash, explanation, status, approvedByUserId) VALUES (?, ?, ?, 'yard', 'lease', 'clear', '[]', '{}', ?, 'Approved local route', 'approved', ?)", [approvalRef, jobId, unitId, "b".repeat(64), manager]);
+    await pool.execute("INSERT INTO hosAttestations (operatorId, dutyDate, method, statement, hoursAvailableMinutesStated, attestedByUserId) VALUES (?, UTC_DATE(), 'paper_log_reviewed', 'Reviewed the paper log for today', 600, ?)", [operatorId, manager]);
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'medical_fitness', 'Medical', NOW(), DATE_ADD(NOW(), INTERVAL 300 DAY), 'verified')", [operatorId]);
+    const c = await callerFor(dispatcher).dispatch.evaluate({ operatorId, unitId, trailerId: null, jobId, postingId: null, routeApprovalRef: approvalRef });
     for (const b of c.blockers) {
+      expect((b as { overrideClass?: string }).overrideClass, b.code).toBe("WARNING_ONLY");
       await callerFor(dispatcher).dispatch.overrideRequest({ checkId: c.checkId, blockerCode: b.code, reason: `Verified by phone — ${b.code}` });
       const granter = b.overrideAuthority === "administrator" ? await withRole("controller") : manager;
       expect((await callerFor(granter).dispatch.overrideGrant({ checkId: c.checkId, blockerCode: b.code, reason: `Accepted on record — ${b.code}` })).granted, b.code).toBe(true);
