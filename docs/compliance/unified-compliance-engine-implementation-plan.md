@@ -40,7 +40,10 @@ Rules for this initiative:
 Each checkpoint is one reviewable PR, with at most one or two additive migrations, and the full gate run
 before push. "Engine?" records the SPINE-moratorium classification (D-01).
 
-### C1a — Dispatch contract and safety defects *(recommended first implementation checkpoint)*
+### C1a — Dispatch contract and safety defects — **done** (see `checkpoints/C1A_READINESS_HARDENING.md`)
+
+*As built:* migration `0172`. Deviations from the plan below: outbox events and R-11 (`unitHeld`) were
+deferred. Tenant scoping of the dispatch path and the D-02 classification were added.
 
 *Engine?* No. It is a contract over the existing composer, plus defect fixes.
 
@@ -83,7 +86,10 @@ before push. "Engine?" records the SPINE-moratorium classification (D-01).
 
 **Out of scope:** new contributors, UI, requirement registry changes.
 
-### C1b — Requirement registry reconciliation
+### C1b — Requirement registry reconciliation *(next; not started)*
+
+*Added by owner decision:* the credential read adapter from `credential-store-reconciliation.md` (D-05),
+non-destructive, after the owner answers its questions.
 
 *Engine?* No. It is a resolver, plus SPINE item 2.
 
@@ -262,3 +268,10 @@ It is first because:
 * It adds no engine, so it is permitted under the SPINE moratorium.
 
 The migration number is taken at PR time per the rules above.
+
+## Migration slots after C1a (checked 2026-09-23)
+
+`main` ends at `0169` (PR #4). C1a uses `0172`. Claims on open branches: `0170`/`0171` by PR #9 and
+`feature/dispatch-assignment-ui`; `0170` also by `claude/leaseos-auth-workspace-system-t008ad`;
+`0169`/`0170` by `claude/driver-portfolio-credential-wallet-ya8928` (its `0169` already collides with
+main). The next compliance slot is `0173`, re-checked at PR time.

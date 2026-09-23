@@ -1,0 +1,179 @@
+# C1a — Readiness hardening (the dispatch compliance contract)
+
+Status: **complete on branch `feat/compliance-c1a-readiness-contract`**, not merged. No C1b or C2 work
+started. No new engine, no second readiness authority.
+
+## SHAs and gates
+
+| | |
+|---|---|
+| Starting SHA (before prerequisite merges) | `006069057b8a245ce00c0453d500f1e69c9e916c` (`main`) |
+| Prerequisite: PR #4 | head `c72a55a`, main merged into it as `8ad53d6` (only the generated `LEASEOS_CURRENT_STATE.md` conflicted; regenerated); gate PASS at `8ad53d6`; GitHub CI green |
+| PR #4 merge SHA | `38d26770bdcd5b4bd89f14fee6874559492394bf` (merge commit, tree identical to the gated `8ad53d6`) |
+| Post-merge `main` gate | PASS. 312 files, 4334 passed, 3 skipped (`agentRuntimeApi`, pre-existing); 408 tables; 166 migrations (head `0169_defect_resolution`); 647 role / 36 external / 2 integration procedures; build OK; current-state current |
+| C1a base | `38d2677` |
+| C1a ending SHA | `Code commit `1272b2d` (the documentation commit that follows it adds only files under `docs/compliance/`)` |
+| Migration used | **`0172_dispatch_override_provenance.sql`**. Checked against every remote branch immediately before commit: `0170`/`0171` are claimed by PR #9 and `feature/dispatch-assignment-ui`, `0170` also by the auth-workspace branch and by `claude/driver-portfolio-credential-wallet-ya8928` (which also claims `0169`, already taken on main). `0172` was free on all of them |
+| C1a full gate | **PASS** at `1272b2d`, gates 0–8: 314 files, **4404 passed**, 3 skipped (the pre-existing `agentRuntimeApi` cases); no DB suite skipped; test-file type errors 0/0; 0 bare `protectedProcedure`; 408 tables; 167 migrations; 647 role / 36 external / 2 integration procedures; build OK; current-state regenerated and current. Focused C1a suites first: `complianceFinding.test.ts` 42/42, `complianceReadinessC1a.db.test.ts` 15/15 |
+
+## PR dependency / conflict matrix (#4, #5, #6, #9)
+
+| PR | Branch | Stacks on | Touches `readinessComposer.ts` | Touches `dispatchRouter.ts` | Migrations | Could overwrite OOS wiring? | Action taken |
+|---|---|---|---|---|---|---|---|
+| #4 | `readiness-defect-repair` | main | **yes** (OOS read, defect/release split) | no | `0169` | n/a (it *is* the wiring) | main merged in (`8ad53d6`), gate PASS, CI green, **merged** as `38d2677` |
+| #5 | `feature/dispatcher-readiness-panel` | #4 | no | yes (`readiness` returns capabilities) | none | **no** (does not touch the composer) | main merged in (`e6b65f2`; `a11yCoverage.test.ts` entries from both sides kept; generated doc regenerated); base retargeted to `main`; focused suites pass |
+| #6 | `feature/dispatcher-detail-assignment` | #5 | no | yes | none | no | #5 merged in (`02c0b74`); focused suites pass |
+| #9 | `feature/dispatch-role-assignment-backend` | #5 | no | yes (role-slot procedures) | `0170`, `0171` | no | #5 merged in (`84c69fc`); its own 13 suites + count pins pass; **`0170` still collides** with the auth-workspace branch and the driver-portfolio branch |
+
+C1a conflicts expected with #5/#6/#9 only in `dispatchRouter.ts` (C1a adds scope checks and changes
+`overrideRequest`/`overrideGrant`/`award`; they add procedures and change `readiness`'s return). They
+are textual, not semantic. C1a must merge after #5, or #5 must rebase onto C1a, so that #5's
+`readiness` return keeps C1a's scope check.
+
+## What changed
+
+### Files
+
+| File | Change |
+|---|---|
+| `server/_core/complianceFinding.ts` | **new**: the typed contract (`ComplianceFinding`), D-02 classification, strictest-wins merge, override classes, empty approved-override-policy registry, shared coverage rule |
+| `server/_core/complianceFinding.test.ts` | **new**: 42 pure cases |
+| `server/complianceReadinessC1a.db.test.ts` | **new**: 15 database-backed cases through the real procedures |
+| `server/telematics.test.ts`, `server/surfaces.test.ts` (unchanged; a C1a test was leaving an expired policy that the unscoped exception centre showed a driver — fixed in the C1a test) | an undetermined fault is now UNKNOWN/BLOCK/APPROVED_POLICY_ONLY instead of manager-overridable |
+| `docs/compliance/*` | the Checkpoint 0 documents brought onto this branch and updated; D-05 matrix; tenancy follow-up; this record |
+| `drizzle/0172_dispatch_override_provenance.sql`, `drizzle/schema.ts` | grantor/policy/scope/expiry/org on `dispatchOverrides`; `ruleSetHash`/`orgRef` on `dispatchEligibilityChecks`; fingerprint widened to 80 |
+| `server/readinessComposer.ts` | findings merged strictest-wins; structured dangerous goods; complete fact set; rule-set and policy hashes; enforcement version |
+| `server/_core/dispatchReadiness.ts` | `requestOverride` decided by override class; policy-only overrides |
+| `server/_core/dispatchAward.ts` | SHA-256 canonical fingerprint; 11 new facts; `decideAward` uses the shared coverage rule |
+| `server/_core/dispatchEnforcement.ts` | the legacy enforced path uses the same coverage rule |
+| `server/_core/readinessCapabilities.ts` | the unsafe cast removed |
+| `server/dispatchEnforcementService.ts` | shared grant loader (grantor, not requester); tenant-scope helpers; legacy recompute carries the route |
+| `server/dispatchRouter.ts` | tenant scope on every procedure; policy reference on requests; grant provenance; persisted `orgRef`/`ruleSetHash` |
+| `server/routers.ts` | `jobUnits.create` passes the acting scope to the gated path |
+| `server/dispatchGate.test.ts`, `server/dispatchEnforcement.test.ts`, `server/_core/dispatchAward.test.ts`, `server/commsDispatch.test.ts` | updated to the new contract (see "tests changed", below); nothing deleted |
+| `LEASEOS_CURRENT_STATE.md` | regenerated by `scripts/current-state.sh` |
+
+### Defects fixed
+
+| ID | Defect | Fix |
+|---|---|---|
+| R-2 / C1a-3 | The award path recorded the **requester** as the override grantor, in `dispatchRouter.award` **and** in the legacy `createJobUnitGated` | Grantor columns (0172); `overrideGrant` records grantor, role, time, reason, class, policy, scope and expiry; both paths read them through one loader; a grant whose grantor equals the requester, or with no recorded grantor (every pre-0172 row), is not a grant |
+| R-3 / C1a-4 | `mergeBlockers` kept the first duplicate, so a later non-overridable duplicate was dropped | `mergeFindings`: strictest by (effect, override class, severity, result), deterministic tie-break, evidence of all duplicates kept, order-independent |
+| R-4 / C1a-5 | A stray `minimumRole` field behind `as DispatchBlocker` hid a missing `overrideAuthority` | Typed return, no cast; the classification decides what may release it |
+| R-6 / C1a-2 | Override-ability was a bare boolean; "overridable blocking" findings were silently unawardable; safety UNKNOWNs were releasable by any manager | Explicit `overrideClass` (`NEVER_OVERRIDABLE`, `APPROVED_POLICY_ONLY`, `WARNING_ONLY`, `INFORMATIONAL`) read by request, grant, award and the legacy path; there is **no general manager override** |
+| R-5 / C1a-6 | Insurance, enforcement, roadside, faults, calibration, medical, HOS, device, unit documents, route status, legacy licence and rules were outside the fingerprint; FNV-1a 32-bit | 11 new facts plus corrected trailer, route, material and destination versions; `canonicalJson` + SHA-256 (`EF2-…`) |
+| R-7 / C1a-7 | Dangerous goods decided by `/tdg\|dangerous\|hazard/i` over the job's free text | `dangerousGoodsAuthority` over `loadProfiles` verified classification; free text can only raise suspicion (UNKNOWN), never establish DG or non-DG |
+| R-8 | The legacy enforced path recomputed facts without the check's route | The route is carried through |
+| — | PR #4 left `enforcement_result_unknown` manager-overridable | Classified `NEVER_OVERRIDABLE` (regulator order) |
+| — | No tenant scoping anywhere on `dispatch.*` | Every procedure resolves the caller's organization server-side and refuses other tenants' identities and checks as "not found" |
+
+### D-02, as encoded
+
+| Finding | Result | Effect | Override class |
+|---|---|---|---|
+| active OOS (`oos.*`), `enforcement_result_unknown`, required-but-unevaluated enforcement | UNSATISFIED / UNKNOWN | BLOCK | NEVER_OVERRIDABLE |
+| licence, required credential, medical, HOS, inspection, registration, insurance, route, permit, DG classification, TDG document, required-capability **unknowns**; undetermined telematics fault; trailer compatibility unknown | UNKNOWN | BLOCK | APPROVED_POLICY_ONLY (no policy approved, so effectively never) |
+| expired/missing/insufficient versions of the above, critical defect, missing mechanic release, roadside event, radio not authorized | UNSATISFIED | BLOCK | NEVER_OVERRIDABLE |
+| communication plan incomplete (company policy), availability, documents, destination acceptance unverified, maintenance overdue, route review, insurance proof, calibration, device, HOS **attested** (P8.3) | UNKNOWN / UNSATISFIED / SATISFIED | WARN | WARNING_ONLY (acknowledged by the producer's authority, never the requester) |
+
+**Operational consequence the owner should see:** the posting award and the *enforced* legacy path can
+no longer be completed by overriding `hos_unknown`, `route_not_evaluated`, `medical_fitness_unknown`
+or similar UNKNOWNs. The facts must be established: an approved route, today's HOS attestation, a
+verified medical. The composer still receives no computed HOS (`hoursAvailableMinutes` is null), so
+**every award now needs a same-day HOS attestation**. A trailer always reads
+`trailer_compatibility_unknown` (the composer never establishes compatibility), so **every trailer
+dispatch now blocks** until C3. Enforcement mode `off`/`advisory` for `jobUnits.create` is unchanged.
+
+## SPINE path (C1a-10)
+
+```
+producer engines (credentials, medical, HOS attestation, unit, insurance, defects/releases, roadside,
+  telematics, calibration, enforcement read from outOfServiceOrders [PR #4], Academy, dangerous goods
+  from loadProfiles, route approval, communications, capability contract)
+  → DispatchBlocker (unchanged producer vocabulary)
+  → classifyBlocker → ComplianceFinding            server/_core/complianceFinding.ts
+  → mergeFindings (strictest wins)                  readinessComposer.mergeBlockers
+  → composeReadiness: eligibility + facts + SHA-256 fingerprint + ruleSetHash   (the ONE composer)
+  → dispatch.evaluate: dispatchEligibilityChecks (findings, fingerprint, ruleSetHash, orgRef)
+  → dispatch.overrideRequest / overrideGrant: dispatchOverrides (requester, grantor, class, policy, scope, expiry)
+  → dispatch.award → decideAward → uncoveredFindings → awardAssignment (FOR UPDATE, dispatchAuditEvents)
+    or jobUnits.create → createJobUnitGated → decideLegacyAssignment → uncoveredFindings (same rule)
+```
+
+`complianceFinding` is reached from a router (`dispatchRouter`, `readinessComposer`), so it is **not**
+added to `DECLARED_UNWIRED`.
+
+**Moratorium status:** unchanged, and not lifted. C1a is reconciliation (one contract over the existing
+composer) plus safety fixes. None of the thirteen SPINE engines moved off `DECLARED_UNWIRED`; SPINE
+item 1 (boundary confirmation) and item 2 (the four duplications, including
+`complianceDocumentValidity`) are not done. What C1a makes real is the dispatch half of the path:
+one typed decision from findings to award, with provenance.
+
+## Tests
+
+New: `server/_core/complianceFinding.test.ts` (42), `server/complianceReadinessC1a.db.test.ts` (15).
+
+| # | Required | Where |
+|---|---|---|
+| 1 | government OOS blocks dispatch | C1a-8 e2e (readiness → `blocked`, `oos.vehicle` BLOCK) |
+| 2 | OOS cannot be overridden | C1a-8 (request refused; manager grant refused; controller refused) |
+| 3 | repair is not release | C1a-8 (shop release recorded → still BLOCK; `orderRelease` refused) |
+| 4 | authorized release removes the OOS contribution | C1a-8 (safety finding + `orderRelease` → no `oos.*`) |
+| 5 | real override grantor recorded | C1a-3 DB test (row columns) |
+| 6 | requester and grantor distinct | C1a-3 DB test (self-grant refused), pure `uncoveredFindings`, legacy row test |
+| 7 | strictest duplicate wins | pure (`NEVER_OVERRIDABLE` kept over overridable) |
+| 8 | order independent | pure (every pair `merge(A,B) ≡ merge(B,A)`; composer merge too) |
+| 9 | no unsafe cast | pure (typed keys; source scan) |
+| 10 | DG free text cannot establish compliance | pure + DB |
+| 11 | missing structured DG authority → UNKNOWN | pure + DB |
+| 12 | insurance change invalidates | DB |
+| 13 | OOS change invalidates | DB (award refused "changed") |
+| 14 | HOS change invalidates | DB |
+| 15 | credential change invalidates | DB (structured and legacy licence) |
+| 16 | route/permit change invalidates | DB (dependency hash, then revocation) |
+| 17 | rule-set change invalidates | DB (`ruleSetHash` moves on a new Academy binding) |
+| 18 | tenant-crossing refused | DB (readiness, evaluate, request, grant, award; injected tenant ignored) |
+| 19 | safety UNKNOWN never green | pure (merge → `unknown`; administrator grant does not award) + D-02 table |
+| 20 | refusal is server-side | C1a-8 (API refusal; no `assignment_approved` row) |
+
+Tests changed, with the reason (none deleted, none skipped):
+
+* `dispatchGate.test.ts`: the checklist now says a route unknown needs verification or an approved policy.
+  "Awards when a manager granted the override" became "a manager's grant alone never releases a
+  route-legality unknown", plus "an approved policy releases it". The Unit 142 end-to-end now shows the
+  manager refused, then the facts established and only warnings acknowledged.
+* `dispatchEnforcement.test.ts`: enforced mode no longer "assigns once the unknowns are overridden".
+  It assigns once they are established. The pure case uses an administrative unknown for the
+  acknowledgement path and asserts that a route unknown is not released.
+* `dispatchAward.test.ts`, `commsDispatch.test.ts`: fixtures carry the new facts and grant fields.
+* `telematics.test.ts`: an unassessed fault is asserted as UNKNOWN / BLOCK / APPROVED_POLICY_ONLY, where it
+  used to be asserted as manager-overridable.
+
+## Unresolved risks
+
+1. **Operational:** awards now require facts that are often not yet recorded: HOS (no computed hours),
+   route approvals, and trailer compatibility. This is D-02 working as decided, but it will surface
+   immediately in any deployment running `enforced`. The approved-override-policy registry is the
+   designed release valve and is empty.
+2. **Same condition, different codes:** `truck_insurance_*` (base engine) and `insurance_coverage_*`
+   (composer) describe one condition under two codes. Strictest-wins works per code, not per condition.
+3. **Stored checks from before C1a** carry `EF-` fingerprints and re-evaluate once. Their stored
+   blockers are re-classified on read, so an old check's safety unknowns are now refused at award.
+4. **Two other hashers remain** (`structures.hashPart`, `commPackage.hashOf`). They were not unified
+   to avoid changing route and package outputs.
+5. **Carrier-scope OOS** matches only through enforcement events on this unit, trailer or operator,
+   as in PR #4. A carrier-wide order recorded against a different unit does not ground this one.
+6. **Unscoped tables** remain: see `docs/compliance/follow-ups/TENANCY_UNSCOPED_COMPLIANCE_TABLES.md`.
+7. **No outbox events** are emitted for `compliance.evaluated`/`blocker.*` yet. The audit trail is the
+   persisted check and override rows plus `dispatchAuditEvents`.
+8. **Shift readiness** (R-10) is still a separate authority; D-06's behavioural-equivalence tests are not
+   written.
+9. **`0170` collision** among PR #9, the auth-workspace branch and the driver-portfolio branch (which
+   also reuses `0169`) is unresolved and is not this checkpoint's to resolve.
+
+## Next recommended checkpoint
+
+**C1b — requirement registry reconciliation** (authority tier, immutable versions, generalized promotion
+ledger with the HOS history preserved, `complianceDocumentValidity` resolution, and the credential
+read adapter from the D-05 matrix). It is safe to begin once C1a is reviewed and merged, and it needs
+owner answers to the D-05 questions in `docs/compliance/credential-store-reconciliation.md`.

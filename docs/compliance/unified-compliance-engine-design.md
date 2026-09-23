@@ -1,6 +1,8 @@
 # LeaseOS — Unified Compliance Engine: Design (Checkpoint 0)
 
-Status: **design only**. No production code, no migrations, no seeds changed by this checkpoint.
+Status: Checkpoint 0 design, **approved 2026-09-23**. C1a has since been implemented. Its record is
+`docs/compliance/checkpoints/C1A_READINESS_HARDENING.md`, and §26 below says what it changed in this
+design. Owner decisions taken on 2026-09-23 are recorded in §23.
 
 | | |
 |---|---|
@@ -130,14 +132,14 @@ Verified defects on `main`:
 
 | # | Defect | Evidence | Status |
 |---|---|---|---|
-| R-1 | **Active government OOS orders never reach dispatch.** `ReadinessSubject.enforcement` is optional and no production caller passes it. | `readinessComposer.ts:74,412`; callers `dispatchRouter.ts:53,68,134,169`, `portalRouter.ts:300`, `dispatchEnforcementService.ts:52` | **Fixed on PR #4** (`loadEnforcementState` reads `enforcementEvents`/`outOfServiceOrders`), not merged |
-| R-2 | **The override grantor is not recorded.** `overrideGrant` updates only `granted`/`refusalReason`. `award` then rebuilds `grantedByUserId` from `requestedByUserId`. | `dispatchRouter.ts:113,136` | **Open on every branch**, including #4 and #9 |
-| R-3 | `mergeBlockers` dedupes by `code`, first wins, so a later, stricter blocker with the same code is dropped. | `readinessComposer.ts:621-623` | open |
-| R-4 | `blockersForUnevaluatedRequired` sets `minimumRole:"supervisor"` behind a cast instead of `overrideAuthority`. | `readinessCapabilities.ts:208` | open |
-| R-5 | Insurance, enforcement, telematics faults, roadside, calibration and medical are **not in `EligibilityFacts`**, so a change in them does not stale a check inside its 30-minute window. `permitVersion`, `materialClassificationVersion` and `destinationAcceptanceVersion` are always `"none"`. | `dispatchAward.ts:27-61` | open |
-| R-6 | "Overridable" `blocking` blockers such as `route_approval_stale` can never be awarded (`decideAward` refuses every `blocking` blocker). The override class is implicit. | `dispatchAward.ts:211`, `readinessComposer.ts:481` | open |
-| R-7 | Some inputs are hard-coded: `permitRequired:false`, `permitOnFile:null`, `hoursAvailableMinutes:null`, `availabilityDeclared:false`. Dangerous goods are detected by **regex on job type/mode**. | `readinessComposer.ts:227,403-404,532` | open; violates "never infer DG from free text" |
-| R-8 | `dispatchEnforcementService` recomputes facts without `routeApprovalRef`, so route-bound checks fingerprint-mismatch in enforced mode. | `dispatchEnforcementService.ts:52` | open |
+| R-1 | **Active government OOS orders never reach dispatch.** `ReadinessSubject.enforcement` is optional and no production caller passes it. | `readinessComposer.ts:74,412`; callers `dispatchRouter.ts:53,68,134,169`, `portalRouter.ts:300`, `dispatchEnforcementService.ts:52` | **Fixed by PR #4**, merged to main as `38d2677`; C1a adds the end-to-end refusal test |
+| R-2 | **The override grantor is not recorded.** `overrideGrant` updates only `granted`/`refusalReason`. `award` then rebuilds `grantedByUserId` from `requestedByUserId`. | `dispatchRouter.ts:113,136` | **Fixed in C1a** (0172 grantor columns; one grant loader for both award paths) |
+| R-3 | `mergeBlockers` dedupes by `code`, first wins, so a later, stricter blocker with the same code is dropped. | `readinessComposer.ts:621-623` | **Fixed in C1a** (`mergeFindings`, strictest wins, order-independent) |
+| R-4 | `blockersForUnevaluatedRequired` sets `minimumRole:"supervisor"` behind a cast instead of `overrideAuthority`. | `readinessCapabilities.ts:208` | **Fixed in C1a** (typed, no cast) |
+| R-5 | Insurance, enforcement, telematics faults, roadside, calibration and medical are **not in `EligibilityFacts`**, so a change in them does not stale a check inside its 30-minute window. `permitVersion`, `materialClassificationVersion` and `destinationAcceptanceVersion` are always `"none"`. | `dispatchAward.ts:27-61` | **Fixed in C1a** (11 new facts, SHA-256 canonical) |
+| R-6 | "Overridable" `blocking` blockers such as `route_approval_stale` can never be awarded (`decideAward` refuses every `blocking` blocker). The override class is implicit. | `dispatchAward.ts:211`, `readinessComposer.ts:481` | **Fixed in C1a** (explicit `overrideClass`) |
+| R-7 | Some inputs are hard-coded: `permitRequired:false`, `permitOnFile:null`, `hoursAvailableMinutes:null`, `availabilityDeclared:false`. Dangerous goods are detected by **regex on job type/mode**. | `readinessComposer.ts:227,403-404,532` | **DG regex fixed in C1a** (structured `loadProfiles`); permits and computed HOS remain hard-coded until C6 and C2 |
+| R-8 | `dispatchEnforcementService` recomputes facts without `routeApprovalRef`, so route-bound checks fingerprint-mismatch in enforced mode. | `dispatchEnforcementService.ts:52` | **Fixed in C1a** |
 | R-9 | The licence **class and endorsements are not checked** in the composer. `driverTraining.evaluateDriverQualification` does check them, but is fed a client-supplied profile and never reads the DB. | `complianceRouter.ts:300`, `driverTraining.ts:246` | open |
 | R-10 | Shift readiness (`readiness.forShift|forTime`, `shiftReadiness.ts`) is a **second readiness system**. It has its own `CheckState` and does not call `composeReadiness`. | `readinessRouter.ts` | open (owner decision D-06) |
 | R-11 | `unitHeld` on incidents is not read by the composer. | `recordsRouter.ts:465` | open |
@@ -792,12 +794,12 @@ Database-backed suites follow the `*.db.test.ts` convention (gate 6 refuses skip
 
 | ID | Decision | Recommended default |
 |---|---|---|
-| D-01 | Does this initiative proceed under the SPINE moratorium, and which checkpoints count as "no new engine"? | C1a/C1b proceed (resolvers and contracts over existing engines, plus SPINE item 2). C2+ wait for owner sign-off. |
-| D-02 | Which UNKNOWNs block dispatch? | UNKNOWN on tiers 1–3 and on any safety-critical capability (`DISPATCH_REQUIRED_ALWAYS`) blocks. UNKNOWN on tiers 4–8 warns unless the pack says block. |
-| D-03 | One generalized rule promotion ledger, or per-family ledgers? | One ledger. Add `ruleFamily`/`ruleRef` to `hosRuleLimitHistory` (additive; existing rows = `hos_limit`). |
+| D-01 | Does this initiative proceed under the SPINE moratorium, and which checkpoints count as "no new engine"? | **Decided:** the moratorium stays. C1a and C1b are permitted (reconciliation, wiring, safety fixes, consolidation); no C2+ standalone engine until the compliance path is wired through the spine. |
+| D-02 | Which UNKNOWNs block dispatch? | **Decided:** fail-closed per finding for safety/regulatory prerequisites (OOS, licence, required qualification, HOS, inspection, safety defect, insurance, route, weight/dimension, permit, DG classification, TDG documents, mandatory client/site authorization); administrative unknowns may warn; no global "all unknowns block". Encoded in C1a (`complianceFinding.ts` `CLASSIFICATION`). |
+| D-03 | One generalized rule promotion ledger, or per-family ledgers? | **Decided:** one generalized rule/source promotion ledger, typed by rule/domain/authority, immutable history, strongest available approval (two-person where practical) for dispatch-blocking statutory rules, HOS point-in-time history preserved. C1b. |
 | D-04 | Two-person approval: which families? | All tier-1/2/3 rule promotions and source verifications. Credential verification stays single-person with sampling review. |
-| D-05 | Canonical credential store | `complianceDocuments` for documents (licence, medical, registration, external certificates). `academyQualifications` for training-derived qualifications. `workerQualifications` becomes a projection or migrates. `operatorCapabilities` stays matching-only. `operators.license*` is read-only legacy. |
-| D-06 | Shift readiness vs dispatch readiness | `readiness.forShift` becomes a projection over `composeReadiness` (C4). |
+| D-05 | Canonical credential store | **Decided:** do not pick arbitrarily; produce a reconciliation matrix first. Done: `docs/compliance/credential-store-reconciliation.md` (recommendation awaiting owner review). Original recommendation: `complianceDocuments` for documents (licence, medical, registration, external certificates). `academyQualifications` for training-derived qualifications. `workerQualifications` becomes a projection or migrates. `operatorCapabilities` stays matching-only. `operators.license*` is read-only legacy. |
+| D-06 | Shift readiness vs dispatch readiness | **Decided:** yes, ultimately a projection over the canonical composer; keep the existing implementation until behavioural-equivalence tests exist, then migrate callers. |
 | D-07 | First-class jurisdictions at launch | Alberta provincial + Canada federal (south of 60). BC, SK, NT/YT/NU packs are hosted but unverified. |
 | D-08 | Alberta-first before Canada-wide packs? | Yes. The engine is jurisdiction-neutral; verified data is Alberta-first. |
 | D-09 | Internal company requirements: block vs warn | Warn by default; each company pack declares block explicitly with an approver. |
@@ -808,7 +810,7 @@ Database-backed suites follow the `*.db.test.ts` convention (gate 6 refuses skip
 | D-14 | Contractor records retained | Only what a requirement names, owned by the contractor org via `organizationRelationships`. Never merged into an employee record. |
 | D-15 | Audit-package retention | The longest applicable verified retention for included records; until verified, company default + legal-hold override. |
 | D-16 | Regulatory polling cadence | Weekly for tier-1 instruments, daily for advisories/road bans. All results are proposals. |
-| D-17 | Order of stacked PRs | Merge #4 → #5 → #6 → #9 and resolve the 0170 collision **before** C1a starts. |
+| D-17 | Order of stacked PRs | **Decided:** PR #4 first. Done: merged as `38d2677`; #5 retargeted to main and #6/#9 brought up to date (see the C1a checkpoint's matrix). |
 | D-18 | Eligibility fingerprint algorithm change (FNV-1a → sha256) | Accept. Existing checks become stale once, on deploy. |
 
 ---
@@ -848,3 +850,22 @@ ledger.
 * Whether `incidentActions` migrates into the C7 findings/CAPA model or stays incident-local with a projection.
 * Whether the Academy's "UNRELEASED" checkpoint notes (0087/0088 docs) are closed. The gate run in this
   checkpoint includes the Academy suites.
+
+---
+
+## 26. What C1a changed in this design
+
+* **§3.1:** the typed contribution exists as `ComplianceFinding` in `server/_core/complianceFinding.ts`.
+  Its fields: `domain`, `result`, `dispatchEffect`, `overrideClass`, `authorityClass`, `ruleRef`
+  (classification rule and version), `evidenceRefs`, `evaluatedAt`. The override class is
+  `APPROVED_POLICY_ONLY`, not `OVERRIDABLE_BY_APPROVED_POLICY`. `missingInputs`, `sourceRef` and
+  `resolution` were **not** added; they belong to C1b's requirement registry, which has the sources.
+* **§4:** the classification only tightens a producer's claim. The approved-override-policy registry
+  exists and is empty (two distinct approvers required per policy).
+* **§8:** implemented as described, plus tenant scoping on every `dispatch.*` procedure. The one
+  migration is `0172_dispatch_override_provenance.sql`. Outbox events (`compliance.evaluated`,
+  `blocker.*`) were **not** emitted in C1a; the persisted check and override rows are the record. R-11
+  (`unitHeld`) is deferred.
+* **§6 (dangerous goods):** `dangerousGoodsAuthority` reads `loadProfiles`. Free text may raise UNKNOWN
+  and never establishes DG or non-DG.
+* **§20:** the next free slot after C1a is `0173`, subject to the open-branch check.
