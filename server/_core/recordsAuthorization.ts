@@ -287,6 +287,12 @@ export type Permission =
   | "hos.attest"
   /* P8.3 — putting a scanned log page on file. Retention, not a dispatch answer. */
   | "hos.recordScannedLog"
+  // DC-A (0178) — Document Control. Reading the register, taking a document in, confirming
+  // what a scan says, issuing a numbered record, voiding a number, and managing the catalog, the
+  // series and the templates are each their own act: intake creates a row, confirmation creates a
+  // fact, issue consumes a number, void explains a gap.
+  | "document.read" | "document.intake" | "document.confirm" | "document.issue" | "document.void"
+  | "document.catalog.manage" | "document.series.manage" | "document.template.manage"
   /* P8.5 — the vault. `restricted.read` is the permission the break-glass prompt sits behind; it is
      NOT implied by an administration role, which is the point of the whole subsystem. */
   | "vault.matter.manage" | "restricted.read" | "restricted.audit.read"
@@ -348,6 +354,8 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    "document.read",
+    "document.intake",
     "automation.override.operational",
     "facility.directory.report",
     "facility.directory.read",
@@ -431,6 +439,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "document.read",
+    "document.intake",
+    "document.confirm",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -542,6 +553,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
+    "document.read",
+    "document.intake",
     "assistant.ask",
     "board.read",
     "board.post",
@@ -608,6 +621,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
+    "document.read",
+    "document.intake",
+    "document.confirm",
     "facility.directory.read",
     "academy.evaluate",
     "assistant.ask",
@@ -695,6 +711,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -816,6 +836,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
+    "document.void",
+    "document.template.manage",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -978,6 +1004,14 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
+    "document.void",
+    "document.catalog.manage",
+    "document.series.manage",
+    "document.template.manage",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1230,6 +1264,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.graph.build",
   ],
   hr: [
+    "document.read",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1266,6 +1301,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "audit.package.read",
   ],
   legal: [
+    "document.read",
     "evidence.read_legal",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
@@ -1293,6 +1329,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    "document.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.read_safety_summary",
@@ -1347,6 +1384,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   /* ---- B20.5 finance and payroll functions ---- */
 
   bookkeeper: [
+    "document.read",
+    "document.intake",
     "facility.directory.read",
     "commercial.read",
     "commercial.write",
@@ -1469,6 +1508,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    "document.read",
+    "document.confirm",
+    "document.issue",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1735,6 +1777,15 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  // DC-A (0178) — Document Control. Each of these creates operational truth (a controlled record, a
+  // confirmed extraction, a consumed number) or changes what every later record is judged by.
+  "document.intake",
+  "document.confirm",
+  "document.issue",
+  "document.void",
+  "document.catalog.manage",
+  "document.series.manage",
+  "document.template.manage",
   "academy.source.review",
   "academy.certificate.issue",
   "academy.certificate.sign_own",
@@ -2288,6 +2339,14 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "commercialOffice.documentDeliveryUpdate": "commercial.write",
   "commercialOffice.documentGet": "commercial.read",
   "commercialOffice.documentsList": "commercial.read",
+  // DC-A (0178) — Document Control, Checkpoint A: the definition registry and the catalog.
+  "documentControl.definitionsList": "document.read",
+  "documentControl.definitionGet": "document.read",
+  "documentControl.catalogSeed": "document.catalog.manage",
+  "documentControl.definitionOverlay": "document.catalog.manage",
+  "documentControl.definitionCreate": "document.catalog.manage",
+  "documentControl.definitionRetire": "document.catalog.manage",
+  "documentControl.sourceArtifactsList": "document.read",
   "commercialOffice.glAccountSet": "commercial.policy",
   "commercialOffice.glMappingSet": "commercial.policy",
   "commercialOffice.glList": "commercial.read",

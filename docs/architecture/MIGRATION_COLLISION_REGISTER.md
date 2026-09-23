@@ -40,7 +40,21 @@ and `0157` is historically used twice. None of those is reused.
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
 
+## State at Document Control Checkpoint A (2026-09-23, `main` = `0cd4817`)
+
+Scan run with the command above against every remote branch. Claims found: `0170` (eld-compliance,
+auth-workspace, work-calendar), `0172`–`0175` (training-academy-workforce), `0175`–`0177`
+(driver-portfolio ×2). `0178` was the first number free on `main` and on every open branch.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0178 | `0178_document_control_definitions.sql` | `claude/document-control-architecture-jlffzk` | none yet | open branch | none at claim time | keeps 0178 unless a branch merges ahead with it; re-check at PR time |
+| 0179+ | Document Control checkpoints B–F (register extension, numbering ledger, templates, mappings, intake) | same branch | none yet | planned | — | consecutive from 0178; re-check at PR time |
+
 ## Change log
+
+* **2026-09-23 (later)**: Document Control claims `0178` after a fresh scan; driver-portfolio had moved to
+  `0175`–`0177` and training-academy to `0172`–`0175` since the C1a scan.
 
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.

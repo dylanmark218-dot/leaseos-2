@@ -1,0 +1,100 @@
+LEASEOS 2
+FIELDROUTE / OPERATIONAL RECORD TEMPLATE
+EQUIPMENT RENTAL CONTRACT
+Oilfield / construction equipment rental agreement - commercial terms and signatures
+DOC REF: FRM-COM-RNT-001
+Revision 1.0  |  Template  |  Enter / verify against the active customer and job record
+PAGE 1 OF 2
+1. AGREEMENT & PARTIES
+RENTAL CONTRACT / LEASE REF
+JOB / PROJECT REF
+CUSTOMER ID
+SITE REF
+LESSOR / EQUIPMENT OWNER
+LESSEE / CUSTOMER
+BILLING CONTACT
+SITE CONTACT
+2. RENTAL TERM & COMMERCIAL TERMS
+START DATE / TIME
+PLANNED RETURN / END
+RATE BASIS
+RATE AMOUNT
+Daily
+Weekly
+Monthly
+Standby terms apply
+Fuel / consumables billed
+Damage / loss terms apply
+DEPOSIT / SECURITY
+MINIMUM TERM
+OVERTIME / EXCESS RATE
+TAX / FEE TREATMENT
+3. USE, CARE & RETURN TERMS
+Equipment remains the property of the lessor unless a separate transfer provision applies. Lessee will use the equipment only for the disclosed work, follow
+manufacturer / site requirements, report damage or unsafe conditions promptly, and return accessories, keys, controls and attachments with the equipment. Any rate,
+standby, damage, fuel, transport, cleaning or loss charges should be supported by the active customer contract / approved terms in LeaseOS.
+SPECIAL TERMS / ATTACHMENTS / GOVERNING CONTRACT REFERENCE
+LESSOR / OWNER
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+LESSEE / AUTHORIZED REPRESENTATIVE
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+LEASEOS RECORDER / OFFICE
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+Contract template. The active customer-specific contract terms control billing and legal obligations.
+LEASEOS 2
+
+LEASEOS 2
+FIELDROUTE / OPERATIONAL RECORD TEMPLATE
+EQUIPMENT RENTAL INVENTORY LOG
+Asset-level inventory, condition and returnable accessory record
+DOC REF: FRM-COM-RNT-001
+Revision 1.0  |  Template  |  Enter / verify against the active customer and job record
+PAGE 2 OF 2
+RENTAL CONTRACT REF
+JOB / PROJECT REF
+SITE / LOCATION
+1. INVENTORY / CONDITION
+LINE
+ASSET / ITEM
+SERIAL / TAG
+QTY
+METER / HOURS
+OUT CONDITION
+IN CONDITION ACCESSORIES / NOTES
+1
+2
+3
+4
+5
+6
+7
+8
+INVENTORY NOTES / MISSING ITEMS / DAMAGE DETAIL
+2. RETURN / CLOSEOUT CHECK
+All listed assets returned
+Return exception / damage
+Meter / hours verified
+Cleaning complete
+ACTUAL RETURN DATE / TIME
+RETURN LOCATION
+RECEIVED BY
+RETURNED BY / LESSEE
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+RECEIVED BY / LESSOR
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+OFFICE CLOSEOUT
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+Inventory log links asset identity and condition evidence to the rental contract and closeout record.
+LEASEOS 2

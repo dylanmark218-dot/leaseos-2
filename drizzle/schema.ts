@@ -8872,3 +8872,93 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
+
+/* ==================================================================
+ * DC-A (0178) — Document Control: the definition registry and the
+ * catalog's provenance. A definition says how a class of controlled record
+ * behaves; it is not the document and not the template. Vocabularies are
+ * mirrored in server/_core/documentDefinitions.ts and held in step by test.
+ * ================================================================== */
+
+export const documentDefinitions = mysqlTable("documentDefinitions", {
+  id: int("id").autoincrement().primaryKey(),
+  definitionRef: varchar("definitionRef", { length: 64 }).notNull().unique(),
+  /** NULL = platform-provided; a tenant row with the same key is an overlay of the columns it may change. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  /** COALESCE(orgRef, 'platform'), maintained by the write path so the unique index can see NULL tenancy. */
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  definitionKey: varchar("definitionKey", { length: 40 }).notNull(),
+  definitionVersion: int("definitionVersion").default(1).notNull(),
+  status: mysqlEnum("status", ["draft", "active", "retired"]).default("active").notNull(),
+  supersedesDefinitionId: int("supersedesDefinitionId"),
+  documentClass: mysqlEnum("documentClass", ["operational_form", "controlled_credential", "financial_commercial", "regulated_record", "reference_document", "incident_evidence", "unclassified"]).notNull(),
+  displayName: varchar("displayName", { length: 200 }).notNull(),
+  description: text("description"),
+  primaryDomainOwner: varchar("primaryDomainOwner", { length: 40 }).notNull(),
+  allowedOriginsJson: text("allowedOriginsJson").notNull(),
+  numberingPolicy: mysqlEnum("numberingPolicy", ["leaseos_series", "leaseos_series_optional", "domain_managed", "external_only", "archival_only"]).notNull(),
+  numberSeriesType: varchar("numberSeriesType", { length: 24 }),
+  externalReferencePolicy: mysqlEnum("externalReferencePolicy", ["forbidden", "optional", "required"]).default("optional").notNull(),
+  allowedExternalReferenceTypesJson: text("allowedExternalReferenceTypesJson").notNull(),
+  leaseosTemplateAvailable: boolean("leaseosTemplateAvailable").default(false).notNull(),
+  customTemplateAllowed: boolean("customTemplateAllowed").default(true).notNull(),
+  importAllowed: boolean("importAllowed").default(true).notNull(),
+  requiredFieldsJson: text("requiredFieldsJson").notNull(),
+  optionalFieldsJson: text("optionalFieldsJson").notNull(),
+  allowedLinkKindsJson: text("allowedLinkKindsJson").notNull(),
+  signaturePolicy: mysqlEnum("signaturePolicy", ["none", "optional", "required_single", "required_multi", "domain_managed"]).default("optional").notNull(),
+  revisionPolicy: mysqlEnum("revisionPolicy", ["immutable_supersede", "amend_with_reason", "domain_managed", "reference_versioned"]).default("immutable_supersede").notNull(),
+  printPolicy: mysqlEnum("printPolicy", ["not_printable", "printable", "controlled_copy"]).default("printable").notNull(),
+  extractionProfileKey: varchar("extractionProfileKey", { length: 40 }),
+  /** NULL = UNCONFIGURED: retained indefinitely, never disposition-eligible, surfaced as a finding. No default period is ever applied. */
+  retentionPolicyId: int("retentionPolicyId"),
+  workflowKey: varchar("workflowKey", { length: 40 }),
+  readCategory: varchar("readCategory", { length: 40 }).notNull(),
+  sensitivityTier: mysqlEnum("sensitivityTier", ["INTERNAL", "CONFIDENTIAL", "RESTRICTED", "HIGHLY_RESTRICTED"]).default("INTERNAL").notNull(),
+  jurisdictionsJson: text("jurisdictionsJson").notNull(),
+  jurisdictionPolicy: mysqlEnum("jurisdictionPolicy", ["universal", "configurable_verify_by_jurisdiction"]).default("universal").notNull(),
+  regulatoryBasis: mysqlEnum("regulatoryBasis", ["not_inferred_from_template", "verified_source_cited"]).default("not_inferred_from_template").notNull(),
+  representationPolicy: mysqlEnum("representationPolicy", ["internal_record", "official_external_record", "attach_official_record_required"]).default("internal_record").notNull(),
+  representationNotice: varchar("representationNotice", { length: 300 }),
+  industriesJson: text("industriesJson").notNull(),
+  packKey: varchar("packKey", { length: 24 }),
+  /** The supplied catalog's own key when it differs from ours (an aliased kind), or equals it. */
+  sourcePackageKey: varchar("sourcePackageKey", { length: 80 }),
+  source: varchar("source", { length: 160 }).notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  activatedAt: timestamp("activatedAt"),
+  retiredAt: timestamp("retiredAt"),
+  retiredByUserId: int("retiredByUserId"),
+}, (t) => ({ scopeKeyVersion: uniqueIndex("documentDefinitions_scope_key_version").on(t.scopeKey, t.definitionKey, t.definitionVersion), keyStatus: index("documentDefinitions_key_status").on(t.definitionKey, t.status) }));
+
+/** Every artifact the supplied catalog carried, by SHA-256, with where it came from and which family it belongs to. */
+export const documentSourceArtifacts = mysqlTable("documentSourceArtifacts", {
+  id: int("id").autoincrement().primaryKey(),
+  artifactRef: varchar("artifactRef", { length: 40 }).notNull().unique(),
+  sha256: varchar("sha256", { length: 64 }).notNull().unique(),
+  sourceCollection: varchar("sourceCollection", { length: 120 }).notNull(),
+  sourcePath: varchar("sourcePath", { length: 512 }).notNull(),
+  fileName: varchar("fileName", { length: 220 }).notNull(),
+  extension: varchar("extension", { length: 10 }).notNull(),
+  byteLength: int("byteLength").notNull(),
+  role: mysqlEnum("role", ["printable_template", "editable_template_source", "render_template_source", "engine_definition_or_reference", "reference"]).notNull(),
+  titleCandidate: varchar("titleCandidate", { length: 220 }),
+  templateCodeDetected: varchar("templateCodeDetected", { length: 40 }),
+  revisionDetected: varchar("revisionDetected", { length: 20 }),
+  pages: int("pages"),
+  /** The definition the artifact's family resolves to (after aliasing), when it belongs to one. */
+  definitionKey: varchar("definitionKey", { length: 40 }),
+  sourcePackageKey: varchar("sourcePackageKey", { length: 80 }),
+  variantNo: int("variantNo"),
+  /** Where the bytes live in the repository's seed data, when they do; the seeder recomputes the hash from here. */
+  repositoryPath: varchar("repositoryPath", { length: 512 }),
+  storageKey: varchar("storageKey", { length: 512 }),
+  hashVerifiedAt: timestamp("hashVerifiedAt"),
+  importBatchRef: varchar("importBatchRef", { length: 40 }).notNull(),
+  importedByUserId: int("importedByUserId"),
+  importedAt: timestamp("importedAt").defaultNow().notNull(),
+}, (t) => ({ family: index("documentSourceArtifacts_family").on(t.definitionKey, t.variantNo) }));
+
+export type InsertDocumentDefinition = typeof documentDefinitions.$inferInsert;
+export type InsertDocumentSourceArtifact = typeof documentSourceArtifacts.$inferInsert;
