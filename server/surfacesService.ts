@@ -7,10 +7,10 @@
  * and walks an entity's history into a timeline. Nothing here is a new store.
  */
 
-import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql, type Column } from "drizzle-orm";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { complianceDocumentScopeWhere, getDb, jobScopeSubquery, memberUserScopeWhere, orgScopeWhere, ownershipScopeWhere, tripScopeSubquery, type TenantScope } from "./db";
-import { entityIdsInScope } from "./_core/entityScope";
+import { financialEntityScopeWhere } from "./_core/entityScope";
 import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
   billingBooks, calibrationSweeps, complianceDocuments, disposalTickets, fieldTickets, manifests, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
@@ -67,8 +67,7 @@ export async function loadExceptionSources(scope: TenantScope, now = new Date())
   };
   if (!db) return empty;
   const horizon = new Date(now.getTime() + 90 * DAY);
-  const entities = await entityIdsInScope(db as never, scope);
-  const inEntities = (col: Parameters<typeof inArray>[0]) => entities.length ? inArray(col, entities) : sql`FALSE`;
+  const inEntities = (col: Column) => financialEntityScopeWhere(db as never, col, scope);
   // A proposal belongs where its job, else its trip, else its unit belongs; with none of those, to the single tenant only.
   const proposalScope = or(
     inArray(assistantProposals.jobId, jobScopeSubquery(db, scope)),

@@ -3,9 +3,9 @@
  * hook every finance write path calls.
  */
 
-import { entityIdsInScope } from "./_core/entityScope";
+import { financialEntityScopeWhere } from "./_core/entityScope";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, type Column } from "drizzle-orm";
 import { getDb, type TenantScope } from "./db";
 import { bankAccounts, bankStatementLines, bankStatements, customerPayments, gstReturns, bulkFuelDispenses, bulkFuelReadings, bulkFuelTanks, expenseRecords, fuelStatementLines, fuelStatements, fuelTransactions, iftaReturns, jurisdictionDistanceRecords, periodCloses, vendorBills } from "../drizzle/schema";
 import { closeReadiness, periodBounds, periodOf, periodState, writePermitted, type CloseFacts, type PeriodState } from "./_core/periodClose";
@@ -101,9 +101,8 @@ export async function loadFuelLineFindings(scope: TenantScope): Promise<{ statem
   const db = await getDb();
   if (!db) return { statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [] };
   // 0174: every row here is keyed to a financial entity — the money boundary — read before the limits.
-  const entities = await entityIdsInScope(db as never, scope);
-  if (!entities.length) return { statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [] };
-  const statements = await db.select().from(fuelStatements).where(inArray(fuelStatements.financialEntityId, entities)).orderBy(desc(fuelStatements.importedAt)).limit(100);
+  const inScope = (col: Column) => financialEntityScopeWhere(db as never, col, scope);
+  const statements = await db.select().from(fuelStatements).where(inScope(fuelStatements.financialEntityId)).orderBy(desc(fuelStatements.importedAt)).limit(100);
   const withFindings: { statementRef: string; provider: string; unmatched: number; ambiguous: number; importedAt: Date }[] = [];
   for (const st of statements) {
     const lines = await db.select({ matchOutcome: fuelStatementLines.matchOutcome, matchReason: fuelStatementLines.matchReason }).from(fuelStatementLines).where(eq(fuelStatementLines.fuelStatementId, st.id));
@@ -111,7 +110,7 @@ export async function loadFuelLineFindings(scope: TenantScope): Promise<{ statem
     const ambiguous = lines.filter(l => l.matchOutcome === "ambiguous").length;
     if (unmatched + ambiguous > 0) withFindings.push({ statementRef: st.statementRef, provider: st.provider, unmatched, ambiguous, importedAt: st.importedAt });
   }
-  const tanks = await db.select().from(bulkFuelTanks).where(and(eq(bulkFuelTanks.status, "active"), inArray(bulkFuelTanks.financialEntityId, entities))).limit(200);
+  const tanks = await db.select().from(bulkFuelTanks).where(and(eq(bulkFuelTanks.status, "active"), inScope(bulkFuelTanks.financialEntityId))).limit(200);
   const tanksOut: { tankRef: string; name: string; variancePct: number; varianceLitres: number; reason: string }[] = [];
   for (const t of tanks) {
     const readings = await db.select().from(bulkFuelReadings).where(eq(bulkFuelReadings.bulkFuelTankId, t.id)).orderBy(desc(bulkFuelReadings.readAt)).limit(2);
@@ -123,7 +122,7 @@ export async function loadFuelLineFindings(scope: TenantScope): Promise<{ statem
     const rec = reconcileTank({ opening: { at: readings[1]!.readAt, litresOnHand: readings[1]!.litresOnHand, method: readings[1]!.method }, closing: { at: readings[0]!.readAt, litresOnHand: readings[0]!.litresOnHand, method: readings[0]!.method }, movements: [...disp.map(d => ({ kind: "dispense" as const, litres: d.litres, at: d.at })), ...purch.filter(p => p.litres != null).map(p => ({ kind: "purchase" as const, litres: p.litres!, at: p.at }))], capacityLitres: t.capacityLitres, tolerancePct: t.varianceTolerancePct });
     if (rec.withinTolerance === false && rec.variancePct != null && rec.varianceLitres != null) tanksOut.push({ tankRef: t.tankRef, name: t.name, variancePct: rec.variancePct, varianceLitres: rec.varianceLitres, reason: rec.reason });
   }
-  const closes = await db.select().from(periodCloses).where(inArray(periodCloses.financialEntityId, entities)).orderBy(desc(periodCloses.at), desc(periodCloses.id)).limit(500);
+  const closes = await db.select().from(periodCloses).where(inScope(periodCloses.financialEntityId)).orderBy(desc(periodCloses.at), desc(periodCloses.id)).limit(500);
   const latest = new Map<string, (typeof closes)[number]>();
   for (const c of closes) { const k = `${c.financialEntityId}:${c.period}`; if (!latest.has(k)) latest.set(k, c); }
   const soft: { financialEntityId: number; period: string; reviewItems: number; since: Date }[] = [];

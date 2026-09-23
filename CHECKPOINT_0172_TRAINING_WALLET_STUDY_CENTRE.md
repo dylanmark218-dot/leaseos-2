@@ -162,3 +162,15 @@ Automatic sweep scheduling; email/SMS delivery; Saskatchewan/BC source sets and 
 
 - Code: revert the checkpoint commit(s) on this branch.
 - Database: 0172/0173 are additive. To roll back a database that applied them, drop triggers `workerQualifications_history_update_guard`, `workerQualifications_history_delete_guard`, `externalTrainingHandoffs_delete_guard`; drop tables `credentialRenewalPolicies`, `credentialCompanySettings`, `trainingProviderCapabilities`, `externalTrainingHandoffs`, `academyQuestionBookmarks`; drop the added columns listed in §2. Dropping `workerQualifications` columns loses wallet facts recorded since 0172 — export them first. Newly published course versions (`CLASS1:2` etc.) can be set back to `retired` and the `:1` versions to `published`; no attempt rows need changing because attempts are bound to their own version.
+
+## 14. Follow-up: checkpoint 0174
+
+The hardening pass on this checkpoint is in `CHECKPOINT_0174_TRAINING_COMPLIANCE_HARDENING.md`. It covers:
+
+- tenant scoping of every Exception Centre source and of readiness;
+- the scheduled renewal sweep with slot ownership and run records;
+- escalation ladders;
+- two-person source review;
+- the verification queue with corrections;
+- handoff closure;
+- the `sha256HexV1` integrity hash, with `stableHash` frozen.

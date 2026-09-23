@@ -8,7 +8,7 @@
  * entity outside the scope is "not found" — never "forbidden", which would confirm it exists.
  */
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, notInArray, or, type Column } from "drizzle-orm";
 import type { MySql2Database } from "drizzle-orm/mysql2";
 import { contractorSettlements, employeePayrollProfiles, financialEntities, payPeriods, payRuns, payrollAdjustments, payrollDisputes } from "../../drizzle/schema";
 import { SINGLE_TENANT_ID } from "./actingScope";
@@ -20,6 +20,19 @@ export const notFound = (what: string) => new TRPCError({ code: "NOT_FOUND", mes
 
 export function entityScopeWhere(scope: MoneyScope) {
   return scope.tenantId === SINGLE_TENANT_ID ? or(isNull(financialEntities.orgRef), eq(financialEntities.orgRef, SINGLE_TENANT_ID)) : eq(financialEntities.orgRef, scope.tenantId);
+}
+/**
+ * 0174 — a query-level filter for a row keyed to a financial entity. An organization sees
+ * rows on the entities it owns. The default (single-tenant) scope sees every row that is not
+ * on an entity some organization owns — including a row with no entity, or with an entity id
+ * that has no entity record, which is how the single tenant's older data looks.
+ */
+export function financialEntityScopeWhere(db: Db, col: Column, scope: MoneyScope) {
+  if (scope.tenantId === SINGLE_TENANT_ID) {
+    const owned = db.select({ id: financialEntities.id }).from(financialEntities).where(and(isNotNull(financialEntities.orgRef), ne(financialEntities.orgRef, SINGLE_TENANT_ID)));
+    return or(isNull(col), notInArray(col, owned))!;
+  }
+  return inArray(col, db.select({ id: financialEntities.id }).from(financialEntities).where(eq(financialEntities.orgRef, scope.tenantId)));
 }
 /** The entity ids this scope may see. Empty means the caller can see no money at all. */
 export async function entityIdsInScope(db: Db, scope: MoneyScope): Promise<number[]> {

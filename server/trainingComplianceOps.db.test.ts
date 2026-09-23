@@ -58,6 +58,17 @@ d("tenant isolation", () => {
     expect(exB.items.some(x => x.key.includes(up.holdingRef))).toBe(false);
   }, 60_000);
 
+  it("1b. money sources are scoped by financial entity at the query: A's bill is invisible to B and to the single tenant", async () => {
+    const A = await org(), B = await org();
+    const entityId = 5_000_000 + Math.floor(Math.random() * 1_000_000);
+    await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay, orgRef) VALUES (?,?,?,'corporation','AB',12,31,?)", [entityId, `FE-${rnd()}`, `entity ${rnd()}`, A]);
+    const billRef = `BILL-${rnd()}`;
+    await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, vendorInvoiceNumber, invoiceDate, receivedAt, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?, ?, 1, ?, NOW(), NOW(), 100, 5, 105, 'mismatch', 'mismatch')", [billRef, entityId, `INV-${rnd()}`]);
+    expect((await loadExceptionSources({ tenantId: A })).vendorBills.some(b => b.billRef === billRef)).toBe(true);
+    expect((await loadExceptionSources({ tenantId: B })).vendorBills.some(b => b.billRef === billRef)).toBe(false);
+    expect((await loadExceptionSources({ tenantId: "default" })).vendorBills.some(b => b.billRef === billRef)).toBe(false);
+  }, 60_000);
+
   it("2. readiness.forTime / forShift and shifts.eligibility answer 'not found' for a guessed user id from another organization", async () => {
     const A = await org(), B = await org();
     const dispatcherA = await member(A, ["dispatcher"]), workerB = await member(B, ["driver"]), workerA = await member(A, ["driver"]);
