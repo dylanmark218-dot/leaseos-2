@@ -1,6 +1,8 @@
 # Driver credential stores: reconciliation matrix and recommendation (D-05)
 
-Status: **recommendation for owner review. Nothing here is consolidated or migrated.**
+Status: **recommendation APPROVED by the owner on 2026-09-23 (D-05).** Nothing is consolidated or
+migrated yet, and neither legacy structure may be deleted or destructively migrated until the five
+prerequisites in "Before any removal" below are met.
 Owner decision D-05 (2026-09-23): do not pick a store arbitrarily. Produce this matrix, recommend one
 canonical authority with adapters or projections for the others, and bring it back before any
 destructive consolidation.
@@ -59,3 +61,26 @@ Owner questions carried with this:
 * Contractor workers (0115, `organizationWorkers`) carry no credentials. Should their credentials
   live in the same two canonical stores, owned by the contractor organization? *Recommended: yes,
   scoped by `orgRef` so a contractor's record never lands in an employee file (D-14).*
+
+## Owner decision (2026-09-23)
+
+* `complianceDocuments`: the canonical authority for document-backed compliance credentials.
+* `academyQualifications`: the canonical authority for earned or issued qualifications,
+  competency and training state.
+* Legacy stores stay readable through adapters or projections for now.
+* `workerQualifications` must **not** remain an independent source of truth. It has no production
+  writer.
+* `operatorCapabilities`: candidate dead schema; it gets **no new responsibilities**.
+* Shift readiness, crews, open shifts and the calendar move to the canonical qualification projection.
+
+## Before any removal
+
+Required for each legacy store. None of this is done yet; it is C1b/C2 preparation work.
+
+| Prerequisite | `workerQualifications` | `operatorCapabilities` | `operators.license*` |
+|---|---|---|---|
+| 1. All current readers | `openShiftsRouter` (eligibility), `crewRouter` (forecast), `calendarRouter` (expiries), `readinessRouter` (shift readiness), via `qualificationValidity.ts` | none found | `readinessComposer` (legacy licence fallback), `readinessRouter`, `openShiftsRouter`, `manifestCustodyRouter`, client showcase |
+| 2. Replacement reader path | the canonical credential/qualification projection over `academyQualifications` + `complianceDocuments` | none needed | `complianceDocuments(driver_licence)`, with the legacy field as a labelled fallback until migrated |
+| 3. Behavioural-equivalence tests | for each of the four readers: same inputs → same eligibility/expiry answer through the projection, including the verified-with-no-expiry → UNKNOWN case, which the projection must preserve | a test that nothing reads or writes it | licence present / expired / missing / legacy-only, through composer and shift readiness |
+| 4. Historical-data migration | rows present in deployed databases (no production writer, so seed/import/manual only) must be mapped to `academyQualifications` (`sourceKind` external_credential/company_signoff) or `complianceDocuments`, with provenance kept and nothing marked verified that was not | none expected; confirm row count per deployment before dropping | copy each legacy licence into `complianceDocuments` as `needs_review`, never `verified` |
+| 5. Rollback | readers switch behind one adapter; rollback = point the adapter back at the table (no data deleted until a later, separate decision) | table kept until a separate decision | legacy field kept read-only; rollback = re-enable the fallback |

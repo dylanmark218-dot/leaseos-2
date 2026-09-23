@@ -178,3 +178,15 @@ Tests changed, with the reason (none deleted, none skipped):
 ledger with the HOS history preserved, `complianceDocumentValidity` resolution, and the credential
 read adapter from the D-05 matrix). It is safe to begin once C1a is reviewed and merged, and it needs
 owner answers to the D-05 questions in `docs/compliance/credential-store-reconciliation.md`.
+
+## Owner decisions recorded after review (2026-09-23)
+
+* **Fail-closed UNKNOWN is kept as built.** No blanket override policy will be added to make current
+  flows easier; the approved-override-policy registry stays empty.
+  * Missing HOS authority may be met by the same-day HOS attestation path, until calculated or
+    verified HOS state replaces it (HOS work).
+  * Unknown truck/trailer compatibility stays blocking until C3 establishes it from verified fleet data.
+  * Government OOS stays absolutely non-overridable.
+  * Safety-critical UNKNOWN stays non-green.
+* **D-05 approved:** see `docs/compliance/credential-store-reconciliation.md`.
+* **Merge order:** PR #5, then C1a, then restack #6 and #9.
