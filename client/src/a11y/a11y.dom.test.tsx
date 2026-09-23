@@ -16,6 +16,8 @@ import type { BoardTileView } from "../widgets/WidgetBoard";
 import { listOfferable } from "../../../server/_core/widgetService";
 import type { RoleActor } from "../../../server/_core/roleActor";
 import { demonstration, fromQuery } from "../showcase/panelSource";
+import { LoginView } from "../pages/LoginView";
+import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser } from "../portal/PortalChooser";
 
 afterEach(cleanup);
 
@@ -57,6 +59,11 @@ const a11yTiles: BoardTileView[] = [
 ];
 const A11Y_DRIVER: RoleActor = { roles: ["driver"], permissions: [] } as never;
 
+const a11yPortals = [
+  { portal: "field_workforce", displayName: "Field Workforce", purpose: "Perform daily work — assignments, inspections, loads, tickets, evidence" },
+  { portal: "fleet_maintenance", displayName: "Fleet Maintenance", purpose: "Work orders, defects and vehicle maintenance" },
+];
+
 const surfaces = [
   { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
   { name: "commercial office — organizations", render: () => render(<CommercialOfficeView {...office("organizations")} />) },
@@ -69,6 +76,18 @@ const surfaces = [
   { name: "widget tile — unknown", render: () => render(<WidgetTileShell title="Hours Remaining" variant="kpi" payload={unknown("no verified duty record loaded")} />) },
   { name: "add-widget picker", render: () => render(<AddWidgetPicker offers={listOfferable(A11Y_DRIVER)} alreadyAdded={[]} onAdd={() => {}} />) },
   { name: "showcase panel — demonstration", render: () => render(<SourcedPanel title="Route alternatives" source={demonstration("no routing engine result is read on this page")}><p>body</p></SourcedPanel>) },
+  // The sign-in and workspace-selection screens. Read in a cab and in a shop,
+  // on a phone and on a desktop, which is exactly what the three viewports are
+  // for. Each error state is run separately: the alert and status regions only
+  // exist in those states, and a rule that never sees them has not checked them.
+  { name: "login — first visit", render: () => render(<LoginView reason="unauthenticated" busy={false} onSignIn={() => {}} />) },
+  { name: "login — session expired", render: () => render(<LoginView reason="expired" busy={false} detail="Signed out after inactivity" onSignIn={() => {}} />) },
+  { name: "login — sign-in failed", render: () => render(<LoginView reason="auth_error" busy={false} detail="invalid oauth state" onSignIn={() => {}} />) },
+  { name: "login — in flight", render: () => render(<LoginView reason="unauthenticated" busy onSignIn={() => {}} />) },
+  { name: "workspace chooser", render: () => render(<PortalChooser options={a11yPortals} notReached={[{ portal: "executive", displayName: "Executive", purpose: "company-wide performance" }]} onChoose={() => {}} />) },
+  { name: "workspace chooser — declined default and link", render: () => render(<PortalChooser options={a11yPortals} rejectedDefault="executive" rejectedRequest="executive" onChoose={() => {}} />) },
+  { name: "no workspace available", render: () => render(<NoPortalAvailable notReached={a11yPortals} onSignOut={() => {}} />) },
+  { name: "organization selection required", render: () => render(<OrganizationSelectionRequired detail="member of 2 organizations" />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {

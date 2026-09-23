@@ -26,6 +26,7 @@ const NOT_A_SURFACE: Record<string, string> = {
   "client/src/portal/UniversalSearch.tsx": "a live tRPC caller; needs a client harness",
   "client/src/portal/QuickCapture.tsx": "a live tRPC caller; needs a client harness",
   "client/src/portal/SyncIndicator.tsx": "a status chip with no interactive content of its own",
+  "client/src/pages/Login.tsx": "a live router and session caller; LoginView is the surface, and all four of its states are run through the axe rules",
 };
 
 describe("the accessibility suite keeps up with the screens", () => {
