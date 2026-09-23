@@ -85,7 +85,11 @@ const readinessBlocked: DispatchReadinessViewProps["state"] = {
   },
 };
 
-/** The dispatch detail screen: a loaded job with an assignment, and the two states that say less. */
+/**
+ * The dispatch detail screen: a posting with one filled slot and one nobody is on — the shape that
+ * exercises both the controls and the states that say less. A required slot left open is the case
+ * the screen could not represent before the canonical slot model, so it belongs in the a11y sweep.
+ */
 const jobDetail = (o: Partial<DispatchJobDetailViewProps> = {}): DispatchJobDetailViewProps => ({
   jobId: 41,
   job: { kind: "loaded", job: {
@@ -93,14 +97,37 @@ const jobDetail = (o: Partial<DispatchJobDetailViewProps> = {}): DispatchJobDeta
     location: "04-12-052-09W5", status: "dispatched", progress: 0, eta: "14:30",
     vehicleText: "the blue vac", driverText: "Dana",
   } },
-  assignments: { kind: "loaded", rows: [
-    { jobUnitId: 900, unitId: 512, unitName: "HV-0031", operatorId: 77, operatorName: "J. Mercer",
-      role: "operator", joinedAt: new Date("2026-09-21T13:00:00Z"), departedAt: null },
-    { jobUnitId: 901, unitId: 513, unitName: null, operatorId: null, operatorName: null,
-      role: "support unit", joinedAt: new Date("2026-09-21T13:05:00Z"), departedAt: null },
-  ] },
+  slots: {
+    kind: "loaded",
+    rows: [
+      { roleId: 900, postingId: 60, roleCode: "PRIMARY_UNIT", roleLabel: "Primary unit",
+        displayName: "Primary unit", required: true, status: "assigned",
+        operatorId: 77, operatorName: "J. Mercer", unitId: 512, unitName: "HV-0031",
+        trailerId: 640, trailerName: "TR-640",
+        requiredEquipmentClass: "vac_truck", requiredTrailerClass: null, lastEventId: 4100 },
+      { roleId: 901, postingId: 60, roleCode: "SUPPORT_UNIT", roleLabel: "Support unit",
+        displayName: "Support unit", required: true, status: "open",
+        operatorId: null, operatorName: null, unitId: null, unitName: null,
+        trailerId: null, trailerName: null,
+        requiredEquipmentClass: null, requiredTrailerClass: null, lastEventId: null },
+    ],
+    staffing: { state: "partially_staffed", filled: 1, requiredTotal: 2,
+      unfilledRoles: ["Support unit"],
+      message: "1 of 2 required roles filled. Outstanding: Support unit." },
+    planningState: "partially_staffed",
+    history: [
+      { id: 4100, roleId: 900, eventType: "assignment_created",
+        fromOperatorId: null, fromUnitId: null, toOperatorId: 77, toUnitId: 512,
+        reason: null, actorUserId: 3, occurredAt: new Date("2026-09-21T13:00:00Z") },
+    ],
+  },
   namesResolved: true,
+  operatorChoices: [{ id: 77, label: "J. Mercer" }, { id: 78, label: "R. Okonkwo" }],
+  unitChoices: [{ id: 512, label: "HV-0031" }, { id: 513, label: "HV-0032" }],
+  mutation: { kind: "idle" },
+  canAssign: true,
   readiness: <DispatchReadinessView {...readinessPanel(readinessBlocked)} as="panel" />,
+  onAssign: () => {}, onUnassign: () => {},
   onRefresh: () => {}, refreshing: false, ...o,
 });
 
@@ -124,8 +151,12 @@ const surfaces = [
   { name: "dispatch readiness — blocked", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked)} />) },
   { name: "dispatch readiness — query failed", render: () => render(<DispatchReadinessView {...readinessPanel({ kind: "failed", message: "Database unavailable" })} />) },
   { name: "dispatch readiness — capability picture", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked, readinessCapabilities, { status: "BLOCKED", explanation: "1 capability blocked; 1 was not evaluated.", missingRequired: [] })} />) },
-  { name: "dispatch detail — job with assignments", render: () => render(<DispatchJobDetailView {...jobDetail()} />) },
-  { name: "dispatch detail — unassigned job", render: () => render(<DispatchJobDetailView {...jobDetail({ assignments: { kind: "loaded", rows: [] } })} />) },
+  { name: "dispatch detail — a filled slot and an open one", render: () => render(<DispatchJobDetailView {...jobDetail()} />) },
+  { name: "dispatch detail — job with no posting", render: () => render(<DispatchJobDetailView {...jobDetail({ slots: { kind: "no_posting" } })} />) },
+  // A refused write is an alert a screen reader must reach; it is the state most likely to be
+  // styled into a corner and never announced.
+  { name: "dispatch detail — a refused write", render: () => render(<DispatchJobDetailView {...jobDetail({ mutation: { kind: "conflict", roleId: 900, message: "This slot changed since you loaded it." } })} />) },
+  { name: "dispatch detail — read-only dispatcher", render: () => render(<DispatchJobDetailView {...jobDetail({ canAssign: false })} />) },
   { name: "dispatch detail — job outside the readable window", render: () => render(<DispatchJobDetailView {...jobDetail({ job: { kind: "outside_window" } })} />) },
   { name: "commercial office — organizations", render: () => render(<CommercialOfficeView {...office("organizations")} />) },
   { name: "commercial office — documents", render: () => render(<CommercialOfficeView {...office("documents")} />) },
