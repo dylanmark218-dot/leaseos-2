@@ -8786,7 +8786,7 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
 
-/* ---- 0169/0170: Driver Portfolio and Credential Wallet ---- */
+/* ---- 0175/0176: Driver Portfolio and Credential Wallet ---- */
 
 /**
  * What a customer, a site, a job type, a piece of equipment or the company
@@ -8814,7 +8814,7 @@ export const driverRequirementBindings = mysqlTable("driverRequirementBindings",
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-/** Append-only (0170): what happened to a driver's credentials, and who did it. */
+/** Append-only (0176): what happened to a driver's credentials, and who did it. */
 export const driverPortfolioEvents = mysqlTable("driverPortfolioEvents", {
   id: int("id").autoincrement().primaryKey(),
   eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),

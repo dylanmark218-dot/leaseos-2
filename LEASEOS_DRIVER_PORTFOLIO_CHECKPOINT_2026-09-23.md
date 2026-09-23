@@ -1,4 +1,4 @@
-# LeaseOS — Driver Portfolio and Credential Wallet: the model (0169/0170)
+# LeaseOS — Driver Portfolio and Credential Wallet: the model (0175/0176)
 
 **Release label:** unreleased, on `v23.25`. `LEASEOS_RELEASE` is unchanged; promotion is the owner's call.
 
@@ -93,7 +93,7 @@ certificates would give a second answer to "does this person hold H2S".
 
 ## Persistence
 
-- **`0169`.**
+- **`0175`.**
   - **`driverRequirementBindings`** records what a subject requires, whether it
     is mandatory or informational, and when it is in force. A subject is the
     company (`*`), a customer, a site, a job type, a piece of equipment or one
@@ -103,7 +103,7 @@ certificates would give a second answer to "does this person hold H2S".
     client requirements never reach another company's drivers.
   - **`driverPortfolioEvents`** records uploads, verifications, shares and
     dispatch use.
-- **`0170`.** Makes `driverPortfolioEvents` append-only in the database.
+- **`0176`.** Makes `driverPortfolioEvents` append-only in the database.
   Triggers refuse an UPDATE or DELETE that bypasses the router.
 
 ## Tests
