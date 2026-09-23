@@ -65,7 +65,12 @@ export const evidenceRecords = mysqlTable("evidenceRecords", {
   // one: an evidence object has one identity, not two.
   trackingNumber: varchar("trackingNumber", { length: 64 }).unique(),
   // v21.6 — the device's own reference; makes an offline upload idempotent.
-  clientCaptureRef: varchar("clientCaptureRef", { length: 80 }).unique(),
+  // 0173 — unique per CAPTURING USER, not per installation: it is a string the
+  // device picks, so a global index let one company's handset take a name out
+  // of another's namespace and, worse, made the idempotency lookup match
+  // across companies. The index lives in the migration (it is composite, over
+  // a generated column) and is asserted by columnParity.
+  clientCaptureRef: varchar("clientCaptureRef", { length: 80 }),
   recordType: varchar("recordType", { length: 60 }).default("other").notNull(),
   sealState: mysqlEnum("sealState", ["draft", "sealed", "amended", "superseded"])
     .default("draft")
@@ -2790,7 +2795,11 @@ export const syncPackages = mysqlTable("syncPackages", {
   verificationMode: mysqlEnum("verificationMode", ["exact_wire", "reconstructed", "unverified"]).default("unverified").notNull(),
   deviceClockAt: timestamp("deviceClockAt"),
   clockSkewMs: int("clockSkewMs"),
-  packageRef: varchar("packageRef", { length: 64 }).notNull().unique(),
+  // 0173 — unique per DEVICE, as deviceSyncNonces already is, rather than per
+  // installation: the device chooses this string, so a global index let one
+  // company's device take a reference another's could then never sync under.
+  // The composite index is in the migration, over a generated column.
+  packageRef: varchar("packageRef", { length: 64 }).notNull(),
   deviceId: varchar("deviceId", { length: 120 }).notNull(),
   // v20.20 — an enrolled device, and the key it signed with.
   fieldDeviceId: int("fieldDeviceId"),

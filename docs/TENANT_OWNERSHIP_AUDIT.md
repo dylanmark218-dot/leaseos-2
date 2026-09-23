@@ -657,3 +657,140 @@ Kept explicitly, rather than quietly assumed:
   Nobody has confirmed that.
 - **`bookOrgRef` vs `orgRef` on `vendors`** was resolved by reading two call
   sites. The rest of the 13 `bookOrgRef` tables were not audited individually.
+
+## 10. The sync, dedup and offline audit
+
+Requested as its own pass over operators, units, jobs, dispatch, documents,
+scans, tracking, outbox, device assignments and offline package metadata, with
+one question: **which identities in these paths are tenant-owned, and do they
+carry tenant context?**
+
+The answer split more sharply than expected. The record tables in that list are
+already covered — they go through `orgScopeWhere`, `coreRecordOwnership` or
+`entityScope`, and 0171/0172 gave the tracking chain its ownership and its
+tenant-relative numbers. What was **not** covered is the part of the system
+where the identifier is chosen by the DEVICE and then used to decide whether two
+things are the same record. Four findings, three of them live.
+
+### The pattern
+
+A client-supplied string behind a **global unique index**, used for idempotency
+or dedup. Each one is three defects at once:
+
+1. a namespace one company can exhaust, denying another;
+2. a merge rule that can join two companies' records because their devices
+   happened to agree on a string;
+3. an oracle, because the collision is observable.
+
+`deviceSyncNonces` had it right from the start — unique on
+`(fieldDeviceId, nonce)` — which is the shape the others have now been given.
+
+### S1 — a sync package could name any evidence record (**high**, fixed)
+
+`sync.receivePackage` takes `evidenceRecordId` as a bare integer per item and
+nothing scoped it. The server then read that record's seal, fetched the stored
+object out of the blob store, hashed its bytes, wrote `syncPackageItems` and
+`syncReceipts` rows against it, and returned a **per-item verdict** saying
+whether the hash the caller DECLARED matched.
+
+That is a confirmation oracle over another company's sealed evidence content,
+and every one of those reads happened before anything could have refused it —
+the same ordering mistake the v23.29 webhook work corrected, where the rule was
+set: *filter by tenant before reading or processing tenant material.*
+
+Fixed by checking every item with `evidenceInScope` before the first seal read.
+That helper already existed in `db.ts` with the authoritative chain — job, else
+capturing user, else the single tenant only — so no ownership needed inventing.
+It answers null for "no such record" and "not yours" alike, and the refusal
+covers the whole package and names no id: saying which item was out of scope
+would rebuild the oracle one record at a time.
+
+### S2 — the conflict lookup is unscoped (**latent**, not fixed, deliberately)
+
+`lookupServerVersion(recordType, recordRef)` takes a caller-supplied ref with no
+tenant filter, and a conflict row stores `serverValuesJson` — the server's field
+values — which the caller's organization can then read.
+
+Not fixed, because it is **not live**: `SERVER_VERSIONS` is an in-memory `Map`
+with a test seam, and the code says so ("without a versioned store for every
+record type yet"). There is no store to leak from. Recording it rather than
+fixing it, because the fix belongs with the store: when a real versioned store
+is wired behind that function, it must take the acting scope and resolve the ref
+within it, or this becomes S1 again for every record type at once.
+
+### S3 — `syncPackages.packageRef` was globally unique (**medium**, fixed)
+
+Device-chosen, `.unique()`, and the insert had no catch. One tenant taking a
+string meant another tenant's device could never sync under it: the insert
+raised a duplicate-key error that surfaced as `INTERNAL_SERVER_ERROR`, which the
+device retries forever. Proven exactly that way before the fix.
+
+Now unique per device — `(deviceKey, packageRef)` in 0173 — matching the nonce,
+and a genuine repeat from the same device answers CONFLICT with a sentence
+instead of an internal error.
+
+### S4 — `evidenceRecords.clientCaptureRef` was globally unique (**high**, fixed)
+
+The worst of the four. An 8-to-80 character string the device picks, globally
+unique, and the upload path looked it up **with no scope at all** to decide
+"already uploaded":
+
+```ts
+const existing = await findEvidenceByClientCaptureRef(input.clientCaptureRef);
+if (existing) return { id: existing.id, key: existing.storageKey, url: existing.storageUrl, alreadyUploaded: true };
+```
+
+On a collision the caller received another organization's evidence id, storage
+key and storage URL, while the evidence they were uploading was discarded
+unstored. One request, a disclosure and a data loss. The test proved it
+literally: tenant B's upload came back as tenant A's record.
+
+Scoped to the capturing **user**, which is tighter than the organization and
+also the truer rule — idempotency here means "this handset is retrying", and two
+people in one company carry two handsets whose capture counters are unrelated.
+It needs no ownership inference either: `capturedBy` is written from the
+authenticated caller, so the scope is a fact about the row rather than a chain
+to resolve. 0173 makes the index agree.
+
+### Migration note
+
+0173 assigns **no ownership**. It changes two unique indexes from global to
+relative, over generated columns (`COALESCE(capturedBy, -1)`,
+`COALESCE(fieldDeviceId, -1)`) for the reason 0172 records — MySQL treats NULLs
+as distinct inside a unique index, so a composite over the nullable owner would
+constrain nothing on the rows that need it most. `capturedBy` and
+`fieldDeviceId` are existing columns with existing values; rows where they are
+NULL share the sentinel bucket, which is **stricter** than the
+NULLs-are-distinct rule they had before, never looser. Nothing is backfilled and
+no row is given an owner it did not already have.
+
+### Two fixtures corrected
+
+Both were constructing states the product's own write paths cannot produce, and
+both are the same pattern already corrected twice in this checkpoint (`fieldroute`
+`operatorId: 1`, `operationalTruth` `subjectId: 1`):
+
+- `fieldDevice.test.ts` sent `evidenceRecordId: 9` with no evidence row behind
+  it. Every other test in that file uploads real evidence first; this one now
+  does too.
+- `commercialOffice.db.test.ts` inserted vendors by raw SQL with no book. See
+  F4.
+
+### Mutations
+
+All killed: MUT-S1a (scope gate removed), MUT-S1b (refusal names the offending
+id), MUT-S3a (package row loses its device, so every row shares the sentinel
+bucket), MUT-S3b (`packageRef` index global again), MUT-S4a (capture lookup
+unscoped again), MUT-S4b (`clientCaptureRef` index global again).
+
+### What this pass did not establish
+
+- **S2 is recorded, not fixed.** See above; the fix belongs with the store.
+- **`syncConflicts.conflictRef`, `syncReceipts` and the outbox refs are
+  server-minted** (`ref()`), so they are not in this class — a collision there
+  would be a random one, not one a tenant can choose. They were not otherwise
+  audited.
+- **Offline package metadata held on the device** was not examined. This pass
+  covers what the server accepts and stores, not what the handset keeps.
+- **No claim is made about the other ~230 `.unique()` columns.** The census in
+  §8 lists them; this pass looked only at those a client supplies.

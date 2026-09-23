@@ -122,8 +122,17 @@ d("column-level parity between schema.ts and the applied migrations", () => {
       // exactly where there is one tenant to protect.
       "billingBooks.orgKey", "calibrationSweeps.orgKey", "commercialApprovals.orgKey",
       "commercialDocuments.orgKey", "customerCredits.orgKey", "delayEvents.orgKey",
-      "disposalTickets.orgKey", "fieldTickets.orgKey", "invoices.orgKey",
+      "disposalTickets.orgKey",
+      // 0173 — the same device, for the two identifiers the DEVICE chooses
+      // rather than the server minting them: COALESCE(capturedBy, -1) and
+      // COALESCE(fieldDeviceId, -1). Sentinels no real id can take, for the
+      // reason above — a composite over the nullable owner would constrain
+      // nothing on exactly the rows that need it. Listed in sort order, which
+      // is why they are not together.
+      "evidenceRecords.captureOwnerKey",
+      "fieldTickets.orgKey", "invoices.orgKey",
       "manifestReconciliationOverrides.orgKey", "signatoryAuthorities.orgKey",
+      "syncPackages.deviceKey",
       "trackingReferences.orgKey", "trackingSequences.orgKey",
       // Predates this work: the partial-uniqueness key for a live role grant.
       "userRoleAssignments.activeGrantKey",

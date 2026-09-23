@@ -12,7 +12,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb, orgScopeWhere, type TenantScope } from "./db";
+import { evidenceInScope, getDb, orgScopeWhere, type TenantScope } from "./db";
 import { sealIsTrustworthy, verifySealAgainstStored } from "./_core/evidenceSeal";
 import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
 import { createHash } from "node:crypto";
@@ -224,7 +224,8 @@ export const syncRouter = router({
        * legacy message is kept for the case it actually describes — a real row
        * with no binding, which only the caller with no organization can see.
        */
-      const d = await loadDevice(input.deviceRef, await resolveActingScope(db, ctx.user.id));
+      const scope = await resolveActingScope(db, ctx.user.id);
+      const d = await loadDevice(input.deviceRef, scope);
       if (!d) throw noSuchDevice();
       const history = await db.select().from(deviceKeyEvents).where(eq(deviceKeyEvents.fieldDeviceId, d.id));
       if (!d.orgRef) throw unboundDevice();
@@ -239,7 +240,7 @@ export const syncRouter = router({
       // than retrying forever.
       const refuse = async (reason: string, code?: SyncRefusalCode, skewMs?: number | null) => {
         await db.insert(syncPackages).values({
-          packageRef: input.packageRef, deviceId: input.deviceRef, fieldDeviceId: d?.id ?? null,
+          packageRef: input.packageRef, deviceId: input.deviceRef, fieldDeviceId: d.id,
           signedWithFingerprint: input.signedWithFingerprint, operatorId: null, state: "rejected",
           itemCount: input.items.length, queuedAt: input.queuedAt, lastAttemptAt: now, attemptCount: 1,
           serverReceivedAt: null, refusalReason: reason,
@@ -285,6 +286,34 @@ export const syncRouter = router({
       } catch {
         throw new TRPCError({ code: "CONFLICT", message: "Device sync nonce was already used" });
       }
+      /*
+       * Every evidence record this package names must be one the acting
+       * organization can already see — checked HERE, before a single seal is
+       * read and before a single stored object is fetched and hashed.
+       *
+       * `evidenceRecordId` arrives as a bare integer the device chose. Nothing
+       * scoped it, so a package could name another company's evidence and the
+       * server would read their seal, pull their file out of the blob store,
+       * hash its bytes, write receipt rows against it, and hand the caller a
+       * per-item verdict saying whether the hash they GUESSED matched. That is
+       * a confirmation oracle over another company's sealed content, and the
+       * reading happened before anything could have refused it — the same
+       * ordering mistake the webhook work fixed in v23.29, where the rule was
+       * set: filter by tenant BEFORE reading or processing tenant material.
+       *
+       * `evidenceInScope` is the authoritative chain (job, else capturing user,
+       * else the single tenant only) rather than a join that happens to be
+       * available, and it answers null for "no such record" and "not yours"
+       * alike, so the refusal below cannot tell the two apart. One refusal for
+       * the whole package, naming no id: saying WHICH item was out of scope
+       * would rebuild the oracle a record at a time.
+       */
+      for (const it of items) {
+        if (!(await evidenceInScope(it.evidenceRecordId, scope))) {
+          return refuse("Package names evidence this organization cannot see");
+        }
+      }
+
       const admission = admitPackage({
         device: d ? {
           deviceRef: d.deviceRef, userId: d.userId, status: d.status, keyFingerprint: d.keyFingerprint,
@@ -297,15 +326,23 @@ export const syncRouter = router({
       });
 
       // Even a refused package is a row: the office can see a revoked device tried.
+      /*
+       * 0173 — `packageRef` is unique per DEVICE now, not per installation, so
+       * a duplicate here means this device has already sent this package, not
+       * that some other company took the name first. It used to be a global
+       * index with no catch at all: one tenant choosing a string made the
+       * insert raise, which surfaced as an internal error the device would
+       * retry forever, and told the other tenant the name was taken.
+       */
       const pkg = await db.insert(syncPackages).values({
-        packageRef: input.packageRef, deviceId: input.deviceRef, fieldDeviceId: d?.id ?? null,
+        packageRef: input.packageRef, deviceId: input.deviceRef, fieldDeviceId: d.id,
         signedWithFingerprint: input.signedWithFingerprint, operatorId: null,
         state: admission.admitted ? "server_received" : "rejected",
         itemCount: items.length, queuedAt: input.queuedAt, lastAttemptAt: now, attemptCount: 1,
         serverReceivedAt: admission.admitted ? now : null,
         refusalReason: admission.admitted ? null : admission.reason,
         verificationMode, deviceClockAt: input.deviceClockAt ?? null, clockSkewMs,
-      });
+      }).catch(() => { throw new TRPCError({ code: "CONFLICT", message: "This device has already sent a package under that reference" }); });
       const packageId = Number(pkg[0]?.insertId ?? 0);
       if (!admission.admitted) {
         return { packageRef: input.packageRef, state: "rejected" as const, reason: admission.reason, verified: 0, rejected: items.length, conflicts: 0 };
