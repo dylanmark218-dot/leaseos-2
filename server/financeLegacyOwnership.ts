@@ -24,7 +24,6 @@
  * the same transaction (`scripts/finance-legacy-ownership.ts`).
  */
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
-import { emitDomainEvent } from "./_core/eventEmitter";
 
 export type Evidence = { source: "customer_account" | "payment_allocation" | "customer_credit" | "job_organization"; ref: string; entityIds: number[] };
 export type Classification =
@@ -115,13 +114,14 @@ export async function assignProvenBook(pool: Pool, invoiceNumber: string, by: { 
     if (cls.verdict !== "PROVEN") { await conn.rollback(); return { assigned: false, refusal: `${cls.verdict}: ${cls.reason} — quarantined for administrator review, not assigned` }; }
     const [ent] = await rows(conn, "SELECT orgRef FROM financialEntities WHERE id = ?", [cls.financialEntityId]);
     await conn.query("UPDATE invoices SET financialEntityId = ? WHERE id = ? AND financialEntityId IS NULL", [cls.financialEntityId, inv.id]);
-    await emitDomainEvent({ execute: (sql, params) => conn.query(sql, params) }, {
-      type: "finance.legacy_book_assigned",
-      actor: { userId: by.userId != null ? String(by.userId) : null, role: by.label, source: "human" },
-      subject: { entityType: "invoice", entityId: String(inv.id) },
-      tenantId: ent?.orgRef ?? "default",
-      payload: { invoiceNumber, financialEntityId: cls.financialEntityId, previous: null, evidence: cls.evidence, reason: by.reason },
-    });
+    // The assignment and its evidence are one outbox row in the same transaction. Written directly, as the
+    // other outbox writers do (enforcementOutbox): `_core/eventEmitter` is declared unwired on purpose.
+    const occurredAt = new Date();
+    const eventId = `EVT-${occurredAt.getTime().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    await conn.query(
+      "INSERT INTO domainEventOutbox (eventId, eventType, eventVersion, aggregateType, aggregateId, tenantId, correlationId, actorSource, actorUserId, payloadJson, occurredAt) VALUES (?, 'finance.legacy_book_assigned', 1, 'invoice', ?, ?, ?, 'human', ?, ?, ?)",
+      [eventId, String(inv.id), ent?.orgRef ?? "default", eventId, by.userId != null ? String(by.userId) : null, JSON.stringify({ invoiceNumber, financialEntityId: cls.financialEntityId, previous: null, evidence: cls.evidence, reason: by.reason, assignedBy: by.label }), occurredAt],
+    );
     await conn.commit();
     return { assigned: true, financialEntityId: cls.financialEntityId };
   } catch (err) {
