@@ -1,6 +1,9 @@
-# LeaseOS Route Intelligence — implementation plan (T0 → RI-12)
+# LeaseOS Route Intelligence — implementation plan (T0 → RI-12, revised at RI-0.5)
 
-Planned against `main` = `0060690` (v23.25). T0 (this checkpoint) writes documents only: no schema,
+Planned against `main` = `0060690` (v23.25) at T0; **revised at RI-0.5 against `origin/main` = `6b01a0e`**
+(`0169_defect_resolution` merged) and the lineage findings in `LINEAGE_RECONCILIATION.md`,
+`MIGRATION_RECONCILIATION.md` and `LATER_FEATURE_PORT_MANIFEST.md`. The architectural intent of every
+checkpoint is unchanged; what changed is the order, and which items are ports rather than builds. T0 (this checkpoint) writes documents only: no schema,
 no API, no engine, no migration. Every later checkpoint is a **resolver, a router over an existing
 engine, a wiring, or a deletion** — never an engine beside one that exists — so the SPINE moratorium's
 own test ("Nothing above needs a new engine") is met by construction.
@@ -25,6 +28,106 @@ Ordering follows the prompt's twelve areas, with two changes forced by the depen
 **permits (RI-4a)** move ahead of the weight/structure integration because the fingerprint, the
 readiness composer and the package all need permit rows to exist; and **TDG's cargo-flag fix (RI-6a)**
 is pulled forward into the readiness hardening because it is a one-line permissive defect on `main`.
+
+
+---
+
+## RI-0.5 outcome — the revised order
+
+| Checkpoint | Disposition after lineage analysis | Why |
+|---|---|---|
+| **RI-0.5** (this) | done: documents only | canonical base = `leaseos-2` `main` (LINEAGE §4) |
+| **RI-P** — lineage ports (new, before RI-1) | **inserted**: manifest items B3, B2, C3, A1, A2, B1, C1, A3, C2 as one commit each on one port branch, one PR | every later RI checkpoint touches the five both-side files; porting first means porting once. A3 (permits) and A2 (osmLoad fold) are prerequisites T0 had assigned to RI-4a and RI-1 |
+| **RI-0.6** — dangerous-goods readiness flag (new, isolated) | **inserted**, one file, no migration; may ride with RI-P or stand alone | the regex is on every line; it is a permissive defect independent of routing (§ below) |
+| **RI-0.7** — permit readiness literal | **replaced by a port** (manifest A3); no new architecture | the later lineage already closes it exactly as the T0 design specified |
+| RI-1 reconciliation / source authority | **split**: the `osmLoadPlan` fold and the duplicate-prefix gate leave it. The fold is manifest A2 (a port with an equivalence proof); the gate is designed in MIGRATION §6 and lands **after** the 0169–0173 renumbering, on owner approval. RI-1 keeps: `geofabrik_osm_*` registry rows, `routeConstraintContext` composer, `sourcePrecedence` + `jurisdiction` wiring, T8/T14 | the gate would go red against unmerged branches that are being renumbered; the fold already exists |
+| RI-2 unified contracts | unchanged, **moved after RI-P** | its `vehicleProfiles` migration takes a number after the ports' numbers |
+| RI-3 province graph | unchanged | depends on A1/A2 having landed (ice roads, extract header) |
+| RI-4a permits | **replaced by the port** (manifest A3) plus the two things the later lineage did not do: `permitSet` computed from rows in `routeDependencies` / `routeApprovalCheck` (T6), tenant-scope test T5. Those two stay as "RI-4a-rest" after RI-P | |
+| RI-4b weights / structures / bans / advisories | unchanged | |
+| RI-5 HOS | unchanged; note that `dutyRecords`/`dailyLogs` are identical on every line — nothing to port | |
+| RI-6 TDG | **RI-6a extracted** as RI-0.6 (above); RI-6b unchanged | |
+| RI-7 comms imports / reminders | unchanged | identical on every line |
+| RI-8 LSD / facility / oilfield | unchanged | |
+| RI-9 route package | unchanged in intent; **its device half must wait for the scanner decision** (manifest B5) because both scanner variants rewrite `client/src/runtime/contracts.ts`, which the package vault reuses | |
+| RI-10 GPS / deviation / reroute | unchanged in intent; **depends on manifest C1** (trip-stop provenance) so a deviation proposal can name its actor and source with the same `proposalFields` vocabulary; and on PR #10's boundary resolver landing on top of C1 | |
+| RI-11 field / dispatch UI, native | unchanged in intent; **blocked on the scanner decision** (B5) and HS1 `capabilities()` over the chosen `contracts.ts` | |
+| RI-12 field validation | unchanged | |
+
+Revised sequence: **RI-0.5 → RI-P (+RI-0.6) → RI-1 → RI-2 → RI-3 → RI-4a-rest → RI-4b → RI-5 → RI-6b → RI-7 → RI-8 → RI-9 → RI-10 → RI-11 → RI-12**,
+with RI-4a-rest, RI-5, RI-6b, RI-7 still parallelisable after RI-2.
+
+**Exact first production implementation checkpoint after reconciliation: RI-P item 1–3 (B3, B2, C3)**
+as the first commit of the port branch — zero-risk, proves the branch and the gate — followed in the
+same PR by A1, A2, B1, C1, A3, C2 in the manifest's order. Owner approval of LINEAGE §4 gates it.
+
+### RI-P — lineage ports
+
+| | |
+|---|---|
+| Purpose | land the later lineage's verified work on canonical `main` once, by feature, without recreating anything from memory |
+| Files | per manifest item (A1, A2, A3, B1, B2, B3, C1, C2, C3); the five both-side files are hand-merged once per item that touches them |
+| Tables | +`movementPermits`, +`movementPermitDeterminations` (A3); `tripStops` +5 columns (C1) |
+| API | `movementPermit.statusFor/record/determine/verify/listForJob`; `tripStops.create/update` write provenance |
+| Migrations | **two, renumbered at merge** per MIGRATION §5 and manifest §D (origin `0168_movement_permits`, origin `0169_trip_stop_provenance`); ledger status confirmed on every real environment first |
+| Tests first | every ported test file as it exists at the source commit; `osmLoad.test.ts` must contain every `osmLoadPlan.test.ts` case before `osmLoadPlan.ts` is deleted; T1 (permit branches reach the verdict), T6 (permit change stales an approval — may stay RED until RI-4a-rest), T5 (permit out of scope is NOT_FOUND) |
+| Focused command | `pnpm exec vitest run server/_core/osmImport.test.ts server/_core/osmLoad.test.ts server/_core/movementPermits.test.ts server/_core/movementPermitAuthority.test.ts server/_core/dispatchReadiness.test.ts server/dispatchGate.test.ts server/tripStopProvenance.test.ts server/webhookTenantIsolation.db.test.ts server/documentationTruth.test.ts server/engineReachability.test.ts server/procedureAuthorization.test.ts` |
+| Full gate | `bash scripts/ci-gate.sh` |
+| Rollback | revert per commit; down-files for the two migrations |
+| Safety invariants | as T0 RI-4a; plus: a port carries the source commit in its message and changes no semantics; the v2327 branch and the `leaseos` repository are left untouched as provenance |
+
+### RI-0.6 — dangerous-goods readiness flag (isolated; Step 10 record)
+
+**Exact existing behaviour** (`server/readinessComposer.ts:333` on `origin/main`, identical on every
+line):
+
+```ts
+const dangerousGoods = /tdg|dangerous|hazard/i.test(`${job?.type ?? ""} ${job?.mode ?? ""}`);
+```
+
+The flag then drives: the TDG credential requirement (`:293` in the T0 tree), `job.dangerousGoods`,
+`tdgDocumentPrepared: dangerousGoods ? null : true`, `emergencyPlanOnFile: dangerousGoods ? null : true`,
+the communications lone-worker/DG blockers, and the Academy readiness binding. A job whose `type`/`mode`
+text does not contain those words is treated as non-DG **and** as having its TDG document and ERAP on
+file, whatever its loads carry. No test drives a DG job through the composer: every fixture sets
+`dangerousGoods: false` directly on `ReadinessInput` (`hosAttestation.test.ts:41`,
+`destinationAcceptance.db.test.ts:27`, `commsDispatch.test.ts:235-300`), and no test fixture has a job
+`type`/`mode` containing `tdg`/`hazard`/`dangerous`, so the regex's true branch is unexecuted by the
+suite.
+
+**Authoritative structured data already available:** `loadProfiles.unNumber`, `properShippingName`,
+`dgClass`, `packingGroup`, `classificationStatus` (`needs_verification` / `verified` / `blocked`) on
+`drizzle/schema.ts:212` (migration 0003), joined to the job through `loads`; the Academy binding and
+`compliancePassport.dangerousGoodsAssist` already consume structured fields.
+
+**Minimal corrective checkpoint (one file, no migration):** in `readinessComposer.ts`, replace the regex
+with a read of the job's loads' `loadProfiles`: `dangerousGoods = true` if any load has
+`classificationStatus = verified` and a `unNumber`; `null` if any load is `needs_verification`/`blocked`
+or has no profile; `false` only when every load has a verified non-DG classification. Thread `null`
+through `ReadinessInput.job.dangerousGoods: boolean | null` so `dispatchReadiness` adds
+`dg_classification_unverified` (severity `unknown`), and keep `tdgDocumentPrepared`/`emergencyPlanOnFile`
+as `null` whenever the flag is not `false`. Tests first: T9 (a job typed "water haul" carrying a
+verified UN 1267 load is DG; a job typed "TDG run" with no load profile is `unknown`, never `true` from
+the words), plus one `degradationSuite` case. Focused: `pnpm exec vitest run server/dispatchGate.test.ts server/_core/dispatchReadiness.test.ts server/academyReadinessBindings.test.ts server/_core/degradationSuite.test.ts`.
+
+### RI-0.7 — permit readiness literal (Step 11 record)
+
+`server/readinessComposer.ts:544-545` on `origin/main`: `permitRequired: false, permitOnFile: null`.
+Because `dispatchReadiness.ts` only enters its permit branch when `permitRequired` is truthy, the
+`permit_missing`/`permit_unknown` blockers are dead on `main` and an oversize movement passes the permit
+check in silence. The later lineage closes this exactly as T0's design asked, and the port is the fix:
+
+1. `movementPermits` + `movementPermitDeterminations` tables (A3) give the composer something to read;
+2. `permitStatusForJob(db, jobId)` returns `{ permitRequired: boolean | null, permitOnFile: boolean | null }`
+   — `null` when no determination row exists, `permitOnFile` from verified, in-window rows
+   (`permitCoversMoment` reads a null window as unknown);
+3. the composer's two lines become `permitRequired: permits.permitRequired, permitOnFile: permits.permitOnFile`;
+4. `dispatchReadiness` gains `permit_requirement_unknown` (severity `unknown`, manager-overridable,
+   verdict stays non-eligible) beside the untouched non-overridable `permit_missing`/`permit_unknown`;
+5. four new `dispatchReadiness.test.ts` cases pin the three states apart.
+
+No new permit architecture; `permitRefs` on `spatial.routeApprove` become references to these rows in
+RI-4a-rest.
 
 ---
 
@@ -268,7 +371,7 @@ RI-1 ──▶ RI-2 ──▶ RI-3 ──▶ RI-4b ──▶ RI-8 ──▶ RI-9
 RI-4a, RI-5, RI-6a and RI-7 are independent of each other and of RI-3; they can run in parallel on
 separate branches provided each takes its migration number at merge time.
 
-## Recommended first implementation checkpoint
+## Recommended first implementation checkpoint (T0 text; superseded by the RI-0.5 outcome above)
 
 **RI-1.** It needs no migration, no owner data decision and no device; it fixes three real defects
 (unregistered OSM standing keys, the duplicate OSM plan file, the missing duplicate-prefix gate) and
