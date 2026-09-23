@@ -19,6 +19,8 @@ import type { RoleActor } from "../../../server/_core/roleActor";
 import { demonstration, fromQuery } from "../showcase/panelSource";
 import { LoginView } from "../pages/LoginView";
 import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser } from "../portal/PortalChooser";
+import { RenewalQueuePanel, SourceReviewPanel, SystemExceptionsPanel, VerificationQueuePanel } from "../pages/ComplianceOperationsView";
+import { renewalRows, sourceRows, sweepRuns, verificationItems } from "../pages/complianceOpsFixtures";
 import { CompliancePanel, PathwayPanel, StudyCentrePanel, TutorPanel, WalletPanel, type StudyCourse, type WalletData } from "../pages/TrainingWalletView";
 
 afterEach(cleanup);
@@ -149,6 +151,11 @@ const surfaces = [
   { name: "study tutor — unknown", render: () => render(<TutorPanel onAsk={noop} asking={false} answer={{ status: "UNKNOWN_REFER_TO_AUTHORITY", lines: ["UNKNOWN — refer to authority."], citations: [], referTo: [{ sourceRef: "S", title: "Class 1 Learning Pathway", url: "https://www.alberta.ca/class-1-learning-pathway" }], practice: [], notice: "Refer to the authority." }} />) },
   { name: "career pathway", render: () => render(<PathwayPanel pathways={[{ code: "P", title: "Swamper to driver", disclaimer: "A development view only.", steps: [{ code: "A", title: "Study", state: "complete", detail: "Done" }, { code: "B", title: "Eligibility", state: "UNKNOWN_VERIFY_WITH_AUTHORITY", detail: "Verify with authority" }] }]} />) },
   { name: "training compliance", render: () => render(<CompliancePanel dashboard={{ headlines: ["1 person's H2S_ALIVE expires within 30 days."], people: 3, views: { expiringSoon: [1] } }} queue={[{ handoffRef: "HO", status: "REQUESTED", employee: { userId: 1, name: "Sam" }, credential: { code: "H2S_ALIVE", displayName: "H2S Alive" }, currentExpiry: null, reason: null, latestVerified: null, requiredBy: null, dispatchImpact: null, requestedAt: "2026-09-01", providerOptions: { official: [{ sourceRef: "S", title: "ESC providers", sourceUrl: "https://www.energysafetycanada.com/course/10490" }], company: [] } }]} onMark={noop} onSweep={noop} sweeping={false} sweepResult={null} />) },
+  /* 0174 — Compliance Operations queues. */
+  { name: "renewal queue", render: () => render(<RenewalQueuePanel rows={renewalRows} notice="Company notification policy — these thresholds are when people are told, not when anything expires." />) },
+  { name: "verification queue", render: () => render(<VerificationQueuePanel items={verificationItems} onVerify={noop} onReject={noop} onRequestCorrection={noop} busy={false} />) },
+  { name: "source review", render: () => render(<SourceReviewPanel sources={sourceRows} onAct={noop} busy={false} />) },
+  { name: "system exceptions", render: () => render(<SystemExceptionsPanel runs={sweepRuns} exceptions={[{ key: "k", title: "SYSTEM FAILURE — renewal sweep", reason: "Says nothing about the credential." }]} notice="A failed run says nothing about any credential." />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {

@@ -421,7 +421,7 @@ export const trainingWalletRouter = router({
       thresholds: z.array(z.number().int().min(1).max(730)).min(1).max(12),
       perCode: z.record(z.string().regex(/^[A-Z0-9_]+$/), z.object({ employerReviewMonths: z.number().int().min(1).max(120).nullable().optional(), recommendedRefresherMonths: z.number().int().min(1).max(120).nullable().optional() })).optional(),
       /** 0174 — escalation ladders by credential category (or "default"). Omitted = unchanged; {} = LeaseOS defaults. */
-      escalation: z.record(z.enum(["default", ...ESCALATION_CATEGORIES] as [string, ...string[]]), z.object({
+      escalation: z.partialRecord(z.enum(["default", ...ESCALATION_CATEGORIES]), z.object({
         steps: z.array(z.object({ threshold: z.union([z.number().int(), z.literal("expired")]), recipients: z.array(z.enum(["employee", "supervisor", "safety", "hr", "management"])).min(1).max(5), urgency: z.enum(["awareness", "notice", "urgent", "critical", "exception"]) }).strict()).min(1).max(12),
       }).strict()).optional(),
     }).strict())

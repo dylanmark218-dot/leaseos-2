@@ -8,6 +8,9 @@
 -- row that supersedes this one; it is never an edit of this one. A reviewed source may
 -- only move to superseded (naming its successor); rejected and superseded are final.
 -- Notes and the redistribution confirmation may still be appended.
+--
+-- Rollback: DROP TRIGGER `academySourceRecords_history_guard`; DROP TRIGGER `academySourceRecords_delete_guard`;
+-- then remove this file's row from the migration ledger.
 
 CREATE TRIGGER `academySourceRecords_history_guard`
 BEFORE UPDATE ON `academySourceRecords`

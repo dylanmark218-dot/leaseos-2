@@ -912,7 +912,7 @@ export const trainingAcademyRouter = router({
         contentBlockCount: blocks.length, courseVersionPresent: !!version, predatesRetentionGuards: !!cert && cert.issuedAt < guardsInstalledAt,
       });
       const producedAt = new Date();
-      // Integrity hash (class B/C): sha256HexV1 — see server/_core/integrityHash.ts and docs/HASH_CLASSIFICATION.md.
+      // New integrity value: sha256HexV1 — see server/_core/integrityHash.ts and docs/HASH_CLASSIFICATION.md.
       // `stableHash` is a frozen legacy fingerprint and is not used for new integrity values.
       const packageHash = sha256HexV1({ requestRef: r.requestRef, certificateRef: cert?.certificateRef ?? null, parts: pkg.parts, attemptIds: attempts.map(a => a.id), blockIds: blocks.map(b => b.id), producedAt: producedAt.toISOString() });
       await db.update(academyInspectorRequests).set({ state: pkg.complete ? "produced" : "incomplete", producedAt: pkg.complete ? producedAt : null, producedByUserId: pkg.complete ? ctx.user.id : null, packageHash: pkg.complete ? packageHash : null, packagePartsJson: JSON.stringify(pkg.parts), missingPartsJson: JSON.stringify(pkg.missing), irrecoverable: pkg.irrecoverable }).where(eq(academyInspectorRequests.id, r.id));

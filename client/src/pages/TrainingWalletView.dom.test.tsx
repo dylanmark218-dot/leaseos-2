@@ -93,3 +93,31 @@ describe("TutorPanel, PathwayPanel, CompliancePanel", () => {
     expect(onMark).toHaveBeenCalledWith("HO-1", "booked");
   });
 });
+
+describe("WalletPanel — 0174 statuses", () => {
+  it("shows the credential's status and the renewal in motion separately; a company review is not an expiry; a correction request is actionable", () => {
+    const w = wallet({
+      credentials: [
+        { holdingRef: "H1", code: "H2S_ALIVE", displayName: "H2S Alive", issuer: null, issuingJurisdiction: null, certificateNumber: null, issuedAt: "2024-01-01", expiresAt: "2026-10-01", endorsements: [], restrictions: [], verificationState: "verified", verifiedAt: "2024-01-05", boundary: "external_provider", lifecycle: "actual_expiry", current: true, supersededByHoldingRef: null },
+        { holdingRef: "H4", code: "WHMIS_EMPLOYER", displayName: "WHMIS", issuer: null, issuingJurisdiction: null, certificateNumber: null, issuedAt: "2025-09-01", expiresAt: null, endorsements: [], restrictions: [], verificationState: "verified", verifiedAt: "2025-09-02", boundary: "employer_issued", lifecycle: "employer_review", current: true, supersededByHoldingRef: null },
+        { holdingRef: "H5", code: "FIRST_AID", displayName: "First Aid", issuer: null, issuingJurisdiction: null, certificateNumber: null, issuedAt: null, expiresAt: "2028-01-01", endorsements: [], restrictions: [], verificationState: "unverified", verifiedAt: null, boundary: "external_provider", lifecycle: "actual_expiry", current: false, supersededByHoldingRef: null, correction: { requestedAt: "2026-09-20", note: "Expiry year unreadable" } },
+      ],
+      expiring: [
+        { code: "H2S_ALIVE", basis: "actual_expiry", legalExpiry: "2026-10-01", employerReviewAt: null, labels: [], held: true, heldReason: "", canRequestTraining: true, walletStatus: "EXPIRING", renewalStatus: "BOOKED", statusLine: "Expires 2026-10-01 (8 day(s))", renewalSteps: [{ label: "Requested 2026-09-01", done: true }, { label: "Booked for 2026-09-28", done: true }, { label: "New certificate verified", done: false }], validityNote: "Your current credential counts only until its own expiry (2026-10-01). A renewal request or booking does not extend it." },
+        { code: "WHMIS_EMPLOYER", basis: "employer_review", legalExpiry: null, employerReviewAt: "2026-09-01", labels: [], held: true, heldReason: "", canRequestTraining: false, walletStatus: "COMPANY_REVIEW_DUE", renewalStatus: "NONE", statusLine: "Company policy review due 2026-09-01 — not an expiry", renewalSteps: [], validityNote: "" },
+      ],
+    });
+    render(<WalletPanel wallet={w} policies={[]} onRequestTraining={vi.fn()} requesting={false} onUpload={vi.fn()} uploading={false} onHandoffDone={vi.fn()} />);
+    const h2s = screen.getByTestId("credential-H2S_ALIVE").textContent!;
+    expect(h2s).toContain("Expiring");
+    expect(h2s).toContain("Booked");
+    expect(h2s).toContain("does not extend it");
+    const whmis = screen.getByTestId("credential-WHMIS_EMPLOYER").textContent!;
+    expect(whmis).toContain("Company review due");
+    expect(whmis).toContain("not an expiry");
+    expect(whmis).not.toContain("Expired");
+    expect(screen.getByTestId("credential-FIRST_AID").textContent).toContain("Correction requested");
+    fireEvent.click(screen.getByText("Upload a corrected record"));
+    expect(screen.getByRole("heading", { name: "Upload a corrected record" })).toBeInTheDocument();
+  });
+});

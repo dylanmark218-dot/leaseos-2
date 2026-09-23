@@ -14,6 +14,17 @@
 -- row is the run record (started, completed, inspected, actionable, created,
 -- suppressed, failures). It carries no tenant column on purpose: a run spans every
 -- organization; each failure inside `failuresJson` names the tenant it concerns.
+--
+-- Rollback (manual; nothing here rewrites existing data):
+--   DROP TABLE `scheduledJobRuns`;
+--   ALTER TABLE `workerQualifications` DROP COLUMN `correctionRequestedAt`, DROP COLUMN `correctionRequestedByUserId`,
+--     DROP COLUMN `correctionNote`, DROP COLUMN `correctsHoldingRef`;
+--   (first drop 0175's triggers, then) UPDATE `academySourceRecords` SET `reviewStatus`='unreviewed' WHERE `reviewStatus`='under_review';
+--   ALTER TABLE `academySourceRecords` MODIFY `reviewStatus` enum('unreviewed','reviewed','superseded','rejected') NOT NULL DEFAULT 'unreviewed',
+--     DROP COLUMN `proposedByUserId`, DROP COLUMN `firstReviewedByUserId`, DROP COLUMN `firstReviewedAt`, DROP COLUMN `firstReviewNote`,
+--     DROP COLUMN `approvedByUserId`, DROP COLUMN `approvedAt`, DROP COLUMN `rejectionReason`, DROP COLUMN `supersedesSourceRef`, DROP COLUMN `supersededBySourceRef`;
+--   ALTER TABLE `credentialCompanySettings` DROP COLUMN `escalationPolicyJson`;
+--   DELETE FROM the migration ledger the row for this file. Code from 0174 must be reverted first.
 
 CREATE TABLE `scheduledJobRuns` (
   `id` int AUTO_INCREMENT NOT NULL,

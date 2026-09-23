@@ -150,7 +150,11 @@ export type ScheduledRunResult =
  * call from every instance on every heartbeat: the first INSERT for a slot wins,
  * and everything else returns without work.
  */
-export async function runScheduledRenewalSweep(db: Db, args: { ownerId: string; now?: Date; slotMinutes?: number; leaseSeconds?: number; faults?: SweepFaults }): Promise<ScheduledRunResult> {
+export async function runScheduledRenewalSweep(db: Db, args: {
+  ownerId: string; now?: Date; slotMinutes?: number; leaseSeconds?: number; faults?: SweepFaults;
+  /** Restrict the run to these organizations (tests; an operator re-run). Omitted = every organization. */
+  tenants?: readonly string[];
+}): Promise<ScheduledRunResult> {
   const now = args.now ?? new Date();
   const slotKey = slotKeyFor(RENEWAL_SWEEP_JOB, now, args.slotMinutes ?? 60);
   const leaseUntil = new Date(now.getTime() + (args.leaseSeconds ?? 900) * 1000);
@@ -174,7 +178,7 @@ export async function runScheduledRenewalSweep(db: Db, args: { ownerId: string; 
   let tenants: string[] = [];
   try {
     await syncCredentialPolicies(db);
-    tenants = await tenantsToSweep(db);
+    tenants = args.tenants ? [...args.tenants] : await tenantsToSweep(db);
     for (const t of tenants) {
       try {
         const c = await runRenewalSweepForTenant(db, t, now, null, args.faults);
@@ -203,7 +207,7 @@ export async function runScheduledRenewalSweep(db: Db, args: { ownerId: string; 
  * pass; checks the database only when the slot changes, and never throws into the
  * worker loop — a failure is recorded on the run row and in the audit chain.
  */
-export function createRenewalSweepTicker(args: { db: Db; ownerId: string; slotMinutes?: number; log?: (msg: string) => void }) {
+export function createRenewalSweepTicker(args: { db: Db; ownerId: string; slotMinutes?: number; log?: (msg: string) => void; tenants?: readonly string[] }) {
   let lastSlot: string | null = null;
   let inFlight = false;
   return async function tick(at: Date) {
@@ -211,7 +215,7 @@ export function createRenewalSweepTicker(args: { db: Db; ownerId: string; slotMi
     if (slot === lastSlot || inFlight) return;
     inFlight = true;
     try {
-      const r = await runScheduledRenewalSweep(args.db, { ownerId: args.ownerId, now: at, slotMinutes: args.slotMinutes });
+      const r = await runScheduledRenewalSweep(args.db, { ownerId: args.ownerId, now: at, slotMinutes: args.slotMinutes, tenants: args.tenants });
       lastSlot = slot;
       if (r.ran && r.status !== "completed") args.log?.(`renewal sweep ${r.slotKey}: ${r.status} (${r.counts.failures.length} failure(s))`);
     } catch (e) {
