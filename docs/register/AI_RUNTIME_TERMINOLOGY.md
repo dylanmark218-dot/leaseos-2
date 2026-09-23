@@ -641,10 +641,13 @@ element is an observable artifact.
 8. **Two retry loops** (`llm.ts`, `drainWorker.ts`). Acknowledged in
    `openAiCompatibleProvider.ts`; door 2 has none for that reason.
 9. **`docs/register/SPINE_WIRING_PLAN.md` is cited** by `SECRETARY_SPINE_MORATORIUM.md` and
-   `engineReachability.test.ts`, and **does not exist in this tree or in the history of either
-   branch.** The moratorium's wording is preserved by
-   quotation in the moratorium document, so the rule is still legible, but the primary source is
-   missing.
+   `engineReachability.test.ts`, and at the time of this survey **did not exist in this
+   repository or in any of its branches, tags or objects.** Its canonical copy is in the sibling
+   repository `dylanmark218-dot/leaseos`, authored at `df51d65a` on 2026-09-21, after this
+   repository's import snapshot; the citations here were written against that copy. It has
+   since been restored here byte for byte with a provenance record and a structural guard
+   (`docs/register/SPINE_WIRING_PLAN_PROVENANCE.md`, `server/spineWiringPlan.test.ts`, PR #13).
+   Nothing in this document reconstructs its contents.
 10. **Dangling OCR chain.** `extractToProposal()` (`documentExtraction.ts`) and `persistQuestions()`
     (`questionQueueService.ts`) have no production caller; `documentExtraction` counts as reached
     only because `normalizeVendor()` and the `DocumentType` type are imported elsewhere.
@@ -684,5 +687,7 @@ None. The earliest incomplete item remains **per-boundary confirmation on `tripS
 resolver from `proposalFields.source × status` to `BoundaryConfirmation` per `BoundaryKey`, reached
 from `assistantCommitReceipts.targetRecordId`. Nothing in this survey moves ahead of it, and no
 finding here requires an engine before it. The one thing this survey adds to the SPINE conversation
-is item 9 of §18: the plan document the moratorium cites should be restored to the tree, because a
-moratorium whose primary text is missing is enforced by quotation.
+is item 9 of §18: the plan document the moratorium cites was absent from this repository, and a
+moratorium whose primary text is missing is enforced by quotation. The recovered plan's ordering
+(per-boundary confirmation → the four duplications → `offlineCapability` → the rest of the spine)
+is the order this document assumed.
