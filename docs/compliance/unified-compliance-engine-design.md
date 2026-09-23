@@ -133,7 +133,7 @@ Verified defects on `main`:
 | # | Defect | Evidence | Status |
 |---|---|---|---|
 | R-1 | **Active government OOS orders never reach dispatch.** `ReadinessSubject.enforcement` is optional and no production caller passes it. | `readinessComposer.ts:74,412`; callers `dispatchRouter.ts:53,68,134,169`, `portalRouter.ts:300`, `dispatchEnforcementService.ts:52` | **Fixed by PR #4**, merged to main as `38d2677`; C1a adds the end-to-end refusal test |
-| R-2 | **The override grantor is not recorded.** `overrideGrant` updates only `granted`/`refusalReason`. `award` then rebuilds `grantedByUserId` from `requestedByUserId`. | `dispatchRouter.ts:113,136` | **Fixed in C1a** (0172 grantor columns; one grant loader for both award paths) |
+| R-2 | **The override grantor is not recorded.** `overrideGrant` updates only `granted`/`refusalReason`. `award` then rebuilds `grantedByUserId` from `requestedByUserId`. | `dispatchRouter.ts:113,136` | **Fixed in C1a** (0174 grantor columns; one grant loader for both award paths) |
 | R-3 | `mergeBlockers` dedupes by `code`, first wins, so a later, stricter blocker with the same code is dropped. | `readinessComposer.ts:621-623` | **Fixed in C1a** (`mergeFindings`, strictest wins, order-independent) |
 | R-4 | `blockersForUnevaluatedRequired` sets `minimumRole:"supervisor"` behind a cast instead of `overrideAuthority`. | `readinessCapabilities.ts:208` | **Fixed in C1a** (typed, no cast) |
 | R-5 | Insurance, enforcement, telematics faults, roadside, calibration and medical are **not in `EligibilityFacts`**, so a change in them does not stale a check inside its 30-minute window. `permitVersion`, `materialClassificationVersion` and `destinationAcceptanceVersion` are always `"none"`. | `dispatchAward.ts:27-61` | **Fixed in C1a** (11 new facts, SHA-256 canonical) |
@@ -863,9 +863,9 @@ ledger.
 * **§4:** the classification only tightens a producer's claim. The approved-override-policy registry
   exists and is empty (two distinct approvers required per policy).
 * **§8:** implemented as described, plus tenant scoping on every `dispatch.*` procedure. The one
-  migration is `0172_dispatch_override_provenance.sql`. Outbox events (`compliance.evaluated`,
+  migration is `0174_dispatch_override_provenance.sql` (built as `0172`; moved at integration because another branch had claimed `0172`/`0173`, see `docs/architecture/MIGRATION_COLLISION_REGISTER.md`). Outbox events (`compliance.evaluated`,
   `blocker.*`) were **not** emitted in C1a; the persisted check and override rows are the record. R-11
   (`unitHeld`) is deferred.
 * **§6 (dangerous goods):** `dangerousGoodsAuthority` reads `loadProfiles`. Free text may raise UNKNOWN
   and never establishes DG or non-DG.
-* **§20:** the next free slot after C1a is `0173`, subject to the open-branch check.
+* **§20:** the next free slot after C1a is `0175`, subject to the open-branch check and the collision register.

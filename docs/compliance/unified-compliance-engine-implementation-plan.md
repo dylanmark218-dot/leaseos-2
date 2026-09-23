@@ -42,7 +42,7 @@ before push. "Engine?" records the SPINE-moratorium classification (D-01).
 
 ### C1a — Dispatch contract and safety defects — **done** (see `checkpoints/C1A_READINESS_HARDENING.md`)
 
-*As built:* migration `0172`. Deviations from the plan below: outbox events and R-11 (`unitHeld`) were
+*As built:* migration `0174` (built as `0172`, moved at integration; see the collision register). Deviations from the plan below: outbox events and R-11 (`unitHeld`) were
 deferred. Tenant scoping of the dispatch path and the D-02 classification were added.
 
 *Engine?* No. It is a contract over the existing composer, plus defect fixes.
@@ -271,7 +271,7 @@ The migration number is taken at PR time per the rules above.
 
 ## Migration slots after C1a (checked 2026-09-23)
 
-`main` ends at `0169` (PR #4). C1a uses `0172`. Claims on open branches: `0170`/`0171` by PR #9 and
+`main` ends at `0169` (PR #4; PR #5 added none). C1a uses `0174`. Claims on open branches: `0170`/`0171` by PR #9 and
 `feature/dispatch-assignment-ui`; `0170` also by `claude/leaseos-auth-workspace-system-t008ad`;
 `0169`/`0170` by `claude/driver-portfolio-credential-wallet-ya8928` (its `0169` already collides with
-main). The next compliance slot is `0173`, re-checked at PR time.
+main); `0172`/`0173` by `claude/training-academy-workforce-q3mdse`. The next compliance slot is `0175`, re-checked at PR time against `docs/architecture/MIGRATION_COLLISION_REGISTER.md`.

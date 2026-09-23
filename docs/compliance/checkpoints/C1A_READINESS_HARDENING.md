@@ -8,13 +8,14 @@ started. No new engine, no second readiness authority.
 | | |
 |---|---|
 | Starting SHA (before prerequisite merges) | `006069057b8a245ce00c0453d500f1e69c9e916c` (`main`) |
-| Prerequisite: PR #4 | head `c72a55a`, main merged into it as `8ad53d6` (only the generated `LEASEOS_CURRENT_STATE.md` conflicted; regenerated); gate PASS at `8ad53d6`; GitHub CI green |
-| PR #4 merge SHA | `38d26770bdcd5b4bd89f14fee6874559492394bf` (merge commit, tree identical to the gated `8ad53d6`) |
-| Post-merge `main` gate | PASS. 312 files, 4334 passed, 3 skipped (`agentRuntimeApi`, pre-existing); 408 tables; 166 migrations (head `0169_defect_resolution`); 647 role / 36 external / 2 integration procedures; build OK; current-state current |
-| C1a base | `38d2677` |
-| C1a ending SHA | `Code commit `1272b2d` (the documentation commit that follows it adds only files under `docs/compliance/`)` |
-| Migration used | **`0172_dispatch_override_provenance.sql`**. Checked against every remote branch immediately before commit: `0170`/`0171` are claimed by PR #9 and `feature/dispatch-assignment-ui`, `0170` also by the auth-workspace branch and by `claude/driver-portfolio-credential-wallet-ya8928` (which also claims `0169`, already taken on main). `0172` was free on all of them |
-| C1a full gate | **PASS** at `1272b2d`, gates 0–8: 314 files, **4404 passed**, 3 skipped (the pre-existing `agentRuntimeApi` cases); no DB suite skipped; test-file type errors 0/0; 0 bare `protectedProcedure`; 408 tables; 167 migrations; 647 role / 36 external / 2 integration procedures; build OK; current-state regenerated and current. Focused C1a suites first: `complianceFinding.test.ts` 42/42, `complianceReadinessC1a.db.test.ts` 15/15 |
+| PR #4 | head `c72a55a`, main merged into it as `8ad53d6` (only the generated `LEASEOS_CURRENT_STATE.md` conflicted; regenerated); gate PASS at `8ad53d6`; CI green; **merged as `38d26770bdcd5b4bd89f14fee6874559492394bf`** |
+| Main gate after PR #4 | PASS. 312 files, 4334 passed, 3 skipped; 166 migrations (head `0169`) |
+| PR #5 | head `e6b65f22ffc0af4e8ac29dfcb8e5e9506006c287` (contains `38d2677`); CI green; server change limited to `dispatch.readiness` returning `capabilities`/`capabilityVerdict`; **merged as `6b01a0eaf5f1147fd0db0499e3cd9fccf3c03ee1`** |
+| Main gate after PR #5 | PASS. 315 files, 4416 passed, 3 skipped; 166 migrations (head `0169`); 647/36/2 procedures; build OK |
+| C1a as first built | `1272b2d` + `7c07bef` on `38d2677` (full gate PASS, CI green) |
+| C1a rebased | onto `6b01a0e`. Only `LEASEOS_CURRENT_STATE.md` conflicted textually; `dispatchRouter.ts` merged with **both** #5's capability picture and C1a's tenant scope check in `dispatch.readiness` (read and verified, not assumed) |
+| Migration used | **`0174_dispatch_override_provenance.sql`**. Built as `0172`; the re-scan at integration found `0172`/`0173` claimed by `claude/training-academy-workforce-q3mdse`, so C1a moved to the first number no branch held. See `docs/architecture/MIGRATION_COLLISION_REGISTER.md` |
+| C1a rebased gate / PR / merge | recorded in "Integration record" at the end of this document |
 
 ## PR dependency / conflict matrix (#4, #5, #6, #9)
 
@@ -25,7 +26,7 @@ started. No new engine, no second readiness authority.
 | #6 | `feature/dispatcher-detail-assignment` | #5 | no | yes | none | no | #5 merged in (`02c0b74`); focused suites pass |
 | #9 | `feature/dispatch-role-assignment-backend` | #5 | no | yes (role-slot procedures) | `0170`, `0171` | no | #5 merged in (`84c69fc`); its own 13 suites + count pins pass; **`0170` still collides** with the auth-workspace branch and the driver-portfolio branch |
 
-C1a conflicts expected with #5/#6/#9 only in `dispatchRouter.ts` (C1a adds scope checks and changes
+(Written before integration.) C1a conflicts expected with #5/#6/#9 only in `dispatchRouter.ts` (C1a adds scope checks and changes
 `overrideRequest`/`overrideGrant`/`award`; they add procedures and change `readiness`'s return). They
 are textual, not semantic. C1a must merge after #5, or #5 must rebase onto C1a, so that #5's
 `readiness` return keeps C1a's scope check.
@@ -41,7 +42,7 @@ are textual, not semantic. C1a must merge after #5, or #5 must rebase onto C1a, 
 | `server/complianceReadinessC1a.db.test.ts` | **new**: 15 database-backed cases through the real procedures |
 | `server/telematics.test.ts`, `server/surfaces.test.ts` (unchanged; a C1a test was leaving an expired policy that the unscoped exception centre showed a driver — fixed in the C1a test) | an undetermined fault is now UNKNOWN/BLOCK/APPROVED_POLICY_ONLY instead of manager-overridable |
 | `docs/compliance/*` | the Checkpoint 0 documents brought onto this branch and updated; D-05 matrix; tenancy follow-up; this record |
-| `drizzle/0172_dispatch_override_provenance.sql`, `drizzle/schema.ts` | grantor/policy/scope/expiry/org on `dispatchOverrides`; `ruleSetHash`/`orgRef` on `dispatchEligibilityChecks`; fingerprint widened to 80 |
+| `drizzle/0174_dispatch_override_provenance.sql`, `drizzle/schema.ts` | grantor/policy/scope/expiry/org on `dispatchOverrides`; `ruleSetHash`/`orgRef` on `dispatchEligibilityChecks`; fingerprint widened to 80 |
 | `server/readinessComposer.ts` | findings merged strictest-wins; structured dangerous goods; complete fact set; rule-set and policy hashes; enforcement version |
 | `server/_core/dispatchReadiness.ts` | `requestOverride` decided by override class; policy-only overrides |
 | `server/_core/dispatchAward.ts` | SHA-256 canonical fingerprint; 11 new facts; `decideAward` uses the shared coverage rule |
@@ -57,7 +58,7 @@ are textual, not semantic. C1a must merge after #5, or #5 must rebase onto C1a, 
 
 | ID | Defect | Fix |
 |---|---|---|
-| R-2 / C1a-3 | The award path recorded the **requester** as the override grantor, in `dispatchRouter.award` **and** in the legacy `createJobUnitGated` | Grantor columns (0172); `overrideGrant` records grantor, role, time, reason, class, policy, scope and expiry; both paths read them through one loader; a grant whose grantor equals the requester, or with no recorded grantor (every pre-0172 row), is not a grant |
+| R-2 / C1a-3 | The award path recorded the **requester** as the override grantor, in `dispatchRouter.award` **and** in the legacy `createJobUnitGated` | Grantor columns (0174); `overrideGrant` records grantor, role, time, reason, class, policy, scope and expiry; both paths read them through one loader; a grant whose grantor equals the requester, or with no recorded grantor (every pre-0174 row), is not a grant |
 | R-3 / C1a-4 | `mergeBlockers` kept the first duplicate, so a later non-overridable duplicate was dropped | `mergeFindings`: strictest by (effect, override class, severity, result), deterministic tie-break, evidence of all duplicates kept, order-independent |
 | R-4 / C1a-5 | A stray `minimumRole` field behind `as DispatchBlocker` hid a missing `overrideAuthority` | Typed return, no cast; the classification decides what may release it |
 | R-6 / C1a-2 | Override-ability was a bare boolean; "overridable blocking" findings were silently unawardable; safety UNKNOWNs were releasable by any manager | Explicit `overrideClass` (`NEVER_OVERRIDABLE`, `APPROVED_POLICY_ONLY`, `WARNING_ONLY`, `INFORMATIONAL`) read by request, grant, award and the legacy path; there is **no general manager override** |

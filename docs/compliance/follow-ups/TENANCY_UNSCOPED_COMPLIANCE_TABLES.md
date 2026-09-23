@@ -3,7 +3,7 @@
 Tracked follow-up from C1a. The owner instruction was: do not repair every tenancy issue in C1a, add
 no new unscoped compliance persistence, and track the existing gaps with exact tables and the
 remediation dependency. C1a added `orgRef` to the two tables it touched (`dispatchEligibilityChecks`,
-`dispatchOverrides`, migration 0172) and scoped every `dispatch.*` procedure on the readiness path.
+`dispatchOverrides`, migration 0174) and scoped every `dispatch.*` procedure on the readiness path.
 
 "Platform" means the row is the same law for every tenant (NULL `orgRef` = platform, by design). For
 those, the fix is not a tenant column. The fix is to stop tenants *writing* them without a platform
@@ -22,4 +22,4 @@ role.
 | `auditPackages`, `auditPackageItems`, `auditPackageAccess` | no `orgRef`; `auditRouter.packageList` filters by `subjectRef` only | a package list can show another tenant's packages | add `orgRef`; scope every `audit.*` procedure | C9 |
 | `exceptionCentre.loadExceptionSources` (surface) | takes no tenant scope | exception centre rows can cross tenants | pass the acting scope through `surfacesService` | independent; small |
 | `communicationPolicies` (surface) | `currentCommunicationPolicy` ignores `scopeType`/`scopeRef` | one branch's policy governs every branch | honour scope in the resolver | independent; small |
-| `dispatchEligibilityChecks`, `dispatchOverrides` rows written **before 0172** | `orgRef` NULL | read as the historical single tenant (`default`), the 0132 rule | none needed; documented | — |
+| `dispatchEligibilityChecks`, `dispatchOverrides` rows written **before 0174** | `orgRef` NULL | read as the historical single tenant (`default`), the 0132 rule | none needed; documented | — |
