@@ -21,13 +21,8 @@
  *     proposal  ≠  committed evidence
  *
  * Reading receipts for a stop, checking their seals, and refusing a chain some later
- * write has broken is the receipt reader's job. In this repository there is none yet:
- * that reader decides whether a stop was edited after its newest commit by comparing
- * `tripStops.updatedAt` with the receipt's `committedAt`, and this repository's
- * `tripStops` has no `updatedAt` — its migrations stop at 0168, before the trip-stop
- * provenance migration. See docs/register/SPINE_ITEM1_BOUNDARY_CONFIRMATION.md.
- * Everything here is pure: no database, no clock, no caller context, and no runtime
- * import at all.
+ * write has broken is `boundaryEvidence.ts`. Everything here is pure: no database,
+ * no clock, no caller context, and no runtime import at all.
  *
  * ## Three verdicts, never two
  *

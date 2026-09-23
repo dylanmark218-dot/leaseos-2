@@ -5,11 +5,7 @@
  * the row an actor; it did not say which of the five timestamps a person stands
  * behind. `siteBaseline` filters on exactly that and cannot be wired to real
  * data without it. One resolver, read by both engines."
- * (`docs/register/SPINE_WIRING_PLAN.md:47-49`, which lives in the sibling
- * repository; this one carries no copy of the plan. The finding does not
- * depend on it: `server/_core/siteBaseline.ts` is byte-identical across both
- * trees, `UnloadStopPatch` lacks `setupStartedAt` in both, and both schemas
- * carry `fieldManifest` and `fieldManifestHash` on `assistantCommitReceipts`.)
+ * (`docs/register/SPINE_WIRING_PLAN.md:47-49`)
  *
  * ## What the survey established
  *
