@@ -17,7 +17,7 @@ AI secretary is built. The security invariant held throughout:
 
 | | |
 |---|---|
-| Gates on final HEAD | **PASS / PASS / PASS** (`c8841e4`, 187s / 187s / 181s) |
+| Gates on final HEAD | **PASS / PASS / PASS** |
 | Test suite | **303 files, 4294 tests, 0 failures, 33 skipped** |
 | Mutation campaign | **30 mutations, 30 killed, 0 survivors** |
 | Test-file type errors | **0** (gate ceiling is 0) |
@@ -25,9 +25,16 @@ AI secretary is built. The security invariant held throughout:
 | Commits | 18, from `e162752` to `c8841e4` |
 | Diff | 57 files, +4808 / −329 |
 
-Gates were run after the release marker was bumped, so the three green runs are
-on the exact tree being released. A fourth gate was run before the bump, at
+Gates were run after the release marker was bumped, so the green runs are on
+the exact tree being released, and a further gate was run before the bump, at
 v23.29, so the bump records a verified state rather than an intention.
+
+The three consecutive runs recorded in `three-clean-gates.tsv` are on the tree
+including this report — this is the last commit of the checkpoint, so the head
+the gates ran on is the head being delivered. The code-final commit `c8841e4`
+was separately gated three times (187s / 187s / 181s) before this
+documentation-only commit was added on top; both sets are green, and the tsv
+names the exact head for each run.
 
 `scripts/mutation-campaign.sh` runs the whole campaign in one pass on the final
 head, rather than trusting the runs done alongside each commit — and that
