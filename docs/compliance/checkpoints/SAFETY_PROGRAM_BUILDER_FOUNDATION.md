@@ -2,7 +2,8 @@
 
 Status: **complete on branch `claude/safety-compliance-program-builder-2qnty0`**, not merged. This is the
 data model and template engine, plus the first two categories of the Alberta Commercial/Oilfield content
-pack: company foundation (19 templates) and occupational health and safety (39 templates), loaded as drafts.
+pack: company foundation (19 templates), occupational health and safety (39) and commercial trucking / National
+Safety Code (41), loaded as drafts.
 Every other template is a skeleton and every regulatory reference seeds unverified. Further categories load
 one at a time into the keys this checkpoint creates.
 
@@ -86,7 +87,21 @@ limit, the 20-worker and 5-to-19-worker committee and representative thresholds 
 confirm against the instrument as consolidated; a test holds the committee thresholds in the text equal to the
 ones the obligations engine uses.
 
-Content in both categories is written through per-kind builders (`safetyProgramContent/shared.ts`), and the
+Category 3, **commercial trucking / National Safety Code**, is in `server/_core/safetyProgramContent/nscTrucking.ts`:
+41 templates covering driver qualification, abstracts and licence verification; hours of service, ELD and
+sleeper berth; driver fatigue; dispatch and driver responsibility and the no-coercion rule; speed, seat belts,
+distracted and defensive driving, backing; journey management, winter, adverse weather, mountain, remote and
+radio-controlled roads; load, cargo and equipment securement; weights and road bans; TDG by road, shipping
+documents and placarding; fueling; pre-trip and post-trip inspection, defect reporting, out-of-service
+equipment, CVIP tracking, preventive maintenance, repair authorization, tires and coupling; collision
+reporting, roadside inspection response, carrier profile monitoring and progressive correction. With the
+Transportation Safety Policy and Maintenance Policy from category 1, these are the carrier's written safety and
+maintenance programs. **Hours-of-service limits are not restated**: the policies point to the LeaseOS rule
+profile that the duty-status engine enforces, and a test holds them free of hour figures so the text cannot
+disagree with what is enforced. Figures stated (24-hour trip inspection validity, 12-month abstract review,
+cargo-securement WLL and g-force criteria) are for the reviewer to confirm against the instruments.
+
+Content in every category is written through per-kind builders (`safetyProgramContent/shared.ts`), and the
 integrity check now also refuses a template whose headings differ from its skeleton's, in order.
 
 ## API (`server/safetyProgramRouter.ts`, mounted as `safetyProgram`, 38 procedures, all `roleProcedure`)
@@ -141,7 +156,7 @@ The PDF/ZIP archive is not built here — the manifest is.
 
 ## Tests
 
-- `server/_core/safetyProgram.test.ts` — 43 cases (content pack integrity, heading order, merge fields and OHS content checks included): catalog integrity (unique keys, real modules and packs,
+- `server/_core/safetyProgram.test.ts` — 46 cases (content pack integrity, heading order, merge fields, OHS and trucking content checks included): catalog integrity (unique keys, real modules and packs,
   every cited reference exists, seeds cannot carry a verification), obligations by profile, assembly and its
   hash, policy codes, version chain, approval and edit rules, acknowledgement steps, matrix statuses and
   evidence choice, corrective-action rules, COR readiness by evidence, manifest, ledger chain, packs.
@@ -162,7 +177,7 @@ below when the gate completes). Typecheck clean; test-file typecheck adds no err
 
 ## Not in this checkpoint
 
-Policy body content beyond company foundation and OHS (every other template is a skeleton; the written text is
+Policy body content beyond company foundation, OHS and trucking (every other template is a skeleton; the written text is
 a draft a person adapts and reviews before it is marked reviewed); verification of any regulatory reference (all
 unverified — provision numbers are what the template authors worked from and must be checked against the
 instruments as consolidated); a client UI; the PDF/ZIP vendor package; a hazard-assessment record and a drill

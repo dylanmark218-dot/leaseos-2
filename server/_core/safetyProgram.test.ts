@@ -420,3 +420,32 @@ describe("the OHS content pack", () => {
     }
   });
 });
+
+describe("the NSC trucking content pack", () => {
+  const pack = CONTENT_PACKS.find(p => p.moduleKey === "nsc_trucking")!;
+  const body = (key: string) => contentForTemplate(key)!.template.sections.map(s => s.body).join("\n");
+
+  it("covers all forty-one trucking templates, and no summary carries an unrendered merge field", () => {
+    expect(pack.templates.map(t => t.templateKey).sort()).toEqual(POLICY_TEMPLATE_SEEDS.filter(t => t.moduleKey === "nsc_trucking").map(t => t.templateKey).sort());
+    expect(pack.templates.length).toBe(41);
+    for (const p of CONTENT_PACKS) for (const t of p.templates) expect(mergeFieldsIn(t.summary), t.templateKey).toEqual([]);
+  });
+
+  it("keeps hours-of-service figures in one place: the HOS policies point to the rule profile and state no hours", () => {
+    for (const key of ["nsc_trucking.hours_of_service_policy", "nsc_trucking.sleeper_berth_policy", "nsc_trucking.no_coercion_to_violate_hours_of_service", "nsc_trucking.eld_and_logbook_policy", "nsc_trucking.fatigue_management_drivers"]) {
+      expect(body(key), key).not.toMatch(/\b\d+(\.\d+)?\s*(hours?|hrs?|h)\b/i);
+    }
+    for (const key of ["nsc_trucking.hours_of_service_policy", "nsc_trucking.sleeper_berth_policy", "nsc_trucking.no_coercion_to_violate_hours_of_service"]) expect(body(key), key).toMatch(/hours-of-service rule profile/);
+  });
+
+  it("carries the NSC criteria a carrier audit checks", () => {
+    expect(body("nsc_trucking.load_securement")).toMatch(/aggregate WLL of at least one-half the weight of the cargo/);
+    expect(body("nsc_trucking.load_securement")).toMatch(/0\.8 g forward, 0\.5 g rearward and 0\.5 g sideways/);
+    expect(body("nsc_trucking.pre_trip_inspection")).toMatch(/valid for 24 hours/);
+    expect(body("nsc_trucking.pre_trip_inspection")).toMatch(/A major defect: do not drive/);
+    expect(body("nsc_trucking.driver_abstract_review")).toMatch(/at least once every 12 months/);
+    expect(body("nsc_trucking.dangerous_goods_transportation_road")).toMatch(/TDG training certificate issued by \{\{company\.name\}\}/);
+    expect(body("nsc_trucking.dispatch_responsibility")).toMatch(/readiness check, which blocks or flags/);
+    expect(body("nsc_trucking.defect_reporting")).toMatch(/The mechanic who performs the repair records it and releases it/);
+  });
+});

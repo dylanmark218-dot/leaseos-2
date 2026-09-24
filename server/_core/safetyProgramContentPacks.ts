@@ -7,10 +7,12 @@
 import type { ContentPack } from "./safetyProgramContentTypes";
 import { COMPANY_FOUNDATION } from "./safetyProgramContent/companyFoundation";
 import { OHS } from "./safetyProgramContent/ohs";
+import { NSC_TRUCKING } from "./safetyProgramContent/nscTrucking";
 
 export const CONTENT_PACKS: readonly ContentPack[] = [
   { packRef: "ab_commercial_oilfield_v1.company_foundation", title: "Alberta Commercial / Oilfield pack — Company foundation", moduleKey: "company_foundation", templates: COMPANY_FOUNDATION },
   { packRef: "ab_commercial_oilfield_v1.ohs", title: "Alberta Commercial / Oilfield pack — Occupational health and safety", moduleKey: "ohs", templates: OHS },
+  { packRef: "ab_commercial_oilfield_v1.nsc_trucking", title: "Alberta Commercial / Oilfield pack — Commercial trucking / National Safety Code", moduleKey: "nsc_trucking", templates: NSC_TRUCKING },
 ];
 
 export function contentForTemplate(templateKey: string) {

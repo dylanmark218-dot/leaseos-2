@@ -53,7 +53,7 @@ d("0182 — Safety & Compliance Program Builder", () => {
 
     // The library is platform-wide and outlives a test run: put the foundation templates back to skeletons so
     // this run proves the skeleton → draft → reviewed transitions itself rather than inheriting them.
-    await pool.execute("UPDATE policyTemplates SET contentStatus = 'skeleton', contentHash = '' WHERE moduleKey IN ('company_foundation', 'ohs') AND orgRef IS NULL");
+    await pool.execute("UPDATE policyTemplates SET contentStatus = 'skeleton', contentHash = '' WHERE moduleKey IN ('company_foundation', 'ohs', 'nsc_trucking') AND orgRef IS NULL");
 
     // --- library: seeded from code, idempotent, unverified
     const first = await S.safetyProgram.syncCatalog();
@@ -79,11 +79,12 @@ d("0182 — Safety & Compliance Program Builder", () => {
     expect(c1.packs.map(p => [p.packRef, p.drafted, p.revised, p.unchanged, p.skippedReviewed.length, p.missingTemplates.length])).toEqual([
       ["ab_commercial_oilfield_v1.company_foundation", 19, 0, 0, 0, 0],
       ["ab_commercial_oilfield_v1.ohs", 39, 0, 0, 0, 0],
+      ["ab_commercial_oilfield_v1.nsc_trucking", 41, 0, 0, 0, 0],
     ]);
     const onlyOhs = await S.safetyProgram.syncContent({ packRef: "ab_commercial_oilfield_v1.ohs" });
     expect(onlyOhs.packs.map(p => [p.packRef, p.unchanged])).toEqual([["ab_commercial_oilfield_v1.ohs", 39]]);   // one category at a time
     const c2 = await S.safetyProgram.syncContent();
-    expect(c2.packs.map(p => p.unchanged)).toEqual([19, 39]);
+    expect(c2.packs.map(p => p.unchanged)).toEqual([19, 39, 41]);
     expect(await code(() => S.safetyProgram.syncContent({ packRef: "no.such.pack" }))).toBe("NOT_FOUND");
     expect(await code(() => D.safetyProgram.syncContent())).toBe("FORBIDDEN");
     const drafted = await A.safetyProgram.templateDetail({ templateKey: "company_foundation.health_and_safety_policy" });
@@ -135,8 +136,8 @@ d("0182 — Safety & Compliance Program Builder", () => {
     const commit = await S.safetyProgram.versionDraftFromTemplate({ policyRef: p4.policyRef, president: "D. Mark" });
     expect(commit.unresolvedMergeFields).toEqual(["company.safetyManager"]);   // not supplied, so not invented: it stays visible in the text
     expect(commit.sections.find(x => x.heading === "Commitment")!.body).toMatch(/\{\{company\.safetyManager\}\} is the designated safety authority/);
-    const p5 = await S.safetyProgram.policyCreate({ templateKey: "nsc_trucking.backing_policy" });   // trucking has no content pack yet
-    expect(p5.policyCode).toBe("NSC-PRC-001");
+    const p5 = await S.safetyProgram.policyCreate({ templateKey: "oilfield_industrial.h2s_procedure" });   // oilfield has no content pack yet
+    expect(p5.policyCode).toBe("OIL-PRC-001");
     const skel = await S.safetyProgram.versionDraftFromTemplate({ policyRef: p5.policyRef });   // a skeleton template drafts as headings
     const flha = await S.safetyProgram.versionDraftFromTemplate({ policyRef: p3.policyRef });   // the FLHA form now has content
     expect(flha.templateContentStatus).toBe("draft"); expect(flha.unresolvedMergeFields).toEqual([]);
