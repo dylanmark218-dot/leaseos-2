@@ -93,7 +93,7 @@ refuse. `audit.delete` is already on `NEVER_AUTONOMOUS` for the case where one i
    that may use a model, and only a *different* one: `verifierFor()` already refuses
    same-model verification.
 3. **"Thirty agents."** The value is real. Thirty *engines* are not. Each new module would enter
-   `DECLARED_UNWIRED` in `server/engineReachability.test.ts`, which already lists more than fifty. Under this
+   `DECLARED_UNWIRED` in `server/engineReachability.test.ts`, which already lists sixty-three. Under this
    design, an agent is a declaration (§5) read by one executor. Adding the thirty-first agent
    should be a data change plus its capabilities, not a module.
 4. **One manifest per agent, one allowlist per task.** PR #7 scopes tools by *task*
@@ -144,7 +144,8 @@ capability it exercises finally meet.
 ### 6.0 Before any agent: the SPINE, unchanged
 
 Per-boundary confirmation → the four duplications → `offlineCapability` → the rest of the spine
-(`SPINE_WIRING_PLAN.md`). Then PR #7 merges or is rebased, so `server/_core/ai/` exists on `main`.
+(`SPINE_WIRING_PLAN.md`). Item 1's resolver, chain rule and receipt reader are in the tree and
+still declared unwired (`SPINE_ITEM1_BOUNDARY_CONFIRMATION.md`). Then PR #7 merges or is rebased, so `server/_core/ai/` exists on `main`.
 
 ### 6.1 The executor: once, for every agent
 
