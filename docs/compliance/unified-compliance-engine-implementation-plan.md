@@ -86,7 +86,7 @@ deferred. Tenant scoping of the dispatch path and the D-02 classification were a
 
 **Out of scope:** new contributors, UI, requirement registry changes.
 
-### C1b — Requirement registry reconciliation *(authorized after C1a merged; plan below, no code yet)*
+### C1b — Requirement registry reconciliation *(authorized after C1a merged; C1b-1 implemented, see `checkpoints/C1B_1_RULE_LEDGER.md`)*
 
 *Updated 2026-09-23 against the real merged state (`main` = `42c454f`, migration head `0174`).*
 *Engine?* No. It is consolidation: seven verification ladders become one ledger, and SPINE item 2's
@@ -150,7 +150,7 @@ OHS systems. C1b builds the regulatory authority that they will consume later.
 
 | Slice | Content | Migration |
 |---|---|---|
-| C1b-1 | ledger generalization + source fields + lifecycle; HOS equivalence tests; `promote()` generalized | one |
+| C1b-1 | ledger generalization + source fields + lifecycle; HOS equivalence tests; `promote()` generalized. **Implemented** (`0189`; the next free number was re-scanned, see the register) | one |
 | C1b-2 | requirements under the ledger; immutable revisions; two-person for dispatch-blocking statute; loader fixes; `requirementRef` on findings and checks; point-in-time query | one |
 | C1b-3 | SPINE item 2 `complianceDocumentValidity` reconciliation (equivalence first); D-05 credential read adapter, non-destructive, with equivalence tests for the four `workerQualifications` readers | none expected |
 
@@ -167,7 +167,9 @@ OHS systems. C1b builds the regulatory authority that they will consume later.
 * None of the thirteen engines is expected to leave `DECLARED_UNWIRED` except `complianceDocumentValidity`.
   The moratorium stays in force.
 
-**Owner questions before C1b code**
+**Owner questions before C1b code.** *The owner said "Continue" without answering these. C1b-1 proceeds
+on the recommended answer to each, and records them in `checkpoints/C1B_1_RULE_LEDGER.md` so they can be
+reversed. None of them changes dispatch behaviour in C1b-1.*
 
 * **C1b-Q1:** generalize `hosRuleLimitHistory` in place (recommended: additive, history untouched),
   or create a new ledger and copy HOS history into it (two sources of truth during the transition)?

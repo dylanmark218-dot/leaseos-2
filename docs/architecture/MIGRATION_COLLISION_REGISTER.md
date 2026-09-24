@@ -22,7 +22,46 @@ other claimant takes the next number free on `main` *and* on all open branches a
 Reserved slots `0016`/`0017` are never used (CI gate 0). `0094`, `0095` and `0098` are historical gaps,
 and `0157` is historically used twice. None of those is reused.
 
-## Current state (2026-09-23, `main` = `42c454f`, after PR #4, PR #5 and C1a #12)
+## Current state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
+
+`main` migration head: **`0179_trip_stop_provenance.sql`** (#17). `main` holds `0169`, `0170`/`0171`
+(PR #9), `0174` (C1a) and `0179`; `0172`, `0173` and `0175`–`0178` are open on `main` and claimed only by
+branches. Every number from `0175` to `0188` is claimed by at least one open branch.
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| 0170 | `0170_organization_scoped_role_grants.sql` | `claude/leaseos-auth-workspace-system-t008ad` | open branch | **with main** (`0170_dispatch_role_types`, #9) | its author renumbers at rebase |
+| 0170 | `0170_work_calendar_tasks_reminders.sql` | `claude/work-calendar-task-engine-0mtjyk` | open branch | **with main** | its author renumbers at rebase |
+| 0172 | `0172_training_wallet_renewal_handoff.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none | keeps 0172 |
+| 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none | keeps 0173 |
+| 0175 | `0175_client_services_portal.sql` | `claude/client-portal-job-tracking-zqmejc` | open branch | with driver-portfolio ×2, auth-workspace | first to merge keeps it |
+| 0175 | `0175_driver_portfolio.sql` | `claude/driver-portfolio-api-ya8928`, `claude/driver-portfolio-credential-wallet-ya8928` | open branches | as above | first to merge keeps it |
+| 0175 | `0175_organization_invitations.sql` | `claude/leaseos-auth-workspace-system-t008ad` | open branch | as above | first to merge keeps it |
+| 0176 | `0176_driver_portfolio_events_append_only.sql` | both driver-portfolio branches | open branches | same file on both | follows its branch |
+| 0177 | `0177_driver_portfolio_api.sql` | `claude/driver-portfolio-api-ya8928` | open branch | none | — |
+| 0178 | `0178_document_control_definitions.sql` | `claude/document-control-architecture-jlffzk` | open branch | none | — |
+| 0179 | `0179_document_control_register.sql` | `claude/document-control-architecture-jlffzk` | open branch | **with main** (`0179_trip_stop_provenance`) | its author renumbers at rebase |
+| 0179 | `0179_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | open branch | **with main** | its author renumbers at rebase |
+| 0180 | `0180_document_control_numbering.sql` | `claude/document-control-architecture-jlffzk` | open branch | none | — |
+| 0181 | `0181_document_control_templates.sql` | `claude/document-control-architecture-jlffzk` | open branch | none | — |
+| 0182 | `0182_board_membership.sql`, `0182_customer_account_profile.sql`, `0182_document_control_intake.sql`, `0182_integration_hub_connectors.sql`, `0182_safety_program_builder.sql` | communications-marketplace, customer-contract-rates, document-control, integration-hub, safety-program-builder | open branches | five-way | first to merge keeps it |
+| 0183 | `0183_customer_contracts_rate_sheets.sql`, `0183_document_control_disposal.sql`, `0183_integration_hub_delivery_and_sync.sql`, `0183_open_work_offers_availability.sql` | customer-contract-rates, document-control, integration-hub, communications-marketplace | open branches | four-way | first to merge keeps it |
+| 0184 | `0184_integration_hub_dead_letters_conflicts.sql`, `0184_job_commercial_context.sql` | integration-hub, customer-contract-rates | open branches | two-way | first to merge keeps it |
+| 0185 | `0185_assistant_proposal_tenancy.sql`, `0185_webhook_delivery_claim.sql` | `claude/relaxed-carson-qfcopf`, `claude/sec-004-webhook-delivery-integrity` | open branches | two-way | first to merge keeps it |
+| 0186 | `0186_external_source_categories.sql` | `claude/canadian-govt-apis-leaseos-q33l42` | open branch | none | — |
+| 0187 | `0187_training_compliance_operations.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none (was 0174, collided with main) | — |
+| 0188 | `0188_source_review_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none | — |
+| 0189 | `0189_rule_ledger_generalization.sql` | `claude/leaseos-compliance-survey-5faxe8` (C1b-1) | this branch | none | keeps 0189 |
+
+**Next free number for new work: `0190`** (re-check with the scan above before committing).
+
+### Change log
+
+* **2026-09-24 (C1b-1)**: rescanned after #6, #9, #11, #10, #13, #17, #18, #21, #23–#25 merged. C1b-1 takes
+  `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
+  four branches since). No other branch renumbered.
+
+## Earlier state (2026-09-23, `main` = `42c454f`, after PR #4, PR #5 and C1a #12)
 
 `main` migration head: **`0174_dispatch_override_provenance.sql`**. `main` holds `0169` (PR #4) and
 `0174` (C1a); `0170`–`0173` are open on `main` and claimed only by branches.
@@ -41,7 +80,7 @@ and `0157` is historically used twice. None of those is reused.
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | *(main)* | #12 | — | **on main** | none | — |
 
-**Next free number for new work: `0175`** (re-check with the scan above before committing).
+Next free number at that time: `0175` (superseded above).
 
 ## Change log
 
