@@ -541,6 +541,55 @@ d("the scanner names a record only when it can prove whose it is", () => {
     expect(body).not.toContain(B.jobCode);
     expect(body).not.toContain(B.unitNumber);
   }, 30_000);
+
+  /**
+   * The number that is somebody else's must look exactly like the number that
+   * is nobody's.
+   *
+   * Found by the end-of-checkpoint mutation campaign, not by writing this test
+   * first: MUT-F3b removes `orgScopeWhere` from the reference lookup and every
+   * existing test still passed. The test above asserts that tenant B's
+   * IDENTIFIERS never appear in the response, and they do not — with the
+   * mutation the answer is `ownership_unverifiable`, which names nothing.
+   *
+   * But `ownership_unverifiable` and `none` are different dispositions carrying
+   * different reasons, and a number that exists nowhere always answers `none`.
+   * So the mutant turned the scanner into an oracle: type numbers, keep the
+   * ones that come back "I cannot attribute this", and you have learned which
+   * numbers are registered in other companies without ever seeing a record.
+   * Withholding the identifiers is not enough; the two cases have to be the
+   * same case.
+   */
+  it("answers a number registered to another organization exactly as one registered nowhere", async () => {
+    const a = await org(), b = await org();
+    const ua = await member(a, ["office", "management", "safety"]);
+    const ub = await member(b, ["office", "management", "safety"]);
+    const B = await seedTenant(b, ub);
+
+    await pool.execute(
+      "INSERT INTO trackingReferences (trackingNumber, orgRef, entityType, entityId, issuedAt) VALUES (?,?,?,?,NOW())",
+      [B.jobCode, b, "JOB", B.jobId],
+    );
+    const nowhere = `JOB-${rnd()}`;   // the same shape, registered to nobody
+
+    const scan = (text: string) => callerFor(ua).scanning.reviewScan({
+      kind: "load_ticket",
+      pages: [{
+        pageIndex: 0, contentHash: `h-${rnd()}`, qualityVerdict: "acceptable", qualityFailures: [],
+        acceptedOverObjection: false, ocrAttempted: true, ocrMeanConfidence: 95,
+        ocrText: `Job ${text} completed`, barcodes: null,
+      }],
+      observations: [],
+    });
+
+    const foreign = await scan(B.jobCode);
+    const fictional = await scan(nowhere);
+    // The scanned text is the caller's own input and is echoed back, so it is
+    // blanked; both are long distinctive codes, never a bare integer that
+    // occurs in the JSON by coincidence.
+    const say = (r: unknown, n: string) => JSON.stringify(r).split(n).join("<n>");
+    expect(say(foreign.links, B.jobCode)).toBe(say(fictional.links, nowhere));
+  }, 30_000);
 });
 
 d("Tenant A cannot dispatch Tenant B's people or fleet", () => {
