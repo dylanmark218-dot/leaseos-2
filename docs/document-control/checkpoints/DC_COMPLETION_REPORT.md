@@ -11,9 +11,9 @@ the live repository as the authority. Every claim below was verified by a gate r
 |---|---|
 | Starting SHA (branch base on `main`) | `0cd4817` — "Checkpoint I: the dispatcher's screen can fill a slot (#11)" |
 | Design commit (Phase 1, design only) | `7759056` |
-| Final SHA | `__FINAL_SHA__` |
+| Final SHA | `e49c96e` |
 | Branch | `claude/document-control-architecture-jlffzk` (the session's designated branch; the suggested `feature/document-control-template-catalog` was not used because this session may push only to its designated branch) |
-| Commits created (implementation) | A `7dbc06b` · B `3d3daef` · C `4d8ede2` · D `7e329e5` · E `c4f9815` · F `04cc6b3` · G `f6b95f2` · H `__FINAL_SHA__` |
+| Commits created (implementation) | A `7dbc06b` · B `3d3daef` · C `4d8ede2` · D `7e329e5` · E `c4f9815` · F `04cc6b3` · G `f6b95f2` · H `e49c96e` |
 | Size | 178+ files, ~15,000 insertions over the design commit; 3.7 MB of catalog data under `data/document-control/` (136 files: 66 canonical PDF/DOCX, extracted text, reference material, CSV/JSON catalog, SHA-256 sums) |
 
 ## Database
