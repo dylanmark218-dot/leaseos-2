@@ -355,7 +355,72 @@ export type SendFailure =
   | "contract_refused"     // 426 — see negotiateContract
   | "conflict"             // a versioned write lost
   | "rejected"             // the server validated and refused the content (400/422, hash mismatch)
-  | "not_found";
+  | "not_found"
+  | "local";               // the device itself failed (vault read, missing native binding) — no request was answered
+
+const TRPC_CODE_FAILURE: Record<string, SendFailure> = {
+  UNAUTHORIZED: "unauthenticated",
+  FORBIDDEN: "forbidden",
+  NOT_FOUND: "not_found",
+  CONFLICT: "conflict",
+  TOO_MANY_REQUESTS: "rate_limited",
+  TIMEOUT: "server_unavailable",
+  CLIENT_CLOSED_REQUEST: "network",
+  INTERNAL_SERVER_ERROR: "server_unavailable",
+  NOT_IMPLEMENTED: "server_unavailable",
+  BAD_GATEWAY: "server_unavailable",
+  SERVICE_UNAVAILABLE: "server_unavailable",
+  GATEWAY_TIMEOUT: "server_unavailable",
+  BAD_REQUEST: "rejected",
+  PARSE_ERROR: "rejected",
+  PAYLOAD_TOO_LARGE: "rejected",
+  UNPROCESSABLE_CONTENT: "rejected",
+  PRECONDITION_FAILED: "rejected",
+  METHOD_NOT_SUPPORTED: "rejected",
+  UNSUPPORTED_MEDIA_TYPE: "rejected",
+  CONTRACT_REFUSED: "contract_refused",
+};
+
+const NETWORK_MESSAGE = /\b(ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|EPIPE)\b|failed to fetch|fetch failed|networkerror|network request failed|load failed/i;
+
+function statusFailure(status: number): SendFailure | null {
+  if (status === 401) return "unauthenticated";
+  if (status === 403) return "forbidden";
+  if (status === 404) return "not_found";
+  if (status === 409) return "conflict";
+  if (status === 426) return "contract_refused";
+  if (status === 429) return "rate_limited";
+  if (status >= 500) return "server_unavailable";
+  if (status >= 400) return "rejected";
+  return null;
+}
+
+/**
+ * Names a thrown send error in the contract's terms. It reads the shapes the
+ * shells actually see — a tRPC client error (`data.code`, `data.httpStatus`),
+ * the gate's 426 body, a fetch/Node network error — and never guesses upward:
+ * an error it cannot place as a server answer or a lost connection is `local`,
+ * which fails the capture visibly rather than retrying it forever.
+ */
+export function classifySendFailure(e: unknown): SendFailure {
+  if (e == null || typeof e !== "object") return "local";
+  const err = e as { name?: unknown; message?: unknown; code?: unknown; status?: unknown; data?: { code?: unknown; httpStatus?: unknown } | null; meta?: { response?: { status?: unknown } } | null; cause?: unknown };
+  const code = typeof err.data?.code === "string" ? err.data.code : typeof err.code === "string" ? err.code : null;
+  if (code && TRPC_CODE_FAILURE[code]) return TRPC_CODE_FAILURE[code];
+  const status = [err.data?.httpStatus, err.meta?.response?.status, err.status].find((s): s is number => typeof s === "number");
+  if (status != null) { const f = statusFailure(status); if (f) return f; }
+  const message = typeof err.message === "string" ? err.message : "";
+  if (code && NETWORK_MESSAGE.test(code)) return "network";
+  if (err.name === "AbortError" || err.name === "TimeoutError" || NETWORK_MESSAGE.test(message)) return "network";
+  // fetch() rejects with a bare TypeError when there is no route at all; tRPC wraps it with no data.
+  if (err.name === "TypeError" && /fetch|network|load/i.test(message)) return "network";
+  // A tRPC client error with no server data never got an answer: the request did not complete.
+  if (err.name === "TRPCClientError" && err.data == null) {
+    const inner = err.cause != null ? classifySendFailure(err.cause) : "local";
+    return inner === "local" ? "network" : inner;
+  }
+  return "local";
+}
 
 /**
  * What the queue does next.
@@ -386,6 +451,7 @@ export function queueDisposition(f: SendFailure): QueueDisposition {
     case "forbidden":
     case "rejected":
     case "not_found":
+    case "local":
       return "failed";
   }
 }

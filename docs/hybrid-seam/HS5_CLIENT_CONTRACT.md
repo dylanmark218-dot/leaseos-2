@@ -84,8 +84,25 @@ duplicate is a success; a mismatch is `failed` and the local copy is retained.
 | 426 | `upgrade` — hold the queue; drain if allowed |
 | lost versioned write | `needs_person` → `conflict` |
 | 403, 400/422, hash mismatch, 404 | `failed` — retained with reason |
+| device-side error (vault, missing native binding) | `failed` — retained with reason |
 
 No disposition deletes local work or resends under another identity or company.
+
+`classifySendFailure(e)` turns what a shell actually catches (a tRPC client error, the gate's 426,
+a fetch/Node network error) into one of these. Anything it cannot place is `local`, so it fails
+visibly instead of retrying forever.
+
+**Wired into `SyncEngine`** (`client/src/runtime/syncEngine.ts`):
+
+- The first device-wide failure (`retry`, `reauth`, `upgrade`) stops the pass. The capture goes back
+  to `queued`, and so does every capture already prepared, keeping its server id and seal so the
+  retry is idempotent.
+- `retry`: a package is still attempted for what was prepared. The engine then records
+  `syncNotBefore`, and automatic passes wait until then. `syncOnce({ force: true })` (reconnect,
+  "Sync now") skips the wait. A pass the server answers resets the back-off.
+- `reauth` / `upgrade`: the queue is held (`hold()`) and no package is sent. Not even a forced pass
+  sends until `clearHold()` runs after sign-in or update.
+- A failed package send is classified the same way. `syncOnce` no longer throws on it.
 
 ## Known gaps (not closed by HS5)
 
@@ -94,9 +111,12 @@ No disposition deletes local work or resends under another identity or company.
   migration.
 - **Headers are not sent yet.** No installed shell exists; `clientContractHeaders()` is the helper
   the Tauri and Capacitor builds must add to the tRPC link. The website correctly sends none.
-- **`SyncEngine` does not yet call `checkUploadReceipt`, `queueDisposition` or `retryDelayMs`**; it
-  keeps its current retry-by-next-sync behaviour. Wiring it is the next step, with the outbox
-  honouring `reauth` / `upgrade` holds.
+- **Upload receipts carry no hash yet.** `fieldRoute.evidence.upload` returns `{ id, key,
+  alreadyUploaded }`, so `checkUploadReceipt` has nothing to compare against at upload time. The
+  hash is still verified end to end: the server recomputes it at package time and rejects a
+  mismatch per item. Returning the stored hash from the upload is a server change.
+- **Nothing calls `clearHold()` yet.** The sign-in and app-update flows of the installed shells
+  must call it. Until they exist, a held browser runtime clears when the page reloads (memory store).
 - **Record versions are a rule, not yet a column** on every editable table; server procedures
   adopt `classifyVersionedWrite` per record type.
 - **Session scope handshake** (`SessionScope` returned to the client) is typed, not yet a procedure.

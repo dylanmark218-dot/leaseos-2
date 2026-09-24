@@ -162,12 +162,12 @@ describe("upload receipts", () => {
 
 describe("offline queue behaviour", () => {
   it("every failure has a disposition, and none of them deletes work", () => {
-    const all: SendFailure[] = ["network", "server_unavailable", "rate_limited", "unauthenticated", "forbidden", "contract_refused", "conflict", "rejected", "not_found"];
+    const all: SendFailure[] = ["network", "server_unavailable", "rate_limited", "unauthenticated", "forbidden", "contract_refused", "conflict", "rejected", "not_found", "local"];
     const got = Object.fromEntries(all.map(f => [f, queueDisposition(f)]));
     expect(got).toEqual({
       network: "retry", server_unavailable: "retry", rate_limited: "retry",
       unauthenticated: "reauth", contract_refused: "upgrade", conflict: "needs_person",
-      forbidden: "failed", rejected: "failed", not_found: "failed",
+      forbidden: "failed", rejected: "failed", not_found: "failed", local: "failed",
     });
   });
   it("backs off exponentially within the upper half of each step, and caps", () => {

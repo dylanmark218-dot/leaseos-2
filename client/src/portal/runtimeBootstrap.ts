@@ -28,7 +28,8 @@ export function mountBrowserFallbackRuntime(transport: Transport): MountedRuntim
   const outbox = new Outbox(store, vault, tickingClock);
   const engine = new SyncEngine({ store, vault, keystore, transport, connectivity, clock: tickingClock, platform: "web" });
   if (typeof window !== "undefined") {
-    window.addEventListener("online", () => { connectivity.isOnline = true; void engine.syncOnce(); });
+    // The connection coming back is a reason to try now, not after the back-off.
+    window.addEventListener("online", () => { connectivity.isOnline = true; void engine.syncOnce({ force: true }); });
     window.addEventListener("offline", () => { connectivity.isOnline = false; });
     connectivity.isOnline = navigator.onLine;
   }
@@ -40,7 +41,8 @@ export function mountBrowserFallbackRuntime(transport: Transport): MountedRuntim
       if (c.jobId != null || c.unitId != null) { await outbox.queue(c.localId); void engine.syncOnce(); }
       return { localId: c.localId };
     },
-    syncNow: () => engine.syncOnce(),
+    // A person asked: skip the back-off. A held queue (sign in / update) stays held.
+    syncNow: () => engine.syncOnce({ force: true }),
   };
   g.leaseosRuntime = mounted;
   return mounted;
