@@ -261,3 +261,28 @@ describe("the tree that was tested is the tree that is reviewed", () => {
     expect(strays).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Release marker — ported from the v23.29 line (ec9b427), manifest B2  */
+/* ------------------------------------------------------------------ */
+
+describe("the release marker and the generated document name the same release", () => {
+  /*
+   * `LEASEOS_RELEASE` was introduced as THE explicit release source of truth, replacing a generator
+   * that inferred the label from the newest checkpoint filename. It then drifted anyway, and
+   * silently, on the line this test comes from: nothing consulted the marker, and nothing noticed
+   * when it sat at v22.20 while the document advanced through v23.x. A source of truth that no
+   * check reads is not one. This is that check.
+   */
+  it("keeps LEASEOS_RELEASE equal to the Release row of LEASEOS_CURRENT_STATE.md", () => {
+    const marker = readFileSync("LEASEOS_RELEASE", "utf8").trim();
+    const documented = state.match(/\| Release \| \*\*([^*]+)\*\*/)?.[1]?.trim();
+    expect(marker.length).toBeGreaterThan(0);
+    expect(documented).toBeDefined();
+    expect(
+      marker,
+      `LEASEOS_RELEASE says ${marker} and LEASEOS_CURRENT_STATE.md says ${documented}. ` +
+      `These name one release; regenerate the document with that release, or correct the marker.`,
+    ).toBe(documented);
+  });
+});
