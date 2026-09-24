@@ -39,9 +39,14 @@ and `0157` is historically used twice. None of those is reused.
 | 0172 | `0172_training_wallet_renewal_handoff.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | **was** with C1a's original `0172` | C1a moved off; this branch keeps 0172 |
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
+| 0182 | `0182_safety_program_builder.sql` | `claude/safety-compliance-program-builder-2qnty0` | none yet | `6f52b57` | open branch | none | first number no branch held at the 2026-09-24 scan (0178–0181 are `document-control-architecture`; 0179 also `eld-compliance-intelligence` and `migration-0169-reconciliation`) |
 
 ## Change log
 
+* **2026-09-24**: `claude/safety-compliance-program-builder-2qnty0` claims **0182** (Safety & Compliance Program
+  Builder, 14 tables). Scan at that date: 0170 (auth-workspace, work-calendar), 0172–0175 (training-academy-workforce),
+  0175–0177 (driver-portfolio ×2), 0178–0181 (document-control-architecture), 0179 (eld-compliance-intelligence,
+  migration-0169-reconciliation). No other branch was renumbered.
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
   No other branch was renumbered.

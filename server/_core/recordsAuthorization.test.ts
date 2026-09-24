@@ -533,6 +533,8 @@ describe("payroll and tax authorization boundaries", () => {
       "dispatch.readiness_own",
       "academy.read_own", "academy.progress_own", "academy.assessment_own",
       "academy.certificate.sign_own", "academy.direct_supervision_attest_own",
+      // 0182 — the policies a person must acknowledge, and their own signature on one.
+      "safety_program.read_own", "safety_program.acknowledge_own",
     ]);
   });
 

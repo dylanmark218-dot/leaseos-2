@@ -329,7 +329,12 @@ export type Permission =
   // v22.21 — Training Academy. Learner permissions are universal but self-scoped in the router.
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
-  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage";
+  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
+  // 0182 — Safety & Compliance Program Builder. read_own / acknowledge_own are universal and self-scoped
+  // in the router (the caller's own policies, the caller's own signature); manage, approve and verify are
+  // the acts that change what the company is taken to require, make a version binding, or close a loop.
+  | "safety_program.read" | "safety_program.write" | "safety_program.manage" | "safety_program.approve" | "safety_program.verify"
+  | "safety_program.read_own" | "safety_program.acknowledge_own";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -695,6 +700,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "safety_program.read",
+    "safety_program.write",
+    "safety_program.manage",
+    "safety_program.approve",
+    "safety_program.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -816,6 +826,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    "safety_program.read",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -978,6 +989,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "safety_program.read",
+    "safety_program.write",
+    "safety_program.manage",
+    "safety_program.approve",
+    "safety_program.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1230,6 +1246,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.graph.build",
   ],
   hr: [
+    "safety_program.read",
+    "safety_program.write",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1266,6 +1284,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "audit.package.read",
   ],
   legal: [
+    "safety_program.read",
     "evidence.read_legal",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
@@ -1293,6 +1312,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    "safety_program.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.read_safety_summary",
@@ -1469,6 +1489,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    "safety_program.read",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1688,6 +1709,9 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // 0182 — your own policies to acknowledge, your own signature. The router resolves the person from ctx.user.id.
+  "safety_program.read_own",
+  "safety_program.acknowledge_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -1735,6 +1759,10 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  "safety_program.manage",
+  "safety_program.approve",
+  "safety_program.verify",
+  "safety_program.acknowledge_own",
   "academy.source.review",
   "academy.certificate.issue",
   "academy.certificate.sign_own",
@@ -2859,6 +2887,44 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "telematics.videoView": "safety.video.read",
 
   /* ---- v22.21/v22.22: Training Academy ---- */
+  // 0182 — Safety & Compliance Program Builder
+  "safetyProgram.catalog": "safety_program.read",
+  "safetyProgram.templateDetail": "safety_program.read",
+  "safetyProgram.syncCatalog": "safety_program.manage",
+  "safetyProgram.obligations": "safety_program.read",
+  "safetyProgram.programGet": "safety_program.read",
+  "safetyProgram.programSet": "safety_program.manage",
+  "safetyProgram.assemble": "safety_program.read",
+  "safetyProgram.policyCreate": "safety_program.write",
+  "safetyProgram.policyList": "safety_program.read",
+  "safetyProgram.policyDetail": "safety_program.read",
+  "safetyProgram.versionDraft": "safety_program.write",
+  "safetyProgram.versionEdit": "safety_program.write",
+  "safetyProgram.versionApprove": "safety_program.approve",
+  "safetyProgram.versionWithdraw": "safety_program.approve",
+  "safetyProgram.policyRetire": "safety_program.approve",
+  "safetyProgram.myPolicies": "safety_program.read_own",
+  "safetyProgram.acknowledge": "safety_program.acknowledge_own",
+  "safetyProgram.acknowledgementStatus": "safety_program.read",
+  "safetyProgram.overlaySet": "safety_program.write",
+  "safetyProgram.overlayList": "safety_program.read",
+  "safetyProgram.reviewSchedule": "safety_program.write",
+  "safetyProgram.reviewComplete": "safety_program.approve",
+  "safetyProgram.referenceList": "safety_program.read",
+  "safetyProgram.referenceUpsert": "safety_program.manage",
+  "safetyProgram.referenceVerify": "safety_program.verify",
+  "safetyProgram.trainingRequirementList": "safety_program.read",
+  "safetyProgram.trainingRequirementUpsert": "safety_program.manage",
+  "safetyProgram.trainingMatrixCompute": "safety_program.write",
+  "safetyProgram.trainingMatrix": "safety_program.read",
+  "safetyProgram.correctiveActionOpen": "safety_program.write",
+  "safetyProgram.correctiveActionProgress": "safety_program.write",
+  "safetyProgram.correctiveActionVerify": "safety_program.verify",
+  "safetyProgram.correctiveActionList": "safety_program.read",
+  "safetyProgram.corReadiness": "safety_program.read",
+  "safetyProgram.vendorPackageManifest": "safety_program.read",
+  "safetyProgram.events": "safety_program.read",
+
   "academy.catalog": "academy.read_own",
   "academy.myTraining": "academy.read_own",
   "academy.assignmentDetail": "academy.read_own",
