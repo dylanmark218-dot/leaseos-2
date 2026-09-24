@@ -18,6 +18,8 @@ export const jobs = mysqlTable("jobs", {
   orgRef: varchar("orgRef", { length: 64 }),
   /** 0134 — the client organization a person linked; `customer` stays as the captured text. */
   customerOrgRef: varchar("customerOrgRef", { length: 64 }),
+  /** 0175 — the customer account this job is for, when a person assigned one; the portal lists a job by it. */
+  customerAccountId: int("customerAccountId"),
   jobCode: varchar("jobCode", { length: 32 }).notNull().unique(),
   type: varchar("type", { length: 120 }).notNull(),
   mode: mysqlEnum("mode", ["general", "hydrovac", "recovery", "transport"])
@@ -1130,6 +1132,10 @@ export const dailyLogs = mysqlTable("dailyLogs", {
 // This table records WHAT HAPPENED. It deliberately carries no rates or
 // amounts — "45 minutes standby" is a fact; whether that becomes money is the
 // rate engine's decision. Keeps accounting logic out of field evidence.
+/** 0175 — the open-ticket billing lifecycle. Explicit; every transition is audited. */
+export const BILLING_STATES = ["DRAFT", "OPEN", "AWAITING_CUSTOMER_REVIEW", "CUSTOMER_ACCEPTED", "DISPUTED", "FINALIZED", "INVOICED", "VOID"] as const;
+export type BillingState = (typeof BILLING_STATES)[number];
+
 export const fieldTickets = mysqlTable("fieldTickets", {
   id: int("id").autoincrement().primaryKey(),
   ticketNumber: varchar("ticketNumber", { length: 64 }).notNull().unique(),
@@ -1168,6 +1174,17 @@ export const fieldTickets = mysqlTable("fieldTickets", {
   ])
     .default("unsigned")
     .notNull(),
+  // 0175 — the open-ticket billing lifecycle, stored rather than only derived. `billingVersion` moves
+  // under a row lock on every line write; FINALIZED freezes the lines behind a `final` revision.
+  billingState: mysqlEnum("billingState", [...BILLING_STATES]).default("DRAFT").notNull(),
+  billingVersion: int("billingVersion").default(1).notNull(),
+  customerPoNumber: varchar("customerPoNumber", { length: 80 }),
+  finalizedAt: timestamp("finalizedAt"),
+  finalizedByUserId: int("finalizedByUserId"),
+  finalRevisionId: int("finalRevisionId"),
+  voidedAt: timestamp("voidedAt"),
+  voidedByUserId: int("voidedByUserId"),
+  voidReason: varchar("voidReason", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -1218,6 +1235,16 @@ export const fieldTicketLines = mysqlTable("fieldTicketLines", {
   // is operational data worth having, not something to overwrite.
   operatorStatement: varchar("operatorStatement", { length: 220 }),
   customerStatement: varchar("customerStatement", { length: 220 }),
+  // 0175 — internal-only lines never reach a customer projection; a line may name what it bills
+  // (a load, a disposal ticket, a unit, a period) and may amend a frozen line rather than edit it.
+  customerVisible: boolean("customerVisible").default(true).notNull(),
+  loadId: int("loadId"),
+  disposalTicketId: int("disposalTicketId"),
+  unitId: int("unitId"),
+  periodStartAt: timestamp("periodStartAt"),
+  periodEndAt: timestamp("periodEndAt"),
+  addedByUserId: int("addedByUserId"),
+  amendsLineId: int("amendsLineId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -4818,6 +4845,8 @@ export const customerAccounts = mysqlTable("customerAccounts", {
   // v21.11 — contract rules: which delays the customer pays for, and the post-site billing basis.
   delayBillingRulesJson: text("delayBillingRulesJson"),
   postSiteBillingRuleJson: text("postSiteBillingRuleJson"),
+  /** 0175 — what an authenticated portal identity may see of a unit's position. `none` until a person turns it on. */
+  locationSharing: mysqlEnum("locationSharing", ["none", "approximate", "live"]).default("none").notNull(),
   status: mysqlEnum("status", ["active", "on_hold", "inactive"]).default("active").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
@@ -5100,7 +5129,7 @@ export type InsertExternalAccessLog = typeof externalAccessLog.$inferInsert;
  * v21.14 — Customer alert preferences
  * ================================================================== */
 
-export const CUSTOMER_ALERT_KINDS = ["arrival", "work_start", "delay", "breakdown", "incident_notice", "load_complete", "disposal_complete", "signoff_ready", "r1_available", "r2_available", "document_ready", "dispute_update", "billing_update", "job_complete"] as const;
+export const CUSTOMER_ALERT_KINDS = ["arrival", "work_start", "delay", "breakdown", "incident_notice", "load_complete", "disposal_complete", "signoff_ready", "r1_available", "r2_available", "document_ready", "dispute_update", "billing_update", "job_complete", "tracking_link_created", "dispatched", "en_route", "on_location", "ticket_ready_for_review", "invoice_issued"] as const;
 
 export const externalAlertPreferences = mysqlTable("externalAlertPreferences", {
   id: int("id").autoincrement().primaryKey(),
@@ -8872,3 +8901,138 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
+
+/* ==================================================================
+ * 0175 — Client services: tracking links, document releases, customer actions, customer audit ledger
+ * ================================================================== */
+
+export const TRACKING_LINK_CONTACT_KINDS = ["customer", "consultant", "lease_representative", "site_supervisor", "customer_contact", "other"] as const;
+export const LOCATION_MODES = ["none", "approximate", "live"] as const;
+export const LIVE_UNTIL_RULES = ["until_completion", "hours_after_completion", "custom", "manual"] as const;
+
+/** A one-time tracking link: a random token (stored only as its hash) that projects one job to one recipient. */
+export const jobTrackingLinks = mysqlTable("jobTrackingLinks", {
+  id: int("id").autoincrement().primaryKey(),
+  linkRef: varchar("linkRef", { length: 64 }).notNull().unique(),
+  /** The acting organization of the creator; the resolver re-checks the job against it on every request. */
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  jobId: int("jobId").notNull(),
+  customerAccountId: int("customerAccountId"),
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  label: varchar("label", { length: 120 }),
+  contactKind: mysqlEnum("contactKind", [...TRACKING_LINK_CONTACT_KINDS]),
+  contactName: varchar("contactName", { length: 180 }),
+  contactEmail: varchar("contactEmail", { length: 220 }),
+  contactPhone: varchar("contactPhone", { length: 60 }),
+  externalIdentityId: int("externalIdentityId"),
+  scopeJson: text("scopeJson").notNull(),
+  locationMode: mysqlEnum("locationMode", [...LOCATION_MODES]).default("none").notNull(),
+  liveUntilRule: mysqlEnum("liveUntilRule", [...LIVE_UNTIL_RULES]).default("hours_after_completion").notNull(),
+  liveGraceHours: int("liveGraceHours"),
+  liveExpiresAt: timestamp("liveExpiresAt"),
+  expiresAt: timestamp("expiresAt"),
+  maxAccessCount: int("maxAccessCount"),
+  accessCount: int("accessCount").default(0).notNull(),
+  lastAccessedAt: timestamp("lastAccessedAt"),
+  status: mysqlEnum("status", ["active", "revoked", "disabled", "superseded"]).default("active").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokedByUserId: int("revokedByUserId"),
+  revokedReason: varchar("revokedReason", { length: 300 }),
+  supersededByLinkId: int("supersededByLinkId"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type JobTrackingLinkRow = typeof jobTrackingLinks.$inferSelect;
+export type InsertJobTrackingLink = typeof jobTrackingLinks.$inferInsert;
+
+/** Every use of a link, allowed or refused. The client address is stored only as a hash. */
+export const jobTrackingLinkAccess = mysqlTable("jobTrackingLinkAccess", {
+  id: int("id").autoincrement().primaryKey(),
+  linkId: int("linkId").notNull(),
+  action: varchar("action", { length: 40 }).notNull(),
+  outcome: mysqlEnum("outcome", ["allowed", "denied"]).notNull(),
+  detail: varchar("detail", { length: 300 }),
+  ipHash: varchar("ipHash", { length: 64 }),
+  userAgent: varchar("userAgent", { length: 200 }),
+  at: timestamp("at").notNull(),
+});
+
+export const CUSTOMER_DOCUMENT_KINDS = ["job_ticket", "load_ticket", "disposal_ticket", "scale_ticket", "signed_field_ticket", "work_order", "service_report", "proof_of_delivery", "final_invoice", "customer_receipt", "other"] as const;
+export const DOCUMENT_SOURCE_TYPES = ["fieldTicketDocument", "evidenceRecord", "commercialDocument"] as const;
+
+/** A release points into the catalogue the document already lives in, carrying that record's own number. */
+export const customerDocumentReleases = mysqlTable("customerDocumentReleases", {
+  id: int("id").autoincrement().primaryKey(),
+  releaseRef: varchar("releaseRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  jobId: int("jobId").notNull(),
+  customerAccountId: int("customerAccountId"),
+  sourceType: mysqlEnum("sourceType", [...DOCUMENT_SOURCE_TYPES]).notNull(),
+  sourceId: int("sourceId").notNull(),
+  documentRef: varchar("documentRef", { length: 80 }).notNull(),
+  kind: mysqlEnum("kind", [...CUSTOMER_DOCUMENT_KINDS]).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  contentHash: varchar("contentHash", { length: 64 }),
+  releasedByUserId: int("releasedByUserId").notNull(),
+  releasedAt: timestamp("releasedAt").notNull(),
+  expiresAt: timestamp("expiresAt"),
+  withdrawnAt: timestamp("withdrawnAt"),
+  withdrawnByUserId: int("withdrawnByUserId"),
+  withdrawReason: varchar("withdrawReason", { length: 300 }),
+  status: mysqlEnum("status", ["released", "withdrawn"]).default("released").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ source: uniqueIndex("customerDocumentReleases_source_unique").on(t.sourceType, t.sourceId) }));
+export type CustomerDocumentReleaseRow = typeof customerDocumentReleases.$inferSelect;
+
+export const CUSTOMER_ACTION_KINDS = ["acknowledge", "approve", "dispute", "comment", "sign"] as const;
+
+/** What a customer did to a ticket. Append-only; a page visit is never an action. */
+export const customerTicketActions = mysqlTable("customerTicketActions", {
+  id: int("id").autoincrement().primaryKey(),
+  actionRef: varchar("actionRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  jobId: int("jobId").notNull(),
+  fieldTicketId: int("fieldTicketId").notNull(),
+  customerAccountId: int("customerAccountId"),
+  kind: mysqlEnum("kind", [...CUSTOMER_ACTION_KINDS]).notNull(),
+  actorKind: mysqlEnum("actorKind", ["tracking_link", "portal_identity", "internal_user"]).notNull(),
+  trackingLinkId: int("trackingLinkId"),
+  externalIdentityId: int("externalIdentityId"),
+  userId: int("userId"),
+  representativeName: varchar("representativeName", { length: 180 }),
+  representativeTitle: varchar("representativeTitle", { length: 120 }),
+  customerPoNumber: varchar("customerPoNumber", { length: 80 }),
+  comment: text("comment"),
+  snapshotHash: varchar("snapshotHash", { length: 64 }),
+  revisionId: int("revisionId"),
+  signatureName: varchar("signatureName", { length: 180 }),
+  signaturePayloadHash: varchar("signaturePayloadHash", { length: 64 }),
+  ipHash: varchar("ipHash", { length: 64 }),
+  userAgent: varchar("userAgent", { length: 200 }),
+  at: timestamp("at").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CustomerTicketActionRow = typeof customerTicketActions.$inferSelect;
+
+/** The customer audit ledger: append-only, hash-chained per organization. */
+export const customerAuditEvents = mysqlTable("customerAuditEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  eventType: varchar("eventType", { length: 80 }).notNull(),
+  jobId: int("jobId"),
+  fieldTicketId: int("fieldTicketId"),
+  trackingLinkId: int("trackingLinkId"),
+  externalIdentityId: int("externalIdentityId"),
+  actorUserId: int("actorUserId"),
+  subjectType: varchar("subjectType", { length: 60 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  eventJson: text("eventJson").notNull(),
+  ipHash: varchar("ipHash", { length: 64 }),
+  previousHash: varchar("previousHash", { length: 64 }),
+  eventHash: varchar("eventHash", { length: 64 }).notNull(),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CustomerAuditEventRow = typeof customerAuditEvents.$inferSelect;

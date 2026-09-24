@@ -99,6 +99,8 @@ import { contractorOperationsRouter } from "./contractorOperationsRouter";
 import { auditRouter } from "./auditRouter";
 import { spatialRouter } from "./spatialRouter";
 import { closeoutRouter } from "./closeoutRouter";
+import { clientServicesRouter } from "./clientServicesRouter";
+import { trackingRouter } from "./trackingRouter";
 import { insuranceRouter } from "./insuranceRouter";
 import { publicProcedure, roleProcedure, router } from "./_core/trpc";
 import { storagePut } from "./storage";
@@ -365,6 +367,10 @@ export const appRouter = router({
   invoicing: invoicingRouter,
   geo: geoRouter,
   closeout: closeoutRouter,
+  // 0175 — client services: tracking links, releases, open-ticket billing (roles) …
+  clientServices: clientServicesRouter,
+  // … and the one-time link gate (server/trackingRouter.ts): its own gate, never roles, never portal identities.
+  tracking: trackingRouter,
   portalAdmin: portalAdminRouter,
   // v21.10 — external identities only; gated by externalProcedure, never by roles.
   portal: portalRouter,

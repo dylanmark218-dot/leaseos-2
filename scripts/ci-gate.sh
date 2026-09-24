@@ -110,6 +110,14 @@ echo "== 7b. External gate: portal mounts only externalProcedure, and the count 
 EXT=$(grep -c 'externalProcedure(' server/portalRouter.ts || true); ROLE_IN_PORTAL=$(grep -c 'roleProcedure(' server/portalRouter.ts || true)
 echo "externally-gated procedures: $EXT"; [ "$ROLE_IN_PORTAL" = "0" ] || { echo "portalRouter mounts a role procedure"; exit 1; }
 
+echo "== 7d. Tracking gate: trackingRouter mounts only trackingProcedure, and nothing else mounts one =="
+TRK=$(grep -c 'trackingProcedure(' server/trackingRouter.ts || true); ROLE_IN_TRK=$(grep -c 'roleProcedure(' server/trackingRouter.ts || true); EXT_IN_TRK=$(grep -c 'externalProcedure(' server/trackingRouter.ts || true)
+TRK_ELSEWHERE=$(grep -l 'trackingProcedure(' $ROUTERS 2>/dev/null | grep -v 'server/trackingRouter.ts' || true)
+echo "tracking-gated procedures: $TRK"
+if [ "$ROLE_IN_TRK" != "0" ] || [ "$EXT_IN_TRK" != "0" ]; then echo "FAIL: trackingRouter mounts a role or external procedure"; exit 1; fi
+if [ "$TRK" = "0" ]; then echo "FAIL: no trackingProcedure in trackingRouter"; exit 1; fi
+if [ -n "$TRK_ELSEWHERE" ]; then echo "FAIL: trackingProcedure mounted outside trackingRouter: $TRK_ELSEWHERE"; exit 1; fi
+
 echo "== 7c. Machine gate: inbound mounts only integrationProcedure, and the count is pinned =="
 INB=$(grep -c 'integrationProcedure(' server/integrationRouter.ts || true); ROLE_IN_INBOUND=$(sed -n '/export const inboundRouter/,$p' server/integrationRouter.ts | grep -c 'roleProcedure(' || true); EXT_IN_INBOUND=$(sed -n '/export const inboundRouter/,$p' server/integrationRouter.ts | grep -c 'externalProcedure(' || true)
 echo "integration-gated procedures: $INB"

@@ -7,6 +7,8 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  /** 0175 — the origin a customer opens a tracking link on, e.g. https://leaseos.app. Empty means links are returned as paths. */
+  publicBaseUrl: process.env.LEASEOS_PUBLIC_URL ?? "",
 };
 
 /**

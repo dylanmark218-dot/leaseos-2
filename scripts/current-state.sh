@@ -23,6 +23,7 @@ ROUTERS=$(ls server/*Router*.ts server/routers.ts server/recordsRouter.ts 2>/dev
 PROCS=$(cat $ROUTERS | grep -c 'roleProcedure(' || true)
 EXT_PROCS=$(grep -c 'externalProcedure(' server/portalRouter.ts 2>/dev/null || echo 0)
 INB_PROCS=$(grep -c 'integrationProcedure(' server/integrationRouter.ts || true)
+TRK_PROCS=$(grep -c 'trackingProcedure(' server/trackingRouter.ts 2>/dev/null || echo 0)
 BARE=$(cat $ROUTERS | grep -cE 'protectedProcedure\s*$|protectedProcedure\.' || true)
 PERMS=$(node -e '
 const fs=require("fs");const s=fs.readFileSync("server/_core/recordsAuthorization.ts","utf8");
@@ -46,7 +47,7 @@ NATIVE=$(grep -o 'NotOnDeviceError(' client/src/runtime/adapters/capacitor.ts | 
 TEMPLATE="$(mktemp)"
 # Unconditional: the unresolved-placeholder check exits before any later line.
 trap 'rm -f "$TEMPLATE"' EXIT
-export BARE EXT_PROCS INB_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES TEST_CASES TEST_FILES UNI_COUNT
+export BARE EXT_PROCS INB_PROCS TRK_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES TEST_CASES TEST_FILES UNI_COUNT
 cat > "$TEMPLATE" <<'MD'
 # LeaseOS — Current State (generated; do not edit by hand)
 
@@ -62,6 +63,7 @@ here can be added rather than read.
 | Role-authorized procedures | **@@PROCS@@** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **@@EXT_PROCS@@** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **@@INB_PROCS@@** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
+| Tracking-gated procedures (one-time links) | **@@TRK_PROCS@@** | `trackingProcedure(` call sites in `server/trackingRouter.ts` |
 | Bare `protectedProcedure` | **@@BARE@@** | must be 0 |
 | Permissions | **@@PERM_COUNT@@** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **@@SENS_COUNT@@** | `SENSITIVE_PERMISSIONS` |
@@ -1077,7 +1079,7 @@ MD
 # Only the named placeholders may change the document. Anything else that
 # looks like one is a mistake, and this refuses rather than shipping a page
 # with @@SOMETHING@@ printed in the middle of it.
-ALLOWED="BARE EXT_PROCS INB_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES TEST_CASES TEST_FILES UNI_COUNT" python3 - "$TEMPLATE" "$OUT" <<'PY'
+ALLOWED="BARE EXT_PROCS INB_PROCS TRK_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES TEST_CASES TEST_FILES UNI_COUNT" python3 - "$TEMPLATE" "$OUT" <<'PY'
 import os, re, sys
 template, out = sys.argv[1], sys.argv[2]
 text = open(template).read()

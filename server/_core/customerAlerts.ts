@@ -8,7 +8,7 @@ import type { CUSTOMER_ALERT_KINDS } from "../../drizzle/schema";
 
 export type AlertKind = (typeof CUSTOMER_ALERT_KINDS)[number];
 
-export const DEFAULT_ON: Record<AlertKind, boolean> = { arrival: true, work_start: true, delay: true, breakdown: true, incident_notice: true, load_complete: false, disposal_complete: false, signoff_ready: true, r1_available: true, r2_available: true, document_ready: true, dispute_update: true, billing_update: true, job_complete: true };
+export const DEFAULT_ON: Record<AlertKind, boolean> = { arrival: true, work_start: true, delay: true, breakdown: true, incident_notice: true, load_complete: false, disposal_complete: false, signoff_ready: true, r1_available: true, r2_available: true, document_ready: true, dispute_update: true, billing_update: true, job_complete: true, tracking_link_created: true, dispatched: true, en_route: false, on_location: true, ticket_ready_for_review: true, invoice_issued: true };
 
 export function alertText(kind: AlertKind, ctx: { ticketNumber: string; jobCode?: string | null; detail?: string | null }): { title: string; body: string; deepLink: string } {
   const where = ctx.jobCode ? `${ctx.jobCode} (${ctx.ticketNumber})` : ctx.ticketNumber;
@@ -27,6 +27,13 @@ export function alertText(kind: AlertKind, ctx: { ticketNumber: string; jobCode?
     dispute_update: ["Dispute update", `Your dispute on ${where} has been updated${ctx.detail ? `: ${ctx.detail}` : ""}.`],
     billing_update: ["Billing update", `Billing on ${where} changed${ctx.detail ? `: ${ctx.detail}` : ""}.`],
     job_complete: ["Job complete", `${where} is complete and financially ready.`],
+    // 0175 — the tracking and open-ticket chain. Templates only; nothing private has a kind.
+    tracking_link_created: ["Tracking link ready", `A tracking link for ${where} was issued${ctx.detail ? ` to ${ctx.detail}` : ""}.`],
+    dispatched: ["Unit dispatched", `A unit has been dispatched to ${where}.`],
+    en_route: ["Unit en route", `The unit for ${where} is en route.`],
+    on_location: ["Unit on location", `The unit for ${where} is on location.`],
+    ticket_ready_for_review: ["Service ticket ready for review", `The service ticket for ${where} is ready for your review${ctx.detail ? ` — ${ctx.detail}` : ""}.`],
+    invoice_issued: ["Invoice issued", `An invoice for ${where} has been issued${ctx.detail ? `: ${ctx.detail}` : ""}.`],
   };
   return { title: t[kind][0], body: t[kind][1], deepLink: `/customer?ticket=${encodeURIComponent(ctx.ticketNumber)}` };
 }

@@ -78,6 +78,8 @@ import {
   safetyEvents,
   users,
   externalIdentities,
+  jobTrackingLinks,
+  jobTrackingLinkAccess,
   integrationClients,
   coreRecordOwnership, organizationMemberships, fieldTickets, incidentReports, loads } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -1518,4 +1520,32 @@ export async function touchIntegrationClient(id: number, at: Date) {
   const db = await getDb();
   if (!db) return;
   await db.update(integrationClients).set({ lastSeenAt: at }).where(eq(integrationClients.id, id));
+}
+
+/* ---- 0175: one-time tracking links (the gate's store) ---- */
+
+/** The link a token hash names, or undefined. The row alone decides nothing; the gate does. */
+export async function findTrackingLinkByTokenHash(tokenHash: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(jobTrackingLinks).where(eq(jobTrackingLinks.tokenHash, tokenHash)).limit(1))[0];
+}
+
+/** One access row per use, allowed or refused. Never throws: a refused attempt with no log line is still refused. */
+export async function recordTrackingLinkAccess(input: { linkId: number; action: string; outcome: "allowed" | "denied"; detail: string | null; ipHash: string | null; userAgent: string | null; at: Date }) {
+  try {
+    const db = await getDb();
+    if (!db) return undefined;
+    const r = await db.insert(jobTrackingLinkAccess).values(input);
+    return r[0]?.insertId;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Count and stamp an allowed use. Atomic, so the access limit cannot be raced past. */
+export async function touchTrackingLink(id: number, at: Date) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(jobTrackingLinks).set({ accessCount: sql`${jobTrackingLinks.accessCount} + 1`, lastAccessedAt: at }).where(eq(jobTrackingLinks.id, id));
 }

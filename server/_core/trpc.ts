@@ -250,3 +250,96 @@ export function integrationProcedure(procedureName: string) {
     })
   );
 }
+
+/* ==================================================================
+ * 0175 — trackingProcedure: the one-time link gate.
+ *
+ * Built like externalProcedure and no weaker, for a recipient who has no
+ * account: the token in `x-tracking-token` is hashed and resolved to exactly
+ * one link; the link's status, expiry and access limit are checked; the job it
+ * names must still belong to the link's organization (fail closed — a link
+ * can never reach a second job, and a job moved out of the tenant is gone);
+ * the link's SCOPE decides its permissions, never the request; every decision
+ * is an audit row and an access-log row; an action or a download is refused
+ * when its audit row cannot be written. A refusal never says whether the job
+ * exists.
+ * ================================================================== */
+
+import { TRACKING_SENSITIVE_PERMISSIONS, trackingPermissionForProcedure, type TrackingPermission } from "./recordsAuthorization";
+import { findTrackingLinkByTokenHash, jobInScope, recordTrackingLinkAccess, touchTrackingLink } from "../db";
+import { SCOPE_FOR_PERMISSION, hashClientAddress, hashTrackingToken, linkCheck, parseScope, tokenShapeValid, type LocationMode, type TrackingScope } from "./trackingLinks";
+import { ENV } from "./env";
+
+export type TrackingContext = {
+  linkId: number;
+  linkRef: string;
+  orgRef: string;
+  jobId: number;
+  customerAccountId: number | null;
+  scope: TrackingScope;
+  locationMode: LocationMode;
+  liveUntilRule: "until_completion" | "hours_after_completion" | "custom" | "manual";
+  liveGraceHours: number | null;
+  liveExpiresAt: Date | null;
+  expiresAt: Date | null;
+  contactName: string | null;
+  contactKind: string | null;
+  externalIdentityId: number | null;
+  /** Keyed hash of the client address, for the audit rows; never the address. */
+  ipHash: string | null;
+  userAgent: string | null;
+};
+
+/** The client address as the proxy or socket reports it; hashed before it is stored anywhere. */
+function clientAddressOf(req: unknown): { ipHash: string | null; userAgent: string | null } {
+  const r = req as { headers?: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string }; ip?: string } | undefined;
+  const fwd = r?.headers?.["x-forwarded-for"];
+  const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(",")[0]?.trim();
+  const address = first || r?.ip || r?.socket?.remoteAddress || null;
+  const ua = r?.headers?.["user-agent"];
+  return { ipHash: hashClientAddress(address, ENV.cookieSecret || "leaseos"), userAgent: (Array.isArray(ua) ? ua[0] : ua)?.slice(0, 200) ?? null };
+}
+
+export function trackingProcedure(procedureName: string) {
+  const permission: TrackingPermission | null = trackingPermissionForProcedure(procedureName);
+  if (!permission) throw new Error(`No tracking permission mapped for procedure "${procedureName}" — add it to TRACKING_PROCEDURE_PERMISSIONS`);
+  const scopeKey = SCOPE_FOR_PERMISSION[permission];
+  return t.procedure.use(
+    t.middleware(async ({ ctx, next }) => {
+      const headers = (ctx.req as { headers?: Record<string, string | string[] | undefined> } | undefined)?.headers ?? {};
+      const raw = headers["x-tracking-token"];
+      const token = Array.isArray(raw) ? raw[0] : raw;
+      const now = new Date();
+      const { ipHash, userAgent } = clientAddressOf(ctx.req);
+      const refuse = async (outcome: string, detail: string, code: "UNAUTHORIZED" | "FORBIDDEN", linkId: number | null) => {
+        await recordAuthorizationDecision({ actorUserId: null, procedureName, permission, rolesHeld: "tracking_link", outcome, subjectType: "trackingLink", subjectId: linkId != null ? String(linkId) : null, detail, occurredAt: now });
+        if (linkId != null) await recordTrackingLinkAccess({ linkId, action: procedureName, outcome: "denied", detail, ipHash, userAgent, at: now });
+        throw new TRPCError({ code, message: detail });
+      };
+      if (!token) return refuse("denied_unauthenticated", "No tracking token", "UNAUTHORIZED", null);
+      // A token of the wrong shape is not even hashed: it cannot be one this system issued.
+      if (!tokenShapeValid(token)) return refuse("denied_unauthenticated", "Unknown tracking link", "UNAUTHORIZED", null);
+      const link = await findTrackingLinkByTokenHash(hashTrackingToken(token));
+      if (!link) return refuse("denied_unauthenticated", "Unknown tracking link", "UNAUTHORIZED", null);
+      const lc = linkCheck({ status: link.status, expiresAt: link.expiresAt, maxAccessCount: link.maxAccessCount, accessCount: link.accessCount }, now);
+      if (!lc.allowed) return refuse("denied_scope", lc.reason!, "FORBIDDEN", link.id);
+      // The job must still be the link's organization's. Ambiguous or moved ownership is "gone", not "forbidden".
+      const job = await jobInScope(link.jobId, { tenantId: link.orgRef });
+      if (!job) return refuse("denied_scope", "This tracking link no longer resolves to a job", "FORBIDDEN", link.id);
+      const scope = parseScope(link.scopeJson);
+      if (!scope[scopeKey]) return refuse("denied_no_role", `This tracking link does not permit ${scopeKey}`, "FORBIDDEN", link.id);
+      const auditId = await recordAuthorizationDecision({ actorUserId: null, procedureName, permission, rolesHeld: "tracking_link", outcome: "allowed", subjectType: "trackingLink", subjectId: link.linkRef, detail: null, occurredAt: now });
+      const accessId = await recordTrackingLinkAccess({ linkId: link.id, action: procedureName, outcome: "allowed", detail: null, ipHash, userAgent, at: now });
+      if ((auditId === undefined || accessId === undefined) && TRACKING_SENSITIVE_PERMISSIONS.includes(permission)) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Refused: a customer action is not performed when its audit record cannot be written" });
+      }
+      await touchTrackingLink(link.id, now);
+      const tracking: TrackingContext = {
+        linkId: link.id, linkRef: link.linkRef, orgRef: link.orgRef, jobId: link.jobId, customerAccountId: link.customerAccountId, scope,
+        locationMode: link.locationMode, liveUntilRule: link.liveUntilRule, liveGraceHours: link.liveGraceHours, liveExpiresAt: link.liveExpiresAt, expiresAt: link.expiresAt,
+        contactName: link.contactName, contactKind: link.contactKind, externalIdentityId: link.externalIdentityId, ipHash, userAgent,
+      };
+      return next({ ctx: { ...ctx, tracking } });
+    })
+  );
+}

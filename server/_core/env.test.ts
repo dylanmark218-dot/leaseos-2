@@ -23,6 +23,7 @@ const OK = {
   isProduction: true,
   forgeApiUrl: "https://forge.example",
   forgeApiKey: "forge-key",
+  publicBaseUrl: "",
 };
 
 const envWith = (over: Partial<typeof OK>) => ({ ...OK, ...over });

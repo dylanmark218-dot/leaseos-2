@@ -329,7 +329,11 @@ export type Permission =
   // v22.21 — Training Academy. Learner permissions are universal but self-scoped in the router.
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
-  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage";
+  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
+  // 0175 — client services: one-time tracking links, customer document releases, the open-ticket
+  // billing lifecycle. Managing a link, releasing a document and moving a ticket's billing state
+  // each change what a customer may see or owe, and each fails closed without its audit row.
+  | "client_services.read" | "client_services.link.manage" | "client_services.document.release" | "client_services.ticket.manage";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -431,6 +435,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "client_services.read",
+    "client_services.link.manage",
+    "client_services.document.release",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -816,6 +823,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    "client_services.read",
+    "client_services.link.manage",
+    "client_services.document.release",
+    "client_services.ticket.manage",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -978,6 +989,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "client_services.read",
+    "client_services.link.manage",
+    "client_services.document.release",
+    "client_services.ticket.manage",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1293,6 +1308,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    "client_services.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.read_safety_summary",
@@ -1347,6 +1363,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   /* ---- B20.5 finance and payroll functions ---- */
 
   bookkeeper: [
+    "client_services.read",
+    "client_services.ticket.manage",
     "facility.directory.read",
     "commercial.read",
     "commercial.write",
@@ -1469,6 +1487,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    "client_services.read",
+    "client_services.link.manage",
+    "client_services.document.release",
+    "client_services.ticket.manage",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1917,6 +1939,11 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // self-service grant into the restricted sector with no row saying the glass was
   // broken is that category, and without this it proceeded when the audit insert failed.
   "restricted.read",
+  // 0175 — client services writes: a link decides who sees a job, a release decides which
+  // document leaves the building, a billing-state change decides what the customer owes.
+  "client_services.link.manage",
+  "client_services.document.release",
+  "client_services.ticket.manage",
 ] as const;
 
 export function isSensitivePermission(p: Permission): boolean {
@@ -2936,6 +2963,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsRecord": "closeout.terms.record",
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
+  /* ---- 0175: client services — tracking links, releases, open-ticket billing ---- */
+  "clientServices.trackingLinkCreate": "client_services.link.manage",
+  "clientServices.trackingLinkRevoke": "client_services.link.manage",
+  "clientServices.trackingLinkRegenerate": "client_services.link.manage",
+  "clientServices.trackingLinkConfigure": "client_services.link.manage",
+  "clientServices.trackingLinks": "client_services.read",
+  "clientServices.jobCustomerAssign": "client_services.link.manage",
+  "clientServices.auditTrail": "client_services.read",
+  "clientServices.auditVerify": "client_services.read",
 } as const satisfies Record<string, Permission>;
 
 /**
@@ -3059,4 +3095,27 @@ export const INTEGRATION_SENSITIVE_PERMISSIONS: readonly IntegrationPermission[]
 
 export function integrationPermissionForProcedure(name: string): IntegrationPermission | null {
   return (INTEGRATION_PROCEDURE_PERMISSIONS as Record<string, IntegrationPermission>)[name] ?? null;
+}
+
+/* ==================================================================
+ * 0175 — One-time tracking links
+ *
+ * A recipient of a tracking link is not a person with roles and not a portal
+ * identity: they hold exactly what the link's scope grants, for one job, for
+ * the life of the link. The map is consulted at wiring time; an unmapped
+ * tracking procedure refuses to mount. Everything here lives in
+ * server/trackingRouter.ts and nowhere else.
+ * ================================================================== */
+
+export type TrackingPermission = "tracking.read" | "tracking.loads" | "tracking.documents" | "tracking.billing" | "tracking.act";
+
+export const TRACKING_PROCEDURE_PERMISSIONS = {
+  "tracking.resolve": "tracking.read",
+} as const satisfies Record<string, TrackingPermission>;
+
+/** A customer action and a document download are refused when their audit row cannot be written. */
+export const TRACKING_SENSITIVE_PERMISSIONS: readonly TrackingPermission[] = ["tracking.act", "tracking.documents"];
+
+export function trackingPermissionForProcedure(name: string): TrackingPermission | null {
+  return (TRACKING_PROCEDURE_PERMISSIONS as Record<string, TrackingPermission>)[name] ?? null;
 }
