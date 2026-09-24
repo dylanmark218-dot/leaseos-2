@@ -6,7 +6,11 @@ is the one implemented; a different answer to any of them is a change to the bra
 document. Checkpoint 2 (§15) is on the branch: migrations `0182`/`0183`, board membership, publish
 and moderation authorities, replay identity, the post's life with responses, offers and availability,
 the `openShifts` engine wired and its inline copy deleted, the outbox helper, and the refusal suites.
-Checkpoint 3 (the award) is not built.
+Checkpoint 3 (the award, §5.5) is on the branch too: `shifts.award` on `dispatch.assign`, the canonical
+binding run inside the award's transaction (`setRoleAssignmentIn`), the lock order posting → role →
+post → offers, refusal on a stale or uncovered check, the winner's offer awarded and the others not
+selected, the job room kept in step with every binding, and the race suite. `0184` was not needed
+and is released. Checkpoint 4 (Field Mobile) is not built.
 
 **One correction from building it (§5.4).** The preview's verdict is the board's own — role, leave,
 rotation, declared availability, licence, required qualifications — and the readiness composer's

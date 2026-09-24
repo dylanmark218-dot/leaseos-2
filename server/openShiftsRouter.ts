@@ -38,6 +38,7 @@ import {
   crewsOf, declarationsFor, declarersCovering, hardReasons, liveOffersFor, postEvent, previewFor, ref, statusNow, toShiftPost, type Preview, type ShiftPostRow,
 } from "./openShiftsService";
 import { enqueueBoardEvent } from "./_core/boardOutbox";
+import { awardPost } from "./shiftAwardService";
 
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
 
@@ -508,6 +509,27 @@ export const openShiftsRouter = router({
           note: input.decision === "accepted" ? "Accepted — your statement, recorded. The award binds the slot and the readiness check runs then." : "Declined.",
         };
       });
+    }),
+
+  /**
+   * 0183 — Checkpoint 3: fill the post by binding the slot it names, through the canonical
+   * binding, behind the readiness check the dispatcher recorded for this subject and slot.
+   * `dispatch.assign` — the binding's own permission; no second way to bind a slot.
+   */
+  award: roleProcedure("shifts.award")
+    .input(z.object({
+      postRef: z.string().min(1).max(64),
+      userId: z.number().int().positive(),
+      unitId: z.number().int().positive().nullable(),
+      trailerId: z.number().int().positive().nullable().default(null),
+      checkId: z.number().int().positive(),
+      expectedLastEventId: z.number().int().positive().nullable(),
+      reason: z.string().min(5).max(500).nullable().default(null),
+    }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const d = await db();
+      const acting = await resolveActingScope(d, ctx.user.id);
+      return awardPost({ ...input, actorUserId: ctx.user.id, scope: acting });
     }),
 
   /* ---------------- availability: "Offer Me Work" ---------------- */

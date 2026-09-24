@@ -56,7 +56,7 @@ on the branch and move into the table above.
 |---|---|---|---|---|---|
 | 0182 | `0182_board_membership.sql` | `claude/leaseos-communications-marketplace-p8ptqw` | `docs/product/COMPANY_BOARD_OPEN_WORK_DESIGN.md` §10 | scan of every remote branch against `main` `6f52b57` on 2026-09-24: highest claim anywhere is `0181` (`claude/document-control-architecture-jlffzk`) | **file now on the branch** (Checkpoint 2) |
 | 0183 | `0183_open_work_offers_availability.sql` | same | same | same | **file now on the branch** (Checkpoint 2) |
-| 0184 | reserved for that design's Checkpoint 3 | same | same | same | released if Checkpoint 3 needs no column |
+| 0184 | *(released)* | same | same | same | Checkpoint 3 needed no column; `0184` is free again |
 
 ## Change log (continued)
 
@@ -65,3 +65,5 @@ on the branch and move into the table above.
 * **2026-09-24** (later): Checkpoint 2 of that design added `0182_board_membership.sql` and
   `0183_open_work_offers_availability.sql` to `claude/leaseos-communications-marketplace-p8ptqw`. `0184`
   stays reserved. Nothing renumbered.
+* **2026-09-24** (Checkpoint 3): `0184` released — the award needed no column. The first number free
+  on `main` and every open branch is again `0184`.

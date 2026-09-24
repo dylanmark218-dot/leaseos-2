@@ -533,7 +533,7 @@ holding no recognized role still gets nothing.
 
 ## 0182/0183 — Company Board + Open Work (design: `docs/product/COMPANY_BOARD_OPEN_WORK_DESIGN.md`)
 
-Twenty procedures added, all `ROLE_AUTHORIZED`; the live counts are generated into
+Twenty-one procedures added, all `ROLE_AUTHORIZED`; the live counts are generated into
 `LEASEOS_CURRENT_STATE.md` and pinned in `procedureAuthorization.test.ts`.
 
 | Procedure | Permission | Note |
@@ -548,6 +548,7 @@ Twenty procedures added, all `ROLE_AUTHORIZED`; the live counts are generated in
 | `shifts.respond`, `shifts.offerRespond` | `shifts.interest` | a person's own answer |
 | `shifts.publish`, `shifts.close`, `shifts.cancel`, `shifts.offer`, `shifts.offerWithdraw` | `shifts.post` (sensitive) | the poster's acts |
 | `shifts.link` | `dispatch.assign` | naming the slot a post fills is an assignment act |
+| `shifts.award` (Checkpoint 3) | `dispatch.assign` | binds the slot through the canonical binding behind the dispatcher's stored check; not `dispatch.award` |
 | `shifts.availabilitySet`, `shifts.availabilityMine` | `shifts.availability_own` (universal, new) | reads and writes `ctx.user.id` only |
 | `shifts.availabilityFor` | `shifts.read` | another person's declarations, in the caller's organization only |
 

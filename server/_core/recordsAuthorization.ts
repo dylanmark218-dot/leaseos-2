@@ -2743,6 +2743,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "shifts.offer": "shifts.post",
   "shifts.offerWithdraw": "shifts.post",
   "shifts.link": "dispatch.assign",
+  "shifts.award": "dispatch.assign",
   "shifts.availabilitySet": "shifts.availability_own",
   "shifts.availabilityMine": "shifts.availability_own",
   "shifts.availabilityFor": "shifts.read",
