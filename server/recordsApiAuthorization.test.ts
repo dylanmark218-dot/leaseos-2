@@ -1,4 +1,5 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
 import { recordsRouter } from "./recordsRouter";
@@ -37,9 +38,48 @@ let pool: mysql.Pool;
 let nextId = 12_000_000 + Math.floor(Math.random() * 60_000);
 const newUserId = () => nextId++;
 
+/**
+ * Its own database, because one test in this file needs a globally clean slate.
+ *
+ * "Grants management and nothing else when it does run" can only be shown when
+ * NOBODY holds management, and `countActiveManagementGrants` is installation-
+ * wide with nothing to scope it by. So the test revoked every management grant,
+ * did its work, and put them back. The note left there said the restore narrows
+ * the window to this test's own duration but does not close it, and that a
+ * database of its own was worth doing if it ever bit again.
+ *
+ * It bit again: on one full run in three, eight tests across seven other files
+ * failed — a mechanic release, two work-order transitions, a shop day, a
+ * webhook delivery — all of them callers who held management until this file
+ * took it away for a few milliseconds. Nothing in any of those files hints at
+ * the connection, which is what makes this class of flake expensive: the
+ * failure never appears where the cause is.
+ *
+ * `getDb()` reads `process.env.DATABASE_URL` on its FIRST call and caches the
+ * connection, and vitest gives each test file its own process, so pointing the
+ * variable at a private database here — before any procedure runs — is enough
+ * to move this whole file off the shared one. Migrating it costs about six
+ * seconds.
+ */
+const PRIVATE_DB = `recauth_${Math.random().toString(36).slice(2, 8)}`;
+let admin: mysql.Connection | undefined;
+
 beforeAll(async () => {
   if (!URL) return;
-  pool = mysql.createPool({ uri: URL, connectionLimit: 4 });
+  const u = new global.URL(URL);
+  const base = { host: u.hostname, port: Number(u.port || 3306), user: decodeURIComponent(u.username), password: decodeURIComponent(u.password) };
+  admin = await mysql.createConnection({ ...base, multipleStatements: true });
+  await admin.query(`DROP DATABASE IF EXISTS \`${PRIVATE_DB}\`; CREATE DATABASE \`${PRIVATE_DB}\`;`);
+  const privateUrl = `mysql://${base.user}:${base.password}@${base.host}:${base.port}/${PRIVATE_DB}`;
+  execFileSync("bash", ["scripts/apply-migrations.sh"], { env: { ...process.env, DATABASE_URL: privateUrl }, stdio: "pipe" });
+  // Before the first getDb(), which is what binds the connection for this process.
+  process.env.DATABASE_URL = privateUrl;
+  pool = mysql.createPool({ uri: privateUrl, connectionLimit: 4 });
+}, 240_000);
+
+afterAll(async () => {
+  await pool?.end();
+  if (admin) { await admin.query(`DROP DATABASE IF EXISTS \`${PRIVATE_DB}\``); await admin.end(); }
 });
 
 /** A caller with a session and whatever roles we granted them — no UI involved. */

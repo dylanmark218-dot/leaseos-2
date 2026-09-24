@@ -46,6 +46,7 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   "server/gst.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "period-bound arithmetic (2026-Q3 ends 1 October); no comparison with now" },
   "server/ifta.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "quarter-bound arithmetic; no comparison with now" },
   "server/qualificationStore.test.ts": { dates: ["2026-10-01", "2026-11-10"], verdict: "clock_independent", reason: "the expired holding is evaluated against the shift's explicit STARTS, not now" },
+  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "reviewed 2026-09-24 when the clock came within three weeks of the first. Every date-bearing assertion runs off the explicit `asOf` of 2026-10-15: the fiscal year comes from the entity's own fiscalYearEndMonth/Day (10/31), the acquisition and disposal are explicit dates, and the 2036 replacement is acquiredAt plus the stated ten years. The file's only real clock reads are `grantedAt` on a role grant and the `acquiredAt` of two registrations that are refused on identity grounds — 'already asset' and 'one truck, one identity' — before any date logic is reached" },
 };
 
 function testFiles(dir: string, out: string[] = []): string[] {

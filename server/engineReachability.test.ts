@@ -217,7 +217,7 @@ describe("every shared engine is reached, or says why not", () => {
     // block would pass vacuously.
     expect(engines.length).toBeGreaterThan(0);
     expect(engines.length + declarations.length).toBe(mods.length);
-    expect(engines.map(m => m.name).sort()).toEqual(["_core/errors", "captureQuality", "const", "paperworkGuidance", "printability"]);
+    expect(engines.map(m => m.name).sort()).toEqual(["_core/errors", "captureQuality", "const", "organizationSwitch", "paperworkGuidance", "printability"]);
     // `const.ts` qualifies on its two OAuth-state codecs and `_core/errors` on
     // its HttpError factories, rather than on either being a rule. Both are
     // reached, so the classification costs nothing; narrowing the test to

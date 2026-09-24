@@ -37,7 +37,19 @@ import { and, eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { actingOrganizationSelections, organizationMemberships, organizations } from "../drizzle/schema";
-import { resolveActingScope } from "./_core/actingScope";
+import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
+import { syncNamespace } from "@shared/organizationSwitch";
+
+/**
+ * The namespace for a resolved scope.
+ *
+ * `resolveActingScope` reports the single tenant as the literal SINGLE_TENANT_ID
+ * sentinel, which is an in-memory value and not an organization reference, so
+ * it is mapped back to null before being turned into a key. Filing that
+ * caller's material under `org:default` would make a sentinel look like a
+ * company and would collide with a real organization that ever took the name.
+ */
+const namespaceFor = (tenantId: string) => syncNamespace(tenantId === SINGLE_TENANT_ID ? null : tenantId);
 
 async function dbOrThrow() {
   const db = await getDb();
@@ -79,11 +91,11 @@ export const actingOrganizationRouter = router({
       const now = new Date();
       const mine = await activeMembershipsFor(db, ctx.user.id, now);
 
-      let acting: { orgRef: string; membershipRef: string | null; derivedFrom: string } | null = null;
+      let acting: { orgRef: string; membershipRef: string | null; derivedFrom: string; syncNamespace: string } | null = null;
       let mustChoose = false;
       try {
         const scope = await resolveActingScope(db, ctx.user.id, now);
-        acting = { orgRef: scope.tenantId, membershipRef: scope.membershipRef, derivedFrom: scope.derivedFrom };
+        acting = { orgRef: scope.tenantId, membershipRef: scope.membershipRef, derivedFrom: scope.derivedFrom, syncNamespace: namespaceFor(scope.tenantId) };
       } catch {
         // Several memberships and no usable selection. That is this procedure's
         // whole reason to exist, so it is a state to report, not to rethrow.
@@ -128,6 +140,15 @@ export const actingOrganizationRouter = router({
       // Resolved, not echoed: what the caller gets back is what every other
       // procedure will now see, which is the only answer worth returning.
       const scope = await resolveActingScope(db, ctx.user.id, now);
-      return { orgRef: scope.tenantId, membershipRef: scope.membershipRef, derivedFrom: scope.derivedFrom };
+      /*
+       * The namespace comes from the server so a handset never derives its own.
+       * The device has to purge and re-file everything it holds on a switch,
+       * and if the two ever computed that key differently the old
+       * organization's material would sit in a namespace nobody purges while
+       * the new one reads somewhere else. `organizationSwitchPlan` turns this
+       * into the ordered steps; the plan is pure and lives in shared/ so both
+       * sides are working from one definition.
+       */
+      return { orgRef: scope.tenantId, membershipRef: scope.membershipRef, derivedFrom: scope.derivedFrom, syncNamespace: namespaceFor(scope.tenantId) };
     }),
 });

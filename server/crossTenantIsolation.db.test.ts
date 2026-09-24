@@ -19,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { readFileSync } from "node:fs";
 import { appRouter } from "./routers";
+import { organizationSwitchPlan, syncNamespace } from "@shared/organizationSwitch";
 
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
@@ -907,5 +908,53 @@ d("F6 — a device refusal does not tell you whether the device exists", () => {
       .toEqual(await observable(callerFor(safetyA).device.activate({ deviceRef: nothing })));
     expect(await observable(callerFor(safetyA).device.rotateKey({ deviceRef: bsDevice, newPublicKeySpkiBase64: "k".repeat(120) })))
       .toEqual(await observable(callerFor(safetyA).device.rotateKey({ deviceRef: nothing, newPublicKeySpkiBase64: "k".repeat(120) })));
+  }, 30_000);
+});
+
+/**
+ * The organization-switch contract, where the server states it.
+ *
+ * The plan itself is pure and tested in organizationSwitch.test.ts. What needs
+ * a live server is the one value the handset must NOT derive for itself: the
+ * namespace it files an organization's material under. If the two sides ever
+ * computed that key differently, a switch would purge one namespace while the
+ * device read another, and the old organization's records would sit on the
+ * handset unreachable by the purge and reachable by everything else.
+ */
+d("the acting organization tells the device where to file its material", () => {
+  it("names a namespace that matches the shared contract, and changes with the organization", async () => {
+    const orgA = await org(), orgB = await org();
+    const user = await member(orgA, ["driver"]);
+    await pool.execute(
+      "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01',1)",
+      [`MEM-${rnd()}`, orgB, user],
+    );
+
+    const mine = await callerFor(user).organization.memberships();
+    expect(mine.mustChoose).toBe(true);   // two live memberships, nothing chosen
+
+    const toA = mine.memberships.find(m => m.orgRef === orgA)!;
+    const actingA = await callerFor(user).organization.actAs({ membershipRef: toA.membershipRef });
+    expect(actingA.syncNamespace).toBe(syncNamespace(orgA));
+
+    const toB = mine.memberships.find(m => m.orgRef === orgB)!;
+    const actingB = await callerFor(user).organization.actAs({ membershipRef: toB.membershipRef });
+    expect(actingB.syncNamespace).toBe(syncNamespace(orgB));
+    expect(actingB.syncNamespace).not.toBe(actingA.syncNamespace);
+
+    // And the plan the device would run from those two values is a real switch.
+    const plan = organizationSwitchPlan({ holding: orgA, target: orgB, deviceBoundTo: orgA, unsentCaptures: 0 });
+    expect(plan.outcome).toBe("switch");
+    expect(plan.steps).toContainEqual({ step: "purge_tenant_cache", of: actingA.syncNamespace });
+    expect(plan.steps).toContainEqual({ step: "switch_namespace", from: actingA.syncNamespace, to: actingB.syncNamespace });
+  }, 30_000);
+
+  it("does not file the caller with no organization under the sentinel's name", async () => {
+    const lone = await member(null, ["driver"]);
+    const mine = await callerFor(lone).organization.memberships();
+    expect(mine.acting?.syncNamespace).toBe(syncNamespace(null));
+    // `default` is an in-memory sentinel, not a company; a real organization
+    // could be named that, and the two must never share a key.
+    expect(mine.acting?.syncNamespace).not.toBe("org:default");
   }, 30_000);
 });
