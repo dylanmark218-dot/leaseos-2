@@ -93,7 +93,13 @@ existing queue, chain of custody, approval queue, timeline, completion
 package, vendor and facility shells) · fleet shop (parts ledger with cores
 and counts, tires by serial and axle position, warranty policies and
 two-person claims, serialized tools, recalls held unverified, work-order
-and unit cost that names what it cannot know) · capital assets (one
+and unit cost that names what it cannot know) · fleet maintenance,
+checkpoint 1 (a work order owned by a person holding a shop role, with
+every assignment kept as history; a cancelled work order that repairs
+nothing, releases nothing and leaves its defect open; a legacy update that
+can no longer move a status; a forward-only advance that stamps when work
+started and finished and keeps its note; telematics answering not-found
+across an organization) · capital assets (one
 identity per unit, two-person capital review, CCA class as a verified
 candidate, pool arithmetic with the claim UNKNOWN until the rate is
 verified, year-end schedule reviewed by a second person, the asset twin) ·

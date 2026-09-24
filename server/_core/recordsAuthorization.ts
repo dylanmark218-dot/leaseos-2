@@ -329,7 +329,10 @@ export type Permission =
   // v22.21 — Training Academy. Learner permissions are universal but self-scoped in the router.
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
-  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage";
+  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
+  // 0189 — fleet maintenance, checkpoint 1. Assigning a work order names who owns the repair; cancelling
+  // one can leave a defect unrepaired, so it is sensitive.
+  | "maintenance.workorder.assign" | "maintenance.workorder.cancel";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -693,6 +696,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.read",
     "spatial.vehicle.manage",
     "spatial.vehicle.verify",
+    // 0189 — fleet maintenance, checkpoint 1.
+    "maintenance.workorder.assign",
+    "maintenance.workorder.cancel",
   ],
   safety: [
     "device.verifySeal",
@@ -1228,6 +1234,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
     "spatial.route.approve",
     "geo.graph.build",
+    // 0189 — fleet maintenance, checkpoint 1.
+    "maintenance.workorder.assign",
+    "maintenance.workorder.cancel",
   ],
   hr: [
     "academy.assign",
@@ -1917,6 +1926,8 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // self-service grant into the restricted sector with no row saying the glass was
   // broken is that category, and without this it proceeded when the audit insert failed.
   "restricted.read",
+  // 0189 — a cancelled work order can leave a defect unrepaired. It may not happen unrecorded.
+  "maintenance.workorder.cancel",
 ] as const;
 
 export function isSensitivePermission(p: Permission): boolean {
@@ -2936,6 +2947,11 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsRecord": "closeout.terms.record",
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
+
+  /* ---- 0189: fleet maintenance, checkpoint 1 ---- */
+  "maintenance.workOrderAssignment": "maintenance.read_defect",
+  "maintenance.workOrderAssign": "maintenance.workorder.assign",
+  "maintenance.workOrderCancel": "maintenance.workorder.cancel",
 } as const satisfies Record<string, Permission>;
 
 /**

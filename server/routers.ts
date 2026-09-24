@@ -36,6 +36,7 @@ async function scopeFor(userId: number) {
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   return { tenantId: (await resolveActingScope(db, userId)).tenantId };
 }
+
 import { securityIncidentsRouter } from "./securityIncidentsRouter";
 import { commercialOfficeRouter } from "./commercialOfficeRouter";
 import { facilityDirectoryRouter } from "./facilityDirectoryRouter";
@@ -90,6 +91,7 @@ import { agentRouter } from "./agentRouter";
 import { hosRouter } from "./hosRouter";
 import { portalRouter } from "./portalRouter";
 import { shopRouter } from "./shopRouter";
+import { maintenanceRouter } from "./maintenanceRouter";
 import { assetRouter } from "./assetRouter";
 import { projectRouter } from "./projectRouter";
 import { inboundRouter, integrationRouter } from "./integrationRouter";
@@ -372,6 +374,8 @@ export const appRouter = router({
   // v21.10 — external identities only; gated by externalProcedure, never by roles.
   portal: portalRouter,
   shop: shopRouter,
+  // 0189 — fleet maintenance, checkpoint 1: who owns a work order, and cancelling one.
+  maintenance: maintenanceRouter,
   asset: assetRouter,
   project: projectRouter,
   integration: integrationRouter,
@@ -1019,8 +1023,10 @@ export const appRouter = router({
         .input(z.object({ unitId: z.number().int().optional() }).optional())
         .query(async ({ ctx, input }) => {
         // P4.1: scope guard
-        if (input?.unitId != null && !(await unitInScope(input.unitId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
-        return listWorkOrders(input?.unitId);
+        const scope = await scopeFor(ctx.user.id);
+        if (input?.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+        // 0189 — without a unit this listed every organization's work orders. It lists the caller's.
+        return listWorkOrders(input?.unitId, scope);
       }),
       create: roleProcedure("workOrders.create")
         .input(
@@ -1057,22 +1063,19 @@ export const appRouter = router({
         .mutation(async ({ ctx, input }) => {
         // P4.1: scope guard
         if (input?.unitId != null && !(await unitInScope(input.unitId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
-        return createWorkOrder(input);
+        return createWorkOrder({ ...input, openedByUserId: ctx.user.id });
       }),
       update: roleProcedure("workOrders.update")
         .input(
           z.object({
             id: z.number().int().positive(),
-            status: z
-              .enum([
-                "draft",
-                "open",
-                "in_progress",
-                "waiting_parts",
-                "ready_for_service",
-                "closed",
-              ])
-              .optional(),
+            /*
+             * 0189 — status is not editable here. This took any status, including backwards, and so
+             * walked around `shop.workOrderAdvance`'s forward-only rule; a status sent now is refused
+             * at the schema, not dropped quietly. Moving a work order is `shop.workOrderAdvance`;
+             * cancelling one is `maintenance.workOrderCancel`.
+             */
+            status: REFUSED,
             priority: z.enum(["routine", "urgent", "critical"]).optional(),
             startedAt: z.coerce.date().optional(),
             completedAt: z.coerce.date().optional(),
@@ -1089,7 +1092,7 @@ export const appRouter = router({
         // P4.1: scope guard
         if (!(await workOrderInScope(input.id, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.id} not found` });
         
-          const { id, ...values } = input;
+          const { id, status: _refused, ...values } = input;
           return updateWorkOrder(id, values);
         }),
     }),

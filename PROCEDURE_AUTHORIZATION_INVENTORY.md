@@ -42,6 +42,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/commercialRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/closeoutRouter.ts` | `ROLE_AUTHORIZED` | **20** |
 | `server/shopRouter.ts` | `ROLE_AUTHORIZED` | **23** |
+| `server/maintenanceRouter.ts` | `ROLE_AUTHORIZED` | **3** |
 | `server/assetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/projectRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/integrationRouter.ts` | `ROLE_AUTHORIZED` (`integrationRouter`) / `INTEGRATION_CLIENT` (`inboundRouter`, `integrationProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md`) | **7** |
@@ -53,7 +54,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**356 role-authorized procedures. Zero on bare `protectedProcedure`.**
+**359 role-authorized procedures. Zero on bare `protectedProcedure`.**
 
 Baseline in `procedureAuthorization.test.ts` is 0 and must never rise.
 
@@ -401,6 +402,16 @@ missed them.
   the closing UCC are UNKNOWN until a person verifies the class rate, and an
   unknown schedule cannot be reviewed as a tax fact or carry balances
   forward. The schedule is prepared by one person and reviewed by another.
+- **A work order is owned by a person, and cancelling it repairs nothing.** (0189, fleet
+  maintenance checkpoint 1) Assigning, reassigning and unassigning a work order is
+  history, not an edit: the assignee is a user holding a shop role in the unit's
+  organization, and the assigner is the caller. Assigning is the shop lead's and
+  management's. Cancelling is theirs too and sensitive: a cancelled work order
+  never evidences a release, and the defect it was opened for stays open. Reading
+  who owns a work order uses `maintenance.read_defect`. The legacy
+  `workOrders.update` no longer sets a status at all; `shop.workOrderAdvance`
+  moves a work order and `maintenance.workOrderCancel` ends one. Telematics
+  procedures now answer NOT_FOUND for another organization's unit.
 - **Stock is a derivation; a count is a movement.** (v21.15) On-hand is the
   signed sum of an append-only movement ledger; a physical count adjusts the
   record and keeps the variance; an issue beyond on-hand is refused by the

@@ -50,7 +50,8 @@ describe("the monolith's create paths refuse trust-bearing input at the schema",
   it("names every refused field, and none of them has a default that would let a value through", () => {
     const src = readFileSync("server/routers.ts", "utf8");
     const refused = (src.match(/^\s+([a-zA-Z]+): REFUSED,/gm) ?? []).map(l => l.trim().split(":")[0]!);
-    expect(refused.sort()).toEqual(["accessRole", "authMethod", "classificationStatus", "confidence", "confidence", "documentHash", "inspectionStatus", "maintenanceStatus", "source", "status", "status", "status", "status", "status", "unitId", "verificationStatus", "verifiedAt", "verifiedAt"]);
+    // 0189: +1 status — `fieldRoute.workOrders.update` no longer moves a work order; that is shop.workOrderAdvance.
+    expect(refused.sort()).toEqual(["accessRole", "authMethod", "classificationStatus", "confidence", "confidence", "documentHash", "inspectionStatus", "maintenanceStatus", "source", "status", "status", "status", "status", "status", "status", "unitId", "verificationStatus", "verifiedAt", "verifiedAt"]);
     expect(src).toContain('const REFUSED = z.undefined(');
   });
 });

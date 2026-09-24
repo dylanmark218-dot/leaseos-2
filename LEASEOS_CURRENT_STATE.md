@@ -7,16 +7,16 @@ here can be added rather than read.
 | Measure | Value | Read from |
 |---|---|---|
 | Release | **v23.25** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **410** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **170** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **652** | `roleProcedure(` call sites across all routers |
+| Tables | **411** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **171** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **655** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **355** | the `Permission` union |
-| Sensitive (fail-closed) permissions | **125** | `SENSITIVE_PERMISSIONS` |
+| Permissions | **357** | the `Permission` union |
+| Sensitive (fail-closed) permissions | **126** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **327 / 4449** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **328 / 4455** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -43,7 +43,13 @@ existing queue, chain of custody, approval queue, timeline, completion
 package, vendor and facility shells) · fleet shop (parts ledger with cores
 and counts, tires by serial and axle position, warranty policies and
 two-person claims, serialized tools, recalls held unverified, work-order
-and unit cost that names what it cannot know) · capital assets (one
+and unit cost that names what it cannot know) · fleet maintenance,
+checkpoint 1 (a work order owned by a person holding a shop role, with
+every assignment kept as history; a cancelled work order that repairs
+nothing, releases nothing and leaves its defect open; a legacy update that
+can no longer move a status; a forward-only advance that stamps when work
+started and finished and keeps its note; telematics answering not-found
+across an organization) · capital assets (one
 identity per unit, two-person capital review, CCA class as a verified
 candidate, pool arithmetic with the claim UNKNOWN until the rate is
 verified, year-end schedule reviewed by a second person, the asset twin) ·

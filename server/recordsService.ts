@@ -461,7 +461,7 @@ export type WorkOrderSubject = {
   unitId: number;
   status:
     | "draft" | "open" | "in_progress" | "waiting_parts"
-    | "ready_for_service" | "closed";
+    | "ready_for_service" | "closed" | "cancelled";
   defectSeverity: "advisory" | "inspection_required" | "critical";
 };
 

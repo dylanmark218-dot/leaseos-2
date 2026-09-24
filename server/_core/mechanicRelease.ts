@@ -25,7 +25,9 @@ export type ReleaseAttempt = {
     | "in_progress"
     | "waiting_parts"
     | "ready_for_service"
-    | "closed";
+    | "closed"
+    // 0189 — a cancelled work order produced no repair and cannot produce a release.
+    | "cancelled";
   defectSeverity: DefectSeverity;
   releaseType: ReleaseType;
   repairSummary?: string | null;
@@ -90,6 +92,12 @@ export function evaluateMechanicRelease(a: ReleaseAttempt): ReleaseDecision {
     blockers.push({
       code: "work_not_started",
       label: `Work order is ${a.workOrderStatus} — no repair has been performed`,
+    });
+  }
+  if (a.workOrderStatus === "cancelled") {
+    blockers.push({
+      code: "work_order_cancelled",
+      label: "Work order was cancelled — no repair was performed under it",
     });
   }
   if (a.workOrderStatus === "waiting_parts") {

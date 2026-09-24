@@ -14,6 +14,49 @@ status changed.* Every table and procedure below is checked against it.
 
 ---
 
+## Revision 2026-09-24 — built on the Fleet & Equipment Portfolio, not beside it
+
+The first version of this document was written from a survey of `main` and missed an unmerged design
+on `claude/fleet-equipment-portfolio-design-3d13d5`:
+`docs/fleet/FLEET_EQUIPMENT_PORTFOLIO_SURVEY_AND_DESIGN.md`. The owner named that portfolio as the
+foundation this module must sit on, and it already specifies four things this document proposed
+differently. Where they overlap, **the portfolio's model governs**, and this module consumes it:
+
+| Concept | This document proposed | The portfolio specifies | Now |
+|---|---|---|---|
+| Manual holds | `unitServiceHolds` (`kind`, lifted by a second person) | `unitHolds` (`holdType` safety / maintenance / inspection / compliance / damage / administrative, `dispatchEffect` block / warn, type-gated release, `orgRef`, evidence) | **`unitHolds`**. §3.3's `unitServiceHolds` is withdrawn |
+| Meters | copy every odometer and hour figure into `unitMeterReadings` (int minor units, correction chain) | a manual ledger for readings with no home, and every other source **read in place** with its label — master-manifest rule 3 forbids duplicating distance values across tables | **the portfolio's ledger plus the read-in-place union.** The copy design and its back-fill are withdrawn |
+| Unit state | `unitServiceState` projection | `fleetPortfolio.operationalState(facts)` with lifecycle stored and operational state derived | **`operationalState`**. §3.4 is withdrawn |
+| Hold codes in readiness | `unit_hold_<kind>`, all non-overridable | `unit_hold_<type>` with block holds `APPROVED_POLICY_ONLY` and warn holds `WARNING_ONLY` | **the portfolio's table** (§B.5 there) |
+
+Two further facts changed since the first version:
+
+- **The 0169 release blocker is closed.** `claude/migration-0169-reconciliation` merged (PR #17)
+  and renumbered the trip-stop provenance migration forward as `0179`.
+- **Migration numbers.** `0175`–`0188` are all claimed by open branches. The first number free on
+  `main` and every branch is `0189`, which checkpoint 1 took.
+
+**Consequence for the sequence (§9).** The portfolio's own plan runs Fleet Asset Core → Inspections
+and Defects → Documents → a mechanic work-order portal. That overlaps this document's CP2–CP6. The
+recommendation, for the owner (O-11 in §10), is one sequence, not two:
+
+1. **Mechanic CP1 — done:** work-order ownership and cancellation, and four survey fixes (below).
+   Nothing in it overlaps the portfolio.
+2. **Portfolio Fleet Asset Core** — `unitHolds`, the meter ledger and union, `operationalState`,
+   lifecycle, components, `fleetPortfolioEvents`, hold codes in readiness.
+3. **Portfolio checkpoint 2 (Inspections and Defects), absorbing this document's CP2** — the defect
+   history, severity proposal and triage, defect → work order in one transaction, work-order tasks,
+   one release door, roadside close.
+4. **This document's CP3–CP8 on that foundation** — preventive maintenance reading the portfolio's
+   meter union, parts and labour and costs, the portal UI, driver alerts and the lockout (placing
+   `unitHolds` of type `maintenance` / `safety` rather than a table of its own), history and reports,
+   the release gate.
+
+Sections below that describe withdrawn tables are left as written and marked, so the reasoning that
+was replaced can be read.
+
+---
+
 ## 0. The one thing to decide first: the SPINE moratorium
 
 `docs/register/SPINE_WIRING_PLAN.md` states, hash-pinned by `server/spineWiringPlan.test.ts`: *"The
@@ -37,8 +80,13 @@ are that kind of work. Two parts are not:
 **Recommendation:** amend D-01 to name this module as the first post-spine domain, on the condition
 that every new engine ships wired in the same checkpoint (never a `DECLARED_UNWIRED` entry), and
 that no migration lands until the `0169` reconciliation blocker named in
-`docs/register/SPINE_ITEM1_BOUNDARY_CONFIRMATION.md` is closed. The amendment is recorded as an
-owner decision in §10 and in the checkpoint document, not implied.
+`docs/register/SPINE_ITEM1_BOUNDARY_CONFIRMATION.md` is closed (it closed on 2026-09-24 as `0179`).
+The amendment is recorded as an owner decision in §10 and in the checkpoint document, not implied.
+
+*Revision 2026-09-24:* the meter record in the table above is now the portfolio's, and the
+portfolio's own survey reaches the same moratorium reading (its C-1): a projection plus a router,
+with any new `_core` module reached from its router in the same PR. Checkpoint 1 as delivered adds
+no `_core` module at all.
 
 ---
 
@@ -246,6 +294,9 @@ Every table below is append-only unless a `status` column is named, and every on
 through `unitId` unless it carries `orgRef`. Column types follow the repo: `int` ids, `varchar`
 refs, `timestamp`, `enum`, integer minor units.
 
+> **Withdrawn 2026-09-24** — superseded by the portfolio's `unitMeterReadings` manual ledger and
+> read-in-place union (see the revision at the top). Kept for the reasoning.
+
 **`unitMeterReadings`** (CP1) — the meter record
 
 | Column | Notes |
@@ -269,6 +320,8 @@ sources disagree beyond `odometerReconciliation`'s tolerance — a discrepancy i
 averaged. Every existing writer in §1.3 also inserts a reading here from CP1 on (dual-write, the
 same shape as the money shadows), so the record fills from the day it exists; the historical
 columns are back-filled by one script with `source` set truthfully and `confidence: 'stated'`.
+
+> **Withdrawn 2026-09-24** — superseded by the portfolio's `unitHolds`. Kept for the reasoning.
 
 **`unitServiceHolds`** (CP1) — explicit holds
 
@@ -392,6 +445,10 @@ current meter; the reason names the missing thing. A schedule with three axes an
 is evaluated on the two it can read and says the third is unknown — it does not round to `ok`.
 
 ### 3.4 The unit service state — one projection, every reader
+
+> **Withdrawn 2026-09-24** — superseded by the portfolio's `operationalState(facts)`. The reason
+> ordering below (held > unknown > restricted > available, unknown when a source cannot be read) is
+> offered to that projection as a review note, not built here.
 
 ```
 unitServiceState(unitId, now) → {
@@ -601,34 +658,22 @@ collision register, the `OPERATIONAL_PROCEDURE_PERMISSIONS` pin bumped in both t
 history note, the inventory row and total updated, the `current-state.sh` heredoc carrying the
 router's phrase, and `documentationTruth` extended with that phrase.
 
-### CP1 — domain model, migrations, authorization
+### CP1 — work-order ownership, cancellation, and four fixes (delivered 2026-09-24)
 
-- Migration `0175_fleet_maintenance_model.sql`: `unitMeterReadings`, `unitServiceHolds`,
-  `maintenanceDefects` ALTER, `workOrders` ALTER (incl. `cancelled`); indexes.
-- `schema.ts` in step; column parity green.
-- `server/_core/unitMeter.ts` (`currentMeter`, reconciliation across sources, `unknown` with
-  reasons) and `server/_core/unitServiceState.ts` — **both reached** by `maintenanceRouter.ts`
-  in this checkpoint.
-- `maintenanceRouter.ts`: `meterRecord`, `meterCorrect`, `meterCurrent`, `holdPlace`, `holdLift`
-  (refuses `safety` lifts — nothing can satisfy them until CP2 exists, and it says so),
-  `unitServiceState`, `workOrderCancel`, `workOrderAssign` (writes `workOrderAssignments` — the
-  table lands here so cancel and assign have provenance from day one).
-- Dual-write: every §1.3 writer also inserts a `unitMeterReadings` row; back-fill script under
-  `scripts/`, labelled by source.
-- Fixes S-2 (`workOrders.update` loses `status`), S-7 (`workOrderAdvance` sets `startedAt` on
-  the move to `in_progress` and `completedAt` on `ready_for_service`, and its `note` is appended to
-  `workOrders.findings` with a timestamp and the caller's id until `maintenanceDefectEvents` lands
-  in CP2), S-8 (scope on `telematics.*`, `asset.*`, unfiltered `workOrders.list`).
-- Permissions: `maintenance.meter.*`, `maintenance.hold.*`, `maintenance.workorder.assign/cancel`,
-  `maintenance.my_unit_read`; sensitive set +4.
-- Tests: pure (`unitMeter.test.ts`: unknown-not-zero, disagreement surfaced, correction chain;
-  `unitServiceState.test.ts`: every input in isolation and combined, `unknown` on read failure);
-  `tenantScopeMaintenance.db.test.ts` (another organization's unit answers NOT_FOUND on every
-  procedure); the readiness suite unchanged and green (nothing consumes the new state yet).
-- **Done when:** a meter reading from telematics, a work order and a trip on the same unit read
-  back as three rows with sources, `currentMeter` names the disagreement, a `manual` hold placed by
-  a shop lead cannot be lifted by the same person, and no procedure in the tree can move a work
-  order backwards.
+Narrowed from the original CP1 once the portfolio design was found; the withdrawn parts are listed in
+the revision at the top. The record is `docs/register/MECHANIC_PORTAL_CP1_WORK_ORDER_OWNERSHIP.md`.
+
+- Migration `0189_work_order_ownership.sql`: `workOrderAssignments` (append-only), `workOrders`
+  gains `cancelled`, `openedByUserId`, `cancelledAt`, `cancelledByUserId`, `cancelReason`.
+- `server/maintenanceRouter.ts` (mounted as `maintenance`): `workOrderAssignment` (read),
+  `workOrderAssign`, `workOrderCancel`. Two permissions, `maintenance.workorder.assign` and
+  `maintenance.workorder.cancel` (sensitive), held by shop lead and management.
+- `evaluateMechanicRelease` refuses a cancelled work order (`work_order_cancelled`); the shop refuses
+  to advance it or issue parts to it.
+- S-2: `fieldRoute.workOrders.update` refuses a `status` at the schema. S-7: `shop.workOrderAdvance`
+  stamps `startedAt` / `completedAt` once and keeps its note. S-8: every telematics procedure and the
+  unit-less `fieldRoute.workOrders.list` are scoped to the caller's organization.
+- No new `_core` engine; the unwired-engine census is unchanged.
 
 ### CP2 — defect to work order
 
@@ -745,11 +790,11 @@ router's phrase, and `documentationTruth` extended with that phrase.
 
 ---
 
-## 10. Owner decisions needed before CP1
+## 10. Owner decisions
 
 | ID | Decision | Recommended default |
 |---|---|---|
-| O-1 | Amend D-01 for this module (§0), and close the `0169` reconciliation blocker before `0175` lands | amend, conditioned on every engine shipping wired; CP1/CP2 can start on the routers while the blocker closes |
+| O-1 | Amend D-01 for this module (§0) | amend, conditioned on every engine shipping wired. The `0169` blocker it was paired with closed as `0179`; CP1 needed no amendment because it adds no engine |
 | O-2 | A `held` unit is refused at slot binding in every enforcement mode | yes — a hold is a known stop, not an unknown |
 | O-3 | A driver-proposed `critical` holds the unit before triage | yes; triage may lower it with a reason, recorded |
 | O-4 | Severity vocabulary stays three-valued (`advisory / inspection_required / critical`) rather than the functional spec's L1–L4 | keep three; the readiness classification, the release evaluator and eighteen database tests are built on them; the driver's proposal is a separate column |
@@ -759,6 +804,8 @@ router's phrase, and `documentationTruth` extended with that phrase.
 | O-8 | Trailers and equipment get schedules exactly as trucks (they are `units`) | yes; catalogue rows carry an `appliesToVehicleTypes` hint only |
 | O-9 | Who may place a `manual` hold | shop_lead, safety, management; dispatcher may not |
 | O-10 | The retired `records.maintenance.recordRelease` refuses with a pointer rather than being deleted | refuse with pointer (the `hos.limitVerify` precedent) |
+| O-11 | Run the mechanic portal and the Fleet & Equipment Portfolio as one sequence (revision at the top), with the portfolio's Fleet Asset Core next | yes — every later mechanic checkpoint reads the portfolio's holds, meters and state |
+| O-12 | Meter regression: the portfolio records a reading below the last verified one as `meter_regression`, flagged and never rejected; the withdrawn draft here read the meter as unknown until corrected. Which does a service interval see? | the portfolio's flag, plus: a service interval reading a regressed meter reports `not_evaluable` rather than a due figure |
 
 ---
 

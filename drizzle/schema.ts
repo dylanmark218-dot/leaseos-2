@@ -703,6 +703,8 @@ export const workOrders = mysqlTable("workOrders", {
     "waiting_parts",
     "ready_for_service",
     "closed",
+    // 0189 — cancelled is not closed: nothing was repaired, so it can never evidence a release.
+    "cancelled",
   ])
     .default("open")
     .notNull(),
@@ -719,6 +721,11 @@ export const workOrders = mysqlTable("workOrders", {
   parts: text("parts"),
   findings: text("findings"),
   correctiveAction: text("correctiveAction"),
+  /* 0189 — who opened it, and the cancellation act on the row it changes. NULL on older rows means not recorded. */
+  openedByUserId: int("openedByUserId"),
+  cancelledAt: timestamp("cancelledAt"),
+  cancelledByUserId: int("cancelledByUserId"),
+  cancelReason: varchar("cancelReason", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -8891,4 +8898,26 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   loadId: int("loadId"),
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
+});
+
+/* ------------------------------------------------------------------ */
+/* 0189 — Fleet maintenance, checkpoint 1: who owns a work order        */
+/* ------------------------------------------------------------------ */
+
+/** Who owns a work order, as history. The current assignee is the newest row; nothing updates one. */
+export const workOrderAssignments = mysqlTable("workOrderAssignments", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  workOrderId: int("workOrderId").notNull(),
+  unitId: int("unitId").notNull(),
+  eventType: mysqlEnum("eventType", ["assigned", "reassigned", "unassigned"]).notNull(),
+  fromUserId: int("fromUserId"),
+  toUserId: int("toUserId"),
+  shopFacilityId: int("shopFacilityId"),
+  expectedCompletionAt: timestamp("expectedCompletionAt"),
+  reason: varchar("reason", { length: 400 }),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 40 }).notNull(),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

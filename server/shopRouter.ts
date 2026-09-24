@@ -59,7 +59,7 @@ export const shopRouter = router({
       const p = await partByNumber(input.partNumber);
       const wo = (await db.select({ id: workOrders.id, unitId: workOrders.unitId, status: workOrders.status }).from(workOrders).where(eq(workOrders.workOrderNumber, input.workOrderNumber)).limit(1))[0];
       if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: "Work order not found" });
-      if (wo.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Work order is closed" });
+      if (wo.status === "closed" || wo.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Work order is ${wo.status}` });
       const pos = (await positionsFor(p.id)).find(x => x.bin === input.bin) ?? { onHandQty: 0, avgUnitCostCents: null };
       const d = issueDecision({ onHandQty: pos.onHandQty, qty: input.qty, partNumber: p.partNumber });
       if (!d.permitted) throw new TRPCError({ code: "PRECONDITION_FAILED", message: d.refusal! });
@@ -301,8 +301,20 @@ export const shopRouter = router({
       // back to in_progress from waiting_parts is forward in the real sense.
       const sideways = wo.status === "waiting_parts" && input.to === "in_progress";
       if (wo.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A closed work order is not reopened by changing a status — raise a new one" });
+      if (wo.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A cancelled work order is not reopened by changing a status — raise a new one" });
       if (to <= from && !sideways) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `A work order does not move from ${wo.status} back to ${input.to}` });
-      await db.update(workOrders).set({ status: input.to }).where(eq(workOrders.id, input.workOrderId));
+      /*
+       * 0189 — the move leaves a trace. `startedAt` is set the first time work starts and `completedAt`
+       * the first time it reaches ready-for-service or closed; neither is ever moved. The note was
+       * accepted and thrown away; it is now appended to the findings with who and when, until the
+       * defect history table (maintenance checkpoint 2) carries it as its own row.
+       */
+      const now = new Date();
+      const set: Partial<typeof workOrders.$inferInsert> = { status: input.to };
+      if (input.to === "in_progress" && !wo.startedAt) set.startedAt = now;
+      if ((input.to === "ready_for_service" || input.to === "closed") && !wo.completedAt) set.completedAt = now;
+      if (input.note?.trim()) set.findings = `${wo.findings ? `${wo.findings}\n` : ""}[${now.toISOString()} ${wo.status} → ${input.to}, user ${ctx.user.id}] ${input.note.trim()}`;
+      await db.update(workOrders).set(set).where(eq(workOrders.id, input.workOrderId));
       return { workOrderId: input.workOrderId, from: wo.status, to: input.to };
     }),
 

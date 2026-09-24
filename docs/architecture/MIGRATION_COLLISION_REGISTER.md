@@ -39,8 +39,16 @@ and `0157` is historically used twice. None of those is reused.
 | 0172 | `0172_training_wallet_renewal_handoff.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | **was** with C1a's original `0172` | C1a moved off; this branch keeps 0172 |
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
+| 0189 | `0189_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | none yet | `1680e94` | open branch; full gate green locally | none: `0175`–`0188` are all claimed by open branches (scan below), `0179` is on `main` | keeps 0189 |
 
 ## Change log
+
+* **2026-09-24**: `claude/mechanic-portal-domain-82efa9` claims `0189` (fleet maintenance checkpoint 1,
+  work-order ownership). The register's scan against every `origin` branch found `0175` claimed four
+  times (`claude/client-portal-job-tracking-zqmejc`, both driver-portfolio branches,
+  `claude/leaseos-auth-workspace-system-t008ad`) and every number through `0188` claimed by at least
+  one branch, so 0189 is the first number free on `main` and on every open branch. The branch had
+  drafted `0175`; it moved before any push.
 
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
