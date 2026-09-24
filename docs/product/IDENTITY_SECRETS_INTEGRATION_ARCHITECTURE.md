@@ -153,7 +153,7 @@ New table, org-scoped, storing a **reference** and never a secret:
 integrationConnections
   orgRef            NULL = platform-wide (511, weather); non-null = this company's own account
   providerKey       "alberta_511" | "manitoba_511" | "yukon_511" | ...
-  credentialType    "none" | "api_key" | "oauth2" | "hmac"
+  authScheme        see the seven below
   secretRef         "integrations/alberta511"    -- a pointer, never the value
   status            "active" | "rotating" | "revoked"
   scopesJson        ["traffic/read"]
@@ -161,9 +161,31 @@ integrationConnections
   lastRotatedAt, rotationDueAt, createdByUserId, revokedAt
 ```
 
+#### The declared authentication schemes
+
+A connector **declares** its scheme; LeaseOS never assumes one. An earlier draft of this
+document collapsed these into four values, which lost a distinction that matters — see the
+rule below the table.
+
+| Scheme | What LeaseOS holds | Lifecycle LeaseOS owns |
+|---|---|---|
+| `NONE` | nothing | — open feed; still goes through a connector |
+| `API_KEY` | a long-lived key | rotation only |
+| `STATIC_BEARER` | a long-lived token | rotation only |
+| `OAUTH2_CLIENT_CREDENTIALS` | client id + secret | **mints** access tokens; there is no refresh token |
+| `OAUTH2_REFRESH` | a refresh credential | rotates refresh, mints access |
+| `SIGNED_REQUEST` | a signing secret | per-request signature, never transmitted |
+| `MUTUAL_TLS` | a client certificate + key | certificate renewal, not token rotation |
+
+**Only the schemes a shipping connector actually needs get implemented.** The enum exists so
+that adding one is a connector change rather than a redesign; building all seven during S2
+is explicitly out of scope.
+
 Rules:
-- `credentialType: "none"` for open feeds — they still go through the connector, so caching, licence and audit apply uniformly.
-- OAuth providers store the **refresh** credential server-side; access tokens are held in memory and never persisted beyond their life.
+- `authScheme: NONE` for open feeds — they still go through the connector, so caching, licence and audit apply uniformly.
+- **The two OAuth grants are not one scheme.** `OAUTH2_CLIENT_CREDENTIALS` issues an access token and *no* refresh token — LeaseOS re-mints from the client secret when it expires. `OAUTH2_REFRESH` issues both, and the refresh credential is the thing that must be stored and rotated. Treating them alike means either storing a refresh token that does not exist, or never rotating one that does. Earlier drafts of this section said "OAuth providers store the refresh credential server-side" without qualification, which is wrong for the client-credentials grant.
+- `SIGNED_REQUEST` and `MUTUAL_TLS` hold material that is **never sent as a bearer value** — a signature is computed per request, a client certificate is presented during the handshake. Neither belongs in a header the way an API key does, and neither is rotated on the token schedule.
+- Access tokens under either OAuth grant are held in memory and never persisted beyond their life.
 - `orgRef` non-null gives per-company credentials (Company A's telematics ≠ Company B's). The connector resolves by tenant context; A can never request B's connection.
 - **Every read through a connector consults `knowledgeSourceId`'s licence** before storing or serving content. Missing assessment ⇒ `unassessed` ⇒ permitted to do nothing.
 
