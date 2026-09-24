@@ -28,7 +28,19 @@ export type CaptureKind =
   | "pretrip" | "posttrip" | "hos_event" | "job_accept" | "load_ticket" | "disposal_ticket" | "fuel_receipt"
   | "expense_receipt" | "photo" | "signature" | "incident" | "defect_report" | "tailgate" | "tdg_document" | "voice_note"
   // v22.20 — a roadside enforcement document and the order it carries.
-  | "roadside_enforcement" | "oos_order";
+  | "roadside_enforcement" | "oos_order"
+  // 0182/0183 — a board message, an acknowledgement of one, a response to open work.
+  | "board_message" | "board_acknowledgement" | "shift_response";
+
+/**
+ * 0182/0183 — captures sent DIRECTLY to their own tRPC procedure with the capture's `localId` as
+ * the client mutation id, never packaged for `sync.receivePackage`. A chat message is not evidence:
+ * sealing one would make a conversation an evidence record, and the package protocol would upload
+ * it as a file. They share the outbox, the six states and the store; they do not share the channel.
+ * Each relates to a channel, a message or a post rather than to a job or a unit.
+ */
+export const DIRECT_CAPTURE_KINDS: readonly CaptureKind[] = ["board_message", "board_acknowledgement", "shift_response"];
+export const isDirectCapture = (kind: CaptureKind): boolean => DIRECT_CAPTURE_KINDS.includes(kind);
 
 export type GpsFix = { latitude: number; longitude: number; accuracyM: number | null; fixedAt: string; source: "device_gps" | "network" | "manual" };
 

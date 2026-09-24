@@ -65,6 +65,20 @@ d("acknowledgement", () => {
     expect(await count(pool, "SELECT COUNT(*) AS n FROM domainEventOutbox WHERE aggregateType = 'boardMessage' AND aggregateId = ? AND eventType = 'message.acknowledged'", [m.messageRef])).toBe(1);
   });
 
+  it("tells the reader whether they owe an acknowledgement: false before, true after, null when they were never in the audience", async () => {
+    const a = await org(pool);
+    const safety = await member(pool, a, ["safety"]);
+    const drv = await member(pool, a, ["driver"]);
+    const bystander = await member(pool, a, ["driver"]);
+    const c = await callerFor(safety).board.createChannel({ type: "safety", name: `S ${rnd()}` });
+    const m = await callerFor(safety).board.post({ channelRef: c.channelRef, body: "Do not use Unit 318", priority: "urgent", deviceCreatedAt: NOW(), recipients: [drv] });
+    const mine = async (userId: number) => (await callerFor(userId).board.read({ channelRef: c.channelRef })).messages.find(x => x.messageRef === m.messageRef)!.acknowledgedByMe;
+    expect(await mine(drv)).toBe(false);
+    expect(await mine(bystander)).toBeNull();
+    await callerFor(drv).board.acknowledge({ messageRef: m.messageRef });
+    expect(await mine(drv)).toBe(true);
+  });
+
   it("gives another organization's person no receipt to acknowledge", async () => {
     const a = await org(pool), b = await org(pool);
     const safety = await member(pool, a, ["safety"]);

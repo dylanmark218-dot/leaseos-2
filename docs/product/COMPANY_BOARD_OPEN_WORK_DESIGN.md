@@ -10,7 +10,15 @@ Checkpoint 3 (the award, §5.5) is on the branch too: `shifts.award` on `dispatc
 binding run inside the award's transaction (`setRoleAssignmentIn`), the lock order posting → role →
 post → offers, refusal on a stale or uncovered check, the winner's offer awarded and the others not
 selected, the job room kept in step with every binding, and the race suite. `0184` was not needed
-and is released. Checkpoint 4 (Field Mobile) is not built.
+and is released. Checkpoint 4 (§11, the Field Mobile slice) is on the branch as well: a **Board**
+panel in the portal shell with the six tabs (Inbox · Dispatch · My Jobs · Open Work · Company ·
+Safety), conversations, the open-work list and card, acknowledgement, answering a post and an offer.
+Writes go through `client/src/runtime/boardQueue.ts`, built on the existing `Outbox` with three new
+capture kinds (`board_message`, `board_acknowledgement`, `shift_response`) that are sent straight to
+their own procedure with the capture's `localId` as the mutation id and are excluded from
+`SyncEngine` packaging. Without the native shell the queue is in memory and the screen says so.
+Answering an offer is online-only, and says so. `board.read` now returns `acknowledgedByMe`.
+All four checkpoints are built; nothing is merged.
 
 **One correction from building it (§5.4).** The preview's verdict is the board's own — role, leave,
 rotation, declared availability, licence, required qualifications — and the readiness composer's

@@ -8,7 +8,7 @@
  * the same rule the server's storage plan applies.
  */
 
-import type { CaptureAuthorizationClaim, CaptureKind, GpsFix, LocalCapture, LocalStore, FileVault, Clock } from "./contracts";
+import { isDirectCapture, type CaptureAuthorizationClaim, type CaptureKind, type GpsFix, type LocalCapture, type LocalStore, type FileVault, type Clock } from "./contracts";
 
 const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -40,8 +40,37 @@ export class Outbox {
     // The vault refuses to seal a record that relates to nothing. Better the
     // worker hears it now — "which job or unit is this for?" — than the sync
     // engine hears it hours later.
-    if (c.jobId == null && c.unitId == null) throw new Error(`Capture ${localId} relates to no job or unit — it cannot be sealed on the server; attach it to one before queuing`);
+    //
+    // 0182/0183 — a direct capture is never sealed; it relates to a channel, a
+    // message or a post instead, and must name one. Relating to nothing is
+    // refused the same way.
+    if (isDirectCapture(c.kind)) {
+      const f = c.fields as { channelRef?: unknown; messageRef?: unknown; postRef?: unknown };
+      if (!f.channelRef && !f.messageRef && !f.postRef) throw new Error(`Capture ${localId} relates to no channel, message or post — name one before queuing`);
+    } else if (c.jobId == null && c.unitId == null) {
+      throw new Error(`Capture ${localId} relates to no job or unit — it cannot be sealed on the server; attach it to one before queuing`);
+    }
     return this.transition(c, "queued", { lastError: null });
+  }
+
+  /**
+   * 0182/0183 — the send did not reach a server that answered: back to queued, attempt counted,
+   * reason kept. Not `failed`: failed means the server refused it, and a dropped connection is
+   * not a refusal. The retry carries the same mutation id, so it cannot become a second record.
+   */
+  async requeue(localId: string, reason: string) {
+    const c = await this.must(localId);
+    if (c.syncState !== "syncing") throw new Error(`Capture ${localId} is ${c.syncState}; only a capture being sent goes back to the queue`);
+    return this.transition(c, "queued", { lastError: reason });
+  }
+
+  /** 0182/0183 — the server's reference for a direct capture, kept once it answered. */
+  async setServerRef(localId: string, serverRef: string) {
+    const c = await this.must(localId);
+    c.fields = { ...c.fields, serverRef };
+    c.updatedAt = this.clock.now().toISOString();
+    await this.store.putCapture(c);
+    return c;
   }
 
   async markSyncing(localId: string, packageRef: string) { return this.transition(await this.must(localId), "syncing", { packagedIn: packageRef, attempts: (await this.must(localId)).attempts + 1 }); }

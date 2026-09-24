@@ -817,6 +817,13 @@ export const messageBoardRouter = router({
         const view = await viewFor(d, { kind: row.kind, objectRef: row.objectRef, heldPermissions: permissionsFor(readerRoles) });
         byMessage.set(row.messageRef, [...(byMessage.get(row.messageRef) ?? []), view]);
       }
+      // 0182 — the reader's own receipt, so a screen asks for an acknowledgement only from somebody
+      // who owes one. No receipt is `null`: not in the audience, which is not "acknowledged".
+      const myReceipts = visible.length && viewer.internal
+        ? await d.select({ messageRef: messageReceipts.messageRef, acknowledgedAt: messageReceipts.acknowledgedAt }).from(messageReceipts)
+            .where(and(eq(messageReceipts.userId, ctx.user.id), inArray(messageReceipts.messageRef, visible.map(m => m.messageRef))))
+        : [];
+      const receiptOf = new Map(myReceipts.map(r => [r.messageRef, r.acknowledgedAt]));
 
       return {
         channelRef: channel.channelRef,
@@ -826,6 +833,7 @@ export const messageBoardRouter = router({
           messageRef: m.messageRef, authorUserId: m.authorUserId, priority: m.priority, body: m.body,
           deviceCreatedAt: m.deviceCreatedAt, serverReceivedAt: m.serverReceivedAt,
           requiresAcknowledgement: m.requiresAcknowledgement,
+          acknowledgedByMe: receiptOf.has(m.messageRef) ? receiptOf.get(m.messageRef) != null : null,
         })),
         note: "Device time is when it happened; server time is when it arrived. Both are shown because they are different facts.",
       };

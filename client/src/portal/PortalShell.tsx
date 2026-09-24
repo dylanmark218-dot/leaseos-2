@@ -19,11 +19,12 @@ import { ExceptionsPanel } from "./panels/ExceptionsPanel";
 import { InboxPanel } from "./panels/InboxPanel";
 import { TimelinePanel } from "./panels/TimelinePanel";
 import { SetupPanel } from "./panels/SetupPanel";
+import { BoardPanel } from "./panels/BoardPanel";
 import { UniversalSearch } from "./UniversalSearch";
 import { SyncIndicator } from "./SyncIndicator";
 import { QuickCapture } from "./QuickCapture";
 
-export type PanelKey = "myday" | "exceptions" | "inbox" | "timeline" | "setup";
+export type PanelKey = "myday" | "exceptions" | "inbox" | "board" | "timeline" | "setup";
 
 const OFFICE_PORTALS = new Set<PortalKey>(["office_administration", "finance_billing", "management", "executive", "hr_workforce", "auditor_regulator"]);
 
@@ -140,13 +141,15 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
 
       <main className="mx-auto max-w-6xl px-4 py-6">
         <div className="mb-4 flex gap-2 text-sm">
-          {(["myday", "exceptions", "inbox", "timeline", ...(OFFICE_PORTALS.has(portal) ? ["setup" as PanelKey] : [])] as PanelKey[]).map(p => (
+          {(["myday", "exceptions", "inbox", "board", "timeline", ...(OFFICE_PORTALS.has(portal) ? ["setup" as PanelKey] : [])] as PanelKey[]).map(p => (
             <button key={p} onClick={() => setPanel(p)} className={`rounded-lg px-3 py-1 ${panel === p ? "bg-white shadow" : "text-[#5b6b82]"}`}>{p === "myday" ? "My Day" : p[0]!.toUpperCase() + p.slice(1)}</button>
           ))}
         </div>
         {panel === "myday" && view && (OFFICE_PORTALS.has(portal) ? <MyDayPanel view={view} office={officeView} onGo={go} /> : <MyDayPanel view={view} onGo={go} />)}
         {panel === "exceptions" && <ExceptionsPanel items={(exceptions.data?.items ?? []) as never} summary={myDay.data?.attention as never} onGo={go} />}
         {panel === "inbox" && <InboxPanel items={(inbox.data?.items ?? []) as never} counts={inbox.data?.counts ?? {}} onGo={go} />}
+        {/* 0182/0183 — conversations and open work; writes go through the device's board queue. */}
+        {panel === "board" && <BoardPanel online={online} />}
         {panel === "timeline" && <TimelinePanel />}
         {panel === "setup" && OFFICE_PORTALS.has(portal) && <SetupPanel />}
         {view && view.quickCapture.length > 0 && <QuickCapture actions={view.quickCapture} />}
