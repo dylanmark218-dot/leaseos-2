@@ -14,7 +14,7 @@ version CI uses), once before any change and once after.
 
 | | Before | After |
 |---|---|---|
-| Gate | **failed** at gate 6 | passes gates 0–7c; gate 8 regenerated the current-state doc (new test files) |
+| Gate | **failed** at gate 6 | **PASS**, all gates 0–8 |
 | Test files | 1 failed, 333 passed | 336 passed |
 | Test cases | 1 failed, 4770 passed | 4824 passed |
 | `pnpm audit` | 2 critical, 39 high, 61 moderate, 8 low | 0 critical, 0 high, 3 moderate, 0 low |
@@ -202,6 +202,24 @@ clock, so the three-week warning fired. Reviewed and recorded in
 - the schedule takes an explicit `asOf`;
 - `dispose` compares only with `acquiredAt` and the period's close state;
 - the twin's clock read is on the km path, which is dead here (no distance).
+
+### FLAKE-1 — three suites wrote critical defects onto unit 1 (pre-existing)
+
+Found when a second full gate run on unchanged code failed where the first had
+passed. `complianceReadinessC1a` got `critical_defect` and
+`mechanic_release_missing` on a truck it had just created.
+
+`workflowOrchestration`, `workflowEndToEnd` and `operationalApiAuthorization`
+each record an open critical defect against the literal `unitId` 1. The id
+only fills a NOT NULL column (no foreign key, nothing reads it back). But in a
+fresh database, unit 1 belongs to whichever suite creates a unit first, which
+depends on how concurrently running files interleave. The database left by the
+failing run showed unit 1 was C1a's truck, with all three defects on it.
+
+Reproduced deterministically on a fresh database by running `workflowEndToEnd`
+then `complianceReadinessC1a` without file parallelism: 1 failed before the
+change, 29/29 passed after. The three suites now use a unit id no test
+creates. This is on `main` too, independent of the hardening changes.
 
 ## Not done in this pass, and why
 
