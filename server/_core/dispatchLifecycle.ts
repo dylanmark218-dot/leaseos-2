@@ -24,7 +24,13 @@ const POSTING_TRANSITIONS: Record<PostingState, PostingState[]> = {
   open_for_bid: ["bid_closed", "awarding", "invite_only", "cancelled"],
   invite_only: ["bid_closed", "awarding", "open_for_bid", "cancelled"],
   on_call: ["awarding", "bid_closed", "cancelled"],
-  direct: ["awarding", "cancelled"],
+  // A direct-assignment posting reaches staffing by being crewed, not by being awarded. The bid
+  // path arrives at `partially_staffed` through `awarding` because somebody had to be selected
+  // first; a direct posting has nobody to select. Until the canonical assignment subsystem there
+  // was no way to create a posting at all, so `direct` had no onward path but `awarding` and the
+  // gap could not be reached. `awarding` is deliberately NOT reused for this: it means "we are
+  // choosing who gets this", never "we are short a truck".
+  direct: ["awarding", "partially_staffed", "staffed", "cancelled"],
   bid_closed: ["awarding", "open_for_bid", "cancelled"],
   awarding: ["partially_staffed", "staffed", "bid_closed", "cancelled"],
   partially_staffed: ["awarding", "staffed", "cancelled"],
