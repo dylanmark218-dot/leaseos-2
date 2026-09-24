@@ -1,4 +1,13 @@
 export const COOKIE_NAME = "app_session_id";
+/**
+ * The refresh credential's cookie. Separate from the access cookie because the two have different
+ * lifetimes and different paths: the access token rides on every request, the refresh credential is
+ * scoped to `/api/auth` so no other route ever sees it.
+ *
+ * Its value is `familyRef.verifier` — the reference names the row, the verifier proves possession,
+ * and only the verifier's hash is stored server-side.
+ */
+export const REFRESH_COOKIE_NAME = "app_refresh_id";
 export const ONE_YEAR_MS = 1000 * 60 * 60 * 24 * 365;
 export const AXIOS_TIMEOUT_MS = 30_000;
 export const UNAUTHED_ERR_MSG = 'Please login (10001)';
