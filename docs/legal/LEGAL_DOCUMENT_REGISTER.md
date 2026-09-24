@@ -34,6 +34,7 @@ draft exists in project knowledge only; TRACKED = a reviewed version lives under
 | L18 | Corporate formation & governance checklist, regulatory-change procedure, employee/contractor legal handbook | `Corporate_Formation___Governance_Checklist…` | DRAFT-PK | — | incorporation |
 | L19 | Privacy impact assessment template; legal-document index / version register | `legal-document_index_version_register__corporate_formation…` | DRAFT-PK | — | first customer data |
 | L20 | Master Legal & Compliance Manual (Draft 34); Legal Launch Gate | `Draft_34___Master_LeaseOS_Legal___Compliance_Manual`, `…master_LeaseOS_Legal_Launch_Gate` | DRAFT-PK | — | launch |
+| L21 | ToS section: maps, routing and third-party transportation data (part of L2) | `docs/legal/TOS_MAPS_ROUTING_THIRD_PARTY_DATA.md` — in the repo, but a draft counsel has not reviewed | DRAFT (tracked, unreviewed) | — | first provincial feed shown to a customer |
 
 None of these is code, and none of them is finished by this register. What the
 register does is make "the legal side is done" a checkable claim: it is done
