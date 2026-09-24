@@ -19,7 +19,7 @@ import { commercialDocumentLinks, commercialDocuments, disposalTickets, document
 import { SINGLE_TENANT_ID } from "./actingScope";
 import { applyOverlay, rowToDefinition, type DocumentDefinitionRow, type DocumentLinkKind, type EffectiveDefinition, type ExternalReferenceType, type IssuerKind, type OriginKind } from "./documentDefinitions";
 import { factsMutable, issuerScopeKey, nextControlState, normaliseReferenceValue, provenanceSentence, referenceDuplicateVerdict, registerRefusals, type ControlState, type DocumentEventType, type ImportChannel, type IssuerInput, type LinkRole, type LinkSource, type ReferenceSource } from "./documentRegister";
-import { consumeFromBlock, ensureSeriesRow, mintNumberInTx, NumberSeriesRefusal, voidNumber } from "./numberSeries";
+import { consumeFromBlock, ensureSeriesRow, issueReserved, mintNumberInTx, NumberSeriesRefusal, voidNumber } from "./numberSeries";
 import { MINTING_POLICIES } from "./documentDefinitions";
 
 type Db = MySql2Database<Record<string, unknown>>;
@@ -157,6 +157,8 @@ export type RegisterArgs = {
   templateRevisionRef?: string | null;
   renderManifestHash?: string | null;
   controlNumber?: string | null;
+  /** DC-E: a number reserved before rendering (so the PDF can carry it) is issued here, in the same transaction as the row. */
+  reservedAllocationRef?: string | null;
   requestedState: ControlState;
   importChannel?: ImportChannel | null;
   externalReferences?: ReferenceInput[];
@@ -258,6 +260,12 @@ export async function registerControlledDocument(db: Db, args: RegisterArgs): Pr
     if (!documentId) refuse("PRECONDITION_FAILED", "Document insert returned no id");
     await tx.update(numberAllocations).set({ recordId: documentId }).where(eq(numberAllocations.allocationRef, docMint.allocationRef));
     if (controlMint) await tx.update(numberAllocations).set({ recordId: documentId }).where(eq(numberAllocations.allocationRef, controlMint.allocationRef));
+    if (args.reservedAllocationRef) {
+      try {
+        const issued = await issueReserved(tx, { allocationRef: args.reservedAllocationRef, scopeKey, recordType: "commercialDocument", recordId: documentId, actor: { userId: args.actor.userId, deviceRef: args.actor.deviceRef ?? null }, at: now });
+        if (issued.number !== controlNumber) throw new DocumentControlRefusal("PRECONDITION_FAILED", `BLOCKED — the reserved number ${issued.number} is not the control number on the document (${controlNumber})`);
+      } catch (e) { if (e instanceof NumberSeriesRefusal) throw new DocumentControlRefusal(e.code, `BLOCKED — ${e.message}`); throw e; }
+    }
     await tx.insert(trackingReferences).values({ trackingNumber: documentRef, entityType: "commercialDocument", entityId: documentId, issuedAt: now, issuedByUserId: args.actor.userId, deviceId: args.actor.deviceRef ?? null });
     for (const l of resolvedLinks) await tx.insert(commercialDocumentLinks).values({ documentId, recordType: l.recordType, recordRef: l.recordRef, recordId: l.recordId, role: l.role, source: l.source, confirmationStatus: l.confirmed ? "confirmed" : "proposed", linkedByUserId: args.actor.userId, linkedByDeviceRef: args.actor.deviceRef ?? null });
     const referenceRefs: string[] = [];

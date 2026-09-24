@@ -17,6 +17,7 @@ import { z } from "zod";
 import { documentDefinitions, documentSourceArtifacts } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { seedDocumentCatalog } from "./_core/documentCatalogSeed";
+import { formFor } from "./_core/documentControlForms";
 import { CONTROL_STATES, IMPORT_CHANNELS, LINK_ROLES, LINK_SOURCES, REFERENCE_SOURCES } from "./_core/documentRegister";
 import { amendDocument, confirmDocument, DocumentControlRefusal, documentView, issueDocument, listDocuments, registerControlledDocument, supersedeDocument, voidDocument, withdrawDocument, type Actor } from "./_core/documentRegisterService";
 import { storageKeyInput } from "./_core/storageKey";
@@ -24,6 +25,9 @@ import { allocateDeviceBlock, gapReport, listSeries, NumberSeriesRefusal, retire
 import { documentSourceArtifacts as artifactsTable, documentTemplateArtifacts, documentTemplateRevisions, documentTemplates, evidenceRecords, numberBlocks } from "../drizzle/schema";
 import { customTemplateRefusals, EMPTY_MAPPING, layoutKindForMime, mappingHash, releaseManifestHash, rendererFor, RENDERERS, TEMPLATE_SOURCE_KINDS, type FieldMapping } from "./_core/documentTemplates";
 import { desc } from "drizzle-orm";
+import { prepareFromTemplate, renderFromTemplate } from "./_core/documentRenderService";
+import { mappingRefusals, SEMANTIC_FIELDS } from "./_core/semanticFields";
+import { storagePut } from "./storage";
 import {
   applyOverlay, DEFINITION_KEY_PATTERN, definitionRefusals, DOCUMENT_CLASSES, DOCUMENT_LINK_KINDS, EXTERNAL_REFERENCE_POLICIES, EXTERNAL_REFERENCE_TYPES, ORIGIN_KINDS,
   EXTERNAL_ORIGINS, ISSUER_KINDS, PRINT_POLICIES, READ_CATEGORIES, RENDERED_ORIGINS, representationLabel, REVISION_POLICIES, rowToDefinition, SIGNATURE_POLICIES, TENANT_AUTHORABLE_NUMBERING, TENANT_OVERRIDABLE_COLUMNS,
@@ -102,7 +106,9 @@ export const documentControlRouter = router({
         const d = (await effectiveDefinitions(db, bookOrgRef, true)).find(x => x.definitionKey === input.definitionKey);
         if (!d) throw new TRPCError({ code: "NOT_FOUND", message: `No document definition "${input.definitionKey}" in this business's catalog` });
         const artifacts = await db.select().from(documentSourceArtifacts).where(eq(documentSourceArtifacts.definitionKey, input.definitionKey));
-        return { definition: { ...d, label: representationLabel(d) }, artifacts: artifacts.map(a => ({ artifactRef: a.artifactRef, sha256: a.sha256, role: a.role, fileName: a.fileName, extension: a.extension, byteLength: a.byteLength, sourceCollection: a.sourceCollection, sourcePackageKey: a.sourcePackageKey, variantNo: a.variantNo, pages: a.pages, hashVerifiedAt: a.hashVerifiedAt, repositoryPath: a.repositoryPath })), overridable: TENANT_OVERRIDABLE_COLUMNS };
+        return { definition: { ...d, label: representationLabel(d) }, artifacts: artifacts.map(a => ({ artifactRef: a.artifactRef, sha256: a.sha256, role: a.role, fileName: a.fileName, extension: a.extension, byteLength: a.byteLength, sourceCollection: a.sourceCollection, sourcePackageKey: a.sourcePackageKey, variantNo: a.variantNo, pages: a.pages, hashVerifiedAt: a.hashVerifiedAt, repositoryPath: a.repositoryPath })), overridable: TENANT_OVERRIDABLE_COLUMNS,
+          // The slot list a scan of this kind is proposed against: the engine's own form, or a supplied compliance form; null where nothing structured is extracted.
+          extractionForm: d.extractionProfileKey ? formFor(d.extractionProfileKey) : null };
       }),
     /**
      * Assert the supplied catalog into the platform registry. Management only;
@@ -239,7 +245,7 @@ export const documentControlRouter = router({
     registerRendered: roleProcedure("documentControl.documentRegisterRendered")
       .input(z.object({
         definitionKey: z.string().regex(DEFINITION_KEY_PATTERN), title: z.string().min(1).max(300), originKind: z.enum(RENDERED_ORIGINS as unknown as [string, ...string[]]),
-        ...bytesInput, templateRevisionRef: z.string().max(64).nullable().optional(), renderManifestHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), controlNumber: z.string().max(64).nullable().optional(),
+        ...bytesInput, templateRevisionRef: z.string().max(80).nullable().optional(), renderManifestHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), controlNumber: z.string().max(64).nullable().optional(),
         issuedAt: z.coerce.date().nullable().optional(), counterpartyOrgRef: z.string().max(64).nullable().optional(), requestedState: z.enum(["issued", "proposed"]).default("issued"),
         externalReferences: z.array(referenceInput).max(20).default([]), links: z.array(linkInput).max(20).default([]),
       }))
@@ -268,7 +274,7 @@ export const documentControlRouter = router({
         return guarded(() => voidDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx), ...input }));
       }),
     supersede: roleProcedure("documentControl.documentSupersede")
-      .input(z.object({ documentRef: z.string().min(1).max(64), reason: z.string().min(10).max(500), ...bytesInput, templateRevisionRef: z.string().max(64).nullable().optional(), renderManifestHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), title: z.string().min(1).max(300).optional() }))
+      .input(z.object({ documentRef: z.string().min(1).max(64), reason: z.string().min(10).max(500), ...bytesInput, templateRevisionRef: z.string().max(80).nullable().optional(), renderManifestHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), title: z.string().min(1).max(300).optional() }))
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         return guarded(() => supersedeDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx), ...input }));
@@ -297,6 +303,27 @@ export const documentControlRouter = router({
       .query(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         return listDocuments(db, { bookOrgRef }, input ?? {});
+      }),
+  }),
+  /**
+   * DC-E — the semantic layer and the render path. `prepare` is the dry run:
+   * every mapped field resolved from LeaseOS Records with its provenance, the
+   * fields only a person supplies, and whether LeaseOS can render the layout.
+   */
+  semantic: router({
+    fields: roleProcedure("documentControl.semanticFields").query(() => SEMANTIC_FIELDS),
+    prepare: roleProcedure("documentControl.documentPrepare")
+      .input(z.object({ templateRevisionRef: z.string().max(80), context: z.object({ jobId: z.number().int().positive().nullable().optional(), loadId: z.number().int().positive().nullable().optional(), operatorId: z.number().int().positive().nullable().optional(), unitId: z.number().int().positive().nullable().optional(), facilityId: z.number().int().positive().nullable().optional(), customerAccountId: z.number().int().positive().nullable().optional() }).default({}), humanValues: z.record(z.string().max(120), z.union([z.string().max(2000), z.number(), z.null()])).optional() }))
+      .query(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => prepareFromTemplate(db, { book: { bookOrgRef }, templateRevisionRef: input.templateRevisionRef, context: input.context, humanValues: input.humanValues }));
+      }),
+    /** Render and register in one act: a filled markdown layout through the present renderer, bound to its revision, numbered where the definition mints. */
+    render: roleProcedure("documentControl.documentRender")
+      .input(z.object({ templateRevisionRef: z.string().max(80), context: z.object({ jobId: z.number().int().positive().nullable().optional(), loadId: z.number().int().positive().nullable().optional(), operatorId: z.number().int().positive().nullable().optional(), unitId: z.number().int().positive().nullable().optional(), facilityId: z.number().int().positive().nullable().optional(), customerAccountId: z.number().int().positive().nullable().optional() }).default({}), humanValues: z.record(z.string().max(120), z.union([z.string().max(2000), z.number(), z.null()])).optional(), title: z.string().min(1).max(300).optional(), requestedState: z.enum(["issued", "proposed"]).default("issued"), links: z.array(linkInput).max(20).default([]) }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => renderFromTemplate(db, { book: { bookOrgRef }, actor: actorOf(ctx), templateRevisionRef: input.templateRevisionRef, context: input.context, humanValues: input.humanValues, title: input.title, requestedState: input.requestedState, links: input.links, storagePut }));
       }),
   }),
   /**
@@ -371,7 +398,7 @@ export const documentControlRouter = router({
         return out;
       }),
     get: roleProcedure("documentControl.templateGet")
-      .input(z.object({ templateRef: z.string().max(40) }))
+      .input(z.object({ templateRef: z.string().max(80) }))
       .query(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         const f = (await db.select().from(documentTemplates).where(eq(documentTemplates.templateRef, input.templateRef)).limit(1))[0];
@@ -416,7 +443,7 @@ export const documentControlRouter = router({
       }),
     /** A new draft revision of a family: a new layout, a new mapping, or both. The current released revision is untouched until this one is released. */
     revisionDraft: roleProcedure("documentControl.templateRevisionDraft")
-      .input(z.object({ templateRef: z.string().max(40), fieldMapping: z.object({ version: z.literal(1), fields: z.array(z.object({ printedField: z.string().min(1).max(120), semanticKey: z.string().max(120).nullable(), transform: z.string().max(60).nullable().optional(), required: z.boolean().optional() })).max(300) }).optional(), layout: z.object({ evidenceRecordId: z.number().int().positive(), contentHash: z.string().regex(/^[a-f0-9]{64}$/), byteLength: z.number().int().positive(), fileName: z.string().max(220), mimeType: z.string().max(120) }).optional(), notes: z.string().max(500).optional() }))
+      .input(z.object({ templateRef: z.string().max(80), fieldMapping: z.object({ version: z.literal(1), fields: z.array(z.object({ printedField: z.string().min(1).max(120), semanticKey: z.string().max(120).nullable(), transform: z.string().max(60).nullable().optional(), required: z.boolean().optional() })).max(300) }).optional(), layout: z.object({ evidenceRecordId: z.number().int().positive(), contentHash: z.string().regex(/^[a-f0-9]{64}$/), byteLength: z.number().int().positive(), fileName: z.string().max(220), mimeType: z.string().max(120) }).optional(), notes: z.string().max(500).optional() }))
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         const f = (await db.select().from(documentTemplates).where(eq(documentTemplates.templateRef, input.templateRef)).limit(1))[0];
@@ -435,6 +462,8 @@ export const documentControlRouter = router({
           layoutKind = layoutKindForMime(input.layout.mimeType); layoutContentHash = input.layout.contentHash; layoutStorageKey = `evidence:${input.layout.evidenceRecordId}`;
         }
         const mapping = input.fieldMapping ?? (JSON.parse(base.fieldMappingJson) as FieldMapping);
+        const mappingProblems = mappingRefusals(mapping);
+        if (mappingProblems.length) throw new TRPCError({ code: "BAD_REQUEST", message: `BLOCKED — ${mappingProblems.join("; ")}` });
         const fieldMappingHash = mappingHash(mapping);
         if (layoutContentHash === base.layoutContentHash && fieldMappingHash === base.fieldMappingHash) throw new TRPCError({ code: "BAD_REQUEST", message: "Nothing changed: the layout and the mapping hash to the current revision's" });
         const renderer = rendererFor(layoutKind);
@@ -444,7 +473,7 @@ export const documentControlRouter = router({
       }),
     /** Release a draft: its manifest is computed, it becomes the current revision, the previous released one is retired for new records, and the database refuses any later change to it. */
     revisionRelease: roleProcedure("documentControl.templateRevisionRelease")
-      .input(z.object({ revisionRef: z.string().max(40) }))
+      .input(z.object({ revisionRef: z.string().max(80) }))
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         const r = (await db.select().from(documentTemplateRevisions).where(eq(documentTemplateRevisions.revisionRef, input.revisionRef)).limit(1))[0];
@@ -461,7 +490,7 @@ export const documentControlRouter = router({
         return { revisionRef: r.revisionRef, revision: r.revision, status: "released" as const, releaseManifestHash: manifest };
       }),
     retire: roleProcedure("documentControl.templateRetire")
-      .input(z.object({ templateRef: z.string().max(40), reason: z.string().min(5).max(300) }))
+      .input(z.object({ templateRef: z.string().max(80), reason: z.string().min(5).max(300) }))
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         const f = (await db.select().from(documentTemplates).where(eq(documentTemplates.templateRef, input.templateRef)).limit(1))[0];

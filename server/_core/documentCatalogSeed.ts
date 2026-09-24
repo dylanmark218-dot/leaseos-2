@@ -88,6 +88,7 @@ function toInsert(d: DocumentDefinitionSeed, extra: { orgRef: string | null; def
 export type CatalogSeedReport = {
   importBatchRef: string;
   templates: TemplateSeedReport;
+  mappings: MappingSeedReport;
   definitions: { created: string[]; updated: string[]; unchanged: number; aliased: Record<string, string>; refused: string[] };
   categories: { created: string[]; unchanged: number };
   artifacts: { registered: number; unchanged: number; verified: number; missingOnDisk: string[]; refused: string[] };
@@ -157,6 +158,7 @@ export async function seedDocumentCatalog(db: Db, args: { importedByUserId: numb
     categories: { created: [], unchanged: 0 },
     artifacts: { registered: 0, unchanged: 0, verified: 0, missingOnDisk: [], refused: [] },
     templates: { families: { created: [], unchanged: 0, skipped: [] }, revisions: { released: [], unchanged: 0 }, artifactsLinked: 0, renderableNow: [] },
+    mappings: { released: [], unchanged: 0, refused: [] },
   };
 
   // Definitions: platform scope only. Tenant overlays are never touched by a seed.
@@ -219,6 +221,7 @@ export async function seedDocumentCatalog(db: Db, args: { importedByUserId: numb
     known.add(m.sha256);
   }
   report.templates = await seedStandardTemplates(db, { importedByUserId: args.importedByUserId, entries });
+  report.mappings = await seedStandardMappings(db, { importedByUserId: args.importedByUserId });
   return report;
 }
 
@@ -259,7 +262,7 @@ export async function seedStandardTemplates(db: Db, args: { importedByUserId: nu
     if (!family.length) { report.families.skipped.push(`${templateKey}: no registered artifacts`); continue; }
     let fam = byKey.get(templateKey);
     if (!fam) {
-      const templateRef = `TPL-P-${templateKey}`.slice(0, 40);
+      const templateRef = `TPL-P-${templateKey}`;
       await db.insert(documentTemplates).values({ templateRef, orgRef: null, scopeKey: PLATFORM_SCOPE, templateKey, definitionKey, sourceKind: "leaseos_standard", ownerKind: "leaseos", name: e.display_name, sourcePackageKey: e.document_definition_key, createdByUserId: args.importedByUserId });
       fam = (await db.select().from(documentTemplates).where(eq(documentTemplates.templateRef, templateRef)).limit(1))[0]!;
       report.families.created.push(templateKey);
@@ -277,7 +280,7 @@ export async function seedStandardTemplates(db: Db, args: { importedByUserId: nu
     const renderer = rendererFor(layoutKind);
     const fieldMappingHash = mappingHash(EMPTY_MAPPING);
     const manifest = releaseManifestHash({ layoutContentHash: layoutArtifact.sha256, fieldMappingHash, rendererKey: renderer.rendererKey, rendererVersion: renderer.rendererVersion, editableSourceHash: editable?.sha256 ?? null });
-    const revisionRef = `TPLR-P-${templateKey}-r1`.slice(0, 40);
+    const revisionRef = `TPLR-P-${templateKey}-r1`;
     const ins = await db.insert(documentTemplateRevisions).values({ revisionRef, templateId: fam.id, revision: 1, status: "released", layoutKind, layoutArtifactId: layoutArtifact.id, layoutStorageKey: null, layoutContentHash: layoutArtifact.sha256, fieldMappingJson: JSON.stringify(EMPTY_MAPPING), fieldMappingHash, rendererKey: renderer.rendererKey, rendererVersion: renderer.rendererVersion, releaseManifestHash: manifest, notes: `seeded from ${CATALOG_ROOT} (${e.document_definition_key}); fields unmapped until Checkpoint E`, createdByUserId: args.importedByUserId, releasedByUserId: args.importedByUserId, releasedAt: new Date() });
     const revisionId = Number(ins[0]?.insertId ?? 0);
     const roles: { artifactId: number; role: "printable" | "printable_alternate" | "editable_source" | "render_source" | "reference" }[] = [];
@@ -287,6 +290,47 @@ export async function seedStandardTemplates(db: Db, args: { importedByUserId: nu
     for (const r of roles) { await db.insert(documentTemplateArtifacts).values({ revisionId, artifactId: r.artifactId, role: r.role }); report.artifactsLinked++; }
     report.revisions.released.push(revisionRef);
     if (renderer.renderable) report.renderableNow.push(templateKey);
+  }
+  return report;
+}
+
+/* ===================== DC-E — mapped revisions of the standard families ===================== */
+
+import { STANDARD_MAPPINGS } from "./documentStandardMappings";
+import { mappingRefusals } from "./semanticFields";
+
+export type MappingSeedReport = { released: string[]; unchanged: number; refused: string[] };
+
+/**
+ * For every family with a standard mapping: if the current released revision's
+ * mapping hash differs, release revision N+1 carrying the mapping and retire
+ * the previous released revision for new records. Idempotent by hash. A
+ * mapping that names a key outside the registry is refused, not released.
+ */
+export async function seedStandardMappings(db: Db, args: { importedByUserId: number | null }): Promise<MappingSeedReport> {
+  const report: MappingSeedReport = { released: [], unchanged: 0, refused: [] };
+  for (const [templateKey, mapping] of Object.entries(STANDARD_MAPPINGS)) {
+    const problems = mappingRefusals(mapping);
+    if (problems.length) { report.refused.push(`${templateKey}: ${problems.join("; ")}`); continue; }
+    const fam = (await db.select().from(documentTemplates).where(and(eq(documentTemplates.scopeKey, PLATFORM_SCOPE), eq(documentTemplates.templateKey, templateKey))).limit(1))[0];
+    if (!fam) { report.refused.push(`${templateKey}: no seeded family`); continue; }
+    const revs = await db.select().from(documentTemplateRevisions).where(eq(documentTemplateRevisions.templateId, fam.id));
+    const current = revs.filter(r => r.status === "released").sort((a, b) => b.revision - a.revision)[0];
+    if (!current) { report.refused.push(`${templateKey}: no released revision to build on`); continue; }
+    const desiredHash = mappingHash(mapping);
+    if (current.fieldMappingHash === desiredHash) { report.unchanged++; continue; }
+    const next = Math.max(...revs.map(r => r.revision)) + 1;
+    const editable = (await db.select({ sha256: documentSourceArtifacts.sha256 }).from(documentTemplateArtifacts).innerJoin(documentSourceArtifacts, eq(documentSourceArtifacts.id, documentTemplateArtifacts.artifactId)).where(and(eq(documentTemplateArtifacts.revisionId, current.id), eq(documentTemplateArtifacts.role, "editable_source"))).limit(1))[0];
+    const manifest = releaseManifestHash({ layoutContentHash: current.layoutContentHash, fieldMappingHash: desiredHash, rendererKey: current.rendererKey, rendererVersion: current.rendererVersion, editableSourceHash: editable?.sha256 ?? null });
+    const revisionRef = `TPLR-P-${templateKey}-r${next}`;
+    await db.transaction(async tx => {
+      const ins = await tx.insert(documentTemplateRevisions).values({ revisionRef, templateId: fam.id, revision: next, status: "released", layoutKind: current.layoutKind, layoutArtifactId: current.layoutArtifactId, layoutStorageKey: current.layoutStorageKey, layoutContentHash: current.layoutContentHash, fieldMappingJson: JSON.stringify(mapping), fieldMappingHash: desiredHash, rendererKey: current.rendererKey, rendererVersion: current.rendererVersion, releaseManifestHash: manifest, notes: `standard mapping (DC-E); supersedes ${current.revisionRef}`, supersedesRevisionId: current.id, createdByUserId: args.importedByUserId, releasedByUserId: args.importedByUserId, releasedAt: new Date() });
+      const newId = Number(ins[0]?.insertId ?? 0);
+      const links = await tx.select().from(documentTemplateArtifacts).where(eq(documentTemplateArtifacts.revisionId, current.id));
+      for (const l of links) await tx.insert(documentTemplateArtifacts).values({ revisionId: newId, artifactId: l.artifactId, role: l.role });
+      await tx.update(documentTemplateRevisions).set({ status: "retired", retiredByUserId: args.importedByUserId, retiredAt: new Date() }).where(eq(documentTemplateRevisions.id, current.id));
+    });
+    report.released.push(revisionRef);
   }
   return report;
 }

@@ -1,11 +1,20 @@
 /**
  * Document Control, Checkpoint A (0178) — the definition registry and the catalog seed, through the router.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import mysql from "mysql2/promise";
 import { createHash } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import { appRouter } from "./routers";
+
+// DC-E renders PDFs through the storage layer; kept in memory here, as commercialOffice.db.test does.
+const objects = new Map<string, Buffer>();
+vi.mock("./storage", () => ({
+  storagePut: async (relKey: string, data: Buffer | Uint8Array | string) => { objects.set(relKey, Buffer.from(data as never)); return { key: relKey, url: `mem://${relKey}` }; },
+  storageGet: async (relKey: string) => ({ key: relKey, url: `mem://${relKey}` }),
+  storageGetSignedUrl: async (relKey: string) => `mem://${relKey}`,
+  storageRead: async (relKey: string) => { const b = objects.get(relKey); if (!b) throw new Error(`no object ${relKey}`); return b; },
+}));
 import { seedDocumentCatalog } from "./_core/documentCatalogSeed";
 import { SYSTEM_DEFINITIONS } from "./_core/documentDefinitions";
 
@@ -14,7 +23,15 @@ const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
 let seq = 260_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
-beforeAll(() => { if (DB_URL) pool = mysql.createPool({ uri: DB_URL, connectionLimit: 4 }); });
+beforeAll(async () => {
+  if (!DB_URL) return;
+  pool = mysql.createPool({ uri: DB_URL, connectionLimit: 4 });
+  // Older suites in the same database address "operator 1" and "unit 1" and expect them in the default scope. This
+  // suite assigns the operators and units it creates to a business; so that the first row of either table is never one
+  // of those, an unowned operator and unit go in first (a no-op for the ids when another suite has already got there).
+  await pool.execute("INSERT INTO operators (name, company) VALUES ('DC fixture (default scope)', 'LeaseOS')");
+  await pool.execute("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'vac truck')", [`U-DC-${rnd()}`]);
+});
 afterAll(async () => { await pool?.end(); });
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 async function org() { const orgRef = `ORG-${rnd()}`; await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [orgRef, `o ${orgRef}`]); return orgRef; }
@@ -261,21 +278,24 @@ d("standard template families are seeded once, released, and immutable", () => {
     expect(second.templates.families.created).toEqual([]);
     expect(second.templates.revisions.released).toEqual([]);
     expect(second.templates.artifactsLinked).toBe(0);
-    const [[counts]] = await pool.query<mysql.RowDataPacket[]>("SELECT (SELECT COUNT(*) FROM documentTemplates WHERE scopeKey='platform') AS fams, (SELECT COUNT(*) FROM documentTemplateRevisions WHERE status='released') AS revs, (SELECT COUNT(*) FROM documentTemplateArtifacts) AS arts");
+    const [[counts]] = await pool.query<mysql.RowDataPacket[]>("SELECT (SELECT COUNT(*) FROM documentTemplates WHERE scopeKey='platform') AS fams, (SELECT COUNT(*) FROM documentTemplateRevisions WHERE status='released') AS revs, (SELECT COUNT(*) FROM documentTemplateArtifacts a JOIN documentTemplateRevisions r ON r.id = a.revisionId WHERE r.revision = 1) AS arts");
     expect(Number(counts!.fams)).toBe(46);
     expect(Number(counts!.revs)).toBeGreaterThanOrEqual(46);
-    expect(Number(counts!.arts)).toBe(66 + 4);   // 66 canonical PDF/DOCX artifacts + 4 markdown render sources
+    expect(Number(counts!.arts)).toBe(66 + 4);   // revision 1 of every family: 66 canonical PDF/DOCX artifacts + 4 markdown render sources (mapped revisions carry their own links)
     const lib = await callerFor(office).documentControl.templates.list();
     const bol = lib.find(t => t.templateKey === "bill_of_lading")!;
     expect(bol).toMatchObject({ definitionKey: "bill_of_lading", sourceKind: "leaseos_standard", ownerKind: "leaseos", layer: "platform" });
-    expect(bol.currentRevision).toMatchObject({ revision: 1, layoutKind: "pdf_overlay", renderable: false });
+    expect(bol.currentRevision).toMatchObject({ layoutKind: "pdf_overlay", renderable: false });   // revision 2 once the standard mapping (DC-E) is released
     const bolFull = await callerFor(office).documentControl.templates.get({ templateRef: bol.templateRef });
-    expect(bolFull.revisions[0]!.artifacts.map(x => [x.role, x.extension]).sort()).toEqual([["editable_source", "docx"], ["printable", "pdf"]]);
-    expect(bolFull.revisions[0]!.artifacts.every(x => /^[a-f0-9]{64}$/.test(x.sha256) && x.sourceCollection === "LeaseOS-Freight-and-Transportation-Templates")).toBe(true);
+    const rev1 = bolFull.revisions.find(r => r.revision === 1)!;
+    expect(rev1.artifacts.map(x => [x.role, x.extension]).sort()).toEqual([["editable_source", "docx"], ["printable", "pdf"]]);
+    expect(rev1.artifacts.every(x => /^[a-f0-9]{64}$/.test(x.sha256) && x.sourceCollection === "LeaseOS-Freight-and-Transportation-Templates")).toBe(true);
     // The invoice family attaches to the existing `invoice` definition; the DOT family has two PDF variants under one revision.
     expect(lib.find(t => t.templateKey === "commercial_invoice")!.definitionKey).toBe("invoice");
     const dot = await callerFor(office).documentControl.templates.get({ templateRef: lib.find(t => t.templateKey === "dot_fmcsa_registration_and_authority_record")!.templateRef });
-    expect(dot.revisions[0]!.artifacts.map(x => x.role).sort()).toEqual(["printable", "printable_alternate", "render_source"]);
+    const dotRev1 = dot.revisions.find(r => r.revision === 1)!;
+    expect(dotRev1.artifacts.map(x => x.role).sort()).toEqual(["printable", "printable_alternate", "render_source"]);
+    expect(dotRev1).toMatchObject({ layoutKind: "markdown_text", rendererKey: "leaseos_text_v1" });
     expect(dot.revisions[0]!).toMatchObject({ layoutKind: "markdown_text", rendererKey: "leaseos_text_v1", renderable: true });
     // Released is immutable at the database.
     await expect(pool.execute("UPDATE documentTemplateRevisions SET fieldMappingJson = '{\"version\":1,\"fields\":[{\"printedField\":\"x\",\"semanticKey\":null}]}' WHERE revisionRef = ?", [bol.currentRevision!.revisionRef])).rejects.toThrow(/immutable; a change is a new revision/);
@@ -322,5 +342,82 @@ d("standard template families are seeded once, released, and immutable", () => {
     expect((await callerFor(officeB).documentControl.templates.list()).some(t => t.templateRef === tpl.templateRef)).toBe(false);
     await expect(callerFor(officeB).documentControl.templates.get({ templateRef: tpl.templateRef })).rejects.toThrow(/not in this business's library/);
     await expect(m.documentControl.templates.revisionDraft({ templateRef: tpl.templateRef, fieldMapping: { version: 1, fields: [{ printedField: "Ticket #", semanticKey: "document.controlNumber", required: true }, { printedField: "Driver Name", semanticKey: "operator.name" }] } })).rejects.toThrow(/Nothing changed/);
+  }, 90_000);
+});
+
+
+/* ===================== Checkpoint E — semantic fields, mapped revisions, prepare and render ===================== */
+
+async function operator(orgRef: string, name: string) { const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, company) VALUES (?,?)", [name, "Pride Vac"]); await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,?,?,1)", [orgRef, "operator", r.insertId]); return r.insertId; }
+async function unit(orgRef: string, unitNumber: string) { const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [unitNumber, "vac truck"]); await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,?,?,1)", [orgRef, "unit", r.insertId]); return r.insertId; }
+async function load(jobId: number, operatorId: number, unitId: number) { const n = `L-${rnd()}`; const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO loads (loadNumber, jobId, operatorId, unitId, material, quantity, quantityUnit, measurementMethod) VALUES (?,?,?,?,?,?,?,?)", [n, jobId, operatorId, unitId, "produced water", 18.5, "m3", "meter"]); return { id: r.insertId, loadNumber: n }; }
+
+d("the semantic layer: mapped standard revisions, resolution with provenance, and rendering through the present renderer", () => {
+  it("releases mapped revision 2 of the representative families once, retiring revision 1; a rerun releases nothing", async () => {
+    const a = await org(); const mgr = await member(a, ["management"]); const office = await member(a, ["office"]);
+    const first = await callerFor(mgr).documentControl.definitions.catalogSeed();
+    expect(first.mappings.refused).toEqual([]);
+    const again = await callerFor(mgr).documentControl.definitions.catalogSeed();
+    expect(again.mappings.released).toEqual([]);
+    expect(again.mappings.unchanged).toBeGreaterThanOrEqual(14);
+    const lib = await callerFor(office).documentControl.templates.list({ definitionKey: "bill_of_lading" });
+    const bol = await callerFor(office).documentControl.templates.get({ templateRef: lib[0]!.templateRef });
+    expect(bol.revisions.map(r => [r.revision, r.status])).toEqual([[2, "released"], [1, "retired"]]);
+    expect(bol.revisions[0]!.fieldMapping.fields.find(f => f.printedField === "Driver")).toMatchObject({ semanticKey: "operator.name", required: true });
+    expect(bol.revisions[0]!.artifacts.map(x => x.role).sort()).toEqual(["editable_source", "printable"]);   // artifacts carried to the mapped revision
+    expect(bol.revisions[0]!.releaseManifestHash).not.toBe(bol.revisions[1]!.releaseManifestHash);
+    // A business's own mapping is validated against the same registry.
+    const pdfHash = sha(`custom-${rnd()}`); const ev = await evidence(office, pdfHash);
+    const tpl = await callerFor(mgr).documentControl.templates.createCustom({ definitionKey: "job_safety_analysis", templateKey: `pride_jsa_${rnd().toLowerCase()}`, name: "Pride JSA", sourceKind: "organization_custom", evidenceRecordId: ev, contentHash: pdfHash, byteLength: 1000, fileName: "Pride_JSA.pdf", mimeType: "application/pdf" });
+    await callerFor(mgr).documentControl.templates.revisionRelease({ revisionRef: tpl.revisionRef });
+    await expect(callerFor(mgr).documentControl.templates.revisionDraft({ templateRef: tpl.templateRef, fieldMapping: { version: 1, fields: [{ printedField: "Driver Name", semanticKey: "driver.fullName" }] } })).rejects.toThrow(/not in the semantic registry/);
+    const ok = await callerFor(mgr).documentControl.templates.revisionDraft({ templateRef: tpl.templateRef, fieldMapping: { version: 1, fields: [{ printedField: "Driver Name", semanticKey: "operator.name" }, { printedField: "Hazards", semanticKey: "hazard.description", required: true }] } });
+    expect(ok.revision).toBe(2);
+  }, 90_000);
+
+  it("prepares from LeaseOS Records with provenance, leaves person-only fields to the person, and renders a NORM record bound to its revision — but refuses to render a PDF layout it cannot execute", async () => {
+    const a = await org(), b = await org(); const mgr = await member(a, ["management"]); const office = await member(a, ["office"]);
+    await callerFor(mgr).documentControl.definitions.catalogSeed();
+    const j = await job(a); const op = await operator(a, "R. Singh"); const u = await unit(a, `VT-${rnd().slice(0, 4)}`); const l = await load(j.id, op, u); const fac = await facility(`Tervita ${rnd()}`);
+    const c = callerFor(office);
+    const norm = (await c.documentControl.templates.list({ definitionKey: "norm_survey_and_handling_record" }))[0]!;
+    expect(norm.currentRevision).toMatchObject({ revision: 2, layoutKind: "markdown_text", renderable: true });
+    const prep = await c.documentControl.semantic.prepare({ templateRevisionRef: norm.currentRevision!.revisionRef, context: { jobId: j.id, loadId: l.id, facilityId: fac } });
+    expect(prep).toMatchObject({ renderable: true, originKind: "leaseos_generated", wouldMint: false, notFound: [] });
+    const site = prep.fields.find(f => f.printedField === "siteOrLeaseName")!;
+    expect(site).toMatchObject({ authority: "auto_fill", value: "LSD 1-2-3-4", state: "filled" });
+    expect(site.source).toBe(`jobs.location#${j.id}`);
+    expect(prep.fields.find(f => f.printedField === "wellOrEquipmentId")).toMatchObject({ state: "filled", source: `units.unitNumber#${u}` });
+    expect(prep.fields.find(f => f.printedField === "documentRef")).toMatchObject({ authority: "server_only", state: "server_at_issue" });
+    expect(prep.fields.find(f => f.printedField === "backgroundReading")).toMatchObject({ authority: "human_only", state: "missing" });
+    expect(prep.missingRequired).toEqual(["jurisdiction"]);
+    // Cross-tenant records are not found; a required person-only field cannot be issued blank.
+    const jB = await job(b);
+    await expect(c.documentControl.semantic.prepare({ templateRevisionRef: norm.currentRevision!.revisionRef, context: { jobId: jB.id } })).resolves.toMatchObject({ notFound: [`job ${jB.id}`] });
+    await expect(c.documentControl.semantic.render({ templateRevisionRef: norm.currentRevision!.revisionRef, context: { jobId: jB.id } })).rejects.toThrow(/not in this business's records/);
+    await expect(c.documentControl.semantic.render({ templateRevisionRef: norm.currentRevision!.revisionRef, context: { jobId: j.id } })).rejects.toThrow(/required fields have no value: jurisdiction/);
+    // A person supplies what only a person may; the record's values are never overridden by a person's.
+    const r = await c.documentControl.semantic.render({ templateRevisionRef: norm.currentRevision!.revisionRef, context: { jobId: j.id, loadId: l.id, facilityId: fac }, humanValues: { jurisdiction: "CA-AB", backgroundReading: 0.08, surveyorName: "D. Mark", siteOrLeaseName: "SOMEWHERE ELSE" }, title: "NORM survey — LSD 1-2-3-4" });
+    expect(r).toMatchObject({ controlState: "issued", controlNumber: null, definitionRef: "DEF-P-norm_survey_and_handling_record-v1" });
+    expect(r.provenance).toMatch(/Rendered by LeaseOS from template revision/);
+    expect(r.storageKey).toMatch(new RegExp(`^documents/${a}/norm_survey_and_handling_record/`));
+    const bytes = objects.get(r.storageKey)!;
+    expect(bytes.subarray(0, 8).toString()).toBe("%PDF-1.4");
+    expect(sha(bytes as never)).toBe(r.contentHash);
+    expect(r.unfilled).toContain("maxGammaReading");
+    expect(r.unfilled).not.toContain("backgroundReading");
+    const v = await c.documentControl.documents.get({ documentRef: r.documentRef });
+    expect(v.document).toMatchObject({ originKind: "leaseos_generated", issuerKind: "tenant", templateRevisionRef: norm.currentRevision!.revisionRef, controlNumber: null, importChannel: "system" });
+    expect(v.document.renderManifestHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(v.timeline.map(e => e.eventType)).toEqual(["document.issued", "document.template_bound"]);
+    expect(v.links.map(x => x.recordType).sort()).toEqual(["facility", "job", "load", "operator", "unit"]);
+    expect(v.links.every(x => x.source === "domain" && x.confirmationStatus === "confirmed")).toBe(true);
+    expect(v.definition!.representationNotice).toMatch(/Jurisdiction-specific/);
+    // A PDF layout is registered and printable as supplied, and LeaseOS says plainly that it cannot render it.
+    const bol = (await c.documentControl.templates.list({ definitionKey: "bill_of_lading" }))[0]!;
+    await expect(c.documentControl.semantic.render({ templateRevisionRef: bol.currentRevision!.revisionRef, context: { jobId: j.id, loadId: l.id } })).rejects.toThrow(/cannot render a pdf_overlay layout.*D-DC-05/);
+    // The registry is readable; the number a rendered document would carry is server-only.
+    const fields = await c.documentControl.semantic.fields();
+    expect(fields.find(f => f.key === "document.controlNumber")!.authority).toBe("server_only");
   }, 90_000);
 });

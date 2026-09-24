@@ -261,4 +261,89 @@ issued and bound on revision 1, revision 2 drafted from a mapping change and rel
 retired for new records and refused, the earlier document still on revision 1, another business
 sees nothing, unchanged mapping refused.
 
+**Closing the checkpoint.** Two things the first run showed: (1) a rendering is linked to the
+load's operator and unit whether or not the caller named them — `resolveSemanticContext` now returns
+the effective context (the load supplies its job, operator and unit) and `renderFromTemplate` links
+from that, so the record is about what it was filled from; (2) `definitions.get` returns
+`extractionForm` — the slot list a scan of that kind is proposed against, from `formFor` — so the
+compliance forms are reached from production code, not only from a test. Two repository census
+pins that count procedures (`crossLayerIntegrity` 696→728, `operationalApiAuthorization` 634→666)
+were bumped for the 32 procedures of A–E; they had not been run at A–D (focused suites only), so
+their bump lands here. The suite seeds one unowned operator and unit before its own tenant-owned
+ones: older suites in the shared database address "operator 1"/"unit 1" in the default scope.
+
+**Gates (full `scripts/ci-gate.sh`, fresh database).** 175 migrations apply; parity 419/419;
+tsc clean; test-file type errors 0 (pin 0); vitest 336 files: 4764 passed, 3 skipped, 2 failed:
+`calendarFixtures.test.ts` — **pre-existing and date-triggered**: on 2026-09-24 the fixtures in
+`capitalAssets.test.ts` (a file this branch does not touch) fall within the guard's three-week
+window; it fails identically on the untouched base `7759056` (proved in a worktree) and is not
+this branch's; and `dispatchConcurrency.test.ts › created every table the schema declares` —
+**caused by this session's own concurrent edit**: the F table was added to `drizzle/schema.ts`
+while the E gate was running against an E-migrated database; on the E tree alone (F edits
+stashed) the test passes, and the F gate carries it. Build clean.
+
+---
+
+## Checkpoint E — the semantic field layer, mapped revisions, prepare and render (no migration)
+
+**What it adds.** `server/_core/semanticFields.ts`: one registry of keys in the repository's nouns
+(`operator.name`, `unit.unitNumber`, `job.jobCode`, `load.quantity`, `facility.name`,
+`billing.afeNumber`, …) each naming the table and column it is read from, with three authorities
+that are the AI Secretary boundary made concrete — `auto_fill` (read from LeaseOS Records),
+`human_only` (signatures, hazards, weights and readings, acceptance, another issuer's number,
+jurisdiction: no renderer and no model supplies them), `server_only` (the control number, the
+archival ref, the issue timestamp: set at issue, never by a person or a template). A test checks
+every auto-fill source against `drizzle/schema.ts`. `semanticResolver.ts` copies those values from
+the authoritative rows in the acting business's scope and names the row each came from. Adding a
+key is a code change with a test; it is not tenant-configurable.
+
+**Mapped revisions.** `documentStandardMappings.ts` maps the printed labels of fourteen
+representative families (BOL, POD, JSA, tailgate, daily safety report, incident report, oilfield
+load ticket, disposal ticket, waste pickup ticket, hotshot ticket, and the four markdown-rendered
+compliance records) to the registry; the seeder releases each as revision 2 (retiring the empty
+revision 1 for new records, carrying the artifacts) and is idempotent by mapping hash. The disposal
+mapping keeps the facility's number, the weights and the acceptance out of any auto-fill. The
+remaining 32 families keep their empty revision until a person maps them; nothing is guessed from a
+PDF. A business's own mapping is validated against the same registry (`driver.fullName` is refused;
+`operator.name` is the key).
+
+**Forms reconciled.** `documentControlForms.ts` compiles the package's four structured compliance
+forms from the reference JSON (kept with its SHA-256) to the engine's `FormDefinition` at load,
+refusing any field type the engine lacks; a test holds the compiled forms against the drop-in's keys
+and field counts. `formFor` answers the engine's forms first, then these, then nothing. The drop-in
+TypeScript is not copied.
+
+**Prepare and render.** `documentRenderService.prepareFromTemplate` (the dry run and the Secretary's
+future primitive): every mapped field resolved with provenance (`jobs.location#17`), person-only
+fields left to the person (a person's value never overrides a record's), server-only fields marked
+for issue, required-and-missing named, and whether LeaseOS can render the layout at all.
+`renderFromTemplate`: for a markdown-text layout, fill (a missing value is a visible blank, never an
+invention), render through `renderPdf`, store, and register through the one write path bound to the
+revision with a render manifest, links to the records it was prepared from as `domain`-sourced, and
+— where the definition mints — a number reserved before rendering so the paper carries it, issued in
+the register's transaction, voided with a reason if rendering fails. A layout the renderer cannot
+execute is refused with the D-DC-05 reason. The definition's representation notice is printed at the
+top of every rendering.
+
+**Reused.** `renderPdf`/`sha256Hex` (`ticketPdf.ts`); `storagePut`; `FORMS` and `FieldType`
+(`aiProposal.ts`); `coreRecordOwnership` for operator/unit scope; `jobs`, `loads`, `billingBooks`,
+`facilities`, `customerAccounts`, `organizations` as the authoritative sources; the register (B),
+the series (C: `reserveNumber`/`issueReserved`), the templates (D). Not built: a duplicate domain
+field, a PDF-filling renderer, a model call.
+
+**Surface.** Three procedures: `semantic.fields` and `semantic.prepare` (`document.read`),
+`semantic.render` (`document.issue`). Census 666 (+3).
+
+**Tests.** `server/_core/semanticFields.test.ts` (6): registry integrity against the schema,
+authorities, mapping refusals, the fourteen standard mappings valid with record and person fields
+mixed and `operator.name` reused across six or more forms, the disposal mapping's human-only facts,
+the four compliance forms compiled and matched to the drop-in. `server/documentControl.db.test.ts`
+(+2): mapped revision 2 released once with revision 1 retired and artifacts carried, rerun releases
+nothing, a business's unknown key refused; prepare resolves site and unit from real rows with
+provenance, marks the archival ref server-at-issue and the reading human-only, names
+`jurisdiction` as required-and-missing, finds nothing across tenants, refuses to issue with a
+required blank, renders a NORM record from a person's jurisdiction and reading (the record's site
+value not overridden) to a real PDF 1.4 whose hash matches the stored bytes, bound to its revision
+with a render manifest and domain-sourced links, and refuses a PDF layout by name.
+
 **Gates.** See the commit.

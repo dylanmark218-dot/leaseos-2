@@ -17,7 +17,7 @@
 -- revision 3 after revision 4 is released, because nothing about revision 3 can move.
 CREATE TABLE `documentTemplates` (
   `id` int AUTO_INCREMENT NOT NULL,
-  `templateRef` varchar(40) NOT NULL,
+  `templateRef` varchar(80) NOT NULL,
   `orgRef` varchar(64) NULL,
   `scopeKey` varchar(64) NOT NULL,
   `templateKey` varchar(80) NOT NULL,
@@ -42,7 +42,7 @@ CREATE INDEX `documentTemplates_definition` ON `documentTemplates` (`definitionK
 --> statement-breakpoint
 CREATE TABLE `documentTemplateRevisions` (
   `id` int AUTO_INCREMENT NOT NULL,
-  `revisionRef` varchar(40) NOT NULL,
+  `revisionRef` varchar(80) NOT NULL,
   `templateId` int NOT NULL,
   `revision` int NOT NULL,
   `status` enum('draft','released','retired') NOT NULL DEFAULT 'draft',

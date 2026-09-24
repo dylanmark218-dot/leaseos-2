@@ -2372,6 +2372,10 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "documentControl.templateRevisionDraft": "document.template.manage",
   "documentControl.templateRevisionRelease": "document.template.manage",
   "documentControl.templateRetire": "document.template.manage",
+  // DC-E — the semantic registry is a read; preparing is a read (a dry run writes nothing); rendering issues a document.
+  "documentControl.semanticFields": "document.read",
+  "documentControl.documentPrepare": "document.read",
+  "documentControl.documentRender": "document.issue",
   "commercialOffice.glAccountSet": "commercial.policy",
   "commercialOffice.glMappingSet": "commercial.policy",
   "commercialOffice.glList": "commercial.read",

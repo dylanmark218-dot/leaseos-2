@@ -24,7 +24,7 @@ ALTER TABLE `commercialDocuments`
   ADD COLUMN `controlNumber` varchar(64) NULL,
   ADD COLUMN `controlNumberIssuedAt` timestamp NULL,
   ADD COLUMN `controlState` enum('captured','needs_classification','proposed','confirmed','issued','void','withdrawn') NOT NULL DEFAULT 'confirmed',
-  ADD COLUMN `templateRevisionRef` varchar(64) NULL,
+  ADD COLUMN `templateRevisionRef` varchar(80) NULL,
   ADD COLUMN `renderManifestHash` varchar(64) NULL,
   ADD COLUMN `capturedByUserId` int NULL,
   ADD COLUMN `capturedByDeviceRef` varchar(64) NULL,

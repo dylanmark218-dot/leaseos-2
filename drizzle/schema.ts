@@ -8673,7 +8673,7 @@ export const commercialDocuments = mysqlTable("commercialDocuments", {
   controlNumber: varchar("controlNumber", { length: 64 }),
   controlNumberIssuedAt: timestamp("controlNumberIssuedAt"),
   controlState: mysqlEnum("controlState", ["captured", "needs_classification", "proposed", "confirmed", "issued", "void", "withdrawn"]).default("confirmed").notNull(),
-  templateRevisionRef: varchar("templateRevisionRef", { length: 64 }),
+  templateRevisionRef: varchar("templateRevisionRef", { length: 80 }),
   renderManifestHash: varchar("renderManifestHash", { length: 64 }),
   capturedByUserId: int("capturedByUserId"),
   capturedByDeviceRef: varchar("capturedByDeviceRef", { length: 64 }),
@@ -9122,7 +9122,7 @@ export type InsertNumberAllocation = typeof numberAllocations.$inferInsert;
 
 export const documentTemplates = mysqlTable("documentTemplates", {
   id: int("id").autoincrement().primaryKey(),
-  templateRef: varchar("templateRef", { length: 40 }).notNull().unique(),
+  templateRef: varchar("templateRef", { length: 80 }).notNull().unique(),
   orgRef: varchar("orgRef", { length: 64 }),
   scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
   /** The family's own key: the package key for a seeded standard, a tenant-chosen key for its own. */
@@ -9143,7 +9143,7 @@ export const documentTemplates = mysqlTable("documentTemplates", {
 
 export const documentTemplateRevisions = mysqlTable("documentTemplateRevisions", {
   id: int("id").autoincrement().primaryKey(),
-  revisionRef: varchar("revisionRef", { length: 40 }).notNull().unique(),
+  revisionRef: varchar("revisionRef", { length: 80 }).notNull().unique(),
   templateId: int("templateId").notNull(),
   revision: int("revision").notNull(),
   status: mysqlEnum("status", ["draft", "released", "retired"]).default("draft").notNull(),
