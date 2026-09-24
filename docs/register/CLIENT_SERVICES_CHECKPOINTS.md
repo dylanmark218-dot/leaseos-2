@@ -304,3 +304,59 @@ that gains a state change calls `enqueueCustomerEvent` in its transaction. Nothi
 **Unresolved risks:** `invoicing.send` writes the invoice update and the outbox event in two statements (the existing
 procedure had no transaction); a crash between them loses the event, not the invoice — the retry-safe event id makes a
 re-send harmless once `send` becomes transactional.
+
+## CP9 — full gate
+
+**Command:** `DATABASE_URL=… bash scripts/ci-gate.sh` (drops and recreates the database, applies every migration
+including `0175_client_services_portal.sql`, then parity, typecheck, the test-file type pin, the bare-procedure
+check, the full vitest run, the production build, the three procedure gates, and the current-state check).
+
+**Result: PASS.**
+
+| Gate | Result |
+|---|---|
+| Reserved migration slots 0016/0017 | untouched |
+| Migrations from an empty database | all applied, Academy retention guard verified |
+| Table parity (`schema.ts` vs migrations) | 415 / 415 |
+| `tsc --noEmit` | clean |
+| Test-file type errors | 0 (pinned ceiling 0) |
+| Bare `protectedProcedure` | none |
+| Full test suite | 346 files, 4885 passed, 3 skipped (pre-existing, `agentRuntimeApi.test.ts`), 0 failed |
+| Production build (`vite build` + esbuild) | built |
+| External gate | 46 externally-gated procedures (pinned) |
+| Tracking gate (new, step 7d) | 11 tracking-gated procedures, only in `trackingRouter` (pinned) |
+| Machine gate | 2 integration-gated procedures (pinned) |
+| Current-state document | regenerated and matching |
+
+**Against baseline:** before this branch the same gate reported 334 files / 4771 tests. The branch adds 12 test files
+and 114 cases; nothing that passed before fails now.
+
+**The one failure on the first run, and its fix:** `server/calendarFixtures.test.ts` (the calendar tripwire) named three
+files with a fixture date inside three weeks and a real clock read: two of this branch's (`trackingLinks.db.test.ts`
+— a custom live-until date of 2026-09-25 compared with an explicit `now`; `clientPortal.db.test.ts` — a posting
+scheduled for 2026-09-26) and one untouched by the branch (`capitalAssets.test.ts`, whose 2026-10-15 schedule date
+came within 21 days on 2026-09-24, the day of the run — it fails identically on `main` today; `git diff origin/main`
+on that file and on the tripwire is empty). The two branch fixtures were made clock-relative. The untouched file was
+reviewed the way the tripwire asks: its dates are an explicit `asOf` inside a fixed fiscal year and a disposal aged
+against that `asOf`, its clock reads stamp a role grant and two refused registrations — recorded in `REVIEWED` as
+`clock_independent` with that reason. Commit `1f1e9cf`.
+
+**Commits on `claude/client-portal-job-tracking-zqmejc`:** `c4aa8c4` CP1 · `48ea7b5` CP2 · `7ad7e70` CP3 · `d8420f6`
+CP4 · `33dd5f3` CP5 · `05973e6` CP6 · `2dc4b83` CP7 · `c9d9ad1` CP8 · `1f1e9cf` CP9 tripwire · (this commit) CP9
+report. No pull request was opened.
+
+**Security posture across the module, restated once:** every customer read goes through an explicit projection
+(`projectCustomerJob`, `projectOpenTicket`, `projectLoads`, `releasedDocumentsFor`) — no internal row is ever
+serialized; a tracking token is 32 random bytes stored only as a SHA-256 hash and shown once; every gate decision
+fails closed (bad shape, unknown hash, revoked, superseded, expired, over the access limit, job out of the link's
+organization, scope key missing → denied, and denied for a sensitive scope is recorded); tenant scoping is by the
+job's `orgRef` on every table this module added; billing lines the office marks internal never leave the server;
+customer actions are rows and hash-chained ledger entries, and a page view writes an access-log row, never an action;
+finalized tickets are frozen revisions that amendments supersede rather than edit.
+
+**Unresolved risks carried forward (from the checkpoint sections above):** no production writer exists yet for
+"dispatched" / "en route" / load and disposal completion, so those customer moments are documented hook points with
+their event types defined but nothing emitting them; `invoicing.send` is not transactional (pre-existing shape); the
+portal list projections are N+1 like the existing `portal.jobBoard`; a QR image is rendered client-side from the URL
+payload, no library added; `LEASEOS_PUBLIC_URL` must be set in production for the link URL and QR payload to be
+absolute.
