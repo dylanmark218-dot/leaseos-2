@@ -1,4 +1,4 @@
--- v23.26 — 0179: the canonical ELD event ledger, append-only, and the conflict ledger beside it.
+-- v23.26 — 0187: the canonical ELD event ledger, append-only, and the conflict ledger beside it.
 --
 -- An electronic logging device produces a legal record, and a legal record is never rewritten.
 -- Until now the only duty-status store was `dutyRecords` (0008): mutable, untenanted, with no device

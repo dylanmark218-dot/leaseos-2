@@ -176,7 +176,7 @@ export type Permission =
   /* P1.2 — running the seal's third leg against the stored object. */
   | "device.verifySeal"
   | "sync.push_own" | "sync.resolve_conflict"
-  /* 0179 — the ELD event ledger. A device appends its own events (self-scoped in code: the device
+  /* 0187 — the ELD event ledger. A device appends its own events (self-scoped in code: the device
      must be enrolled to the session user); reading a device's chain is an office act. */
   | "eld.event.record_own" | "eld.read"
   // v20.21 — compliance master registry. Reading a passport is broad
@@ -1696,7 +1696,7 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
-  // 0179 — an ELD batch is admitted only for a device enrolled to `ctx.user.id`; the store re-checks it.
+  // 0187 — an ELD batch is admitted only for a device enrolled to `ctx.user.id`; the store re-checks it.
   "eld.event.record_own",
 ] as const;
 
@@ -2487,7 +2487,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "sync.receivePackage": "sync.push_own",
   "sync.resolveConflict": "sync.resolve_conflict",
 
-  /* ---- 0179: the ELD event ledger ---- */
+  /* ---- 0187: the ELD event ledger ---- */
   "eld.eventsAppend": "eld.event.record_own",
   "eld.deviceIntegrity": "eld.read",
 

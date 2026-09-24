@@ -53,6 +53,7 @@ import {
   evidenceInScope,
   jobInScope,
   operatorInScope,
+  operatorForUserInScope,
   tripInScope,
   unitInScope,
   workOrderInScope,
@@ -314,6 +315,8 @@ const widgetDeps: WidgetDeps = {
   },
   readerFor: (actor) => widgetReaderFor(actor, (userId) =>
     appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId } as never }) as never,
+    // The caller's own operator record, in the scope the actor was resolved in — not their user id.
+    () => operatorForUserInScope(actor.userId, { tenantId: actor.tenantId }),
     (subject) => composeReadiness(subject)),
 };
 
@@ -337,7 +340,7 @@ export const appRouter = router({
   assistantAsk: assistantAskRouter,
   agent: agentRouter,
   hos: hosRouter,
-  // 0179 — the canonical ELD event ledger; a device appends, the office reads its chain.
+  // 0187 — the canonical ELD event ledger; a device appends, the office reads its chain.
   eld: eldRouter,
   records: recordsRouter,
   payroll: payrollRouter,
@@ -600,6 +603,12 @@ export const appRouter = router({
               : undefined;
           return createTripStop({
             ...input,
+            // 0179: the actor was in hand here and discarded. A stop is evidence
+            // on the spine; `driver_typed` because this procedure is a person
+            // entering it directly — the assistant path stamps neither, because
+            // its provenance is per-field in proposalFields.
+            recordedByUserId: ctx.user.id,
+            recordedSource: "driver_typed" as const,
             waitMinutes:
               input.waitMinutes ??
               minutes(input.arrivedAt, input.setupStartedAt),
@@ -633,7 +642,16 @@ export const appRouter = router({
         { const tid = await tripStopTripId(input.id); if (tid != null && !(await tripInScope(tid, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip stop ${input.id} not found` }); }
         
           const { id, ...values } = input;
-          return updateTripStop(id, values);
+          return updateTripStop(id, {
+            ...values,
+            // 0179: an edit left no trace at all before this — no actor, and the
+            // table carried no updatedAt. The receipt reader compares this stamp
+            // with the newest assistant commit, so a hand edit is never mistaken
+            // for committed evidence.
+            updatedByUserId: ctx.user.id,
+            updatedSource: "driver_typed" as const,
+            updatedAt: new Date(),
+          });
         }),
     }),
     operatingZones: router({

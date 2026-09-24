@@ -1,5 +1,5 @@
 /**
- * 0179 — the only writer of `eldEvents`.
+ * 0187 — the only writer of `eldEvents`.
  *
  * Routers do not insert ELD events. They authenticate the transport (signature, nonce, freshness)
  * and hand the enrolled device and the raw batch here. This module decides identity, tenancy,

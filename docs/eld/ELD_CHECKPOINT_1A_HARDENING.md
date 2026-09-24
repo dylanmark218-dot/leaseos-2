@@ -113,6 +113,9 @@ device identity* (a provider's device id under an `integrationClients` row, or a
 
 ## 10. Migration number
 
+> **Superseded 2026-09-24:** main later merged its own `0179_trip_stop_provenance.sql` (PR #17), and
+> the ledger moved to `0187_eld_event_ledger.sql`. The history below is the checkpoint's own.
+
 `0170_eld_event_ledger.sql` → `0179_eld_event_ledger.sql`, content unchanged except the header line.
 Main merged the dispatch role model (0170, 0171, 0174); the register's scan shows 0172–0178 claimed by
 open branches; 0179 is the first number free everywhere. Every "0170" reference in this branch's own

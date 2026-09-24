@@ -1,5 +1,5 @@
 /**
- * 0179 — the canonical ELD event ledger, against a real database.
+ * 0187 — the canonical ELD event ledger, against a real database.
  *
  * Every case goes through the production door: `device.enroll` + `device.activate` for identity,
  * `eld.eventsAppend` with a real P-256 signature for the push, raw SQL only to inspect rows and to

@@ -1,5 +1,5 @@
 /**
- * 0179 — the canonical ELD event: what a device records, how it is serialized, and what is hashed.
+ * 0187 — the canonical ELD event: what a device records, how it is serialized, and what is hashed.
  *
  * Shared by the server ledger and the device runtime, and written so that a Kotlin, Swift, Rust or
  * C producer can reproduce the same bytes without a JavaScript runtime. Nothing here touches a

@@ -1,4 +1,4 @@
-# ELD Checkpoint 1 — the canonical event ledger (migration 0179, originally 0170)
+# ELD Checkpoint 1 — the canonical event ledger (migration 0187, originally 0170)
 
 **Branch:** `claude/eld-compliance-intelligence-ramlrd`. **Design:** `ELD_COMPLIANCE_INTELLIGENCE_DESIGN.md` (commit `ab87f5f`).
 **Scope of this checkpoint:** trustworthy ELD event capture and nothing after it. No HOS mechanics, no
@@ -11,8 +11,10 @@ Written as `0170_eld_event_ledger.sql`: at implementation time the highest migra
 and `origin/main` was `0169_defect_resolution.sql`. Main then merged the dispatch role model, which owns
 0170, 0171 and 0174, and open branches claim 0172–0178 (see `docs/architecture/MIGRATION_COLLISION_REGISTER.md`
 on main). Under the register's rule the merged branch keeps its number and every other claimant takes the
-first number free everywhere, so the hardening checkpoint renumbered this file to **`0179_eld_event_ledger.sql`**
-with no other change.
+first number free everywhere, so the hardening checkpoint renumbered this file to `0179_eld_event_ledger.sql`
+with no other change. On 2026-09-24 PR #17 merged `0179_trip_stop_provenance.sql` to main, and the file
+moved again, to **`0187_eld_event_ledger.sql`**, the first number free on main and every open branch.
+The register on main records all three numbers.
 The migration is a single file: two tables, indexes, and four single-statement triggers (the 0061/0062
 form, so the runner needs no `DELIMITER` handling).
 
