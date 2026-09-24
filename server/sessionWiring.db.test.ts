@@ -42,7 +42,7 @@ afterAll(async () => { await pool?.end(); });
 function caller(cookieValue?: string) {
   const cleared: string[] = [];
   const set: { name: string; value: string; options: Record<string, unknown> }[] = [];
-  const req = { headers: { cookie: cookieValue ? `${REFRESH_COOKIE_NAME}=${cookieValue}` : "" } };
+  const req = { headers: { cookie: cookieValue ? `${REFRESH_COOKIE_NAME}=${cookieValue}` : "", host: "app.leaseos.test", origin: "https://app.leaseos.test" } };
   const res = {
     clearCookie: (name: string) => { cleared.push(name); },
     cookie: (name: string, value: string, options: Record<string, unknown>) =>
@@ -113,5 +113,25 @@ d("refresh spends one credential and issues the next", () => {
 
   it("refuses when no refresh cookie is presented", async () => {
     await expect(caller().api.auth.refresh()).rejects.toThrow();
+  });
+});
+
+d("E3w — the credential endpoints refuse a cross-site caller", () => {
+  const foreign = (cookieValue: string) => appRouter.createCaller({
+    req: { headers: { cookie: `${REFRESH_COOKIE_NAME}=${cookieValue}`, host: "app.leaseos.test", origin: "https://evil.example" } },
+    res: { clearCookie: () => {}, cookie: () => {} },
+    user: { id: 1, role: "user" },
+  } as never);
+
+  it("refuses a cross-site refresh, and does not rotate the family", async () => {
+    const f = await createSessionFamily({ openId: openId(), appId: null });
+    await expect(foreign(`${f.familyRef}.${f.verifier}`).auth.refresh()).rejects.toThrow();
+    // The real browser's verifier must still work: a refused cross-site call may not strand it.
+    expect((await redeemRefresh(f.familyRef, f.verifier, new Date())).kind).toBe("ok");
+  });
+
+  it("refuses a cross-site revoke-all", async () => {
+    const f = await createSessionFamily({ openId: openId(), appId: null });
+    await expect(foreign(`${f.familyRef}.${f.verifier}`).auth.revokeAll()).rejects.toThrow();
   });
 });

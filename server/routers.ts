@@ -3,6 +3,7 @@ import { COOKIE_NAME, REFRESH_COOKIE_NAME } from "@shared/const";
 import { redeemRefresh, revokeAllForOpenId, revokeFamily } from "./sessionFamilyService";
 import { ACCESS_TOKEN_TTL_MS, REFRESH_ABSOLUTE_TTL_MS } from "./_core/sessionFamily";
 import { sdk } from "./_core/sdk";
+import { isTrustedOrigin } from "./_core/csrf";
 
 /**
  * The refresh cookie carries `familyRef.verifier`. Split on the FIRST dot only: the reference is
@@ -433,6 +434,14 @@ export const appRouter = router({
      * away about which families exist or why one died.
      */
     refresh: publicProcedure.mutation(async ({ ctx }) => {
+      /*
+       * The cookie is sameSite "none" so embedded surfaces keep working, which means a page on any
+       * origin can cause this call. It could read nothing — the cookies are httpOnly — but it
+       * could rotate the family and strand the real browser, or trip reuse detection and kill it.
+       */
+      if (!isTrustedOrigin(ctx.req)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Cross-site refresh refused" });
+      }
       const presented = readRefreshCookie(ctx.req);
       if (!presented) throw new TRPCError({ code: "UNAUTHORIZED", message: "No refresh credential" });
 
@@ -457,6 +466,9 @@ export const appRouter = router({
 
     /** Sign out everywhere — the control a stolen-laptop report needs. */
     revokeAll: publicProcedure.mutation(async ({ ctx }) => {
+      if (!isTrustedOrigin(ctx.req)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Cross-site revocation refused" });
+      }
       const presented = readRefreshCookie(ctx.req);
       if (!presented) throw new TRPCError({ code: "UNAUTHORIZED", message: "No refresh credential" });
       const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date());
