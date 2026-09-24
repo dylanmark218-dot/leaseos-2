@@ -330,3 +330,169 @@ outcomes.
 | RR-5 | Which search provider? It needs its own licence assessment row before use (RC-9). | Owner, at AIL-3R-b |
 | RR-6 | Model-driven watchers after AIL-9 only; structured feeds through the existing feed family on the SPINE schedule (RC-5) | **Yes** |
 | RR-7 | Regulated domains without a ledger (TDG, weights, permits, OHS, tax, environmental): candidates recorded, nothing promotable until a ledger exists (RC-8) | **Yes** |
+
+---
+
+## 7. Owner rulings (2026-09-24)
+
+The reconciliation is **approved**. The rulings below govern where they differ from §§0–6.
+
+### RR-1 — Source reproduction and counsel
+
+**Yes.** Licence and legal review must distinguish at least eleven uses:
+- linking;
+- metadata use;
+- transient retrieval;
+- short quoted snippets;
+- answering or paraphrasing from a source;
+- caching;
+- indexing;
+- RAG ingestion;
+- tenant learning;
+- global evaluation;
+- global training.
+
+Until the rights for a source are established, **the more restrictive interpretation applies**.
+Where LeaseOS may only link or use metadata, the AI identifies the source and gives the allowed
+reference. It does not store, reproduce, index, RAG-ingest or train on the restricted content.
+Speculative legal conclusions are not implemented in code.
+
+### RR-2 — Publisher type
+
+**Approved.** The existing A–F authority ladder (`AUTHORITY_LEVELS`) is **neither replaced nor
+duplicated**. A distinct publisher/source classification is added. Candidate values:
+- `government_official`
+- `regulator`
+- `municipal_official`
+- `operator_primary`
+- `manufacturer_primary`
+- `industry_secondary`
+- `general_web`
+- `community_generated`
+- `unknown`
+
+The names are reconciled against repository terminology before implementation. Publisher type
+says **who published** something; the authority system says **what decisional weight** it can
+carry. The mapping from one to the other is server-controlled and explicit. This supersedes the
+provisional class names in RC-1.
+
+### RR-3 — Operational sources
+
+**Confirmed.** Operational sources may:
+- inform;
+- warn;
+- contribute evidence;
+- mark a condition UNKNOWN;
+- create review candidates;
+- trigger a conservative or manual-review path where existing deterministic policy provides one.
+
+They never independently:
+- certify a route safe or legal;
+- clear dispatch;
+- create law;
+- override compliance or deterministic LeaseOS rules;
+- authorize a restricted action.
+
+Road advisories stay advisory evidence unless an authoritative deterministic rule explicitly says
+otherwise.
+
+### RR-4 — Alberta 511
+
+**Yes.** LeaseOS will pursue the written permission `AB_511` requires. Until those rights are
+obtained and recorded, the existing restrictive behaviour stays. Licence controls are not loosened
+to enable AI research.
+
+### RR-5 — Search provider
+
+**No live provider is selected.** AIL-3R-a stays provider-neutral.
+
+Before AIL-3R-b, a separate provider assessment covers:
+- licence terms and commercial use;
+- search-result reproduction and AI/RAG use;
+- retention and query logging;
+- Canadian privacy implications;
+- API security;
+- availability and reliability;
+- cost and rate limits;
+- regional coverage;
+- source URL availability;
+- lock-in.
+
+The chosen provider implements a LeaseOS-owned abstraction. Changing providers must not alter
+evidence semantics, source authority, research receipts, tenant isolation, query minimisation,
+learning admission or safety policy. **No live research provider is activated without another
+owner ruling.**
+
+### RR-6 — Background watchers
+
+**Confirmed.** Model-driven proactive research stays blocked until the controlled model runtime
+after AIL-9. That covers regulatory, facility, equipment, general-safety and arbitrary-web
+watchers.
+
+Deterministic structured-feed monitoring may come earlier, but only when all of these hold:
+- the existing feed architecture supports it;
+- the licence permits the use;
+- no LLM or provider activation is needed;
+- advisory data cannot silently become authoritative.
+
+### RR-7 — Domains without promotion ledgers
+
+**Confirmed.** Where a regulated domain has no governed promotion target, research findings may be:
+- answered from, where permitted;
+- cited;
+- stored as permitted evidence;
+- recorded as findings;
+- turned into review candidates.
+
+They stay **record/review only**. No improvised route into production deterministic rules. A
+governed ledger for such a domain is its own domain checkpoint.
+
+### RR-8 — Research and learning scope (new)
+
+All research and learning starts inside authenticated LeaseOS scope: `GLOBAL`, `ORGANIZATION`,
+`USER`, `SESSION/JOB`. Organization and user identity come from trusted server-side acting context.
+
+None of these may establish or change organization or user scope:
+- a model response;
+- a retrieved web page;
+- an uploaded document;
+- a search result;
+- a model-generated tool argument.
+
+Company research may be personalised with company knowledge and current operational context. User
+research may use authorized user preferences and role context.
+
+**Query minimisation applies before anything leaves LeaseOS.** None of the following are sent
+unnecessarily:
+- employee, driver and customer names;
+- private lease identifiers;
+- job numbers;
+- private facility information;
+- proprietary load details;
+- internal notes;
+- tenant identifiers.
+
+Internal context decides *what* to research. It does not all leave LeaseOS. Findings inherit their
+tenant and user scope unless deliberately promoted through governance.
+
+**Promotion gets harder as scope widens:**
+
+| Promotion | Governance |
+|---|---|
+| user → company | moderate |
+| company → global | strict |
+| internet → global | strictest |
+
+Frequency is never truth. A user pattern that conflicts with company policy or safety is a
+candidate for review, never a policy change.
+
+### Sequence
+
+1. **SEC-OUTBOUND-1** (security, isolated)
+2. AIL-1A (learning scopes)
+3. AIL-1B (company intelligence)
+4. AIL-1C (user intelligence)
+5. AIL-2 (tool / capability binding)
+6. AIL-3 (governance enforcement)
+7. AIL-3R-a (research contracts and tests)
+8. AIL-3R-b (live provider), later and only after explicit approval

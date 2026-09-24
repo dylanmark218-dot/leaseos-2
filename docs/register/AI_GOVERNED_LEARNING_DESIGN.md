@@ -772,15 +772,19 @@ For HOS, TDG, regulatory compliance, permits, mechanical clearance, dispatch saf
 protected determinations, a statistical accuracy threshold is **never authority**. The AI
 extracts, explains and proposes. Deterministic rules and authorized people decide.
 
-### Revised checkpoint order (supersedes §9)
+### Revised checkpoint order (supersedes §9; updated 2026-09-24 with the research rulings)
 
 | AIL | Content |
 |---|---|
 | **AIL-0** | Safety characterization: tests only, no behaviour change. **Done**, see `AIL_0_SAFETY_CHARACTERIZATION.md`. |
-| AIL-1 | Tenant containment: tenant ownership of AI proposals, aliases and learning intake (Gap C) |
+| SEC-OUTBOUND-1 | Security checkpoint, not an AI feature: harden the existing caller-controlled server-side fetches before any new research fetcher exists (owner ruling 2026-09-24). |
+| AIL-1A | Identity and learning scopes: `GLOBAL`, `ORGANIZATION`, `USER`, `SESSION/JOB` as explicit governed scopes; every learned or researched thing has one, derived from acting context (RR-8). Also closes the tenant-ownership part of Gap C. |
+| AIL-1B | Company intelligence profile: organization terminology, aliases, preferences, procedures and knowledge, all as governed records (R-1) |
+| AIL-1C | User intelligence profile: user preferences, recurring workflows and verified corrections. It never rewrites company policy, and frequency is not truth. |
 | AIL-2 | Tool → capability binding (R-3) |
 | AIL-3 | Governance enforcement: the Constitution as executable kernel rules; a consumer for `FORBIDDEN_AI_OUTCOMES` (Gap A) |
-| AIL-3R | Governed research gateway: `research()` answers with citations and changes nothing; `learn()` is AIL-4. Split into 3R-a (pure contracts and tests, inside R-4) and 3R-b (live search and fetch, needs its own ruling). See `AIL_3R_RESEARCH_GATEWAY_DESIGN.md`. |
+| AIL-3R-a | Research contracts and tests, provider-neutral (RR-5). See `AIL_3R_RESEARCH_GATEWAY_DESIGN.md`. |
+| AIL-3R-b | Live search provider. **Not approved.** It needs the provider assessment (RR-5) and another owner ruling. |
 | AIL-4 | Learning candidate record |
 | AIL-5 | Skill registry |
 | AIL-6 | Evaluation and quarantine (R-8 gates) |
