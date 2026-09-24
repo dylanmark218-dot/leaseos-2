@@ -20,6 +20,8 @@ import type { RoleActor } from "../../../server/_core/roleActor";
 import { demonstration, fromQuery } from "../showcase/panelSource";
 import { LoginView } from "../pages/LoginView";
 import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser } from "../portal/PortalChooser";
+import { FileManagerView } from "../records/FileManagerView";
+import { counts as fileCounts, detail as fileDetail, fileManagerProps } from "../test/fileManagerFixtures";
 
 afterEach(cleanup);
 
@@ -180,6 +182,12 @@ const surfaces = [
   { name: "workspace chooser — declined default and link", render: () => render(<PortalChooser options={a11yPortals} rejectedDefault="executive" rejectedRequest="executive" onChoose={() => {}} />) },
   { name: "no workspace available", render: () => render(<NoPortalAvailable notReached={a11yPortals} onSignOut={() => {}} />) },
   { name: "organization selection required", render: () => render(<OrganizationSelectionRequired detail="member of 2 organizations" />) },
+  // The Records & File Manager: folders, list and inspector together, then the states that only
+  // exist when something is refused or missing — an alert must be reachable in each.
+  { name: "records — list and inspector", render: () => render(<FileManagerView {...fileManagerProps()} />) },
+  { name: "records — nothing selected, empty folder", render: () => render(<FileManagerView {...fileManagerProps({ folder: "billing", selectedId: null, detail: { kind: "none" }, list: { kind: "loaded", rows: [], counts: fileCounts, truncated: true, reach: { categories: [], own: true, canVerify: false } } })} />) },
+  { name: "records — integrity failure and withheld history", render: () => render(<FileManagerView {...fileManagerProps({ notice: { tone: "error", text: "File storage is not reachable from this server" }, detail: { kind: "loaded", detail: fileDetail({ lifecycle: "integrity_failed", accessHistory: null, legalHold: { active: true, holds: [{ holdNumber: "LH-2201", matterRef: "MAT-221", status: "active", placedAt: new Date("2026-09-12T00:00:00Z"), releasedAt: null }] } }) } })} />) },
+  { name: "records — list failed, record refused", render: () => render(<FileManagerView {...fileManagerProps({ list: { kind: "failed", message: "Database unavailable" }, detail: { kind: "failed", message: "Record 1 not found" } })} />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {

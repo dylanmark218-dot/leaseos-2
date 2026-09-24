@@ -24,7 +24,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | Surface | Class | Count |
 |---|---|---|
 | `server/routers.ts` | `ROLE_AUTHORIZED` | **85** |
-| `server/recordsRouter.ts` | `ROLE_AUTHORIZED` | **17** |
+| `server/recordsRouter.ts` | `ROLE_AUTHORIZED` | **21** |
 | `server/payrollRouter.ts` | `ROLE_AUTHORIZED` | **40** |
 | `server/portalFundingRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/purchasingRouter.ts` | `ROLE_AUTHORIZED` | **9** |

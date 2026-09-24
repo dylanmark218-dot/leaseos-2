@@ -33,6 +33,7 @@ import AssistantCalibration from "./pages/AssistantCalibration";
 import TripOperationsWorkspace from "./showcase/TripOperationsWorkspace";
 import TrainingAcademy from "./pages/TrainingAcademy";
 import DispatchJobDetail from "./dispatch/DispatchJobDetail";
+import FileManager from "./records/FileManager";
 
 function DashboardRoute({ children }: { children: ReactNode }) {
   return <DashboardLayout>{children}</DashboardLayout>;
@@ -57,6 +58,10 @@ function Router() {
       <Route path="/map" component={() => <MapSurface />} />
       <Route path="/jobs" component={() => <JobsSurface />} />
       <Route path="/evidence" component={() => <EvidenceSurface />} />
+      {/* The Records & File Manager: browse, inspect and download records the
+          server has already decided this caller may see. */}
+      <Route path="/records" component={() => <FileManager />} />
+      <Route path="/files" component={() => <Redirect to="/records" />} />
       <Route path="/safety" component={() => <SafetySurface />} />
       {/* v22.20 — communications, on real procedures. Not showcase routes:
           these read sealed packages and the transmit engine, so demonstration

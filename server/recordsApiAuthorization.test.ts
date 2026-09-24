@@ -84,8 +84,8 @@ async function attempt(fn: () => Promise<unknown>): Promise<"forbidden" | "passe
 }
 
 d("the gate is on every records procedure", () => {
-  it("declares a permission for all 18 procedures", () => {
-    expect(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length).toBe(18);
+  it("declares a permission for all 21 procedures", () => {
+    expect(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length).toBe(21);
   });
 
   it("mounts records on the app router", () => {
