@@ -19,6 +19,7 @@ import { appendCustomerAuditEvent } from "./_core/customerAudit";
 import { projectOpenTicket } from "./_core/customerJobView";
 import { loadTicket, recordSignature, snapshotFor } from "./closeoutRouter";
 import { orgRefForTicket, transitionBilling, type Actor } from "./serviceTicketService";
+import { enqueueCustomerEvent } from "./_core/customerEvents";
 import type { Authority, PostSiteAuthorization } from "./_core/siteCloseout";
 
 export type CustomerActor = Actor & { kind: "tracking_link" | "portal_identity"; userAgent?: string | null; displayName?: string | null };
@@ -80,6 +81,7 @@ export async function recordCustomerAction(i: ActionInput): Promise<{ actionRef:
       : null;
     if (i.customerPoNumber !== undefined && i.customerPoNumber !== null && i.customerPoNumber !== x.t.customerPoNumber) await tx.update(fieldTickets).set({ customerPoNumber: i.customerPoNumber }).where(eq(fieldTickets.id, x.t.id));
     await tx.insert(customerTicketActions).values({ actionRef, orgRef: org.orgRef, jobId: org.jobId, fieldTicketId: x.t.id, customerAccountId: x.t.customerAccountId, kind: i.kind, actorKind: i.actor.kind, trackingLinkId: i.actor.trackingLinkId ?? null, externalIdentityId: i.actor.externalIdentityId ?? null, userId: null, representativeName: i.representativeName ?? i.actor.displayName ?? null, representativeTitle: i.representativeTitle ?? null, customerPoNumber: i.customerPoNumber ?? null, comment: i.comment ?? null, snapshotHash: i.snapshotHash ?? current, ipHash: i.actor.ipHash ?? null, userAgent: i.actor.userAgent ?? null, at });
+    if (transition?.changed) await enqueueCustomerEvent(tx, { eventType: i.kind === "approve" ? "customer.ticket.approved" : "customer.ticket.disputed", tenantId: org.orgRef, subjectRef: x.t.ticketNumber, occurrence: actionRef, jobId: org.jobId, customerAccountId: x.t.customerAccountId, payload: { actionRef, via: i.actor.kind, representativeName: i.representativeName ?? null } });
     // The transition already put approve / dispute on the ledger; acknowledge and comment get their own entry.
     if (!transition) await appendCustomerAuditEvent(tx, { orgRef: org.orgRef, eventType, subjectType: "fieldTicket", subjectRef: x.t.ticketNumber, jobId: org.jobId, fieldTicketId: x.t.id, trackingLinkId: i.actor.trackingLinkId ?? null, externalIdentityId: i.actor.externalIdentityId ?? null, ipHash: i.actor.ipHash ?? null, occurredAt: at, payload: { actionRef, representativeName: i.representativeName ?? null, comment: i.comment ?? null, snapshotHash: i.snapshotHash ?? current, via: i.actor.kind } });
     return transition;

@@ -15,6 +15,7 @@ import { actingScopeFor, fieldTicketInScope, getDb, jobInScope, unitInScope } fr
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { afterLineWrite, beforeLineWrite, openIfDraft, orgRefForTicket, transitionBilling, type Actor as BillingActor } from "./serviceTicketService";
 import { customerTicketActions } from "../drizzle/schema";
+import { enqueueCustomerEvent } from "./_core/customerEvents";
 import { fieldDevices } from "../drizzle/schema";
 import { canonicalSignaturePayload, checkSignatureAttestation } from "./_core/deviceSignature";
 import { clientAdjustments, customerAccounts, customerContractTerms, delayEvents, disposalTickets, fieldTicketDocuments, fieldTicketEvents, fieldTicketLines, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, jobs, loads, payrollAdjustments, roadHazardObservations, signatoryAuthorities, tripStops, weatherObservations } from "../drizzle/schema";
@@ -216,7 +217,10 @@ export const closeoutRouter = router({
       if (x.t.billingState === "DRAFT") await openIfDraft(x.db, x.t.id);   // 0175 — work has started: the open ticket accrues from here
       const ins = await x.db.insert(fieldTicketEvents).values({ fieldTicketId: x.t.id, eventType: input.eventType, clock: meta.clock, customerBillable: decided.customerBillable, billingRuleRef: decided.ruleRef, occurredAt: input.occurredAt, endedAt: input.endedAt ?? null, durationMinutes, billableMinutes: decided.billableMinutes, sourceTripStopId: input.tripStopId ?? null, detail: input.detail ?? null, source: input.source, confidence: input.confidence });
       // v21.14 — the customer's alerts, from the same events: first site work is arrival and work start; a hold is a delay.
-      if (input.eventType === "site_work" && !x.events.some(ev => ev.eventType === "site_work")) { await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "arrival", ticketNumber: x.t.ticketNumber }); await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "work_start", ticketNumber: x.t.ticketNumber }); }
+      if (input.eventType === "site_work" && !x.events.some(ev => ev.eventType === "site_work")) { await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "arrival", ticketNumber: x.t.ticketNumber }); await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "work_start", ticketNumber: x.t.ticketNumber });
+        // 0175 — the first site work is the unit on location: the customer-safe alert and the outbox event, once per ticket.
+        await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "on_location", ticketNumber: x.t.ticketNumber, subjectRef: `${x.t.ticketNumber}:on_location` });
+        { const org = await orgRefForTicket(x.db, x.t.id); await x.db.transaction(async tx => { await enqueueCustomerEvent(tx, { eventType: "customer.job.on_location", tenantId: org.orgRef, subjectRef: x.t.ticketNumber, jobId: org.jobId, customerAccountId: x.t.customerAccountId, actorUserId: ctx.user.id, payload: { occurredAt: input.occurredAt } }); }); } }
       if (input.eventType === "standby" || input.eventType === "customer_hold" || input.eventType === "weather_hold") await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "delay", ticketNumber: x.t.ticketNumber, detail: input.eventType.replace(/_/g, " "), subjectRef: `${x.t.ticketNumber}:${Number(ins[0]?.insertId ?? 0)}` });
       return { eventId: Number(ins[0]?.insertId ?? 0), clock: meta.clock, customerBillable: decided.customerBillable, billingRuleRef: decided.ruleRef };
     }),
@@ -277,7 +281,11 @@ export const closeoutRouter = router({
       const y = await loadTicket(input.ticketNumber);
       const { snapshot, hash, findings } = snapshotFor(y);
       // 0175 — presenting the site is presenting the open ticket: the customer reviews it under this hash.
-      const billing = await x.db.transaction(async tx => transitionBilling(tx, { ticketId: x.t.id, action: "present", actor: { userId: ctx.user.id }, eventType: "ticket_presented", payload: { snapshotHash: hash, siteWorkCompleteAt: input.siteWorkCompleteAt.toISOString() }, refuse: false }));
+      const billing = await x.db.transaction(async tx => {
+        const r = await transitionBilling(tx, { ticketId: x.t.id, action: "present", actor: { userId: ctx.user.id }, eventType: "ticket_presented", payload: { snapshotHash: hash, siteWorkCompleteAt: input.siteWorkCompleteAt.toISOString() }, refuse: false });
+        if (r.changed) { const org = await orgRefForTicket(tx, x.t.id); await enqueueCustomerEvent(tx, { eventType: "customer.ticket.ready_for_review", tenantId: org.orgRef, subjectRef: x.t.ticketNumber, occurrence: hash.slice(0, 12), jobId: org.jobId, customerAccountId: x.t.customerAccountId, actorUserId: ctx.user.id, payload: { snapshotHash: hash, siteWorkCompleteAt: input.siteWorkCompleteAt.toISOString() } }); }
+        return r;
+      });
       await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "signoff_ready", ticketNumber: x.t.ticketNumber, subjectRef: `${x.t.ticketNumber}:${hash.slice(0, 12)}` });
       if (billing.changed) await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "ticket_ready_for_review", ticketNumber: x.t.ticketNumber, subjectRef: `${x.t.ticketNumber}:${hash.slice(0, 12)}` });
       return { snapshot, snapshotHash: hash, findings, billingState: billing.to };
@@ -543,6 +551,7 @@ export const closeoutRouter = router({
       const documentRef = `${x.t.ticketNumber}-PKG-${contentHash.slice(0, 8).toUpperCase()}`;
       await db.insert(fieldTicketDocuments).values({ documentRef, fieldTicketId: x.t.id, revisionId: latest.id, kind: "completion_package", storageKey: stored.key, contentHash, sourceSnapshotHash: latest.snapshotHash, byteLength: bytes.length, generatedByUserId: ctx.user.id, generatedAt });
       await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "job_complete", ticketNumber: x.t.ticketNumber, subjectRef: documentRef });
+      { const org = await orgRefForTicket(db, x.t.id); await db.transaction(async tx => { await enqueueCustomerEvent(tx, { eventType: "customer.job.completed", tenantId: org.orgRef, subjectRef: x.t.ticketNumber, jobId: org.jobId, customerAccountId: x.t.customerAccountId, actorUserId: ctx.user.id, payload: { documentRef, contentHash } }); }); }
       return { documentRef, contentHash, alreadyRendered: false as const };
     }),
 });

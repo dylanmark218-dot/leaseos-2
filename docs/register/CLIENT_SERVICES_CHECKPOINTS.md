@@ -244,3 +244,63 @@ an account, and an identity binds to an account — a finer grant later narrows 
 **Unresolved risks:** `accountJobs` caps at 200 jobs per read and the list projections are N+1 (the existing
 `portal.jobBoard` has the same shape); the portal sign-in reuses the customer shell's token entry rather than a
 dedicated invitation flow.
+
+## CP8 — documents, ticket sequencing, notifications on the outbox, QR
+
+**Files:** `server/_core/customerEvents.ts` (new: `CUSTOMER_EVENT_TYPES`, `enqueueCustomerEvent`), hooks in
+`server/clientServicesRouter.ts` (link created / revoked, document released, ticket presented, ticket finalized),
+`server/closeoutRouter.ts` (first `site_work` → on location; `sitePrepare` → ready for review; completion package →
+job completed), `server/customerActionService.ts` (approved / disputed), `server/invoicingRouter.ts` (`send` →
+invoice issued, with the `invoice_issued` in-app alert beside the existing `billing_update`).
+
+**Migrations / tables:** none. The events ride the existing `domainEventOutbox` (aggregateType `customerJob`); the in-app
+alerts ride `workflowNotifications` through `queueCustomerAlert` (the six new alert kinds landed in CP2).
+
+**Events (14 types, `customer.*`):** tracking_link.created / revoked; job.dispatched / en_route / on_location /
+completed; load.completed; disposal.completed; document.released; ticket.ready_for_review / approved / disputed /
+finalized; invoice.issued. Each is appended inside the transaction that makes the domain write, under the job's
+organization, with the customer account, the acting user (or `system` for a customer's own act), and a payload that
+carries refs and hashes — never a token, never a rate, never a person's contact details. The event id is
+sha256-derived from (type, subject, occurrence), so a retried commit finds its own row (`ER_DUP_ENTRY` is tolerated and
+reported as `duplicate: true`). Delivery is the production outbox worker, the workflow rules and webhook
+subscriptions — nothing in this module delivers, and an email / SMS channel joins by subscribing to these types.
+
+**Documents:** released documents were wired in CP3/CP4 (`customerDocumentReleases` over the existing catalogue with the
+record's own number preserved); CP8 adds the `customer.document.released` event beside the `document_ready` alert. A
+re-release of the same source is idempotent and raises nothing.
+
+**Ticket sequencing:** the billing lifecycle from CP5 is what the events follow: presented (`ticketPresent` and
+`sitePrepare` both, once per hash), approved / disputed (link or portal), finalized, invoiced (`invoicing.send`),
+completed (the completion package). A re-present under the same hash, an acknowledgement, a comment and an idempotent
+re-render change no state and raise nothing.
+
+**QR:** `qrPayload(baseUrl, token)` (CP2) returns the secure URL as the only payload, encoding `url`; the create
+response carries it once beside the token. No QR image library is added: the client renders from the URL with any
+standard encoder, and the payload is by construction the same secret as the link — nothing about the job is encoded.
+
+**Tests added:** `server/customerEvents.db.test.ts` (2 walks): one job from on-location to completion package —
+12 events in order, all under the organization, all on the job, actor recorded, payload refs and hashes match the
+domain records, no token in any payload, the second organization's outbox empty, the identity on the account queued the
+default-on alerts once per moment (two `ticket_ready_for_review`, one per hash); and idempotency — a retried enqueue
+returns the first event id as `duplicate`, the first payload stands, a new occurrence is a new event.
+
+**Test results:** 3/3 new; `serviceTicketBilling.db`, `customerActions.db`, `trackingLinks.db`, `trackingApi.db`,
+`clientPortal.db`, `invoicing`, `siteCloseout`, `enforcementOutbox`, `b20WorkflowWiring` and the drift guards
+(`engineReachability`, `tenantIsolation`, `procedureAuthorization`, `operationalApiAuthorization`,
+`crossLayerIntegrity`, `documentationTruth`, `columnParity`, `clientTruth`, `a11yCoverage`): 201/201. `tsc` and the
+test-file typecheck clean; `LEASEOS_CURRENT_STATE.md` regenerated (329 test files).
+
+**Decisions:** the CP8 test found `sitePrepare` presenting the ticket with the alert but without the event — fixed in
+the same transaction as the transition. `invoicing.send` keeps its existing `billing_update` alert and adds
+`invoice_issued`, so nobody who relied on the old key loses it.
+
+**Hook points without a production writer today (documented, not faked):** `customer.job.dispatched` and
+`customer.job.en_route` — no production code writes `jobs.status` to dispatched or starts a trip (the posting state
+changes only in `dispatchRoleService.ts` and reaches staffed / partially_staffed, never dispatched);
+`customer.load.completed` and `customer.disposal.completed` — loads and disposal tickets are inserted by the field
+sync, which has no per-load completion transition. The types exist and are default-off / opt-in alerts; the writer
+that gains a state change calls `enqueueCustomerEvent` in its transaction. Nothing emits them speculatively.
+
+**Unresolved risks:** `invoicing.send` writes the invoice update and the outbox event in two statements (the existing
+procedure had no transaction); a crash between them loses the event, not the invoice — the retry-safe event id makes a
+re-send harmless once `send` becomes transactional.

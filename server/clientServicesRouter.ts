@@ -26,6 +26,7 @@ import { DEFAULT_SCOPE, LIVE_PRESETS, hashTrackingToken, newTrackingToken, parse
 import { appendCustomerAuditEvent, verifyCustomerAuditChain } from "./_core/customerAudit";
 import { queueCustomerAlert } from "./customerAlertService";
 import { ENV } from "./_core/env";
+import { enqueueCustomerEvent } from "./_core/customerEvents";
 
 async function db() {
   const d = await getDb();
@@ -143,6 +144,7 @@ export const clientServicesRouter = router({
           scopeJson: serializeScope(linkScope), locationMode: input.locationMode, ...live, expiresAt: input.expiresAt ?? null, maxAccessCount: input.maxAccessCount ?? null, createdByUserId: ctx.user.id, createdAt: now,
         });
         await appendCustomerAuditEvent(tx, { orgRef: scope.tenantId, eventType: "tracking_link_created", subjectType: "trackingLink", subjectRef: linkRef, jobId: job.id, trackingLinkId: Number(ins[0]?.insertId ?? 0), externalIdentityId, actorUserId: ctx.user.id, payload: { scope: linkScope, locationMode: input.locationMode, livePreset: input.livePreset, expiresAt: input.expiresAt ?? null, maxAccessCount: input.maxAccessCount ?? null, contactKind: input.contactKind ?? null, contactName: input.contactName ?? null } });
+        await enqueueCustomerEvent(tx, { eventType: "customer.tracking_link.created", tenantId: scope.tenantId, subjectRef: linkRef, jobId: job.id, customerAccountId, actorUserId: ctx.user.id, payload: { jobCode: jobRow.jobCode, contactKind: input.contactKind ?? null, contactName: input.contactName ?? null, contactEmail: input.contactEmail ?? null, contactPhone: input.contactPhone ?? null, scope: linkScope, locationMode: input.locationMode } });
       });
       await queueCustomerAlert({ customerAccountId, kind: "tracking_link_created", ticketNumber: linkRef, jobCode: jobRow.jobCode, detail: input.contactName ?? null, subjectRef: linkRef, tenantId: scope.tenantId });
       const url = trackingUrl(ENV.publicBaseUrl, token);
@@ -160,6 +162,7 @@ export const clientServicesRouter = router({
       await d.transaction(async tx => {
         await tx.update(jobTrackingLinks).set({ status: "revoked", revokedAt: now, revokedByUserId: ctx.user.id, revokedReason: input.reason }).where(eq(jobTrackingLinks.id, l.id));
         await appendCustomerAuditEvent(tx, { orgRef: scope.tenantId, eventType: "tracking_link_revoked", subjectType: "trackingLink", subjectRef: l.linkRef, jobId: l.jobId, trackingLinkId: l.id, actorUserId: ctx.user.id, payload: { reason: input.reason, previousStatus: l.status } });
+        await enqueueCustomerEvent(tx, { eventType: "customer.tracking_link.revoked", tenantId: scope.tenantId, subjectRef: l.linkRef, jobId: l.jobId, customerAccountId: l.customerAccountId, actorUserId: ctx.user.id, payload: { reason: input.reason } });
       });
       return { linkRef: l.linkRef, status: "revoked" as const, alreadyRevoked: false };
     }),
@@ -263,6 +266,7 @@ export const clientServicesRouter = router({
         if (existing) await tx.update(customerDocumentReleases).set({ status: "released", releasedByUserId: ctx.user.id, releasedAt: now, withdrawnAt: null, withdrawnByUserId: null, withdrawReason: null, expiresAt: input.expiresAt ?? null, kind: input.kind, title: input.title ?? existing.title }).where(eq(customerDocumentReleases.id, existing.id));
         else await tx.insert(customerDocumentReleases).values({ releaseRef, orgRef: scope.tenantId, jobId: job.id, customerAccountId: jobRow.customerAccountId, sourceType: input.sourceType, sourceId: input.sourceId, documentRef: cat.documentRef, kind: input.kind, title: input.title ?? cat.title, contentHash: cat.contentHash, releasedByUserId: ctx.user.id, releasedAt: now, expiresAt: input.expiresAt ?? null });
         await appendCustomerAuditEvent(tx, { orgRef: scope.tenantId, eventType: "customer_document_released", subjectType: "document", subjectRef: cat.documentRef, jobId: job.id, actorUserId: ctx.user.id, payload: { releaseRef, sourceType: input.sourceType, sourceId: input.sourceId, kind: input.kind, expiresAt: input.expiresAt ?? null, rereleased: !!existing } });
+        await enqueueCustomerEvent(tx, { eventType: "customer.document.released", tenantId: scope.tenantId, subjectRef: releaseRef, occurrence: now.toISOString(), jobId: job.id, customerAccountId: jobRow.customerAccountId, actorUserId: ctx.user.id, payload: { documentRef: cat.documentRef, kind: input.kind, title: input.title ?? cat.title, contentHash: cat.contentHash } });
       });
       await queueCustomerAlert({ customerAccountId: jobRow.customerAccountId, kind: "document_ready", ticketNumber: cat.documentRef, jobCode: job.jobCode, subjectRef: releaseRef, tenantId: scope.tenantId });
       return { releaseRef, documentRef: cat.documentRef, kind: input.kind, status: "released" as const, alreadyReleased: false };
@@ -306,7 +310,12 @@ export const clientServicesRouter = router({
       const d = await db();
       const r = await d.transaction(async tx => {
         if (input.customerPoNumber !== undefined) await tx.update(fieldTickets).set({ customerPoNumber: input.customerPoNumber }).where(eq(fieldTickets.id, t.id));
-        return transitionBilling(tx, { ticketId: t.id, action: "present", actor: { userId: ctx.user.id }, eventType: "ticket_presented", payload: { snapshotHash: hash, customerPoNumber: input.customerPoNumber ?? null } });
+        const r = await transitionBilling(tx, { ticketId: t.id, action: "present", actor: { userId: ctx.user.id }, eventType: "ticket_presented", payload: { snapshotHash: hash, customerPoNumber: input.customerPoNumber ?? null } });
+        if (r.changed) {
+          const org = await orgRefForTicket(tx, t.id);
+          await enqueueCustomerEvent(tx, { eventType: "customer.ticket.ready_for_review", tenantId: org.orgRef, subjectRef: t.ticketNumber, occurrence: hash.slice(0, 12), jobId: org.jobId, customerAccountId: x.t.customerAccountId, actorUserId: ctx.user.id, payload: { snapshotHash: hash } });
+        }
+        return r;
       });
       if (r.changed) await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "ticket_ready_for_review", ticketNumber: x.t.ticketNumber, jobCode: x.job?.jobCode ?? null, subjectRef: `${x.t.ticketNumber}:${hash.slice(0, 12)}` });
       return { ticketNumber: x.t.ticketNumber, billingState: r.to, snapshotHash: hash, findings };
@@ -346,6 +355,7 @@ export const clientServicesRouter = router({
         await tx.update(fieldTickets).set({ billingState: "FINALIZED", billingVersion: locked.billingVersion + 1, finalizedAt: now, finalizedByUserId: ctx.user.id, finalRevisionId: frozen.revisionId, updatedAt: now }).where(eq(fieldTickets.id, t.id));
         const org = await orgRefForTicket(tx, t.id);
         await appendCustomerAuditEvent(tx, { orgRef: org.orgRef, eventType: "ticket_finalized", subjectType: "fieldTicket", subjectRef: locked.ticketNumber, jobId: org.jobId, fieldTicketId: t.id, actorUserId: ctx.user.id, payload: { from: locked.billingState, to: "FINALIZED", version: locked.billingVersion + 1, documentRef: frozen.documentRef, snapshotHash: frozen.hash, totals: frozen.snapshot.billing, withoutCustomerAcceptance: check.overrides } });
+        await enqueueCustomerEvent(tx, { eventType: "customer.ticket.finalized", tenantId: org.orgRef, subjectRef: locked.ticketNumber, jobId: org.jobId, customerAccountId: locked.customerAccountId, actorUserId: ctx.user.id, payload: { documentRef: frozen.documentRef, snapshotHash: frozen.hash, customerSubtotalCents: frozen.snapshot.billing.customerSubtotalCents } });
         return { finalized: true as const, alreadyFinalized: false, documentRef: frozen.documentRef, snapshotHash: frozen.hash, billingState: "FINALIZED" as const, refusals: [] as string[], totals: frozen.snapshot.billing };
       });
       if (out.finalized && !out.alreadyFinalized) { const x = await loadTicket(input.ticketNumber); await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "billing_update", ticketNumber: x.t.ticketNumber, jobCode: x.job?.jobCode ?? null, detail: "ticket finalized", subjectRef: out.documentRef ?? x.t.ticketNumber }); }

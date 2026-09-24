@@ -15,6 +15,8 @@ import { queueCustomerAlert } from "./customerAlertService";
 import { getDb } from "./db";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { transitionBilling } from "./serviceTicketService";
+import { enqueueCustomerEvent } from "./_core/customerEvents";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { roleProcedure, router } from "./_core/trpc";
 import { disputeResolution, draftFromTicket, finalizeCheck, snapshotHash, voidCheck, type TicketLineForInvoice } from "./_core/invoiceDraft";
 import { determine } from "./_core/taxRuleEngine";
@@ -122,7 +124,7 @@ export const invoicingRouter = router({
   }),
 
   /** Send: a finalized, rendered invoice goes to the customer's portal with its due date from the account's terms; the customer is alerted. */
-  send: roleProcedure("invoicing.send").input(z.object({ invoiceNumber: z.string().min(1).max(64) })).mutation(async ({ input }) => {
+  send: roleProcedure("invoicing.send").input(z.object({ invoiceNumber: z.string().min(1).max(64) })).mutation(async ({ ctx, input }) => {
     const d = await db();
     const inv = (await d.select().from(invoices).where(eq(invoices.invoiceNumber, input.invoiceNumber)).limit(1))[0];
     if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "No such invoice" });
@@ -136,6 +138,9 @@ export const invoicingRouter = router({
     await d.update(invoices).set({ status: "sent", sentAt, dueAt }).where(eq(invoices.id, inv.id));
     const ticket = (await d.select({ ticketNumber: fieldTickets.ticketNumber }).from(fieldTickets).where(eq(fieldTickets.id, doc.fieldTicketId)).limit(1))[0];
     const alert = await queueCustomerAlert({ customerAccountId: inv.customerAccountId, kind: "billing_update", ticketNumber: ticket?.ticketNumber ?? inv.invoiceNumber, subjectRef: inv.invoiceNumber, detail: `Invoice ${inv.invoiceNumber} issued: ${inv.currency} ${(inv.totalCents / 100).toFixed(2)}, due ${dueAt.toISOString().slice(0, 10)}` });
+    // 0175 — the customer-facing event, on the outbox, beside the in-app alert; delivery channels subscribe to it.
+    await queueCustomerAlert({ customerAccountId: inv.customerAccountId, kind: "invoice_issued", ticketNumber: ticket?.ticketNumber ?? inv.invoiceNumber, subjectRef: `${inv.invoiceNumber}:issued`, detail: `${inv.invoiceNumber}, ${inv.currency} ${(inv.totalCents / 100).toFixed(2)}, due ${dueAt.toISOString().slice(0, 10)}` });
+    await d.transaction(async tx => { await enqueueCustomerEvent(tx, { eventType: "customer.invoice.issued", tenantId: (inv.jobId != null ? (await tx.select({ orgRef: jobs.orgRef }).from(jobs).where(eq(jobs.id, inv.jobId)).limit(1))[0]?.orgRef : null) ?? SINGLE_TENANT_ID, subjectRef: inv.invoiceNumber, jobId: inv.jobId, customerAccountId: inv.customerAccountId, actorUserId: ctx.user.id, payload: { totalCents: inv.totalCents, currency: inv.currency, dueAt, documentRef: doc.documentRef } }); });
     return { invoiceNumber: inv.invoiceNumber, status: "sent" as const, sentAt, dueAt, termsDays, documentRef: doc.documentRef, alertsQueued: alert.queued };
   }),
 
