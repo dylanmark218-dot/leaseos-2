@@ -13,6 +13,7 @@
 import type { TileReader } from "./_core/widgetService";
 import type { RoleActor } from "./_core/roleActor";
 import type { WidgetPayload } from "./_core/widgetPayload";
+import { operatorIdFromRecord, type OperatorId, type OperatorResolution } from "./_core/operatorIdentity";
 
 const NOT_PROMOTED = (widgetKey: string): WidgetPayload<unknown> => ({
   state: "unknown",
@@ -28,7 +29,7 @@ type Caller = {
     inbox: () => Promise<unknown>;
     exceptions: (input: { category?: string; limit: number }) => Promise<unknown>;
   };
-  hos: { status: (input: { operatorId: number; lookbackDays: number; at: Date }) => Promise<unknown> };
+  hos: { status: (input: { operatorId: OperatorId; lookbackDays: number; at: Date }) => Promise<unknown> };
   /** The legacy FieldRoute lists live under fieldRoute.*; their procedure names are jobs.list / trips.list / documents.list. */
   fieldRoute: {
     jobs: { list: () => Promise<readonly JobRow[]> };
@@ -36,7 +37,7 @@ type Caller = {
     identity: { documents: { list: () => Promise<readonly DocRow[]> } };
   };
 };
-type Readiness = (subject: { operatorId: number; unitId: number | null; trailerId: number | null; jobId: number | null }) => Promise<unknown>;
+type Readiness = (subject: { operatorId: OperatorId; unitId: number | null; trailerId: number | null; jobId: number | null }) => Promise<unknown>;
 
 /** A subject reference is a string the client chose; it is matched, never trusted as an id. */
 const byRef = <T extends { id: number }>(rows: readonly T[], ref: string, code: (r: T) => string | null | undefined) =>
@@ -62,8 +63,29 @@ const intOption = (options: Readonly<Record<string, unknown>> | null, key: strin
   return typeof v === "number" && Number.isInteger(v) && v >= min && v <= max ? v : fallback;
 };
 
-export function widgetReaderFor(actor: RoleActor, callerFor: (userId: number) => Caller, readiness?: Readiness): TileReader {
+/**
+ * The self-scoped tiles (hosRemaining, documentExpiry, unitReadiness) are about the caller as an
+ * operator, so they need the caller's operator id — which is not their user id (see
+ * `_core/operatorIdentity`). `operatorOf` resolves it through `operators.userId` in the acting
+ * scope; it is asked at most once per board, and only if one of those tiles is on it. No record,
+ * or more than one, and those tiles say `unknown` — they never fall back to the user id.
+ */
+export function widgetReaderFor(actor: RoleActor, callerFor: (userId: number) => Caller, operatorOf: () => Promise<OperatorResolution>, readiness?: Readiness): TileReader {
   const caller = callerFor(actor.userId);
+  let resolution: Promise<OperatorResolution> | null = null;
+  const self = async (): Promise<{ ok: true; operatorId: OperatorId } | { ok: false; payload: WidgetPayload<unknown> }> => {
+    const r = await (resolution ??= operatorOf());
+    if (r.kind === "resolved") return { ok: true, operatorId: r.operatorId };
+    return {
+      ok: false,
+      payload: {
+        state: "unknown",
+        reason: r.kind === "none"
+          ? "this person has no operator record in the acting organization"
+          : "more than one operator record names this person in the acting organization; which one is theirs is not decided here",
+      },
+    };
+  };
   return async (task) => {
     if (task.deviceLocal) {
       return { state: "unknown", reason: "device-local tile: the field runtime resolves this on the device, never the server" };
@@ -101,7 +123,9 @@ export function widgetReaderFor(actor: RoleActor, callerFor: (userId: number) =>
         // branch is an unverified candidate until a person promotes one (P9), and
         // the tile shows exactly that — it never rounds UNKNOWN to a number.
         try {
-          const value = await caller.hos.status({ operatorId: actor.userId, lookbackDays: 16, at: new Date() });
+          const me = await self();
+          if (!me.ok) return me.payload;
+          const value = await caller.hos.status({ operatorId: me.operatorId, lookbackDays: 16, at: new Date() });
           return { state: "ok", value, provenance: { ...SYSTEM(), exact: false }, deepLink: { portal: "driver", route: "/portal/driver" } };
         } catch (e) { return failed("Hours of service", e); }
       }
@@ -127,10 +151,12 @@ export function widgetReaderFor(actor: RoleActor, callerFor: (userId: number) =>
       case "documentExpiry": {
         // Self-scoped: this operator's own documents, in the vault's own states.
         try {
+          const me = await self();
+          if (!me.ok) return me.payload;
           const now = new Date();
           const warnDays = intOption(task.options, "warnDays", 30, 1, 180);
           const limit = intOption(task.options, "limit", 8, 3, 30);
-          const mine = (await caller.fieldRoute.identity.documents.list()).filter(d => d.ownerType === "operator" && d.ownerId === actor.userId);
+          const mine = (await caller.fieldRoute.identity.documents.list()).filter(d => d.ownerType === "operator" && d.ownerId === me.operatorId);
           const rows = mine.map(d => ({ id: d.id, docType: d.docType, title: d.title, expiresAt: d.expiresAt, state: expiryState(d, now, warnDays) }))
             .sort((a, b) => (a.expiresAt ? new Date(a.expiresAt).getTime() : Infinity) - (b.expiresAt ? new Date(b.expiresAt).getTime() : Infinity))
             .slice(0, limit);
@@ -144,7 +170,9 @@ export function widgetReaderFor(actor: RoleActor, callerFor: (userId: number) =>
         if (!unitId) return { state: "unknown", reason: task.subjectRef ? `unit reference ${task.subjectRef} is not a unit id` : "no unit selected for this tile" };
         if (!readiness) return { state: "unknown", reason: "readiness composer not bound to this board" };
         try {
-          const r = await readiness({ operatorId: actor.userId, unitId, trailerId: null, jobId: null });
+          const me = await self();
+          if (!me.ok) return me.payload;
+          const r = await readiness({ operatorId: me.operatorId, unitId, trailerId: null, jobId: null });
           return { state: "ok", value: r, provenance: SYSTEM(), deepLink: { portal: "office", route: `/portal/office?unit=${unitId}` } };
         } catch (e) { return failed("Unit readiness", e); }
       }
@@ -158,7 +186,7 @@ export function widgetReaderFor(actor: RoleActor, callerFor: (userId: number) =>
           if (!job) return { state: "unknown", reason: `no job matches ${task.subjectRef} among the jobs this person may read` };
           const trip = (await caller.fieldRoute.trips.list()).filter(t => t.jobId === job.id && t.operatorId && t.unitId).sort((a, b) => b.id - a.id)[0];
           if (!trip) return { state: "unknown", reason: `job ${job.jobCode} has no dispatched trip with an operator and a unit` };
-          const r = await readiness({ operatorId: trip.operatorId!, unitId: trip.unitId, trailerId: null, jobId: job.id });
+          const r = await readiness({ operatorId: operatorIdFromRecord(trip.operatorId!), unitId: trip.unitId, trailerId: null, jobId: job.id });
           return { state: "ok", value: { jobCode: job.jobCode, tripNumber: trip.tripNumber, readiness: r }, provenance: SYSTEM(), deepLink: { portal: "office", route: `/portal/office?job=${encodeURIComponent(job.jobCode)}` } };
         } catch (e) { return failed("Dispatch readiness", e); }
       }
