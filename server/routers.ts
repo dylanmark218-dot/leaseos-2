@@ -53,6 +53,7 @@ import {
   evidenceInScope,
   jobInScope,
   operatorInScope,
+  operatorForUserInScope,
   tripInScope,
   unitInScope,
   workOrderInScope,
@@ -313,6 +314,8 @@ const widgetDeps: WidgetDeps = {
   },
   readerFor: (actor) => widgetReaderFor(actor, (userId) =>
     appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId } as never }) as never,
+    // The caller's own operator record, in the scope the actor was resolved in — not their user id.
+    () => operatorForUserInScope(actor.userId, { tenantId: actor.tenantId }),
     (subject) => composeReadiness(subject)),
 };
 
