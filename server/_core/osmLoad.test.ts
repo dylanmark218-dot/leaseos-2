@@ -286,7 +286,8 @@ describe("one loader", () => {
       d.name === "node_modules" ? [] : d.isDirectory() ? walk(`${dir}/${d.name}`) : [`${dir}/${d.name}`]);
     const offenders = [...walk("server"), ...walk("scripts"), ...walk("tools")]
       .filter(f => /\.(ts|py|sh)$/.test(f) && !f.endsWith("osmLoad.test.ts"))
-      .filter(f => /osmLoadPlan/.test(readFileSync(f, "utf8")));
+      // An import or dynamic import of the module, not a comment that remembers it existed.
+      .filter(f => /(from\s+|import\(\s*|require\(\s*)["'][^"']*osmLoadPlan["']/.test(readFileSync(f, "utf8")));
     expect(offenders).toEqual([]);
   });
 
