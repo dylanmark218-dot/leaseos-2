@@ -43,7 +43,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/closeoutRouter.ts` | `ROLE_AUTHORIZED` | **20** |
 | `server/shopRouter.ts` | `ROLE_AUTHORIZED` | **23** |
 | `server/assetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
-| `server/safetyProgramRouter.ts` (0182, Safety & Compliance Program Builder) | `ROLE_AUTHORIZED` | **36** |
+| `server/safetyProgramRouter.ts` (0182, Safety & Compliance Program Builder) | `ROLE_AUTHORIZED` | **38** |
 | `server/projectRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/integrationRouter.ts` | `ROLE_AUTHORIZED` (`integrationRouter`) / `INTEGRATION_CLIENT` (`inboundRouter`, `integrationProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md`) | **7** |
 | `server/telematicsRouter.ts` | `ROLE_AUTHORIZED` | **7** |

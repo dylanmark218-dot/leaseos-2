@@ -51,6 +51,10 @@ d("0182 — Safety & Compliance Program Builder", () => {
     const outsider = await personIn(await org(), "management", "OFFICE_ADMIN");
     const S = callerFor(safety), M = callerFor(manager), D = callerFor(driver), A = callerFor(auditor), X = callerFor(outsider);
 
+    // The library is platform-wide and outlives a test run: put the foundation templates back to skeletons so
+    // this run proves the skeleton → draft → reviewed transitions itself rather than inheriting them.
+    await pool.execute("UPDATE policyTemplates SET contentStatus = 'skeleton', contentHash = '' WHERE moduleKey = 'company_foundation' AND orgRef IS NULL");
+
     // --- library: seeded from code, idempotent, unverified
     const first = await S.safetyProgram.syncCatalog();
     expect(first.modulesUpserted).toBe(14);
@@ -69,6 +73,22 @@ d("0182 — Safety & Compliance Program Builder", () => {
     expect(await code(() => D.safetyProgram.syncCatalog())).toBe("FORBIDDEN");
     expect(await code(() => D.safetyProgram.policyCreate({ templateKey: "company_foundation.health_and_safety_policy" }))).toBe("FORBIDDEN");
     expect(await code(() => A.safetyProgram.policyCreate({ templateKey: "company_foundation.health_and_safety_policy" }))).toBe("FORBIDDEN");
+
+    // --- content pack: skeleton → draft, idempotent, reviewed never overwritten
+    const c1 = await S.safetyProgram.syncContent();
+    expect(c1.packs.map(p => [p.packRef, p.drafted, p.revised, p.unchanged, p.skippedReviewed.length, p.missingTemplates.length])).toEqual([["ab_commercial_oilfield_v1.company_foundation", 19, 0, 0, 0, 0]]);
+    const c2 = await S.safetyProgram.syncContent();
+    expect(c2.packs[0]).toMatchObject({ drafted: 0, revised: 0, unchanged: 19 });
+    expect(await code(() => S.safetyProgram.syncContent({ packRef: "no.such.pack" }))).toBe("NOT_FOUND");
+    expect(await code(() => D.safetyProgram.syncContent())).toBe("FORBIDDEN");
+    const drafted = await A.safetyProgram.templateDetail({ templateKey: "company_foundation.health_and_safety_policy" });
+    expect(drafted.contentStatus).toBe("draft");
+    expect(drafted.sections.find(x => x.heading === "Policy statement")!.body).toMatch(/\{\{company\.name\}\} will provide a healthy and safe workplace/);
+    await pool.execute("UPDATE policyTemplates SET contentStatus = 'reviewed' WHERE templateKey = 'company_foundation.quality_policy'");   // a person reviewed it
+    const c3 = await S.safetyProgram.syncContent();
+    expect(c3.packs[0]!.skippedReviewed).toEqual(["company_foundation.quality_policy"]);
+    await S.safetyProgram.syncCatalog();   // the catalog sync never resets a drafted or reviewed template to a skeleton
+    expect((await A.safetyProgram.templateDetail({ templateKey: "company_foundation.health_and_safety_policy" })).contentStatus).toBe("draft");
 
     // --- program: obligations and assembly
     const profile = { jurisdictions: ["CA-AB"], workforceSize: 24, nscCarrier: true, federalCarrier: false, oilfield: true, hydrovac: true, groundDisturbance: false, dangerousGoods: true, workingAlone: true };
@@ -94,6 +114,26 @@ d("0182 — Safety & Compliance Program Builder", () => {
     expect(p3.policyCode).toBe("OHS-FRM-001");
     expect(await code(() => X.safetyProgram.policyDetail({ policyRef: p1.policyRef }))).toBe("NOT_FOUND");   // another organization: not found, never forbidden
     expect((await A.safetyProgram.assemble()).coverage.policiesCreated).toBe(3);
+
+    // --- a first draft rendered from the template, with the company's own name and officers
+    const effective = new Date(Date.now() + 7 * 86_400_000);   // clock-relative: the rendered date is whatever was passed, never compared with now
+    const fromTpl = await S.safetyProgram.versionDraftFromTemplate({ policyRef: p2.policyRef, president: "D. Mark", effectiveFrom: effective });
+    expect(fromTpl.templateContentStatus).toBe("draft");
+    expect(fromTpl.unresolvedMergeFields).toEqual([]);   // this template names no safety manager; the president was supplied
+    const purpose = fromTpl.sections.find(x => x.heading === "Purpose")!.body;
+    expect(purpose).toMatch(/working for ABC Vac Ltd\. safety management system/); expect(purpose).not.toMatch(/\{\{company\.name\}\}/);
+    expect(fromTpl.sections.find(x => x.heading === "Revision history")!.body).toContain(`| 1.0 | ${effective.toISOString().slice(0, 10)} |`);
+    expect(await code(() => S.safetyProgram.versionDraftFromTemplate({ policyRef: p2.policyRef }))).toBe("BAD_REQUEST");   // one open draft
+    await S.safetyProgram.versionWithdraw({ versionRef: fromTpl.versionRef, reason: "fixture: keep POL-002 without an approved version" });
+    const p4 = await S.safetyProgram.policyCreate({ templateKey: "company_foundation.management_commitment_statement" });
+    expect(p4.policyCode).toBe("HSE-STM-001");
+    const commit = await S.safetyProgram.versionDraftFromTemplate({ policyRef: p4.policyRef, president: "D. Mark" });
+    expect(commit.unresolvedMergeFields).toEqual(["company.safetyManager"]);   // not supplied, so not invented: it stays visible in the text
+    expect(commit.sections.find(x => x.heading === "Commitment")!.body).toMatch(/\{\{company\.safetyManager\}\} is the designated safety authority/);
+    const skel = await S.safetyProgram.versionDraftFromTemplate({ policyRef: p3.policyRef });   // a skeleton template drafts as headings
+    expect(skel.templateContentStatus).toBe("skeleton"); expect(skel.sections.every(x => x.body === "")).toBe(true); expect(skel.unresolvedMergeFields).toEqual([]);
+    const blank = await S.safetyProgram.policyCreate({ moduleKey: "ohs", documentKind: "policy", title: "Blank policy" });
+    expect(await code(() => S.safetyProgram.versionDraftFromTemplate({ policyRef: blank.policyRef }))).toBe("BAD_REQUEST");   // no template
 
     // --- version: prepared by safety, approvable only by someone else, immutable after
     const sections = p1.sections.map(s => ({ heading: s.heading, body: s.heading === "Policy statement" ? "ABC Vac Ltd. is committed to the health and safety of every worker." : "" }));

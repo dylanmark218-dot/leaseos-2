@@ -300,3 +300,59 @@ describe("packs", () => {
     expect(SAFETY_PACKS.filter(p => p.kind === "overlay").map(p => p.packKey)).toEqual(["client", "company"]);
   });
 });
+
+/* ---------------- content packs (category 1: company foundation) ---------------- */
+import { contentPackIntegrity, mergeFieldsIn, renderMergeFields, MERGE_FIELDS } from "./safetyProgram";
+import { CONTENT_PACKS, contentForTemplate } from "./safetyProgramContentPacks";
+
+describe("the company-foundation content pack is loadable and honest", () => {
+  const pack = CONTENT_PACKS.find(p => p.moduleKey === "company_foundation")!;
+
+  it("covers all nineteen foundation templates, every key in the catalog, every body written, only declared merge fields", () => {
+    expect(pack.templates.length).toBe(19);
+    expect(contentPackIntegrity(pack)).toEqual({ ok: true, problems: [] });
+    const foundationKeys = POLICY_TEMPLATE_SEEDS.filter(t => t.moduleKey === "company_foundation").map(t => t.templateKey).sort();
+    expect(pack.templates.map(t => t.templateKey).sort()).toEqual(foundationKeys);
+  });
+
+  it("keeps the Alberta NSC distinction in the text: the transportation policy says an OHS program alone does not satisfy it", () => {
+    const t = contentForTemplate("company_foundation.transportation_safety_policy")!.template;
+    expect(t.sections.map(s => s.body).join(" ")).toMatch(/OHS program alone does not satisfy/);
+    const m = contentForTemplate("company_foundation.maintenance_policy")!.template;
+    expect(m.sections.map(s => s.body).join(" ")).toMatch(/Commercial Vehicle Inspection Program/);
+  });
+
+  it("asserts no section number of any Act, Regulation or Code — those live in the verified reference register", () => {
+    for (const t of pack.templates) for (const s of t.sections) expect(s.body, `${t.templateKey} / ${s.heading}`).not.toMatch(/\b(s\.|section|Part)\s*\d+/);
+  });
+
+  it("names the company and its officers only through merge fields, so a company's draft is its own", () => {
+    for (const t of pack.templates) {
+      const text = t.sections.map(s => s.body).join("\n");
+      expect(mergeFieldsIn(text)).toContain("company.name");
+      expect(text).not.toMatch(/ABC Vac|Acme/);
+    }
+  });
+
+  it("rejects a pack with an unknown key, a wrong module, an empty body or an undeclared field", () => {
+    const bad = { moduleKey: "company_foundation", templates: [
+      { templateKey: "not.a.key", sections: [{ heading: "a", body: "b" }, { heading: "c", body: "d" }, { heading: "e", body: "f" }] },
+      { templateKey: "ohs.ppe_policy", sections: [{ heading: "a", body: "b" }, { heading: "c", body: "" }, { heading: "e", body: "{{company.ceo}}" }] },
+    ] };
+    const r = contentPackIntegrity(bad);
+    expect(r.ok).toBe(false);
+    expect(r.problems).toEqual(expect.arrayContaining([
+      "not.a.key: not in the template catalog", "ohs.ppe_policy: belongs to ohs, pack is company_foundation",
+      'ohs.ppe_policy: empty heading or body in "c"', "ohs.ppe_policy: unknown merge field company.ceo",
+    ]));
+  });
+});
+
+describe("merge fields", () => {
+  it("fills what it is given, leaves the rest as written, and names them", () => {
+    const r = renderMergeFields([{ heading: "Statement", body: "{{company.name}} is led by {{company.president}}; policy {{ policy.code }} v{{policy.version}}." }], { "company.name": "ABC Vac Ltd.", "policy.code": "HSE-POL-001", "company.president": "" });
+    expect(r.sections[0]!.body).toBe("ABC Vac Ltd. is led by {{company.president}}; policy HSE-POL-001 v{{policy.version}}.");
+    expect(r.unresolved).toEqual(["company.president", "policy.version"]);
+    expect(MERGE_FIELDS).toContain("company.safetyManager");
+  });
+});

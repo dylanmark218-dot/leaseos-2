@@ -479,3 +479,45 @@ export function catalogIntegrity(): { ok: boolean; problems: string[] } {
 export function templateSeedHash(t: PolicyTemplateSeed): string {
   return contentHash(t.title, t.sections.map(h => ({ heading: h, body: "" })), "");
 }
+
+/* ---------------- content packs and merge fields ---------------- */
+
+export const MERGE_FIELDS = ["company.name", "company.president", "company.safetyManager", "policy.code", "policy.effectiveFrom", "policy.version"] as const;
+export type MergeField = (typeof MERGE_FIELDS)[number];
+
+/** Every `{{field}}` in the text, in order of first appearance. */
+export function mergeFieldsIn(text: string): string[] {
+  const out: string[] = [];
+  for (const m of Array.from(text.matchAll(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g))) if (!out.includes(m[1]!)) out.push(m[1]!);
+  return out;
+}
+
+/** Fill the fields a value was given for; leave the others as written and name them. */
+export function renderMergeFields(sections: readonly Section[], values: Partial<Record<string, string>>): { sections: Section[]; unresolved: string[] } {
+  const unresolved = new Set<string>();
+  const fill = (text: string) => text.replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, (whole, key: string) => {
+    const v = values[key];
+    if (v == null || v === "") { unresolved.add(key); return whole; }
+    return v;
+  });
+  return { sections: sections.map(s => ({ heading: fill(s.heading), body: fill(s.body) })), unresolved: Array.from(unresolved) };
+}
+
+/** What a content pack must satisfy before it loads: known keys, written bodies, only declared merge fields. */
+export function contentPackIntegrity(pack: { moduleKey: string; templates: readonly { templateKey: string; sections: readonly Section[] }[] }): { ok: boolean; problems: string[] } {
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const t of pack.templates) {
+    const seed = POLICY_TEMPLATE_SEEDS.find(s => s.templateKey === t.templateKey);
+    if (!seed) { problems.push(`${t.templateKey}: not in the template catalog`); continue; }
+    if (seed.moduleKey !== pack.moduleKey) problems.push(`${t.templateKey}: belongs to ${seed.moduleKey}, pack is ${pack.moduleKey}`);
+    if (seen.has(t.templateKey)) problems.push(`${t.templateKey}: repeated in the pack`);
+    seen.add(t.templateKey);
+    if (t.sections.length < 3) problems.push(`${t.templateKey}: fewer than three sections`);
+    for (const s of t.sections) {
+      if (!s.heading.trim() || !s.body.trim()) problems.push(`${t.templateKey}: empty heading or body in "${s.heading}"`);
+      for (const f of mergeFieldsIn(s.body)) if (!(MERGE_FIELDS as readonly string[]).includes(f)) problems.push(`${t.templateKey}: unknown merge field ${f}`);
+    }
+  }
+  return { ok: problems.length === 0, problems };
+}

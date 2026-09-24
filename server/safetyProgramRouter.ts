@@ -20,6 +20,7 @@ import type { AnyMySqlColumn } from "drizzle-orm/mysql-core";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb, ownershipScopeWhere } from "./db";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
+import { financialEntities } from "../drizzle/schema";
 import {
   academyQualifications, clientPolicyOverlays, companyPolicies, companySafetyPrograms, companyTrainingMatrix, complianceDocuments,
   correctiveActions, incidentActions, incidentReports, inspections, nearMissReports, operators, organizationWorkers,
@@ -30,11 +31,12 @@ import {
 import {
   POLICY_TEMPLATE_SEEDS, REGULATORY_REFERENCE_SEEDS, SAFETY_PACKS, SAFETY_PROGRAM_MODULES, moduleByKey,
 } from "./_core/safetyProgramCatalog";
+import { CONTENT_PACKS } from "./_core/safetyProgramContentPacks";
 import {
   acknowledgementDecision, approvalDecision, assembleProgram, completionDecision, contentHash, corReadiness, correctiveActionView,
   editDecision, eventHash, matrixSummary, nextReviewDue, policyCode, programObligations, recommendedModules, recommendedPacks,
   reviewCompletionDecision, sha256, signatureHash, templateSeedHash, trainingMatrixFor, vendorPackageManifest, verificationDecision,
-  verifyEventChain, versionHash, versionLabel,
+  verifyEventChain, versionHash, versionLabel, contentPackIntegrity, renderMergeFields,
   type MatrixAcknowledgement, type MatrixHolding, type MatrixRequirement, type MatrixWorker, type OperationsProfile, type Section,
 } from "./_core/safetyProgram";
 
@@ -226,6 +228,35 @@ export const safetyProgramRouter = router({
     return { modulesUpserted, templatesInserted, templatesRevised, referencesInserted, templateCount: POLICY_TEMPLATE_SEEDS.length };
   }),
 
+  /**
+   * Loads the written content packs into the library. A skeleton becomes a draft; a draft whose text
+   * changed in code is re-issued as a new template version; a template a person has REVIEWED is never
+   * overwritten, and is listed as skipped. Packs load per category so a company can see which are in.
+   */
+  syncContent: roleProcedure("safetyProgram.syncContent").input(z.object({ packRef: z.string().max(120).optional() }).default({})).mutation(async ({ ctx, input }) => {
+    const db = await dbOrThrow();
+    const packs = CONTENT_PACKS.filter(p => !input.packRef || p.packRef === input.packRef);
+    if (input.packRef && packs.length === 0) return notFound(`Content pack ${input.packRef}`);
+    const loaded: { packRef: string; drafted: number; revised: number; unchanged: number; skippedReviewed: string[]; missingTemplates: string[] }[] = [];
+    for (const pack of packs) {
+      const integrity = contentPackIntegrity(pack);
+      if (!integrity.ok) return bad(`Content pack ${pack.packRef} is not loadable: ${integrity.problems.join("; ")}`);
+      const r = { packRef: pack.packRef, drafted: 0, revised: 0, unchanged: 0, skippedReviewed: [] as string[], missingTemplates: [] as string[] };
+      for (const t of pack.templates) {
+        const [existing] = await db.select({ id: policyTemplates.id, title: policyTemplates.title, contentStatus: policyTemplates.contentStatus, contentHash: policyTemplates.contentHash, templateVersion: policyTemplates.templateVersion }).from(policyTemplates).where(and(eq(policyTemplates.templateKey, t.templateKey), isNull(policyTemplates.orgRef))).limit(1);
+        if (!existing) { r.missingTemplates.push(t.templateKey); continue; }   // syncCatalog first
+        if (existing.contentStatus === "reviewed") { r.skippedReviewed.push(t.templateKey); continue; }
+        const hash = contentHash(existing.title, t.sections, "");
+        if (existing.contentStatus === "draft" && existing.contentHash === hash) { r.unchanged++; continue; }
+        await db.update(policyTemplates).set({ sectionsJson: JSON.stringify(t.sections), bodyMarkdown: "", summary: t.summary, contentHash: hash, contentStatus: "draft", templateVersion: existing.contentStatus === "skeleton" ? existing.templateVersion : existing.templateVersion + 1 }).where(eq(policyTemplates.id, existing.id));
+        if (existing.contentStatus === "skeleton") r.drafted++; else r.revised++;
+      }
+      loaded.push(r);
+      await audit(db, null, ctx.user.id, "contentPack", pack.packRef, "content.loaded", r);
+    }
+    return { packs: loaded };
+  }),
+
   /* ---------------- program ---------------- */
 
   obligations: roleProcedure("safetyProgram.obligations").input(z.object({ profile: PROFILE })).query(({ input }) => {
@@ -379,6 +410,49 @@ export const safetyProgramRouter = router({
       });
       await audit(db, orgRef, ctx.user.id, "policyVersion", versionRef, "version.drafted", { policyRef: p.policyRef, versionNumber, contentHash: cHash, versionHash: vHash });
       return { versionRef, versionNumber, versionLabel: versionLabel(versionNumber), contentHash: cHash, versionHash: vHash };
+    }),
+
+  /**
+   * The first draft, rendered from the policy's template: merge fields are filled from the program
+   * (company name, officers) and the policy (code, version, effective date); anything left unfilled is
+   * named in the response and stays visible in the text. A template still at skeleton drafts as headings.
+   */
+  versionDraftFromTemplate: roleProcedure("safetyProgram.versionDraftFromTemplate")
+    .input(z.object({ policyRef: z.string().min(3).max(64), president: z.string().max(160).optional(), safetyManager: z.string().max(160).optional(), companyName: z.string().max(220).optional(), effectiveFrom: z.coerce.date().optional(), changeSummary: z.string().max(500).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const orgRef = await orgOf(db, ctx.user.id);
+      const p = await policyInScope(db, input.policyRef, orgRef);
+      if (!p.templateKey) return bad("This policy was not created from a template; draft its version with versionDraft");
+      if (p.status === "retired") return refuse("A retired policy takes no new versions");
+      const [t] = await db.select().from(policyTemplates).where(eq(policyTemplates.templateKey, p.templateKey)).limit(1);
+      if (!t) return notFound(`Template ${p.templateKey}`);
+      const [openDraft] = await db.select({ versionRef: policyVersions.versionRef }).from(policyVersions).where(and(eq(policyVersions.companyPolicyId, p.id), eq(policyVersions.state, "draft"))).limit(1);
+      if (openDraft) return bad(`A draft (${openDraft.versionRef}) is already open; edit it or withdraw it`);
+      const [last] = await db.select({ versionNumber: policyVersions.versionNumber, versionHash: policyVersions.versionHash }).from(policyVersions).where(eq(policyVersions.companyPolicyId, p.id)).orderBy(desc(policyVersions.versionNumber)).limit(1);
+      const versionNumber = (last?.versionNumber ?? 0) + 1;
+      const program = await activeProgram(db, orgRef);
+      let companyName = input.companyName ?? program?.name ?? null;
+      if (!input.companyName && program?.financialEntityId) {
+        const [fe] = await db.select({ legalName: financialEntities.legalName }).from(financialEntities).where(eq(financialEntities.id, program.financialEntityId)).limit(1);
+        if (fe) companyName = fe.legalName;
+      }
+      const effectiveFrom = input.effectiveFrom ?? new Date();
+      const rendered = renderMergeFields(json<Section[]>(t.sectionsJson, []), {
+        "company.name": companyName ?? undefined, "company.president": input.president, "company.safetyManager": input.safetyManager,
+        "policy.code": p.policyCode, "policy.version": versionLabel(versionNumber), "policy.effectiveFrom": effectiveFrom.toISOString().slice(0, 10),
+      });
+      const cHash = contentHash(p.title, rendered.sections, "");
+      const vHash = versionHash({ policyRef: p.policyRef, versionNumber, contentHash: cHash, previousVersionHash: last?.versionHash ?? null });
+      const versionRef = ref("PV");
+      await db.insert(policyVersions).values({
+        versionRef, companyPolicyId: p.id, versionNumber, versionLabel: versionLabel(versionNumber), state: "draft", title: p.title, sectionsJson: JSON.stringify(rendered.sections), bodyMarkdown: "",
+        contentHash: cHash, changeSummary: input.changeSummary ?? `Drafted from template ${t.templateKey} v${t.templateVersion} (${t.contentStatus})`, preparedByUserId: ctx.user.id, preparedAt: new Date(),
+        supersedesVersionId: p.currentVersionId ?? null, previousVersionHash: last?.versionHash ?? null, versionHash: vHash,
+      });
+      await db.update(companyPolicies).set({ templateVersion: t.templateVersion }).where(eq(companyPolicies.id, p.id));
+      await audit(db, orgRef, ctx.user.id, "policyVersion", versionRef, "version.drafted_from_template", { policyRef: p.policyRef, templateKey: t.templateKey, templateVersion: t.templateVersion, templateContentStatus: t.contentStatus, unresolved: rendered.unresolved, contentHash: cHash, versionHash: vHash });
+      return { versionRef, versionNumber, versionLabel: versionLabel(versionNumber), templateKey: t.templateKey, templateVersion: t.templateVersion, templateContentStatus: t.contentStatus, sections: rendered.sections, unresolvedMergeFields: rendered.unresolved, contentHash: cHash, versionHash: vHash };
     }),
 
   versionEdit: roleProcedure("safetyProgram.versionEdit")

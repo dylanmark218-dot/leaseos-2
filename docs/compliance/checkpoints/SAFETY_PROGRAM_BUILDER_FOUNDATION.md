@@ -1,9 +1,9 @@
 # Safety & Compliance Program Builder — foundation (0182)
 
 Status: **complete on branch `claude/safety-compliance-program-builder-2qnty0`**, not merged. This is the
-data model and template engine. No policy content is written; the library seeds as skeletons and every
-regulatory reference seeds unverified. The first Alberta Commercial/Oilfield content pack is the next
-checkpoint, loaded one category at a time into the keys this checkpoint creates.
+data model and template engine, plus the first category of the Alberta Commercial/Oilfield content pack
+(company foundation, 19 templates, loaded as drafts). Every other template is a skeleton and every regulatory
+reference seeds unverified. Further categories load one at a time into the keys this checkpoint creates.
 
 ## Why it is its own subsystem
 
@@ -56,11 +56,28 @@ Schema/migration parity: **424 / 424**. Column parity was run against the applie
   is at best "attention", nothing at all is "no_evidence".
 - `vendorPackageManifest` — what the package would hold and what is missing by title; an expired COR is missing.
 
-## API (`server/safetyProgramRouter.ts`, mounted as `safetyProgram`, 36 procedures, all `roleProcedure`)
+## Content packs (`server/_core/safetyProgramContentPacks.ts`)
 
-Library: `catalog`, `templateDetail`, `syncCatalog`, `referenceList`, `referenceUpsert`, `referenceVerify`.
-Program: `obligations`, `programGet`, `programSet`, `assemble`. Policies: `policyCreate`, `policyList`,
-`policyDetail`, `versionDraft`, `versionEdit`, `versionApprove`, `versionWithdraw`, `policyRetire`.
+A content pack is one category of the Alberta Commercial / Oilfield Safety Template Pack. Category 1,
+**company foundation**, is written: 19 templates in `server/_core/safetyProgramContent/companyFoundation.ts`
+(mission, philosophy, management commitment, the health and safety / environmental / quality /
+transportation safety / maintenance policies, stop-work authority, worker / supervisor / management /
+contractor responsibilities, code of conduct, ethics, regulatory compliance, client and site rules,
+enforcement and discipline, document control). The text names the company and its officers only through
+merge fields (`{{company.name}}`, `{{company.president}}`, `{{company.safetyManager}}`, `{{policy.code}}`,
+`{{policy.version}}`, `{{policy.effectiveFrom}}`) and cites no section number of any instrument — a test
+holds both. `syncContent` loads a pack: a skeleton becomes a **draft**, a draft whose text changed in code is
+re-issued as a new template version, and a template a person has marked **reviewed** is never overwritten
+(it is listed as skipped). `versionDraftFromTemplate` renders a company's first version from its template
+with the program's name and the supplied officers; a field it cannot fill stays visible in the text and is
+named in the response.
+
+## API (`server/safetyProgramRouter.ts`, mounted as `safetyProgram`, 38 procedures, all `roleProcedure`)
+
+Library: `catalog`, `templateDetail`, `syncCatalog`, `syncContent`, `referenceList`, `referenceUpsert`,
+`referenceVerify`. Program: `obligations`, `programGet`, `programSet`, `assemble`. Policies: `policyCreate`,
+`policyList`, `policyDetail`, `versionDraft`, `versionDraftFromTemplate`, `versionEdit`, `versionApprove`,
+`versionWithdraw`, `policyRetire`.
 Acknowledgement: `myPolicies`, `acknowledge` (self-scoped), `acknowledgementStatus`. Overlays and reviews:
 `overlaySet`, `overlayList`, `reviewSchedule`, `reviewComplete`. Training: `trainingRequirementList`,
 `trainingRequirementUpsert`, `trainingMatrixCompute`, `trainingMatrix`. Corrective actions:
@@ -82,7 +99,7 @@ policy is **not found**, never forbidden. The catalog and references are platfor
 | `safety_program.read_own` (`myPolicies`) | universal, self-scoped | no |
 | `safety_program.acknowledge_own` (`acknowledge`) | universal, self-scoped | yes |
 
-Operational procedure map: 634 → **670**. Universal permissions: 13 → 15. Bare `protectedProcedure`: 0.
+Operational procedure map: 634 → **672**. Universal permissions: 13 → 15. Bare `protectedProcedure`: 0.
 
 ## Evidence the matrix and readiness read
 
@@ -107,7 +124,7 @@ The PDF/ZIP archive is not built here — the manifest is.
 
 ## Tests
 
-- `server/_core/safetyProgram.test.ts` — 29 cases: catalog integrity (unique keys, real modules and packs,
+- `server/_core/safetyProgram.test.ts` — 35 cases (content pack integrity and merge fields included): catalog integrity (unique keys, real modules and packs,
   every cited reference exists, seeds cannot carry a verification), obligations by profile, assembly and its
   hash, policy codes, version chain, approval and edit rules, acknowledgement steps, matrix statuses and
   evidence choice, corrective-action rules, COR readiness by evidence, manifest, ledger chain, packs.
@@ -128,7 +145,8 @@ below when the gate completes). Typecheck clean; test-file typecheck adds no err
 
 ## Not in this checkpoint
 
-Policy body content (every template is a skeleton); verification of any regulatory reference (all
+Policy body content beyond company foundation (every other template is a skeleton; the foundation text is a
+draft a person adapts and reviews before it is marked reviewed); verification of any regulatory reference (all
 unverified — provision numbers are what the template authors worked from and must be checked against the
 instruments as consolidated); a client UI; the PDF/ZIP vendor package; a hazard-assessment record and a drill
 record of their own; Saskatchewan and British Columbia pack content (the packs exist as overlays with no
