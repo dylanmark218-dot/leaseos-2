@@ -55,11 +55,11 @@ describe("tracking links — pure decisions", () => {
     expect(w("hours_after_completion", 24, completed).live).toBe(false);          // 26 h later
     expect(w("hours_after_completion", 24 * 7, completed).live).toBe(true);
     expect(w("hours_after_completion", 24, null).live).toBe(true);
-    expect(w("custom", null, completed, new Date("2026-09-25T00:00:00Z")).live).toBe(true);
-    expect(w("custom", null, completed, new Date("2026-09-24T00:00:00Z")).live).toBe(false);
+    expect(w("custom", null, completed, new Date(now.getTime() + 12 * 3_600_000)).live).toBe(true);    // custom end still ahead
+    expect(w("custom", null, completed, new Date(now.getTime() - 12 * 3_600_000)).live).toBe(false);   // custom end passed
     expect(w("custom", null, completed, null)).toMatchObject({ live: false });   // no date recorded is not "forever"
     expect(w("manual", null, completed).live).toBe(true);
-    expect(liveWindow({ liveUntilRule: "manual", liveGraceHours: null, liveExpiresAt: null, jobCompletedAt: null, linkExpiresAt: new Date("2026-09-24T11:00:00Z"), now }).live).toBe(false);
+    expect(liveWindow({ liveUntilRule: "manual", liveGraceHours: null, liveExpiresAt: null, jobCompletedAt: null, linkExpiresAt: new Date(now.getTime() - 3_600_000), now }).live).toBe(false);
     expect(LIVE_PRESETS["7d"]).toEqual({ liveUntilRule: "hours_after_completion", liveGraceHours: 168 });
   });
   it("reads a scope strictly — anything unreadable grants nothing — and the QR payload is the URL and nothing else", () => {

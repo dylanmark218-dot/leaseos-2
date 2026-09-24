@@ -46,6 +46,8 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   "server/gst.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "period-bound arithmetic (2026-Q3 ends 1 October); no comparison with now" },
   "server/ifta.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "quarter-bound arithmetic; no comparison with now" },
   "server/qualificationStore.test.ts": { dates: ["2026-10-01", "2026-11-10"], verdict: "clock_independent", reason: "the expired holding is evaluated against the shift's explicit STARTS, not now" },
+  // Reviewed 2026-09-24, the day 2026-10-15 came within three weeks, with the file unchanged.
+  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "the schedule is computed at an explicit asOf (2026-10-15) inside a fixed fiscal year ending 2026-10-31, and the disposal (2026-10-20) is aged against that same asOf; the file's real clock reads stamp a role grant and the acquiredAt of two registrations that are refused before any date is read" },
 };
 
 function testFiles(dir: string, out: string[] = []): string[] {

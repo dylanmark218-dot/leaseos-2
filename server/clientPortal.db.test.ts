@@ -77,7 +77,7 @@ d("the authenticated client portal", () => {
     await caller(office).clientServices.jobCustomerAssign({ jobId: assigned.id, customerAccountRef: a1.accountRef });
     await caller(office).clientServices.jobCustomerAssign({ jobId: scheduled.id, customerAccountRef: a1.accountRef });
     await caller(office).clientServices.jobCustomerAssign({ jobId: other.id, customerAccountRef: a2.accountRef });
-    await pool.execute("INSERT INTO dispatchPostings (postingNumber, jobId, planningState, priority, crewSize, scheduledStart) VALUES (?,?,'staffed','normal',1,?)", [`POST-${rnd()}`, scheduled.id, at("07:00", "2026-09-26")]);
+    await pool.execute("INSERT INTO dispatchPostings (postingNumber, jobId, planningState, priority, crewSize, scheduledStart) VALUES (?,?,'staffed','normal',1,?)", [`POST-${rnd()}`, scheduled.id, new Date(Date.now() + 2 * 86_400_000)]);   // the day after tomorrow, whatever day it is
     // A ticket billing to a1 on a job that was never assigned: reachable through the ticket.
     const c = caller(office).closeout;
     const t = await c.ticketOpen({ jobId: ticketed.id, customerAccountRef: a1.accountRef, unitId: u, serviceDescription: "Hydrovac excavation" });
