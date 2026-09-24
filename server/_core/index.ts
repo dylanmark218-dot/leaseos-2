@@ -6,6 +6,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
+import { clientContractGate } from "./clientContractGate";
 import { serveStatic, setupVite } from "./vite";
 import { startProductionWorker } from "./productionWorker";
 import { ENV, assertProductionSecrets } from "./env";
@@ -49,9 +50,10 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerOAuthRoutes(app);
-  // tRPC API
+  // tRPC API — installed clients declare their contract; see clientContractGate.ts
   app.use(
     "/api/trpc",
+    clientContractGate(),
     createExpressMiddleware({
       router: appRouter,
       createContext,

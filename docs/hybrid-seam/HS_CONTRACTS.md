@@ -108,6 +108,9 @@ CORS allowlist. The parity rule stands as invariant 2 and is currently asserted 
 
 No contract-version header exists on either side. HS5 defines it; nothing to reconcile.
 
+**Defined:** `shared/clientContract.ts`, enforced by `server/_core/clientContractGate.ts`; see
+[`HS5_CLIENT_CONTRACT.md`](./HS5_CLIENT_CONTRACT.md) for the rules and the gaps still open.
+
 ---
 
 **Rule for HS1–HS5.** Before adding a type here, search for it. Five of seven HS0 assumptions were
