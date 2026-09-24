@@ -45,3 +45,34 @@ and `0157` is historically used twice. None of those is reused.
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
   No other branch was renumbered.
+
+## Refresh at the Sign & Attest design checkpoint (2026-09-24, `main` = `6f52b57`, after PR #10)
+
+`main` migration head: **`0174_dispatch_override_provenance.sql`** (`0170`, `0171`, `0174` on main; `0172`/`0173`
+still held by `claude/training-academy-workforce-q3mdse`). Scan run with the command above over every
+remote branch that shares history with `main`.
+
+| Number | Migration file | Branch | PR | Base | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0170 | `0170_organization_scoped_role_grants.sql` | `claude/leaseos-auth-workspace-system-t008ad` | none | `f21cd1b` | open branch | **with main's `0170`** | renumber at rebase |
+| 0170 | `0170_work_calendar_tasks_reminders.sql` | `claude/work-calendar-task-engine-0mtjyk` | none | `6b01a0e` | open branch | **with main's `0170`** | renumber at rebase |
+| 0172–0175 | `0172_training_wallet_renewal_handoff`, `0173_wallet_history_guards`, `0174_training_compliance_operations`, `0175_source_review_history_guards` | `claude/training-academy-workforce-q3mdse` | none | `6b01a0e` | open branch | **`0174` with main's `0174`**; `0175` with driver-portfolio | renumber `0174`/`0175` at rebase |
+| 0175–0176 | `0175_driver_portfolio.sql`, `0176_driver_portfolio_events_append_only.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | **#16 (open)** | `42c454f` | PR open | `0175` with training-academy | #16 nearest to merge for these; training-academy renumbers |
+| 0175–0177 | same two + `0177_driver_portfolio_api.sql` | `claude/driver-portfolio-api-ya8928` | none | `42c454f` | stacked on the wallet branch | inherited | follows #16 |
+| 0178–0181 | `0178_document_control_definitions`, `0179_document_control_register`, `0180_document_control_numbering`, `0181_document_control_templates` | `claude/document-control-architecture-jlffzk` | none | `0cd4817` | open branch, four checkpoints | `0179` three ways (below) | first to open a PR keeps; others renumber |
+| 0179 | `0179_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | none | `6b01a0e` | open branch | **with DC `0179` and PR #17** | renumber at rebase |
+| 0179 | `0179_trip_stop_provenance.sql` | `claude/migration-0169-reconciliation` | **#17 (open)** | `6f52b57` | PR open | **with DC `0179` and ELD `0179`** | #17 has a PR and the newest base; owner to confirm |
+| **0182–0184** | `0182_sign_attest_foundation`, `0183_sign_attest_events`, `0184_sign_attest_guards` | `claude/leaseos-sign-attest-design-5993ar` | design only | `6f52b57` | **provisional claim, no SQL yet** (design: `docs/sign-attest/SIGN_ATTEST_DESIGN.md` §16) | none | re-scan at the SA1 PR |
+
+**Unrelated-history branches the scan cannot see.** `claude/mobile-hardware-scanner-mzp1e1-v2327`
+(`0168_movement_permits`, `0169_print_audit`) and `feature/tenant-scope-foundation`
+(`0171_tracking_ownership`, `0172_tenant_relative_numbers`, `0173_offline_identity_scope`) have **no merge
+base with `main`** (`git merge-base` fails), so the scan command reports nothing for them. Their numbers
+collide with main's `0168`–`0171` and with the open claims above. They cannot merge as they stand; whoever
+revives them renumbers onto a fresh scan. Recorded here so the gap in the scan is a known gap.
+
+## Change log (continued)
+
+* **2026-09-24**: refreshed at the Sign & Attest design checkpoint. New since C1a: PR #16 and #17 opened;
+  the document-control branch claimed `0178`–`0181`; `0179` is now claimed three ways; `0174` collides between
+  main and training-academy; Sign & Attest provisionally claims `0182`–`0184`. Two unrelated-history branches noted.
