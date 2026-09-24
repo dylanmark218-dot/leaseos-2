@@ -67,6 +67,12 @@ export type DispatchReadinessViewProps = {
   capabilityVerdict: CapabilityVerdict | null;
   onRefresh: () => void;
   refreshing: boolean;
+  /**
+   * Where this panel is rendered. "page" (the default) keeps the standalone screen exactly as it
+   * was; "panel" drops the page frame and demotes the heading so it can sit inside a larger page
+   * without a second <h1> or a duplicated id.
+   */
+  as?: "page" | "panel";
 };
 
 const TONE: Record<Presented["readiness"], string> = {
@@ -82,15 +88,18 @@ function Badge({ p }: { p: Presented }) {
   return <span className={`inline-block rounded border px-2 py-0.5 text-sm font-medium ${TONE[p.readiness]}`}>{p.label}</span>;
 }
 
-function Frame({ jobId, subject, children, onRefresh, refreshing }: {
+function Frame({ jobId, subject, children, onRefresh, refreshing, as = "page" }: {
   jobId: number; subject: DispatchReadinessViewProps["subject"]; children: React.ReactNode;
-  onRefresh: () => void; refreshing: boolean;
+  onRefresh: () => void; refreshing: boolean; as?: "page" | "panel";
 }) {
+  // The id is derived from the job so two panels on one page can never collide on it.
+  const headingId = `readiness-heading-${jobId}`;
+  const Heading = as === "page" ? "h1" : "h2";
   return (
-    <section className="mx-auto max-w-3xl space-y-4 p-6" aria-labelledby="readiness-heading">
+    <section className={as === "page" ? "mx-auto max-w-3xl space-y-4 p-6" : "space-y-4"} aria-labelledby={headingId}>
       <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 id="readiness-heading" className="text-xl font-semibold">Dispatch readiness</h1>
+          <Heading id={headingId} className="text-xl font-semibold">Dispatch readiness</Heading>
           <p data-testid="subject" className="text-sm text-slate-600">
             {subject
               ? `Job ${jobId} · driver (operator ${subject.operatorId}) · unit ${subject.unitId ?? "none"}${subject.trailerId ? ` · trailer ${subject.trailerId}` : ""}`
@@ -112,9 +121,9 @@ function Frame({ jobId, subject, children, onRefresh, refreshing }: {
 }
 
 export function DispatchReadinessView(props: DispatchReadinessViewProps) {
-  const { jobId, subject, state, capabilities, capabilityVerdict, onRefresh, refreshing } = props;
+  const { jobId, subject, state, capabilities, capabilityVerdict, onRefresh, refreshing, as } = props;
   const frame = (children: React.ReactNode) =>
-    <Frame jobId={jobId} subject={subject} onRefresh={onRefresh} refreshing={refreshing}>{children}</Frame>;
+    <Frame jobId={jobId} subject={subject} onRefresh={onRefresh} refreshing={refreshing} as={as}>{children}</Frame>;
 
   if (!subject) {
     return frame(

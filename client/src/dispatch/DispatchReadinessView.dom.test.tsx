@@ -278,9 +278,10 @@ describe("when the server returned nothing", () => {
 
 describe("when the job has no assignment to evaluate", () => {
   /*
-   * `dispatch.readiness` needs an operator and a unit. A job with no `jobUnits` row, or one whose
-   * row carries no operator, gives the panel nothing to ask about — and a panel with no question
-   * has no answer. It says that, rather than rendering an unanswered form as clear.
+   * `dispatch.readiness` needs an operator and a unit. Since Checkpoint I the panel resolves those
+   * from the canonical slot binding, so a job with no posting, a posting whose slots are all open,
+   * or a filled slot carrying no operator each give it nothing to ask about — and a panel with no
+   * question has no answer. It says that, rather than rendering an unanswered form as clear.
    */
   it("says there is nothing to evaluate rather than showing a verdict", () => {
     render(<DispatchReadinessView {...props({ subject: null, state: { kind: "loaded", result: null } })} />);
