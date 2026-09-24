@@ -2349,6 +2349,9 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "documentControl.sourceArtifactsList": "document.read",
   // DC-B (0179) — the register: intake creates a row, confirmation creates a fact, issue consumes a number.
   "documentControl.documentIntake": "document.intake",
+  "documentControl.documentCapture": "document.intake",
+  "documentControl.documentExtract": "document.intake",
+  "documentControl.documentAttachDerivative": "document.intake",
   "documentControl.documentRegisterRendered": "document.issue",
   "documentControl.documentConfirm": "document.confirm",
   "documentControl.documentIssue": "document.issue",

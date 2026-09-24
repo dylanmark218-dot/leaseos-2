@@ -15,7 +15,7 @@
  */
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { MySql2Database } from "drizzle-orm/mysql2";
-import { commercialDocumentLinks, commercialDocuments, disposalTickets, documentControlEvents, documentDefinitions, documentExternalReferences, documentTemplateRevisions, documentTemplates, evidenceRecords, facilities, fieldTicketDocuments, fieldTickets, jobs, loads, numberAllocations, recordAmendments, retentionPolicies, trackingReferences, trips, units } from "../../drizzle/schema";
+import { commercialDocumentLinks, commercialDocuments, disposalTickets, documentControlEvents, documentDefinitions, documentDerivatives, documentExternalReferences, documentExtractions, documentTemplateRevisions, documentTemplates, evidenceRecords, facilities, fieldTicketDocuments, fieldTickets, jobs, loads, numberAllocations, recordAmendments, retentionPolicies, trackingReferences, trips, units } from "../../drizzle/schema";
 import { SINGLE_TENANT_ID } from "./actingScope";
 import { applyOverlay, rowToDefinition, type DocumentDefinitionRow, type DocumentLinkKind, type EffectiveDefinition, type ExternalReferenceType, type IssuerKind, type OriginKind } from "./documentDefinitions";
 import { factsMutable, issuerScopeKey, nextControlState, normaliseReferenceValue, provenanceSentence, referenceDuplicateVerdict, registerRefusals, type ControlState, type DocumentEventType, type ImportChannel, type IssuerInput, type LinkRole, type LinkSource, type ReferenceSource } from "./documentRegister";
@@ -346,7 +346,9 @@ export async function confirmDocument(db: Db, args: { book: Book; actor: Actor; 
     for (const ref of Array.from(confirmRefs)) {
       const r = existingRefs.find(x => x.referenceRef === ref);
       if (!r) throw new DocumentControlRefusal("NOT_FOUND", `Reference ${ref} is not on this document`);
-      await tx.update(documentExternalReferences).set({ confirmationStatus: "confirmed", confirmedByUserId: args.actor.userId, confirmedAt: now }).where(eq(documentExternalReferences.id, r.id));
+      // A reference proposed while the issuer was unknown takes the issuer the person names now: the number was always theirs.
+      const carry = r.issuerKind === "unknown" && issuer.issuerKind !== "unknown" ? { issuerKind: issuer.issuerKind, issuerOrgRef: issuer.issuerOrgRef ?? null, issuerFacilityId: issuer.issuerFacilityId ?? null, issuerName: issuer.issuerName ?? null, issuerScopeKey: issuerScopeKey(issuer) } : {};
+      await tx.update(documentExternalReferences).set({ confirmationStatus: "confirmed", confirmedByUserId: args.actor.userId, confirmedAt: now, ...carry }).where(eq(documentExternalReferences.id, r.id));
       await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.reference_confirmed", actor: args.actor, occurredAt: now, detail: { referenceRef: ref, referenceType: r.referenceType, referenceValue: r.referenceValue } });
     }
     // Anything still proposed after confirmation is rejected: a confirmed record carries no maybes.
@@ -513,11 +515,14 @@ export async function amendDocument(db: Db, args: { book: Book; actor: Actor; do
 /** Everything a reader may know about one document: the row, its provenance sentence, references, links, versions and the timeline in sequence. */
 export async function documentView(db: Db, book: Book, documentRef: string) {
   const doc = await documentInBook(db, book, documentRef);
-  const [links, refs, events, amendments] = await Promise.all([
+  const [links, refs, events, amendments, derivatives, extractions] = await Promise.all([
     db.select().from(commercialDocumentLinks).where(eq(commercialDocumentLinks.documentId, doc.id)),
     db.select().from(documentExternalReferences).where(eq(documentExternalReferences.documentId, doc.id)),
     db.select().from(documentControlEvents).where(eq(documentControlEvents.documentId, doc.id)).orderBy(documentControlEvents.sequence),
     db.select().from(recordAmendments).where(and(eq(recordAmendments.entityType, "commercialDocument"), eq(recordAmendments.entityId, doc.id))).orderBy(recordAmendments.occurredAt),
+    // DC-F: what was made from the original, and what was read from it (proposals, never facts).
+    db.select().from(documentDerivatives).where(eq(documentDerivatives.documentId, doc.id)).orderBy(documentDerivatives.id),
+    db.select().from(documentExtractions).where(eq(documentExtractions.documentId, doc.id)).orderBy(documentExtractions.id),
   ]);
   const chain: { documentRef: string; version: number; status: string; controlState: string }[] = [];
   let cur: typeof doc | undefined = doc;
@@ -533,6 +538,8 @@ export async function documentView(db: Db, book: Book, documentRef: string) {
     definition: definition ? { definitionKey: definition.definitionKey, displayName: definition.displayName, documentClass: definition.documentClass, numberingPolicy: definition.numberingPolicy, representationPolicy: definition.representationPolicy, representationNotice: definition.representationNotice, revisionPolicy: definition.revisionPolicy, primaryDomainOwner: definition.primaryDomainOwner } : null,
     retention: doc.retentionClass ?? "UNCONFIGURED — retained indefinitely until a person assigns a policy",
     links, references: refs, versions: chain, amendments,
+    derivatives: derivatives.map(x => ({ derivativeRef: x.derivativeRef, derivativeKind: x.derivativeKind, producer: x.producer, producerVersion: x.producerVersion, extractionRef: x.extractionRef, contentHash: x.contentHash, sourceContentHash: x.sourceContentHash, mimeType: x.mimeType, byteLength: x.byteLength, storageKey: x.storageKey, actorSource: x.actorSource, createdByUserId: x.createdByUserId, createdAt: x.createdAt })),
+    extractions: extractions.map(x => ({ extractionRef: x.extractionRef, proposalId: x.proposalId, ocrEngine: x.ocrEngine, ocrEngineVersion: x.ocrEngineVersion, proposedDocumentType: x.documentType, classificationConfidence: x.classificationConfidence, classificationSource: x.classificationSource, contentSha256: x.contentSha256, fieldCount: x.fieldCount, autoFiledCount: x.autoFiledCount, reviewCount: x.reviewCount, askedCount: x.askedCount, humanOnlyCount: x.humanOnlyCount, status: x.status, extractedAt: x.extractedAt, extractedByUserId: x.extractedByUserId })),
     timeline: events.map(e => ({ sequence: e.sequence, eventType: e.eventType, actorUserId: e.actorUserId, actorSource: e.actorSource, deviceRef: e.deviceRef, previousState: e.previousState, newState: e.newState, detail: e.detailJson ? (JSON.parse(e.detailJson) as Record<string, unknown>) : null, occurredAt: e.occurredAt, recordedAt: e.recordedAt })),
   };
 }

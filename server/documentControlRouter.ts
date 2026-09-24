@@ -17,6 +17,7 @@ import { z } from "zod";
 import { documentDefinitions, documentSourceArtifacts } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { seedDocumentCatalog } from "./_core/documentCatalogSeed";
+import { attachDerivative, captureDocument, CAPTURE_MAX_BYTES, DERIVATIVE_KINDS, OCR_DOCUMENT_TYPES, proposeExtraction } from "./_core/documentIntakeService";
 import { formFor } from "./_core/documentControlForms";
 import { CONTROL_STATES, IMPORT_CHANNELS, LINK_ROLES, LINK_SOURCES, REFERENCE_SOURCES } from "./_core/documentRegister";
 import { amendDocument, confirmDocument, DocumentControlRefusal, documentView, issueDocument, listDocuments, registerControlledDocument, supersedeDocument, voidDocument, withdrawDocument, type Actor } from "./_core/documentRegisterService";
@@ -236,6 +237,49 @@ export const documentControlRouter = router({
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         return guarded(() => registerControlledDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx, input.deviceRef), definitionKey: input.definitionKey, title: input.title, originKind: input.originKind as never, issuer: input.issuer, contentHash: input.contentHash, byteLength: input.byteLength, mimeType: input.mimeType, evidenceRecordId: input.evidenceRecordId, issuedAt: input.issuedAt, counterpartyOrgRef: input.counterpartyOrgRef, requestedState: input.requestedState, importChannel: input.importChannel, externalReferences: input.externalReferences, links: input.links }));
+      }),
+    /**
+     * DC-F — bytes in, document out. A photo, a PDF, an exported file: hashed by the server, stored once as the
+     * evidence record, registered at `captured` under whatever definition is known (usually none). No template
+     * and no known form ever prevents this. Idempotent by the device's own capture reference.
+     */
+    capture: roleProcedure("documentControl.documentCapture")
+      .input(z.object({
+        title: z.string().min(1).max(300), fileName: z.string().min(1).max(220), mimeType: z.string().min(1).max(120), dataBase64: z.string().min(1).max(Math.ceil(CAPTURE_MAX_BYTES * 4 / 3) + 16),
+        originKind: z.enum(EXTERNAL_ORIGINS as unknown as [string, ...string[]]).default("external_scanned"), importChannel: z.enum(IMPORT_CHANNELS).default("office_upload"), deviceRef: z.string().max(64).nullable().optional(),
+        clientCaptureRef: z.string().min(8).max(80).nullable().optional(), capturedAt: z.coerce.date().nullable().optional(), latitude: z.number().min(-90).max(90).nullable().optional(), longitude: z.number().min(-180).max(180).nullable().optional(),
+        definitionKey: z.string().regex(DEFINITION_KEY_PATTERN).optional(), issuer: issuerInput.optional(), links: z.array(linkInput).max(20).default([]), externalReferences: z.array(referenceInput).max(20).default([]),
+        requestedState: z.enum(["captured", "needs_classification"]).default("captured"),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const bytes = Buffer.from(input.dataBase64, "base64");
+        return guarded(() => captureDocument(db, { book: { bookOrgRef }, actor: actorOf(ctx, input.deviceRef), bytes, fileName: input.fileName, mimeType: input.mimeType, title: input.title, originKind: input.originKind as never, importChannel: input.importChannel, clientCaptureRef: input.clientCaptureRef, capturedAt: input.capturedAt, latitude: input.latitude, longitude: input.longitude, definitionKey: input.definitionKey, issuer: input.issuer, links: input.links, externalReferences: input.externalReferences, requestedState: input.requestedState, storagePut }));
+      }),
+    /**
+     * DC-F — an OCR reading of a captured document, as a PROPOSAL: recorded, attributed to its engine, kept as a
+     * derivative, and put to the existing proposal engine (fields, questions). The row's facts do not move; a
+     * person confirms through `confirm`. LeaseOS runs no recogniser here: the reading comes from whatever produced it.
+     */
+    extract: roleProcedure("documentControl.documentExtract")
+      .input(z.object({
+        documentRef: z.string().min(1).max(64), expectedDefinitionKey: z.string().regex(DEFINITION_KEY_PATTERN).nullable().optional(), deviceRef: z.string().max(64).nullable().optional(),
+        ocr: z.object({
+          engine: z.string().min(1).max(80), engineVersion: z.string().max(40).nullable().optional(), rawText: z.string().max(200_000),
+          documentTypeHint: z.enum(OCR_DOCUMENT_TYPES).nullable().optional(), documentTypeConfidence: z.number().min(0).max(100).nullable().optional(),
+          fields: z.array(z.object({ key: z.string().min(1).max(60), confidence: z.number().min(0).max(100), value: z.union([z.string().max(2000), z.number(), z.boolean(), z.null()]), sourceText: z.string().max(2000).nullable().optional() })).max(200).default([]),
+        }),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => proposeExtraction(db, { book: { bookOrgRef }, actor: actorOf(ctx, input.deviceRef), documentRef: input.documentRef, expectedDefinitionKey: input.expectedDefinitionKey ?? null, ocr: input.ocr, storagePut }));
+      }),
+    /** DC-F — bytes derived from the original (a page image, a thumbnail, a redaction, a searchable PDF): their own row and key, never the original's. */
+    attachDerivative: roleProcedure("documentControl.documentAttachDerivative")
+      .input(z.object({ documentRef: z.string().min(1).max(64), derivativeKind: z.enum(DERIVATIVE_KINDS), mimeType: z.string().min(1).max(120), dataBase64: z.string().min(1).max(Math.ceil(CAPTURE_MAX_BYTES * 4 / 3) + 16), producer: z.string().min(1).max(80), producerVersion: z.string().max(40).nullable().optional(), extractionRef: z.string().max(64).nullable().optional(), deviceRef: z.string().max(64).nullable().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        return guarded(() => attachDerivative(db, { book: { bookOrgRef }, actor: actorOf(ctx, input.deviceRef), documentRef: input.documentRef, derivativeKind: input.derivativeKind, bytes: Buffer.from(input.dataBase64, "base64"), mimeType: input.mimeType, producer: input.producer, producerVersion: input.producerVersion, extractionRef: input.extractionRef, storagePut }));
       }),
     /**
      * Register something LeaseOS rendered (or a domain minted): a field ticket

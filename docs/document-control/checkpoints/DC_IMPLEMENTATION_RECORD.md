@@ -347,3 +347,83 @@ value not overridden) to a real PDF 1.4 whose hash matches the stored bytes, bou
 with a render manifest and domain-sourced links, and refuses a PDF layout by name.
 
 **Gates.** See the commit.
+
+
+## Checkpoint F — scanner and import convergence
+
+**Commit.** _(filled at commit)_ · migration `0182_document_control_intake.sql` (next free after 0181 on this
+branch; register updated) · census 669 (+3) · `documentIntakeService.ts`, `documentIntake.test.ts`,
+`documentControl.db.test.ts` (+5).
+
+**Capture.** `documents.capture` takes bytes — a photo, a PDF, an exported office file — and does what a
+scanner front-end needs done on the server: refuses what cannot be captured before any byte is stored
+(size, a declared MIME type the bytes do not open as, a rendered origin, an office file called a scan,
+a register invariant, a link out of scope), hashes the bytes itself (a client's hash is never written),
+stores them once under a content-addressed key, creates the `evidenceRecords` row (category
+`document_control`, the device's `clientCaptureRef` for idempotency, the job from a job link), and
+registers the row at `captured` under whatever definition is known — by default
+`unclassified_external_document`. NO TEMPLATE AND NO KNOWN FORM PREVENTS THIS. The same capture
+reference twice is one document and no second object; the same bytes under a new reference are
+captured and flagged with the document they duplicate. The evidence engine (`evidenceRecords`,
+`storagePut`, seals) is reused as is; nothing about it changed.
+
+**Extraction as proposal.** `documents.extract` takes an engine-neutral `OcrResult` (LeaseOS runs
+no recogniser here; the reading comes from a device's engine, a server engine when one is wired, or
+a person's transcription flagged as such) and runs it through the existing extraction engine
+(`classifyDocument`, `extractToProposal` — extended by one optional argument, the form the
+document's definition names, so a form outside the engine's four keyword types can take a reading
+when the register or the scanner already said what the document is). What comes out is recorded as
+a proposal only: a `documentExtractions` row (0027, now tied to the register row by `documentId`),
+an `assistantProposals` row with `proposalFields` (every field `proposed`, source `photo_ocr`) and
+`assistantQuestions` (every sensitive field asked of a person), the raw text as an `ocr_text`
+derivative, and any number the reading found as an `ocr_proposed`, unconfirmed external reference —
+only where the proposed definition carries that kind of reference. The register row's facts do
+not move: definition, issuer and every confirmed reference stay what they were; the state goes to
+`proposed` (a form took the reading) or `needs_classification` (nothing did — the document is
+retained, in the review facet, never dropped). A person confirms through `documents.confirm`, which
+now carries the issuer they name onto a reference proposed while the issuer was unknown. A frozen
+document (confirmed, issued, withdrawn) refuses an extraction. The proposal itself stays in the
+assistant's review queue for its typed domain commit (the disposal adapter, in G).
+
+**Derivatives.** `documentDerivatives` (0182): what was made from the original — OCR text, a page
+image, a thumbnail, a redaction, a searchable PDF — with its own storage key (content-addressed under
+the document, never the original's), its own hash, its producer and version, and the original's
+hash it came from. Idempotent on (document, kind, hash). Byte-identical to the original is refused: a
+derivative is something made from it. Two database triggers make the invariants hold below the
+application: a derivative row's columns are never updatable, and a captured document's `contentHash`
+and `evidenceRecordId` are never updatable (a corrected scan is a new document). `documents.get`
+returns `derivatives` and `extractions` beside links, references, versions, amendments and the
+timeline, which records `document.derivative_added`, `document.extraction_recorded` and
+`document.proposed` with the engine, the proposal and the counts.
+
+**Not built, and not called built.** No OCR engine, no native scanner or printer integration, no
+browser shim presented as either: the `capture`/`extract` procedures are the server contract a
+native front-end (Capacitor or otherwise) calls with the bytes and the reading it produced. No
+`document_control_confirm` adapter in `planAssistantCommit`: a document's facts are confirmed by
+`documents.confirm`; a proposal's domain facts commit through the adapter the form already has
+(disposal, fuel, expense) — G wires the disposal case to the register row. No facility-alias
+resolver (D-DC-07 open).
+
+**Reused.** `evidenceRecords` + `storagePut` + `sha256Hex`; `classifyDocument`, `disposeField`,
+`extractToProposal`, `CONFIDENCE_POLICY` (`documentExtraction.ts`); `assistantProposals`,
+`proposalFields`, `assistantQuestions`, `documentExtractions`; the register (B) for the row, the
+references and the events; `formFor` (E) for the form.
+
+**Tests.** `server/_core/documentIntake.test.ts` (3): what a capture accepts (types, signatures,
+sizes, origins), the document-type → definition and OCR-field → reference-type maps name only
+things the register has, a named form takes a reading the classifier would not and proposes every
+field with the sensitive ones asked. `server/documentControl.db.test.ts` (+5): capture of a PNG and a
+PDF with no template and no definition (server hash, one object, idempotent by capture reference,
+declared type must match bytes, duplicate bytes flagged); an unknown form retained as
+`needs_classification` with its reading kept as a derivative of the original; a facility ticket's
+reading as proposal fields, questions, a proposed reference and a proposed definition with the row's
+facts unmoved until a person confirms (and then the reference carries the named issuer; a further
+extraction refused as frozen; a scanner's say-so recorded as a human classification, still
+unconfirmed); the original immutable at the database (hash and evidence pointer not updatable,
+derivative not updatable, original bytes not a derivative, idempotent re-attach); cross-tenant
+extract, attach, read and capture-with-link all fail closed with nothing stored.
+
+**Gates (full `scripts/ci-gate.sh`, fresh database).** 176 migrations apply (0182 included); parity
+420/420; tsc clean; test-file type errors 0 (pin 0); vitest 337 files: 4773 passed, 3 skipped, 1 failed —
+`calendarFixtures.test.ts`, the pre-existing date-triggered guard recorded under E (fails identically
+on the untouched base `7759056`; not this branch's). Build clean.

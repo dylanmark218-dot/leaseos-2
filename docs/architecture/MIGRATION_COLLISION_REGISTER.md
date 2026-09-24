@@ -49,7 +49,11 @@ auth-workspace, work-calendar), `0172`–`0175` (training-academy-workforce), `0
 | Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|
 | 0178 | `0178_document_control_definitions.sql` | `claude/document-control-architecture-jlffzk` | none yet | open branch | none at claim time | keeps 0178 unless a branch merges ahead with it; re-check at PR time |
-| 0179+ | Document Control checkpoints B–F (register extension, numbering ledger, templates, mappings, intake) | same branch | none yet | planned | — | consecutive from 0178; re-check at PR time |
+| 0179 | `0179_document_control_register.sql` (B) | same branch | none yet | open branch | none at claim time | consecutive from 0178; re-check at PR time |
+| 0180 | `0180_document_control_numbering.sql` (C) | same branch | none yet | open branch | none at claim time | consecutive; re-check at PR time |
+| 0181 | `0181_document_control_templates.sql` (D) | same branch | none yet | open branch | none at claim time | consecutive; re-check at PR time |
+| 0182 | `0182_document_control_intake.sql` (F: `documentDerivatives`, `documentExtractions.documentId`, two immutability triggers) | same branch | none yet | open branch | none at claim time | consecutive; re-check at PR time |
+| 0183+ | Document Control G–H if a migration is needed | same branch | none yet | planned | — | consecutive; re-check at PR time |
 
 ## Change log
 

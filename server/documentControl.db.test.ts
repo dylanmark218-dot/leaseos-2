@@ -421,3 +421,160 @@ d("the semantic layer: mapped standard revisions, resolution with provenance, an
     expect(fields.find(f => f.key === "document.controlNumber")!.authority).toBe("server_only");
   }, 90_000);
 });
+
+d("scanner and import convergence (DC-F): capture with no template, extraction as proposal, derivatives beside an immutable original", () => {
+  const shaB = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+  const png = (tag: string) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(`scan ${tag}`)]);
+  const pdf = (tag: string) => Buffer.from(`%PDF-1.4\n% ${tag}\n%%EOF\n`);
+  const b64 = (b: Buffer) => b.toString("base64");
+  async function tenant() { const a = await org(); await callerFor(await member(a, ["management"])).documentControl.definitions.catalogSeed(); return a; }
+  async function evidenceRow(id: number) { const [r] = await pool.execute<mysql.RowDataPacket[]>("SELECT storageKey, clientCaptureRef, capturedBy, category, recordType FROM evidenceRecords WHERE id = ?", [id]); return r[0]!; }
+
+  it("captures a photo and a PDF with no template and no definition: hashed by the server, stored once, registered captured; the same capture reference twice is one document; declared types must match the bytes", async () => {
+    const a = await tenant(); const driver = await member(a, ["driver"]); const c = callerFor(driver);
+    const bytes = png(rnd()); const ref = `CAP-${rnd()}-${rnd()}`;
+    const base = { title: "Something the driver was handed", fileName: "IMG_0001.png", mimeType: "image/png", dataBase64: b64(bytes), clientCaptureRef: ref, importChannel: "device_sync" as const, deviceRef: "DEV-1" };
+    const r = await c.documentControl.documents.capture(base);
+    expect(r).toMatchObject({ controlState: "captured", definitionKey: "unclassified_external_document", alreadyCaptured: false, duplicateOfDocumentRef: null, byteLength: bytes.byteLength, contentHash: shaB(bytes) });
+    const ev = await evidenceRow(r.evidenceRecordId);
+    expect(ev).toMatchObject({ clientCaptureRef: ref, capturedBy: driver, category: "document_control", recordType: "unclassified_external_document" });
+    expect(objects.get(ev.storageKey)!.equals(bytes)).toBe(true);
+    expect(ev.storageKey).toContain(shaB(bytes));
+    // Sent twice (an offline retry): one document, no second object.
+    const objectsBefore = objects.size;
+    const again = await c.documentControl.documents.capture(base);
+    expect(again).toMatchObject({ alreadyCaptured: true, documentRef: r.documentRef, evidenceRecordId: r.evidenceRecordId });
+    expect(objects.size).toBe(objectsBefore);
+    // What a thing is, is what its bytes say.
+    await expect(c.documentControl.documents.capture({ ...base, clientCaptureRef: null, mimeType: "application/pdf", fileName: "x.pdf" })).rejects.toThrow(/do not open as one/);
+    await expect(c.documentControl.documents.capture({ ...base, clientCaptureRef: null, mimeType: "application/zip" })).rejects.toThrow(/not a kind of bytes/);
+    await expect(c.documentControl.documents.capture({ ...base, clientCaptureRef: null, originKind: "leaseos_generated" as never })).rejects.toThrow();
+    // A PDF import, no template, no definition.
+    const p = await c.documentControl.documents.capture({ title: "Vendor statement", fileName: "statement.pdf", mimeType: "application/pdf", dataBase64: b64(pdf(rnd())), originKind: "external_digital_import", importChannel: "office_upload" });
+    expect(p.controlState).toBe("captured");
+    const v = await c.documentControl.documents.get({ documentRef: r.documentRef });
+    expect(v.document).toMatchObject({ evidenceRecordId: r.evidenceRecordId, contentHash: shaB(bytes), originKind: "external_scanned", issuerKind: "unknown", templateRevisionRef: null, controlNumber: null, capturedByDeviceRef: "DEV-1" });
+    expect(v.derivatives).toEqual([]); expect(v.extractions).toEqual([]);
+    expect(v.timeline.map(e => e.eventType)).toEqual(["document.captured"]);
+    // The same bytes under another capture reference: captured (a second copy of one paper is a fact) and said so.
+    const dup = await c.documentControl.documents.capture({ ...base, clientCaptureRef: `CAP-${rnd()}-${rnd()}` });
+    expect(dup.duplicateOfDocumentRef).toBe(r.documentRef); expect(dup.documentRef).not.toBe(r.documentRef);
+  }, 60_000);
+
+  it("keeps an unknown form: a reading nothing recognises is recorded and kept as a derivative of the original, and the document waits as needs_classification — never dropped", async () => {
+    const a = await tenant(); const office = await member(a, ["office"]); const c = callerFor(office);
+    const bytes = png(rnd());
+    const r = await c.documentControl.documents.capture({ title: "Unknown paper", fileName: "a.png", mimeType: "image/png", dataBase64: b64(bytes) });
+    const text = `Handwritten note ${rnd()} — nothing a form recognises`;
+    const x = await c.documentControl.documents.extract({ documentRef: r.documentRef, ocr: { engine: "test-ocr", engineVersion: "0.1", rawText: text, fields: [] } });
+    expect(x).toMatchObject({ proposalId: null, formKey: null, proposedDefinitionKey: null, controlState: "needs_classification", questions: 0, proposedReferences: [] });
+    expect(x.refusal).toMatch(/No form accepts/);
+    expect(x.classification.documentType).toBe("unknown");
+    const v = await c.documentControl.documents.get({ documentRef: r.documentRef });
+    expect(v.document).toMatchObject({ controlState: "needs_classification", definitionKey: "unclassified_external_document", contentHash: shaB(bytes) });
+    expect(v.extractions).toHaveLength(1);
+    expect(v.extractions[0]).toMatchObject({ extractionRef: x.extractionRef, proposalId: null, status: "extracted", ocrEngine: "test-ocr", contentSha256: shaB(bytes), proposedDocumentType: "unknown", classificationSource: "ocr_model" });
+    expect(v.derivatives).toHaveLength(1);
+    const d = v.derivatives[0]!;
+    expect(d).toMatchObject({ derivativeRef: x.derivativeRef, derivativeKind: "ocr_text", producer: "test-ocr", producerVersion: "0.1", extractionRef: x.extractionRef, sourceContentHash: shaB(bytes), contentHash: shaB(Buffer.from(text, "utf8")), mimeType: "text/plain", actorSource: "ai" });
+    const ev = await evidenceRow(r.evidenceRecordId);
+    expect(d.storageKey).not.toBe(ev.storageKey);
+    expect(objects.get(d.storageKey)!.toString("utf8")).toBe(text);
+    expect(objects.get(ev.storageKey)!.equals(bytes)).toBe(true);
+    expect(v.timeline.map(e => e.eventType)).toEqual(["document.captured", "document.derivative_added", "document.extraction_recorded"]);
+    // It is in the register, in the review facet, found by title.
+    const waiting = await c.documentControl.documents.list({ controlState: "needs_classification", q: "Unknown paper" });
+    expect(waiting.some(h => h.documentRef === r.documentRef)).toBe(true);
+    // A second reading of the same paper is another extraction, not a replacement; the same text is the same derivative.
+    const x2 = await c.documentControl.documents.extract({ documentRef: r.documentRef, ocr: { engine: "test-ocr", engineVersion: "0.2", rawText: text, fields: [] } });
+    expect(x2.derivativeRef).toBe(x.derivativeRef);
+    expect((await c.documentControl.documents.get({ documentRef: r.documentRef })).extractions).toHaveLength(2);
+  }, 60_000);
+
+  it("OCR is a proposal: a facility ticket's reading becomes proposal fields and questions, a proposed reference and a proposed definition; the row's facts move only when a person confirms them", async () => {
+    const a = await tenant(); const office = await member(a, ["office"]); const c = callerFor(office);
+    const fac = await facility(`ACME Disposal ${rnd()}`); const j = await job(a);
+    const bytes = png(rnd());
+    const r = await c.documentControl.documents.capture({ title: "Facility paper", fileName: "t.png", mimeType: "image/png", dataBase64: b64(bytes), links: [{ recordType: "job", recordRef: j.code, recordId: j.id, confirmed: true }] });
+    const x = await c.documentControl.documents.extract({ documentRef: r.documentRef, ocr: {
+      engine: "device-ocr", engineVersion: "1.2", documentTypeHint: "disposal_ticket", documentTypeConfidence: 92,
+      rawText: "ACME DISPOSAL FACILITY  DISPOSAL TICKET 874399  MANIFEST  GROSS 21000 KG  TARE 9000 KG  NET 12000 KG  m3",
+      fields: [{ key: "facilityName", confidence: 99, value: "ACME Disposal" }, { key: "facilityTicketNumber", confidence: 97, value: "874399" }, { key: "grossWeightKg", confidence: 99, value: 21000 }, { key: "tareWeightKg", confidence: 99, value: 9000 }, { key: "netWeightKg", confidence: 99, value: 12000 }, { key: "material", confidence: 70, value: "produced water" }],
+    } });
+    expect(x).toMatchObject({ proposedDefinitionKey: "external_disposal_receipt", formKey: "disposal_ticket", controlState: "proposed", refusal: null });
+    expect(x.proposalId).toMatch(/^PROP-DC-/);
+    expect(x.proposedReferences).toHaveLength(1);
+    expect(x.counts.humanOnly).toBeGreaterThanOrEqual(4);   // the weights, the ticket number, the date
+    expect(x.counts.autoFiled).toBe(1);                       // the facility name: low-risk metadata, still proposed
+    expect(x.questions).toBeGreaterThan(0);
+    // The proposal engine's tables hold it, every field proposed and photo_ocr — nothing confirmed by a machine.
+    const [prop] = await pool.execute<mysql.RowDataPacket[]>("SELECT commitState, targetRef, targetRecordId, jobId, formKey, createdByUserId FROM assistantProposals WHERE proposalId = ?", [x.proposalId]);
+    expect(prop[0]).toMatchObject({ commitState: "awaiting_answers", targetRef: r.documentRef, targetRecordId: r.documentId, jobId: j.id, formKey: "disposal_ticket", createdByUserId: office });
+    const [flds] = await pool.execute<mysql.RowDataPacket[]>("SELECT fieldKey, fieldValue, status, source, `precision` FROM proposalFields WHERE proposalId = ?", [x.proposalId]);
+    expect(flds.length).toBeGreaterThanOrEqual(6);
+    expect(flds.every(f => f.status === "proposed" && f.source === "photo_ocr")).toBe(true);
+    expect(flds.find(f => f.fieldKey === "netWeightKg")).toMatchObject({ fieldValue: "12000", precision: "exact" });
+    const [qs] = await pool.execute<mysql.RowDataPacket[]>("SELECT fieldKey, reason FROM assistantQuestions WHERE proposalId = ? AND status = 'pending'", [x.proposalId]);
+    expect(qs.find(q => q.fieldKey === "netWeightKg")!.reason).toBe("sensitive_human_only");
+    // The register row: still unclassified, still unknown issuer; the number is proposed, by OCR, unconfirmed.
+    const before = await c.documentControl.documents.get({ documentRef: r.documentRef });
+    expect(before.document).toMatchObject({ definitionKey: "unclassified_external_document", issuerKind: "unknown", controlState: "proposed", contentHash: shaB(bytes) });
+    expect(before.references[0]).toMatchObject({ referenceType: "facility_ticket_number", referenceValue: "874399", source: "ocr_proposed", confirmationStatus: "proposed", issuerKind: "unknown" });
+    expect(before.extractions[0]).toMatchObject({ status: "proposed", proposalId: x.proposalId, classificationSource: "ocr_model", proposedDocumentType: "external_disposal_receipt" });
+    expect(before.timeline.map(e => e.eventType)).toEqual(["document.captured", "document.derivative_added", "document.reference_added", "document.proposed"]);
+    expect(before.timeline[3]!.detail).toMatchObject({ proposalId: x.proposalId, engine: "device-ocr", proposedDefinitionKey: "external_disposal_receipt" });
+    // A person confirms: definition, issuer, and the number OCR proposed — which takes the issuer they name.
+    const ok = await c.documentControl.documents.confirm({ documentRef: r.documentRef, definitionKey: "external_disposal_receipt", issuer: { issuerKind: "facility", issuerFacilityId: fac, issuerName: "ACME Disposal" }, confirmReferenceRefs: [before.references[0]!.referenceRef] });
+    expect(ok).toMatchObject({ controlState: "confirmed", definitionKey: "external_disposal_receipt" });
+    const after = await c.documentControl.documents.get({ documentRef: r.documentRef });
+    expect(after.references[0]).toMatchObject({ confirmationStatus: "confirmed", issuerKind: "facility", issuerFacilityId: fac, issuerScopeKey: `facility:${fac}`, source: "ocr_proposed" });
+    expect(after.document).toMatchObject({ issuerKind: "facility", contentHash: shaB(bytes) });
+    // Frozen now: a further reading proposes nothing to it.
+    await expect(c.documentControl.documents.extract({ documentRef: r.documentRef, ocr: { engine: "device-ocr", rawText: "again", fields: [] } })).rejects.toThrow(/frozen/);
+    // A driver who scanned it and said what it was: the say-so is a classification of source human, still proposed until confirmed.
+    const r2 = await c.documentControl.documents.capture({ title: "Second paper", fileName: "u.png", mimeType: "image/png", dataBase64: b64(png(rnd())) });
+    const x2 = await c.documentControl.documents.extract({ documentRef: r2.documentRef, expectedDefinitionKey: "scale_ticket", ocr: { engine: "device-ocr", rawText: "GROSS TARE NET KG SCALE", fields: [{ key: "netWeightKg", confidence: 99, value: 100 }] } });
+    expect(x2).toMatchObject({ proposedDefinitionKey: "scale_ticket", formKey: "disposal_ticket", controlState: "proposed" });
+    expect((await c.documentControl.documents.get({ documentRef: r2.documentRef })).extractions[0]).toMatchObject({ classificationSource: "human", proposedDocumentType: "scale_ticket" });
+    expect((await c.documentControl.documents.get({ documentRef: r2.documentRef })).document.definitionKey).toBe("unclassified_external_document");
+  }, 60_000);
+
+  it("the original is immutable: its hash and bytes never change, a derivative is never overwritten, and the original's own bytes are not a derivative", async () => {
+    const a = await tenant(); const office = await member(a, ["office"]); const c = callerFor(office);
+    const bytes = png(rnd());
+    const r = await c.documentControl.documents.capture({ title: "Scan", fileName: "s.png", mimeType: "image/png", dataBase64: b64(bytes) });
+    const page = png(`page-${rnd()}`);
+    const d1 = await c.documentControl.documents.attachDerivative({ documentRef: r.documentRef, derivativeKind: "page_image", mimeType: "image/png", dataBase64: b64(page), producer: "deskew", producerVersion: "2.0" });
+    expect(d1).toMatchObject({ alreadyAttached: false, sourceContentHash: shaB(bytes), contentHash: shaB(page), byteLength: page.byteLength });
+    expect(d1.storageKey).toContain(`/derivatives/${r.documentRef}/page_image/`);
+    const d2 = await c.documentControl.documents.attachDerivative({ documentRef: r.documentRef, derivativeKind: "page_image", mimeType: "image/png", dataBase64: b64(page), producer: "deskew" });
+    expect(d2).toMatchObject({ alreadyAttached: true, derivativeRef: d1.derivativeRef });
+    await expect(c.documentControl.documents.attachDerivative({ documentRef: r.documentRef, derivativeKind: "other", mimeType: "image/png", dataBase64: b64(bytes), producer: "copy" })).rejects.toThrow(/are the original/);
+    // The database itself refuses: a captured row's bytes and a derivative's bytes are not updatable.
+    await expect(pool.execute("UPDATE commercialDocuments SET contentHash = ? WHERE id = ?", [shaB(page), r.documentId])).rejects.toThrow(/never change/);
+    await expect(pool.execute("UPDATE commercialDocuments SET evidenceRecordId = NULL WHERE id = ?", [r.documentId])).rejects.toThrow(/never change/);
+    await expect(pool.execute("UPDATE documentDerivatives SET storageKey = 'elsewhere' WHERE derivativeRef = ?", [d1.derivativeRef])).rejects.toThrow(/never overwritten/);
+    const ev = await evidenceRow(r.evidenceRecordId);
+    expect(objects.get(ev.storageKey)!.equals(bytes)).toBe(true);
+    const v = await c.documentControl.documents.get({ documentRef: r.documentRef });
+    expect(v.document.contentHash).toBe(shaB(bytes));
+    expect(v.derivatives).toHaveLength(1);
+    expect(v.timeline.map(e => e.eventType)).toEqual(["document.captured", "document.derivative_added"]);
+  }, 60_000);
+
+  it("fails closed across tenants: another business cannot extract from, attach to, or capture against this business's records", async () => {
+    const a = await tenant(); const b = await tenant(); const officeA = await member(a, ["office"]); const officeB = await member(b, ["office"]);
+    const ca = callerFor(officeA), cb = callerFor(officeB);
+    const jA = await job(a);
+    const r = await ca.documentControl.documents.capture({ title: "A's scan", fileName: "a.png", mimeType: "image/png", dataBase64: b64(png(rnd())) });
+    await expect(cb.documentControl.documents.extract({ documentRef: r.documentRef, ocr: { engine: "x", rawText: "y", fields: [] } })).rejects.toThrow(/not in this business/);
+    await expect(cb.documentControl.documents.attachDerivative({ documentRef: r.documentRef, derivativeKind: "thumbnail", mimeType: "image/png", dataBase64: b64(png("t")), producer: "thumb" })).rejects.toThrow(/not in this business/);
+    await expect(cb.documentControl.documents.get({ documentRef: r.documentRef })).rejects.toThrow(/not in this business/);
+    const [n0] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM evidenceRecords WHERE title = 'B against A'");
+    const objectsBefore = objects.size;
+    await expect(cb.documentControl.documents.capture({ title: "B against A", fileName: "b.png", mimeType: "image/png", dataBase64: b64(png(rnd())), links: [{ recordType: "job", recordRef: jA.code, recordId: jA.id }] })).rejects.toThrow(/not in this business's records/);
+    const [n1] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM evidenceRecords WHERE title = 'B against A'");
+    expect(n1[0]!.n).toBe(n0[0]!.n);       // refused before any byte was stored
+    expect(objects.size).toBe(objectsBefore);
+  }, 60_000);
+});

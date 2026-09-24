@@ -3706,6 +3706,8 @@ export const documentExtractions = mysqlTable("documentExtractions", {
   extractedAt: timestamp("extractedAt").notNull(),
   extractedByUserId: int("extractedByUserId"),
   status: mysqlEnum("status", ["extracted", "proposed", "committed", "rejected"]).default("extracted").notNull(),
+  // 0182 (DC-F): the register row this extraction was read from. Proposal only; the row's facts change by a person's confirmation.
+  documentId: int("documentId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -9173,6 +9175,37 @@ export const documentTemplateArtifacts = mysqlTable("documentTemplateArtifacts",
   role: mysqlEnum("role", ["printable", "printable_alternate", "editable_source", "render_source", "reference"]).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (t) => ({ unique: uniqueIndex("documentTemplateArtifacts_unique").on(t.revisionId, t.artifactId) }));
+
+/**
+ * 0182 (DC-F) — what was derived from a captured document's bytes: OCR text, a page image, a
+ * thumbnail, a redaction. Its own bytes and hash, plus the hash of the original it came from.
+ * Never overwritten (trigger); the original never changes (trigger on commercialDocuments).
+ */
+export const documentDerivatives = mysqlTable("documentDerivatives", {
+  id: int("id").autoincrement().primaryKey(),
+  derivativeRef: varchar("derivativeRef", { length: 40 }).notNull().unique(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  bookScopeKey: varchar("bookScopeKey", { length: 64 }).notNull(),
+  documentId: int("documentId").notNull(),
+  evidenceRecordId: int("evidenceRecordId"),
+  sourceContentHash: varchar("sourceContentHash", { length: 64 }).notNull(),
+  derivativeKind: mysqlEnum("derivativeKind", ["ocr_text", "extraction_json", "page_image", "thumbnail", "searchable_pdf", "redaction", "other"]).notNull(),
+  producer: varchar("producer", { length: 80 }).notNull(),
+  producerVersion: varchar("producerVersion", { length: 40 }),
+  extractionRef: varchar("extractionRef", { length: 64 }),
+  storageKey: varchar("storageKey", { length: 512 }).notNull(),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  mimeType: varchar("mimeType", { length: 120 }).notNull(),
+  byteLength: int("byteLength").notNull(),
+  createdByUserId: int("createdByUserId"),
+  actorSource: mysqlEnum("actorSource", ["human", "system", "ai", "integration", "external"]).default("system").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  content: uniqueIndex("documentDerivatives_content_unique").on(t.documentId, t.derivativeKind, t.contentHash),
+  document: index("documentDerivatives_document").on(t.documentId),
+  source: index("documentDerivatives_source").on(t.bookScopeKey, t.sourceContentHash),
+}));
+export type InsertDocumentDerivative = typeof documentDerivatives.$inferInsert;
 
 export type InsertDocumentTemplate = typeof documentTemplates.$inferInsert;
 export type InsertDocumentTemplateRevision = typeof documentTemplateRevisions.$inferInsert;

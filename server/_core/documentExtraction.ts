@@ -276,9 +276,15 @@ export function extractToProposal(args: {
   ocr: OcrResult;
   classification: Classification;
   forms?: Record<string, FormDefinition>;
+  /**
+   * DC-F: the form the document's definition names (its extraction profile),
+   * when a person or the register already said what the document is. The
+   * classification still travels with the outcome; it does not pick the form.
+   */
+  formKey?: string | null;
 }): ExtractionOutcome {
   const forms = args.forms ?? FORMS;
-  const formKey = DOC_TO_FORM[args.classification.documentType];
+  const formKey = args.formKey ?? DOC_TO_FORM[args.classification.documentType];
   const counts = { autoFiled: 0, review: 0, asked: 0, humanOnly: 0 };
   const questions: ExtractionQuestion[] = [];
 
