@@ -6,9 +6,19 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { serveStatic, setupVite } from "./vite";
+import { serveStatic } from "./static";
 import { startProductionWorker } from "./productionWorker";
 import { ENV, assertProductionSecrets } from "./env";
+import { sql } from "drizzle-orm";
+import { getDb } from "../db";
+import {
+  allowedOriginsFromEnv,
+  crossSiteGuard,
+  rateLimit,
+  registerHealthRoutes,
+  securityHeaders,
+  trustProxySetting,
+} from "./httpHardening";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -45,9 +55,32 @@ async function startServer() {
   const app = express();
   const server = createServer(app);
   const worker = await startProductionWorker();
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.disable("x-powered-by");
+  const trustProxy = trustProxySetting(process.env);
+  if (trustProxy !== null) app.set("trust proxy", trustProxy);
+  app.use(
+    securityHeaders({
+      hsts: !isDevelopment,
+      frameAncestors: process.env.LEASEOS_FRAME_ANCESTORS?.trim() || null,
+    })
+  );
+  registerHealthRoutes(app, {
+    database: async () => {
+      const db = await getDb();
+      if (!db) throw new Error("DATABASE_URL is not configured");
+      await db.execute(sql`SELECT 1`);
+    },
+  });
+  app.use("/api", crossSiteGuard({ allowedOrigins: allowedOriginsFromEnv(process.env) }));
+  // Body limits by route. Only tRPC carries files, and the largest is an
+  // evidence upload: 15 MB of bytes is 20 MB of base64, and the procedure
+  // refuses anything longer. Everything else is kilobytes. The limit used to
+  // be 50 MB everywhere.
+  app.use("/api/trpc", express.json({ limit: "25mb" }));
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ limit: "100kb", extended: true }));
+  // A floor against one client hammering sign-in, per process. See rateLimit.
+  app.use("/api/oauth", rateLimit({ windowMs: 60_000, max: 60 }));
   registerOAuthRoutes(app);
   // tRPC API
   app.use(
@@ -59,13 +92,21 @@ async function startServer() {
   );
   // development mode uses Vite, production mode uses static files
   if (isDevelopment) {
+    // Dynamic, so the production bundle never loads Vite — see vite.ts.
+    const { setupVite } = await import("./vite");
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  // Hunting for a free port is a development convenience. In production the
+  // load balancer is pointed at PORT, and a server that quietly binds another
+  // one is a healthy process nobody can reach — so refuse to start instead.
+  if (!isDevelopment && !(await isPortAvailable(preferredPort))) {
+    throw new Error(`Port ${preferredPort} is in use; refusing to start on a different one outside development`);
+  }
+  const port = isDevelopment ? await findAvailablePort(preferredPort) : preferredPort;
 
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);

@@ -407,7 +407,9 @@ export const appRouter = router({
             category: z.string().min(1).max(80),
             fileName: z.string().min(1).max(220),
             mimeType: z.string().min(1).max(120),
-            dataBase64: z.string().min(1),
+            // 15 MiB of bytes is exactly this many base64 characters. Refusing
+            // here stops an oversized upload before it is decoded into memory.
+            dataBase64: z.string().min(1).max(20_971_520),
             latitude: z.number().optional(),
             longitude: z.number().optional(),
             notes: z.string().optional(),

@@ -19,6 +19,7 @@ import { parseLsd } from "./_core/dls";
 import { checkMapping, featureToCandidate, lifecycleFromStatus, SK_FACILITIES, type ArcgisFeature, type FieldMapping } from "./_core/arcgisImport";
 import { readFileSync } from "node:fs";
 import { HYDROVAC_LIST, hydrovacFacilityKey, parseHydrovacList } from "./_core/hydrovacList";
+import { OutboundRefused, outboundJson } from "./_core/outboundHttp";
 import { facilities, facilityAliases, facilityCallAheads, facilityCapabilities, facilityEvidence, facilityOperatingHours, facilitySourceLicences, facilityWaitReports, loadFacilityAssessments, loads, wasteStreamVocabulary, facilityImportRuns, atsLegalSubdivisions } from "../drizzle/schema";
 import { acceptanceStatusSchema, coordinatePrecisionSchema, wasteCodeSchema, type CommercialAccess, type CoordinatePrecision, type FacilityLifecycle, type FacilityMapFeature } from "../shared/facilities";
 type BriefRow = { facilityKey: string; name: string; operatorKey: string; parentCompany: string | null; province: string; municipality: string | null; facilityType: string; facilityTypes: string[]; legalLocation: string | null; physicalAddress: string | null; phone: string | null; dispatchPhone: string | null; afterHoursPhone: string | null; salesContact: string | null; email: string | null; websiteUrl: string | null; licenceKey: string; sourceAuthority: string; commercialAccess: CommercialAccess; lifecycle: FacilityLifecycle; historicalOperators: string[]; normAccepted: boolean | null; sourAccepted: boolean | null; twentyFourHourCallout: boolean | null; notes: string | null; latitude?: number; longitude?: number; coordinatePrecision?: CoordinatePrecision; coordinateSourceUrl?: string; regulatorRef?: string };
@@ -349,7 +350,7 @@ export const facilityDirectoryRouter = router({
     inspect: roleProcedure("facilityDirectory.arcgisInspect")
       .input(z.object({ layerUrl: z.string().url().max(1024) }))
       .mutation(async ({ input }) => {
-        const res = await fetch(`${input.layerUrl.replace(/\/$/, "")}?f=pjson`);
+        const res = await layerFetch(`${input.layerUrl.replace(/\/$/, "")}?f=pjson`);
         if (!res.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Layer returned ${res.status}` });
         const meta = (await res.json()) as { name?: string; geometryType?: string; extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string; type: string; alias?: string }[]; copyrightText?: string; maxRecordCount?: number };
         return { name: meta.name ?? null, geometryType: meta.geometryType ?? null, wkid: meta.extent?.spatialReference?.latestWkid ?? meta.extent?.spatialReference?.wkid ?? null, fields: (meta.fields ?? []).map(f => ({ name: f.name, type: f.type, alias: f.alias ?? null })), copyrightText: meta.copyrightText ?? null, maxRecordCount: meta.maxRecordCount ?? null, note: "Map these fields to ours and record the licence before importing; an empty copyrightText is not a licence." };
@@ -361,7 +362,7 @@ export const facilityDirectoryRouter = router({
       .input(z.object({ source: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), layerUrl: z.string().url().max(1024), licenceKey: z.string().min(1).max(40), mapping: z.object({ id: z.string().min(1), name: z.string().optional(), facilityName: z.string().optional(), operator: z.string().optional(), licenceNumber: z.string().optional(), facilityType: z.string().optional(), status: z.string().optional(), legalLocation: z.string().optional() }), where: z.string().max(500).default("1=1"), maxFeatures: z.number().int().min(1).max(20000).default(5000), note: z.string().max(500).optional() }))
       .mutation(async ({ ctx, input }) => {
         const base = input.layerUrl.replace(/\/$/, "");
-        const metaRes = await fetch(`${base}?f=pjson`);
+        const metaRes = await layerFetch(`${base}?f=pjson`);
         if (!metaRes.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Layer returned ${metaRes.status}` });
         const meta = (await metaRes.json()) as { extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string }[]; maxRecordCount?: number };
         const wkid = meta.extent?.spatialReference?.latestWkid ?? meta.extent?.spatialReference?.wkid;
@@ -370,7 +371,7 @@ export const facilityDirectoryRouter = router({
         const features: { attributes: Record<string, unknown>; geometry?: { x?: number; y?: number; rings?: number[][][] } | null }[] = [];
         for (let offset = 0; features.length < input.maxFeatures; offset += page) {
           const q = new URLSearchParams({ where: input.where, outFields: "*", returnGeometry: "true", f: "json", resultOffset: String(offset), resultRecordCount: String(Math.min(page, input.maxFeatures - features.length)) });
-          const res = await fetch(`${base}/query?${q}`);
+          const res = await layerFetch(`${base}/query?${q}`);
           if (!res.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Query returned ${res.status} at offset ${offset}` });
           const data = (await res.json()) as { features?: typeof features; exceededTransferLimit?: boolean };
           features.push(...(data.features ?? []));
@@ -481,6 +482,22 @@ async function nearbyFacilities(db: Db, latitude: number, longitude: number, rad
 }
 
 /** One ArcGIS import run: check the mapping against the layer's fields, map, upsert, record evidence, write the run. */
+/**
+ * The layer URL is typed by a person, so every request to it goes through the
+ * outbound policy: https on 443, no private or metadata addresses (checked at
+ * connect time, so DNS rebinding cannot swap one in), no redirects, bounded
+ * size and time. A policy refusal is a BAD_REQUEST that says why; the URL was
+ * the problem, not the layer.
+ */
+async function layerFetch(url: string) {
+  try {
+    return await outboundJson<unknown>(url, { timeoutMs: 30_000, maxResponseBytes: 50 * 1024 * 1024 });
+  } catch (e) {
+    if (e instanceof OutboundRefused) throw new TRPCError({ code: "BAD_REQUEST", message: e.message });
+    throw new TRPCError({ code: "BAD_GATEWAY", message: "The layer could not be reached" });
+  }
+}
+
 async function importArcgis(userId: number, input: { source: string; layerUrl: string; licenceKey: string; wkid: number; layerFields: string[]; mapping: FieldMapping; features: ArcgisFeature[]; note?: string }) {
   const db = await dbOrThrow();
   const lic = (await db.select().from(facilitySourceLicences).where(eq(facilitySourceLicences.licenceKey, input.licenceKey)).limit(1))[0];

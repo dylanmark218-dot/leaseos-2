@@ -10,12 +10,18 @@ import { getDb } from "./db";
 import { domainEventOutbox, webhookDeliveries, webhookSubscriptions } from "../drizzle/schema";
 import { deliveryOutcome, signPayload, subscribed } from "./_core/integrationGateway";
 import { decryptSecret, mfaKey } from "./_core/externalIdentityPolicy";
+import { outboundRequest } from "./_core/outboundHttp";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
 export type Poster = (url: string, body: string, headers: Record<string, string>) => Promise<{ status: number } | { error: string }>;
-let poster: Poster = async (url, body, headers) => { try { const r = await fetch(url, { method: "POST", body, headers }); return { status: r.status }; } catch (e) { return { error: e instanceof Error ? e.message : String(e) }; } };
+// The destination was typed by a tenant administrator, so delivery goes through
+// the outbound policy (no private/metadata addresses, checked at connect time;
+// no redirects; bounded time and response). A refusal is recorded as the
+// delivery's error and retried like any failure, so it stays visible.
+const defaultPoster: Poster = async (url, body, headers) => { try { const r = await outboundRequest({ url, method: "POST", body, headers, timeoutMs: 10_000, maxResponseBytes: 64 * 1024 }); return { status: r.status }; } catch (e) { return { error: e instanceof Error ? e.message : String(e) }; } };
+let poster: Poster = defaultPoster;
 export function setWebhookPoster(p: Poster) { poster = p; }
 
 export type DispatchResult = { attempted: number; results: { subscriptionRef: string; eventId: string; attempt: number; status: string; reason: string }[]; skipped: string | null };
