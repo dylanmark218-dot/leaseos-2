@@ -1,9 +1,10 @@
 # Safety & Compliance Program Builder — foundation (0182)
 
 Status: **complete on branch `claude/safety-compliance-program-builder-2qnty0`**, not merged. This is the
-data model and template engine, plus the first category of the Alberta Commercial/Oilfield content pack
-(company foundation, 19 templates, loaded as drafts). Every other template is a skeleton and every regulatory
-reference seeds unverified. Further categories load one at a time into the keys this checkpoint creates.
+data model and template engine, plus the first two categories of the Alberta Commercial/Oilfield content
+pack: company foundation (19 templates) and occupational health and safety (39 templates), loaded as drafts.
+Every other template is a skeleton and every regulatory reference seeds unverified. Further categories load
+one at a time into the keys this checkpoint creates.
 
 ## Why it is its own subsystem
 
@@ -72,6 +73,22 @@ re-issued as a new template version, and a template a person has marked **review
 with the program's name and the supplied officers; a field it cannot fill stays visible in the text and is
 named in the response.
 
+Category 2, **occupational health and safety**, is in `server/_core/safetyProgramContent/ohs.ts`: 39
+templates covering hazard assessment (policy, formal assessment, FLHA, JHA, JSA), the safe work practice and
+safe job procedure systems, orientation (including young and new workers), competency and training, PPE,
+respiratory protection, hearing conservation, eye/face and hand protection, fall protection and working at
+heights, working alone, fatigue, fitness for duty, impairment, heat and cold stress, ergonomics,
+housekeeping, slips and trips, lockout, machine guarding, electrical safety, fire prevention, inspections,
+corrective actions, safety meetings, the right to refuse, near-miss reporting, the Alberta 20-worker health
+and safety program (mapped element by element to the documents that satisfy it) and the committee or
+representative. The few figures the text states — the 3-metre fall-protection threshold, the 85 dBA exposure
+limit, the 20-worker and 5-to-19-worker committee and representative thresholds — are the ones a reviewer must
+confirm against the instrument as consolidated; a test holds the committee thresholds in the text equal to the
+ones the obligations engine uses.
+
+Content in both categories is written through per-kind builders (`safetyProgramContent/shared.ts`), and the
+integrity check now also refuses a template whose headings differ from its skeleton's, in order.
+
 ## API (`server/safetyProgramRouter.ts`, mounted as `safetyProgram`, 38 procedures, all `roleProcedure`)
 
 Library: `catalog`, `templateDetail`, `syncCatalog`, `syncContent`, `referenceList`, `referenceUpsert`,
@@ -124,7 +141,7 @@ The PDF/ZIP archive is not built here — the manifest is.
 
 ## Tests
 
-- `server/_core/safetyProgram.test.ts` — 35 cases (content pack integrity and merge fields included): catalog integrity (unique keys, real modules and packs,
+- `server/_core/safetyProgram.test.ts` — 43 cases (content pack integrity, heading order, merge fields and OHS content checks included): catalog integrity (unique keys, real modules and packs,
   every cited reference exists, seeds cannot carry a verification), obligations by profile, assembly and its
   hash, policy codes, version chain, approval and edit rules, acknowledgement steps, matrix statuses and
   evidence choice, corrective-action rules, COR readiness by evidence, manifest, ledger chain, packs.
@@ -145,8 +162,8 @@ below when the gate completes). Typecheck clean; test-file typecheck adds no err
 
 ## Not in this checkpoint
 
-Policy body content beyond company foundation (every other template is a skeleton; the foundation text is a
-draft a person adapts and reviews before it is marked reviewed); verification of any regulatory reference (all
+Policy body content beyond company foundation and OHS (every other template is a skeleton; the written text is
+a draft a person adapts and reviews before it is marked reviewed); verification of any regulatory reference (all
 unverified — provision numbers are what the template authors worked from and must be checked against the
 instruments as consolidated); a client UI; the PDF/ZIP vendor package; a hazard-assessment record and a drill
 record of their own; Saskatchewan and British Columbia pack content (the packs exist as overlays with no

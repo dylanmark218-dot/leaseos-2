@@ -356,3 +356,67 @@ describe("merge fields", () => {
     expect(MERGE_FIELDS).toContain("company.safetyManager");
   });
 });
+
+describe("every loaded content pack holds the pack rules", () => {
+  it("each pack is loadable, with headings in the order of its template's skeleton", () => {
+    for (const p of CONTENT_PACKS) expect(contentPackIntegrity(p), p.packRef).toEqual({ ok: true, problems: [] });
+  });
+
+  it("no pack cites a section number, and every template names the company only through the merge field", () => {
+    for (const p of CONTENT_PACKS) for (const t of p.templates) {
+      const text = t.sections.map(s => s.body).join("\n");
+      expect(text, t.templateKey).not.toMatch(/\b(s\.|section|Part)\s*\d+/);
+      expect(mergeFieldsIn(text), t.templateKey).toContain("company.name");
+    }
+  });
+
+  it("refuses a pack whose headings drift from the skeleton", () => {
+    const t = contentForTemplate("ohs.housekeeping")!.template;
+    const swapped = { moduleKey: "ohs", templates: [{ ...t, sections: [t.sections[1]!, t.sections[0]!, ...t.sections.slice(2)] }] };
+    expect(contentPackIntegrity(swapped).problems[0]).toMatch(/do not match the safe_work_practice skeleton/);
+  });
+});
+
+describe("the OHS content pack", () => {
+  const pack = CONTENT_PACKS.find(p => p.moduleKey === "ohs")!;
+  const body = (key: string) => contentForTemplate(key)!.template.sections.map(s => s.body).join("\n");
+
+  it("covers all thirty-nine OHS templates", () => {
+    expect(pack.templates.map(t => t.templateKey).sort()).toEqual(POLICY_TEMPLATE_SEEDS.filter(t => t.moduleKey === "ohs").map(t => t.templateKey).sort());
+    expect(pack.templates.length).toBe(39);
+  });
+
+  it("states the committee and representative thresholds the obligations engine uses, so the text and the engine cannot disagree", () => {
+    const text = body("ohs.health_and_safety_committee_or_representative");
+    expect(text).toMatch(/20 or more workers \(joint committee\)/); expect(text).toMatch(/5 to 19 workers \(representative\)/);
+    const at = (n: number) => Object.fromEntries(programObligations({ jurisdictions: ["CA-AB"], workforceSize: n, nscCarrier: false, federalCarrier: false, oilfield: false, hydrovac: false, groundDisturbance: false, dangerousGoods: false, workingAlone: false }).map(o => [o.key, o.applies]));
+    expect([at(4).hs_representative, at(5).hs_representative, at(19).hs_representative, at(20).hs_committee, at(19).hs_committee]).toEqual([false, true, true, true, false]);
+  });
+
+  it("maps every element of the 20-worker health and safety program to a document in the pack", () => {
+    const text = body("ohs.health_and_safety_program_20_or_more_workers");
+    for (const element of ["hazard assessment and control", "emergency response plan", "statement of the responsibilities", "inspections", "another employer or a self-employed person", "orientation and training", "investigating incidents, injuries and refusals", "worker participation", "reviewing and revising the program"]) expect(text, element).toContain(element);
+  });
+
+  it("carries the controls a reviewer will look for first", () => {
+    expect(body("ohs.fall_protection")).toMatch(/3 metres or more/);
+    expect(body("ohs.fall_protection")).toMatch(/rescue/);
+    expect(body("ohs.hearing_conservation")).toMatch(/85 dBA/);
+    expect(body("ohs.working_alone")).toMatch(/effective communication system/);
+    expect(body("ohs.working_alone")).toMatch(/missed check-in starts escalation/);
+    expect(body("ohs.hazardous_energy_control_lockout_tagout")).toMatch(/each worker removes only their own lock/);
+    expect(body("ohs.right_to_refuse_dangerous_work")).toMatch(/told in writing of the refusal/);
+    expect(body("ohs.respiratory_protection")).toMatch(/code of practice/);
+    expect(body("ohs.corrective_action_system")).toMatch(/never the person who completed it/);
+    expect(body("ohs.field_level_hazard_assessment_flha")).toMatch(/whenever the work, the crew, the equipment, the weather or the site conditions change/);
+  });
+
+  it("uses the hierarchy of controls in the order the Code sets it, wherever it appears", () => {
+    for (const t of pack.templates) {
+      const text = t.sections.map(s => s.body).join("\n");
+      if (!text.includes("Controls are chosen in this order")) continue;
+      const e = text.indexOf("eliminate the hazard"), g = text.indexOf("engineering controls"), a = text.indexOf("administrative controls"), p = text.indexOf("personal protective equipment", a);
+      expect(e < g && g < a && a < p, t.templateKey).toBe(true);
+    }
+  });
+});

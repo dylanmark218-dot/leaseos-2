@@ -514,6 +514,8 @@ export function contentPackIntegrity(pack: { moduleKey: string; templates: reado
     if (seen.has(t.templateKey)) problems.push(`${t.templateKey}: repeated in the pack`);
     seen.add(t.templateKey);
     if (t.sections.length < 3) problems.push(`${t.templateKey}: fewer than three sections`);
+    const got = t.sections.map(x => x.heading).join(" | "), want = seed.sections.join(" | ");
+    if (got !== want) problems.push(`${t.templateKey}: headings "${got}" do not match the ${seed.documentKind} skeleton "${want}"`);
     for (const s of t.sections) {
       if (!s.heading.trim() || !s.body.trim()) problems.push(`${t.templateKey}: empty heading or body in "${s.heading}"`);
       for (const f of mergeFieldsIn(s.body)) if (!(MERGE_FIELDS as readonly string[]).includes(f)) problems.push(`${t.templateKey}: unknown merge field ${f}`);

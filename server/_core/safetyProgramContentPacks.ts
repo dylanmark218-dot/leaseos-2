@@ -6,9 +6,11 @@
  */
 import type { ContentPack } from "./safetyProgramContentTypes";
 import { COMPANY_FOUNDATION } from "./safetyProgramContent/companyFoundation";
+import { OHS } from "./safetyProgramContent/ohs";
 
 export const CONTENT_PACKS: readonly ContentPack[] = [
   { packRef: "ab_commercial_oilfield_v1.company_foundation", title: "Alberta Commercial / Oilfield pack — Company foundation", moduleKey: "company_foundation", templates: COMPANY_FOUNDATION },
+  { packRef: "ab_commercial_oilfield_v1.ohs", title: "Alberta Commercial / Oilfield pack — Occupational health and safety", moduleKey: "ohs", templates: OHS },
 ];
 
 export function contentForTemplate(templateKey: string) {
