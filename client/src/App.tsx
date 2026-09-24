@@ -24,6 +24,7 @@ import RouteSafetyWorkspace from "./showcase/RouteSafetyWorkspace";
 import DisposalDirectory from "./pages/DisposalDirectory";
 import DisposalFinder from "./pages/DisposalFinder";
 import CommercialOffice from "./pages/CommercialOffice";
+import DocumentControl from "./pages/DocumentControl";
 import CommunicationsPackage from "./pages/CommunicationsPackage";
 import TransmitCheck from "./pages/TransmitCheck";
 import CommunicationsPackageStatus from "./pages/CommunicationsPackageStatus";
@@ -105,6 +106,14 @@ function Router() {
         component={() => (
           <DashboardRoute>
             <CommercialOffice />
+          </DashboardRoute>
+        )}
+      />
+      <Route
+        path="/document-control"
+        component={() => (
+          <DashboardRoute>
+            <DocumentControl />
           </DashboardRoute>
         )}
       />

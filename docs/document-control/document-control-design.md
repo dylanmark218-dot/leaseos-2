@@ -26,6 +26,12 @@ allocator, a second seal scheme, or a second review queue.
 
 ---
 
+> **As built.** Checkpoints A–H implemented this design on branch
+> `claude/document-control-architecture-jlffzk`. What runs, and where it departs from the design, is
+> in `DOCUMENT_CONTROL_ARCHITECTURE.md` (as-built description) and
+> `checkpoints/DC_IMPLEMENTATION_RECORD.md` (per-checkpoint commits, gates, refusals and gaps). Where the
+> two disagree, the record is authoritative and this document is the intent it was measured against.
+
 ## 0. Binding constraints
 
 **0.1 The SPINE moratorium.** `docs/compliance/unified-compliance-engine-design.md` §0 records the

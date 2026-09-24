@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NEEDS_A_RENDERER, VIEWPORTS, describeRun, runAxe, setViewport } from "./axeHarness";
 import { DisposalFinderView, type DisposalFinderViewProps } from "../pages/DisposalFinderView";
 import { CommercialOfficeView, type CommercialOfficeViewProps } from "../pages/CommercialOfficeView";
+import { DocumentControlView, type DocumentControlViewProps, type DocDetail as DcDocDetail, type DocRow as DcDocRow } from "../pages/DocumentControlView";
 import { DispatchReadinessView, type DispatchReadinessViewProps } from "../dispatch/DispatchReadinessView";
 import { DispatchJobDetailView, type DispatchJobDetailViewProps } from "../dispatch/DispatchJobDetailView";
 import { SourcedPanel } from "../showcase/SourcedPanel";
@@ -146,6 +147,30 @@ const a11yPortals = [
   { portal: "fleet_maintenance", displayName: "Fleet Maintenance", purpose: "Work orders, defects and vehicle maintenance" },
 ];
 
+const dcScan: DcDocRow = { documentRef: "DOC-2026-000418", title: "Facility ticket", definitionKey: "external_disposal_receipt", documentType: "external_disposal_receipt", originKind: "external_scanned", issuerKind: "facility", issuerName: "ACME Disposal", controlNumber: null, controlState: "confirmed", status: "current", version: 1, templateRevisionRef: null, registeredAt: "2026-09-20T18:30:00Z", issuedAt: null, provenance: "Scanned from paper; issued by ACME Disposal; no LeaseOS number." };
+const dcInvoice: DcDocRow = { ...dcScan, documentRef: "DOC-2026-000419", title: "Invoice INV-2026-000031", definitionKey: "invoice", documentType: "invoice", originKind: "system_rendered", issuerKind: "tenant", issuerName: null, controlNumber: "INV-2026-000031", controlState: "issued", issuedAt: "2026-09-21T09:00:00Z", provenance: "Rendered by LeaseOS; issued by the tenant under INV-2026-000031." };
+const dcDetail: DcDocDetail = {
+  document: { ...dcScan, contentHash: "ab".repeat(32), byteLength: 48213, mimeType: "image/png", evidenceRecordId: 77, renderManifestHash: null, capturedByDeviceRef: "DEV-7", importChannel: "device_sync" },
+  provenance: dcScan.provenance, retention: "UNCONFIGURED — retained indefinitely until a person assigns a policy",
+  definition: { definitionKey: "waste_manifest_internal_record", displayName: "Waste manifest (internal record)", documentClass: "operational_form", numberingPolicy: "leaseos_series_optional", representationPolicy: "internal_record", representationNotice: "Internal record. Not the official EPA Uniform Hazardous Waste Manifest.", revisionPolicy: "amend_with_reason", primaryDomainOwner: "disposal" },
+  links: [{ id: 1, recordType: "job", recordRef: "JOB-26-00481", recordId: 5, role: "subject", source: "human", confirmationStatus: "confirmed" }, { id: 2, recordType: "disposal_ticket", recordRef: "DSP-AI-1", recordId: 9, role: "source_document", source: "domain", confirmationStatus: "confirmed" }],
+  references: [{ referenceRef: "XREF-1", referenceType: "facility_ticket_number", referenceValueRaw: "874399", issuerKind: "facility", issuerName: "ACME Disposal", source: "ocr_proposed", confirmationStatus: "confirmed", mirrorOfTable: "disposalTickets" }],
+  versions: [{ documentRef: "DOC-2026-000418", version: 1, status: "current", controlState: "confirmed" }], amendments: [{ fieldKey: "issuerName", originalValue: "ACME", correctedValue: "ACME Disposal" }],
+  derivatives: [{ derivativeRef: "DRV-1", derivativeKind: "ocr_text", producer: "device-ocr", producerVersion: "1.2", contentHash: "cd".repeat(32), sourceContentHash: "ab".repeat(32), mimeType: "text/plain", byteLength: 91, actorSource: "ai", createdAt: "2026-09-20T18:31:00Z" }],
+  extractions: [{ extractionRef: "EXT-1", proposalId: "PROP-DC-1", ocrEngine: "device-ocr", proposedDocumentType: "external_disposal_receipt", classificationSource: "human", status: "committed", fieldCount: 9, askedCount: 0, humanOnlyCount: 4, extractedAt: "2026-09-20T18:31:00Z" }],
+  timeline: [{ sequence: 1, eventType: "document.captured", actorUserId: 12, actorSource: "human", deviceRef: "DEV-7", previousState: null, newState: "captured", detail: null, occurredAt: "2026-09-20T18:30:00Z" }, { sequence: 2, eventType: "document.reprinted", actorUserId: 3, actorSource: "human", deviceRef: null, previousState: null, newState: null, detail: { copy: 2 }, occurredAt: "2026-09-22T08:00:00Z" }],
+};
+const dc = (tab: DocumentControlViewProps["tab"], o: Partial<DocumentControlViewProps> = {}): DocumentControlViewProps => ({
+  tab, onTab: () => {}, filter: { q: "", definitionKey: "", originKind: "", controlState: "", recordType: "", recordRef: "" }, onFilter: () => {},
+  documents: [dcScan, dcInvoice], selectedDoc: null, onSelectDoc: () => {}, loading: false, reviewQueue: [{ ...dcScan, controlState: "needs_classification", definitionKey: "unclassified_external_document" }],
+  templates: [{ templateRef: "TPL-1", templateKey: "bill_of_lading", definitionKey: "bill_of_lading", name: "Bill of lading", sourceKind: "leaseos_standard", ownerKind: "leaseos", ownerName: null, status: "active", layer: "platform", currentRevision: { revisionRef: "TPLR-1-r2", revision: 2, layoutKind: "pdf_overlay", rendererKey: "pdf_overlay", renderable: false, releasedAt: "2026-09-23T00:00:00Z" } }],
+  selectedTemplate: { template: { templateRef: "TPL-1", templateKey: "bill_of_lading", definitionKey: "bill_of_lading", name: "Bill of lading", sourceKind: "leaseos_standard", ownerKind: "leaseos", ownerName: null, status: "active", layer: "platform", currentRevision: null, orgRef: null }, revisions: [{ revisionRef: "TPLR-1-r2", revision: 2, status: "released", layoutKind: "pdf_overlay", rendererKey: "pdf_overlay", rendererVersion: "0", fieldMappingHash: "ff".repeat(32), releaseManifestHash: "ee".repeat(32), releasedAt: "2026-09-23T00:00:00Z", retiredAt: null }] }, onSelectTemplate: () => {},
+  definitions: [{ definitionKey: "dot_fmcsa_registration_authority", displayName: "DOT/FMCSA registration and authority record", documentClass: "regulatory_record", primaryDomainOwner: "compliance", numberingPolicy: "leaseos_series_optional", numberSeriesType: "REG", externalReferencePolicy: "optional", representationPolicy: "internal_record", representationNotice: "Internal compliance record; not an agency-issued form.", jurisdictionPolicy: "configurable_verify_by_jurisdiction", status: "active", layer: "platform", label: "internal record" }],
+  series: [{ sequenceType: "DOC", periodKey: "2026", branch: "", handedOut: 420, issued: 418, reserved: 1, voided: 1 }], gapQuery: { sequenceType: "DOC", periodKey: "2026" }, onGapQuery: () => {},
+  gapReport: { scopeKey: "default", sequenceType: "DOC", periodKey: "2026", issued: 418, explained: 1, heldByDevice: 0, unexplained: 1, rows: [{ sequence: 7, state: "voided", formattedNumber: "DOC-2026-000007", reasonText: "printer jam, sheet destroyed" }, { sequence: 9, state: "unexplained", formattedNumber: "DOC-2026-000009" }] },
+  ...o,
+});
+
 const surfaces = [
   { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
   { name: "dispatch readiness — blocked", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked)} />) },
@@ -162,6 +187,12 @@ const surfaces = [
   { name: "commercial office — documents", render: () => render(<CommercialOfficeView {...office("documents")} />) },
   { name: "commercial office — disposal", render: () => render(<CommercialOfficeView {...office("disposal")} />) },
   { name: "commercial office — month close", render: () => render(<CommercialOfficeView {...office("month_close")} />) },
+  { name: "document control — library", render: () => render(<DocumentControlView {...dc("library")} />) },
+  { name: "document control — record detail with a representation notice", render: () => render(<DocumentControlView {...dc("library", { selectedDoc: dcDetail })} />) },
+  { name: "document control — review queue", render: () => render(<DocumentControlView {...dc("review")} />) },
+  { name: "document control — templates", render: () => render(<DocumentControlView {...dc("templates")} />) },
+  { name: "document control — definitions", render: () => render(<DocumentControlView {...dc("definitions")} />) },
+  { name: "document control — number series and gaps", render: () => render(<DocumentControlView {...dc("series")} />) },
   { name: "showcase panel — records", render: () => render(<SourcedPanel title="Saved decisions" source={fromQuery("x.list", [{ id: 1 }])}><p>body</p></SourcedPanel>) },
   { name: "widget board", render: () => render(<WidgetBoard name="Yard mornings" seeded={false} deviceClass="desktop" tiles={a11yTiles} />) },
   { name: "widget tile — blocked", render: () => render(<WidgetTileShell title="Unit Readiness" variant="status" payload={blocked([{ code: "A", detail: "Annual inspection expired" }])} />) },

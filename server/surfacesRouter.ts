@@ -11,7 +11,8 @@
 import { z } from "zod";
 import { ACCESS_SCOPE_NOTICE, walkEvidenceChain, type ChainNodeKind } from "./_core/evidenceChainWalk";
 import { roleProcedure, router } from "./_core/trpc";
-import { listActiveUserRoleNames } from "./db";
+import { actingScopeFor, listActiveUserRoleNames } from "./db";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { authorize, isDomainRole, type Permission, type RoleGrant } from "./_core/recordsAuthorization";
 import { deriveExceptions, summarize, visibleTo } from "./_core/exceptionCentre";
 import { CHAIN_READ_PERMISSION, loadExceptionSources, loadInbox, loadTimeline, resolveChainAround, searchEverything } from "./surfacesService";
@@ -82,7 +83,8 @@ export const surfacesRouter = router({
     .query(async ({ ctx, input }) => {
       const { grants } = await grantsFor(ctx.user.id);
       const can = may(ctx.user.id, grants);
-      const hits = (await searchEverything(input.q)).filter(h => can(h.readPermission));
+      const scope = await actingScopeFor(ctx.user.id);
+      const hits = (await searchEverything(input.q, { bookOrgRef: scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId })).filter(h => can(h.readPermission));
       return { q: input.q, total: hits.length, hits };
     }),
 

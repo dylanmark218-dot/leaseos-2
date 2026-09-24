@@ -16,6 +16,16 @@ import { evidenceRelationships } from "../../drizzle/schema";
 
 const enumValues = (col: string): string[] => ((getTableColumns(documentDefinitions) as Record<string, { enumValues?: string[] }>)[col]!.enumValues ?? []);
 
+describe("boundaries the catalog keeps (DC-H)", () => {
+  it("HOS remains domain-owned: no platform definition and none of the package's is an hours-of-service record, and no definition's owner is the HOS domain", () => {
+    const pkg = JSON.parse(readFileSync("data/document-control/document_definitions.seed.json", "utf8")) as { definitions: { document_definition_key?: string; definitionKey?: string }[] };
+    const packageKeys = pkg.definitions.map(d => d.document_definition_key ?? d.definitionKey ?? "").filter(Boolean);
+    expect(packageKeys.length).toBeGreaterThan(30);
+    for (const k of [...SYSTEM_DEFINITIONS.map(d => d.definitionKey), ...packageKeys]) expect(k, k).not.toMatch(/\bhos\b|hours_of_service|daily_log|logbook|\beld\b/);
+    for (const d of SYSTEM_DEFINITIONS) expect(d.primaryDomainOwner, d.definitionKey).not.toBe("hos");
+  });
+});
+
 describe("the vocabularies in code are the enums in the schema", () => {
   it("mirrors every enum column", () => {
     expect(enumValues("status")).toEqual([...DEFINITION_STATUSES]);

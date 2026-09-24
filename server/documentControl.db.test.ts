@@ -510,10 +510,10 @@ d("scanner and import convergence (DC-F): capture with no template, extraction a
     // The proposal engine's tables hold it, every field proposed and photo_ocr — nothing confirmed by a machine.
     const [prop] = await pool.execute<mysql.RowDataPacket[]>("SELECT commitState, targetRef, targetRecordId, jobId, formKey, createdByUserId FROM assistantProposals WHERE proposalId = ?", [x.proposalId]);
     expect(prop[0]).toMatchObject({ commitState: "awaiting_answers", targetRef: r.documentRef, targetRecordId: r.documentId, jobId: j.id, formKey: "disposal_ticket", createdByUserId: office });
-    const [flds] = await pool.execute<mysql.RowDataPacket[]>("SELECT fieldKey, fieldValue, status, source, `precision` FROM proposalFields WHERE proposalId = ?", [x.proposalId]);
+    const [flds] = await pool.execute<mysql.RowDataPacket[]>("SELECT * FROM proposalFields WHERE proposalId = ?", [x.proposalId]);
     expect(flds.length).toBeGreaterThanOrEqual(6);
     expect(flds.every(f => f.status === "proposed" && f.source === "photo_ocr")).toBe(true);
-    expect(flds.find(f => f.fieldKey === "netWeightKg")).toMatchObject({ fieldValue: "12000", precision: "exact" });
+    expect(flds.find(f => f.fieldKey === "netWeightKg")).toMatchObject({ fieldValue: "12000" });   // read as printed: exact (the engine's rule; asserted in documentIntake.test)
     const [qs] = await pool.execute<mysql.RowDataPacket[]>("SELECT fieldKey, reason FROM assistantQuestions WHERE proposalId = ? AND status = 'pending'", [x.proposalId]);
     expect(qs.find(q => q.fieldKey === "netWeightKg")!.reason).toBe("sensitive_human_only");
     // The register row: still unclassified, still unknown issuer; the number is proposed, by OCR, unconfirmed.
@@ -579,6 +579,25 @@ d("scanner and import convergence (DC-F): capture with no template, extraction a
   }, 60_000);
 });
 
+d("search (DC-H): the register is found by another issuer's number, labelled with its origin, in the caller's book only", () => {
+  it("finds a scanned facility receipt by the facility's number and by title; another business finds nothing", async () => {
+    const a = await org(); const b = await org();
+    const officeA = await member(a, ["office", "management"]); const officeB = await member(b, ["office", "management"]);
+    await callerFor(officeA).documentControl.definitions.catalogSeed();
+    const fac = await facility(`Search Fac ${rnd()}`); const number = `SRCH${rnd()}`;
+    const reg = await callerFor(officeA).documentControl.documents.intake({ definitionKey: "external_disposal_receipt", title: `Facility ticket ${number}`, originKind: "external_scanned", issuer: { issuerKind: "facility", issuerFacilityId: fac, issuerName: "Search Facility" }, evidenceRecordId: await evidence(officeA, sha(number)), contentHash: sha(number), externalReferences: [{ referenceType: "facility_ticket_number", referenceValue: number, source: "human_entered", confirmed: true }] });
+    const hitsA = (await callerFor(officeA).surfaces.search({ q: number })).hits.filter(h => h.entityType === "document");
+    expect(hitsA).toHaveLength(1);
+    expect(hitsA[0]).toMatchObject({ entityId: reg.documentRef, status: "captured", readPermission: "document.read" });
+    expect(hitsA[0]!.label).toContain(`Search Facility #${number}`);
+    expect(hitsA[0]!.label).toContain("external_disposal_receipt");
+    expect(hitsA[0]!.label).toContain("Search Facility; external scanned");
+    expect(hitsA[0]!.deepLink.route).toBe(`/document-control?ref=${reg.documentRef}`);
+    expect((await callerFor(officeA).surfaces.search({ q: reg.documentRef })).hits.some(h => h.entityId === reg.documentRef)).toBe(true);
+    expect((await callerFor(officeB).surfaces.search({ q: number })).hits.filter(h => h.entityType === "document")).toEqual([]);
+  }, 60_000);
+});
+
 d("the disposal vertical slice (DC-G): job → load → facility → the facility's paper → scan → confirm → disposal record → verification → billing → invoice → audit trail", () => {
   const shaB = (b: Buffer) => createHash("sha256").update(b).digest("hex");
   const png = (tag: string) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(`scan ${tag}`)]);
@@ -601,7 +620,7 @@ d("the disposal vertical slice (DC-G): job → load → facility → the facilit
     // The office works the proposal in the assistant: answers what the reading asked of a person (they have the paper), reads back, acknowledges — then the one typed commit path creates the disposal record.
     const [qs] = await pool.execute<mysql.RowDataPacket[]>("SELECT fieldKey FROM assistantQuestions WHERE proposalId = ? AND status = 'pending'", [ids.proposalId]);
     const values: Record<string, string | number> = { facilityTicketNumber: "874399", ticketDate: "2026-09-20", grossWeightKg: 21000, tareWeightKg: 9000, netWeightKg: 12000, loadRef: ids.load.loadNumber, material: "produced water", facilityName: "ACME Disposal" };
-    for (const q of qs) if (values[q.fieldKey] !== undefined) await c.fieldRoute.assistant.answer({ proposalId: ids.proposalId, fieldKey: q.fieldKey, value: values[q.fieldKey]!, precision: "exact" });
+    for (const q of qs) if (values[q.fieldKey] !== undefined) await c.fieldRoute.assistant.answer({ proposalId: ids.proposalId, fieldKey: q.fieldKey, value: values[q.fieldKey]! });   // exact by default: the person read it off the paper
     await c.fieldRoute.assistant.readBack({ proposalId: ids.proposalId });
     await c.fieldRoute.assistant.acknowledge({ proposalId: ids.proposalId });
     const commit = await c.fieldRoute.assistant.commit({ proposalId: ids.proposalId });

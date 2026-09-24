@@ -497,8 +497,10 @@ with the three-origin picture and the stale-layout check. The G edits to `closeo
 `assistantCommitService` and `commercialOfficeRouter` are covered by those two plus the existing
 `siteCloseout`, `assistantCommitService` and `commercialOffice.db` suites, re-run green.
 
-**Gates.** _(filled after the run)_
-
+**Gates (full `scripts/ci-gate.sh`, fresh database).** 177 migrations apply (0183 included); parity
+420/420; tsc clean; test-file type errors 0 (pin 0); vitest 337 files: 4775 passed, 3 skipped, 1 failed —
+`calendarFixtures.test.ts`, the pre-existing date-triggered guard recorded under E. Build clean. (The G
+commit `f6b95f2` carried this paragraph as a placeholder; it is filled here, at H.)
 
 ## Checkpoint H — search, audit, screens, documentation
 
@@ -549,4 +551,11 @@ wording; templates' immutability note, a definition's notice, and the gap report
 `documentDefinitions.test.ts` (+1). Search covered by the existing `surfaces` suites plus the
 register's own list tests; a DB assertion of the register hit is in `documentControl.db.test.ts` (+1).
 
-**Gates.** _(filled after the run)_
+**Gates (full `scripts/ci-gate.sh`, fresh database).** 177 migrations apply; parity 420/420; tsc clean;
+test-file type errors 0 (pin 0); vitest 338 files: 4799 passed, 3 skipped, 1 failed —
+`calendarFixtures.test.ts`, the pre-existing date-triggered guard recorded under E. Build clean. The first
+H run also caught two things this checkpoint then fixed: the new view had a jsdom suite but no entry in
+the axe accessibility suite (`a11y.dom.test.tsx` now renders its five screens and a record detail;
+the container is declared not-a-surface with its reason), and the reserved-word audit flagged the word
+`precision` in the DC suite (removed from the raw-SQL neighbourhood; the engine's rule is asserted in
+`documentIntake.test.ts`).

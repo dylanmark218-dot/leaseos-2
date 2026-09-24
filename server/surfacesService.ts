@@ -11,6 +11,7 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql } fr
 import { resolveActingScope } from "./_core/actingScope";
 import { getDb } from "./db";
 import {
+  commercialDocuments, documentExternalReferences,
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
   billingBooks, calibrationSweeps, complianceDocuments, disposalTickets, fieldTickets, manifests, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
   maintenanceDefects, measurementDevices, operationalTasks, operators, purchaseAuthorizations, roadsideServiceEvents,
@@ -203,13 +204,30 @@ export async function loadInbox(args: { userId: number; roles: readonly string[]
 export type SearchHit = { entityType: string; entityId: number | string; label: string; status: string | null; deepLink: { portal: string; route: string }; readPermission: string };
 
 /** Resolve a tracking number or free text across entities. Permission filtering is the router's job. */
-export async function searchEverything(q: string): Promise<SearchHit[]> {
+export async function searchEverything(q: string, opts?: { /** DC-H: the caller's book; register hits come from it alone. Absent, the register is not searched. */ bookOrgRef?: string | null }): Promise<SearchHit[]> {
   const db = await getDb();
   if (!db) return [];
   const term = q.trim();
   if (term.length < 2) return [];
   const pat = `%${term}%`;
   const hits: SearchHit[] = [];
+  // DC-H: Document Control's register — documentRef, LeaseOS number, title, and another issuer's number on it (issuer-scoped), whatever the origin.
+  if (opts && opts.bookOrgRef !== undefined) {
+    const scopeKey = opts.bookOrgRef ?? "default";
+    const byRef = await db.select({ documentId: documentExternalReferences.documentId, referenceType: documentExternalReferences.referenceType, referenceValue: documentExternalReferences.referenceValue, issuerName: documentExternalReferences.issuerName, issuerKind: documentExternalReferences.issuerKind })
+      .from(documentExternalReferences).where(and(eq(documentExternalReferences.bookScopeKey, scopeKey), like(documentExternalReferences.referenceValue, pat.toUpperCase()))).limit(10);
+    const direct = await db.select().from(commercialDocuments).where(and(eq(commercialDocuments.bookScopeKey, scopeKey), or(like(commercialDocuments.documentRef, pat), like(commercialDocuments.controlNumber, pat), like(commercialDocuments.title, pat)))).limit(10);
+    const viaRef = byRef.length ? await db.select().from(commercialDocuments).where(inArray(commercialDocuments.id, Array.from(new Set(byRef.map(r => r.documentId))))) : [];
+    const seen = new Set<number>();
+    for (const d of [...direct, ...viaRef]) {
+      if (seen.has(d.id)) continue; seen.add(d.id);
+      const ref = byRef.find(r => r.documentId === d.id);
+      const issuer = d.issuerKind === "tenant" ? "LeaseOS-issued" : d.issuerName ? d.issuerName : d.issuerKind && d.issuerKind !== "unknown" ? `issued by ${d.issuerKind.replace(/_/g, " ")}` : "issuer unknown";
+      const origin = d.originKind ? d.originKind.replace(/_/g, " ") : "origin unrecorded";
+      const number = d.controlNumber ?? (ref ? `${ref.issuerName ?? ref.issuerKind} #${ref.referenceValue}` : d.documentRef);
+      hits.push({ entityType: "document", entityId: d.documentRef, label: `${number} — ${d.definitionKey ?? d.documentType}: ${d.title} (${issuer}; ${origin})`, status: d.controlState, deepLink: { portal: "office_administration", route: `/document-control?ref=${encodeURIComponent(d.documentRef)}` }, readPermission: "document.read" });
+    }
+  }
   const [u, j, t, l, d, i, wo, pa, vb, rs, fd, md, ip, fx] = await Promise.all([
     db.select({ id: units.id, unitNumber: units.unitNumber, maintenanceStatus: units.maintenanceStatus }).from(units).where(like(units.unitNumber, pat)).limit(10),
     db.select({ id: jobs.id, jobNumber: jobs.jobCode, status: jobs.status, customer: jobs.customer }).from(jobs).where(or(like(jobs.jobCode, pat), like(jobs.customer, pat))).limit(10),
