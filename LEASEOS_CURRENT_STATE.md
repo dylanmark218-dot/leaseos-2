@@ -6,7 +6,7 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **v23.29** | `LEASEOS_RELEASE` (or explicit argument 1) |
+| Release | **v23.30** | `LEASEOS_RELEASE` (or explicit argument 1) |
 | Tables | **413** | `mysqlTable(` declarations in `drizzle/schema.ts` |
 | Migrations | **170** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
 | Role-authorized procedures | **662** | `roleProcedure(` call sites across all routers |
