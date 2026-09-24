@@ -4,7 +4,8 @@ import {
   decodeOAuthState,
 } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
-import { ACCESS_TOKEN_TTL_MS } from "./sessionFamily";
+import { ACCESS_TOKEN_TTL_MS, assessLegacyAccess } from "./sessionFamily";
+import { LEGACY_CUTOVER_AT } from "@shared/const";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
@@ -230,6 +231,20 @@ class SDKServer {
         !isNonEmptyString(name)
       ) {
         console.warn("[Auth] Session payload missing required fields");
+        return null;
+      }
+
+      /*
+       * S1-G — a pre-cutover token is refused once the grace window has closed.
+       *
+       * These are the year-long sessions minted before S1-B. Honouring them until they expired
+       * would have left the defect live for a year; the window gives a fleet time to come back
+       * into coverage and then ends. No new claim is needed to spot one — nothing this build mints
+       * can carry an expiry further out than the access lifetime.
+       */
+      const legacy = assessLegacyAccess(payload as { exp?: number }, new Date(), LEGACY_CUTOVER_AT);
+      if (legacy.kind === "legacy" && !legacy.withinGrace) {
+        console.warn("[Auth] Refusing a pre-S1 session past the transition window");
         return null;
       }
 

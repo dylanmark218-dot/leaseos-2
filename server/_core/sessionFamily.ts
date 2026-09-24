@@ -118,3 +118,55 @@ export function rotated(
     lastUsedAt: now,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* S1-G — retiring the year-long tokens                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How long a pre-S1 token keeps working after the cutover.
+ *
+ * Seven days, measured from the cutover and not from the token. Honouring these until they expired
+ * would leave the defect live for a year; refusing them at deploy would sign out every driver at
+ * once, including ones on a lease with no signal. A week is enough for a fleet to come back into
+ * coverage, and it ends.
+ */
+export const LEGACY_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Tolerance before a far-future expiry is read as legacy. Covers clock skew between the signer and
+ * this process; without it a token minted seconds ago could be misread as a year-long one.
+ */
+const LEGACY_SKEW_MS = 5 * 60 * 1000;
+
+export type LegacyAssessment =
+  | { kind: "current" }
+  | { kind: "legacy"; withinGrace: boolean };
+
+/**
+ * Is this a token from before S1, and if so may it still be used?
+ *
+ * The discriminator needs **no new claim**. Nothing minted after S1-B can carry an expiry further
+ * out than the access lifetime, so a far-future `exp` is itself the evidence that a token predates
+ * the cutover. A missing `exp` is treated the same way — this build always sets one.
+ *
+ * This only ever sees payloads that already passed signature verification, so it cannot admit a
+ * forgery. What it must not do is widen what is accepted, and it does not: a token inside the
+ * access lifetime is reported `current` and never reaches the grace path.
+ */
+export function assessLegacyAccess(
+  payload: { exp?: number },
+  now: Date,
+  cutoverAt: Date,
+): LegacyAssessment {
+  const exp = payload.exp;
+  if (exp === undefined) return { kind: "legacy", withinGrace: withinGrace(now, cutoverAt) };
+
+  const remaining = exp * 1000 - now.getTime();
+  if (remaining <= ACCESS_TOKEN_TTL_MS + LEGACY_SKEW_MS) return { kind: "current" };
+
+  return { kind: "legacy", withinGrace: withinGrace(now, cutoverAt) };
+}
+
+const withinGrace = (now: Date, cutoverAt: Date) =>
+  now.getTime() - cutoverAt.getTime() <= LEGACY_GRACE_MS;

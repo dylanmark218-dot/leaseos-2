@@ -103,3 +103,28 @@ describe("B3 — no caller can mint a year-long user session by omission", () =>
     ).toBe(false);
   });
 });
+
+/* ── S1-F — the login path creates a family and issues both credentials ─────── */
+
+describe("F — a login produces a session family, not just a token", () => {
+  const codeOf = (f: string) =>
+    readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ")
+      .split("\n").map(l => l.replace(/\/\/.*$/, "")).join("\n");
+
+  it("creates a session family at the OAuth callback", () => {
+    expect(
+      /createSessionFamily\s*\(/.test(codeOf("server/_core/oauth.ts")),
+      "a login that mints no family leaves nothing to revoke or rotate",
+    ).toBe(true);
+  });
+
+  it("sets the refresh cookie alongside the access cookie", () => {
+    const src = codeOf("server/_core/oauth.ts");
+    expect(src).toContain("REFRESH_COOKIE_NAME");
+    expect(/refresh:\s*true/.test(src), "the refresh cookie uses the narrow-path options").toBe(true);
+  });
+
+  it("binds the family to the app the session was minted for", () => {
+    expect(/appId/.test(codeOf("server/_core/oauth.ts"))).toBe(true);
+  });
+});

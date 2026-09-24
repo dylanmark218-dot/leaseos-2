@@ -9,6 +9,13 @@ export const COOKIE_NAME = "app_session_id";
  */
 export const REFRESH_COOKIE_NAME = "app_refresh_id";
 export const ONE_YEAR_MS = 1000 * 60 * 60 * 24 * 365;
+/**
+ * When S1 session hardening took effect. Pre-cutover tokens are honoured for `LEGACY_GRACE_MS`
+ * after this instant and refused afterwards, so the year-long sessions have an end date rather
+ * than an expiry date. Move this only when re-running the transition deliberately.
+ */
+export const LEGACY_CUTOVER_AT = new Date("2026-09-24T00:00:00Z");
+
 export const AXIOS_TIMEOUT_MS = 30_000;
 export const UNAUTHED_ERR_MSG = 'Please login (10001)';
 export const NOT_ADMIN_ERR_MSG = 'You do not have required permission (10002)';
