@@ -42,10 +42,10 @@ export type FindingDomain =
   | "enforcement" | "driver_licence" | "driver_qualification" | "medical" | "hos" | "availability"
   | "vehicle_inspection" | "vehicle_registration" | "insurance" | "defect" | "maintenance" | "trailer"
   | "telematics" | "calibration" | "device" | "load_classification" | "dangerous_goods" | "documents"
-  | "permit" | "destination" | "route" | "communications" | "capability" | "unclassified";
+  | "permit" | "destination" | "route" | "communications" | "capability" | "commercial" | "unclassified";
 
 /** Bumped whenever CLASSIFICATION changes meaning. Part of the rule-set hash, so a change stales every check. */
-export const CLASSIFICATION_VERSION = "c1a.2";
+export const CLASSIFICATION_VERSION = "c1a.3";
 
 /**
  * A readiness finding. It IS a `DispatchBlocker` — every existing consumer (the checklist, the
@@ -173,6 +173,14 @@ export const CLASSIFICATION: readonly Rule[] = [
   r("comms.plan_unknown", /^(communication_plan_unknown|communication_plan_unmeasured_segments|communication_geometry_missing)$/, "communications", "company_policy", "UNKNOWN", "WARN", "WARNING_ONLY"),
   r("comms.policy_breach", /^(communication_gap_exceeds_policy|lone_worker_no_satellite)$/, "communications", "company_policy", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
   r("comms.satellite_present", /^lone_worker_satellite_present$/, "communications", "company_policy", ...WARN_ACK),
+
+  /* v23.26 — the job's commercial basis. Company policy under a client contract; never a safety stop. */
+  r("commercial.account_hold", /^commercial_account_(on_hold|inactive)$/, "commercial", "company_policy", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
+  r("commercial.contract", /^commercial_contract_not_usable$/, "commercial", "client_contract", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
+  // Blocking when required and absent; the producer downgrades it to review under a recorded waiver or an emergency posting, and monotonicity keeps it there.
+  r("commercial.reference", /^commercial_reference_missing$/, "commercial", "client_contract", "UNSATISFIED", "WARN", "WARNING_ONLY"),
+  r("commercial.rate_sheet", /^commercial_rate_sheet_unresolved$/, "commercial", "client_contract", "UNKNOWN", "WARN", "WARNING_ONLY"),
+  r("commercial.snapshot", /^commercial_(snapshot|context)_missing$/, "commercial", "company_policy", "UNKNOWN", "WARN", "WARNING_ONLY"),
 
   /* a required capability that was never asked */
   r("capability.unevaluated", /^capability_not_evaluated_/, "capability", "carrier_safety_policy", ...UNKNOWN_BLOCKS),

@@ -52,6 +52,7 @@ import { resolveRouteCommunicationGeography } from "./routeCommunicationGeograph
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
 import { currentReleaseEvidenceFor, type StoredRelease } from "./_core/mechanicRelease";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
+import { commercialReadinessForJob } from "./customerCommercialService";
 import {
   ADVISORY_POLICY, communicationBlockers, planCommunications,
   type CommunicationPolicy, type CoverageObservation, type GeoCondition, type PathSegment,
@@ -420,6 +421,14 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   }).from(loadProfiles).where(eq(loadProfiles.jobId, job.id)) : [];
   const dgAuthority = dangerousGoodsAuthority(jobLoads, job ? /tdg|dangerous|hazard/i.test(`${job.type ?? ""} ${job.mode ?? ""}`) : false);
   const dangerousGoods = dgAuthority.state === "dg";
+  /*
+   * v23.26 — the job's commercial basis: customer on hold, contract not usable, a required PO/AFE
+   * absent, no governing rate sheet version, no snapshot yet. Company policy, never safety; an
+   * emergency posting turns a missing paper reference into a review item and nothing else.
+   */
+  const commercial = job ? await commercialReadinessForJob(db, job.id, now) : { blockers: [] as DispatchBlocker[], version: "none" };
+  extra.push(...commercial.blockers);
+  if (job) contributions.push({ engine: "commercial", finding: commercial.blockers.length ? commercial.blockers.map(b => b.code).join(", ") : "commercial basis in order" });
   /** For rules that only tighten (communications): a load that may be DG is treated as DG there. */
   const possiblyDangerousGoods = dgAuthority.state === "dg" || dgAuthority.state === "unknown";
   extra.push(...dgAuthority.blockers);
@@ -920,7 +929,9 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     hoursAvailableMinutes: null,
     unitId: subject.unitId, unitStatusVersion: unitVersion, criticalDefectCount: criticalCount, mechanicReleaseVersion: releaseVersion,
     trailerId: subject.trailerId, trailerStatusVersion: trailerVersion,
-    jobClassificationVersion: job ? versionOf([job.id, job.type, job.mode, job.status]) : "none",
+    // v23.26 — the commercial basis rides in the job's version: a PO recorded, a hold placed or a
+    // snapshot taken between check and award makes the check stale, like every other job fact.
+    jobClassificationVersion: job ? versionOf([job.id, job.type, job.mode, job.status, commercial.version]) : "none",
     materialClassificationVersion: dgAuthority.version,
     // Permits reach dispatch only inside a route approval's dependency hash (there is no permit
     // record yet — C6); `routeDecisionVersion` carries that hash in full.

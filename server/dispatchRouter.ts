@@ -23,6 +23,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
+import { commercialScope, jobSnapshotCaptureIfReady } from "./customerCommercialService";
 import { getDb, jobInScope, listActiveUserRoleNames } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { assertEntityInScope } from "./_core/entityScope";
@@ -108,11 +109,18 @@ export const dispatchGateRouter = router({
       distribution: z.enum(["direct_assignment", "public_internal_bid", "invite_only", "selected_pool", "on_call", "emergency", "subcontractor_bid"]).optional(),
       roles: z.array(ROLE_DRAFT).max(40).optional(),
     }))
-    .mutation(async ({ ctx, input }) =>
-      createPosting({
+    .mutation(async ({ ctx, input }) => {
+      const posting = await createPosting({
         jobId: input.jobId, distribution: input.distribution, roles: input.roles,
         actorUserId: ctx.user.id, scope: await scopeOf(ctx.user.id),
-      })),
+      });
+      // v23.26 — the posting is the job's activation point: freeze its commercial basis now, so a
+      // later rate change never moves what this job is billed under. A job with no customer assigned
+      // is not refused here (dispatch owns that decision through the readiness gate); a basis that
+      // cannot be frozen (no governing sheet version, contract not active) is reported, not thrown.
+      const commercial = await jobSnapshotCaptureIfReady(await commercialScope(ctx.user.id), { userId: ctx.user.id, roles: ((ctx as { roles?: readonly string[] }).roles ?? []) }, input.jobId);
+      return { ...posting, commercial };
+    }),
 
   addRole: roleProcedure("dispatch.addRole")
     .input(z.object({ postingId: z.number().int().positive() }).and(ROLE_DRAFT))

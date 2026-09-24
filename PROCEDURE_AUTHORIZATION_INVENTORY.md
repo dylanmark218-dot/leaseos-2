@@ -34,6 +34,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/insuranceRouter.ts` | `ROLE_AUTHORIZED` | **12** |
 | `server/surfacesRouter.ts` | `ROLE_AUTHORIZED` | **5** |
 | `server/dispatchRouter.ts` | `ROLE_AUTHORIZED` | **8** |
+| `server/customerCommercialRouter.ts` | `ROLE_AUTHORIZED` | **40** |
 | `server/iftaRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/fuelOpsRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/periodRouter.ts` | `ROLE_AUTHORIZED` | **3** |

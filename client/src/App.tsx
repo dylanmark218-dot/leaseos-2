@@ -24,6 +24,9 @@ import RouteSafetyWorkspace from "./showcase/RouteSafetyWorkspace";
 import DisposalDirectory from "./pages/DisposalDirectory";
 import DisposalFinder from "./pages/DisposalFinder";
 import CommercialOffice from "./pages/CommercialOffice";
+import Customers from "./pages/Customers";
+import Contract from "./pages/Contract";
+import RateSheet from "./pages/RateSheet";
 import CommunicationsPackage from "./pages/CommunicationsPackage";
 import TransmitCheck from "./pages/TransmitCheck";
 import CommunicationsPackageStatus from "./pages/CommunicationsPackageStatus";
@@ -108,6 +111,10 @@ function Router() {
           </DashboardRoute>
         )}
       />
+      <Route path="/customers" component={() => <DashboardRoute><Customers /></DashboardRoute>} />
+      <Route path="/customers/:accountRef">{(p: { accountRef: string }) => <DashboardRoute><Customers accountRef={p.accountRef} /></DashboardRoute>}</Route>
+      <Route path="/contracts/:contractRef">{(p: { contractRef: string }) => <DashboardRoute><Contract contractRef={p.contractRef} /></DashboardRoute>}</Route>
+      <Route path="/rate-sheets/:rateSheetRef">{(p: { rateSheetRef: string }) => <DashboardRoute><RateSheet rateSheetRef={p.rateSheetRef} /></DashboardRoute>}</Route>
       <Route path="/trip-operations" component={() => <Redirect to="/showcase/trips" />} />
       <Route path="/training-academy" component={() => <DashboardRoute><TrainingAcademy /></DashboardRoute>} />
       <Route path="/404" component={NotFound} />

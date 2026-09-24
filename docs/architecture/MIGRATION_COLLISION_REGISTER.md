@@ -39,9 +39,17 @@ and `0157` is historically used twice. None of those is reused.
 | 0172 | `0172_training_wallet_renewal_handoff.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | **was** with C1a's original `0172` | C1a moved off; this branch keeps 0172 |
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
+| 0175–0177 | `0175_driver_portfolio.sql` … `0177_driver_portfolio_api.sql`; `0175_source_review_history_guards.sql` | `claude/driver-portfolio-*`, `claude/training-academy-workforce-q3mdse` | none | — | open branches | 0175 claimed twice across them | theirs to resolve at rebase |
+| 0178–0181 | `0178_document_control_definitions.sql` … `0181_document_control_templates.sql`; `0179_eld_event_ledger.sql`; `0179_trip_stop_provenance.sql` | `claude/document-control-architecture-jlffzk`, `claude/eld-compliance-intelligence-ramlrd`, `claude/migration-0169-reconciliation` | none | — | open branches | 0179 claimed three times | theirs to resolve at rebase |
+| 0182 | `0182_customer_account_profile.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `6f52b57` | this branch | none — first number free on main and every open branch at 2026-09-24 | keeps 0182 |
+| 0183 | `0183_customer_contracts_rate_sheets.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `6f52b57` | this branch | none | keeps 0183 |
+| 0184 | `0184_job_commercial_context.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `6f52b57` | this branch | none | keeps 0184 |
 
 ## Change log
 
+* **2026-09-24**: the Customer / Contract / Rate checkpoint (v23.26) scanned every remote branch and
+  found 0175–0181 claimed (0175 twice, 0179 three times); it took 0182–0184, the first numbers free
+  on `main` and on every open branch. No other branch was renumbered.
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
   No other branch was renumbered.
