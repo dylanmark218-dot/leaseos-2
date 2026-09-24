@@ -36,9 +36,10 @@ d("the monolith's owned records", () => {
     const A = await org(), B = await org();
     const mgrA = await member(A, ["management"]), mgrB = await member(B, ["management"]), legacy = await member(null, ["management"]);
     const tripA = await tripOwnedBy(A), unitA = await unitOwnedBy(A);
-    // A proposal on A's trip: A reads it, B does not find it.
+    // A proposal of A's (on A's trip): A reads it, B does not find it. Since AIL-1A (0185) the proposal
+    // carries its own organization, stamped at draft from the acting scope.
     const proposalId = `PRP-${rnd()}`;
-    await pool.execute("INSERT INTO assistantProposals (proposalId, formKey, formVersion, title, targetRef, targetRecordId, eventDateLocal, utcOffsetMinutes, tripId, createdByUserId, readBack, readBackAcknowledged, commitState) VALUES (?, 'unload_stop', 1, 'Unload stop', ?, 1, '2026-09-09', -360, ?, ?, 'confirmed readback', 1, 'awaiting_readback')", [proposalId, `TRIP-${tripA} unload stop`, tripA, mgrA]);
+    await pool.execute("INSERT INTO assistantProposals (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, targetRecordId, eventDateLocal, utcOffsetMinutes, tripId, createdByUserId, readBack, readBackAcknowledged, commitState) VALUES (?, 'membership', ?, 'unload_stop', 1, 'Unload stop', ?, 1, '2026-09-09', -360, ?, ?, 'confirmed readback', 1, 'awaiting_readback')", [A, proposalId, `TRIP-${tripA} unload stop`, tripA, mgrA]);
     await expect(callerFor(mgrB).fieldRoute.assistant.get({ proposalId })).rejects.toMatchObject({ code: "NOT_FOUND", message: `Proposal ${proposalId} not found` });
     await expect(callerFor(legacy).fieldRoute.assistant.get({ proposalId })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(callerFor(mgrA).fieldRoute.assistant.get({ proposalId })).resolves.toBeTruthy();

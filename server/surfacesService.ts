@@ -45,7 +45,14 @@ async function loadFacilityDirectoryExceptions(db: Awaited<ReturnType<typeof get
   };
 }
 
-export async function loadExceptionSources(now = new Date()): Promise<ExceptionSources> {
+/**
+ * AIL-1A: AI proposals are read for the caller's organization only. `scope` is optional so the
+ * other sources' callers are unchanged, and a caller that passes none gets no proposals at all —
+ * the proposal slice fails closed rather than falling back to every organization's. The other
+ * exception sources are not tenant-scoped yet; that is recorded in AIL_1A_LEARNING_SCOPE.md and not
+ * widened here.
+ */
+export async function loadExceptionSources(now = new Date(), scope: { tenantId: string } | null = null): Promise<ExceptionSources> {
   const db = await getDb();
   const empty: ExceptionSources = {
     now, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [],
@@ -69,7 +76,7 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
       .from(complianceDocuments)
       .where(or(eq(complianceDocuments.verificationStatus, "needs_review"), and(lte(complianceDocuments.expiresAt, horizon), eq(complianceDocuments.verificationStatus, "verified")))).limit(2000),
     db.select({ proposalId: assistantProposals.proposalId, formKey: assistantProposals.formKey, title: assistantProposals.title, createdAt: assistantProposals.createdAt, commitState: assistantProposals.commitState })
-      .from(assistantProposals).where(eq(assistantProposals.commitState, "awaiting_readback")).limit(500),
+      .from(assistantProposals).where(and(eq(assistantProposals.commitState, "awaiting_readback"), scope ? eq(assistantProposals.tenantId, scope.tenantId) : sql`false`)).limit(500),
     db.select({ askedToUserId: assistantQuestions.askedToUserId, count: sql<number>`count(*)`, oldest: sql<Date | null>`min(${assistantQuestions.createdAt})` })
       .from(assistantQuestions).where(eq(assistantQuestions.status, "pending")).groupBy(assistantQuestions.askedToUserId),
     db.select({ id: syncConflicts.id, conflictRef: syncConflicts.conflictRef, recordType: syncConflicts.recordType, recordRef: syncConflicts.recordRef, material: syncConflicts.material, detectedAt: syncConflicts.detectedAt })
@@ -174,7 +181,7 @@ export async function loadInbox(args: { userId: number; roles: readonly string[]
       isNull(workflowNotifications.acknowledgedAt),
       or(eq(workflowNotifications.tenantId, acting.tenantId), isNull(workflowNotifications.tenantId)),
     )).orderBy(desc(workflowNotifications.queuedAt)).limit(100),
-    db.select({ proposalId: assistantProposals.proposalId, title: assistantProposals.title, formKey: assistantProposals.formKey, createdAt: assistantProposals.createdAt }).from(assistantProposals).where(and(eq(assistantProposals.createdByUserId, args.userId), eq(assistantProposals.commitState, "awaiting_readback"))).limit(50),
+    db.select({ proposalId: assistantProposals.proposalId, title: assistantProposals.title, formKey: assistantProposals.formKey, createdAt: assistantProposals.createdAt }).from(assistantProposals).where(and(eq(assistantProposals.createdByUserId, args.userId), eq(assistantProposals.tenantId, acting.tenantId), eq(assistantProposals.commitState, "awaiting_readback"))).limit(50),
     db.select({ questionRef: assistantQuestions.questionRef, question: assistantQuestions.question, createdAt: assistantQuestions.createdAt }).from(assistantQuestions).where(and(eq(assistantQuestions.askedToUserId, args.userId), eq(assistantQuestions.status, "pending"))).limit(50),
     db.select({ authorizationRef: purchaseAuthorizations.authorizationRef, status: purchaseAuthorizations.status, estimatedAmount: purchaseAuthorizations.estimatedAmount, requestedAt: purchaseAuthorizations.requestedAt }).from(purchaseAuthorizations).where(and(eq(purchaseAuthorizations.requestedByUserId, args.userId), eq(purchaseAuthorizations.status, "requested"))).limit(50),
   ]);

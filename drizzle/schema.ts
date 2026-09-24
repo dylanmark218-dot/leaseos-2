@@ -2208,6 +2208,22 @@ export const assistantProposals = mysqlTable("assistantProposals", {
   duplicateOverrideReason: varchar("duplicateOverrideReason", { length: 400 }),
   operatorId: int("operatorId"),
   createdByUserId: int("createdByUserId"),
+  /**
+   * AIL-1A (0185) — the organization this proposal belongs to, stamped at draft time from the
+   * server's acting scope and never from input. NULL only together with `legacy_unresolved` (a CHECK
+   * enforces it): a legacy row nobody could prove the owner of, visible to nobody. NULL never means
+   * global; there is no global proposal.
+   */
+  tenantId: varchar("tenantId", { length: 40 }),
+  /** How `tenantId` was established. The default is the fail-closed marker, not a tenant. */
+  tenantDerivedFrom: mysqlEnum("tenantDerivedFrom", [
+    "membership",
+    "single_tenant_fallback",
+    "backfill_single_tenant_deployment",
+    "legacy_unresolved",
+  ])
+    .default("legacy_unresolved")
+    .notNull(),
   transcript: text("transcript"),
   notes: text("notes"),
   readBack: text("readBack"),

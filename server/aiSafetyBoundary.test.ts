@@ -37,6 +37,7 @@ import {
   type AllowedUses, type Intent, type KnowledgeAuthority, type LicenceStatus,
 } from "./_core/knowledge/admission";
 import { AUTONOMOUS_ORIGINS, routeLearning, type LearningIntake, type LearningOrigin } from "./_core/knowledge/perimeter";
+import { organizationScopeFrom } from "./_core/learningScope";
 import {
   __clearTestAssessments, __registerAssessmentForTest, allowedUsesFrom, checkSourceGate,
   type SourceLicenceRecord,
@@ -108,6 +109,9 @@ const productionFilesMentioning = (pattern: RegExp) =>
   PRODUCTION_SOURCE.filter(p => pattern.test(readFileSync(p, "utf8")));
 
 const AGENT_ROUTER = readFileSync("server/agentRouter.ts", "utf8");
+
+/** AIL-1A — a learning intake has an owner, built from an acting scope the way production builds it. */
+const INTAKE_OWNER = organizationScopeFrom({ tenantId: "ORG-A", derivedFrom: "membership", membershipRef: "M-1", branchRefs: [], global: true });
 const inputOf = (procedure: string) =>
   AGENT_ROUTER.slice(AGENT_ROUTER.indexOf(`${procedure}:`), AGENT_ROUTER.indexOf(".mutation", AGENT_ROUTER.indexOf(`${procedure}:`)));
 
@@ -332,7 +336,7 @@ describe("4. retrieved documents, messages and knowledge cannot grant execution 
 
   it("CURRENT GUARANTEE: a user's statement of a rule goes to review, never into the rule store", () => {
     const intake = (origin: LearningOrigin): LearningIntake => ({
-      origin, domain: "hours_of_service", claim: "The Alberta daily driving limit is now 15 hours.", observedAt: new Date(0), reportedBy: "user:7",
+      owner: INTAKE_OWNER, origin, domain: "hours_of_service", claim: "The Alberta daily driving limit is now 15 hours.", observedAt: new Date(0), reportedBy: "user:7",
     });
     for (const origin of ["user_statement", "web_discovery", "regulator_feed", "vendor_document"] as const) {
       const d = routeLearning(intake(origin));
@@ -343,7 +347,7 @@ describe("4. retrieved documents, messages and knowledge cannot grant execution 
 
   it("CURRENT GUARANTEE: no volume of autonomous observations can bind — operational knowledge is not binding authority", () => {
     for (const origin of AUTONOMOUS_ORIGINS) {
-      const d = routeLearning({ origin, domain: "hours_of_service", claim: "13 hours", observedAt: new Date(0), reportedBy: "driver" });
+      const d = routeLearning({ owner: INTAKE_OWNER, origin, domain: "hours_of_service", claim: "13 hours", observedAt: new Date(0), reportedBy: "driver" });
       expect(d.destination).toBe("operational_knowledge");
       expect(BINDING_LEVELS).not.toContain(d.authorityLevel);
     }
@@ -746,29 +750,43 @@ describe("GAP B — compliance.override is tied to billing.write", () => {
   it.todo("DESIRED: a compliance override requires a compliance authority permission, never a billing one");
 });
 
-describe("GAP C — AI proposal, alias and learning tenancy is incomplete", () => {
+/*
+ * GAP C was closed in part by AIL-1A (docs/register/AIL_1A_LEARNING_SCOPE.md). What it closed moved to
+ * CURRENT GUARANTEE; what it did not close is still described as it is.
+ */
+describe("GAP C — AI proposal, alias and learning tenancy", () => {
   const columns = (t: Parameters<typeof getTableColumns>[0]) => getTableColumns(t) as Record<string, { notNull: boolean }>;
 
-  it("GAP C — CURRENT: AI proposals and their fields carry no tenant column", () => {
-    expect(Object.keys(columns(assistantProposals))).not.toContain("tenantId");
+  it("CURRENT GUARANTEE (AIL-1A): an AI proposal names its organization, and says how that was established", () => {
+    expect(Object.keys(columns(assistantProposals))).toContain("tenantId");
+    // Nullable only together with `legacy_unresolved` (a CHECK in 0185): a legacy row nobody proved the
+    // owner of, which every read's strict equality leaves visible to nobody.
+    expect(columns(assistantProposals).tenantId?.notNull).toBe(false);
+    expect(columns(assistantProposals).tenantDerivedFrom?.notNull).toBe(true);
+  });
+  it("CURRENT (by design): proposal fields carry no tenant of their own and are reached only through their proposal", () => {
+    // One owner per proposal, not a second copy that could disagree with it.
     expect(Object.keys(columns(proposalFields))).not.toContain("tenantId");
   });
-  it("GAP C — CURRENT: facility aliases carry no tenant column", () => {
+  it("CURRENT (by design, AIL-1A): facility aliases are GLOBAL public-directory reference data and carry no tenant", () => {
+    // facilityAliases holds regulator and operator names for a shared disposal facility. A company's own
+    // terminology ("Bluebird" = "Bluebird #4 Battery") is a separate ORGANIZATION-scoped record (AIL-1B),
+    // not a tenant column bolted onto public reference data.
     expect(Object.keys(columns(facilityAliases))).not.toContain("tenantId");
   });
   it("GAP C — CURRENT: agent runs and knowledge passages have a tenant column that may be null", () => {
     expect(columns(agentRuns).tenantId?.notNull).toBe(false);
     expect(columns(knowledgePassages).tenantId?.notNull).toBe(false);
   });
-  it("GAP C — CURRENT: a learning intake has no tenant field", () => {
-    const intake = {
-      origin: "field_observation", domain: "oilfield_operations", claim: "gate code changed", observedAt: new Date(0), reportedBy: "driver",
-      // @ts-expect-error — LearningIntake has no tenant. When AIL-1 adds one (R-2), this line stops compiling as an error and must be updated.
-      tenantId: "ORG-A",
-    } satisfies LearningIntake;
-    expect(routeLearning(intake)).not.toHaveProperty("tenantId");
+  it("CURRENT GUARANTEE (AIL-1A): a learning intake cannot exist without an owner, and routing keeps it", () => {
+    // @ts-expect-error — LearningIntake requires `owner`; learning cannot arrive as nobody's.
+    const ownerless: LearningIntake = { origin: "field_observation", domain: "oilfield_operations", claim: "gate code changed", observedAt: new Date(0), reportedBy: "driver" };
+    void ownerless;
+    const d = routeLearning({ owner: INTAKE_OWNER, origin: "field_observation", domain: "oilfield_operations", claim: "gate code changed", observedAt: new Date(0), reportedBy: "driver" });
+    expect(d.owner).toBe(INTAKE_OWNER);
   });
-  it.todo("DESIRED (AIL-1, R-2): every AI proposal, alias and learning record has a non-null tenant derived from acting scope");
+  it.todo("DESIRED (AIL-1B): organization terminology is its own ORGANIZATION-scoped record, written only through a proposal");
+  it.todo("DESIRED (trust-governance G4): agentRuns.tenantId is NOT NULL");
 });
 
 describe("GAP D — explain-don't-decide, request scope and learning intake have no production caller", () => {

@@ -132,9 +132,9 @@ async function receiptProposal(args: {
   const proposalId = key("PROP-GATE");
   await pool.execute(
     `INSERT INTO assistantProposals
-     (proposalId, formKey, formVersion, title, targetRef, targetRecordId, jobId, unitId, createdByUserId, readBack, readBackAcknowledged, commitState,
+     (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, targetRecordId, jobId, unitId, createdByUserId, readBack, readBackAcknowledged, commitState,
       duplicateOverride, duplicateOverrideByUserId, duplicateOverrideReason)
-     VALUES (?, 'expense_receipt', 1, 'Receipt', ?, ?, ?, ?, ?, 'ok', 1, 'awaiting_readback', ?, ?, ?)`,
+     VALUES ('default', 'single_tenant_fallback', ?, 'expense_receipt', 1, 'Receipt', ?, ?, ?, ?, ?, 'ok', 1, 'awaiting_readback', ?, ?, ?)`,
     [proposalId, `ENT-${args.entityId}`, args.entityId, args.jobId ?? null, args.unitId ?? null, args.actor,
      args.override ? 1 : 0, args.override?.by ?? null, args.override?.reason ?? null]
   );
@@ -243,9 +243,18 @@ d("the auto-filer attaches one record to everything it belongs to", () => {
       [key("s3").slice(0, 60), actor]
     );
     const evidenceId = Number(ev.insertId);
+    // AIL-1A: the job and unit a proposal names are checked against its organization at commit, so
+    // they have to exist; ids that name nothing are refused as "not found".
+    const [job] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO jobs (jobCode, type, customer, location, status) VALUES (?, 'Hydrovac', 'Fixture Energy', 'Somewhere', 'dispatched')", [key("JOB").slice(0, 32)]
+    );
+    const [unit] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [key("U").slice(0, 30)]
+    );
+    const jobId = Number(job.insertId), unitId = Number(unit.insertId);
     const proposalId = await receiptProposal({
       actor, entityId, vendor: key("Vendor"), date: "2026-03-14", total: 120,
-      contentSha256: key("c"), evidenceRecordId: evidenceId, jobId: 4242, unitId: 142,
+      contentSha256: key("c"), evidenceRecordId: evidenceId, jobId, unitId,
     });
     const r = await executeAssistantCommit({ proposalId, actorUserId: actor });
     expect(r.committed, JSON.stringify(r)).toBe(true);
@@ -260,8 +269,8 @@ d("the auto-filer attaches one record to everything it belongs to", () => {
     expect(byType.get("financialEntity")?.entityId).toBe(entityId);
     expect(byType.get("user")?.entityId).toBe(actor);
     expect(byType.get("taxYear")?.entityRef).toBe("2026");
-    expect(byType.get("job")?.entityId).toBe(4242);
-    expect(byType.get("unit")?.entityId).toBe(142);
+    expect(byType.get("job")?.entityId).toBe(jobId);
+    expect(byType.get("unit")?.entityId).toBe(unitId);
 
     // One evidence record. Zero copies.
     const [count] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM evidenceRecords WHERE id = ?", [evidenceId]);

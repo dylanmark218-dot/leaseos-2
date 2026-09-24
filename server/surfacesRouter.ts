@@ -11,7 +11,7 @@
 import { z } from "zod";
 import { ACCESS_SCOPE_NOTICE, walkEvidenceChain, type ChainNodeKind } from "./_core/evidenceChainWalk";
 import { roleProcedure, router } from "./_core/trpc";
-import { listActiveUserRoleNames } from "./db";
+import { actingScopeFor, listActiveUserRoleNames } from "./db";
 import { authorize, isDomainRole, type Permission, type RoleGrant } from "./_core/recordsAuthorization";
 import { deriveExceptions, summarize, visibleTo } from "./_core/exceptionCentre";
 import { CHAIN_READ_PERMISSION, loadExceptionSources, loadInbox, loadTimeline, resolveChainAround, searchEverything } from "./surfacesService";
@@ -36,7 +36,7 @@ export const surfacesRouter = router({
     .input(z.object({ category: z.string().max(40).optional(), limit: z.number().int().positive().max(500).default(200) }).optional())
     .query(async ({ ctx, input }) => {
       const { grants } = await grantsFor(ctx.user.id);
-      const all = deriveExceptions(await loadExceptionSources());
+      const all = deriveExceptions(await loadExceptionSources(new Date(), await actingScopeFor(ctx.user.id)));
       let mine = visibleTo({ exceptions: all, userId: ctx.user.id, grants });
       if (input?.category) mine = mine.filter(x => x.category === input.category);
       return { summary: summarize(mine), items: mine.slice(0, input?.limit ?? 200) };
@@ -58,7 +58,7 @@ export const surfacesRouter = router({
     const can = may(ctx.user.id, grants);
     const [inbox, exceptions] = await Promise.all([
       loadInbox({ userId: ctx.user.id, roles, canApprovePurchases: can("purchasing.approve"), canResolveConflicts: can("sync.resolve_conflict"), canReviewAssistant: can("assistant.review") }),
-      (async () => visibleTo({ exceptions: deriveExceptions(await loadExceptionSources()), userId: ctx.user.id, grants }))(),
+      (async () => visibleTo({ exceptions: deriveExceptions(await loadExceptionSources(new Date(), await actingScopeFor(ctx.user.id))), userId: ctx.user.id, grants }))(),
     ]);
     const session = composeSession(roles as never);
     const waitingFor = inbox.filter(i => i.kind === "my_request" || i.kind === "ai_proposal");

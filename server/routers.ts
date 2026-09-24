@@ -208,7 +208,10 @@ import {
   listPendingProposals,
   replaceProposalFields,
   listProposalFields,
+  proposalAnchorRefusal,
 } from "./db";
+import { organizationScopeFrom } from "./_core/learningScope";
+import { AmbiguousOrganization } from "./_core/actingScope";
 import {
   FORMS,
   buildProposal,
@@ -681,11 +684,35 @@ export const appRouter = router({
             jobId: z.number().int().optional(),
             unitId: z.number().int().optional(),
             capturedOffline: z.boolean().default(false),
+            // AIL-1A — whose proposal this is comes from the session, never the body. A present value
+            // is refused rather than dropped, so a client that tried to say learns that it cannot.
+            tenantId: REFUSED,
+            orgRef: REFUSED,
+            organizationId: REFUSED,
+            createdByUserId: REFUSED,
+            tenantDerivedFrom: REFUSED,
           })
         )
         .mutation(async ({ ctx, input }) => {
           const form = FORMS[input.formKey];
           if (!form) throw new Error(`Unknown form: ${input.formKey}`);
+
+          // AIL-1A — the owner is the acting organization, and every record the draft names must be
+          // that organization's. Both are settled before the model is spent.
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          let owner;
+          try {
+            owner = organizationScopeFrom(await resolveActingScope(db, ctx.user.id));
+          } catch (e) {
+            if (e instanceof AmbiguousOrganization) throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
+            throw e;
+          }
+          const anchorRefusal = await proposalAnchorRefusal(
+            { formKey: form.key, jobId: input.jobId, tripId: input.tripId, unitId: input.unitId, targetRecordId: input.targetRecordId },
+            { tenantId: owner.orgRef },
+          );
+          if (anchorRefusal) throw new TRPCError({ code: "NOT_FOUND", message: anchorRefusal });
 
           const result = await invokeLLM({
             messages: [
@@ -724,6 +751,8 @@ export const appRouter = router({
             tripId: input.tripId,
             unitId: input.unitId,
             createdByUserId: ctx.user.id,
+            tenantId: owner.orgRef,
+            tenantDerivedFrom: owner.derivedFrom,
             transcript: input.transcript,
             notes: extraction.notes,
             commitState: proposal.commitState,
@@ -755,8 +784,9 @@ export const appRouter = router({
         .input(z.object({ tripId: z.number().int().optional() }).optional())
         .query(async ({ ctx, input }) => {
         // P4.1: scope guard
-        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
-        return listPendingProposals(input?.tripId);
+        const scope = await scopeFor(ctx.user.id);
+        if (input?.tripId != null && !(await tripInScope(input.tripId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
+        return listPendingProposals(scope, input?.tripId);
       }),
 
       answer: roleProcedure("assistant.answer")

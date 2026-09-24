@@ -31,14 +31,15 @@ function tablesWithTenant(): { table: string; notNull: boolean }[] {
 }
 
 describe("the tenant surface is known", () => {
-  it("is nineteen tables, and the nullability split is deliberate", () => {
+  it("is twenty tables, and the nullability split is deliberate", () => {
     const scoped = tablesWithTenant();
     // The organization is carried only where something consults it. This count
     // moving is a new scoped concept and has to be changed on purpose — which
-    // is what happened when leaveRequests arrived and this test failed first.
-    expect(scoped).toHaveLength(19);
+    // is what happened when leaveRequests arrived and this test failed first,
+    // and again when AIL-1A (0185) gave assistantProposals an owner.
+    expect(scoped).toHaveLength(20);
     expect(scoped.map(t => t.table).sort()).toEqual([
-      "agentRuns", "assistantQueries", "billingAuthorityBands", "crews", "domainEventOutbox", "enforcementEvents",
+      "agentRuns", "assistantProposals", "assistantQueries", "billingAuthorityBands", "crews", "domainEventOutbox", "enforcementEvents",
       "knowledgePassages", "leaveRequests", "messageChannels", "oosReleasePolicies", "operationalTasks", "outOfServiceOrders",
       "retrievalMeasurements", "retrievalProbes", "shiftPosts", "workerQualifications", "workflowInstances", "workflowNotifications",
       "workflowRules",
@@ -54,8 +55,10 @@ describe("the tenant surface is known", () => {
     expect(scoped.filter(t => t.notNull).map(t => t.table).sort()).toEqual([
       "domainEventOutbox", "operationalTasks", "workflowInstances", "workflowNotifications",
     ]);
+    // assistantProposals is nullable only together with `legacy_unresolved` (0185's CHECK): a legacy
+    // row whose owner was never proved, which strict equality leaves visible to nobody.
     expect(scoped.filter(t => !t.notNull).map(t => t.table).sort()).toEqual([
-      "agentRuns", "assistantQueries", "billingAuthorityBands", "crews", "enforcementEvents",
+      "agentRuns", "assistantProposals", "assistantQueries", "billingAuthorityBands", "crews", "enforcementEvents",
       "knowledgePassages", "leaveRequests",
       "messageChannels", "oosReleasePolicies", "outOfServiceOrders", "retrievalMeasurements", "retrievalProbes", "shiftPosts",
       "workerQualifications",

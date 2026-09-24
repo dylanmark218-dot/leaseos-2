@@ -40,7 +40,9 @@ import {
   type Fingerprint,
   type PriorCapture,
 } from "./documentFingerprint";
-import { getDb } from "../db";
+import { getDb, proposalAnchorRefusal } from "../db";
+import { AmbiguousOrganization, resolveActingScope } from "./actingScope";
+import { rowInTenant } from "./learningScope";
 import { FORMS, commitProposal, type CommittedField } from "./aiProposal";
 import { rehydrateProposal } from "./assistantPersistence";
 import {
@@ -130,6 +132,20 @@ export async function executeAssistantCommit(args: {
     const row = proposals[0];
     if (!row) return { committed: false as const, refusals: ["Proposal not found"] };
 
+    // AIL-1A — the service checks the owner itself, so no caller (router, worker or test) can commit
+    // another organization's proposal by reaching past the procedure's guard. A legacy row whose owner
+    // was never proved has no tenant and belongs to nobody. Answered as "not found" either way.
+    let actingTenant: string;
+    try {
+      actingTenant = (await resolveActingScope(tx, args.actorUserId)).tenantId;
+    } catch (e) {
+      if (e instanceof AmbiguousOrganization) return { committed: false as const, refusals: ["Proposal not found"] };
+      throw e;
+    }
+    if (!rowInTenant(row, { tenantId: actingTenant })) {
+      return { committed: false as const, refusals: ["Proposal not found"] };
+    }
+
     const existingReceipt = await tx
       .select()
       .from(assistantCommitReceipts)
@@ -163,6 +179,15 @@ export async function executeAssistantCommit(args: {
     if (!committed.ok) {
       return { committed: false as const, refusals: committed.refusals };
     }
+
+    // AIL-1A — the records the proposal names are re-checked against its owner at the moment of
+    // writing, with the same rule the draft used. A proposal backfilled from before 0185 was never
+    // checked at draft; this is where it is.
+    const anchorRefusal = await proposalAnchorRefusal(
+      { formKey: row.formKey, jobId: row.jobId, tripId: row.tripId, unitId: row.unitId, targetRecordId: row.targetRecordId },
+      { tenantId: actingTenant },
+    );
+    if (anchorRefusal) return { committed: false as const, refusals: [anchorRefusal] };
 
     const plan = planAssistantCommit(
       {

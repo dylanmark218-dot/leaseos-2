@@ -39,9 +39,14 @@ and `0157` is historically used twice. None of those is reused.
 | 0172 | `0172_training_wallet_renewal_handoff.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | **was** with C1a's original `0172` | C1a moved off; this branch keeps 0172 |
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
+| 0185 | `0185_assistant_proposal_tenancy.sql` | `claude/relaxed-carson-qfcopf` | none yet | `6f52b57` | AIL-1A checkpoint | none | 0170–0184 are each claimed by main or an open branch (fetch of 2026-09-24, comparing file names on all 56 remotes, including the two branches with no merge base); 0185 is the first free number |
 
 ## Change log
 
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
   No other branch was renumbered.
+* **2026-09-24**: AIL-1A claims `0185`. The three-dot scan above misses
+  `feature/tenant-scope-foundation` and `claude/mobile-hardware-scanner-mzp1e1-v2327`, which share no
+  history with main (they claim 0168–0173 and 0168–0169 by file name). The rows above for 0175–0184 are
+  not yet recorded here; they were confirmed as claimed by file name, not reconciled branch by branch.

@@ -43,7 +43,11 @@ d("typed Assistant commit service", () => {
   it("updates an unload trip stop exactly once and leaves an idempotent receipt", async () => {
     const actor = nextUser();
     await role(actor, "office");
-    const tripId = 700000 + Math.floor(Math.random() * 100000);
+    // AIL-1A: the proposal's trip is checked against its organization at commit, so it is a real trip.
+    const [tripInsert] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO trips (tripNumber, tripType, status) VALUES (?, 'one_way', 'planned')", [key("TRP").slice(0, 30)]
+    );
+    const tripId = Number(tripInsert.insertId);
     const [stopInsert] = await pool.execute<mysql.ResultSetHeader>(
       "INSERT INTO tripStops (tripId, stopType, sequence, notes) VALUES (?, 'unload', 1, 'existing note')",
       [tripId]
@@ -53,10 +57,10 @@ d("typed Assistant commit service", () => {
 
     await pool.execute(
       `INSERT INTO assistantProposals
-       (proposalId, formKey, formVersion, title, targetRef, targetRecordId,
+       (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, targetRecordId,
         eventDateLocal, utcOffsetMinutes, tripId, createdByUserId,
         readBack, readBackAcknowledged, commitState)
-       VALUES (?, 'unload_stop', 1, 'Unload stop', ?, ?, '2026-09-09', -360,
+       VALUES ('default', 'single_tenant_fallback', ?, 'unload_stop', 1, 'Unload stop', ?, ?, '2026-09-09', -360,
                ?, ?, 'confirmed readback', 1, 'awaiting_readback')`,
       [proposalId, `TRIP-${tripId} unload stop`, stopId, tripId, actor]
     );
@@ -117,9 +121,9 @@ d("typed Assistant commit service", () => {
 
     await pool.execute(
       `INSERT INTO assistantProposals
-       (proposalId, formKey, formVersion, title, targetRef, unitId, createdByUserId,
+       (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, unitId, createdByUserId,
         readBack, readBackAcknowledged, commitState)
-       VALUES (?, 'defect_report', 1, 'Defect report', ?, ?, ?,
+       VALUES ('default', 'single_tenant_fallback', ?, 'defect_report', 1, 'Defect report', ?, ?, ?,
                'confirmed readback', 1, 'awaiting_readback')`,
       [proposalId, unitNumber, unitId, actor]
     );
@@ -162,9 +166,9 @@ d("typed Assistant commit service", () => {
 
     await pool.execute(
       `INSERT INTO assistantProposals
-       (proposalId, formKey, formVersion, title, targetRef, targetRecordId,
+       (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, targetRecordId,
         createdByUserId, readBack, readBackAcknowledged, commitState)
-       VALUES (?, 'expense_receipt', 1, 'Expense receipt', ?, ?, ?, 'confirmed readback', 1, 'awaiting_readback')`,
+       VALUES ('default', 'single_tenant_fallback', ?, 'expense_receipt', 1, 'Expense receipt', ?, ?, ?, 'confirmed readback', 1, 'awaiting_readback')`,
       [proposalId, `ENT-${entityId}`, entityId, actor]
     );
     // Unique per run: the fingerprint gate now enforces document uniqueness,
@@ -221,9 +225,9 @@ d("typed Assistant commit service", () => {
     const proposalId = key("PROP-RECEIPT-NO");
     await pool.execute(
       `INSERT INTO assistantProposals
-       (proposalId, formKey, formVersion, title, targetRef, targetRecordId,
+       (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, targetRecordId,
         createdByUserId, readBack, readBackAcknowledged, commitState)
-       VALUES (?, 'expense_receipt', 1, 'Expense receipt', 'ENT', ?, ?, 'ok', 1, 'awaiting_readback')`,
+       VALUES ('default', 'single_tenant_fallback', ?, 'expense_receipt', 1, 'Expense receipt', 'ENT', ?, ?, 'ok', 1, 'awaiting_readback')`,
       [proposalId, Number(ent.insertId), actor]
     );
     await insertFields(proposalId, [
@@ -250,9 +254,9 @@ d("typed Assistant commit service", () => {
 
     await pool.execute(
       `INSERT INTO assistantProposals
-       (proposalId, formKey, formVersion, title, targetRef, unitId, createdByUserId,
+       (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, unitId, createdByUserId,
         readBack, readBackAcknowledged, commitState)
-       VALUES (?, 'defect_report', 1, 'Defect report', ?, ?, ?,
+       VALUES ('default', 'single_tenant_fallback', ?, 'defect_report', 1, 'Defect report', ?, ?, ?,
                'confirmed readback', 1, 'awaiting_readback')`,
       [proposalId, unitNumber, unitId, actor]
     );
@@ -301,9 +305,9 @@ d("typed Assistant commit service", () => {
       const proposalId = key("PROP-DSP");
       await pool.execute(
         `INSERT INTO assistantProposals
-         (proposalId, formKey, formVersion, title, targetRef, loadId, facilityId, utcOffsetMinutes,
+         (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, loadId, facilityId, utcOffsetMinutes,
           createdByUserId, readBack, readBackAcknowledged, commitState)
-         VALUES (?, 'disposal_ticket', 1, 'Disposal ticket', ?, ?, ?, -360, ?, 'ok', 1, 'awaiting_readback')`,
+         VALUES ('default', 'single_tenant_fallback', ?, 'disposal_ticket', 1, 'Disposal ticket', ?, ?, ?, -360, ?, 'ok', 1, 'awaiting_readback')`,
         [proposalId, loadNumber, loadId, facilityId, actor]
       );
       await insertFields(proposalId, [
@@ -370,8 +374,8 @@ d("typed Assistant commit service", () => {
     const proposalId = key("PROP-DSP-R");
     await pool.execute(
       `INSERT INTO assistantProposals
-       (proposalId, formKey, formVersion, title, targetRef, loadId, facilityId, utcOffsetMinutes, createdByUserId, readBack, readBackAcknowledged, commitState)
-       VALUES (?, 'disposal_ticket', 1, 'Disposal ticket', ?, ?, ?, -360, ?, 'ok', 1, 'awaiting_readback')`,
+       (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, loadId, facilityId, utcOffsetMinutes, createdByUserId, readBack, readBackAcknowledged, commitState)
+       VALUES ('default', 'single_tenant_fallback', ?, 'disposal_ticket', 1, 'Disposal ticket', ?, ?, ?, -360, ?, 'ok', 1, 'awaiting_readback')`,
       [proposalId, loadNumber, Number(ld.insertId), Number(fac.insertId), actor]
     );
     await insertFields(proposalId, [

@@ -27,6 +27,9 @@
  */
 
 import { AUTHORITY_LEVELS, type AuthorityLevel, type KnowledgeAuthority } from "./admission";
+import {
+  requireDurableTenantScope, type DurableTenantScope, type PlatformAuthority,
+} from "../learningScope";
 
 /* ------------------------------------------------------------------ */
 /* The domains LeaseOS is for                                          */
@@ -226,6 +229,13 @@ export type LearningDestination =
   | "authoritative_rules"; // Level A–C — requires human verification, always
 
 export type LearningIntake = {
+  /**
+   * AIL-1A — who owns what was learned: an ORGANIZATION or a USER inside one, built by
+   * `learningScope` from the server's acting scope. Required, so learning cannot arrive without an
+   * owner. SESSION_JOB context is refused (it is not durable learning), and GLOBAL cannot be built
+   * from a request at all. The claim's own text never sets this.
+   */
+  owner: DurableTenantScope;
   origin: LearningOrigin;
   domain: PerimeterDomain;
   claim: string;
@@ -236,6 +246,8 @@ export type LearningIntake = {
 };
 
 export type IntakeDecision = {
+  /** The intake's owner, unchanged. Routing decides where learning goes, never whose it is. */
+  owner: DurableTenantScope;
   destination: LearningDestination;
   authorityLevel: AuthorityLevel;
   requiresHumanReview: boolean;
@@ -250,6 +262,12 @@ export type IntakeDecision = {
  * is excellent evidence *for* a reviewer; it is not a reviewer.
  */
 export function routeLearning(intake: LearningIntake): IntakeDecision {
+  // Refuses a SESSION_JOB owner (and any value that is not a tenant scope) before routing.
+  const owner = requireDurableTenantScope(intake.owner);
+  return { owner, ...routeByOrigin(intake) };
+}
+
+function routeByOrigin(intake: LearningIntake): Omit<IntakeDecision, "owner"> {
   switch (intake.origin) {
     case "regulator_feed":
       return {
@@ -295,7 +313,18 @@ export type Promotion =
 export function promote(
   intake: LearningIntake,
   review: { reviewerUserId: number; reviewedAt: Date; authorityLevel: AuthorityLevel; sourceTitle: string; jurisdiction: string; contentHash: string; sourceUrl?: string },
+  /**
+   * AIL-1A — the authoritative store is GLOBAL: every organization's rules come from it. Moving a
+   * tenant's intake into it is ORGANIZATION → GLOBAL promotion, which owner ruling R-2 makes a
+   * separate governed operation needing platform authority. No principal holds that today, and
+   * `learningScope` exports no way to make one, so this path is closed to production code. The type
+   * is the barrier; the runtime check below only catches an untyped caller that passes nothing.
+   */
+  platformAuthority: PlatformAuthority,
 ): Promotion {
+  if (!platformAuthority || typeof platformAuthority !== "object") {
+    return { promoted: false, reason: "promotion into the authoritative store is GLOBAL and needs platform authority, which no principal holds yet (R-2, R-6)" };
+  }
   if (!Number.isInteger(review.reviewerUserId) || review.reviewerUserId < 1) {
     return { promoted: false, reason: "a named reviewer is required; automated promotion is not available" };
   }

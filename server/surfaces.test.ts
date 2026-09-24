@@ -213,7 +213,7 @@ d("one company's morning, through the five surfaces", () => {
     const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, 'J. Smith')", [driver]);
     await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'tdg_certificate', 'TDG', NOW(), DATE_ADD(NOW(), INTERVAL 10 DAY), 'verified')", [Number(op.insertId)]);
     const proposalId = key("PROP");
-    await pool.execute("INSERT INTO assistantProposals (proposalId, formKey, formVersion, title, targetRef, createdByUserId, readBack, readBackAcknowledged, commitState) VALUES (?, 'defect_report', 1, 'Hydraulic leak', 'U', ?, 'rb', 0, 'awaiting_readback')", [proposalId, driver]);
+    await pool.execute("INSERT INTO assistantProposals (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, createdByUserId, readBack, readBackAcknowledged, commitState) VALUES ('default', 'single_tenant_fallback', ?, 'defect_report', 1, 'Hydraulic leak', 'U', ?, 'rb', 0, 'awaiting_readback')", [proposalId, driver]);
     await pool.execute(
       "INSERT INTO operationalTasks (taskNumber, taskType, title, status, priority, tenantId, subjectType, subjectId, assignedRole, assignedUserId, dedupeKey, requiresEvidence, escalationStep, createdAt) VALUES (?, 'follow_up', 'Call ABC Tire about invoice', 'open', 'normal', 'default', 'vendorBill', ?, 'office', ?, ?, 0, 0, NOW())",
       [key("TASK").slice(0, 40), billRef, office, key("dedupe").slice(0, 100)]
