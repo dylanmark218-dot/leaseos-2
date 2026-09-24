@@ -66,8 +66,8 @@ the model proposes.
    counterparty), derived from `resolveActingScope`, never from input. Counterparties are `orgRef`
    values in `organizations`. This is the `vendors` / `commercialDocuments` convention.
 2. **One organization identity.** A prospect is an `organizations` row created by
-   `commercialOffice.organizations.create`. Sales state hangs off it in `salesRelationships`. Promotion
-   to customer is `commercialOffice.roles.assign(client)` and `customerAccounts` creation — existing
+   procedure `commercialOffice.organizationCreate`. Sales state hangs off it in `salesRelationships`.
+   Promotion to customer is `commercialOffice.roleAssign` with role `client` and `customerAccounts` creation — existing
    procedures, human-run, no new identity table.
 3. **No contact table here.** Contacts come from the Contact Directory build plan. Sales stores
    `contactMethodId` references and consent/suppression state keyed to them. Until the directory
@@ -317,7 +317,8 @@ with `management` / `controller`.
 | `sales.policy.rules.propose/verify` | mutation | Same shape as `hos.limitVerify`. |
 | `sales.quotes.draftFromIntake` | mutation | Projects `jobIntakes` lines through `resolveRate`/`priceQuantity`; writes `pricingDecisions(subjectKind = quote_line)`; refuses (PRECONDITION_FAILED) on any `unknown_rate`/`conflict`; runs `simulateMargin`; returns `draft` quote or the reasons. Issue stays `project.quoteIssue`. |
 | `sales.quotes.markDeclined/expire` | mutation | The missing internal paths; `expire` is also run by the worker. |
-| `sales.holds.place` | mutation (sensitive) | §9. |
+| `sales.holds.preview` | query | §9.2. Read-only: `composeReadiness` per candidate + `detectBookingConflicts`; writes nothing. |
+| `sales.holds.place` | mutation (sensitive) | §9.3. |
 | `sales.holds.release/extend` | mutation | Extend at most `maxExtensions`. |
 | `sales.intake.upsert` | mutation | Collects the eight booking details; returns `missingFields`. |
 | `sales.intake.convert` | mutation (sensitive) | §9.4. |
@@ -353,12 +354,12 @@ at the gateway with a recorded `agentActions` row. Each new key needs a `degrada
 
 ### 6.3 Tools (model-facing; `SALES_TOOLS`, registry shape from PR #7)
 
-Every tool binds to exactly one `ProcedureName`; the model emits a tool key and arguments validated by
+Every tool binds to exactly one `ProcedureName` — the flat key in `OPERATIONAL_PROCEDURE_PERMISSIONS` (e.g. `commercialOffice.organizationsList`), not the nested router path (`commercialOffice.organizations.list`); the model emits a tool key and arguments validated by
 that procedure's zod input; `formKey`/tenant/permission are never model-supplied.
 
 | Tool key | Category | Bound procedure (existing unless marked new) | Answers |
 |---|---|---|---|
-| `findOrganization` | read | `commercialOffice.organizations.list` (+ name filter) | organization + held commercial roles |
+| `findOrganization` | read | `commercialOffice.organizationsList` (+ name filter) | organization + held commercial roles |
 | `getRelationship` | read | `sales.relationships.get` (new) | vendor status (with evidence flag), requirements, services, last contact |
 | `findContact` | read | directory `contacts.list` (directory build plan) filtered to `public_work` | contact method ids, never raw values in the model context beyond a display label |
 | `getOutreachEligibility` | read | `sales.policy.evaluate` (new) | `OUTREACH_ALLOWED / BLOCKED(reasons) / UNKNOWN` |
@@ -375,7 +376,7 @@ that procedure's zod input; `formKey`/tenant/permission are never model-supplied
 | `updateIntake` | propose | `sales.intake.upsert` (new) | the eight booking details, `missingFields` |
 | `createBookingHold` | propose | `sales.holds.place` (new) | hold or refusal; gateway `require_approval` below Level 5 |
 | `requestQuoteApproval`, `requestDispatchApproval`, `requestHumanDecision` | human_step | `agent.requestAction` with the corresponding capability | parks the run at `waiting_for_approval` |
-| `askClarification` | human_step | `questionQueue.persist` (unwired today) with a generic subject key | queues a question to the opportunity owner |
+| `askClarification` | human_step | `sales.questions.ask` (new; the first procedure over `persistQuestions`, which has no caller today) with a generic subject key | queues a question to the opportunity owner |
 
 Task allowlists: `BD_RESEARCH` (read tools, budget 12), `SALES_CONVERSATION` (read + `draftMessage`,
 `updateIntake`, `askClarification`, budget 10 per inbound message), `QUOTE_DRAFT` (read + `createQuoteDraft`,
@@ -565,8 +566,9 @@ Runs in one transaction, in this lock order, to close the cross-posting race the
    tentative, sourceKind = sales_hold, holdId, expiresAt)` per resource.
 5. Append the opportunity event, emit `sales.hold.placed`.
 
-Idempotency: `holdRef` is derived from `idempotencyKeyFor({ clientCaptureId | agentActionRef,
-opportunityRef, window })`; a replay returns the existing hold. Hard limits: at most 2 live holds per
+Idempotency: `holdRef` is derived server-side from `(agentActionRef | clientCaptureId, opportunityRef,
+window)` in the shape of PR #7's `idempotencyKeyFor` (not on `main`) or the gateway's live
+`idempotencyKey(request)`; a replay returns the existing hold. Hard limits: at most 2 live holds per
 opportunity; total tentative capacity per tenant per day capped by policy (a prospect must not be
 able to reserve the fleet). Dispatchers may **preempt** a sales hold for a confirmed award
 (`resourceBookings.bookingState → released`, reason `preempted_by_award`, event on the opportunity,
