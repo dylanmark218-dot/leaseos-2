@@ -19,6 +19,7 @@ import { demonstration, fromQuery } from "../showcase/panelSource";
 import { SignInView } from "../session/SignInView";
 import { WorkspaceChooserView } from "../session/WorkspaceChooserView";
 import { AccessDeniedView } from "../session/AccessDeniedView";
+import { PeopleAccessView, type PeopleAccessViewProps } from "../people/PeopleAccessView";
 
 afterEach(cleanup);
 
@@ -60,6 +61,26 @@ const a11yTiles: BoardTileView[] = [
 ];
 const A11Y_DRIVER: RoleActor = { roles: ["driver"], permissions: [] } as never;
 
+const PERSON = {
+  userId: 123, displayName: "Dylan Hutchings", membershipStatus: "active" as const, membershipType: "employee",
+  roles: ["driver"], workspaces: ["field_workforce"], defaultWorkspace: "field_workforce",
+  effectiveFrom: "2026-01-04T00:00:00Z", effectiveTo: null, live: true,
+};
+const peopleProps = (over: Partial<PeopleAccessViewProps> = {}): PeopleAccessViewProps => ({
+  organizationName: "ABC Transport",
+  people: [PERSON, { ...PERSON, userId: 456, displayName: "Former Person", membershipStatus: "ended" as const, roles: [], workspaces: [], live: false, effectiveTo: "2026-08-01T00:00:00Z" }],
+  invitations: [
+    { invitationRef: "INV-1", emailHint: "new@example.test", displayNameHint: "R. Cardinal", roles: ["driver"], view: "pending" as const, expiresAt: "2027-10-01T00:00:00Z", invitedAt: "2026-01-02T00:00:00Z" },
+    { invitationRef: "INV-2", emailHint: "old@example.test", displayNameHint: null, roles: ["office"], view: "expired" as const, expiresAt: "2026-01-01T00:00:00Z", invitedAt: "2026-08-01T00:00:00Z" },
+  ],
+  needsResolution: [{ legacyGrantId: 88, userId: 123, displayName: "Dylan Hutchings", role: "mechanic", grantedAt: "2025-03-02T00:00:00Z" }],
+  roleCatalogue: [
+    { role: "driver", description: "Field jobs, trips and field paperwork.", workspaces: [{ key: "field_workforce", label: "Field Workforce" }] },
+    { role: "mechanic", description: "Maintenance work and work orders.", workspaces: [{ key: "fleet_maintenance", label: "Fleet Maintenance" }] },
+  ],
+  ...over,
+});
+
 const surfaces = [
   { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
   { name: "commercial office — organizations", render: () => render(<CommercialOfficeView {...office("organizations")} />) },
@@ -82,6 +103,16 @@ const surfaces = [
   { name: "organization chooser", render: () => render(<WorkspaceChooserView organizations={[{ orgRef: "ORG-A", name: "ABC Transport", membershipType: "employee" }, { orgRef: "ORG-B", name: "Northern Hauling", membershipType: "contractor" }]} activeOrgRef={null} workspaces={[]} onSelectWorkspace={() => {}} onSelectOrganization={() => {}} />) },
   { name: "access denied — no workspace", render: () => render(<AccessDeniedView kind="no_workspace" onSignOut={() => {}} />) },
   { name: "access denied — workspace not open", render: () => render(<AccessDeniedView kind="workspace_not_open" onGoToWorkspace={() => {}} workspaceLabel="Field" onSignOut={() => {}} />) },
+
+  // B23.2 — People & Access. An administrative screen, and a manager may reach
+  // it from a phone in a yard, so all four sections and the person detail go
+  // through the rules rather than only the one that happens to render first.
+  { name: "people & access — active", render: () => render(<PeopleAccessView {...peopleProps()} />) },
+  { name: "people & access — invitations", render: () => render(<PeopleAccessView {...peopleProps({ section: "invitations", issuedLink: { invitationRef: "INV-1", token: "tok" } })} />) },
+  { name: "people & access — needs resolution", render: () => render(<PeopleAccessView {...peopleProps({ section: "resolution" })} />) },
+  { name: "people & access — former", render: () => render(<PeopleAccessView {...peopleProps({ section: "former" })} />) },
+  { name: "people & access — person detail", render: () => render(<PeopleAccessView {...peopleProps({ selected: { person: PERSON, workspaceOptions: [{ key: "field_workforce", label: "Field Workforce" }] } })} />) },
+  { name: "people & access — refusal", render: () => render(<PeopleAccessView {...peopleProps({ error: "This is the last management access in ABC Transport." })} />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {

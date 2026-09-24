@@ -39,13 +39,18 @@ describe("the real tree", () => {
     expect(Object.keys(KNOWN_DUPLICATE_SLOTS)).toEqual(["0157"]);
   });
 
-  it("numbers B23.1 above every slot in use in any lineage of this repository", () => {
+  it("numbers each checkpoint above every slot in use in any lineage of this repository", () => {
     // 0169 — the slot the B23.0 report suggested — is occupied by two different
     // migrations in other lineages (`0169_defect_resolution` in three,
     // `0169_print_audit` in a fourth). 0170 was the first free everywhere.
     expect(files).toContain("0170_organization_scoped_role_grants.sql");
     expect(files.filter(f => f.startsWith("0169_"))).toEqual([]);
-    expect(headSlot(files)).toBe("0170");
+    // B23.2: 0175. By the time this checkpoint allocated, `origin/main` had
+    // reached 0174 and 0170 itself had become a three-way collision across
+    // lineages (dispatch_role_types and driver_portfolio_events took it too).
+    // head+1 on this branch would have collided three times over.
+    expect(files).toContain("0175_organization_invitations.sql");
+    expect(headSlot(files)).toBe("0175");
   });
 
   it("keeps the reserved slots empty", () => {
@@ -57,10 +62,10 @@ describe("the real tree", () => {
 
 describe("the guard catches what it exists to catch", () => {
   it("fails a NEW duplicate, even one next to the tolerated old one", () => {
-    const withNewCollision = [...files, "0170_something_else_entirely.sql"];
+    const withNewCollision = [...files, "0175_something_else_entirely.sql"];
     const findings = auditMigrationSlots(withNewCollision);
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ kind: "duplicate_slot", slot: "0170" });
+    expect(findings[0]).toMatchObject({ kind: "duplicate_slot", slot: "0175" });
     expect(describeFinding(findings[0]!)).toContain("allocate the next free slot");
   });
 
@@ -96,8 +101,8 @@ describe("the guard catches what it exists to catch", () => {
   });
 
   it("accepts a correctly allocated next migration", () => {
-    expect(auditMigrationSlots([...files, "0171_the_next_one.sql"])).toEqual([]);
-    expect(headSlot([...files, "0171_the_next_one.sql"])).toBe("0171");
+    expect(auditMigrationSlots([...files, "0176_the_next_one.sql"])).toEqual([]);
+    expect(headSlot([...files, "0176_the_next_one.sql"])).toBe("0176");
   });
 
   it("gives every tolerated duplicate a reason that says something", () => {

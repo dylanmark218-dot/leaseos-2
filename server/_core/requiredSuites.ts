@@ -73,6 +73,12 @@ export const REQUIRED_SUITES: Readonly<Record<string, string>> = {
     "database: the bootstrap cannot mint cross-tenant authority, and a quarantined grant resolves into the actor's own organization",
   "server/migrationSlots.test.ts":
     "pure: a NEW duplicate migration slot fails, and the inherited 0157 allowance does not mask a collision elsewhere",
+
+  // --- B23.2: who belongs to an organization, and what they may do there ---
+  "server/peopleAccess.test.ts":
+    "pure: invitation state computed rather than stored, every acceptance refusal named without mentioning another company, a default workspace that can never become authority, and the last-administrator invariant",
+  "server/peopleAccess.db.test.ts":
+    "database, adversarial: the full People & Access matrix through appRouter.createCaller — invitation into the actor's own organization only, a forged organization ignored rather than obeyed, one identity joining two companies, accept-once, expiry, cancellation, per-employer offboarding, quarantine resolution, and the last administrator who cannot leave",
 };
 
 export type GateFinding =

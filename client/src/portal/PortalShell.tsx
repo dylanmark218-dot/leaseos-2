@@ -28,12 +28,13 @@ import { ExceptionsPanel } from "./panels/ExceptionsPanel";
 import { InboxPanel } from "./panels/InboxPanel";
 import { TimelinePanel } from "./panels/TimelinePanel";
 import { SetupPanel } from "./panels/SetupPanel";
+import { PeopleAccessPanel } from "./panels/PeopleAccessPanel";
 import { UniversalSearch } from "./UniversalSearch";
 import { SyncIndicator } from "./SyncIndicator";
 import { QuickCapture } from "./QuickCapture";
 import { SessionGate } from "@/session/SessionGate";
 
-export type PanelKey = "myday" | "exceptions" | "inbox" | "timeline" | "setup";
+export type PanelKey = "myday" | "exceptions" | "inbox" | "timeline" | "setup" | "people";
 
 const OFFICE_PORTALS = new Set<PortalKey>(["office_administration", "finance_billing", "management", "executive", "hr_workforce", "auditor_regulator"]);
 
@@ -136,8 +137,13 @@ function PortalShellBody({ initialPanel = "myday", displayName = null, workspace
 
       <main className="mx-auto max-w-6xl px-4 py-6">
         <div className="mb-4 flex gap-2 text-sm">
-          {(["myday", "exceptions", "inbox", "timeline", ...(OFFICE_PORTALS.has(portal) ? ["setup" as PanelKey] : [])] as PanelKey[]).map(p => (
-            <button key={p} onClick={() => setPanel(p)} className={`rounded-lg px-3 py-1 ${panel === p ? "bg-white shadow" : "text-[#5b6b82]"}`}>{p === "myday" ? "My Day" : p[0]!.toUpperCase() + p.slice(1)}</button>
+          {/* B23.2 — "People" only in the management workspace. The procedures
+              behind it refuse anyone without `roles.grant` regardless, so this
+              keeps a door from being drawn rather than being the lock. */}
+          {(["myday", "exceptions", "inbox", "timeline",
+             ...(OFFICE_PORTALS.has(portal) ? ["setup" as PanelKey] : []),
+             ...(portal === "management" ? ["people" as PanelKey] : [])] as PanelKey[]).map(p => (
+            <button key={p} onClick={() => setPanel(p)} className={`rounded-lg px-3 py-1 ${panel === p ? "bg-white shadow" : "text-[#5b6b82]"}`}>{p === "myday" ? "My Day" : p === "people" ? "People" : p[0]!.toUpperCase() + p.slice(1)}</button>
           ))}
         </div>
         {panel === "myday" && view && (OFFICE_PORTALS.has(portal) ? <MyDayPanel view={view} office={officeView} onGo={go} /> : <MyDayPanel view={view} onGo={go} />)}
@@ -145,6 +151,7 @@ function PortalShellBody({ initialPanel = "myday", displayName = null, workspace
         {panel === "inbox" && <InboxPanel items={(inbox.data?.items ?? []) as never} counts={inbox.data?.counts ?? {}} onGo={go} />}
         {panel === "timeline" && <TimelinePanel />}
         {panel === "setup" && OFFICE_PORTALS.has(portal) && <SetupPanel />}
+        {panel === "people" && portal === "management" && <PeopleAccessPanel />}
         {view && view.quickCapture.length > 0 && <QuickCapture actions={view.quickCapture} />}
       </main>
     </div>

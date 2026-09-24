@@ -38,6 +38,8 @@ import { router, sessionProcedure } from "./_core/trpc";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { ONE_YEAR_MS } from "@shared/const";
 import { safeRedirectPath } from "@shared/_core/redirect";
+import { acceptInvitationTransactionally } from "./db";
+import { digestToken } from "./_core/peopleAccess";
 import { listMembershipFacts, rememberDefaultWorkspace } from "./db";
 import type { RoleGrant } from "./_core/recordsAuthorization";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
@@ -219,6 +221,63 @@ export const sessionRouter = router({
         workspace: decision.workspace,
         landing: decision.landing,
         capabilities: context.availableWorkspaces.find(w => w.key === decision.workspace)?.capabilities ?? [],
+      };
+    }),
+  /**
+   * B23.2 — join an organization that invited you.
+   *
+   * This is the one People & Access act that cannot be a `roleProcedure`: the
+   * person accepting holds nothing in the organization they are joining, which
+   * is the entire point of an invitation. `sessionProcedure` is the gate built
+   * for exactly that case, and its procedure list is closed in code and pinned
+   * by the census, so adding one is a deliberate act rather than a default.
+   *
+   * The claim is the TOKEN plus the authenticated identity — never an email
+   * address. `GetUserInfoResponse` carries `email` with no verification flag,
+   * so LeaseOS cannot tell an address somebody proved from one they typed;
+   * matching on it would let anyone who knows a colleague's address take their
+   * place. The token is verified against a stored SHA-256 digest inside the
+   * transaction that creates the membership, so a cancel landing mid-flight
+   * loses and a second acceptance finds the row already accepted.
+   *
+   * ONE IDENTITY. Acceptance binds to `ctx.user.id`, which the session already
+   * resolved from the OAuth `openId`. Somebody who already works for another
+   * company gains a second membership on the same account — no second user row
+   * is created here, or anywhere but the OAuth upsert.
+   */
+  acceptInvitation: sessionProcedure("session.acceptInvitation")
+    .input(z.object({ token: z.string().min(16).max(200) }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.user?.id) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Sign in first, then open the invitation link again" });
+      }
+      const now = new Date();
+      const result = await acceptInvitationTransactionally({
+        tokenDigest: digestToken(input.token),
+        acceptingUserId: ctx.user.id,
+        membershipRef: `MEM-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+        now,
+      });
+      if (!result.ok) {
+        // Each refusal is a sentence somebody can act on, and none of them
+        // says anything about another organization.
+        const message =
+          result.reason === "expired"
+            ? "That invitation has expired — ask for a new one"
+            : result.reason === "already_member"
+              ? "You are already a member of that organization"
+              : result.reason === "not_pending"
+                ? "That invitation has already been used or was cancelled"
+                : "That invitation is not valid";
+        throw new TRPCError({
+          code: result.reason === "already_member" ? "CONFLICT" : "NOT_FOUND",
+          message,
+        });
+      }
+      return {
+        organization: result.orgRef,
+        roles: [...result.roles].sort(),
+        membershipRef: result.membershipRef,
       };
     }),
 });

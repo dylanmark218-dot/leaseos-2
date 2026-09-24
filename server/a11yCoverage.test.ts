@@ -19,6 +19,7 @@ const NOT_A_SURFACE: Record<string, string> = {
   "client/src/widgets/WidgetContentRenderer.tsx": "renders inside WidgetTileShell, which is a surface; it has no standalone accessible root",
   "client/src/portal/panels/SetupPanel.tsx": "every panel is a live tRPC caller; mounting it here would need a client harness, and the four office-portal screens it drives are covered through CommercialOfficeView",
   "client/src/portal/panels/TimelinePanel.tsx": "a live tRPC caller, as above",
+  "client/src/portal/panels/PeopleAccessPanel.tsx": "a live tRPC caller; the screen it renders, PeopleAccessView, is a surface in the suite at every section and in person detail",
   "client/src/portal/panels/MyDayPanel.tsx": "presentational, but reached only through PortalShell's composed view model; covered when the shell is harnessed",
   "client/src/portal/panels/ExceptionsPanel.tsx": "presentational, reached through PortalShell's composed view model, as MyDayPanel",
   "client/src/portal/panels/InboxPanel.tsx": "presentational, reached through PortalShell's composed view model, as MyDayPanel",

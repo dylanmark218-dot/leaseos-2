@@ -88,7 +88,7 @@ const forbidden = (message: string) =>
  * external_accountant) are deliberately absent, as they were before: they are
  * granted by whatever process owns the books, not from here.
  */
-const GRANTABLE_ROLES = [
+export const GRANTABLE_ROLES = [
   "driver", "dispatcher", "mechanic", "shop_lead", "safety",
   "office", "management", "hr", "legal", "auditor",
 ] as const;

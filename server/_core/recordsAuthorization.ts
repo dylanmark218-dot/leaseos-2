@@ -3037,6 +3037,29 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "workforce.probationDecide": "hr.probation.decide",
   "workforce.offboardingOpen": "hr.offboarding.manage",
   "workforce.offboardingRevokeAccess": "hr.access.revoke",
+
+  /* B23.2 — People & Access.
+   *
+   * Every one of these maps to `roles.grant`, which `authorize()` gives to
+   * `management` alone and which is already in SENSITIVE_PERMISSIONS, so the
+   * audit row is written before the act and a failure to write it refuses.
+   *
+   * No new permission was introduced, deliberately. `personnel.read` would
+   * have been the obvious home for the read surfaces, but it reaches
+   * dispatcher, office, HR and payroll_admin — and "who holds what access" is
+   * an access-administration question rather than an HR-record one. Starting
+   * narrow leaves the decision to widen it with an owner; starting wide is not
+   * reversible in practice. */
+  "people.roleCatalogue": "roles.grant",
+  "people.list": "roles.grant",
+  "people.detail": "roles.grant",
+  "people.setRoles": "roles.grant",
+  "people.setDefaultWorkspace": "roles.grant",
+  "people.removeFromOrganization": "roles.grant",
+  "people.invitations.list": "roles.grant",
+  "people.invitations.create": "roles.grant",
+  "people.invitations.cancel": "roles.grant",
+  "people.accessResolution.list": "roles.grant",
   "workforce.offboardingStatus": "hr.offboarding.manage",
   "workforce.offboardingClose": "hr.offboarding.manage",
 
@@ -3113,6 +3136,19 @@ export const SESSION_PROCEDURE_PERMISSIONS = {
   "session.context": "portal.compose_own",
   "session.selectOrganization": "portal.compose_own",
   "session.selectWorkspace": "portal.compose_own",
+  /*
+   * B23.2 — accepting an invitation is the one People & Access act that CANNOT
+   * be a `roleProcedure`: the person accepting holds nothing in the
+   * organization they are joining, which is the entire point. That is the case
+   * `sessionProcedure` was built for in B23.0 — "the one gate an account
+   * holding nothing can pass" — so it belongs here, on a list that is closed in
+   * code and pinned by the census rather than open by default.
+   *
+   * It is not a hole: the gate still requires an authenticated identity, and
+   * the invitation token is verified against a stored digest inside the
+   * transaction that creates the membership.
+   */
+  "session.acceptInvitation": "portal.compose_own",
 } as const satisfies Record<string, Permission>;
 
 export type SessionProcedureName = keyof typeof SESSION_PROCEDURE_PERMISSIONS;

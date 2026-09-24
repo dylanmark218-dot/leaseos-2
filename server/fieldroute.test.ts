@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import { getDb, grantUserRole, listActiveUserRoleNames } from "./db";
-import { jobs, operators, units } from "../drizzle/schema";
+import { jobs, operators, units, users } from "../drizzle/schema";
 
 // P4.1: creates that name a job or unit must name one the caller may see. These were `jobId: FIXTURE_JOB_ID` / `unitId: FIXTURE_UNIT_ID`,
 // placeholders no row necessarily had; the suite now creates a real, unowned job and unit (the single tenant's).
@@ -23,13 +23,33 @@ let FIXTURE_OPERATOR_ID = 1;
  * The grant is the fix rather than loosening the gate — these tests failing
  * against a role-less caller was the gate proving it works.
  */
-const TEST_USER_ID = 1;
+/**
+ * B23.2 — the caller is a user this suite CREATES, not user id 1.
+ *
+ * It was `const TEST_USER_ID = 1`, which held only while nothing gave user 1 an
+ * organization membership. B23.2 added the first code that creates memberships,
+ * and its adversarial suite creates users — on an empty database the first of
+ * them is id 1. `resolveActingScope` then answered with that organization
+ * instead of the historical single tenant, and every fixture row here (job,
+ * unit, operator, evidence: all with no owner) became invisible. Seven tests
+ * failed with "Job N not found", which reads exactly like an authorization bug
+ * and was a fixture naming an identity it did not own.
+ *
+ * Same rule as B23.1B applied to units and operators: create it, keep the id.
+ */
+let TEST_USER_ID = 0;
 
 beforeAll(async () => {
   if (!process.env.DATABASE_URL) return;
   const db = await getDb();
   if (db) {
     const tag = Math.random().toString(36).slice(2, 8).toUpperCase();
+    // The caller's own identity, with an openId of its own so the OAuth upsert
+    // could never collide with it.
+    TEST_USER_ID = (await db.insert(users).values({
+      openId: `fieldroute-test-${tag}`, name: "FieldRoute Test",
+      email: `fieldroute-${tag}@example.test`, loginMethod: "test",
+    } as never))[0].insertId;
     FIXTURE_JOB_ID = (await db.insert(jobs).values({ jobCode: `JOB-FR-${tag}`, type: "Hydrovac", customer: "Fixture Energy", location: "Somewhere", status: "dispatched" } as never))[0].insertId;
     FIXTURE_UNIT_ID = (await db.insert(units).values({ unitNumber: `U-FR-${tag}`, vehicleType: "hydrovac" } as never))[0].insertId;
     FIXTURE_OPERATOR_ID = (await db.insert(operators).values({ name: `Fixture Operator ${tag}`, licenseNumber: `LIC-FR-${tag}` } as never))[0].insertId;
@@ -69,7 +89,7 @@ beforeAll(async () => {
 function createContext(): TrpcContext {
   return {
     user: {
-      id: 1,
+      id: TEST_USER_ID,
       openId: "fieldroute-test-user",
       name: "FieldRoute Test",
       email: "test@fieldroute.local",

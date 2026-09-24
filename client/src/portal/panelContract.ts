@@ -42,6 +42,18 @@ export const PANEL_CONTRACTS: readonly PanelContract[] = [
   { file: "panels/InboxPanel.tsx", procedures: [], portals: "every_portal" },
   { file: "panels/TimelinePanel.tsx", procedures: ["surfaces.timeline"], portals: "every_portal" },
   {
+    file: "panels/PeopleAccessPanel.tsx",
+    procedures: [
+      "people.list", "people.roleCatalogue", "people.detail", "people.setRoles",
+      "people.setDefaultWorkspace", "people.removeFromOrganization",
+      "people.invitations.list", "people.invitations.create", "people.invitations.cancel",
+      "people.accessResolution.list", "records.roles.resolveLegacy",
+    ],
+    portals: ["management"],
+    reason:
+      "B23.2 — who belongs to this organization and what they may do here. `roles.grant` is held by `management` alone and every procedure re-derives it, so this restriction is about not showing a screen that would refuse; it is not the boundary.",
+  },
+  {
     file: "panels/SetupPanel.tsx",
     procedures: [
       "commercialSetup.profileGet", "commercialSetup.profileSet", "commercialSetup.definitionList",

@@ -14,6 +14,7 @@ import { storageKeyInput } from "./_core/storageKey";
 const REFUSED = z.undefined({ message: "Trust-bearing value refused: this state is established by its own review, verification or transition procedure, never by a create or capture." }).optional();
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
+import { peopleRouter } from "./peopleRouter";
 import { recordsRouter } from "./recordsRouter";
 import {
   contractorRouter,
@@ -340,6 +341,8 @@ export const appRouter = router({
   assistantAsk: assistantAskRouter,
   agent: agentRouter,
   hos: hosRouter,
+  // B23.2 — who belongs to this organization and what they may do here.
+  people: peopleRouter,
   records: recordsRouter,
   payroll: payrollRouter,
   contractors: contractorRouter,

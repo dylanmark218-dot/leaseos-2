@@ -74,6 +74,28 @@ INSERT IGNORE INTO operators (id, name, licenseNumber) VALUES
  (99,'SQ Op 99','SQ-LIC-99'),(221,'SQ Op 221','SQ-LIC-221');
 INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId)
  SELECT 'ORG-SQUATTER','operator',id,1 FROM operators WHERE id IN (1,2,3,7,9,47,99,221);
+
+-- B23.2 — and the low USER ids, with memberships.
+--
+-- This is the same defect pointed at identity, and it bit immediately:
+-- `fieldroute.test.ts` said `const TEST_USER_ID = 1`, which held only while
+-- nothing gave user 1 an organization membership. B23.2 added the first code
+-- that creates memberships and a suite that creates users; on an empty database
+-- the first of those users is id 1. `resolveActingScope` then answered with that
+-- organization instead of the historical single tenant, and every unowned
+-- fixture row in fieldroute became invisible — seven failures that read exactly
+-- like an authorization bug.
+--
+-- A member of the squatter is what a test hardcoding a low user id will collide
+-- with, so that is what the squatter is.
+INSERT IGNORE INTO users (id, openId, name, email, loginMethod) VALUES
+ (1,'sq-openid-1','SQ User 1','sq1@example.test','test'),
+ (2,'sq-openid-2','SQ User 2','sq2@example.test','test'),
+ (3,'sq-openid-3','SQ User 3','sq3@example.test','test');
+INSERT INTO organizationMemberships
+ (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId)
+ SELECT CONCAT('MEM-SQ-', id), 'ORG-SQUATTER', id, 'employee', 'active', '2020-01-01', 1
+ FROM users WHERE id IN (1,2,3);
 SQL
 claimed=$(mysqlc -N -B "$scratch" -e "SELECT COUNT(*) FROM coreRecordOwnership;")
 echo "  $claimed records claimed by ORG-SQUATTER"
@@ -94,7 +116,7 @@ else
   echo "the tenant scope refusing a record that belongs to somebody else — the" >&2
   echo "refusal is correct, and the fixture is what is wrong." >&2
   echo "" >&2
-  echo "Fix the test, not the scope: create the unit/operator/job it needs and" >&2
+  echo "Fix the test, not the scope: create the unit/operator/job/USER it needs and" >&2
   echo "use the returned id. See the note in server/enforcementApi.test.ts." >&2
   echo "" >&2
   echo "The scratch database $scratch is left in place for inspection." >&2

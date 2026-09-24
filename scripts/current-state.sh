@@ -76,9 +76,11 @@ organization that granted them — with the migration that scoped them verified
 against a real MariaDB (pre-state, legacy rows of every shape, apply, assert),
 a read-only diagnostic that counts the quarantine before and after deployment,
 a bootstrap that can no longer mint cross-tenant authority, a resolution
-procedure for the grants the migration refused to guess at, and a CI gate that
+procedure for the grants the migration refused to guess at, a CI gate that
 now proves which suites ran from vitest's own report rather than by grepping
-coloured output: a role issued by one company authorizes
+coloured output, and People & Access — the first surface that creates a
+membership at all, through an invitation claimed with a one-time token and an
+authenticated identity rather than an unverified email: a role issued by one company authorizes
 nothing in another, capabilities and workspaces are computed from the acting
 organization's grants rather than filtered afterwards, branch grants name
 their organization explicitly because branch identifiers have no owner, grant
