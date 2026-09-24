@@ -288,8 +288,8 @@ marked unverified. Nothing hard-codes a province into an enforcement path.
    `claude/driver-portfolio-*` (`0175-0177`), and `claude/eld-compliance-intelligence-ramlrd`
    (`0179_eld_event_ledger`) each touch governance-adjacent ground. Their branches were not read
    beyond migration names; coordinate before building G9 or record-integrity rules for documents.
-7. **`users.role = admin` / `adminProcedure`.** A universal escape hatch by shape. Governance must not
-   consult it; it should be inventoried and either mapped to a `Permission` or retired.
+7. **`users.role = admin` / `adminProcedure`.** Three uses, all bootstrap or owner notification
+   (I14). Governance must not consult it; map each use to a `Permission` or keep it confined to bootstrap.
 
 ---
 
@@ -621,7 +621,7 @@ class can be assigned; nothing executes deletion.
 | Training certificates | `academyQualifications`, `academyCertificates`, `academyCertificateSignatures` | learner + employer signatures | academy/HR/safety | inspector requests (`0122`) | trigger-guarded retention chain (`0121`) | — | `academyAuditEvents` | none found |
 | Signatures | `fieldTicketSignatures`, `academyCertificateSignatures`, `commercialApprovalSignatures`, `signatureAudits` | device/portal/drawn | per record permission | field-ticket signer is the customer | policy row only | PDF render | `externalAccessLog` (portal) | L9 e-signature evidence policy DRAFT-PK |
 | GPS / location history | `tripBreadcrumbs`, `zoneEvents`, `telemetrySnapshots`, `locationIdentities` | device capture; telematics ingest | dispatch/office | customer sees `OperationalState` only, no coordinates | none executed; device clock in `retentionPolicies.deviceRetentionDays` | — | zone confirms are proposed-then-confirmed | **Monitoring notice engine unwired (G7)**; L7 GPS notice DRAFT-PK |
-| Photos / video | `evidenceRecords` (storage keys), `videoAccessLog` | device capture | per record | no | policy row; legal hold | audit packages | `videoAccessLog`, `evidenceAccessEvents` | uploads trust client MIME (roadmap claim, not re-verified here) |
+| Photos / video | `evidenceRecords` (storage keys), `videoAccessLog` | device capture | per record | no | policy row; legal hold | audit packages | `videoAccessLog`, `evidenceAccessEvents` | uploads trust the client's `mimeType` string; no byte sniffing (verified, I18) |
 | Scanned paperwork / OCR | `documentExtractions`, `documentFingerprints`, `enforcementDocumentExtractions` | assistant / enforcement scan | proposer + committer | no | none | — | `assistantCommitReceipts` | — |
 | Employment records | `organizationWorkers`, `applicantScreenings`, `leaveRequests`, `shiftPosts`, `employeePayrollProfiles` | HR | HR/payroll/management | no; never attachable to messages | none | `payroll.export` | `authorizationDecisions` | D&A results not stored anywhere (register P8.5) |
 | HOS | `hosAttestations`, `complianceDocuments(scanned_paper)`, `hosRuleLimitHistory` | attestation; scan | dispatch/safety | roadside DTO (`records.roadside.open`) | policy row | audit packages | supersede-only | `dailyLogs` has no writer |
@@ -766,10 +766,12 @@ Each checkpoint is one PR, passes `scripts/ci-gate.sh`, and regenerates `LEASEOS
 | I11 | `insuranceRequirements` hard-deleted and rewritten on update | evidence preservation | `server/insuranceRouter.ts` |
 | I12 | "Moderation is a separate authority" in code comments, but no such authority, report path, or rate limit exists | community standards, human review | `messageBoardRouter.ts:544,573` |
 | I13 | `REMAINING_BUILD_REGISTER.md` P4.1 says tenant isolation is DONE; `LEASEOS_CURRENT_STATE.md` says it is NOT a property; the code supports the latter | transparency (documentation truth) | §1.3 |
-| I14 | `users.role = admin` + `adminProcedure` is an unlogged coarse gate beside the ledgered one | administrative override not a universal escape hatch | `trpc.ts:30-44` |
+| I14 | `users.role = admin` + `adminProcedure` is a coarse gate beside the ledgered one. Verified narrow: three uses — `records.bootstrapManagement` (writes `roleBootstrapEvents` through `bootstrapManagementRole`), `records.bootstrapStatus`, `system.notifyOwner`. Not a universal escape hatch today, but it writes no `authorizationDecisions` row | administrative override auditable | `trpc.ts:30-44`, `recordsRouter.ts:984-1004`, `systemRouter.ts:16` |
 | I15 | Two migrations numbered `0157`; no duplicate-prefix gate | evidence/versioning discipline | `drizzle/`, roadmap |
 | I16 | HOS `dailyLogs` has no production writer; the "completed HOS record" the conformance test would protect does not exist as a mutable record yet (attestations and scans are supersede-only) | truthful records — not a violation, but a test with no subject | §1.8 |
 | I17 | LLM calls go to a vendor default host and transcripts are persisted with no retention class or disclosure | privacy, user awareness | `llm.ts`, `AI_RUNTIME_TERMINOLOGY.md` door 1 |
+| I18 | **Verified:** the evidence upload takes `mimeType` as a client string and passes it straight to `storagePut`; no byte sniffing or magic-number check exists anywhere under `server/` | evidence integrity, security | `routers.ts:409-436` |
+| I19 | **Verified:** `tripStops.create` and `.update` spread `...input` into the write and never record `ctx.user.id`; `tripStops` has no actor column on `main`. Provenance for trip stops is on an open branch (`claude/migration-0169-reconciliation`, `0179_trip_stop_provenance.sql`), not merged | truthful records, human accountability | `routers.ts:568-612`, `schema.ts:606` |
 
 None of these were changed by this survey.
 
