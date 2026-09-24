@@ -4,7 +4,9 @@ One ruling gates every checkpoint in `DOCUMENT_CONTROL_NUMBERING_DESIGN_2026-09-
 same wall the compliance initiative hit, and the same shape of answer is available. Nothing here
 argues the moratorium away; it puts the two coherent rulings side by side.
 
-Measured at `929f721` (this branch) and `0cd4817` (`origin/main`).
+Measured at `929f721` (the survey SHA) and `0cd4817` (`origin/main` at the time). Since then `main` has restored the canonical plan and its guard (`server/spineWiringPlan.test.ts`, PR #13) and completed SPINE item 1 (PR #10); all thirteen spine engines remain declared unwired, so nothing below changes.
+
+**Ruling recorded 2026-09-24 — see the last section.**
 
 ---
 
@@ -102,3 +104,16 @@ D-04 to D-09 belong to Checkpoints 2, 5, 6 and 9 and are decided when those star
   that time.
 
 No implementation starts on either ruling until the design PR is reviewed.
+
+---
+
+## Ruling — 2026-09-24
+
+| ID | Ruling | Bound |
+|---|---|---|
+| **D-00** | **B — carve out** | Checkpoints 1, 2, 6 permitted in that order; 6 counts as SPINE item 2; 3, 4, 5, 7, 8, 9 deferred until the spine is wired; every new module reached or declared; AI worker-boundary ruling kept separate |
+| **D-01** | yearly | `resetPeriod='yearly'` default; per-series override allowed |
+| **D-02** | yes, optional per class | `archivalLedgerId` exists from Checkpoint 1; `archival_sequence_only` definitions draw from the `DOC` series |
+| **D-03** | company-wide | `branch=''`; branch scoping stays a later policy switch on the existing column |
+
+Recorded in the design's §27. The design was rebased onto `main` `6f52b57` the same day with its citations re-verified. Next: the design PR is reviewed; Checkpoint 1 then starts as its own PR taking the next free migration slot at that time (0175 as of this writing; check the collision register and every open branch first).
