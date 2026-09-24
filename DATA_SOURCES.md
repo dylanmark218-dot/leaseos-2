@@ -1,22 +1,22 @@
 # LeaseOS External Data Source Registry
 
-**Verification completed 2026-09-09.** Every field below was checked against the
-publisher and is now seeded into `externalDataSources` by
-`seedExternalDataSources()`. This document describes what the runtime enforces;
-it is not the enforcement itself.
+**Verification completed 2026-09-09; Canadian 511 tranche checked 2026-09-24.**
+Every field below was checked against the publisher and is now seeded into
+`externalDataSources` by `seedExternalDataSources()`. This document describes
+what the runtime enforces; it is not the enforcement itself.
 
-## Eight verified, thirteen not
+## Ten verified, eighteen not
 
 | | Count |
 |---|---|
-| Verified — usable per their licence | **8** |
-| Unverified — inspection only | **3** |
-| Total | **11** |
+| Verified — usable per their licence | **10** |
+| Unverified — inspection only | **18** |
+| Total | **28** |
 
 > **Correction.** The research summary stated "nine of eleven are clean" while
 > separately flagging three as unresolved. Eleven minus three is eight. Seeding
 > nine would have marked a blocked source usable. `externalSourceSeeds.test.ts`
-> now holds the counts at 8 / 3 / 11.
+> holds the counts — now 10 / 18 / 28 after the 511 tranche below.
 
 ## Verified sources
 
@@ -30,6 +30,8 @@ it is not the enforcement itself.
 | `drivebc_open511` | BC MoTI | OGL – BC | yes | yes | no |
 | `msc_geomet` | ECCC | ECCC End-use Licence | yes | yes | no |
 | `cwfis` | NRCan CFS | OGL – Canada | yes | yes | no |
+| `on511` | Ontario MTO | OGL – Ontario | yes | yes | no |
+| `qc_mtmd_roadworks` | Québec MTMD | CC BY 4.0 | yes | yes | no |
 
 ## Unverified — blocked for everything but inspection
 
@@ -38,6 +40,11 @@ it is not the enforcement itself.
 | `aer_st37` | AER Terms of Use, not an open licence. Commercial use and redistribution **unknown**. |
 | `aer_st102` | Same. |
 | `ab511` | Developer terms via account registration. No open licence stated. Commercial use and redistribution **unknown**. |
+| `mb511` | Manitoba 511. Same platform as Alberta: key and throttle documented, no licence on the Developer Resources page. **Unknown**. |
+| `nb511` | New Brunswick 511. Same. **Unknown**. |
+| `yt511` | 511 Yukon. Same. Publishes weight and bridge restrictions, so its answer matters most. **Unknown**. |
+| `nl511` | 511 Newfoundland and Labrador. Same. **Unknown**. |
+| `sk_highway_hotline` | Saskatchewan Highway Hotline. No developer API published; the website is not scraped. Access request drafted in `docs/P6_DATA_PERMISSION_REQUESTS.md` §4. |
 | `aer_st107` | Well and facility licence status. AER Terms of Use, not an open licence. The directory stores the WM approval number and links out; mirroring is **unknown** pending the written answer requested in `docs/P6_DATA_PERMISSION_REQUESTS.md` §2. |
 | `sk_iris` | Believed to be published under a standard unrestricted use licence, and believed is not recorded. Confirmation requested (§3); **unknown** until it arrives. |
 | `mb_petroleum` | Same question, second province (§3). **Unknown**. |
@@ -86,10 +93,47 @@ Rendered wherever the data appears:
 - Contains information licensed under the Open Government Licence – Canada
 - Contains information licensed under the Open Government Licence – Alberta
 - Contains information licensed under the Open Government Licence – British Columbia
+- Contains information licensed under the Open Government Licence – Ontario
+- Source : ministère des Transports et de la Mobilité durable du Québec, via Données Québec, sous licence CC BY 4.0 — données normalisées par LeaseOS
 - Contains data provided by Environment and Climate Change Canada
 
 `collectAttributions()` deduplicates these and **names any source missing
 required attribution** rather than skipping it.
+
+## Canadian road-information providers
+
+Read from each publisher's developer page on 2026-09-24. The adapters are in
+`server/_core/transport/`: the collector, fetcher and ingester they plug into
+already existed. **Needs a key** is about access. **Licence** is about what may
+be done with the answer. They are separate questions, and only the second one
+opens the gate.
+
+| Province | Key | Needs a key | Licence | Gate | Adapter |
+|---|---|---|---|---|---|
+| Alberta | `ab511` | yes — `AB_511_API_KEY` | none published | **rights review** | 511 platform |
+| British Columbia | `drivebc_open511` | no | OGL – BC | open | Open511 |
+| Saskatchewan | `sk_highway_hotline` | — | none published | **no API** | none |
+| Manitoba | `mb511` | yes — `MB_511_API_KEY` | none published | **rights review** | 511 platform |
+| Ontario | `on511` | **yes** — `ON_511_API_KEY` | OGL – Ontario | open once the key is set | 511 platform |
+| Québec | `qc_mtmd_roadworks` | no | CC BY 4.0 | open | MTMD WFS |
+| New Brunswick | `nb511` | yes — `NB_511_API_KEY` | none published | **rights review** | 511 platform |
+| Newfoundland and Labrador | `nl511` | yes — `NL_511_API_KEY` | none published | **rights review** | 511 platform |
+| Yukon | `yt511` | yes — `YT_511_API_KEY` | none published | **rights review** | 511 platform |
+
+- **Ontario needs a key.** Its developer page says "Requires a developer key"
+  and "Ten calls every 60 seconds". Its Developer Resources page puts the data
+  under OGL – Ontario and names commercial vendors, which is why it clears
+  where Alberta does not. Ontario calls its 511 logo "mandatory", but OGL –
+  Ontario excludes logos from the grant, so no logo is shown until Ontario says
+  in writing where it may appear. The licence attribution line is shown instead.
+- **Six provinces, one platform.** AB, ON, MB, NB, YT and NL all document
+  `GET /api/v2/get/event` with the same fields, so they share one parser.
+- **DriveBC caps a page at 500.** It does not say when it has cut a listing
+  short, so a response that fills the page is refused rather than treated as
+  the whole listing. Treating it as whole would withdraw live events.
+- **Québec's roadworks carry clearances** ("Hauteur libre : 4,3 mètres"). These
+  are shown in the headline and typed as restrictions. They stay advisory.
+- Nova Scotia, PEI, the Northwest Territories and Nunavut have not been surveyed yet.
 
 ## Software components — a separate registry
 
