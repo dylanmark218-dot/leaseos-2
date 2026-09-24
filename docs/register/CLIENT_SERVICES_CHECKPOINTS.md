@@ -104,3 +104,31 @@ hash check; every list, download and ticket view is on the ledger with the link 
 
 **Unresolved risks:** `jobs.eta` is a free-text column today; the DTO passes it through only while live tracking is on.
 Position comes from trip breadcrumbs only (no telematics last-known table exists).
+
+## CP4 — tracking UI (`/t/:token`)
+
+**Files:** `client/src/tracking/trackingClient.ts` (token from the path, in memory, sent as `x-tracking-token`),
+`trackingViewModels.ts` (pure: tone, timeline rows, location line, load rows, ticket view with one labelled figure per
+stage, refusal wording), `TrackingView.tsx` (presentational, phone-first), `TrackingPage.tsx` (container: resolves the
+link and fetches only what it permits), `trackingFixtures.ts`; route `/t/:token` in `client/src/App.tsx`.
+
+**Layout:** LeaseOS · Job #… · status chip with its basis · progress timeline · Driver/Unit · ETA/Location (stale
+named in the headline) · Loads (n total / completed / active, each with ticket and destination) · Documents (download
+buttons named by the record's own number) · Open Service Ticket (lines, then invoice / finalized / estimate figures,
+each labelled; "Review ticket" only when the state allows it).
+
+**Tests added:** `client/src/tracking/TrackingView.dom.test.tsx` (7: every state rendered; stale never shown as live;
+estimate vs finalized vs invoice; identity flags hide the unit and operator; refusal wording never names a job;
+download callback and failure alert; loading status), seven tracking surfaces in `client/src/a11y/a11y.dom.test.tsx`
+(WCAG A/AA rules at three widths), `server/trackingViewModels.test.ts` (6). `server/a11yCoverage.test.ts` names the
+container. No migration, no API change.
+
+**Test results:** dom 7/7, axe 21/21 new cases, view-models 6/6, coverage / client-truth / cross-layer guards green;
+`tsc` and test-file typecheck clean.
+
+**Decisions:** the page decides nothing — every visibility choice arrives from the server in the DTO; the "Review
+ticket" button is wired to a placeholder until CP6 lands the actions. No QR renderer is added (none exists in the
+tree); the URL is the payload.
+
+**Unresolved risks:** no browser end-to-end run exists in this container (the register's standing gap); the axe
+rules that need a renderer (contrast, target size) are reported as not evaluated, as for every other screen.

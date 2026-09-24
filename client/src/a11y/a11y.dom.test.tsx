@@ -20,6 +20,8 @@ import type { RoleActor } from "../../../server/_core/roleActor";
 import { demonstration, fromQuery } from "../showcase/panelSource";
 import { LoginView } from "../pages/LoginView";
 import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser } from "../portal/PortalChooser";
+import { TrackingView } from "../tracking/TrackingView";
+import { fixtureLoaded, fixtureStatus, fixtureTicket } from "../tracking/trackingFixtures";
 
 afterEach(cleanup);
 
@@ -180,6 +182,15 @@ const surfaces = [
   { name: "workspace chooser — declined default and link", render: () => render(<PortalChooser options={a11yPortals} rejectedDefault="executive" rejectedRequest="executive" onChoose={() => {}} />) },
   { name: "no workspace available", render: () => render(<NoPortalAvailable notReached={a11yPortals} onSignOut={() => {}} />) },
   { name: "organization selection required", render: () => render(<OrganizationSelectionRequired detail="member of 2 organizations" />) },
+  // 0175 — the customer's tracking page, read on a phone at a lease and on a desktop in an office.
+  // The stale-position and refused states are run separately: the alert and the emphasis only exist there.
+  { name: "tracking — job in progress", render: () => render(<TrackingView state={fixtureLoaded()} />) },
+  { name: "tracking — stale position, live ended", render: () => render(<TrackingView state={fixtureLoaded({ status: fixtureStatus({ live: { available: false, reason: "live tracking ended 24 h after completion", until: null }, location: { mode: "live", position: { latitude: 53.12, longitude: -116.65, precision: "approximate" }, recordedAt: null, ageMinutes: 60, stale: true, note: "stale" } }) })} />) },
+  { name: "tracking — finalized and invoiced ticket", render: () => render(<TrackingView state={fixtureLoaded({ tickets: [fixtureTicket({ status: "INVOICED", finalized: { totalCents: 101_750, at: "2026-09-24T14:00:00Z", label: "Finalized ticket total, before taxes" }, invoiced: { invoiceNumber: "INV-2026-000009", status: "sent", subtotalCents: 101_750, taxCents: 5_088, totalCents: 106_838 }, actions: { acknowledge: false, approve: false, dispute: false, comment: false, sign: false } })] })} />) },
+  { name: "tracking — nothing released, no loads", render: () => render(<TrackingView state={fixtureLoaded({ loads: { total: 0, completed: 0, active: 0, items: [] }, documents: [], tickets: null })} />) },
+  { name: "tracking — refused", render: () => render(<TrackingView state={{ kind: "refused", message: "This tracking link has been revoked" }} />) },
+  { name: "tracking — loading", render: () => render(<TrackingView state={{ kind: "loading" }} />) },
+  { name: "tracking — download failed", render: () => render(<TrackingView state={fixtureLoaded()} error="Stored document does not match its recorded hash — not served" />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {

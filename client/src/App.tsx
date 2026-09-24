@@ -33,6 +33,7 @@ import AssistantCalibration from "./pages/AssistantCalibration";
 import TripOperationsWorkspace from "./showcase/TripOperationsWorkspace";
 import TrainingAcademy from "./pages/TrainingAcademy";
 import DispatchJobDetail from "./dispatch/DispatchJobDetail";
+import { TrackingPage } from "./tracking/TrackingPage";
 
 function DashboardRoute({ children }: { children: ReactNode }) {
   return <DashboardLayout>{children}</DashboardLayout>;
@@ -50,6 +51,8 @@ function Router() {
       <Route path="/portal/:portal/*?" component={() => <PortalShell />} />
       {/* v21.13 — the customer's portal, on external procedures only. */}
       <Route path="/customer" component={() => <CustomerPortal />} />
+      {/* 0175 — the one-time tracking link: no session, no account; the token in the path is the whole credential. */}
+      <Route path="/t/:token" component={() => <TrackingPage />} />
       <Route path="/hos-verification" component={() => <HosVerificationConsole />} />
       <Route path="/widgets" component={() => <WidgetBoardPage />} />
       <Route path="/vendor" component={() => <VendorFacilityPortal />} />
