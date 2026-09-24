@@ -16,6 +16,11 @@ itself more authority.
 repository name disagree, the repository name wins. Every symbol cited below exists at `6f52b57` or
 on the named branch, unless its row says **proposed**.
 
+**Status: approved with conditions, 2026-09-24.** The owner's rulings R-1 … R-8 and the revised
+checkpoint order are recorded in §13. Where §13 differs from the text above (notably the checkpoint
+sequence in §9), §13 governs. The survey text above is kept as written. AIL-0 evidence:
+`docs/register/AIL_0_SAFETY_CHARACTERIZATION.md`.
+
 ---
 
 ## 0. Answer first
@@ -640,3 +645,147 @@ it is not an engine) and nothing else.
 | Wire any model to any tool | explicitly out of scope, and SPINE-blocked |
 | Verify the legal and regulatory statements in the request (Alberta PIPA, PIPEDA, OHS, Bill C-27) | outside a repository survey. Any rule derived from them goes through the layer-B ledger with a named reviewer, and the commercial terms go to counsel, as the request says. |
 | Rename or touch `SPINE_WIRING_PLAN.md` | it is guarded byte for byte by `server/spineWiringPlan.test.ts` |
+
+---
+
+## 13. Owner rulings (2026-09-24)
+
+The design was approved with conditions. The rulings are recorded here as given. Where they
+depend on repository facts, the reconciliation follows each one.
+
+### R-1 — AI memory
+
+**Keep "AI memory intentionally unsupported."** LeaseOS learns only through explicit, persisted,
+governed records: organization terminology and aliases, verified corrections, approved
+preferences, learning candidates, skill candidates and curated knowledge. Each has provenance,
+tenant ownership and lifecycle states. The UI may call this "memory". The architecture does not,
+and the concept is not renamed to make it look as if memory exists.
+
+### R-2 — Tenant ownership of learning
+
+**Mandatory.** Every tenant-generated learning candidate is bound to the organization derived
+server-side from authenticated acting scope. An organization id from the model, from retrieved
+content, from uploaded documents or from a request body is never trusted when acting scope exists.
+**A global candidate is not a null tenant.** Global promotion is a separate, explicit governance
+operation.
+
+### R-3 — Tools and capabilities
+
+**Before skills.** There is one final authority system:
+
+```
+SKILL → allowed registered tool IDs → tool requests capability → capability registry / action gateway
+      → authorization → safety ceiling → approval requirements → domain write
+```
+
+A skill does not assign its own permissions or risk. No third allowlist that can disagree with the
+gateway.
+
+### R-4 — Constitution and the moratorium
+
+The Constitution belongs in the existing trust/governance architecture.
+
+**Moratorium, narrowly relaxed** for work that only:
+- documents AI governance;
+- adds tests;
+- adds restrictive safety rules;
+- adds the schemas and data structures governed learning needs;
+- records provenance;
+- enforces tenant isolation;
+- reduces existing AI authority.
+
+**Still fully in force** against:
+- production LLM or tool wiring;
+- autonomous promotion of skills or rules;
+- autonomous changes to policy, prompts or the Constitution;
+- AI-controlled permission changes;
+- provider activation;
+- unrestricted production self-learning;
+- model self-deployment.
+
+Nothing in the ruling connects the unwired model/provider layer to operational capabilities.
+
+### R-5 — Safety-floor extensions
+
+**Allowed now when they only narrow AI authority.** This covers `NEVER_AUTOMATIC`,
+`NEVER_AUTONOMOUS`, `FORBIDDEN_AI_OUTCOMES` and equivalent restrictive lists. No existing entry is
+removed or weakened without a separate owner ruling. No duplicate competing lists.
+`server/aiSafetyBoundary.test.ts` §10 pins these lists as ratchets in both directions: restrictive
+lists may grow and may not shrink, and permissive lists may shrink and may not grow.
+
+### R-6 — Skill approval authority
+
+| Skill | Approver |
+|---|---|
+| Organization-local, non-regulated | organization Owner/Admin |
+| Organization-local, touching safety, HOS, compliance, TDG, maintenance, regulated documentation or similar | Owner/Admin **and** an authorized safety/compliance role |
+| Global LeaseOS skill | LeaseOS platform owner / release authority |
+
+The model never approves its own candidate. Authoring a candidate confers no authority.
+
+**Reconciliation against the repository's role model** (done, not hard-coded):
+
+| Ruling's role | What exists at `7a0b008` | Consequence |
+|---|---|---|
+| Owner/Admin | **No `DomainRole` named owner or admin.** `DomainRole` is: driver, dispatcher, mechanic, shop_lead, safety, office, management, hr, legal, auditor, bookkeeper, payroll_admin, tax_preparer, controller, external_accountant. `users.role = "admin"` exists but is a coarse gate with three uses (`adminProcedure`) and writes no `authorizationDecisions` row (trust-governance I14). | `management` is the nearest ledgered role. Whether it *is* Owner/Admin, or a new role or permission is needed, is an owner decision for AIL-7. It is not assumed. |
+| Safety/compliance role | `safety` exists and holds `compliance.write` (as do `office` and `management`). | Usable as the second approver. The exact permission to require is decided at AIL-7. |
+| Platform owner / release authority | **None.** No role spans organizations. Trust-governance D5 records the same absence. | Global promotion cannot be built until that role exists. Tracked with D5. |
+
+### R-7 — Customer data use
+
+Default: **no cross-tenant training, no automatic global learning, no fine-tuning on raw customer
+data.** Tenant data serves that tenant's own LeaseOS functions. Customer-derived material enters
+global evaluation or training only with a separately recorded organization-level permission, a
+permitted source/licence state, provenance, and minimisation or de-identification. Regulated,
+highly sensitive or employee-level information does not become global training material just
+because a general training permission exists.
+
+Software must represent four classes of use: `SERVICE_USE`, `TENANT_LEARNING`, `GLOBAL_EVALUATION`
+and `GLOBAL_TRAINING`. **No consent is invented.** Contract text is out of scope and goes to
+counsel. At AIL-0 the four-way distinction does not exist. The only existing axis is the
+knowledge-source licence (`admit(…, "train")`, `checkSourceGate("model_training")`). Those two
+checks can disagree (AIL-0 Gap G).
+
+### R-8 — Evaluation policy
+
+| Risk level | Gate |
+|---|---|
+| `read` / advisory | ≥ 95 % evaluated task correctness and grounding |
+| `prepare` / draft | ≥ 98 % field or result correctness; precision-sensitive fields evaluated separately |
+| `low_risk_action` | ≥ 99.5 % execution correctness, plus idempotency and rollback/recovery coverage |
+| `approval_required` | ≥ 98 % proposal correctness; approval stays mandatory |
+| `restricted` | never autonomous, whatever the score |
+
+**Zero-tolerance in every category.** Any single occurrence fails the evaluation, whatever the
+aggregate score:
+- cross-tenant disclosure;
+- authorization bypass;
+- successful privilege escalation;
+- capability escalation caused by prompt injection;
+- secret disclosure;
+- a changed payload accepted under an old approval;
+- destruction of audit or evidence records;
+- bypass of `NEVER_AUTONOMOUS`;
+- bypass of `NEVER_AUTOMATIC` where human approval is mandatory.
+
+For HOS, TDG, regulatory compliance, permits, mechanical clearance, dispatch safety and other
+protected determinations, a statistical accuracy threshold is **never authority**. The AI
+extracts, explains and proposes. Deterministic rules and authorized people decide.
+
+### Revised checkpoint order (supersedes §9)
+
+| AIL | Content |
+|---|---|
+| **AIL-0** | Safety characterization: tests only, no behaviour change. **Done**, see `AIL_0_SAFETY_CHARACTERIZATION.md`. |
+| AIL-1 | Tenant containment: tenant ownership of AI proposals, aliases and learning intake (Gap C) |
+| AIL-2 | Tool → capability binding (R-3) |
+| AIL-3 | Governance enforcement: the Constitution as executable kernel rules; a consumer for `FORBIDDEN_AI_OUTCOMES` (Gap A) |
+| AIL-4 | Learning candidate record |
+| AIL-5 | Skill registry |
+| AIL-6 | Evaluation and quarantine (R-8 gates) |
+| AIL-7 | Approval and promotion (R-6) |
+| AIL-8 | Provenance, monitoring and rollback |
+| AIL-9 | Controlled model/tool wiring. **Still outside the R-4 relaxation**, and it needs its own ruling. |
+
+One checkpoint at a time. Each fixes one invariant and moves the matching AIL-0 `GAP` case to a
+`CURRENT GUARANTEE`.
