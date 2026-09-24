@@ -628,6 +628,26 @@ export const tripStops = mysqlTable("tripStops", {
   ticketNumber: varchar("ticketNumber", { length: 100 }),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /*
+   * 0179 — row provenance (leaseos's 0169, reconciled forward; see
+   * docs/register/MIGRATION_0169_RECONCILIATION.md). Both write paths hold the
+   * actor; neither recorded it.
+   *
+   * `recordedSource` reuses `proposalFields.source` rather than minting a second
+   * vocabulary. NULL means the row-level source is not authoritative here: the
+   * assistant commit path holds provenance per FIELD in `proposalFields`,
+   * reachable through `assistantCommitReceipts`, and a row-level guess would be
+   * less true than a null.
+   *
+   * This is not the per-boundary confirmation `siteBaseline` reads. That is
+   * derived from committed receipts by `boundaryConfirmation.ts`; `updatedAt` and
+   * `updatedByUserId` are what `boundaryEvidence.ts` compares a receipt against.
+   */
+  recordedByUserId: int("recordedByUserId"),
+  recordedSource: mysqlEnum("recordedSource", ["driver_voice", "driver_typed", "gps", "photo_ocr", "system_inferred", "imported", "human_corrected"]),
+  updatedByUserId: int("updatedByUserId"),
+  updatedSource: mysqlEnum("updatedSource", ["driver_voice", "driver_typed", "gps", "photo_ocr", "system_inferred", "imported", "human_corrected"]),
+  updatedAt: timestamp("updatedAt"),
 });
 
 export const operatingZones = mysqlTable("operatingZones", {
