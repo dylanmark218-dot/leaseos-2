@@ -30,6 +30,7 @@ const NOT_A_SURFACE: Record<string, string> = {
   "client/src/dispatch/DispatchJobDetail.tsx": "the detail screen's container: a live tRPC caller that reads the job, its crew slots and the name lists, writes slot assignments, and composes the readiness panel; the screen it renders, DispatchJobDetailView, is a surface in the suite",
   "client/src/pages/Login.tsx": "a live router and session caller; LoginView is the surface, and all four of its states are run through the axe rules",
   "client/src/tracking/TrackingPage.tsx": "the tracking link's container: reads the token from the route and calls the tracking gate; TrackingView is the surface, and its states are run through the axe rules",
+  "client/src/portal/client/ClientPortal.tsx": "the client portal's container: a live portal-token caller that reads the section from the route; ClientPortalView is the surface, and every section is run through the axe rules",
 };
 
 describe("the accessibility suite keeps up with the screens", () => {

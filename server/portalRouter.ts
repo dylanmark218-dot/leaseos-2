@@ -30,6 +30,15 @@ import { invoiceBalanceCents } from "./_core/accountsReceivable";
 import { decideLine, loadTicket, recordSignature, snapshotFor } from "./closeoutRouter";
 import { whyTheseHours, type PostSiteAuthorization, type SiteSnapshot, type Supplement } from "./_core/siteCloseout";
 import { signatoryAuthorities } from "../drizzle/schema";
+import { customerDocumentReleases, dispatchPostings, jobTrackingLinks } from "../drizzle/schema";
+import { or, sql } from "drizzle-orm";
+import { customerJobFor, customerLoadsFor, customerOpenTicketsFor, releasedDocumentsFor } from "./customerJobProjection";
+import { readReleasedDocument } from "./customerDocuments";
+import { recordCustomerAction, type CustomerActor } from "./customerActionService";
+import { appendCustomerAuditEvent } from "./_core/customerAudit";
+import { orgRefForTicket } from "./serviceTicketService";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
+import { customerStatus } from "./_core/customerJobView";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -71,7 +80,184 @@ async function ownTicket(e: ExternalContext, ticketNumber: string) {
   return x;
 }
 
+/* ---- 0175: the authenticated client portal — the account's jobs, from the canonical records ---- */
+
+/** The jobs an account may see: those assigned to it, and those a field ticket bills to it. One rule, used everywhere here. */
+async function accountJobs(accountId: number) {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  const ticketJobIds = (await db.select({ jobId: fieldTickets.jobId }).from(fieldTickets).where(eq(fieldTickets.customerAccountId, accountId))).map(r => r.jobId);
+  const rows = await db.select().from(jobs).where(ticketJobIds.length ? or(eq(jobs.customerAccountId, accountId), inArray(jobs.id, ticketJobIds)) : eq(jobs.customerAccountId, accountId)).orderBy(desc(jobs.updatedAt)).limit(200);
+  return rows;
+}
+
+/** One job of the account, by its reference, or "no such job on this account". The binding decides. */
+async function accountJob(accountId: number, jobCode: string) {
+  const j = (await accountJobs(accountId)).find(x => x.jobCode === jobCode);
+  if (!j) throw new TRPCError({ code: "NOT_FOUND", message: "No such job on this account" });
+  return j;
+}
+
+/** What an identity sees of a unit's position: the account's setting, live while the job is not long complete. */
+async function accountVisibility(accountId: number, job: { status: string; updatedAt: Date }) {
+  const db = await getDb();
+  const acct = db ? (await db.select({ locationSharing: customerAccounts.locationSharing }).from(customerAccounts).where(eq(customerAccounts.id, accountId)).limit(1))[0] : undefined;
+  const live = job.status !== "complete" || Date.now() - job.updatedAt.getTime() < 7 * 86_400_000;
+  return { locationMode: acct?.locationSharing ?? ("none" as const), live, unit: true, operator: true };
+}
+
+const portalActor = (e: ExternalContext): CustomerActor => ({ kind: "portal_identity", externalIdentityId: e.identityId, displayName: e.displayName });
+
 export const portalRouter = router({
+  /** The dashboard: the account's jobs by bucket, tickets awaiting the customer, open tickets, outstanding invoices, recent documents. Counts only; each has its own view. */
+  clientDashboard: externalProcedure("portal.clientDashboard").query(async ({ ctx }) => {
+    const e = ext(ctx);
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const js = await accountJobs(e.accountId);
+    const now = new Date();
+    const buckets = { active: 0, scheduled: 0, completed: 0 };
+    // The same evidence the job list uses for its bucket: the latest posting's planning state decides "scheduled".
+    const postings = js.length ? await db.select({ jobId: dispatchPostings.jobId, planningState: dispatchPostings.planningState, id: dispatchPostings.id }).from(dispatchPostings).where(inArray(dispatchPostings.jobId, js.map(j => j.id))).orderBy(desc(dispatchPostings.id)) : [];
+    for (const j of js) {
+      const st = customerStatus({ jobStatus: j.status, postingState: postings.find(p => p.jobId === j.id)?.planningState ?? null, events: [], siteSigned: false, safety: [], now });
+      if (st.status === "Completed" || st.status === "Cancelled") buckets.completed++; else if (st.status === "Scheduled") buckets.scheduled++; else buckets.active++;
+    }
+    const tickets = js.length ? await db.select({ billingState: fieldTickets.billingState }).from(fieldTickets).where(and(inArray(fieldTickets.jobId, js.map(j => j.id)), eq(fieldTickets.customerAccountId, e.accountId))) : [];
+    const inv = await db.select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber, totalCents: invoices.totalCents, status: invoices.status, customer: invoices.customer }).from(invoices).where(and(eq(invoices.customerAccountId, e.accountId), inArray(invoices.status, ["sent", "viewed", "approved", "partially_paid", "disputed"])));
+    const allocs = inv.length ? await db.select({ invoiceId: paymentAllocations.invoiceId, amountCents: paymentAllocations.amountCents }).from(paymentAllocations).where(inArray(paymentAllocations.invoiceId, inv.map(i => i.id))) : [];
+    const outstandingCents = inv.reduce((a, i) => a + Math.max(0, i.totalCents - allocs.filter(x => x.invoiceId === i.id).reduce((b, x) => b + x.amountCents, 0)), 0);
+    const docs = js.length ? await db.select({ releaseRef: customerDocumentReleases.releaseRef, documentRef: customerDocumentReleases.documentRef, kind: customerDocumentReleases.kind, title: customerDocumentReleases.title, releasedAt: customerDocumentReleases.releasedAt, jobId: customerDocumentReleases.jobId }).from(customerDocumentReleases).where(and(inArray(customerDocumentReleases.jobId, js.map(j => j.id)), eq(customerDocumentReleases.status, "released"))).orderBy(desc(customerDocumentReleases.releasedAt)).limit(5) : [];
+    const jobCode = new Map(js.map(j => [j.id, j.jobCode]));
+    await logAccess(e, "view", "clientDashboard", "account", null, `${js.length} jobs`);
+    return {
+      asOf: now,
+      jobs: { ...buckets, total: js.length },
+      awaitingCustomerAction: tickets.filter(t => t.billingState === "AWAITING_CUSTOMER_REVIEW").length,
+      openTickets: tickets.filter(t => ["OPEN", "AWAITING_CUSTOMER_REVIEW", "DISPUTED", "CUSTOMER_ACCEPTED"].includes(t.billingState)).length,
+      invoices: { outstanding: inv.filter(i => i.status !== "paid").length, outstandingCents, disputed: inv.filter(i => i.status === "disputed").length },
+      recentDocuments: docs.map(d => ({ ...d, jobReference: jobCode.get(d.jobId) ?? null })),
+    };
+  }),
+
+  /** The account's jobs in a bucket, each as the customer projection's summary. */
+  clientJobs: externalProcedure("portal.clientJobs").input(z.object({ bucket: z.enum(["active", "scheduled", "completed", "all"]).default("all") })).query(async ({ ctx, input }) => {
+    const e = ext(ctx);
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const js = await accountJobs(e.accountId);
+    const now = new Date();
+    const out = [];
+    for (const j of js.slice(0, 100)) {
+      const v = await customerJobFor(db, j.id, { ...(await accountVisibility(e.accountId, j)), locationMode: "none" }, now);
+      const bucket = v.status.label === "Completed" || v.status.label === "Cancelled" ? "completed" : v.status.label === "Scheduled" ? "scheduled" : "active";
+      if (input.bucket !== "all" && bucket !== input.bucket) continue;
+      out.push({ jobReference: v.jobReference, customerReference: v.customerReference, serviceType: v.serviceType, origin: v.origin, destination: v.destination, status: v.status, unit: v.unit, scheduledAt: v.scheduledAt, dispatchedAt: v.dispatchedAt, arrivedAt: v.arrivedAt, completedAt: v.completedAt, ticketNumbers: v.ticketNumbers, lastUpdatedAt: v.lastUpdatedAt, bucket });
+    }
+    await logAccess(e, "view", "clientJobs", input.bucket, null, `${out.length} jobs`);
+    return { asOf: now, jobs: out };
+  }),
+
+  /** One job as the customer sees it — the same projection the tracking link serves, under the account's location setting. */
+  clientJob: externalProcedure("portal.clientJob").input(z.object({ jobReference: z.string().min(1).max(32) })).query(async ({ ctx, input }) => {
+    const e = ext(ctx);
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const j = await accountJob(e.accountId, input.jobReference);
+    const vis = await accountVisibility(e.accountId, j);
+    const view = await customerJobFor(db, j.id, vis);
+    await logAccess(e, "view", "clientJob", j.jobCode, null, null);
+    return { ...view, live: { available: vis.live, reason: vis.live ? "job in progress or recently complete" : "job complete more than 7 days ago", until: null } };
+  }),
+
+  clientJobLoads: externalProcedure("portal.clientJobLoads").input(z.object({ jobReference: z.string().min(1).max(32) })).query(async ({ ctx, input }) => {
+    const e = ext(ctx);
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const j = await accountJob(e.accountId, input.jobReference);
+    await logAccess(e, "view", "clientJobLoads", j.jobCode, null, null);
+    return customerLoadsFor(db, j.id);
+  }),
+
+  /** The open service tickets across the account's jobs: customer-visible lines, the accrued estimate, finalized and invoiced figures. */
+  clientTickets: externalProcedure("portal.clientTickets").input(z.object({ jobReference: z.string().min(1).max(32).optional() }).optional()).query(async ({ ctx, input }) => {
+    const e = ext(ctx);
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const js = input?.jobReference ? [await accountJob(e.accountId, input.jobReference)] : await accountJobs(e.accountId);
+    const out = [];
+    for (const j of js.slice(0, 100)) for (const t of await customerOpenTicketsFor(db, j.id)) out.push({ jobReference: j.jobCode, ...t });
+    // Only tickets that bill to this account: a job may carry another account's ticket.
+    const own = new Set((js.length ? await db.select({ ticketNumber: fieldTickets.ticketNumber }).from(fieldTickets).where(and(inArray(fieldTickets.jobId, js.map(j => j.id)), eq(fieldTickets.customerAccountId, e.accountId))) : []).map(r => r.ticketNumber));
+    const tickets = out.filter(t => own.has(t.ticketNumber));
+    await logAccess(e, "view", "clientTickets", input?.jobReference ?? "account", null, `${tickets.length} tickets`);
+    return { tickets, note: "Amounts marked as estimates are accrued so far and are not an invoice." };
+  }),
+
+  /** Acknowledge, approve (by hash) or comment on a ticket that bills to this account. */
+  clientTicketAct: externalProcedure("portal.clientTicketAct").input(z.object({ ticketNumber: z.string().min(1).max(64), kind: z.enum(["acknowledge", "approve", "comment"]), snapshotHash: z.string().length(64).nullable().optional(), representativeName: z.string().max(180).nullable().optional(), representativeTitle: z.string().max(120).nullable().optional(), customerPoNumber: z.string().max(80).nullable().optional(), comment: z.string().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    const e = ext(ctx);
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const r = await recordCustomerAction({ db, ticketNumber: input.ticketNumber, scope: { customerAccountId: e.accountId }, kind: input.kind, actor: portalActor(e), representativeName: input.representativeName ?? e.displayName, representativeTitle: input.representativeTitle ?? null, customerPoNumber: input.customerPoNumber ?? null, comment: input.comment ?? null, snapshotHash: input.snapshotHash ?? null });
+    await logAccess(e, "decide", "fieldTicket", input.ticketNumber, r.snapshotHash, input.kind);
+    return r;
+  }),
+
+  clientTicketDispute: externalProcedure("portal.clientTicketDispute").input(z.object({ ticketNumber: z.string().min(1).max(64), snapshotHash: z.string().length(64).nullable().optional(), representativeName: z.string().max(180).nullable().optional(), comment: z.string().min(3).max(2000) })).mutation(async ({ ctx, input }) => {
+    const e = ext(ctx);
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const r = await recordCustomerAction({ db, ticketNumber: input.ticketNumber, scope: { customerAccountId: e.accountId }, kind: "dispute", actor: portalActor(e), representativeName: input.representativeName ?? e.displayName, comment: input.comment, snapshotHash: input.snapshotHash ?? null });
+    await logAccess(e, "decide", "fieldTicket", input.ticketNumber, r.snapshotHash, "dispute");
+    return r;
+  }),
+
+  /** Documents released to the customer across the account's jobs — the records' own numbers, never copies. */
+  clientDocuments: externalProcedure("portal.clientDocuments").input(z.object({ jobReference: z.string().min(1).max(32).optional() }).optional()).query(async ({ ctx, input }) => {
+    const e = ext(ctx);
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const js = input?.jobReference ? [await accountJob(e.accountId, input.jobReference)] : await accountJobs(e.accountId);
+    const out = [];
+    for (const j of js.slice(0, 100)) for (const d of await releasedDocumentsFor(db, j.id)) out.push({ jobReference: j.jobCode, ...d });
+    await logAccess(e, "view", "clientDocuments", input?.jobReference ?? "account", null, `${out.length} documents`);
+    return { documents: out };
+  }),
+
+  clientDocumentDownload: externalProcedure("portal.clientDocumentDownload").input(z.object({ releaseRef: z.string().min(1).max(64), purpose: z.string().max(200).optional() })).mutation(async ({ ctx, input }) => {
+    const e = ext(ctx);
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const rel = (await db.select({ jobId: customerDocumentReleases.jobId }).from(customerDocumentReleases).where(eq(customerDocumentReleases.releaseRef, input.releaseRef)).limit(1))[0];
+    const j = rel ? (await accountJobs(e.accountId)).find(x => x.id === rel.jobId) : undefined;
+    if (!j) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found" });
+    const r = await readReleasedDocument(db, { jobId: j.id, releaseRef: input.releaseRef });
+    await db.transaction(async tx => { await appendCustomerAuditEvent(tx, { orgRef: j.orgRef ?? SINGLE_TENANT_ID, eventType: "customer_document_downloaded", subjectType: "document", subjectRef: r.doc.documentRef, jobId: j.id, externalIdentityId: e.identityId, payload: { releaseRef: r.release.releaseRef, contentHash: r.contentHash, kind: r.release.kind, purpose: input.purpose ?? null } }); });
+    await logAccess(e, "download", "customerDocumentRelease", r.release.releaseRef, r.contentHash, input.purpose ?? null);
+    return { releaseRef: r.release.releaseRef, jobReference: j.jobCode, documentRef: r.doc.documentRef, kind: r.release.kind, title: r.release.title, mimeType: r.doc.mimeType, contentHash: r.contentHash, byteLength: r.bytes.length, dataBase64: r.bytes.toString("base64") };
+  }),
+
+  /** The account's people, as the contractor holds them: portal users, signatories on file, and the contacts tracking links were issued to. */
+  clientContacts: externalProcedure("portal.clientContacts").query(async ({ ctx }) => {
+    const e = ext(ctx);
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const js = await accountJobs(e.accountId);
+    const [ids, auths, links] = await Promise.all([
+      db.select({ identityRef: externalIdentities.identityRef, displayName: externalIdentities.displayName, email: externalIdentities.email, status: externalIdentities.status, lastSeenAt: externalIdentities.lastSeenAt }).from(externalIdentities).where(and(eq(externalIdentities.customerAccountId, e.accountId), inArray(externalIdentities.status, ["invited", "active"]))),
+      db.select({ signatoryName: signatoryAuthorities.signatoryName, signatoryRole: signatoryAuthorities.signatoryRole, maySignTicket: signatoryAuthorities.maySignTicket, mayApproveStandby: signatoryAuthorities.mayApproveStandby, mayApproveInvoice: signatoryAuthorities.mayApproveInvoice, extraWorkLimitCents: signatoryAuthorities.extraWorkLimitCents, status: signatoryAuthorities.status }).from(signatoryAuthorities).where(eq(signatoryAuthorities.customerAccountId, e.accountId)),
+      js.length ? db.select({ jobId: jobTrackingLinks.jobId, contactKind: jobTrackingLinks.contactKind, contactName: jobTrackingLinks.contactName, contactEmail: jobTrackingLinks.contactEmail, contactPhone: jobTrackingLinks.contactPhone, status: jobTrackingLinks.status }).from(jobTrackingLinks).where(and(inArray(jobTrackingLinks.jobId, js.map(j => j.id)), eq(jobTrackingLinks.status, "active"), sql`${jobTrackingLinks.contactName} IS NOT NULL`)) : [],
+    ]);
+    const jobCode = new Map(js.map(j => [j.id, j.jobCode]));
+    await logAccess(e, "view", "clientContacts", "account", null, null);
+    return {
+      portalUsers: ids.map(i => ({ identityRef: i.identityRef, displayName: i.displayName, email: i.email, status: i.status, lastSeenAt: i.lastSeenAt, you: i.identityRef === e.identityRef })),
+      signatories: auths.map(a => ({ name: a.signatoryName, role: a.signatoryRole, maySignTicket: a.maySignTicket, mayApproveStandby: a.mayApproveStandby, mayApproveInvoice: a.mayApproveInvoice, extraWorkLimitCents: a.extraWorkLimitCents, status: a.status })),
+      jobContacts: links.map(l => ({ jobReference: jobCode.get(l.jobId) ?? null, kind: l.contactKind, name: l.contactName, email: l.contactEmail, phone: l.contactPhone })),
+    };
+  }),
+
 
 
 

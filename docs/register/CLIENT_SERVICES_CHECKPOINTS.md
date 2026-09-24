@@ -207,3 +207,40 @@ so a customer decision can never be recorded without moving the ticket, nor move
 **Unresolved risks:** the tracking page collects the review through browser prompts; a proper form arrives with the
 portal screens. Drawn-signature capture (an image) is not collected from the link — the signature is the named
 representative's electronic acceptance under the hash, as `portal_link` already is for identities.
+
+## CP7 — authenticated client portal
+
+**Files:** `server/portalRouter.ts` (+10 external procedures; one rule for "the account's jobs": assigned to it, or a
+field ticket bills to it), `client/src/portal/client/{clientViewModels.ts, ClientPortalView.tsx, ClientPortal.tsx,
+clientFixtures.ts}`, routes `/client` and `/client/:section`.
+
+**API added (external, scoped by the identity's account binding):** `portal.clientDashboard`, `portal.clientJobs`
+(active / scheduled / completed / all), `portal.clientJob`, `portal.clientJobLoads`, `portal.clientTickets`,
+`portal.clientTicketAct` (acknowledge / approve by hash / comment, under `portal.customer.decide`),
+`portal.clientTicketDispute` (`portal.customer.dispute`), `portal.clientDocuments`, `portal.clientDocumentDownload`
+(`portal.customer.documents`), `portal.clientContacts`. Invoices use the existing `portal.invoices`. Job detail is the
+same projection the tracking link serves, under the account's `locationSharing` setting; live status ends 7 days after
+completion.
+
+**Navigation:** Dashboard · Active Jobs · Scheduled Jobs · Completed Jobs · Job Tracking · Loads · Disposal Tickets ·
+Documents · Invoices · Open Billing · Contacts. The dashboard shows Active, Scheduled, Awaiting Your Action, Open
+Tickets, Completed, Outstanding Invoices, Recent Documents. Every list arrives scoped; the shell names no account.
+
+**Tests added:** `server/clientPortal.db.test.ts` (1 walk, two accounts in one organization and a third organization:
+each identity sees only its account's jobs, by assignment and by ticket; a foreign job reference is "no such job on this
+account"; location per account setting; tickets with internal lines hidden; dashboard counts; approve as a portal
+identity with the PO stored; dispute; documents listed / downloaded / withdrawn and "not found" for the other account;
+contacts; the ledger names the identity; an unknown token reaches nothing). `ClientPortalView.dom.test.tsx` (8),
+`server/clientPortalViewModels.test.ts` (4), nine client-portal surfaces in the axe suite. Guards: 46 external, 735
+mounted paths.
+
+**Test results:** 13/13 new plus 27 axe cases; guards green; `tsc` and test-file typecheck clean.
+
+**Decisions:** the job ↔ account rule is one function (`accountJobs`) used by every portal read; the dashboard and the
+job list read the same posting state so a staffed-but-undispatched job is "scheduled" in both. Sub-accounts and
+project / location permissions are not architected around one-user-one-account: a job names an account, a ticket names
+an account, and an identity binds to an account — a finer grant later narrows `accountJobs`, nothing else.
+
+**Unresolved risks:** `accountJobs` caps at 200 jobs per read and the list projections are N+1 (the existing
+`portal.jobBoard` has the same shape); the portal sign-in reuses the customer shell's token entry rather than a
+dedicated invitation flow.

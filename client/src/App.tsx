@@ -34,6 +34,7 @@ import TripOperationsWorkspace from "./showcase/TripOperationsWorkspace";
 import TrainingAcademy from "./pages/TrainingAcademy";
 import DispatchJobDetail from "./dispatch/DispatchJobDetail";
 import { TrackingPage } from "./tracking/TrackingPage";
+import { ClientPortal } from "./portal/client/ClientPortal";
 
 function DashboardRoute({ children }: { children: ReactNode }) {
   return <DashboardLayout>{children}</DashboardLayout>;
@@ -53,6 +54,9 @@ function Router() {
       <Route path="/customer" component={() => <CustomerPortal />} />
       {/* 0175 — the one-time tracking link: no session, no account; the token in the path is the whole credential. */}
       <Route path="/t/:token" component={() => <TrackingPage />} />
+      {/* 0175 — the client services portal: the account's jobs, tickets, documents and people, on external procedures only. */}
+      <Route path="/client" component={() => <ClientPortal />} />
+      <Route path="/client/:section" component={() => <ClientPortal />} />
       <Route path="/hos-verification" component={() => <HosVerificationConsole />} />
       <Route path="/widgets" component={() => <WidgetBoardPage />} />
       <Route path="/vendor" component={() => <VendorFacilityPortal />} />

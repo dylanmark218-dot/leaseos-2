@@ -22,6 +22,8 @@ import { LoginView } from "../pages/LoginView";
 import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser } from "../portal/PortalChooser";
 import { TrackingView } from "../tracking/TrackingView";
 import { fixtureLoaded, fixtureStatus, fixtureTicket } from "../tracking/trackingFixtures";
+import { ClientPortalView } from "../portal/client/ClientPortalView";
+import { fixtureClient } from "../portal/client/clientFixtures";
 
 afterEach(cleanup);
 
@@ -191,6 +193,16 @@ const surfaces = [
   { name: "tracking — refused", render: () => render(<TrackingView state={{ kind: "refused", message: "This tracking link has been revoked" }} />) },
   { name: "tracking — loading", render: () => render(<TrackingView state={{ kind: "loading" }} />) },
   { name: "tracking — download failed", render: () => render(<TrackingView state={fixtureLoaded()} error="Stored document does not match its recorded hash — not served" />) },
+  // 0175 — the client services portal, every section: read in a field office and on a phone at a lease.
+  { name: "client portal — dashboard", render: () => render(<ClientPortalView {...fixtureClient()} />) },
+  { name: "client portal — active jobs", render: () => render(<ClientPortalView {...fixtureClient({ section: "active" })} />) },
+  { name: "client portal — job tracking", render: () => render(<ClientPortalView {...fixtureClient({ section: "tracking" })} />) },
+  { name: "client portal — loads", render: () => render(<ClientPortalView {...fixtureClient({ section: "loads" })} />) },
+  { name: "client portal — documents", render: () => render(<ClientPortalView {...fixtureClient({ section: "documents" })} />) },
+  { name: "client portal — invoices", render: () => render(<ClientPortalView {...fixtureClient({ section: "invoices" })} />) },
+  { name: "client portal — open billing", render: () => render(<ClientPortalView {...fixtureClient({ section: "billing" })} />) },
+  { name: "client portal — contacts", render: () => render(<ClientPortalView {...fixtureClient({ section: "contacts" })} />) },
+  { name: "client portal — error and empty", render: () => render(<ClientPortalView {...fixtureClient({ section: "documents", documents: [], error: "Database unavailable", loading: true })} />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {

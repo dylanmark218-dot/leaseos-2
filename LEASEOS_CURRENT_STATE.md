@@ -10,14 +10,14 @@ here can be added rather than read.
 | Tables | **415** | `mysqlTable(` declarations in `drizzle/schema.ts` |
 | Migrations | **170** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
 | Role-authorized procedures | **670** | `roleProcedure(` call sites across all routers |
-| Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
+| Externally-gated procedures (portal) | **46** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Tracking-gated procedures (one-time links) | **11** | `trackingProcedure(` call sites in `server/trackingRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
 | Permissions | **359** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **128** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **326 / 4386** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **328 / 4391** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)

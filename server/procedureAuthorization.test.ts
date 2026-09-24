@@ -252,7 +252,7 @@ describe("migrated operational procedures", () => {
     // The portal router must never mount a role procedure: an external identity is not a domain-role user.
     expect(countBuilders(portalRouter, "roleProcedure")).toBe(0);
     const external = [...portalRouter.matchAll(/externalProcedure\("([^"]+)"\)/g)].map(m => m[1]);
-    expect(external.length).toBe(36);   // v22.10: + invoices, invoiceView, invoiceAccept // v21.17: + quotes, quote acceptance, change-order authorization, RFI answers
+    expect(external.length).toBe(46);   // 0175: +10 portal.client* (dashboard, jobs, job, loads, tickets, act, dispute, documents, download, contacts)   // v22.10: + invoices, invoiceView, invoiceAccept // v21.17: + quotes, quote acceptance, change-order authorization, RFI answers
     for (const name of external) expect(EXTERNAL_PROCEDURE_PERMISSIONS, name).toHaveProperty(name);
     expect(Object.keys(EXTERNAL_PROCEDURE_PERMISSIONS).sort()).toEqual([...external].sort());
     // And no internal router mounts an external procedure.
