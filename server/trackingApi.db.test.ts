@@ -185,7 +185,7 @@ d("the customer-safe tracking API", () => {
     const ot = await trackingCaller(approx.token).tracking.openTicket();
     expect(ot.tickets).toHaveLength(1);
     const tk = ot.tickets[0]!;
-    expect(tk).toMatchObject({ ticketNumber: t.ticketNumber, status: "DRAFT", customerPoNumber: null, finalized: null, invoiced: null });
+    expect(tk).toMatchObject({ ticketNumber: t.ticketNumber, status: "OPEN", customerPoNumber: null, finalized: null, invoiced: null });   // 0175 CP5: work started, so the open ticket is OPEN
     expect(tk.lines.map(x => x.description)).toEqual(["Truck service"]);
     expect(tk.accrued).toMatchObject({ subtotalCents: 83_250, pricedLines: 1, unpricedLines: 0, hiddenLines: 1, isFinal: false });
     expect(tk.accrued.label).toMatch(/not an invoice/);

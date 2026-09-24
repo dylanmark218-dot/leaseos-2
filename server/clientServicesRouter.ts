@@ -14,6 +14,12 @@ import { roleProcedure, router } from "./_core/trpc";
 import { actingScopeFor, getDb, jobInScope } from "./db";
 import { CUSTOMER_DOCUMENT_KINDS, DOCUMENT_SOURCE_TYPES, customerAccounts, customerAuditEvents, customerDocumentReleases, jobTrackingLinks, jobs, externalIdentities, LIVE_UNTIL_RULES, LOCATION_MODES, TRACKING_LINK_CONTACT_KINDS } from "../drizzle/schema";
 import { resolveCatalogueDocument } from "./customerDocuments";
+import { fieldTicketInScope } from "./db";
+import { customerTicketActions, fieldTicketLines, fieldTicketRevisions, fieldTickets } from "../drizzle/schema";
+import { afterLineWrite, beforeLineWrite, linesWithAmounts, lockTicket, orgRefForTicket, ticketTotals, transitionBilling, writeFrozenRevision } from "./serviceTicketService";
+import { finalizeCheck, lineWritePermitted } from "./_core/serviceTicketBilling";
+import { loadTicket, snapshotFor } from "./closeoutRouter";
+import { MEASUREMENT_BASIS, normaliseUnit, priceLineAndRecord } from "./_core/linePricing";
 import { assertEntityInScope } from "./_core/entityScope";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { DEFAULT_SCOPE, LIVE_PRESETS, hashTrackingToken, newTrackingToken, parseScope, qrPayload, serializeScope, trackingUrl, type TrackingScope } from "./_core/trackingLinks";
@@ -34,6 +40,15 @@ async function accountInScope(accountRef: string, tenantId: string) {
   if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
   try { await assertEntityInScope(d, a.financialEntityId, { tenantId }); } catch { throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" }); }
   return a;
+}
+
+/** A ticket in the caller's scope (through its job, else its unit), or "not found". */
+async function ownTicket(ticketNumber: string, userId: number) {
+  const scope = await actingScopeFor(userId);
+  const t = await fieldTicketInScope(ticketNumber, scope);
+  if (!t) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${ticketNumber} not found` });
+  const d = await db();
+  return (await d.select({ id: fieldTickets.id, ticketNumber: fieldTickets.ticketNumber, jobId: fieldTickets.jobId }).from(fieldTickets).where(eq(fieldTickets.id, t.id)).limit(1))[0]!;
 }
 
 /** A link of the caller's organization, by ref, or "not found". */
@@ -277,6 +292,172 @@ export const clientServicesRouter = router({
       const d = await db();
       const rows = await d.select().from(customerDocumentReleases).where(and(eq(customerDocumentReleases.jobId, job.id), eq(customerDocumentReleases.orgRef, scope.tenantId))).orderBy(desc(customerDocumentReleases.id));
       return { jobCode: job.jobCode, releases: rows.map(r => ({ releaseRef: r.releaseRef, sourceType: r.sourceType, sourceId: r.sourceId, documentRef: r.documentRef, kind: r.kind, title: r.title, contentHash: r.contentHash, status: r.status, releasedAt: r.releasedAt, expiresAt: r.expiresAt, withdrawnAt: r.withdrawnAt, withdrawReason: r.withdrawReason })) };
+    }),
+
+  /* ---- the open-ticket billing lifecycle ---- */
+
+  /** Present the open ticket for the customer's review under its current hash. Idempotent; a disputed ticket may be re-presented. */
+  ticketPresent: roleProcedure("clientServices.ticketPresent")
+    .input(z.object({ ticketNumber: z.string().min(1).max(64), customerPoNumber: z.string().max(80).nullable().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const t = await ownTicket(input.ticketNumber, ctx.user.id);
+      const x = await loadTicket(input.ticketNumber);
+      const { hash, findings } = snapshotFor(x);
+      const d = await db();
+      const r = await d.transaction(async tx => {
+        if (input.customerPoNumber !== undefined) await tx.update(fieldTickets).set({ customerPoNumber: input.customerPoNumber }).where(eq(fieldTickets.id, t.id));
+        return transitionBilling(tx, { ticketId: t.id, action: "present", actor: { userId: ctx.user.id }, eventType: "ticket_presented", payload: { snapshotHash: hash, customerPoNumber: input.customerPoNumber ?? null } });
+      });
+      if (r.changed) await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "ticket_ready_for_review", ticketNumber: x.t.ticketNumber, jobCode: x.job?.jobCode ?? null, subjectRef: `${x.t.ticketNumber}:${hash.slice(0, 12)}` });
+      return { ticketNumber: x.t.ticketNumber, billingState: r.to, snapshotHash: hash, findings };
+    }),
+
+  /** Reopen a presented, accepted or disputed ticket for more lines. The customer's earlier decision stands on the ledger; a new hash follows. */
+  ticketReopen: roleProcedure("clientServices.ticketReopen")
+    .input(z.object({ ticketNumber: z.string().min(1).max(64), reason: z.string().min(3).max(300) }))
+    .mutation(async ({ ctx, input }) => {
+      const t = await ownTicket(input.ticketNumber, ctx.user.id);
+      const d = await db();
+      const r = await d.transaction(async tx => transitionBilling(tx, { ticketId: t.id, action: "reopen", actor: { userId: ctx.user.id }, eventType: "ticket_reopened", payload: { reason: input.reason } }));
+      return { ticketNumber: t.ticketNumber, billingState: r.to };
+    }),
+
+  /**
+   * Finalize: freeze the lines and totals behind a `final` revision and its hash. From CUSTOMER_ACCEPTED
+   * without ceremony; from review or dispute only with `withoutCustomerAcceptance` and a reason, which the
+   * revision and the ledger both carry.
+   */
+  ticketFinalize: roleProcedure("clientServices.ticketFinalize")
+    .input(z.object({ ticketNumber: z.string().min(1).max(64), withoutCustomerAcceptance: z.boolean().default(false), reason: z.string().max(400).nullable().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const t = await ownTicket(input.ticketNumber, ctx.user.id);
+      const d = await db();
+      const out = await d.transaction(async tx => {
+        const locked = await lockTicket(tx, t.id);
+        if (locked.billingState === "FINALIZED" && locked.finalRevisionId) {
+          const rev = (await tx.select().from(fieldTicketRevisions).where(eq(fieldTicketRevisions.id, locked.finalRevisionId)).limit(1))[0]!;
+          return { finalized: true as const, alreadyFinalized: true, documentRef: rev.documentRef, snapshotHash: rev.snapshotHash, billingState: locked.billingState, refusals: [] as string[] };
+        }
+        const lines = await linesWithAmounts(tx, t.id);
+        const check = finalizeCheck({ state: locked.billingState, withoutCustomerAcceptance: input.withoutCustomerAcceptance, reason: input.reason ?? null, lineCount: lines.length });
+        if (!check.permitted) return { finalized: false as const, alreadyFinalized: false, refusals: check.refusals, billingState: locked.billingState, documentRef: null, snapshotHash: null };
+        const frozen = await writeFrozenRevision(tx, { ticket: locked, kind: "final", actorUserId: ctx.user.id, finalizedWithoutCustomerAcceptance: check.overrides });
+        const now = new Date();
+        await tx.update(fieldTickets).set({ billingState: "FINALIZED", billingVersion: locked.billingVersion + 1, finalizedAt: now, finalizedByUserId: ctx.user.id, finalRevisionId: frozen.revisionId, updatedAt: now }).where(eq(fieldTickets.id, t.id));
+        const org = await orgRefForTicket(tx, t.id);
+        await appendCustomerAuditEvent(tx, { orgRef: org.orgRef, eventType: "ticket_finalized", subjectType: "fieldTicket", subjectRef: locked.ticketNumber, jobId: org.jobId, fieldTicketId: t.id, actorUserId: ctx.user.id, payload: { from: locked.billingState, to: "FINALIZED", version: locked.billingVersion + 1, documentRef: frozen.documentRef, snapshotHash: frozen.hash, totals: frozen.snapshot.billing, withoutCustomerAcceptance: check.overrides } });
+        return { finalized: true as const, alreadyFinalized: false, documentRef: frozen.documentRef, snapshotHash: frozen.hash, billingState: "FINALIZED" as const, refusals: [] as string[], totals: frozen.snapshot.billing };
+      });
+      if (out.finalized && !out.alreadyFinalized) { const x = await loadTicket(input.ticketNumber); await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "billing_update", ticketNumber: x.t.ticketNumber, jobCode: x.job?.jobCode ?? null, detail: "ticket finalized", subjectRef: out.documentRef ?? x.t.ticketNumber }); }
+      return out;
+    }),
+
+  /** Void a ticket that has not been invoiced. Nothing is deleted; the state and the reason are on record. */
+  ticketVoid: roleProcedure("clientServices.ticketVoid")
+    .input(z.object({ ticketNumber: z.string().min(1).max(64), reason: z.string().min(5).max(400) }))
+    .mutation(async ({ ctx, input }) => {
+      const t = await ownTicket(input.ticketNumber, ctx.user.id);
+      const d = await db();
+      const r = await d.transaction(async tx => {
+        const r = await transitionBilling(tx, { ticketId: t.id, action: "void", actor: { userId: ctx.user.id }, eventType: "ticket_voided", payload: { reason: input.reason } });
+        if (r.changed) await tx.update(fieldTickets).set({ voidedAt: new Date(), voidedByUserId: ctx.user.id, voidReason: input.reason }).where(eq(fieldTickets.id, t.id));
+        return r;
+      });
+      return { ticketNumber: t.ticketNumber, billingState: r.to };
+    }),
+
+  /**
+   * Amend a finalized ticket: a new line beside the frozen ones (never an edit), priced as it is
+   * recorded, and a new `amendment` revision that supersedes the final by reference. The final revision
+   * and its hash are untouched. After invoicing, the correction is a credit, not an amendment.
+   */
+  ticketAmend: roleProcedure("clientServices.ticketAmend")
+    .input(z.object({ ticketNumber: z.string().min(1).max(64), reason: z.string().min(5).max(400), lineKind: z.enum(["service", "load", "disposal", "standby", "equipment", "personnel", "mileage", "other"]), serviceCode: z.string().min(1).max(60).optional(), description: z.string().min(1).max(220), quantity: z.number().nullable().optional(), quantityUnit: z.string().max(30).nullable().optional(), amendsLineId: z.number().int().positive().nullable().optional(), customerVisible: z.boolean().default(true) }))
+    .mutation(async ({ ctx, input }) => {
+      const t = await ownTicket(input.ticketNumber, ctx.user.id);
+      const x = await loadTicket(input.ticketNumber);
+      const d = await db();
+      return d.transaction(async tx => {
+        const locked = await lockTicket(tx, t.id);
+        if (locked.billingState !== "FINALIZED") throw new TRPCError({ code: "PRECONDITION_FAILED", message: locked.billingState === "INVOICED" ? "The ticket is invoiced — a correction is a credit against the invoice" : `Only a finalized ticket is amended; this one is ${locked.billingState.replace(/_/g, " ").toLowerCase()}` });
+        if (input.amendsLineId != null && !x.lines.some(l => l.id === input.amendsLineId)) throw new TRPCError({ code: "NOT_FOUND", message: "The line to amend is not on this ticket" });
+        const ins = await tx.insert(fieldTicketLines).values({ fieldTicketId: t.id, lineKind: input.lineKind, serviceCode: input.serviceCode ?? null, description: input.description, quantity: input.quantity ?? null, quantityUnit: input.quantityUnit ?? null, measurementMethod: "unknown", disposition: "not_presented", customerVisible: input.customerVisible, amendsLineId: input.amendsLineId ?? null, addedByUserId: ctx.user.id });
+        const lineId = Number(ins[0]?.insertId ?? 0);
+        let pricing: unknown = { skipped: "no service named" };
+        const unit = normaliseUnit(input.quantityUnit);
+        if (input.serviceCode && input.quantity != null && unit && x.account) {
+          const r = await priceLineAndRecord({ db: tx as never, financialEntityId: x.account.financialEntityId, rateKind: "sell", serviceCode: input.serviceCode, at: x.t.startedAt ?? x.t.createdAt, subjectKind: "field_ticket_line", subjectRef: `${x.t.ticketNumber}/L${lineId}`, quantity: input.quantity, unit, measurementSource: MEASUREMENT_BASIS.unknown ?? "manual_entry", decidedByUserId: ctx.user.id, context: { customerAccountId: x.account.id, jobId: x.t.jobId, unitId: x.t.unitId } });
+          await tx.update(fieldTicketLines).set({ pricingDecisionRef: r.decisionRef }).where(eq(fieldTicketLines.id, lineId));
+          pricing = { decisionRef: r.decisionRef, outcome: r.outcome.outcome, amountCents: r.outcome.amountCents };
+        }
+        const frozen = await writeFrozenRevision(tx, { ticket: locked, kind: "amendment", actorUserId: ctx.user.id, finalizedWithoutCustomerAcceptance: null });
+        const now = new Date();
+        await tx.update(fieldTickets).set({ billingVersion: locked.billingVersion + 1, finalRevisionId: frozen.revisionId, updatedAt: now }).where(eq(fieldTickets.id, t.id));
+        const org = await orgRefForTicket(tx, t.id);
+        await appendCustomerAuditEvent(tx, { orgRef: org.orgRef, eventType: "ticket_amended", subjectType: "fieldTicket", subjectRef: locked.ticketNumber, jobId: org.jobId, fieldTicketId: t.id, actorUserId: ctx.user.id, payload: { reason: input.reason, lineId, amendsLineId: input.amendsLineId ?? null, description: input.description, quantity: input.quantity ?? null, quantityUnit: input.quantityUnit ?? null, pricing, documentRef: frozen.documentRef, snapshotHash: frozen.hash, supersedes: frozen.snapshot.supersedesRevisionHash, totals: frozen.snapshot.billing } });
+        return { ticketNumber: locked.ticketNumber, lineId, documentRef: frozen.documentRef, snapshotHash: frozen.hash, supersedesRevisionHash: frozen.snapshot.supersedesRevisionHash, totals: frozen.snapshot.billing, billingVersion: locked.billingVersion + 1 };
+      });
+    }),
+
+  /** Change a line while the state allows it. The write names the version it read; a moved version is refused. Before and after are on the ledger. */
+  lineUpdate: roleProcedure("clientServices.lineUpdate")
+    .input(z.object({ ticketNumber: z.string().min(1).max(64), lineId: z.number().int().positive(), expectedVersion: z.number().int().positive().nullable().optional(), description: z.string().min(1).max(220).optional(), quantity: z.number().nullable().optional(), quantityUnit: z.string().max(30).nullable().optional(), customerVisible: z.boolean().optional(), loadId: z.number().int().positive().nullable().optional(), disposalTicketId: z.number().int().positive().nullable().optional(), unitId: z.number().int().positive().nullable().optional(), periodStartAt: z.coerce.date().nullable().optional(), periodEndAt: z.coerce.date().nullable().optional(), reason: z.string().max(300).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const t = await ownTicket(input.ticketNumber, ctx.user.id);
+      const x = await loadTicket(input.ticketNumber);
+      const d = await db();
+      return d.transaction(async tx => {
+        const locked = await beforeLineWrite(tx, { ticketId: t.id, expectedVersion: input.expectedVersion ?? null });
+        const before = (await tx.select().from(fieldTicketLines).where(and(eq(fieldTicketLines.id, input.lineId), eq(fieldTicketLines.fieldTicketId, t.id))).for("update").limit(1))[0];
+        if (!before) throw new TRPCError({ code: "NOT_FOUND", message: "Line not found on this ticket" });
+        const patch = {
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.quantity !== undefined ? { quantity: input.quantity } : {}),
+          ...(input.quantityUnit !== undefined ? { quantityUnit: input.quantityUnit } : {}),
+          ...(input.customerVisible !== undefined ? { customerVisible: input.customerVisible } : {}),
+          ...(input.loadId !== undefined ? { loadId: input.loadId } : {}),
+          ...(input.disposalTicketId !== undefined ? { disposalTicketId: input.disposalTicketId } : {}),
+          ...(input.unitId !== undefined ? { unitId: input.unitId } : {}),
+          ...(input.periodStartAt !== undefined ? { periodStartAt: input.periodStartAt } : {}),
+          ...(input.periodEndAt !== undefined ? { periodEndAt: input.periodEndAt } : {}),
+        };
+        await tx.update(fieldTicketLines).set(patch).where(eq(fieldTicketLines.id, before.id));
+        // A changed quantity or unit is priced again; the earlier decision stays on record and the line carries the new one.
+        let repriced: unknown = null;
+        const q = input.quantity !== undefined ? input.quantity : before.quantity;
+        const u = normaliseUnit(input.quantityUnit !== undefined ? input.quantityUnit : before.quantityUnit);
+        if ((input.quantity !== undefined || input.quantityUnit !== undefined) && before.serviceCode && q != null && u && x.account) {
+          const r = await priceLineAndRecord({ db: tx as never, financialEntityId: x.account.financialEntityId, rateKind: "sell", serviceCode: before.serviceCode, at: x.t.startedAt ?? x.t.createdAt, subjectKind: "field_ticket_line", subjectRef: `${x.t.ticketNumber}/L${before.id}`, quantity: q, unit: u, measurementSource: MEASUREMENT_BASIS[before.measurementMethod] ?? "manual_entry", decidedByUserId: ctx.user.id, context: { customerAccountId: x.account.id, jobId: x.t.jobId, unitId: x.t.unitId } });
+          await tx.update(fieldTicketLines).set({ pricingDecisionRef: r.decisionRef }).where(eq(fieldTicketLines.id, before.id));
+          repriced = { decisionRef: r.decisionRef, outcome: r.outcome.outcome, amountCents: r.outcome.amountCents, previousDecisionRef: before.pricingDecisionRef };
+        }
+        const billing = await afterLineWrite(tx, { ticket: locked, lineId: before.id, eventType: "billing_line_modified", actor: { userId: ctx.user.id }, payload: { reason: input.reason ?? null, before: { description: before.description, quantity: before.quantity, quantityUnit: before.quantityUnit, customerVisible: before.customerVisible, loadId: before.loadId, disposalTicketId: before.disposalTicketId, unitId: before.unitId }, after: patch, repriced } });
+        return { lineId: before.id, billingVersion: billing.version, billingState: billing.state, repriced };
+      });
+    }),
+
+  /** The office's view of the open ticket: every line with its amount (internal ones included), totals, revisions, the customer's actions, and what may happen next. */
+  ticketBilling: roleProcedure("clientServices.ticketBilling")
+    .input(z.object({ ticketNumber: z.string().min(1).max(64) }))
+    .query(async ({ ctx, input }) => {
+      const t = await ownTicket(input.ticketNumber, ctx.user.id);
+      const d = await db();
+      const [row, lines, revisions, actions] = await Promise.all([
+        d.select().from(fieldTickets).where(eq(fieldTickets.id, t.id)).limit(1).then(r => r[0]!),
+        linesWithAmounts(d, t.id),
+        d.select({ id: fieldTicketRevisions.id, documentRef: fieldTicketRevisions.documentRef, revision: fieldTicketRevisions.revision, kind: fieldTicketRevisions.kind, snapshotHash: fieldTicketRevisions.snapshotHash, supersedesRevisionId: fieldTicketRevisions.supersedesRevisionId, generatedAt: fieldTicketRevisions.generatedAt }).from(fieldTicketRevisions).where(eq(fieldTicketRevisions.fieldTicketId, t.id)).orderBy(fieldTicketRevisions.revision),
+        d.select().from(customerTicketActions).where(eq(customerTicketActions.fieldTicketId, t.id)).orderBy(customerTicketActions.id),
+      ]);
+      const x = await loadTicket(input.ticketNumber);
+      const totals = ticketTotals(lines.map(l => ({ customerVisible: l.customerVisible, priced: l.priced, amountCents: l.amountCents, amendsLineId: l.amendsLineId })));
+      return {
+        ticketNumber: row.ticketNumber, billingState: row.billingState, billingVersion: row.billingVersion, customerPoNumber: row.customerPoNumber, finalizedAt: row.finalizedAt, finalRevisionId: row.finalRevisionId, voidedAt: row.voidedAt, voidReason: row.voidReason,
+        presentedHash: snapshotFor(x).hash,
+        lineWrites: lineWritePermitted(row.billingState),
+        lines: lines.map(l => ({ id: l.id, lineKind: l.lineKind, serviceCode: l.serviceCode, description: l.description, quantity: l.quantity, quantityUnit: l.quantityUnit, customerVisible: l.customerVisible, disposition: l.disposition, priced: l.priced, amountCents: l.amountCents, pricingDecisionRef: l.pricingDecisionRef, loadId: l.loadId, disposalTicketId: l.disposalTicketId, unitId: l.unitId, periodStartAt: l.periodStartAt, periodEndAt: l.periodEndAt, amendsLineId: l.amendsLineId, addedByUserId: l.addedByUserId })),
+        totals, revisions,
+        actions: actions.map(a => ({ actionRef: a.actionRef, kind: a.kind, actorKind: a.actorKind, representativeName: a.representativeName, representativeTitle: a.representativeTitle, customerPoNumber: a.customerPoNumber, comment: a.comment, snapshotHash: a.snapshotHash, at: a.at })),
+      };
     }),
 
   /** The customer audit ledger for one job of the caller's organization. */

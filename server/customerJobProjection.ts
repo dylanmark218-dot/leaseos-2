@@ -17,6 +17,7 @@ import { EVENT_CLOCK, type EventType } from "./_core/siteCloseout";
 const EVENT_TYPES = Object.keys(EVENT_CLOCK) as EventType[];
 import { projectCustomerJob, projectLoads, projectOpenTicket, type CustomerJobView, type CustomerOpenTicket, type Fix, type StatusEvent } from "./_core/customerJobView";
 import type { LocationMode } from "./_core/trackingLinks";
+import { loadTicket, snapshotFor } from "./closeoutRouter";
 
 export type Visibility = { locationMode: LocationMode; live: boolean; unit: boolean; operator: boolean };
 
@@ -116,7 +117,8 @@ export async function customerOpenTicketsFor(db: Db, jobId: number): Promise<Cus
     const loadIds = lines.map(l => l.loadId).filter((x): x is number => x != null);
     const loadNumbers = loadIds.length ? new Map((await db.select({ id: loads.id, loadNumber: loads.loadNumber }).from(loads).where(inArray(loads.id, loadIds))).map(r => [r.id, r.loadNumber])) : new Map<number, string>();
     const finalRev = t.finalRevisionId ? (await db.select().from(fieldTicketRevisions).where(eq(fieldTicketRevisions.id, t.finalRevisionId)).limit(1))[0] : undefined;
-    const presented = (await db.select({ snapshotHash: fieldTicketRevisions.snapshotHash }).from(fieldTicketRevisions).where(eq(fieldTicketRevisions.fieldTicketId, t.id)).orderBy(desc(fieldTicketRevisions.revision)).limit(1))[0];
+    // The hash the customer decides against is the ticket as it stands now, computed the way the office presented it.
+    const presented = { snapshotHash: snapshotFor(await loadTicket(t.ticketNumber)).hash };
     const finalTotalCents = finalRev ? ((JSON.parse(finalRev.snapshotJson) as { billing?: { subtotalCents?: number } }).billing?.subtotalCents ?? null) : null;
     // The live invoice drawn from this ticket's lines, if any.
     const invLine = lines.length ? (await db.select({ invoiceId: invoiceLines.invoiceId }).from(invoiceLines).where(inArray(invoiceLines.fieldTicketLineId, lines.map(l => l.id))).limit(1))[0] : undefined;

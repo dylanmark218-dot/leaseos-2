@@ -14,6 +14,7 @@ import { storagePut } from "./storage";
 import { queueCustomerAlert } from "./customerAlertService";
 import { getDb } from "./db";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
+import { transitionBilling } from "./serviceTicketService";
 import { roleProcedure, router } from "./_core/trpc";
 import { disputeResolution, draftFromTicket, finalizeCheck, snapshotHash, voidCheck, type TicketLineForInvoice } from "./_core/invoiceDraft";
 import { determine } from "./_core/taxRuleEngine";
@@ -89,6 +90,11 @@ export const invoicingRouter = router({
     const lineIds = (await d.select({ fieldTicketLineId: invoiceLines.fieldTicketLineId }).from(invoiceLines).where(eq(invoiceLines.invoiceId, inv.id))).map(l => l.fieldTicketLineId).filter((x): x is number => x != null);
     if (lineIds.length) await d.update(billingBookEntries).set({ billingStatus: "ready", holdReason: `Released: invoice ${inv.invoiceNumber} voided — ${input.reason}`.slice(0, 300) }).where(and(eq(billingBookEntries.billingBookId, inv.billingBookId), inArray(billingBookEntries.fieldTicketLineId, lineIds)));
     await d.update(billingBooks).set({ billingState: "billing_review" }).where(eq(billingBooks.id, inv.billingBookId));
+    // 0175 — the tickets this invoice was drawn from return to FINALIZED, audited; the invoice itself stays void on record.
+    if (lineIds.length) {
+      const ticketIds = Array.from(new Set((await d.select({ fieldTicketId: fieldTicketLines.fieldTicketId }).from(fieldTicketLines).where(inArray(fieldTicketLines.id, lineIds))).map(r => r.fieldTicketId)));
+      for (const ticketId of ticketIds) await d.transaction(async tx => transitionBilling(tx, { ticketId, action: "invoice_voided", actor: { userId: ctx.user.id }, eventType: "ticket_voided", payload: { invoiceNumber: inv.invoiceNumber, reason: input.reason, invoiceVoided: true }, refuse: false }));
+    }
     return { voided: true as const, invoiceNumber: inv.invoiceNumber, releasedLines: lineIds.length };
   }),
 
@@ -136,7 +142,7 @@ export const invoicingRouter = router({
   /** Draft an invoice from a signed ticket: accepted, priced lines enter; the rest are excluded with a reason or block the draft. */
   draftFromTicket: roleProcedure("invoicing.draftFromTicket")
     .input(z.object({ ticketNumber: z.string().min(1).max(64), purchaseOrder: z.string().max(80).optional(), afeNumber: z.string().max(80).optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const d = await db();
       const x = await ticketForInvoice(d, input.ticketNumber);
       if (!x.account) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Ticket has no customer account — an invoice is addressed to an account" });
@@ -172,6 +178,8 @@ export const invoicingRouter = router({
         if (id) await d.update(billingBookEntries).set({ billingStatus: "held", holdReason: e.reason.slice(0, 300) }).where(eq(billingBookEntries.id, id));
         else await d.insert(billingBookEntries).values({ billingBookId: book.id, fieldTicketLineId: e.fieldTicketLineId, billingUnit: "n/a", billingStatus: "held", holdReason: e.reason.slice(0, 300) });
       }
+      // 0175 — the open ticket is invoiced; the ledger records which invoice was drawn from it.
+      await d.transaction(async tx => transitionBilling(tx, { ticketId: x.t.id, action: "invoice", actor: { userId: ctx.user.id }, eventType: "invoice_generated", payload: { invoiceNumber, subtotalCents: draft.subtotalCents, lines: draft.lines.length }, refuse: false }));
       return { drafted: true as const, invoiceNumber, bookNumber: book.bookNumber, subtotalCents: draft.subtotalCents, lines: draft.lines.length, excluded: draft.excluded, gstTreatment: "unknown" as const, next: "Set the GST/HST treatment (gst.treatmentSet), then finalize." };
     }),
 

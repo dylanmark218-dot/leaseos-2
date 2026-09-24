@@ -132,3 +132,46 @@ tree); the URL is the payload.
 
 **Unresolved risks:** no browser end-to-end run exists in this container (the register's standing gap); the axe
 rules that need a renderer (contrast, target size) are reported as not evaluated, as for every other screen.
+
+## CP5 — open-ticket billing lifecycle
+
+**Files:** `server/_core/serviceTicketBilling.ts` (pure: the state machine, finalize check, line-write rule, version
+check, derived totals, frozen snapshot + hash), `server/serviceTicketService.ts` (stored: row-locked transitions,
+`beforeLineWrite` / `afterLineWrite`, frozen revisions), `server/clientServicesRouter.ts` (+7), hooks in
+`server/closeoutRouter.ts` (lineAdd is now one transaction under the ticket lock with an optional
+`expectedVersion`; eventRecord opens a draft; sitePrepare presents; recordSignature accepts or disputes and writes the
+`sign` action; decideLine disputes / accepts), `server/invoicingRouter.ts` (draft → INVOICED with `invoice_generated`;
+void → back to FINALIZED), `server/portalRouter.ts` (passes the identity as the actor), `server/customerJobProjection.ts`
+(the hash the customer decides against is computed live, the way the office presented it).
+
+**Lifecycle:** DRAFT → OPEN → AWAITING_CUSTOMER_REVIEW → CUSTOMER_ACCEPTED | DISPUTED → FINALIZED → INVOICED; VOID from
+any state before INVOICED; INVOICED → FINALIZED when the invoice is voided. Every transition is under `FOR UPDATE`,
+bumps `billingVersion`, and lands on the ledger with from / to / version. Lines may be written in DRAFT, OPEN,
+AWAITING_CUSTOMER_REVIEW and DISPUTED; never once the customer accepted a hash or the ticket is frozen. Finalizing an
+unaccepted ticket needs `withoutCustomerAcceptance` and a reason, carried by the revision and the ledger. FINALIZED
+writes a `final` revision (the enum's never-used kind) with the lines, totals and the site / signature hashes; an
+amendment is a new line beside the frozen ones plus an `amendment` revision superseding the final by reference. After
+INVOICED, corrections are the existing credit path.
+
+**API added:** `clientServices.{ticketPresent, ticketReopen, ticketFinalize, ticketVoid, ticketAmend, lineUpdate,
+ticketBilling}`. `closeout.lineAdd` gains `customerVisible`, `loadId`, `disposalTicketId`, `unitId`, `periodStartAt`,
+`periodEndAt`, `expectedVersion` and returns `billingVersion` / `billingState` (additive).
+
+**Tests added:** `server/serviceTicketBilling.test.ts` (5: every transition and refusal, finalize by name, line-write
+rule, version check, derived totals, frozen hash reproducibility); `server/serviceTicketBilling.db.test.ts` (4: the
+whole life through the real routers with tenant B refused at each step and the ledger in order; eight concurrent
+`lineAdd` calls serialized with versions 2..9 each exactly once and totals adding up; dispute / re-accept / finalize
+refusals / void). Guards: 652 operational, 720 mounted paths.
+
+**Test results:** 9/9 new; the existing closeout, invoicing, portal, pricing and contract-terms suites re-run green
+with the hooks in place; guards green; `tsc` and test-file typecheck clean.
+
+**Decisions:** the open ticket is the field ticket (no second ticket); amounts live in pricing decisions and totals are
+derived on every read; the presented hash is computed live rather than stored, so a line added after presentation
+changes what the customer must accept.
+
+**Security implications:** an accepted or frozen ticket cannot be edited through any router; a stale version is refused
+by name; every state change carries the actor (user, portal identity or tracking link).
+
+**Unresolved risks:** `eventRecord` opens a draft ticket without a version bump (events are not lines); the finalized
+snapshot does not yet carry post-site supplement hours (R2), which the existing supplement revision holds separately.

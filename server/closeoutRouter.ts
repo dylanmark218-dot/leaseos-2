@@ -13,6 +13,8 @@ import { approvalDecision, decideBillable, termsInEffect, type Terms } from "./_
 import { storagePut } from "./storage";
 import { actingScopeFor, fieldTicketInScope, getDb, jobInScope, unitInScope } from "./db";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
+import { afterLineWrite, beforeLineWrite, openIfDraft, orgRefForTicket, transitionBilling, type Actor as BillingActor } from "./serviceTicketService";
+import { customerTicketActions } from "../drizzle/schema";
 import { fieldDevices } from "../drizzle/schema";
 import { canonicalSignaturePayload, checkSignatureAttestation } from "./_core/deviceSignature";
 import { clientAdjustments, customerAccounts, customerContractTerms, delayEvents, disposalTickets, fieldTicketDocuments, fieldTicketEvents, fieldTicketLines, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, jobs, loads, payrollAdjustments, roadHazardObservations, signatoryAuthorities, tripStops, weatherObservations } from "../drizzle/schema";
@@ -53,7 +55,7 @@ export async function recordSignature(args: { ticketNumber: string; signer: { na
  * `device_auth`: a method that names a device without proving one is a label, which is what this
  * replaces.
  */
-deviceAttestation?: { deviceRef: string; keyFingerprint: string; signatureP1363Base64: string; signedAt: Date } | null; requested: Authority[]; extraWorkCents: number; postSiteAuthorization: PostSiteAuthorization | null; snapshotHash: string; authority: { signatoryName: string; mayConfirmWork: boolean; maySignTicket: boolean; mayApproveStandby: boolean; extraWorkLimitCents: number | null; mayApproveInvoice: boolean; mayChangeRates: boolean; validTo: Date | null; status: "active" | "revoked" } | null; gps: { latitude: number; longitude: number } | null; offline: boolean; witnessedByOperatorId: number | null; externalIdentityId: number | null; paperScanEvidenceRecordId: number | null; generatedByUserId: number | null }) {
+deviceAttestation?: { deviceRef: string; keyFingerprint: string; signatureP1363Base64: string; signedAt: Date } | null; requested: Authority[]; extraWorkCents: number; postSiteAuthorization: PostSiteAuthorization | null; snapshotHash: string; authority: { signatoryName: string; mayConfirmWork: boolean; maySignTicket: boolean; mayApproveStandby: boolean; extraWorkLimitCents: number | null; mayApproveInvoice: boolean; mayChangeRates: boolean; validTo: Date | null; status: "active" | "revoked" } | null; gps: { latitude: number; longitude: number } | null; offline: boolean; witnessedByOperatorId: number | null; externalIdentityId: number | null; paperScanEvidenceRecordId: number | null; generatedByUserId: number | null; actor?: BillingActor }) {
   const x = await loadTicket(args.ticketNumber);
   if (x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Ticket already signed (revision ${x.signature.revision}); a later change is a new revision, not a second signature` });
   if (!x.t.completedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Site work has not been marked complete — prepare the ticket first" });
@@ -92,11 +94,20 @@ deviceAttestation?: { deviceRef: string; keyFingerprint: string; signatureP1363B
   const documentRef = `${x.t.ticketNumber}-R1`;
   await x.db.insert(fieldTicketRevisions).values({ documentRef, fieldTicketId: x.t.id, revision: 1, kind: "site_signed", snapshotJson: canonicalJson(snapshot), snapshotHash: hash, billableHoursSite: snapshot.siteBillableHours, billableHoursPostSite: null, generatedByUserId: args.generatedByUserId, generatedAt: now });
   await x.db.update(fieldTickets).set({ status: "closed", signatureStatus: d.refused.length ? "partially_accepted" : "accepted" }).where(eq(fieldTickets.id, x.t.id));
+  // 0175 — a signature is the customer's decision on the open ticket: accepted, or disputed when some authority was refused.
+  {
+    const actor: BillingActor = args.actor ?? { userId: args.generatedByUserId ?? null, externalIdentityId: args.externalIdentityId ?? null };
+    const org = await orgRefForTicket(x.db, x.t.id);
+    await x.db.transaction(async tx => {
+      await transitionBilling(tx, { ticketId: x.t.id, action: d.refused.length ? "dispute" : "accept", actor, eventType: "customer_signature", payload: { documentRef, snapshotHash: hash, signer: args.signer.name, method: args.method, exercised: d.exercised, refused: d.refused.map(r => r.authority), withinAuthority: d.withinAuthority }, refuse: false });
+      await tx.insert(customerTicketActions).values({ actionRef: ref("CTA"), orgRef: org.orgRef, jobId: org.jobId, fieldTicketId: x.t.id, customerAccountId: x.t.customerAccountId, kind: "sign", actorKind: actor.trackingLinkId ? "tracking_link" : actor.externalIdentityId ? "portal_identity" : "internal_user", trackingLinkId: actor.trackingLinkId ?? null, externalIdentityId: actor.externalIdentityId ?? null, userId: actor.userId ?? null, representativeName: args.signer.name, representativeTitle: args.signer.role, snapshotHash: hash, signatureName: args.signer.name, signaturePayloadHash: hash, ipHash: actor.ipHash ?? null, at: now });
+    });
+  }
   await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "r1_available", ticketNumber: x.t.ticketNumber, subjectRef: documentRef });
   return { documentRef, revision: 1, snapshotHash: hash, exercised: d.exercised, refused: d.refused, withinAuthority: d.withinAuthority, signedAt: now };
 }
 
-export async function decideLine(args: { ticketNumber: string; lineId: number; disposition: "accepted" | "disputed"; customerQuantity: number | null; customerStatement: string | null; customerAccountIdMustMatch: number | null }) {
+export async function decideLine(args: { ticketNumber: string; lineId: number; disposition: "accepted" | "disputed"; customerQuantity: number | null; customerStatement: string | null; customerAccountIdMustMatch: number | null; actor?: BillingActor }) {
   const x = await loadTicket(args.ticketNumber);
   if (args.customerAccountIdMustMatch != null && x.t.customerAccountId !== args.customerAccountIdMustMatch) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket on this account" });
   if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Lines are decided against a signed ticket" });
@@ -105,6 +116,13 @@ export async function decideLine(args: { ticketNumber: string; lineId: number; d
   const d = lineDecision(line, { disposition: args.disposition, customerQuantity: args.customerQuantity, customerStatement: args.customerStatement });
   if (d.refusal) throw new TRPCError({ code: "BAD_REQUEST", message: d.refusal });
   await x.db.update(fieldTicketLines).set({ disposition: d.line.disposition, customerStatement: d.line.customerStatement }).where(eq(fieldTicketLines.id, line.id));
+  // 0175 — a disputed line disputes the ticket; every line accepted accepts it. Both are the customer's decisions and go on the ledger.
+  {
+    const after = x.lines.map(l => (l.id === line.id ? d.line : l));
+    const allAccepted = after.length > 0 && after.every(l => l.disposition === "accepted");
+    const action = d.line.disposition === "disputed" ? "dispute" : allAccepted ? "accept" : null;
+    if (action) await x.db.transaction(async tx => transitionBilling(tx, { ticketId: x.t.id, action, actor: args.actor ?? {}, eventType: action === "dispute" ? "customer_dispute" : "customer_approval", payload: { lineId: line.id, disposition: d.line.disposition, customerStatement: d.line.customerStatement }, refuse: false }));
+  }
   return { lineId: line.id, disposition: d.line.disposition, operatorStatement: line.operatorStatement, operatorQuantity: line.quantity, customerStatement: d.line.customerStatement };
 }
 
@@ -145,27 +163,34 @@ export const closeoutRouter = router({
     }),
 
   lineAdd: roleProcedure("closeout.lineAdd")
-    .input(z.object({ ticketNumber: z.string().min(1).max(64), lineKind: z.enum(["service", "load", "disposal", "standby", "equipment", "personnel", "mileage", "other"]), serviceCode: z.string().min(1).max(60).optional(), description: z.string().min(1).max(220), quantity: z.number().nullable().optional(), quantityUnit: z.string().max(30).nullable().optional(), measurementMethod: z.enum(["meter", "scale", "loadsense_calibrated", "loadsense_uncalibrated", "gauge", "estimate", "customer_stated", "system_timed", "unknown"]).default("unknown"), sourceTrackingNumber: z.string().max(64).nullable().optional(), operatorStatement: z.string().max(220).nullable().optional() }))
+    .input(z.object({ ticketNumber: z.string().min(1).max(64), lineKind: z.enum(["service", "load", "disposal", "standby", "equipment", "personnel", "mileage", "other"]), serviceCode: z.string().min(1).max(60).optional(), description: z.string().min(1).max(220), quantity: z.number().nullable().optional(), quantityUnit: z.string().max(30).nullable().optional(), measurementMethod: z.enum(["meter", "scale", "loadsense_calibrated", "loadsense_uncalibrated", "gauge", "estimate", "customer_stated", "system_timed", "unknown"]).default("unknown"), sourceTrackingNumber: z.string().max(64).nullable().optional(), operatorStatement: z.string().max(220).nullable().optional(), customerVisible: z.boolean().optional(), loadId: z.number().int().positive().nullable().optional(), disposalTicketId: z.number().int().positive().nullable().optional(), unitId: z.number().int().positive().nullable().optional(), periodStartAt: z.coerce.date().nullable().optional(), periodEndAt: z.coerce.date().nullable().optional(), expectedVersion: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
       const x = await loadTicket(input.ticketNumber);
       if (x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Ticket is signed — a later addition is a supplement, not an edit" });
-      const ins = await x.db.insert(fieldTicketLines).values({ fieldTicketId: x.t.id, lineKind: input.lineKind, serviceCode: input.serviceCode ?? null, description: input.description, quantity: input.quantity ?? null, quantityUnit: input.quantityUnit ?? null, measurementMethod: input.measurementMethod, sourceTrackingNumber: input.sourceTrackingNumber ?? null, disposition: "not_presented", operatorStatement: input.operatorStatement ?? null });
-      const lineId = Number(ins[0]?.insertId ?? 0);
-      // v22.8 — a line that names its service is priced as it is recorded; the decision is written once and the line carries it. A line still records a fact: an unknown rate never stops it.
-      let pricing: { decisionRef: string; outcome: string; amountCents: number | null; reasons: string[] } | { skipped: string } = { skipped: "no service named" };
-      if (input.serviceCode) {
-        const unit = normaliseUnit(input.quantityUnit);
-        if (input.quantity == null || !unit) pricing = { skipped: input.quantity == null ? "no quantity" : `unit "${input.quantityUnit}" is not in the pricing vocabulary` };
-        else if (!x.account) pricing = { skipped: "ticket has no customer account" };
-        else {
-          const r = await priceLineAndRecord({ db: x.db as never, financialEntityId: x.account.financialEntityId, rateKind: "sell", serviceCode: input.serviceCode, at: x.t.startedAt ?? x.t.createdAt, subjectKind: "field_ticket_line", subjectRef: `${x.t.ticketNumber}/L${lineId}`, quantity: input.quantity, unit, measurementSource: MEASUREMENT_BASIS[input.measurementMethod] ?? "manual_entry", decidedByUserId: ctx.user.id, context: { customerAccountId: x.account.id, jobId: x.t.jobId, unitId: x.t.unitId } });
-          await x.db.update(fieldTicketLines).set({ pricingDecisionRef: r.decisionRef }).where(eq(fieldTicketLines.id, lineId));
-          pricing = { decisionRef: r.decisionRef, outcome: r.outcome.outcome, amountCents: r.outcome.amountCents, reasons: r.outcome.reasons };
+      // 0175 — one transaction under the ticket's row lock: the state must allow a line, the version the
+      // caller read (if named) must still be current, the line and its pricing decision are written, the
+      // version moves, the ledger records it. Two writers on one ticket are serialized here.
+      return x.db.transaction(async tx => {
+        const locked = await beforeLineWrite(tx, { ticketId: x.t.id, expectedVersion: input.expectedVersion ?? null });
+        const ins = await tx.insert(fieldTicketLines).values({ fieldTicketId: x.t.id, lineKind: input.lineKind, serviceCode: input.serviceCode ?? null, description: input.description, quantity: input.quantity ?? null, quantityUnit: input.quantityUnit ?? null, measurementMethod: input.measurementMethod, sourceTrackingNumber: input.sourceTrackingNumber ?? null, disposition: "not_presented", operatorStatement: input.operatorStatement ?? null, customerVisible: input.customerVisible ?? true, loadId: input.loadId ?? null, disposalTicketId: input.disposalTicketId ?? null, unitId: input.unitId ?? null, periodStartAt: input.periodStartAt ?? null, periodEndAt: input.periodEndAt ?? null, addedByUserId: ctx.user.id });
+        const lineId = Number(ins[0]?.insertId ?? 0);
+        // v22.8 — a line that names its service is priced as it is recorded; the decision is written once and the line carries it. A line still records a fact: an unknown rate never stops it.
+        let pricing: { decisionRef: string; outcome: string; amountCents: number | null; reasons: string[] } | { skipped: string } = { skipped: "no service named" };
+        if (input.serviceCode) {
+          const unit = normaliseUnit(input.quantityUnit);
+          if (input.quantity == null || !unit) pricing = { skipped: input.quantity == null ? "no quantity" : `unit "${input.quantityUnit}" is not in the pricing vocabulary` };
+          else if (!x.account) pricing = { skipped: "ticket has no customer account" };
+          else {
+            const r = await priceLineAndRecord({ db: tx as never, financialEntityId: x.account.financialEntityId, rateKind: "sell", serviceCode: input.serviceCode, at: x.t.startedAt ?? x.t.createdAt, subjectKind: "field_ticket_line", subjectRef: `${x.t.ticketNumber}/L${lineId}`, quantity: input.quantity, unit, measurementSource: MEASUREMENT_BASIS[input.measurementMethod] ?? "manual_entry", decidedByUserId: ctx.user.id, context: { customerAccountId: x.account.id, jobId: x.t.jobId, unitId: x.t.unitId } });
+            await tx.update(fieldTicketLines).set({ pricingDecisionRef: r.decisionRef }).where(eq(fieldTicketLines.id, lineId));
+            pricing = { decisionRef: r.decisionRef, outcome: r.outcome.outcome, amountCents: r.outcome.amountCents, reasons: r.outcome.reasons };
+          }
         }
-      }
-      return { lineId, pricing };
+        const billing = await afterLineWrite(tx, { ticket: locked, lineId, eventType: "billing_line_added", actor: { userId: ctx.user.id }, payload: { lineKind: input.lineKind, description: input.description, quantity: input.quantity ?? null, quantityUnit: input.quantityUnit ?? null, serviceCode: input.serviceCode ?? null, customerVisible: input.customerVisible ?? true, pricing } });
+        return { lineId, pricing, billingVersion: billing.version, billingState: billing.state };
+      });
     }),
 
   /** An event on one clock. Standby and post-site kinds are REVIEW until a rule or a signed basis says otherwise. */
@@ -188,6 +213,7 @@ export const closeoutRouter = router({
       const durationMinutes = input.endedAt ? Math.round((input.endedAt.getTime() - input.occurredAt.getTime()) / 60_000) : null;
       let decided: { customerBillable: "yes" | "no" | "review"; billableMinutes: number | null; ruleRef: string | null } = { customerBillable: billable, billableMinutes: null, ruleRef: null };
       if (billable === "review") { const d = decideBillable({ eventType: input.eventType, occurredAt: input.occurredAt, durationMinutes, terms: await termsFor(x.t.customerAccountId, input.occurredAt) }); decided = { customerBillable: d.customerBillable, billableMinutes: d.billableMinutes, ruleRef: d.ruleRef }; }
+      if (x.t.billingState === "DRAFT") await openIfDraft(x.db, x.t.id);   // 0175 — work has started: the open ticket accrues from here
       const ins = await x.db.insert(fieldTicketEvents).values({ fieldTicketId: x.t.id, eventType: input.eventType, clock: meta.clock, customerBillable: decided.customerBillable, billingRuleRef: decided.ruleRef, occurredAt: input.occurredAt, endedAt: input.endedAt ?? null, durationMinutes, billableMinutes: decided.billableMinutes, sourceTripStopId: input.tripStopId ?? null, detail: input.detail ?? null, source: input.source, confidence: input.confidence });
       // v21.14 — the customer's alerts, from the same events: first site work is arrival and work start; a hold is a delay.
       if (input.eventType === "site_work" && !x.events.some(ev => ev.eventType === "site_work")) { await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "arrival", ticketNumber: x.t.ticketNumber }); await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "work_start", ticketNumber: x.t.ticketNumber }); }
@@ -250,8 +276,11 @@ export const closeoutRouter = router({
       await x.db.update(fieldTickets).set({ completedAt: input.siteWorkCompleteAt, status: "presented", ...(input.postSiteRequired != null ? { postSiteRequired: input.postSiteRequired } : {}), updatedAt: new Date() }).where(eq(fieldTickets.id, x.t.id));
       const y = await loadTicket(input.ticketNumber);
       const { snapshot, hash, findings } = snapshotFor(y);
+      // 0175 — presenting the site is presenting the open ticket: the customer reviews it under this hash.
+      const billing = await x.db.transaction(async tx => transitionBilling(tx, { ticketId: x.t.id, action: "present", actor: { userId: ctx.user.id }, eventType: "ticket_presented", payload: { snapshotHash: hash, siteWorkCompleteAt: input.siteWorkCompleteAt.toISOString() }, refuse: false }));
       await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "signoff_ready", ticketNumber: x.t.ticketNumber, subjectRef: `${x.t.ticketNumber}:${hash.slice(0, 12)}` });
-      return { snapshot, snapshotHash: hash, findings };
+      if (billing.changed) await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "ticket_ready_for_review", ticketNumber: x.t.ticketNumber, subjectRef: `${x.t.ticketNumber}:${hash.slice(0, 12)}` });
+      return { snapshot, snapshotHash: hash, findings, billingState: billing.to };
     }),
 
   /** The operator or office witnesses the consultant's signature — drawn on the tablet, or a paper scan in the vault. */
@@ -268,7 +297,7 @@ export const closeoutRouter = router({
   /** The office records the customer's per-line position from a paper ticket. Both sides stay. */
   lineDecide: roleProcedure("closeout.lineDecide")
     .input(z.object({ ticketNumber: z.string().min(1).max(64), lineId: z.number().int().positive(), disposition: z.enum(["accepted", "disputed"]), customerQuantity: z.number().nullable().optional(), customerStatement: z.string().max(220).nullable().optional() }))
-    .mutation(async ({ input }) => decideLine({ ticketNumber: input.ticketNumber, lineId: input.lineId, disposition: input.disposition, customerQuantity: input.customerQuantity ?? null, customerStatement: input.customerStatement ?? null, customerAccountIdMustMatch: null })),
+    .mutation(async ({ ctx, input }) => decideLine({ ticketNumber: input.ticketNumber, lineId: input.lineId, disposition: input.disposition, customerQuantity: input.customerQuantity ?? null, customerStatement: input.customerStatement ?? null, customerAccountIdMustMatch: null, actor: { userId: ctx.user.id } })),
 
   /** Stage 2: what happened after the lease, under what was signed, with the disposal ticket and GPS beside each other. */
   supplementPrepare: roleProcedure("closeout.supplementPrepare")
