@@ -52,5 +52,27 @@ export function TrackingPage() {
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setDownloading(null); }
   };
 
-  return <TrackingView state={state} onDownload={d => void download(d)} onReviewTicket={() => setError("Ticket review from this link arrives with the customer-actions checkpoint.")} downloading={downloading} error={error} />;
+  /** The review dialog is the browser's own prompts for now: name, decision, statement. The server decides the rest. */
+  const review = async (ticketNumber: string) => {
+    setError(null);
+    const ticket = state.kind === "loaded" ? state.tickets?.find(t => t.ticketNumber === ticketNumber) : undefined;
+    if (!ticket) return;
+    const representativeName = window.prompt("Your name, as the representative reviewing this ticket:");
+    if (!representativeName?.trim()) return;
+    const decision = window.prompt('Type "approve" to approve the ticket as shown, or "dispute" to dispute it:')?.trim().toLowerCase();
+    try {
+      if (decision === "approve") {
+        const customerPoNumber = window.prompt("PO or reference number (optional):") || null;
+        await trackingClient.tracking.approve.mutate({ ticketNumber, snapshotHash: (ticket as { snapshotHash?: string | null }).snapshotHash ?? "", representativeName, customerPoNumber });
+      } else if (decision === "dispute") {
+        const comment = window.prompt("What is disputed, and why?");
+        if (!comment?.trim()) return;
+        await trackingClient.tracking.dispute.mutate({ ticketNumber, representativeName, comment });
+      } else return;
+      const tickets = await trackingClient.tracking.openTicket.query().then(r => r.tickets);
+      setState(s => (s.kind === "loaded" ? { ...s, tickets: tickets as never } : s));
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
+
+  return <TrackingView state={state} onDownload={d => void download(d)} onReviewTicket={t => void review(t)} downloading={downloading} error={error} />;
 }

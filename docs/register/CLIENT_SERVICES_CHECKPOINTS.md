@@ -175,3 +175,35 @@ by name; every state change carries the actor (user, portal identity or tracking
 
 **Unresolved risks:** `eventRecord` opens a draft ticket without a version bump (events are not lines); the finalized
 snapshot does not yet carry post-site supplement hours (R2), which the existing supplement revision holds separately.
+
+## CP6 — customer actions: acknowledge, approve, dispute, comment, sign
+
+**Files:** `server/customerActionService.ts` (one entry point for the link and, in CP7, the portal: ownership by job
+or by account, state checks from the same projection the customer reads, hash guard, one transaction for the action
+row, the ledger entry and the billing transition; signature through `recordSignature` as `portal_link`),
+`server/trackingRouter.ts` (+5), `client/src/tracking/TrackingPage.tsx` ("Review ticket" approves or disputes).
+
+**API added:** `tracking.{acknowledge, approve, dispute, comment, sign}` under `tracking.act` (sensitive: refused
+when the audit row cannot be written). Approve requires the representative's name and the hash reviewed; a changed
+ticket is refused and re-reviewed. Dispute requires a statement. Sign carries authorities, extra-work cents and the
+post-site basis; authority is the signatory's on file when the link names a known contact, else `unknown`.
+
+**Recorded per action:** action kind, timestamp, job, ticket, organization, link (or identity), representative name and
+title, PO/reference, comment, the snapshot hash shown, signature name and payload hash, hashed client address, user
+agent — on `customerTicketActions` (append-only) and on the hash-chained ledger.
+
+**Tests added:** `server/customerActions.db.test.ts` (3): a read writes no action; a link without `act` and a link on
+another job are refused by name; acknowledge; approve refused before presentation, with a stale hash and with a blank
+name, then accepted with the PO stored; dispute needs a statement and moves the state; comment; every row carries the
+link, the representative, a hashed address and never the address; reopen / correct / re-present / sign from the link
+through the canonical chain with `withinAuthority: unknown`; a second signature refused; ledger order and chain;
+the link's own access log counts refusals; closed and voided tickets refuse actions; a revoked link cannot act.
+
+**Test results:** 3/3 new; guards, tracking, billing and closeout suites green; `tsc` and test-file typecheck clean.
+
+**Decisions:** approve and dispute are the billing transitions themselves (one ledger entry each, with the action ref),
+so a customer decision can never be recorded without moving the ticket, nor move it without being recorded.
+
+**Unresolved risks:** the tracking page collects the review through browser prompts; a proper form arrives with the
+portal screens. Drawn-signature capture (an image) is not collected from the link — the signature is the named
+representative's electronic acceptance under the hash, as `portal_link` already is for identities.

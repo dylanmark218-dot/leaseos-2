@@ -16,6 +16,7 @@ import { liveWindow } from "./_core/trackingLinks";
 import { customerJobFor, customerLoadsFor, customerOpenTicketsFor, releasedDocumentsFor, type Visibility } from "./customerJobProjection";
 import { readReleasedDocument } from "./customerDocuments";
 import { appendCustomerAuditEvent } from "./_core/customerAudit";
+import { recordCustomerAction, recordCustomerSignature, type CustomerActor } from "./customerActionService";
 
 const trk = (ctx: unknown) => (ctx as { tracking: TrackingContext }).tracking;
 
@@ -32,6 +33,8 @@ async function liveFor(t: TrackingContext, now: Date) {
   if (!job) throw new TRPCError({ code: "NOT_FOUND", message: "This tracking link no longer resolves to a job" });
   return liveWindow({ liveUntilRule: t.liveUntilRule, liveGraceHours: t.liveGraceHours, liveExpiresAt: t.liveExpiresAt, jobCompletedAt: job.status === "complete" ? job.updatedAt : null, linkExpiresAt: t.expiresAt, now });
 }
+
+const actorOf = (t: TrackingContext): CustomerActor => ({ kind: "tracking_link", trackingLinkId: t.linkId, externalIdentityId: t.externalIdentityId, ipHash: t.ipHash, userAgent: t.userAgent, displayName: t.contactName });
 
 const visibilityFor = (t: TrackingContext, live: boolean): Visibility => ({ locationMode: t.locationMode, live, unit: t.scope.unit, operator: t.scope.operator });
 
@@ -73,6 +76,37 @@ export const trackingRouter = router({
     const tickets = await customerOpenTicketsFor(d, t.jobId);
     await d.transaction(async tx => { await appendCustomerAuditEvent(tx, { orgRef: t.orgRef, eventType: "customer_ticket_viewed", subjectType: "job", subjectRef: String(t.linkRef), jobId: t.jobId, trackingLinkId: t.linkId, externalIdentityId: t.externalIdentityId, ipHash: t.ipHash, payload: { tickets: tickets.map(x => ({ ticketNumber: x.ticketNumber, status: x.status, version: x.version })) } }); });
     return { tickets, note: "Amounts marked as estimates are accrued so far and are not an invoice. A finalized total and an invoice are shown only when they exist." };
+  }),
+
+  /* ---- customer actions: never a page visit, always a record ---- */
+
+  /** "I have seen this ticket." Recorded with who said so; changes no state. */
+  acknowledge: trackingProcedure("tracking.acknowledge").input(z.object({ ticketNumber: z.string().min(1).max(64), representativeName: z.string().min(1).max(180), representativeTitle: z.string().max(120).nullable().optional(), comment: z.string().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    const t = trk(ctx);
+    return recordCustomerAction({ db: await db(), ticketNumber: input.ticketNumber, scope: { jobId: t.jobId }, kind: "acknowledge", actor: actorOf(t), representativeName: input.representativeName, representativeTitle: input.representativeTitle ?? null, comment: input.comment ?? null });
+  }),
+
+  /** Approve the ticket as reviewed — by hash — naming the representative and, when they have one, the PO or reference. */
+  approve: trackingProcedure("tracking.approve").input(z.object({ ticketNumber: z.string().min(1).max(64), snapshotHash: z.string().length(64), representativeName: z.string().min(1).max(180), representativeTitle: z.string().max(120).nullable().optional(), customerPoNumber: z.string().max(80).nullable().optional(), comment: z.string().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    const t = trk(ctx);
+    return recordCustomerAction({ db: await db(), ticketNumber: input.ticketNumber, scope: { jobId: t.jobId }, kind: "approve", actor: actorOf(t), representativeName: input.representativeName, representativeTitle: input.representativeTitle ?? null, customerPoNumber: input.customerPoNumber ?? null, comment: input.comment ?? null, snapshotHash: input.snapshotHash });
+  }),
+
+  /** Dispute the ticket, saying what and why. Both sides stay on record. */
+  dispute: trackingProcedure("tracking.dispute").input(z.object({ ticketNumber: z.string().min(1).max(64), snapshotHash: z.string().length(64).nullable().optional(), representativeName: z.string().min(1).max(180), representativeTitle: z.string().max(120).nullable().optional(), comment: z.string().min(3).max(2000) })).mutation(async ({ ctx, input }) => {
+    const t = trk(ctx);
+    return recordCustomerAction({ db: await db(), ticketNumber: input.ticketNumber, scope: { jobId: t.jobId }, kind: "dispute", actor: actorOf(t), representativeName: input.representativeName, representativeTitle: input.representativeTitle ?? null, comment: input.comment, snapshotHash: input.snapshotHash ?? null });
+  }),
+
+  comment: trackingProcedure("tracking.comment").input(z.object({ ticketNumber: z.string().min(1).max(64), representativeName: z.string().max(180).nullable().optional(), comment: z.string().min(1).max(2000) })).mutation(async ({ ctx, input }) => {
+    const t = trk(ctx);
+    return recordCustomerAction({ db: await db(), ticketNumber: input.ticketNumber, scope: { jobId: t.jobId }, kind: "comment", actor: actorOf(t), representativeName: input.representativeName ?? null, comment: input.comment });
+  }),
+
+  /** Sign the presented site ticket electronically, through the canonical signature chain. Authority is unknown unless the link names a known signatory. */
+  sign: trackingProcedure("tracking.sign").input(z.object({ ticketNumber: z.string().min(1).max(64), snapshotHash: z.string().length(64), signerName: z.string().min(1).max(180), signerTitle: z.string().max(120).nullable().optional(), authorities: z.array(z.enum(["work_confirmation", "time_confirmation", "quantity_confirmation", "standby_approval", "change_order_authorization", "invoice_approval"])).min(1), extraWorkCents: z.number().int().nonnegative().default(0), postSiteAuthorization: z.object({ disposalRequired: z.boolean(), travelToDisposal: z.boolean(), disposalWait: z.boolean(), disposalUnload: z.boolean(), returnTravel: z.enum(["yes", "no", "per_contract"]), capRule: z.enum(["none", "per_contract"]), restockingBillable: z.literal(false), postTripBillable: z.literal(false) }).nullable().optional(), gps: z.object({ latitude: z.number(), longitude: z.number() }).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    const t = trk(ctx);
+    return recordCustomerSignature({ db: await db(), ticketNumber: input.ticketNumber, scope: { jobId: t.jobId }, actor: actorOf(t), signerName: input.signerName, signerTitle: input.signerTitle ?? null, authorities: input.authorities, extraWorkCents: input.extraWorkCents, postSiteAuthorization: input.postSiteAuthorization ?? null, snapshotHash: input.snapshotHash, gps: input.gps ?? null });
   }),
 
   /** What this link is: the job's reference, who it was issued to, what it permits, and whether live tracking is still on. */

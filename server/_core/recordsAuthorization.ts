@@ -3126,6 +3126,11 @@ export const TRACKING_PROCEDURE_PERMISSIONS = {
   "tracking.documents": "tracking.documents",
   "tracking.documentDownload": "tracking.documents",
   "tracking.openTicket": "tracking.billing",
+  "tracking.acknowledge": "tracking.act",
+  "tracking.approve": "tracking.act",
+  "tracking.dispute": "tracking.act",
+  "tracking.comment": "tracking.act",
+  "tracking.sign": "tracking.act",
 } as const satisfies Record<string, TrackingPermission>;
 
 /** A customer action and a document download are refused when their audit row cannot be written. */

@@ -268,7 +268,7 @@ describe("migrated operational procedures", () => {
     expect(countBuilders(trackingRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(trackingRouter, "publicProcedure")).toBe(0);
     const tracking = [...trackingRouter.matchAll(/trackingProcedure\("([^"]+)"\)/g)].map(m => m[1]);
-    expect(tracking.length).toBe(6);   // CP2: resolve; CP3: status, loads, documents, documentDownload, openTicket
+    expect(tracking.length).toBe(11);   // CP2: resolve; CP3: status, loads, documents, documentDownload, openTicket; CP6: acknowledge, approve, dispute, comment, sign
     for (const name of tracking) expect(TRACKING_PROCEDURE_PERMISSIONS, name).toHaveProperty(name);
     expect(Object.keys(TRACKING_PROCEDURE_PERMISSIONS).sort()).toEqual([...tracking].sort());
     expect(countBuilders(OPERATIONAL_SOURCES, "trackingProcedure")).toBe(0);
