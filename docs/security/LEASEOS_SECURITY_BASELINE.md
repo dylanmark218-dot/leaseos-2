@@ -29,7 +29,7 @@ program decomposition (`docs/security/LEASEOS_SECURITY_PROGRAM.md`) and the firs
 | Canonical main | `origin/main` = `6f52b57` ("SPINE item 1: per-boundary confirmation — resolver and chain rule (#10)") |
 | Working tree | clean (`git status --short` empty) before any document was written |
 | Release row | v23.25 (`LEASEOS_RELEASE`) |
-| Generated counts | 410 tables, 169 migration files, 652 `roleProcedure`, 36 `externalProcedure`, 2 `integrationProcedure`, 0 bare `protectedProcedure`, 355 permissions in the generated table (the union has 360 literals; two are declared twice, see §4), 125 sensitive, 13 universal, 319 test files / 4,347 `it(` (`LEASEOS_CURRENT_STATE.md:7-20`) |
+| Generated counts | 410 tables, 169 migration files, 652 `roleProcedure`, 36 `externalProcedure`, 2 `integrationProcedure`, 0 bare `protectedProcedure`, 355 permissions in the generated table — **an undercount**: the generator's pattern `/"([a-z_.]+)"/` skips the six camelCase permissions (`device.verifySeal`, `geo.locationVerifyFromGrid`, `hos.recordScannedLog`, `timeOff.decide`, `timeOff.request`, `timeOff.schedulingRead`) and counts one word quoted in a comment (`valid`); the union holds **360** unique names, with `commercial.read` and `hos.read` each declared twice (§4), 125 sensitive, 13 universal, 319 test files / 4,347 `it(` (`LEASEOS_CURRENT_STATE.md:7-20`) |
 | Migration head on main | `0174_dispatch_override_provenance.sql`; gaps at 0094, 0095, 0098, 0172, 0173; `0157` used twice; 0016/0017 reserved (`docs/architecture/MIGRATION_COLLISION_REGISTER.md`) |
 | Superseded work not to be re-merged | `claude/leaseos-auth-workspace-system-t008ad` (`docs/register/PORTAL_ORG_SCOPE_DEFERRED.md` §7) |
 | Related branches NOT on main | ELD ledger `shared/eld/eldEvent.ts` (branch `claude/eld-compliance-intelligence-ramlrd`); webhook tenant test `server/webhookTenantIsolation.db.test.ts` and fix `3c4f997` (branch `feature/tenant-scope-foundation`); AI fencing `server/_core/ai/` (PR #7 branch) |
@@ -469,7 +469,7 @@ replaced**.
 ## 15. CI / security-gate assessment
 
 Package manager pnpm (sha512-pinned), Vite + esbuild build, GitHub Actions on push and PR, MariaDB 10.11 service,
-MIT-style repository licence (`LICENSE` present). Deployment architecture: **not represented in the repository**
+MIT licence (`LICENSE`). Deployment architecture: **not represented in the repository**
 (no Dockerfile, compose, manifest, or runbook).
 
 | Gate | Enforces | Security value | Status |
@@ -553,7 +553,7 @@ executed.
 | V20 | Health endpoint always ok; no error reporting; whole-error logging may include PII; worker skips secret assertion; `DATABASE_URL`/MFA key not asserted | Low | §13, §8 |
 | V21 | AI call has no timeout, a hard-coded fallback host, no model/usage audit, client string in system prompt, unfenced transcript | Low today (single path, no records) | §12 |
 | V22 | `voiceTranscription` fetches any URL (SSRF) — inert while unwired | Low (latent) | `voiceTranscription.ts:99` |
-| V23 | Documentation drift: "non-exported" device key, "server-recomputed manifest hash", "4 native bindings", "`llm.ts` not wired", 36 vs 39 `orgRef` tables | Low (misleads the next reader) | §7, §11, §12 |
+| V23 | Documentation drift: "non-exported" device key, "server-recomputed manifest hash", "4 native bindings", "`llm.ts` not wired", 36 vs 39 `orgRef` tables; and the generated permission count (355) is itself wrong — `scripts/current-state.sh` misses six camelCase permissions and counts a comment word, so gate 8 pins a mis-measurement | Low (misleads the next reader) | §1, §7, §11, §12 |
 
 **Highest-risk weakness:** V1. A single session token — obtainable by any script on the page, any device that once
 held the cookie, or any log that ever captured a Bearer header — is a year of the holder's full authority with no
