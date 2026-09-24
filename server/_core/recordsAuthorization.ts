@@ -329,7 +329,11 @@ export type Permission =
   // v22.21 — Training Academy. Learner permissions are universal but self-scoped in the router.
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
-  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage";
+  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
+  // Analytics Checkpoint B — read-only metrics over existing records. `analytics.read` opens the
+  // organization's metrics, each still gated by its source records' own read permission;
+  // `analytics.read_own` is universal and self-scoped in code (analyticsRouter.mine).
+  | "analytics.read" | "analytics.read_own";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -431,6 +435,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -542,6 +548,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "assistant.ask",
     "board.read",
     "board.post",
@@ -608,6 +616,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "facility.directory.read",
     "academy.evaluate",
     "assistant.ask",
@@ -695,6 +705,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -816,6 +828,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -978,6 +992,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1230,6 +1246,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.graph.build",
   ],
   hr: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1293,6 +1311,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.read_safety_summary",
@@ -1469,6 +1489,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1688,6 +1710,9 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // Analytics Checkpoint B — your own numbers. analyticsRouter.mine resolves the operator from
+  // `ctx.user.id`; the input cannot name one.
+  "analytics.read_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -1703,7 +1728,7 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
   mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
   shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
   dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
-  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation"],
+  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", "analytics.read"],
   auditor: ["payroll.read", "billing.write", "personnel.write"],
 
   // The banking and tax-identifier reads are held by nobody in this model.
@@ -2522,6 +2547,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "widgets.offerable": "myday.read_own",
   "widgets.boardResolve": "myday.read_own",
   "widgets.layoutSave": "myday.read_own",
+  // Analytics Checkpoint B (docs/analytics/CHECKPOINT_B.md). Read-only; the organization is
+  // resolved server-side and each metric is also gated by its own source permission.
+  "analytics.catalog": "analytics.read",
+  "analytics.metric": "analytics.read",
+  "analytics.drilldown": "analytics.read",
+  "analytics.mine": "analytics.read_own",
+  "analytics.mineDrilldown": "analytics.read_own",
   "surfaces.search": "surface.search",
   // P3.6: no permission of its own — every hop is gated by the permission of the record it is,
   // and a caller with none of them gets an empty chain and the same notice everybody gets.

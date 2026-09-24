@@ -9,14 +9,14 @@ here can be added rather than read.
 | Release | **v23.25** | `LEASEOS_RELEASE` (or explicit argument 1) |
 | Tables | **410** | `mysqlTable(` declarations in `drizzle/schema.ts` |
 | Migrations | **169** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **652** | `roleProcedure(` call sites across all routers |
+| Role-authorized procedures | **657** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **355** | the `Permission` union |
+| Permissions | **357** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **125** | `SENSITIVE_PERMISSIONS` |
-| Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **319 / 4347** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Universal (self-scoped) permissions | **14** | `UNIVERSAL_PERMISSIONS` |
+| Test files / cases | **320 / 4369** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -155,7 +155,13 @@ the snapshot, sent with the account's terms and an alert, listed, viewed
 and accepted in the customer portal; supplemental drafts for lines released
 by a resolved dispute or a void; disputes resolved upheld, credited or
 partial with the credit approved by a second person in AR; voids recorded,
-never deleted, refused where money is applied).
+never deleted, refused where money is applied) · analytics metric registry
+(Checkpoint B: read-only metrics over trips, fleet, maintenance, compliance documents, stored
+readiness verdicts, safety reports and duty records; each value aggregated from exactly the rows
+its drill-down returns; organization resolved from membership and applied by each source table's
+existing scope rule; every metric also gated by its source's read permission; zone-stated ranges;
+a missing timestamp reported as unknown, never zero; metrics the records cannot support registered
+with their reason — no dashboards, exports or financial metrics yet).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 

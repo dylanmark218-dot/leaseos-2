@@ -2,7 +2,8 @@
 
 Against `v23.25` (HEAD `6f52b57`, 410 tables, 169 migrations, 652 role-authorized procedures).
 **A survey, no code.** Nothing in `server/`, `client/`, `shared/` or `drizzle/` was changed for
-this checkpoint. Every claim below was checked in the source, not inferred from the checkpoint
+this checkpoint. **Checkpoint B has since been built** — see `docs/analytics/CHECKPOINT_B.md` for what was
+implemented and what the survey's plan became. Every claim below was checked in the source, not inferred from the checkpoint
 prose; schema references are `drizzle/schema.ts:<line>` unless another file is named.
 
 The survey answers the nine questions Checkpoint A asked for, in order:

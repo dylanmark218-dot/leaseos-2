@@ -49,6 +49,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/workforceRouter.ts` | `ROLE_AUTHORIZED` | **16** |
 | `server/auditRouter.ts` | `ROLE_AUTHORIZED` | **6** |
 | `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **11** |
+| `server/analyticsRouter.ts` | `ROLE_AUTHORIZED` (`analytics.read` for organization metrics, each also gated by its source's read permission; universal `analytics.read_own` for `mine` / `mineDrilldown`, self-scoped in code) | **5** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
@@ -72,6 +73,11 @@ missed them.
   pay run; `controller` approves it; neither can do both.
 - **Self-service takes no subject id.** Own-pay and own-tax procedures resolve
   the employee from the session. There is no field to spoof.
+- **A metric reveals no more than its records.** (Analytics Checkpoint B) `analytics.read`
+  opens the procedure; the metric's own `requiredPermission` — the read permission of the
+  records it counts — is checked again inside it, so `analytics.read` never widens what a role
+  can see. A driver is denied `analytics.read` outright and gets their own numbers through
+  `analytics.mine`, which resolves the operator from the session.
 - **Sensitive permissions fail closed without an audit trail.** The count is in `LEASEOS_CURRENT_STATE.md`, generated from the array — it is no longer written here by hand. (v21.9.1 found nine actions missing from the set: dispatch award and override grant, enforcement changes, IFTA and GST finalization, period close and reopen, credit and write-off decisions. Added and test-pinned.)
 - **Insurance is layered by what a role needs to know.** A driver reads a
   summary — status and policy ref, never a premium. Verifying coverage with

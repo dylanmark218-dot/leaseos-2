@@ -26,6 +26,7 @@ import { deviceRouter, syncRouter } from "./deviceRouter";
 import { complianceRouter } from "./complianceRouter";
 import { calibrationRouter, requirementRouter } from "./requirementRouter";
 import { surfacesRouter } from "./surfacesRouter";
+import { analyticsRouter } from "./analyticsRouter";
 import { widgetsRouter, type WidgetDeps } from "./widgetsRouter";
 import { manifestCustodyRouter } from "./manifestCustodyRouter";
 import { resolveActingScope } from "./_core/actingScope";
@@ -353,6 +354,7 @@ export const appRouter = router({
   requirement: requirementRouter,
   calibration: calibrationRouter,
   surfaces: surfacesRouter,
+  analytics: analyticsRouter,
   dispatch: dispatchGateRouter,
   ifta: iftaRouter,
   fuel: fuelOpsRouter,

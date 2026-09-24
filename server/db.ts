@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import type { MySqlColumn } from "drizzle-orm/mysql-core";
 import { SINGLE_TENANT_ID, resolveActingScope } from "./_core/actingScope";
 import { drizzle } from "drizzle-orm/mysql2";
@@ -715,13 +715,18 @@ const documentOwnerOrg = sql<string | null>`(
     ELSE NULL
   END)`;
 
+/** The document-owner rule above as a predicate, so every reader of complianceDocuments applies the same one. */
+export function complianceDocumentScopeWhere(scope: TenantScope) {
+  return scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId);
+}
+
 export async function listComplianceDocuments(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
   return db
     .select()
     .from(complianceDocuments)
-    .where(scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId))
+    .where(complianceDocumentScopeWhere(scope))
     .orderBy(desc(complianceDocuments.createdAt))
     .limit(100);
 }
@@ -870,6 +875,26 @@ export async function incidentInScope(incidentNumber: string, scope: TenantScope
   if (i.unitId != null) return (await unitInScope(i.unitId, scope)) ? { id: i.id } : null;
   if (i.operatorId != null) return (await operatorInScope(i.operatorId, scope)) ? { id: i.id } : null;
   return scope.tenantId === SINGLE_TENANT_ID ? { id: i.id } : null;
+}
+
+/**
+ * `incidentInScope`'s rule as a predicate over many rows: through the job when there is one, else the
+ * unit's owner, else the operator's owner, else the historical single tenant only. For every table that
+ * carries the same three references (incidentReports, nearMissReports). The precedence is the point —
+ * a row with a job is decided by its job even when its unit is owned by somebody else.
+ */
+export function jobUnitOperatorScopeWhere(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  cols: { jobId: MySqlColumn; unitId: MySqlColumn; operatorId: MySqlColumn },
+  scope: TenantScope,
+) {
+  const branches = [
+    and(isNotNull(cols.jobId), inArray(cols.jobId, jobScopeSubquery(db, scope))),
+    and(isNull(cols.jobId), isNotNull(cols.unitId), ownershipScopeWhere("unit", cols.unitId, scope)),
+    and(isNull(cols.jobId), isNull(cols.unitId), isNotNull(cols.operatorId), ownershipScopeWhere("operator", cols.operatorId, scope)),
+  ];
+  if (scope.tenantId === SINGLE_TENANT_ID) branches.push(and(isNull(cols.jobId), isNull(cols.unitId), isNull(cols.operatorId)));
+  return or(...branches);
 }
 
 /** Subquery of job ids the scope may see; `inArray(col, jobScopeSubquery(db, scope))`. */

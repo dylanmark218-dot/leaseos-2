@@ -26,16 +26,6 @@ import { join } from "path";
  * directions.
  */
 const DECLARED_UNWIRED: Record<string, string> = {
-  // Merged in from the parallel B28 port, not yet wired. `widgetSources.documentExpiry`
-  // currently decides expiry inline, which is a second answer to "is this document in
-  // force" beside `documentValidity` — the duplication `qualificationValidity`'s own
-  // header exists to refuse. This adapter is the intended replacement, and routing the
-  // tile through it is its own checkpoint because the vault's presentation vocabulary
-  // (current/expiring/expired/unverified/rejected) and the engine's own states
-  // (in_force/expiring/expired/unverified/rejected/none) are not the same words, and
-  // `widgetsBoard.db.test` pins the former. Not done here because this tree cannot yet
-  // run that suite.
-  complianceDocumentValidity: "adapter over documentValidity for the documentExpiry tile; the tile still decides expiry inline (see the note above)",
   demoDataset: "the demonstration dataset's rules and step shape; reached from server/demoDataset.db.test.ts and scripts/demo-dataset.ts (the demo path), not from a router — a router that could seed demonstration rows into a customer's database is not something to build",
   // B28 widget engine (v22.23): the v1 service (widgetService/widgetDashboard/widgetLayoutWrite/
   // widgetRegistry/widgetPayload/roleActor) is reached through widgetsRouter. The layer below is
@@ -186,6 +176,14 @@ function importsOfBody(body: string, fromDir = ""): string[] {
   for (const m of text.matchAll(/(?:from|import)\s*\(?\s*"\.\/([A-Za-z0-9_/]+)"/g)) {
     out.push(fromDir ? `${fromDir}${m[1]}` : m[1]);
   }
+  // `../documentValidity` from `analytics/metricSources.ts` is `documentValidity`. Without this an
+  // engine reached only from a subdirectory reads as unreached — the blind spot `knowledge/` escaped
+  // only because its modules import nothing but `../../db`. From a file directly in `_core`, `../x`
+  // leaves `_core` and is not an engine, so it is skipped.
+  if (fromDir) {
+    const parent = fromDir.slice(0, -1).includes("/") ? fromDir.slice(0, fromDir.slice(0, -1).lastIndexOf("/") + 1) : "";
+    for (const m of text.matchAll(/(?:from|import)\s*\(?\s*"\.\.\/([A-Za-z0-9_][A-Za-z0-9_/]*)"/g)) out.push(`${parent}${m[1]}`);
+  }
   return out;
 }
 
@@ -299,7 +297,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(57);   // SPINE item 1: +2 boundaryConfirmation (the resolver) and boundaryEvidence (the chain rule), declared above; the receipt reader is not in this repository — tripStops has no updatedAt here   // census repair: -2 +3. externalSourceSeeds and externalDataRegistry left the declared list because they are reached — db.ts loads the first with `await import`, which the old regex could not see, and its declaration read "no application path reaches this engine". knowledge/evaluationState, knowledge/perimeter and knowledge/repository entered it because coreEngines now recurses; server/_core/knowledge/ was outside the census entirely, nine modules that could be neither reached nor declared   // B23.0 closeout: +4 trip-operations engines (safetyBinder, siteBaseline, tripBillingProjection, tripPassportPackage), declared above and wired by nobody yet   // v23.24 merge: their 49 + 1 — the four OSM loader cores landed unwired this line (osmImport, osmTopology, osmLoadPlan, osmLoad: the build runs from scripts, not from a router, and a router that rebuilds the road graph on request is not something to expose), and the union is 50, counted from DECLARED_UNWIRED rather than taken from either pin: the one entry their side still does not carry is complianceDocumentValidity (merged in from the parallel B28 port at v22.24, unwired because the documentExpiry tile decides expiry inline; see its entry above)   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(56);   // Analytics Checkpoint B: -1 complianceDocumentValidity, now reached through analyticsRouter → analytics/metricSources (the documentExpiry tile and the readiness composer still decide expiry inline — SPINE item 2 stays open); the census also learned to follow `../x` out of a _core subdirectory, which is how that reach is seen   // SPINE item 1: +2 boundaryConfirmation (the resolver) and boundaryEvidence (the chain rule), declared above; the receipt reader is not in this repository — tripStops has no updatedAt here   // census repair: -2 +3. externalSourceSeeds and externalDataRegistry left the declared list because they are reached — db.ts loads the first with `await import`, which the old regex could not see, and its declaration read "no application path reaches this engine". knowledge/evaluationState, knowledge/perimeter and knowledge/repository entered it because coreEngines now recurses; server/_core/knowledge/ was outside the census entirely, nine modules that could be neither reached nor declared   // B23.0 closeout: +4 trip-operations engines (safetyBinder, siteBaseline, tripBillingProjection, tripPassportPackage), declared above and wired by nobody yet   // v23.24 merge: their 49 + 1 — the four OSM loader cores landed unwired this line (osmImport, osmTopology, osmLoadPlan, osmLoad: the build runs from scripts, not from a router, and a router that rebuilds the road graph on request is not something to expose), and the union is 50, counted from DECLARED_UNWIRED rather than taken from either pin: the one entry their side still does not carry is complianceDocumentValidity (merged in from the parallel B28 port at v22.24, unwired because the documentExpiry tile decides expiry inline; see its entry above)   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });

@@ -107,9 +107,24 @@ describe("the reachability census is consistent with it", () => {
       .filter(p => !p.includes("/_core/"))
       .map(p => readFileSync(p, "utf8"))
       .join("\n");
+    // Reached through a hop, as the census counts it: a router imports `_core/analytics/metricSources`,
+    // which imports `../complianceDocumentValidity`. Checking only a router's direct imports called an
+    // engine unreached that the census, the authority this test defers to, counts as reached.
+    const reachedThrough = new Set<string>();
+    const queue = Array.from(production.matchAll(/_core\/([A-Za-z0-9_/]+)["']/g)).map(m => m[1]!);
+    while (queue.length) {
+      const mod = queue.pop()!;
+      if (reachedThrough.has(mod) || !existsSync(`server/_core/${mod}.ts`)) continue;
+      reachedThrough.add(mod);
+      const dir = mod.includes("/") ? mod.slice(0, mod.lastIndexOf("/") + 1) : "";
+      const parent = dir.slice(0, -1).includes("/") ? dir.slice(0, dir.slice(0, -1).lastIndexOf("/") + 1) : "";
+      const body = readFileSync(`server/_core/${mod}.ts`, "utf8");
+      for (const m of body.matchAll(/from\s+"\.\/([A-Za-z0-9_/]+)"/g)) queue.push(`${dir}${m[1]}`);
+      if (dir) for (const m of body.matchAll(/from\s+"\.\.\/([A-Za-z0-9_][A-Za-z0-9_/]*)"/g)) queue.push(`${parent}${m[1]}`);
+    }
     for (const name of spineEngines()) {
       const declared = new RegExp(`^\\s*"?${name}"?:`, "m").test(census);
-      const reached = new RegExp(`_core/${name}["']`).test(production);
+      const reached = new RegExp(`_core/${name}["']`).test(production) || reachedThrough.has(name);
       expect(declared || reached, `${name} is on the spine, and the census neither declares nor reaches it`).toBe(true);
     }
   });

@@ -533,6 +533,8 @@ describe("payroll and tax authorization boundaries", () => {
       "dispatch.readiness_own",
       "academy.read_own", "academy.progress_own", "academy.assessment_own",
       "academy.certificate.sign_own", "academy.direct_supervision_attest_own",
+      // Analytics Checkpoint B — your own numbers; the operator comes from the session.
+      "analytics.read_own",
     ]);
   });
 
