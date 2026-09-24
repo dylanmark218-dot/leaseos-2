@@ -75,6 +75,14 @@ const DECLARED_UNWIRED: Record<string, string> = {
   disposalReconciliation: "reconciliation engine; no procedure calls it",
   domainEmitters: "event vocabulary; emitted from raw SQL paths",
   feedHttp: "HTTP edge; scheduler not started in production",
+  // The Canadian 511 tranche (2026-09-24): per-province endpoints and parsers over the feed layer
+  // above, declared for the same reason it is — nothing starts the scheduler that would call them.
+  "transport/providerRegistry": "per-province endpoint, key location and parser over feedCollector/feedHttp/feedIngest; scheduler not started",
+  "transport/ibi511": "the 511 platform parser shared by AB, ON, MB, NB, YT and NL; reached only through providerRegistry",
+  "transport/drivebcOpen511": "DriveBC Open511 parser; reached only through providerRegistry",
+  "transport/quebecRoadworks": "Québec MTMD roadworks parser; reached only through providerRegistry",
+  "transport/placement": "publisher geometry to the point-and-radius advisoryImpact places; used only by the parsers above",
+  "transport/fields": "date, severity and column-width coercions shared by the parsers above",
   feedScheduler: "backoff scheduler; nothing starts it from an entry point",
   fieldTicket: "ticket engine; router path predates it",
   heartbeat: "liveness helper; no monitor calls it",
@@ -282,6 +290,13 @@ describe("every engine is reached, or says why not", () => {
       "feedCollector",
       "feedIngest",
       "monitoringNotice",
+      // The provincial parsers and their helpers, imported only by providerRegistry and each
+      // other. They leave with the feed layer, when the scheduler is started.
+      "transport/drivebcOpen511",
+      "transport/fields",
+      "transport/ibi511",
+      "transport/placement",
+      "transport/quebecRoadworks",
       // SPINE item 1, landing as one chain before its router: boundaryEvidence holds the
       // chain rule and imports boundaryConfirmation, which imports siteBaseline's types.
       // Not the `billing` shape — nothing else in the tree answers "which boundaries does
@@ -299,7 +314,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(57);   // SPINE item 1: +2 boundaryConfirmation (the resolver) and boundaryEvidence (the chain rule), declared above; the receipt reader is not in this repository — tripStops has no updatedAt here   // census repair: -2 +3. externalSourceSeeds and externalDataRegistry left the declared list because they are reached — db.ts loads the first with `await import`, which the old regex could not see, and its declaration read "no application path reaches this engine". knowledge/evaluationState, knowledge/perimeter and knowledge/repository entered it because coreEngines now recurses; server/_core/knowledge/ was outside the census entirely, nine modules that could be neither reached nor declared   // B23.0 closeout: +4 trip-operations engines (safetyBinder, siteBaseline, tripBillingProjection, tripPassportPackage), declared above and wired by nobody yet   // v23.24 merge: their 49 + 1 — the four OSM loader cores landed unwired this line (osmImport, osmTopology, osmLoadPlan, osmLoad: the build runs from scripts, not from a router, and a router that rebuilds the road graph on request is not something to expose), and the union is 50, counted from DECLARED_UNWIRED rather than taken from either pin: the one entry their side still does not carry is complianceDocumentValidity (merged in from the parallel B28 port at v22.24, unwired because the documentExpiry tile decides expiry inline; see its entry above)   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(63);   // Canadian 511 tranche: +6 transport/* (providerRegistry and the parsers it routes to), declared above; unwired for the same reason feedCollector/feedIngest/feedHttp are   // SPINE item 1: +2 boundaryConfirmation (the resolver) and boundaryEvidence (the chain rule), declared above; the receipt reader is not in this repository — tripStops has no updatedAt here   // census repair: -2 +3. externalSourceSeeds and externalDataRegistry left the declared list because they are reached — db.ts loads the first with `await import`, which the old regex could not see, and its declaration read "no application path reaches this engine". knowledge/evaluationState, knowledge/perimeter and knowledge/repository entered it because coreEngines now recurses; server/_core/knowledge/ was outside the census entirely, nine modules that could be neither reached nor declared   // B23.0 closeout: +4 trip-operations engines (safetyBinder, siteBaseline, tripBillingProjection, tripPassportPackage), declared above and wired by nobody yet   // v23.24 merge: their 49 + 1 — the four OSM loader cores landed unwired this line (osmImport, osmTopology, osmLoadPlan, osmLoad: the build runs from scripts, not from a router, and a router that rebuilds the road graph on request is not something to expose), and the union is 50, counted from DECLARED_UNWIRED rather than taken from either pin: the one entry their side still does not carry is complianceDocumentValidity (merged in from the parallel B28 port at v22.24, unwired because the documentExpiry tile decides expiry inline; see its entry above)   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });
