@@ -213,6 +213,37 @@ verified boundary layer (`jurisdiction.test.ts`) and is declared unwired. Seeds 
 (`driverTraining.ts`, `radioChannelSeeds.ts`, `complianceRequirementSeeds.ts`) and every seed is
 marked unverified. Nothing hard-codes a province into an enforcement path.
 
+### 1.15 Disposal tickets and data exports (verified in a second pass)
+
+**Disposal tickets** (`disposalTickets`, `schema.ts:1048`) have exactly two writers and no updater:
+
+| Writer | Number | Status written | Source / confidence |
+|---|---|---|---|
+| Facility portal submission accepted by the office (`commercialRouter.ts:156-160`) | `nextTrackingNumber(db, { sequenceType: "DSP" })` — the sequential allocator in `_core/trackingNumbers.ts:60` | `needs_review` | `facility_portal`; confidence **supplied by the facility** (`p.confidence ?? "medium"`) |
+| AI Secretary commit (`assistantCommitService.ts:~611`) | `DSP-AI-${proposalId}` — **not** drawn from the sequence | `needs_review`, pinned by the adapter's type (`assistantCommitAdapters.ts:121,682`) | `photo_ocr`; confidence is the weakest field weight (`:655-660`) |
+
+No query-builder or raw-SQL `UPDATE` of `disposalTickets` exists anywhere under `server/`, and no
+trigger guards the table. A ticket is therefore unmodifiable by absence of a path rather than by
+enforcement, and no procedure ever moves one out of `needs_review`. It is read by the surfaces
+service and the portal only.
+
+The sequential allocator is sound: an atomic counter row per type, branch and period, incremented
+with `LAST_INSERT_ID()` in its own transaction. It runs **before** the ticket insert and outside
+that insert's transaction, so a failed insert leaves a gap with no record of why.
+
+The AI boundary holds here. A model-drafted disposal ticket cannot be committed as verified: the
+status is a type-level literal, and the committing human is on the receipt.
+
+**Exports.** Every export procedure writes the universal `authorizationDecisions` row. Beyond that:
+
+| Procedure | Sensitive (fail-closed ledger) | Own access record | Note |
+|---|---|---|---|
+| `records.evidence.export` | yes | `evidenceAccessEvents` via `recordEvidenceAccess` | complete |
+| `audit.packageDownload` | yes | `auditPackageAccess` | complete; two-person release upstream |
+| `payroll.export` (`payrollRouter.ts:491`) | yes | none | **returns `{ exported: true }` and exports nothing, changes no state** |
+| `invoicing.render` | no | none | customer invoice PDF; a lost ledger row is tolerated |
+| `facilityDirectory.exportCsv/GeoJson` | no | none | facility directory is world facts by decision |
+
 ---
 
 ## 2. Existing components to reuse (do not duplicate)
@@ -680,6 +711,7 @@ actions and actor types **from source**, so a rule added without a case fails.
 | suspension is not silent | db | an `accountStateEvents` row with `state: suspended` makes `roleProcedure` deny `ACCOUNT_SUSPENDED` and still writes the ledger row; reinstatement is a new row |
 | human review path exists | pure | every `deny` from a rule flagged `reviewable: true` carries `review.queue` |
 | receipts are immutable | db | UPDATE/DELETE on `governanceReceipts` raises 45000 |
+| every issued document number comes from its sequence | db | for each numbered record kind (disposal ticket, invoice, manifest, commercial document), every row's number parses as an allocation of that kind's `trackingSequences` counter (catches I20) |
 
 All of these reuse the `createCaller` fixture pattern and the `DATABASE_URL` gate; the CI gate's
 "no skipped db suite" check keeps them from silently not running.
@@ -772,6 +804,11 @@ Each checkpoint is one PR, passes `scripts/ci-gate.sh`, and regenerates `LEASEOS
 | I17 | LLM calls go to a vendor default host and transcripts are persisted with no retention class or disclosure | privacy, user awareness | `llm.ts`, `AI_RUNTIME_TERMINOLOGY.md` door 1 |
 | I18 | **Verified:** the evidence upload takes `mimeType` as a client string and passes it straight to `storagePut`; no byte sniffing or magic-number check exists anywhere under `server/` | evidence integrity, security | `routers.ts:409-436` |
 | I19 | **Verified:** `tripStops.create` and `.update` spread `...input` into the write and never record `ctx.user.id`; `tripStops` has no actor column on `main`. Provenance for trip stops is on an open branch (`claude/migration-0169-reconciliation`, `0179_trip_stop_provenance.sql`), not merged | truthful records, human accountability | `routers.ts:568-612`, `schema.ts:606` |
+| I20 | AI-committed disposal tickets are numbered `DSP-AI-<proposalId>` outside the `DSP` sequence, so the disposal ticket register has two numbering schemes and the sequence cannot account for every ticket | auditable sequential numbering | `assistantCommitService.ts:~611` vs `commercialRouter.ts:158` |
+| I21 | Disposal tickets are never promoted from `needs_review`; nothing verifies them. Immutability is by absence of a write path, with no trigger | record integrity (enforced, not incidental) | §1.15 |
+| I22 | A facility's portal submission sets its own ticket's `confidence` | trust-bearing values from their own review | `commercialRouter.ts:156-160` |
+| I23 | `payroll.export` reports `exported: true` while producing nothing and recording nothing | truthful records | `payrollRouter.ts:491-497` |
+| I24 | The tracking-number allocation commits before, and separately from, the record that uses it, so a failed insert leaves an unexplained gap | auditable sequence | `trackingNumbers.ts:60-88` |
 
 None of these were changed by this survey.
 
