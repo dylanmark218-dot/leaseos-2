@@ -150,7 +150,7 @@ from.
 | `assistant.draft` | owner never recorded; job, trip, unit and target ids copied from the body unchecked | refuses `tenantId`, `orgRef`, `organizationId`, `createdByUserId` and `tenantDerivedFrom` in the body (BAD_REQUEST, not dropped); checks **every** anchor (job, trip, unit, and `targetRecordId` as a trip stop on the proposal's trip for `unload_stop`, or as a financial entity for `expense_receipt` / `fuel_receipt`) **before the model is called**; stamps `tenantId` and `tenantDerivedFrom` from the acting scope |
 | `get` / `answer` / `setStatus` / `readBack` / `acknowledge` / `commit` / `reject` (through `proposalInScope`) | owner inferred from the first non-null of job, trip or unit, else the single tenant; a missing row returned "in scope" | strict `rowInTenant(proposal, scope)`; a missing or unresolved row is "not found" |
 | `assistant.pending` | no tenant filter without a `tripId` | the query carries `tenantId = acting` on both branches |
-| `executeAssistantCommit` (any caller) | no tenant check of its own | resolves the actor's scope **inside the transaction**; refuses another organization's or an unresolved row as "Proposal not found"; re-checks every anchor with the same rule as draft |
+| `executeAssistantCommit` (any caller) | no tenant check of its own | resolves the actor's scope **inside the transaction**; refuses another organization's or an unresolved row as "Proposal not found"; re-checks every anchor with the same rule as draft, **on the transaction's own connection** (`proposalAnchorRefusal(tx, …)`), before any field is read |
 | Exception Centre AI proposals | every organization's `awaiting_readback` proposals | the caller's organization only. With no scope passed, the proposal slice is empty (fail closed). |
 | Inbox "my proposals" | by creator only | by creator **and** tenant |
 
@@ -184,7 +184,7 @@ exists, alias containment is enforced by:
 
 ## 5. Invariants → tests
 
-`server/learningScope.test.ts` (36 cases, pure) and `server/learningScope.db.test.ts` (16 cases,
+`server/learningScope.test.ts` (36 cases, pure) and `server/learningScope.db.test.ts` (17 cases,
 database: two organizations, forged ids, a legacy row, an ambiguous member).
 
 | # | Invariant | Where proved |
@@ -194,19 +194,19 @@ database: two organizations, forged ids, a legacy row, an ambiguous member).
 | 3 | A user cannot read another user's USER scope | pure `canSee` (`OTHER_USER`) |
 | 4 | USER scope is bounded by organization | pure: same numeric user id in another org → `CROSS_ORGANIZATION` |
 | 5 | A request body cannot change trusted scope | database: resolver refuses forged ids; draft refuses five identity fields |
-| 6 | A model or tool payload cannot change scope | pure: the model-injection payload is refused; database: a mocked model response carrying `organizationId`, `tenantId` and `userId` leaves the stamped tenant unchanged |
+| 6 | A model or tool payload cannot change scope | database: a mocked model response carrying `organizationId`, `tenantId` and `userId` leaves the stamped tenant unchanged. The model's output is never read for identity; the owner comes from the session. Pure: a scope *request* carrying the same keys is refused by name. |
 | 7 | SESSION_JOB refs cannot cross organizations | database: another organization's job, trip and agent run → NOT_FOUND; an agent run with a NULL tenant anchors nobody |
 | 8 | Tenant records cannot be created as GLOBAL | pure `canTarget(…, GLOBAL)`; database: GLOBAL refused for a manager/controller/safety holder |
 | 9 | GLOBAL requires platform authority | no constructor; forgery scan over all production files; the lookalikes in §3 pinned as not authority |
 | 10 | NULL organization is not global | `rowInTenant(null, …)` false for every scope; `NO_ORGANIZATION` refusal |
 | 11 | Legacy or unresolved ownership fails closed | database: a `legacy_unresolved` proposal is invisible to its creator, to the default tenant and to the pending list, and cannot be committed |
 | 12 | Company aliases do not leak | pure: the same term with two meanings in two organizations; AIL-0 `CrossTenantContext` |
-| 13 | Company proposals do not leak | database: §4.1 paths, the Exception Centre and the pending list with and without a trip |
+| 13 | Company proposals do not leak | database: §4.1 paths, the Exception Centre and the pending list with and without a trip; a row stamped A that names B's trip is refused at commit by the anchor re-check; drafts naming B's financial entity, or a trip stop on another trip, are refused |
 | 14 | Learning intake receives trusted ownership | pure and database: the owner comes from the resolver, and a claim naming another org does not move it |
 | 15 | User preferences cannot weaken org safety | pure `scopeMayHold`; characterization that automation policy has no user scope and overrides only narrow |
 | 16 | Session context does not become durable learning | pure `requireDurableTenantScope`; `routeLearning` refuses a session owner |
 
-**The tests catch real regressions.** Four protections were each reverted temporarily, and the
+**The tests catch real regressions.** Six protections were each reverted temporarily, and the
 database suite failed every time:
 
 | Reverted protection | Result |
@@ -215,6 +215,8 @@ database suite failed every time:
 | unscoped pending list | 2 failures |
 | no commit-side tenant check | 2 failures |
 | unchecked draft anchors | 1 failure |
+| no commit-side anchor re-check | 1 failure |
+| no financial-entity anchor check | 1 failure |
 
 ## 6. Intentional behaviour changes
 
@@ -224,7 +226,8 @@ database suite failed every time:
    called. This includes a mixed-anchor draft, where the first anchor is the caller's and a later one
    is not.
 3. **A draft body carrying an owner field is refused** (BAD_REQUEST).
-4. **A commit re-checks the proposal's owner and anchors inside its transaction.** A proposal naming a
+4. **A commit re-checks the proposal's owner and anchors inside its transaction, on the transaction's
+   own connection.** A proposal naming a
    job, trip or unit that does not exist is now refused at commit, where before it was committed.
    Three test fixtures named such ids (a random trip id, job `4242`, trip `8844`). They now create real
    records; the assertions were not loosened.
@@ -262,6 +265,12 @@ adds none and fixes none of them, because they are outside its scope:
   - `documentFingerprints` duplicate priors are matched across tenants in the commit service;
   - `merchantMemory` has no organization (it is unwired);
   - `trips.create`, `agent.requestAction` targets and `manifestCustody.bind` take unchecked ids;
+  - `surfaces.search`, `timeline` and `chain` apply no tenant filter. Records created at commit carry
+    the proposal id (`FUEL-…`, `DSP-AI-…`, `EXP-AI-…`), so another organization's committed proposal ids
+    can be listed there. They cannot be read or changed through the proposal paths.
+  - the commit adapters also read `loadId`, `facilityId`, `fleetCardId` and `operatorId` from the
+    proposal row without a tenant check. No production path writes those columns today (the draft's
+    input drops them), but the first writer must add them to `proposalAnchorRefusal`.
   - `assistantQuestions` has no tenant (and no production caller);
   - `agentRuns.tenantId` is nullable (trust-governance G4).
 - **Coordination.** `feature/tenant-scope-foundation` rewrites `actingScope.ts` and redefines NULL
@@ -269,4 +278,33 @@ adds none and fixes none of them, because they are outside its scope:
 
 ## 9. Verification
 
-See the checkpoint report for the full gate. It is summarised in the design register row for AIL-1A.
+Full `scripts/ci-gate.sh` against a disposable `mariadb:10.11` container (the CI image), from a
+clean database:
+
+| Gate | Result |
+|---|---|
+| 0 Reserved migration slots | pass |
+| 1 Clean database | pass |
+| 2 Migrations, including `0185` | pass |
+| 3 Table parity | pass |
+| 4 Typecheck, and the test-file ratchet | pass, 0 test-file errors (ceiling 0) |
+| 5 Bare `protectedProcedure` | pass |
+| 6 Test suite | 335 of 337 files passed. **1 AIL-1A failure, fixed:** `operationalTruth.test.ts` pins the list of refused fields in `routers.ts`, and the five new draft refusals were added to it (`5808636`). **1 pre-existing failure, not fixed:** the `calendarFixtures.test.ts` clock tripwire on `capitalAssets.test.ts`, already recorded at AIL-0. `columnParity`, `tenantIsolation` and every AIL-1A suite passed against MariaDB, and no database suite was skipped. |
+| 7 Production build | pass (run by hand, because the script stops at gate 6) |
+| 7b / 7c Portal and inbound gates | pass |
+| 8 Current-state document | current |
+
+**Adversarial review.** Four independent lenses reviewed the diff (tenant isolation, correctness,
+scope-contract soundness, test and documentation honesty), and a skeptic per lens tried to refute
+each finding against the code. Three findings survived, and all three are fixed:
+
+1. The commit-time anchor re-check ran on pool connections outside the transaction, which made the
+   "inside its transaction" claim false and risked exhausting the pool under concurrent commits. It
+   now runs on the transaction.
+2. The commit-side re-check and two draft anchor branches had no test. Three database cases were
+   added, and each is mutation-checked.
+3. The module header said model output naming an organization was "refused". It is never read for
+   identity, which is what is now stated.
+
+The other findings were refuted on reading the code. They are recorded in the review transcript, not
+here.

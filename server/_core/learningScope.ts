@@ -11,9 +11,11 @@
  * Four rules carry the module.
  *
  * **Scope is derived, never supplied.** The organization comes from `resolveActingScope()` and the
- * user from the authenticated session. A request, a model response, a tool argument, a retrieved
- * page or an uploaded document that *names* an organization or user is refused rather than obeyed —
- * and refused, not silently ignored, so a caller that tried learns that it cannot.
+ * user from the authenticated session. A scope *request* that names an organization or user is
+ * refused rather than obeyed — refused, not silently ignored, so a caller that tried learns that it
+ * cannot. Model responses, tool arguments, retrieved pages and uploaded documents are never read for
+ * identity at all: nothing in this module takes them as input, and the owner is stamped from the
+ * session, so an organization named inside them has no path to become one.
  *
  * **The scope is a discriminator, not a pattern of nulls.** "No organization id, therefore global"
  * is the mistake this repository already makes in several places (the commercial default book, the

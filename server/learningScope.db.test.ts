@@ -206,6 +206,20 @@ d("assistant proposals are their organization's alone (invariants 1, 2, 13)", ()
     expect((await listPendingProposals({ tenantId: "default" })).some(r => r.proposalId === orphan)).toBe(false);
   });
 
+  it("re-checks every anchor at commit, so a row never checked at draft cannot write into another organization", async () => {
+    // A row stamped A but naming B's trip — what a pre-0185 backfilled row could look like. The owner check
+    // passes (it is A's), so only the commit-side anchor re-check stands between it and B's trip.
+    const A = await org(), B = await org();
+    const a1 = await person([A]);
+    const tripB = await tripOf(B);
+    const p = await proposalOf(A, a1, { tripId: tripB });
+    expect(await executeAssistantCommit({ proposalId: p, actorUserId: a1 })).toEqual({ committed: false, refusals: [`Trip ${tripB} not found`] });
+    const [row] = await pool.query<mysql.RowDataPacket[]>("SELECT commitState FROM assistantProposals WHERE proposalId = ?", [p]);
+    expect(row[0].commitState).toBe("awaiting_readback");
+    const [receipts] = await pool.query<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM assistantCommitReceipts WHERE proposalId = ?", [p]);
+    expect(Number(receipts[0].n)).toBe(0);
+  });
+
   it("will not store a tenant without saying how it was established, or a derivation without a tenant", async () => {
     await expect(pool.execute("INSERT INTO assistantProposals (proposalId, formKey, title, targetRef, tenantId) VALUES (?, 'defect_report', 't', 'r', 'ORG-X')", [`PRP-${rnd()}`]))
       .rejects.toMatchObject({ message: expect.stringContaining("assistantProposals_tenant_shape") });
@@ -254,6 +268,17 @@ d("a draft is owned by the session's organization, and names only that organizat
     await expect(draft(a1, { unitId: unitB })).rejects.toMatchObject({ code: "NOT_FOUND", message: `Unit ${unitB} not found` });
     await expect(callerFor(a1).fieldRoute.assistant.draft({ formKey: "unload_stop", targetRef: "stop", transcript: "arrived ten", targetRecordId: stop.insertId } as never))
       .rejects.toMatchObject({ code: "NOT_FOUND", message: `Trip stop ${stop.insertId} not found` });
+    // A financial entity is the target of an expense or fuel receipt: B's is not found.
+    const [entB] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, ownerUserId, orgRef) VALUES (?, 'B Ltd', 'corporation', 'CA-AB', 1, ?)", [`ENT-${rnd()}`, B],
+    );
+    await expect(callerFor(a1).fieldRoute.assistant.draft({ formKey: "expense_receipt", targetRef: "ENT", transcript: "receipt", targetRecordId: entB.insertId } as never))
+      .rejects.toMatchObject({ code: "NOT_FOUND", message: `Financial entity ${entB.insertId} not found` });
+    // A's own trip stop, but on a different trip of A's than the one the draft names: not found either.
+    const tripA1 = await tripOf(A), tripA2 = await tripOf(A);
+    const [stopA1] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO tripStops (tripId, stopType, sequence) VALUES (?, 'unload', 1)", [tripA1]);
+    await expect(callerFor(a1).fieldRoute.assistant.draft({ formKey: "unload_stop", targetRef: "stop", transcript: "arrived ten", tripId: tripA2, targetRecordId: stopA1.insertId } as never))
+      .rejects.toMatchObject({ code: "NOT_FOUND", message: `Trip stop ${stopA1.insertId} not found` });
     // Mixing an own anchor with a foreign one is refused too: every anchor is checked, not the first.
     const jobA = await jobOf(A);
     await expect(draft(a1, { jobId: jobA, tripId: tripB })).rejects.toMatchObject({ code: "NOT_FOUND", message: `Trip ${tripB} not found` });

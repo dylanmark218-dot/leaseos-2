@@ -83,6 +83,7 @@ import {
 import { ENV } from "./_core/env";
 import { entityScopeWhere } from "./_core/entityScope";
 import { rowInTenant, type SessionJobSubject } from "./_core/learningScope";
+import type { DbOrTx } from "./_core/dbTypes";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -930,31 +931,47 @@ export async function proposalInScope(proposalId: string, scope: TenantScope): P
 
 /**
  * AIL-1A — every record a draft names must be the caller's organization's, checked before the model
- * is called and again inside the commit. Returns the refusal, or null when all anchors are in scope.
- * "Not found" for every miss, so a caller cannot probe for another organization's ids.
+ * is called and again at commit. Returns the refusal, or null when all anchors are in scope. "Not
+ * found" for every miss, so a caller cannot probe for another organization's ids.
+ *
+ * Every lookup runs on `executor`: the draft passes the ordinary connection, and the commit passes its
+ * own transaction, so the re-check reads on the connection that holds the proposal's row lock rather
+ * than asking the pool for a second one while holding it.
  *
  * targetRecordId means different things per form: a trip stop for `unload_stop` (it must also sit on
  * the proposal's trip), a financial entity for `expense_receipt` and `fuel_receipt`, and nothing the
  * commit adapters read for any other form.
  */
 export async function proposalAnchorRefusal(
+  executor: DbOrTx,
   anchors: { formKey: string; jobId?: number | null; tripId?: number | null; unitId?: number | null; targetRecordId?: number | null },
   scope: TenantScope,
 ): Promise<string | null> {
-  const db = await getDb();
-  if (!db) return "Database unavailable";
-  if (anchors.jobId != null && !(await jobInScope(anchors.jobId, scope))) return `Job ${anchors.jobId} not found`;
-  if (anchors.tripId != null && !(await tripInScope(anchors.tripId, scope))) return `Trip ${anchors.tripId} not found`;
-  if (anchors.unitId != null && !(await unitInScope(anchors.unitId, scope))) return `Unit ${anchors.unitId} not found`;
+  const one = async (q: Promise<unknown[]>) => (await q).length > 0;
+  if (anchors.jobId != null
+    && !(await one(executor.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.id, anchors.jobId), orgScopeWhere(jobs, scope))).limit(1)))) {
+    return `Job ${anchors.jobId} not found`;
+  }
+  if (anchors.tripId != null
+    && !(await one(executor.select({ id: trips.id }).from(trips).where(and(eq(trips.id, anchors.tripId), orgScopeWhere(trips, scope))).limit(1)))) {
+    return `Trip ${anchors.tripId} not found`;
+  }
+  if (anchors.unitId != null
+    && !(await one(executor.select({ id: units.id }).from(units).where(and(eq(units.id, anchors.unitId), ownershipScopeWhere("unit", units.id, scope))).limit(1)))) {
+    return `Unit ${anchors.unitId} not found`;
+  }
   if (anchors.targetRecordId != null) {
     if (anchors.formKey === "unload_stop") {
-      const stopTrip = await tripStopTripId(anchors.targetRecordId);
-      if (stopTrip == null || !(await tripInScope(stopTrip, scope))) return `Trip stop ${anchors.targetRecordId} not found`;
-      if (anchors.tripId != null && stopTrip !== anchors.tripId) return `Trip stop ${anchors.targetRecordId} not found`;
+      const stop = (await executor.select({ tripId: tripStops.tripId }).from(tripStops).where(eq(tripStops.id, anchors.targetRecordId)).limit(1))[0];
+      const stopTripInScope = stop != null
+        && await one(executor.select({ id: trips.id }).from(trips).where(and(eq(trips.id, stop.tripId), orgScopeWhere(trips, scope))).limit(1));
+      if (!stop || !stopTripInScope) return `Trip stop ${anchors.targetRecordId} not found`;
+      if (anchors.tripId != null && stop.tripId !== anchors.tripId) return `Trip stop ${anchors.targetRecordId} not found`;
     } else if (anchors.formKey === "expense_receipt" || anchors.formKey === "fuel_receipt") {
-      const entity = (await db.select({ id: financialEntities.id }).from(financialEntities)
-        .where(and(eq(financialEntities.id, anchors.targetRecordId), entityScopeWhere(scope))).limit(1))[0];
-      if (!entity) return `Financial entity ${anchors.targetRecordId} not found`;
+      if (!(await one(executor.select({ id: financialEntities.id }).from(financialEntities)
+        .where(and(eq(financialEntities.id, anchors.targetRecordId), entityScopeWhere(scope))).limit(1)))) {
+        return `Financial entity ${anchors.targetRecordId} not found`;
+      }
     }
   }
   return null;

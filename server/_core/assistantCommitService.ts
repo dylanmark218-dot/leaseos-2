@@ -163,6 +163,16 @@ export async function executeAssistantCommit(args: {
       };
     }
 
+    // AIL-1A — the records the proposal names are re-checked against its owner at the moment of
+    // writing, with the same rule the draft used, on this transaction's own connection. A proposal
+    // backfilled from before 0185 was never checked at draft; this is where it is.
+    const anchorRefusal = await proposalAnchorRefusal(
+      tx,
+      { formKey: row.formKey, jobId: row.jobId, tripId: row.tripId, unitId: row.unitId, targetRecordId: row.targetRecordId },
+      { tenantId: actingTenant },
+    );
+    if (anchorRefusal) return { committed: false as const, refusals: [anchorRefusal] };
+
     const storedFields = await tx
       .select()
       .from(proposalFields)
@@ -179,15 +189,6 @@ export async function executeAssistantCommit(args: {
     if (!committed.ok) {
       return { committed: false as const, refusals: committed.refusals };
     }
-
-    // AIL-1A — the records the proposal names are re-checked against its owner at the moment of
-    // writing, with the same rule the draft used. A proposal backfilled from before 0185 was never
-    // checked at draft; this is where it is.
-    const anchorRefusal = await proposalAnchorRefusal(
-      { formKey: row.formKey, jobId: row.jobId, tripId: row.tripId, unitId: row.unitId, targetRecordId: row.targetRecordId },
-      { tenantId: actingTenant },
-    );
-    if (anchorRefusal) return { committed: false as const, refusals: [anchorRefusal] };
 
     const plan = planAssistantCommit(
       {

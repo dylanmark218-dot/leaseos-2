@@ -709,6 +709,7 @@ export const appRouter = router({
             throw e;
           }
           const anchorRefusal = await proposalAnchorRefusal(
+            db,
             { formKey: form.key, jobId: input.jobId, tripId: input.tripId, unitId: input.unitId, targetRecordId: input.targetRecordId },
             { tenantId: owner.orgRef },
           );
