@@ -8,6 +8,47 @@ Everything below is cited to the baseline. Where the survey contradicted the pro
 
 ---
 
+## 0a. Owner decisions — recorded
+
+| | Decision |
+|---|---|
+| **S1 · 511 licensing** | Connector auth = developer API key, server-side only. **API access and transient processing may proceed** on a valid credential. **Persistent caching, offline redistribution and commercial reuse stay BLOCKED** until Alberta's terms explicitly authorize LeaseOS's commercial use. Possession of a developer key is *not* proof of redistribution rights. A training/RAG assessment is **not** automatically applied to operational traffic data — the assessment must name the actual dataset and its terms. |
+| **S2 · Sessions** | 15-minute access credential; rotating, server-tracked refresh with a 30-day absolute lifetime; reuse of a rotated refresh revokes the family. Offline Field Mobile is a **device-bound** model, never a longer bearer token. |
+| **S3 · Two-person approval** | Exceptional **platform-level** actions on customer Restricted data only — platform JIT access, bulk Restricted export, extraordinary security recovery. Not for routine authorized tenant work. |
+| **S4 · Provider credentials** | Platform-managed by default for shared public/government feeds; tenant BYOC only where contract, licensing, quota, billing or provider policy requires it. Both models supported, never mixed. |
+
+### The four credentials, and the boundaries between them
+
+| Credential | Authenticates | Carries LeaseOS user authority? |
+|---|---|---|
+| **Provider API key / token** | LeaseOS server → outside provider | **Zero.** None. Ever. |
+| **Human session** | person → LeaseOS | identity only — permissions are looked up server-side |
+| **Machine identity** | authorized service/integration → LeaseOS | narrow scopes only; never `admin:everything` |
+| **Webhook secret** | verifies a webhook message | not reusable as MFA or provider-encryption material |
+| **MFA secret** | authentication-factor verification only | not an authorization token |
+
+**Secret classes stay cryptographically separated** — separate keys, each with a key id.
+
+---
+
+## 0b. Source-policy model (S1 decision, expressed)
+
+A provider's policy record must express these **independently**, because they are different legal questions:
+
+```
+apiAccessAuthorized              -- may we call it at all
+transientProcessingAuthorized    -- may we use the response in-flight
+persistentCachingAuthorized      -- may we store it
+offlineRedistributionAuthorized  -- may we ship it to a device
+commercialReuseAuthorized        -- may we use it in a paid product
+```
+
+Alberta 511 at this baseline: **apiAccess = yes** (developer key), **transientProcessing = yes**, **persistentCaching / offlineRedistribution / commercialReuse = blocked pending documented permission**. Documented rate limit: **10 requests / 60 seconds** — a connector-level constraint, recorded beside the credential.
+
+`knowledgeSources` remains the right *shape*, but its existing 511 row concerns training/course content. Operational road data needs **its own assessment row naming that feed**; the training decision is not inherited.
+
+---
+
 ## 0. The rule this document exists to keep
 
 > **Authentication** answers *who are you*. **Authorization** answers *what may you do*. **Provider credentials** answer *what outside system may LeaseOS talk to*.
@@ -42,8 +83,31 @@ res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS })
 ```
 There is no short-lived access token, no refresh rotation and no server-side revocation list. A token captured once is valid for a year. This is the hardening item recalled in the brief, now verified rather than repeated.
 
-**FINDING-2 — The session cookie is `sameSite: "none"`.**
+**FINDING-1b — The session token is also mirrored into `sessionStorage` and sent as a Bearer header.**
+```ts
+// client/src/main.tsx:54 — "Preview auto-login fallback"
+const raw = sessionStorage.getItem("manus-cookie");
+… return { Authorization: `Bearer ${token}` };
+// server/_core/sdk.ts:286 — cookie first, then this header
+```
+This path exists because embedded contexts (Safari ITP, private browsing, iOS/Android WebView) block iframe cookies. Its consequence is that the **`httpOnly` protection does not hold on that path**: a one-year token sits in `sessionStorage`, readable by any script on the page. Any session fix that changes only the cookie would miss it entirely — which is why the consumer survey came before the plan.
+
+**FINDING-1c — `ONE_YEAR_MS` is the *default*, not just the OAuth call site.**
+`sdk.ts:190` — `const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS`. Changing `oauth.ts` alone would leave every other caller minting year-long tokens.
+
+**FINDING-2 — The session cookie is `sameSite: "none"`, and that is load-bearing.**
 `_core/cookies.ts` returns `{ httpOnly: true, path: "/", sameSite: "none", secure: isSecureRequest(req) }`. `httpOnly` is right. `sameSite: "none"` means the cookie is sent on cross-site requests, so the cookie layer contributes nothing against CSRF, and `secure` is computed per-request rather than always true. The OAuth callback does have a proper one-time state/nonce CSRF guard, but that protects login, not authenticated mutations.
+
+**It cannot simply be switched to `lax`.** FINDING-1b shows the app runs embedded, and the client sends `credentials: "include"`. `sameSite: "lax"` would break authenticated use in every iframe/WebView context. So CSRF must be solved **independently of SameSite** (§S1-E of the plan), not by tightening the cookie and hoping.
+
+**FINDING-2b — There is no session table, so revocation is currently impossible.**
+`verifySession` (`sdk.ts:204`) is a stateless HS256 `jwtVerify` with no server lookup. Logout clears the cookie (`routers.ts:387`) — but a token already copied out of the browser stays valid for the rest of its year. `grep` finds no `*session*` table in `drizzle/schema.ts`.
+
+**FINDING-2c — A better model already exists next door.**
+External/portal identities use `TOKEN_TTL_MS = 90 days` with `ROTATION_GRACE_MS = 10 minutes` (`externalIdentityPolicy.ts:13`) and store bearer tokens **as SHA-256 only**. S1 should follow this precedent rather than invent one.
+
+**FINDING-2d — Cron sessions are a third consumer.**
+`sdk.ts:299` branches on a `cron_` openId prefix before the normal user path. Any session change must keep that branch working.
 
 **FINDING-3 — No outbound provider credential exists yet, which is the good news.**
 Nothing to migrate, and no key has yet been placed anywhere wrong. This architecture lands *before* the first one, which is what the brief asked for.
@@ -197,14 +261,18 @@ Highest risk first, smallest first where risk is equal.
 
 ## 6. Owner decisions
 
-**OD-S1 — Does the 511 Alberta `link_and_metadata_only` assessment govern operational road data?**
-The recorded assessment sits in the knowledge/training domain and explicitly names 511 Alberta as link-only. The proposed connector caches road closures and restrictions for offline use. Either the operational feed is a separately-licensed product (and needs its own `knowledgeSources` row and assessment), or the caching step is not permitted for this source. **This is a licence question, not an engineering one**, and it blocks S3's caching behaviour for that provider — not S3 itself.
+**OD-S1 through OD-S4 are CLOSED** — recorded in §0a and reflected throughout §0b, §2.1, §2.3 and §2.6.
 
-**OD-S2 — Session lifetime and re-login tolerance.** A 15-minute access token with a rotating refresh is the standard shape, but drivers work in poor connectivity. How long may a refresh live, and what happens to a device offline past that window?
+### Genuine decisions still open
 
-**OD-S3 — Two-person approval scope.** Which record classes require it? Proposal: restricted class only (medical, identity, banking, investigation).
+**OD-S5 — Does the embedded/preview Bearer path survive S1?**
+FINDING-1b's `sessionStorage` mirror exists to keep the product working inside iframes and WebViews where cookies are blocked. A 15-minute access credential makes it far less dangerous, but it is still a token readable by page scripts. Either it stays (accepted risk, now short-lived), or embedded contexts move to a different mechanism. **This is a product-surface question** — which embedded contexts must keep working — not a security one, and it shapes S1-E.
 
-**OD-S4 — Per-company vs platform credentials for public feeds.** Should 511-type feeds be one platform credential, or may a company supply its own? The table supports both (`orgRef` nullable); the operational default is a policy choice.
+**OD-S6 — Refresh lifetime split between Web and Field Mobile.**
+S2 sets a 30-day absolute maximum. Web may want shorter. Field Mobile's offline window is governed by the device-bound model (S4/S6), not by the refresh token — but the *maximum disconnected period* before a device must re-authenticate is an operational call.
+
+**OD-S7 — Which feed is Alberta 511's operational dataset, and under what terms?**
+§0b requires the assessment to name the actual dataset. Somebody has to identify the operational traffic feed and its licence, separately from the existing training-content row. This blocks S3's caching, not S3's API access.
 
 ---
 
