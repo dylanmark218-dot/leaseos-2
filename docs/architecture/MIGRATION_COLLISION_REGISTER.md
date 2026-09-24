@@ -76,3 +76,22 @@ by open branches (`0175` by `claude/driver-portfolio-*` and `claude/training-aca
 
 * **2026-09-23 (0169 reconciliation)**: added the cross-repository 0169 row, the academy branch's
   `0174` collision (new since C1a), and 0179. No file renamed.
+
+## State at Document Control adoption (2026-09-24, `main` = `1680e94`)
+
+The owner adopted `claude/document-control-architecture-jlffzk` as the Document Control implementation
+(`docs/document-control/DC_RECONCILIATION_BRIEF_2026-09-24.md`) and ruled that its checkpoints A–C land
+first. They land from `claude/document-control-design-imsd3n`. Scan run with the command above against
+every remote branch: claims now reach `0188` (`0187` eld-compliance and training-academy, `0188`
+training-academy). `main` holds `0179_trip_stop_provenance.sql`, so the branch's `0179` could not keep
+its number.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0178 | `0178_document_control_definitions.sql` | `claude/document-control-design-imsd3n` (from `…-jlffzk`) | this PR | only claimant | none | keeps 0178 |
+| 0189 | `0189_document_control_register.sql` | same | this PR | first number free after every claim | none | **renamed from 0179** (collided with `main`'s trip-stop provenance); content unchanged, header says so |
+| 0190 | `0190_document_control_numbering.sql` | same | this PR | next free | none | **renamed from 0180** to stay after 0189; content unchanged |
+| 0181–0183 | Document Control D–H (templates, intake, disposal) | `claude/document-control-architecture-jlffzk` | none | held under the D-00 carve-out | 0182/0183 also claimed by four and three other branches | renumber past every claim when that work is ruled in |
+
+* **2026-09-24 (Document Control adoption)**: `0179 → 0189` and `0180 → 0190` for Document Control;
+  `0178` kept. No other branch's file renamed.

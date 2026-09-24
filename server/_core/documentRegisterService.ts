@@ -1,5 +1,5 @@
 /**
- * Document Control — the register's one write path (DC-B, 0179).
+ * Document Control — the register's one write path (DC-B, 0189).
  *
  * Every controlled record is written here, inside one transaction: the row,
  * its links, its external references and the timeline event that says what

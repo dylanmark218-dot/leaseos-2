@@ -1,6 +1,14 @@
 # LeaseOS — Document Control: Design (Checkpoint 0, revised for template-independent documents)
 
-Status: **design only — not approved for implementation.** No migration is created or reserved by this
+Status: **implemented and adopted.** Written as a design-only checkpoint on
+`claude/document-control-architecture-jlffzk` and built there as checkpoints A–H. On 2026-09-24 the owner
+adopted it as the Document Control implementation (`DC_RECONCILIATION_BRIEF_2026-09-24.md`); **A–C are on
+`main`** with migrations `0178`, `0189` and `0190` (built as 0178–0180), and D–H stay on that branch under
+the D-00 carve-out. What runs, and where it departs from this text, is in
+`checkpoints/DC_IMPLEMENTATION_RECORD.md`; the approved intent and the owner's rulings are in
+`DOCUMENT_CONTROL_NUMBERING_DESIGN_2026-09-23.md`. The original status line follows.
+
+*Original status:* design only — not approved for implementation. No migration is created or reserved by this
 document. No production code is changed. This revision incorporates the owner's architectural expansion:
 Document Control must not depend on a LeaseOS template existing, and templated, company-form and
 scanned third-party documents must all land in the same authoritative record layer.

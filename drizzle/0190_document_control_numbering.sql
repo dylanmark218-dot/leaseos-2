@@ -1,7 +1,7 @@
--- 0180 — Document Control, Checkpoint C: controlled numbering with a ledger, per business, offline blocks.
+-- 0190 — Document Control, Checkpoint C: controlled numbering with a ledger, per business, offline blocks.
 --
--- Slot: 0178/0179 are Checkpoints A/B on this branch; 0180 is the next number free on main and on
--- every open branch at the same scan (docs/architecture/MIGRATION_COLLISION_REGISTER.md).
+-- Slot: built as 0180 on claude/document-control-architecture-jlffzk; renumbered 0190 when adopted onto
+-- main (2026-09-24), after 0189 (Checkpoint B). Content unchanged.
 --
 -- The counter stays `trackingSequences` (project rule §18) — one row-locked
 -- `UPDATE … LAST_INSERT_ID(nextNumber)+n`, the discipline the sheet-serial allocator measured

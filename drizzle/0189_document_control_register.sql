@@ -1,7 +1,8 @@
--- 0179 — Document Control, Checkpoint B: the 0144 register becomes origin-aware.
+-- 0189 — Document Control, Checkpoint B: the 0144 register becomes origin-aware.
 --
--- Slot: 0178 is Checkpoint A on this branch; 0179 is the next number free on main and on every open
--- branch at the same scan (docs/architecture/MIGRATION_COLLISION_REGISTER.md).
+-- Slot: built as 0179 on claude/document-control-architecture-jlffzk; renumbered 0189 when adopted onto
+-- main (2026-09-24), because main took 0179 for trip_stop_provenance and open branches hold 0180–0188
+-- (docs/architecture/MIGRATION_COLLISION_REGISTER.md). Content unchanged.
 --
 -- A controlled record must always say how it came to exist (originKind), who issued it (issuerKind
 -- and the resolution of that issuer), which definition governs it, whether it carries a LeaseOS

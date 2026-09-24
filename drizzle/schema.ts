@@ -953,7 +953,7 @@ export type InsertZoneEvent = typeof zoneEvents.$inferInsert;
 
 export const trackingSequences = mysqlTable("trackingSequences", {
   id: int("id").autoincrement().primaryKey(),
-  /** DC-C (0180) — the business the counter belongs to; NULL and scopeKey 'default' for the historical single tenant and every legacy series. */
+  /** DC-C (0190) — the business the counter belongs to; NULL and scopeKey 'default' for the historical single tenant and every legacy series. */
   orgRef: varchar("orgRef", { length: 64 }),
   scopeKey: varchar("scopeKey", { length: 64 }).default("default").notNull(),
   sequenceType: varchar("sequenceType", { length: 24 }).notNull(),
@@ -8678,7 +8678,7 @@ export const commercialDocuments = mysqlTable("commercialDocuments", {
   statusReason: varchar("statusReason", { length: 500 }),
   registeredByUserId: int("registeredByUserId").notNull(),
   registeredAt: timestamp("registeredAt").defaultNow().notNull(),
-  // DC-B (0179) — provenance and lifecycle. NULL originKind = registered before Document Control
+  // DC-B (0189) — provenance and lifecycle. NULL originKind = registered before Document Control
   // kept provenance ("unrecorded"), never a guess. `bookScopeKey` = COALESCE(bookOrgRef,'default')
   // so the control-number unique index can see the single tenant.
   bookScopeKey: varchar("bookScopeKey", { length: 64 }).default("default").notNull(),
@@ -8712,7 +8712,7 @@ export const commercialDocumentLinks = mysqlTable("commercialDocumentLinks", {
   recordRef: varchar("recordRef", { length: 80 }).notNull(),
   linkedByUserId: int("linkedByUserId").notNull(),
   linkedAt: timestamp("linkedAt").defaultNow().notNull(),
-  // DC-B (0179) — the id beside the ref, the role the record plays, and whether a person or a domain said so.
+  // DC-B (0189) — the id beside the ref, the role the record plays, and whether a person or a domain said so.
   recordId: int("recordId"),
   role: varchar("role", { length: 40 }),
   source: mysqlEnum("source", ["human", "domain", "ocr_proposed"]).default("human").notNull(),
@@ -9019,9 +9019,9 @@ export type InsertDocumentDefinition = typeof documentDefinitions.$inferInsert;
 export type InsertDocumentSourceArtifact = typeof documentSourceArtifacts.$inferInsert;
 
 /* ==================================================================
- * DC-B (0179) — Document Control: the 0144 register becomes origin-aware. The
+ * DC-B (0189) — Document Control: the 0144 register becomes origin-aware. The
  * columns below are added to commercialDocuments and commercialDocumentLinks
- * by 0179 (see the ALTER statements there); the two new tables carry external
+ * by 0189 (see the ALTER statements there); the two new tables carry external
  * identifiers and the append-only timeline.
  * ================================================================== */
 
@@ -9078,7 +9078,7 @@ export type InsertDocumentExternalReference = typeof documentExternalReferences.
 export type InsertDocumentControlEvent = typeof documentControlEvents.$inferInsert;
 
 /* ==================================================================
- * DC-C (0180) — controlled numbering: the ledger around the one counter.
+ * DC-C (0190) — controlled numbering: the ledger around the one counter.
  * trackingSequences gains orgRef/scopeKey (declared on that table); these two
  * tables hold device blocks and one row per minted number.
  * ================================================================== */

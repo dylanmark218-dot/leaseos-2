@@ -74,3 +74,27 @@ import would still have to be taken from that branch.
 **A.** The two designs converge on every invariant except how a corrected document keeps its
 identity, and the other branch's answer to that is sound. Rewriting finished work to change it would
 cost more than it protects.
+
+---
+
+## Ruling — 2026-09-24
+
+**Option A: adopt the other branch, within the carve-out.**
+
+* Checkpoints **A (definitions and catalog), B (origin-aware register) and C (numbering ledger and device
+  blocks)** land first, from `claude/document-control-design-imsd3n`, rebased onto `main` `1680e94`.
+  Migrations `0178` kept, `0179 → 0189`, `0180 → 0190` (content unchanged; see the collision register).
+* **G (disposal slice)** is the next PR under the carve-out. It depends on F's capture procedures, so
+  its PR states exactly which part of F it needs and nothing more.
+* **D, E, F, H** stay built on `claude/document-control-architecture-jlffzk`, unmerged, until the spine
+  is wired or the owner widens the ruling.
+* **Record identity** follows the other branch: one control number and one supersede chain for the
+  life of a document. I-1 in the merged design is amended to say so.
+* The **number-to-current-version resolver** suggested above turned out to be unnecessary for A–C: the
+  control number always sits on the current row (unique per business), and `documentView` already
+  returns the whole version chain from any version's reference, which the ported supersede test
+  asserts. A single resolver becomes worth adding when QR verification lands (a deferred checkpoint),
+  because that is the first caller that starts from a printed, possibly superseded reference.
+* **Canonical documents:** the merged design stays the approved intent and the record of rulings; the
+  other branch's `document-control-design.md` and `checkpoints/DC_IMPLEMENTATION_RECORD.md` describe what
+  is built. Where they disagree about behaviour, the implementation record wins, as it says itself.

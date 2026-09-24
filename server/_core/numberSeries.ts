@@ -1,5 +1,5 @@
 /**
- * Document Control — controlled numbering (DC-C, 0180).
+ * Document Control — controlled numbering (DC-C, 0190).
  *
  * The counter is `trackingSequences` and the discipline is the sheet-serial
  * allocator's: the period row is seeded with INSERT IGNORE outside the
@@ -267,7 +267,7 @@ export type GapRow = { sequence: number; formattedNumber: string | null; state: 
  * Every sequence the counter has handed out for a series and period, with its
  * ledger state. A sequence with no row is `unexplained` — which, for a series
  * minted through this module, means a defect, and for a legacy series (FT,
- * INV, DSP, DOC before 0180) means a number the old path burned outside any
+ * INV, DSP, DOC before 0190) means a number the old path burned outside any
  * ledger.
  */
 export async function gapReport(db: DbOrTx, key: SeriesKey, periodKey: string): Promise<{ scopeKey: string; sequenceType: string; periodKey: string; issued: number; unexplained: number; explained: number; heldByDevice: number; rows: GapRow[] }> {

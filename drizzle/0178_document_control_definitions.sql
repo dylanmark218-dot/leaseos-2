@@ -8,7 +8,7 @@
 -- A document DEFINITION says how a class of controlled record behaves — whether LeaseOS mints a number
 -- for it, whether it may arrive as a scan with no template, who owns the facts it carries, what it may
 -- be linked to, how it is represented. It is not the document (that is the 0144 register, extended in
--- 0179) and not the visual template (0181). Every enforced policy is a column. `scopeKey` is
+-- 0189) and not the visual template (a later checkpoint). Every enforced policy is a column. `scopeKey` is
 -- COALESCE(orgRef, 'platform'), maintained by the write path, so the unique index can see the
 -- platform/tenant split that a NULL orgRef would hide from it.
 --
