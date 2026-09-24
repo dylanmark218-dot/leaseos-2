@@ -10,7 +10,7 @@ means verified in the tree at the commit below rather than believed.
 | Migration head | `0174_dispatch_override_provenance.sql`; slots `0172`/`0173` are claimed by an open branch (`docs/architecture/MIGRATION_COLLISION_REGISTER.md:39-41`) |
 | Owner source reconciled | `docs/knowledge/source/LeaseOS_Live_Assist_Unified_AI_Build_Plan_v2_0.txt` (19 Sep 2026; v1.0 beside it), indexed **PARTIAL** at `docs/knowledge/INDEX.md:26` |
 | Binding constraints read | `docs/register/SPINE_WIRING_PLAN.md`, `docs/register/AI_RUNTIME_TERMINOLOGY.md`, `docs/REMAINING_BUILD_REGISTER.md` §P1, §P9, `docs/register/SCOPE_RECONCILIATION_2026-09-21.md`, `LEASEOS_MASTER_PROGRAMMING_MANIFEST_V8.md` §1, §28 |
-| Companion | none yet; the implementation plan for the first slice (§21) is the next document |
+| Companion | `docs/live-assist/LIVE_ASSIST_LA1_IMPLEMENTATION_PLAN.md` (checkpoint LA-1, §22) |
 
 ### Status vocabulary used below
 
@@ -53,7 +53,7 @@ These come before any architecture because each one changes what may be built, o
      back to the hard-coded host `https://forge.manus.im` when `BUILT_IN_FORGE_API_URL` is unset, and only
      checks that a key is present. Sending camera and screen images through that path before P9.1 is
      closed would send the most sensitive data LeaseOS handles through its least-hardened seam.
-     **P9.1 is a hard precondition for any Live Assist inference** (§21).
+     **P9.1 is a hard precondition for any Live Assist inference** (§22).
 3. **Organization-wide isolation is not yet a property of the system.**
    `LEASEOS_CURRENT_STATE.md:1001` says so, and `server/tenantIsolation.test.ts:133-143` asserts that the
    sentence stays until it is fixed. `evidenceRecords` (`drizzle/schema.ts:48`) has no organization
