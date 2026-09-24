@@ -45,3 +45,20 @@ and `0157` is historically used twice. None of those is reused.
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
   No other branch was renumbered.
+
+## Reservations recorded by design branches (not yet files on any branch)
+
+A design document that names its migration numbers is a claim the next claimant should see here, or
+two branches pick the same free number from the same scan. Rows leave this table when the files land
+on the branch and move into the table above.
+
+| Number | Intended file | Branch | Design | Basis | Note |
+|---|---|---|---|---|---|
+| 0182 | `0182_board_membership.sql` | `claude/leaseos-communications-marketplace-p8ptqw` | `docs/product/COMPANY_BOARD_OPEN_WORK_DESIGN.md` §10 | scan of every remote branch against `main` `6f52b57` on 2026-09-24: highest claim anywhere is `0181` (`claude/document-control-architecture-jlffzk`) | first number free on `main` and on every open branch |
+| 0183 | `0183_open_work_offers_availability.sql` | same | same | same | |
+| 0184 | reserved for that design's Checkpoint 3 | same | same | same | released if Checkpoint 3 needs no column |
+
+## Change log (continued)
+
+* **2026-09-24**: the Company Board + Open Work design reserved `0182`–`0184` by scan (highest open
+  claim `0181`). Nothing renumbered; no file added.
