@@ -14,6 +14,7 @@ import {
   assessFreshness,
   collectAttributions,
   evaluateSourceUsage,
+  integrationState,
   planFeedFetch,
 } from "./externalDataRegistry";
 import { seedExternalDataSources, listExternalDataSources } from "../db";
@@ -31,7 +32,7 @@ const byKey = (k: string) =>
   ALL_DATA_SOURCES.find(s => s.sourceKey === k)!;
 
 describe("the count is eight, not nine", () => {
-  it("has twenty-one sources, eight verified and thirteen not", () => {
+  it("has twenty-nine sources, eight verified and twenty-one not", () => {
     // The research summary said "nine of eleven are clean" while separately
     // flagging three as unresolved. Eleven minus three is eight. Seeding nine
     // would have marked a blocked source usable.
@@ -41,9 +42,14 @@ describe("the count is eight, not nine", () => {
     // redistributing a channel bank to field tablets as operational data is a
     // separate permission nobody has confirmed. They seed unverified, which
     // means inspection only, and the eight stays eight.
-    expect(ALL_DATA_SOURCES).toHaveLength(21);
+    //
+    // 2026-09-24 added eight federal and provincial candidates — Ontario 511,
+    // Transport Canada recalls, the recalls-and-alerts feed, two StatCan
+    // services, two open-data catalogues and Québec's truck network. Research
+    // named their licences; nobody has reviewed one, so the eight stays eight.
+    expect(ALL_DATA_SOURCES).toHaveLength(29);
     expect(VERIFIED_DATA_SOURCES).toHaveLength(8);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(13);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(21);
   });
 
   it("names exactly the ones that could not be verified", () => {
@@ -52,15 +58,23 @@ describe("the count is eight, not nine", () => {
       "aer_st102",
       "aer_st107",
       "aer_st37",
+      "bc_data_catalogue",
       "bc_resource_road_maps",
       "crtc_coverage",
+      "goc_open_data_api",
+      "hc_recalls_safety_alerts",
       "ised_b1_western",
       "ised_bc_rr",
       "ised_cb_grs",
       "ised_sms",
       "mb_petroleum",
+      "on511",
+      "qc_reseau_camionnage",
       "sk_iris",
       "statcan_boundaries",
+      "statcan_rdaas",
+      "statcan_wds",
+      "tc_vehicle_recalls",
     ]);
   });
 
@@ -172,6 +186,16 @@ describe("Alberta 511 is throttled centrally", () => {
     expect(SOURCES_REQUIRING_API_KEY).toContain("ab511");
   });
 
+  it("is not the only 511 that does — Ontario's is keyed and throttled the same way", () => {
+    // The planning notes said Ontario 511 needed no key. Its developer page
+    // says "Requires a developer key" and "Ten calls every 60 seconds".
+    const on511 = byKey("on511");
+    expect(SOURCES_REQUIRING_API_KEY).toContain("on511");
+    expect(on511.rateLimitCalls).toBe(10);
+    expect(on511.rateLimitWindowSeconds).toBe(60);
+    expect(SOURCE_CAVEATS.on511).toContain("never proxy the raw API");
+  });
+
   it("refuses an eleventh call inside the window and serves cache instead", () => {
     const recent = Array.from({ length: 10 }, () => new Date(now.getTime() - 20_000));
     const r = planFeedFetch({
@@ -250,15 +274,23 @@ describe("attribution is collected, and gaps are named", () => {
       "aer_st102",
       "aer_st107",
       "aer_st37",
+      "bc_data_catalogue",
       "bc_resource_road_maps",
       "crtc_coverage",
+      "goc_open_data_api",
+      "hc_recalls_safety_alerts",
       "ised_b1_western",
       "ised_bc_rr",
       "ised_cb_grs",
       "ised_sms",
       "mb_petroleum",
+      "on511",
+      "qc_reseau_camionnage",
       "sk_iris",
       "statcan_boundaries",
+      "statcan_rdaas",
+      "statcan_wds",
+      "tc_vehicle_recalls",
     ]);
   });
 });
@@ -334,6 +366,77 @@ describe("software components are registered separately from data", () => {
   });
 });
 
+describe("the four integration states are a label over the gate", () => {
+  it("never calls a source approved that the gate would refuse, or the reverse", () => {
+    for (const s of ALL_DATA_SOURCES) {
+      const { state } = integrationState(s);
+      const permitted = evaluateSourceUsage({ source: s, intent: "operational_decision" }).permitted;
+      const approved = state === "APPROVED_FREE_COMMERCIAL" || state === "APPROVED_WITH_ATTRIBUTION";
+      expect(approved, s.sourceKey).toBe(permitted);
+    }
+  });
+
+  it("puts every verified seed in APPROVED_WITH_ATTRIBUTION — each owes a credit line", () => {
+    for (const s of VERIFIED_DATA_SOURCES) {
+      expect(integrationState(s).state, s.sourceKey).toBe("APPROVED_WITH_ATTRIBUTION");
+    }
+  });
+
+  it("puts every unverified seed in PERMISSION_REQUIRED, Alberta 511 included", () => {
+    for (const s of UNVERIFIED_DATA_SOURCES) {
+      expect(integrationState(s).state, s.sourceKey).toBe("PERMISSION_REQUIRED");
+    }
+    expect(integrationState(byKey("ab511")).reason).toMatch(/unverified/);
+  });
+
+  it("does not let a forged status reach an approved state", () => {
+    const forged = { ...byKey("on511"), status: "verified" as const, verifiedAt: new Date() };
+    expect(integrationState(forged).state).toBe("PERMISSION_REQUIRED");
+  });
+
+  it("is APPROVED_FREE_COMMERCIAL only when no attribution is owed", () => {
+    const noCredit = { ...byKey("canvec"), attributionRequired: false };
+    expect(integrationState(noCredit).state).toBe("APPROVED_FREE_COMMERCIAL");
+  });
+
+  it("is DO_NOT_USE for a refusal on the record, a withdrawal or a supersession", () => {
+    const base = byKey("msc_geomet");
+    expect(integrationState({ ...base, commercialUsePermitted: "no" }).state).toBe("DO_NOT_USE");
+    expect(integrationState({ ...base, status: "withdrawn" }).state).toBe("DO_NOT_USE");
+    expect(integrationState({ ...base, status: "superseded" }).state).toBe("DO_NOT_USE");
+  });
+
+  it("does not turn an advisory source into a safety source by approving it", () => {
+    expect(integrationState(byKey("cwfis")).state).toBe("APPROVED_WITH_ATTRIBUTION");
+    expect(isAdvisoryOnly("cwfis")).toBe(true);
+  });
+});
+
+describe("the 2026-09-24 candidates", () => {
+  const keys = [
+    "on511", "tc_vehicle_recalls", "hc_recalls_safety_alerts", "goc_open_data_api",
+    "statcan_wds", "statcan_rdaas", "bc_data_catalogue", "qc_reseau_camionnage",
+  ];
+
+  it("each names the publisher page a reviewer starts from", () => {
+    for (const k of keys) expect(byKey(k).sourceUrl, k).toMatch(/^https:\/\//);
+  });
+
+  it("does not read a licence off a catalogue for the datasets it lists", () => {
+    // A catalogue listing a dataset clears nothing about that dataset.
+    expect(SOURCE_CAVEATS.goc_open_data_api).toContain("its own licence");
+    expect(byKey("bc_data_catalogue").licenceName).toBeNull();
+  });
+
+  it("keeps a recall match informational", () => {
+    expect(SOURCE_CAVEATS.tc_vehicle_recalls).toContain("not a determination that a unit is safe or unsafe");
+  });
+
+  it("leaves a 'continual' feed's freshness unknown instead of inventing an interval", () => {
+    expect(byKey("hc_recalls_safety_alerts").updateIntervalHours).toBeNull();
+  });
+});
+
 /* ------------------------------------------------------------------ */
 
 const URL = process.env.DATABASE_URL;
@@ -350,13 +453,13 @@ beforeAll(async () => {
 });
 
 d("seeding into the database", () => {
-  it("inserts all twenty-one and is idempotent on a second run", async () => {
+  it("inserts all twenty-nine and is idempotent on a second run", async () => {
     const first = await seedExternalDataSources();
-    expect(first.inserted.length + first.existing.length).toBe(21);
+    expect(first.inserted.length + first.existing.length).toBe(29);
 
     const second = await seedExternalDataSources();
     expect(second.inserted).toEqual([]);
-    expect(second.existing).toHaveLength(21);
+    expect(second.existing).toHaveLength(29);
   });
 
   it("persists status, rate limit and retrieval date", async () => {

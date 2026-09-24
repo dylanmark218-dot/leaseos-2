@@ -40,8 +40,21 @@ and `0157` is historically used twice. None of those is reused.
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
 
+## Claim added 2026-09-24 (`main` = migration head `0174`)
+
+A fresh scan of every remote branch found claims through `0185`: `0175` (auth-workspace, client-portal,
+driver-portfolio, training-academy), `0176`–`0177` (driver-portfolio), `0178`–`0183` (document-control),
+`0179` (eld-compliance, migration-0169-reconciliation), `0182`–`0184` (communications-marketplace,
+customer-contract-rates, integration-hub, safety-program-builder), `0185` (relaxed-carson, sec-004).
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0186 | `0186_external_source_categories.sql` | `claude/canadian-govt-apis-leaseos-q33l42` | none | open branch | none at scan time | first number no branch held; re-check at PR time |
+
 ## Change log
 
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
+  No other branch was renumbered.
+* **2026-09-24**: `0186` claimed by `claude/canadian-govt-apis-leaseos-q33l42` (external source categories).
   No other branch was renumbered.

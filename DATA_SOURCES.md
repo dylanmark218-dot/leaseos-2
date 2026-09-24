@@ -5,13 +5,13 @@ publisher and is now seeded into `externalDataSources` by
 `seedExternalDataSources()`. This document describes what the runtime enforces;
 it is not the enforcement itself.
 
-## Eight verified, thirteen not
+## Eight verified, twenty-one not
 
 | | Count |
 |---|---|
 | Verified — usable per their licence | **8** |
-| Unverified — inspection only | **3** |
-| Total | **11** |
+| Unverified — inspection only | **21** |
+| Total | **29** |
 
 > **Correction.** The research summary stated "nine of eleven are clean" while
 > separately flagging three as unresolved. Eleven minus three is eight. Seeding
@@ -48,15 +48,48 @@ it is not the enforcement itself.
 | `bc_resource_road_maps` | The province states these are planning tools and that the posted road sign takes precedence. |
 | `statcan_boundaries` | The provincial/territorial boundary file. Licence not reviewed here, so nothing imports from it — which is exactly why a coordinate still cannot establish a province. |
 | `crtc_coverage` | Modelled coverage layers published for regulatory purposes, not a guarantee of service at a position. |
+| `on511` | Ontario 511 developer API. **Requires a developer key; ten calls per sixty seconds** (both verbatim on the developer page). The page states no licence. The same feeds on data.ontario.ca are OGL – Ontario, which is a lead for the reviewer, not a clearance. |
+| `tc_vehicle_recalls` | Transport Canada Vehicle Recalls Database, last 60 days, daily. Catalogue states OGL – Canada; not yet reviewed. A match is information for a person, never a safe/unsafe determination. |
+| `hc_recalls_safety_alerts` | Government of Canada Recalls and Safety Alerts feed. Catalogue states OGL – Canada; not yet reviewed. |
+| `goc_open_data_api` | The federal CKAN catalogue. Catalogue states OGL – Canada for itself; each dataset it lists is its own source with its own licence. |
+| `statcan_wds` | Statistics Canada Web Data Service. Statistics Canada Open Licence named; not yet reviewed. |
+| `statcan_rdaas` | Statistics Canada Reference Data as a Service. Same licence named; not yet reviewed. |
+| `bc_data_catalogue` | BC's CKAN catalogue. Licensing is per dataset and not uniformly OGL – BC, so the row names no licence. |
+| `qc_reseau_camionnage` | Québec heavy-truck network. Données Québec lists CC BY 4.0; the attribution wording is recorded on review. |
 
-All ten carry `attributionText: null` deliberately, as a second barrier: a
+Every one carries `attributionText: null` deliberately, as a second barrier: a
 source cannot reach operational use by editing `status` and the permission flags
 alone — somebody has to have actually recorded what the publisher requires shown.
 Test-pinned.
 
 **Required to unblock:** written confirmation from AER (Terms of Use) and from
 Alberta 511 (developer terms) covering (a) commercial fleet use and (b) offline
-redistribution to field tablets.
+redistribution to field tablets. Ontario 511 needs the same two answers for
+its developer API. For the other seven 2026-09-24 candidates a reviewer reads
+the named licence and records its attribution. None needs a written request
+unless that reading leaves commercial fleet use unclear.
+
+## Integration states
+
+`integrationState()` gives each source one of four states for integration
+planning. It adds no second rule: it labels what `evaluateSourceUsage` already
+decides for `operational_decision`, and a test checks that the two agree for
+every seeded source.
+
+| State | Meaning | Today |
+|---|---|---|
+| `APPROVED_FREE_COMMERCIAL` | Cleared for commercial use, no attribution owed | none |
+| `APPROVED_WITH_ATTRIBUTION` | Cleared for commercial use; show the attribution text | the 8 verified |
+| `PERMISSION_REQUIRED` | Unreviewed, commercial terms unknown, or attribution unrecorded | the 21 unverified |
+| `DO_NOT_USE` | Withdrawn, superseded, or commercial use recorded as not permitted | none |
+
+"Approved" answers commercial use only. Offline bundling and redistribution
+are still decided per intent by the gate, and an advisory-only source
+(`cwfis`) stays advisory.
+
+**Clearing a 2026-09-24 candidate** is `geo.sourceReview` with the licence
+the reviewer read, the attribution text it requires, and what it permits. The
+research that named each licence is not a review.
 
 ## Caveats the code carries
 

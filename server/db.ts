@@ -1444,6 +1444,7 @@ export async function seedExternalDataSources(): Promise<{
       sourceKey: s.sourceKey,
       displayName: s.displayName,
       authority: s.authority,
+      sourceUrl: s.sourceUrl ?? null,
       jurisdiction: s.jurisdiction ?? null,
       category: s.category,
       licenceName: s.licenceName ?? null,

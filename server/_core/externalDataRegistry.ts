@@ -37,6 +37,13 @@ export type SourceCategory =
   // mobile coverage layers a route's communication plan reads.
   | "spectrum"
   | "coverage"
+  // 0186 — the federal and provincial candidates of 2026-09-24: a recall
+  // database, a recalls-and-alerts feed, statistics services and open-data
+  // catalogues. None is a road or a weather layer.
+  | "vehicle_recalls"
+  | "safety_alerts"
+  | "statistics"
+  | "dataset_catalog"
   | "other";
 
 export type SourceStatus = "unverified" | "verified" | "superseded" | "withdrawn";
@@ -46,6 +53,8 @@ export type ExternalDataSource = {
   sourceKey: string;
   displayName: string;
   authority: string;
+  /** The publisher's page for the service or dataset — where a reviewer starts. */
+  sourceUrl?: string | null;
   category: SourceCategory;
   jurisdiction?: string | null;
   licenceName?: string | null;
@@ -161,6 +170,63 @@ export function evaluateSourceUsage(args: {
   }
 
   return { permitted: true, ...base, caveats };
+}
+
+/* ------------------------------------------------------------------ */
+/* Integration state                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The four states a person planning an integration asks about.
+ *
+ *   APPROVED_FREE_COMMERCIAL  — cleared for commercial use, no attribution owed.
+ *   APPROVED_WITH_ATTRIBUTION — cleared for commercial use; the attribution
+ *                               text must be shown wherever the data appears.
+ *   PERMISSION_REQUIRED       — nobody has cleared it: unreviewed, commercial
+ *                               terms unknown, or required attribution not yet
+ *                               recorded. Inspection only.
+ *   DO_NOT_USE                — withdrawn, superseded, or commercial use
+ *                               recorded as not permitted.
+ *
+ * A label over the gate, never a second gate. The two approved states are
+ * exactly the sources `evaluateSourceUsage` permits for `operational_decision`,
+ * and a test holds them together, so this cannot say "approved" about a
+ * source the gate would refuse. Approved says nothing about offline bundling
+ * or redistribution, which the gate still decides per intent, nor about
+ * fitness: an advisory-only source is still advisory.
+ */
+export type IntegrationState =
+  | "APPROVED_FREE_COMMERCIAL"
+  | "APPROVED_WITH_ATTRIBUTION"
+  | "PERMISSION_REQUIRED"
+  | "DO_NOT_USE";
+
+export function integrationState(source: ExternalDataSource): {
+  state: IntegrationState;
+  reason: string;
+} {
+  if (source.status === "withdrawn" || source.status === "superseded") {
+    return { state: "DO_NOT_USE", reason: `${source.sourceKey} is ${source.status}` };
+  }
+  if (source.commercialUsePermitted === "no") {
+    return {
+      state: "DO_NOT_USE",
+      reason: `Commercial use of ${source.sourceKey} is recorded as not permitted`,
+    };
+  }
+  const gate = evaluateSourceUsage({ source, intent: "operational_decision" });
+  if (!gate.permitted) {
+    return { state: "PERMISSION_REQUIRED", reason: gate.reason! };
+  }
+  return source.attributionRequired
+    ? {
+        state: "APPROVED_WITH_ATTRIBUTION",
+        reason: `Cleared for commercial use; show: ${source.attributionText}`,
+      }
+    : {
+        state: "APPROVED_FREE_COMMERCIAL",
+        reason: "Cleared for commercial use; no attribution owed",
+      };
 }
 
 /* ------------------------------------------------------------------ */
