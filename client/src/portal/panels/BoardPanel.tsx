@@ -28,7 +28,23 @@ type Runtime = { boardQueue?: BoardQueue };
 
 let browserFallback: BoardQueue | null = null;
 
-function queueFor(transport: BoardTransport): { queue: BoardQueue; durable: boolean } {
+/*
+ * The browser fallback outlives any one mount of the panel, so it cannot hold one mount's
+ * mutations. It sends through whichever mount is current; with none mounted, a send has no answer
+ * and the capture simply waits in the queue, which is the right outcome.
+ */
+const liveTransport: { current: BoardTransport | null } = { current: null };
+const need = (): BoardTransport => {
+  if (!liveTransport.current) throw new Error("The board is not open; kept on this device");
+  return liveTransport.current;
+};
+const delegating: BoardTransport = {
+  post: input => need().post(input),
+  acknowledge: input => need().acknowledge(input),
+  respond: input => need().respond(input),
+};
+
+function queueFor(): { queue: BoardQueue; durable: boolean } {
   const native = (globalThis as { leaseosRuntime?: Runtime }).leaseosRuntime?.boardQueue;
   if (native) return { queue: native, durable: true };
   if (!browserFallback) {
@@ -37,7 +53,7 @@ function queueFor(transport: BoardTransport): { queue: BoardQueue; durable: bool
     browserFallback = new BoardQueue({
       store: new MemoryStore(), vault: new MemoryVault(keystore), clock,
       connectivity: { online: async () => (typeof navigator === "undefined" ? true : navigator.onLine) },
-      transport,
+      transport: delegating,
     });
   }
   return { queue: browserFallback, durable: false };
@@ -54,12 +70,13 @@ export function BoardPanel({ online }: { online: boolean }) {
   const [local, setLocal] = useState<LocalCapture[]>([]);
   const [offerAnswer, setOfferAnswer] = useState<{ kind: "idle" } | { kind: "pending" } | { kind: "failed"; message: string }>({ kind: "idle" });
 
-  const transport = useMemo<BoardTransport>(() => ({
-    post: input => utils.client.board.post.mutate(input),
-    acknowledge: input => utils.client.board.acknowledge.mutate(input),
-    respond: input => utils.client.shifts.respond.mutate(input),
-  }), [utils]);
-  const { queue, durable } = useMemo(() => queueFor(transport), [transport]);
+  // The three writes the queue makes, as hooks, so the portal contract can see them.
+  const postMessage = trpc.board.post.useMutation();
+  const acknowledgeMessage = trpc.board.acknowledge.useMutation();
+  const respondToPost = trpc.shifts.respond.useMutation();
+  liveTransport.current = { post: postMessage.mutateAsync, acknowledge: acknowledgeMessage.mutateAsync, respond: respondToPost.mutateAsync };
+  useEffect(() => () => { liveTransport.current = null; }, []);
+  const { queue, durable } = useMemo(() => queueFor(), []);
 
   const me = trpc.auth.me.useQuery();
   const mine = trpc.board.mine.useQuery(undefined, { refetchInterval: 60_000 });
