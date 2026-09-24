@@ -12,8 +12,10 @@ import { and, eq, gte, inArray, isNull, lte, notInArray, or, sql, like, desc } f
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
-import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries, evidenceRecords, fieldTicketDocuments, retentionPolicies, documentDefinitions } from "../drizzle/schema";
+import { loads, commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries, evidenceRecords, fieldTicketDocuments, retentionPolicies, documentDefinitions } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
+import { appendDocumentEvent } from "./_core/documentRegisterService";
+import { jobInScope } from "./db";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { matchFacilityStatementLine, type DisposalTicketLite } from "./_core/facilityStatements";
@@ -321,6 +323,36 @@ export const commercialOfficeRouter = router({
    * ambiguous, and a person resolves the rest. Nothing here edits a disposal ticket.
    */
   disposal: router({
+    /**
+     * DC-G — the verifier's act. A ticket read from a photograph or typed by a driver enters
+     * `needs_review`; the billing gate counts verified tickets only (v20.16). Verification names
+     * who and when, advances the load's chain to disposal_verified where the load is at or past
+     * the facility, and tells the register rows linked to the ticket. The office's act, in scope.
+     */
+    verifyTicket: roleProcedure("commercialOffice.disposalTicketVerify")
+      .input(z.object({ ticketNumber: z.string().min(1).max(64), outcome: z.enum(["verified", "rejected"]), note: z.string().max(400).nullable().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db } = await bookFor(ctx.user.id);
+        const scope = await resolveActingScope(db, ctx.user.id);
+        const t = (await db.select().from(disposalTickets).where(eq(disposalTickets.ticketNumber, input.ticketNumber)).limit(1))[0];
+        const jobId = t?.jobId ?? (t?.loadId != null ? (await db.select({ jobId: loads.jobId }).from(loads).where(eq(loads.id, t.loadId)).limit(1))[0]?.jobId ?? null : null);
+        if (!t || (jobId != null && !(await jobInScope(jobId, scope)))) throw new TRPCError({ code: "NOT_FOUND", message: `Disposal ticket ${input.ticketNumber} not found` });
+        if (jobId == null && scope.tenantId !== SINGLE_TENANT_ID) throw new TRPCError({ code: "NOT_FOUND", message: `Disposal ticket ${input.ticketNumber} not found` });
+        if (t.verificationStatus === "verified" && input.outcome === "verified") return { ticketNumber: t.ticketNumber, verificationStatus: "verified" as const, alreadyVerified: true as const, loadChainState: null, documentsTold: 0 };
+        const now = new Date();
+        return db.transaction(async tx => {
+          await tx.update(disposalTickets).set({ verificationStatus: input.outcome, verifiedByUserId: ctx.user.id, verifiedAt: now, verificationNote: input.note ?? null }).where(eq(disposalTickets.id, t.id));
+          let loadChainState: string | null = null;
+          if (input.outcome === "verified" && t.loadId != null) {
+            const l = (await tx.select({ chainState: loads.chainState }).from(loads).where(eq(loads.id, t.loadId)).limit(1))[0];
+            if (l && ["arrived_disposal", "weighed", "unloaded"].includes(l.chainState)) { await tx.update(loads).set({ chainState: "disposal_verified" }).where(eq(loads.id, t.loadId)); loadChainState = "disposal_verified"; }
+            else loadChainState = l?.chainState ?? null;
+          }
+          const linked = await tx.select({ documentId: commercialDocumentLinks.documentId }).from(commercialDocumentLinks).where(and(eq(commercialDocumentLinks.recordType, "disposal_ticket"), eq(commercialDocumentLinks.recordId, t.id)));
+          for (const l of linked) await appendDocumentEvent(tx, { documentId: l.documentId, eventType: "document.domain_verified", actor: { userId: ctx.user.id, source: "human" }, occurredAt: now, detail: { domain: "disposal", recordType: "disposal_ticket", recordRef: t.ticketNumber, outcome: input.outcome, note: input.note ?? null, loadChainState } });
+          return { ticketNumber: t.ticketNumber, verificationStatus: input.outcome, alreadyVerified: false as const, loadChainState, documentsTold: linked.length };
+        });
+      }),
     statementImport: roleProcedure("commercialOffice.facilityStatementImport")
       .input(z.object({
         facilityId: z.number().int().positive(), facilityStatementNumber: z.string().max(80).optional(),

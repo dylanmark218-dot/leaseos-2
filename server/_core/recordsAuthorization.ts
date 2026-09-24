@@ -2388,6 +2388,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "commercialOffice.arAgingByOrganization": "commercial.read",
   "commercialOffice.approvalLedger": "commercial.read",
   "commercialOffice.facilityStatementImport": "commercial.write",
+  "commercialOffice.disposalTicketVerify": "commercial.write",
   "commercialOffice.facilityStatementLines": "commercial.read",
   "commercialOffice.facilityStatementLineResolve": "commercial.write",
   "commercialOffice.facilityStatementClose": "commercial.write",

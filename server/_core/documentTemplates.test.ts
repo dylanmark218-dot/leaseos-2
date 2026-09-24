@@ -80,7 +80,7 @@ describe("the supplied markdown render sources", () => {
 describe("an uploaded company or customer form is untrusted input", () => {
   it("accepts a PDF or DOCX under the cap with a plain name and refuses the rest, naming why", () => {
     expect(customTemplateRefusals({ mimeType: "application/pdf", byteLength: 1024, fileName: "PrideVac_DisposalTicket_2026.pdf" })).toEqual([]);
-    expect(customTemplateRefusals({ mimeType: "text/html", byteLength: 10, fileName: "x.html" })).toEqual(expect.arrayContaining([expect.stringMatching(/PDF or a DOCX/)]));
+    expect(customTemplateRefusals({ mimeType: "text/html", byteLength: 10, fileName: "x.html" })).toEqual(expect.arrayContaining([expect.stringMatching(/PDF, a DOCX or a markdown-text layout/)]));
     expect(customTemplateRefusals({ mimeType: "application/pdf", byteLength: 16 * 1024 * 1024, fileName: "big.pdf" })).toEqual(expect.arrayContaining([expect.stringMatching(/between 1 byte and/)]));
     expect(customTemplateRefusals({ mimeType: "application/pdf", byteLength: 10, fileName: "../../etc/passwd" })).toEqual(expect.arrayContaining([expect.stringMatching(/file name carries only/)]));
   });

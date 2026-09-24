@@ -427,3 +427,126 @@ extract, attach, read and capture-with-link all fail closed with nothing stored.
 420/420; tsc clean; test-file type errors 0 (pin 0); vitest 337 files: 4773 passed, 3 skipped, 1 failed —
 `calendarFixtures.test.ts`, the pre-existing date-triggered guard recorded under E (fails identically
 on the untouched base `7759056`; not this branch's). Build clean.
+
+
+## Checkpoint G — the disposal vertical slice
+
+**Commit.** _(filled at commit)_ · migration `0183_document_control_disposal.sql` · census 670 (+1:
+`commercialOffice.disposal.verifyTicket`) · `documentControl.db.test.ts` (+2, the two scenarios).
+
+**The path, as it runs.** job → load (arrived at the facility) → the facility hands the driver its
+paper → the driver photographs it and names the job and load (`documents.capture`, links `human`) →
+the device's reading is proposed (`documents.extract`: an assistant proposal for the `disposal_ticket`
+form, the facility's number as an `ocr_proposed` reference; nothing in the disposal domain, nothing on
+the row's facts) → the office confirms the document (`documents.confirm`: the paper is the facility's
+receipt, the facility issued it, the number stands) and **the proposal follows the confirmed facts**
+(its `facilityId`/`loadId`/`jobId` are set from the confirmed issuer and links — server-resolved,
+never read off the paper) → the office works the proposal in the assistant (answers what the reading
+asked of a person, reads back, acknowledges) and the one typed commit path (`fieldRoute.assistant.commit`
+→ `disposal_ticket_create`, v20.16, unchanged) creates the `disposalTickets` row in `needs_review` —
+and now, in the same transaction, the register row is linked to the record it became (`disposal_ticket`,
+source `domain`, role `source_document`), the facility's number on it is marked a mirror of
+`disposalTickets.facilityTicketNumber`, the extraction is committed and the disposal row's
+`evidenceRefs` names the document → a disposal line on a field ticket that names the LeaseOS ticket is
+**refused until a person verifies it** (`closeout.lineAdd`, new rule; a number that is nobody's ticket
+is kept as typed) → the verifier's act (`commercialOffice.disposal.verifyTicket`, new: in scope through
+the ticket's job, refuses another business's ticket as not found; records who and when in the disposal
+domain's own new columns, advances the load to `disposal_verified` where it was at or past the facility,
+and tells every register row linked to the ticket with a `document.domain_verified` event) → the
+disposal line enters → the invoice's document is rendered by the invoicing engine (`invoicing.render`)
+and registered as the tenant's issued record under the domain's number (`documents.registerRendered`,
+definition `invoice`, `system_rendered`, `INV-…`, linked to the job, the load, the disposal ticket and
+the invoice) → the audit trail: the register lists the documents of a load, a disposal ticket, a job,
+each with its own origin, issuer and number, and the scan's timeline reconstructs the chain with its
+actors and sources (captured → derivative → reference proposed → proposed → reference confirmed →
+classified → confirmed → linked to the disposal record → verified by the domain).
+
+**B passes without any LeaseOS disposal template.** The facility's paper is the original, the
+`disposalTickets` row is the fact, the register row is the controlled record that ties them; no
+template is looked up, none exists for the definition, none is asked for. **A** adds the company's own
+disposal ticket: a markdown-text layout uploaded as untrusted bytes (hashed, kept as evidence, read back
+only against the hash the revision released — `layoutTextOf` now reads an uploaded layout from the
+evidence store), mapped through the semantic layer, released as revision 2, rendered from the records
+(the load's driver and unit, the facility) and the person's values as `proposed`, then issued under the
+disposal record's number by the office (`documents.issue` with the domain-managed number). Three
+records on one disposal, each with its origin: the facility's paper (`external_scanned`, no LeaseOS
+number), the company's ticket (`organization_template`, `DSP-…`), the invoice (`system_rendered`,
+`INV-…`). The paper is never replaced by the rendering; a second rendering is a second document, and
+the issued one keeps its revision and its number.
+
+**Two catalog and template changes, both small.** The `invoice` definition allows a `disposal_ticket`
+link (an invoice for a disposal haul cites the ticket it bills; 0178's seed regenerated — the migration
+is unmerged). `text/markdown` is accepted as a custom template layout (`markdown_text`), the one kind
+the present renderer executes; a PDF or DOCX is still registered and printable as supplied, not
+rendered (D-DC-05 unchanged).
+
+**Not built.** No facility-statement matching → verification automation (the verifier is a person; the
+statement engine is untouched and can feed the same act later); no billing-readiness wiring beyond the
+disposal-line rule (`evaluateBillingReadiness` has no production caller today and gets none here); no
+invoice drafting through the closeout chain in the test — the invoice's rows are fixtured as the office
+suites fixture them, the document is rendered by the real engine and registered by the real path.
+
+**Reused.** `executeAssistantCommit` + `disposal_ticket_create` (v20.16) as the one path from proposal
+to disposal record; `assistant.answer/readBack/acknowledge/commit`; `closeout.ticketOpen/lineAdd`;
+`invoicing.render`; `fieldTicketDocuments`; the register (B), intake (F), templates (D), semantic layer
+(E). `loads.chainState` advanced by the verifier, as the adapter's own comment reserved for it.
+
+**Tests.** `server/documentControl.db.test.ts` (+2): B, the whole path with no template, with the
+audit trail asserted event by event and actor by actor; A, the company template path on top of it,
+with the three-origin picture and the stale-layout check. The G edits to `closeoutRouter`,
+`assistantCommitService` and `commercialOfficeRouter` are covered by those two plus the existing
+`siteCloseout`, `assistantCommitService` and `commercialOffice.db` suites, re-run green.
+
+**Gates.** _(filled after the run)_
+
+
+## Checkpoint H — search, audit, screens, documentation
+
+**Commit.** _(filled at commit)_ · no migration · census 670 (no new procedure; search extended in
+place) · `client/src/pages/DocumentControl.tsx`, `DocumentControlView.tsx`,
+`DocumentControlView.dom.test.tsx`; `surfacesService.searchEverything` extended; HOS boundary test.
+
+**Search.** `surfaces.search` now finds the register's rows by `documentRef`, LeaseOS number, title,
+and another issuer's number on the document (`documentExternalReferences`, issuer-scoped), and only in
+the caller's book: the router resolves the acting scope and passes it; `searchEverything` searches the
+register only when a book is given, so any other caller keeps exactly the behaviour it had. Each hit
+is labelled with its number (the LeaseOS one, else the issuer's, else the ref), definition, title,
+issuer ("LeaseOS-issued" / the facility's name / "issuer unknown") and origin, and deep-links to the
+document's detail. The pre-existing tenant gap in the other entity searches is unchanged and noted
+(§19 of the design).
+
+**Screens.** `/document-control` (`DashboardRoute`, the existing layout and components; the container/
+pure-view/DOM-test split the Commercial Office uses). Document Library: every document whatever its
+origin, an origin badge on each row ("ACME Disposal · external scanned", "LeaseOS-issued · system
+rendered", "origin unrecorded" for a legacy row), the LeaseOS number in the number column and the
+internal ref muted where there is none, filters by text, definition, origin, state and related record.
+Record detail: provenance sentence, the representation notice where the definition carries one,
+internal record vs. LeaseOS controlled number vs. template revision side by side, bytes and retention,
+external numbers with issuer, source, confirmation and mirror, related records with role/source/
+confirmation, revision history and amendments, source and derivatives (readings and what was made from
+the original), print/reprint history from the timeline ("a reprint never mints a new number"), and the
+audit timeline as recorded — sequence, event, actor, actor source, device, state before and after,
+detail. Review Queue: the register's own `captured` / `needs_classification` / `proposed` states — not a
+second queue — with "nothing here is a fact yet". Template Library: families with source, layer, current
+revision, renderable-or-not ("registered and printable as supplied"), and a revision list with hashes
+and manifests, retired ones readable. Definitions: class, owner, numbering, reference policy,
+representation label and notice, jurisdiction policy, layer. Number Series: counters, device blocks,
+and a gap report per period naming every void's reason and calling an unexplained gap a finding. All
+read-only: writes stay on their own procedures, and no administration app was built beside the product.
+
+**Documentation.** `docs/document-control/DOCUMENT_CONTROL_ARCHITECTURE.md` (as built: registry,
+record, numbering, templates, semantic layer, scanner convergence and the OCR boundary, the disposal
+slice, search and screens, the jurisdiction / AI Secretary / HOS / Driver Wallet / Fleet / SDS
+boundaries, security and tenancy, sequence recovery, what is not built); the design document points to
+it; the migration register carries 0178–0183; `LEASEOS_CURRENT_STATE.md` regenerated; this record.
+
+**Boundary proved.** `documentDefinitions.test.ts`: no platform definition and none of the package's
+forty-six is an hours-of-service record, and no definition's owner is the HOS domain (matrix 14).
+
+**Tests.** `DocumentControlView.dom.test.tsx` (4): the library with origins and numbers kept apart and
+no origin invented; the detail with every section; the representation notice and the review queue's
+wording; templates' immutability note, a definition's notice, and the gap report's finding.
+`documentDefinitions.test.ts` (+1). Search covered by the existing `surfaces` suites plus the
+register's own list tests; a DB assertion of the register hit is in `documentControl.db.test.ts` (+1).
+
+**Gates.** _(filled after the run)_

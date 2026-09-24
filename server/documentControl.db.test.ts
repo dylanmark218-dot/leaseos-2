@@ -310,7 +310,7 @@ d("standard template families are seeded once, released, and immutable", () => {
     await callerFor(mgr).documentControl.definitions.catalogSeed();
     const c = callerFor(office); const m = callerFor(mgr);
     const pdfHash = sha("PrideVac_DisposalTicket_2026.pdf"); const ev = await evidence(office, pdfHash);
-    await expect(m.documentControl.templates.createCustom({ definitionKey: "disposal_ticket", templateKey: "pridevac_disposal_ticket", name: "PrideVac disposal ticket", sourceKind: "organization_custom", evidenceRecordId: ev, contentHash: pdfHash, byteLength: 90_000, fileName: "PrideVac_DisposalTicket_2026.html", mimeType: "text/html" })).rejects.toThrow(/PDF or a DOCX/);
+    await expect(m.documentControl.templates.createCustom({ definitionKey: "disposal_ticket", templateKey: "pridevac_disposal_ticket", name: "PrideVac disposal ticket", sourceKind: "organization_custom", evidenceRecordId: ev, contentHash: pdfHash, byteLength: 90_000, fileName: "PrideVac_DisposalTicket_2026.html", mimeType: "text/html" })).rejects.toThrow(/PDF, a DOCX or a markdown-text layout/);
     const tpl = await m.documentControl.templates.createCustom({ definitionKey: "disposal_ticket", templateKey: "pridevac_disposal_ticket", name: "PrideVac disposal ticket", sourceKind: "organization_custom", evidenceRecordId: ev, contentHash: pdfHash, byteLength: 90_000, fileName: "PrideVac_DisposalTicket_2026.pdf", mimeType: "application/pdf" });
     expect(tpl).toMatchObject({ layoutKind: "pdf_overlay", renderable: false });
     expect(tpl.rendererNote).toMatch(/D-DC-05/);
@@ -577,4 +577,165 @@ d("scanner and import convergence (DC-F): capture with no template, extraction a
     expect(n1[0]!.n).toBe(n0[0]!.n);       // refused before any byte was stored
     expect(objects.size).toBe(objectsBefore);
   }, 60_000);
+});
+
+d("the disposal vertical slice (DC-G): job → load → facility → the facility's paper → scan → confirm → disposal record → verification → billing → invoice → audit trail", () => {
+  const shaB = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+  const png = (tag: string) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(`scan ${tag}`)]);
+  const b64 = (b: Buffer) => b.toString("base64");
+  async function tenant() { const a = await org(); await callerFor(await member(a, ["management"])).documentControl.definitions.catalogSeed(); return a; }
+
+  /** The paper's reading, as a device's recogniser would hand it over. The facility's number, the weights, the load the driver keyed. */
+  const readingOf = (loadNumber: string, ticket: string) => ({
+    engine: "device-ocr", engineVersion: "1.2", documentTypeHint: "disposal_ticket" as const, documentTypeConfidence: 90,
+    rawText: `ACME DISPOSAL FACILITY  DISPOSAL TICKET ${ticket}  LOAD ${loadNumber}  GROSS 21000 KG  TARE 9000 KG  NET 12000 KG  m3`,
+    fields: [
+      { key: "facilityName", confidence: 99, value: "ACME Disposal" }, { key: "facilityTicketNumber", confidence: 97, value: ticket }, { key: "loadRef", confidence: 96, value: loadNumber },
+      { key: "ticketDate", confidence: 95, value: "2026-09-20" }, { key: "grossWeightKg", confidence: 99, value: 21000 }, { key: "tareWeightKg", confidence: 99, value: 9000 }, { key: "netWeightKg", confidence: 99, value: 12000 }, { key: "material", confidence: 90, value: "produced water" },
+    ],
+  });
+
+  /** Everything after the scan is confirmed: the disposal record through the assistant's typed commit, verification, a billing line, an invoice rendered and registered. Shared by both scenarios. */
+  async function fromConfirmedScanToInvoice(a: string, office: number, ids: { job: { id: number; code: string }; load: { id: number; loadNumber: string }; fac: number; op: number; un: number; documentRef: string; proposalId: string }) {
+    const c = callerFor(office);
+    // The office works the proposal in the assistant: answers what the reading asked of a person (they have the paper), reads back, acknowledges — then the one typed commit path creates the disposal record.
+    const [qs] = await pool.execute<mysql.RowDataPacket[]>("SELECT fieldKey FROM assistantQuestions WHERE proposalId = ? AND status = 'pending'", [ids.proposalId]);
+    const values: Record<string, string | number> = { facilityTicketNumber: "874399", ticketDate: "2026-09-20", grossWeightKg: 21000, tareWeightKg: 9000, netWeightKg: 12000, loadRef: ids.load.loadNumber, material: "produced water", facilityName: "ACME Disposal" };
+    for (const q of qs) if (values[q.fieldKey] !== undefined) await c.fieldRoute.assistant.answer({ proposalId: ids.proposalId, fieldKey: q.fieldKey, value: values[q.fieldKey]!, precision: "exact" });
+    await c.fieldRoute.assistant.readBack({ proposalId: ids.proposalId });
+    await c.fieldRoute.assistant.acknowledge({ proposalId: ids.proposalId });
+    const commit = await c.fieldRoute.assistant.commit({ proposalId: ids.proposalId });
+    expect(commit, JSON.stringify(commit)).toMatchObject({ committed: true, targetType: "disposal_ticket" });
+    const dspId = (commit as { targetRecordId: number }).targetRecordId;
+    const [dspRows] = await pool.execute<mysql.RowDataPacket[]>("SELECT ticketNumber, verificationStatus, facilityTicketNumber, loadId, facilityId, netKg, evidenceRefs, verifiedByUserId FROM disposalTickets WHERE id = ?", [dspId]);
+    const dsp = dspRows[0]!;
+    expect(dsp).toMatchObject({ verificationStatus: "needs_review", facilityTicketNumber: "874399", loadId: ids.load.id, facilityId: ids.fac, netKg: 12000, verifiedByUserId: null });
+    expect(JSON.parse(dsp.evidenceRefs).documentRef).toBe(ids.documentRef);
+    // The register heard: the scan is linked to the record it became, the facility's number is a mirror of the domain's column, the extraction is committed.
+    const afterCommit = await c.documentControl.documents.get({ documentRef: ids.documentRef });
+    expect(afterCommit.links.find(l => l.recordType === "disposal_ticket")).toMatchObject({ recordRef: dsp.ticketNumber, recordId: dspId, source: "domain", confirmationStatus: "confirmed", role: "source_document" });
+    expect(afterCommit.references[0]).toMatchObject({ referenceValue: "874399", confirmationStatus: "confirmed", mirrorOfTable: "disposalTickets", mirrorOfId: dspId, mirrorOfColumn: "facilityTicketNumber" });
+    expect(afterCommit.extractions[0]!.status).toBe("committed");
+    expect(afterCommit.document.controlNumber).toBeNull();   // the facility's paper never gets a LeaseOS number
+    // Billing: a disposal line naming the ticket is refused until a person verifies it; another business cannot verify it.
+    const ft = await c.closeout.ticketOpen({ jobId: ids.job.id, unitId: ids.un, operatorId: ids.op, serviceDescription: "Disposal haul" });
+    const line = { ticketNumber: ft.ticketNumber, lineKind: "disposal" as const, description: "Disposal — ACME 874399", quantity: 12, quantityUnit: "t", measurementMethod: "scale" as const, sourceTrackingNumber: dsp.ticketNumber as string };
+    await expect(c.closeout.lineAdd(line)).rejects.toThrow(/needs_review.*verified ticket/);
+    const b = await tenant(); const officeB = await member(b, ["office"]);
+    await expect(callerFor(officeB).commercialOffice.disposal.verifyTicket({ ticketNumber: dsp.ticketNumber, outcome: "verified" })).rejects.toThrow(/not found/);
+    const ver = await c.commercialOffice.disposal.verifyTicket({ ticketNumber: dsp.ticketNumber, outcome: "verified", note: "matches the facility's paper 874399" });
+    expect(ver).toMatchObject({ verificationStatus: "verified", loadChainState: "disposal_verified", alreadyVerified: false });
+    expect(ver.documentsTold).toBeGreaterThanOrEqual(1);
+    const [v2] = await pool.execute<mysql.RowDataPacket[]>("SELECT d.verificationStatus, d.verifiedByUserId, d.verifiedAt, d.verificationNote, l.chainState FROM disposalTickets d JOIN loads l ON l.id = d.loadId WHERE d.id = ?", [dspId]);
+    expect(v2[0]).toMatchObject({ verificationStatus: "verified", verifiedByUserId: office, chainState: "disposal_verified" });
+    expect(v2[0]!.verifiedAt).not.toBeNull();
+    expect((await c.commercialOffice.disposal.verifyTicket({ ticketNumber: dsp.ticketNumber, outcome: "verified" })).alreadyVerified).toBe(true);
+    const added = await c.closeout.lineAdd(line);
+    expect(added.lineId).toBeGreaterThan(0);
+    // The invoice: its rows as the office's own suites fixture them, its document rendered by the invoicing engine, registered as the tenant's issued record under the domain's number.
+    const invoiceNumber = `INV-${rnd()}`;
+    const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO billingBooks (bookNumber, jobId, customer, billingState, openedAt, createdAt, updatedAt) VALUES (?, ?, 'Cust', 'invoiced', NOW(), NOW(), NOW())", [`BB-${rnd()}`, ids.job.id]);
+    const [inv] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO invoices (invoiceNumber, issuedAt, billingBookId, jobId, customer, subtotalCents, taxCents, totalCents, currency, status, gstTreatment) VALUES (?, NOW(), ?, ?, 'Cust', 240000, 12000, 252000, 'CAD', 'approved', 'taxable')", [invoiceNumber, book.insertId, ids.job.id]);
+    await pool.execute("INSERT INTO invoiceLines (invoiceId, lineNo, fieldTicketLineId, description, quantityMillis, billableQuantityMillis, unit, rateMillis, amountCents, basis) VALUES (?, 1, ?, 'Disposal — ACME 874399', 12000, 12000, 't', 200000, 240000, 'verified disposal ticket')", [inv.insertId, added.lineId]);
+    const calc = { lines: [{ lineNo: 1, description: "Disposal — ACME 874399", billableQuantityMillis: 12000, unit: "t", rateMillis: 200000, amountCents: 240000, basis: `verified disposal ticket ${dsp.ticketNumber}` }], subtotalCents: 240000, taxCents: 12000, totalCents: 252000, ratePercent: 5 };
+    await pool.execute("INSERT INTO billingSnapshots (invoiceId, billingBookId, capturedAt, sourceFactsJson, calculatedLinesJson, subtotalCents, totalCents, payloadHash) VALUES (?, ?, NOW(), ?, ?, 240000, 252000, ?)", [inv.insertId, book.insertId, JSON.stringify({ disposalTicket: dsp.ticketNumber }), JSON.stringify(calc), sha(`${invoiceNumber}-snapshot`)]);
+    const rendered = await c.invoicing.render({ invoiceNumber });
+    expect(rendered.alreadyRendered).toBe(false);
+    const [ftd] = await pool.execute<mysql.RowDataPacket[]>("SELECT id, storageKey, contentHash FROM fieldTicketDocuments WHERE documentRef = ?", [rendered.documentRef]);
+    expect(objects.get(ftd[0]!.storageKey)!.subarray(0, 4).toString()).toBe("%PDF");
+    const invDoc = await c.documentControl.documents.registerRendered({
+      definitionKey: "invoice", title: `Invoice ${invoiceNumber}`, originKind: "system_rendered", contentHash: rendered.contentHash, byteLength: rendered.byteLength, mimeType: "application/pdf", fieldTicketDocumentId: ftd[0]!.id, controlNumber: invoiceNumber,
+      links: [{ recordType: "job", recordRef: ids.job.code, recordId: ids.job.id }, { recordType: "load", recordRef: ids.load.loadNumber, recordId: ids.load.id }, { recordType: "disposal_ticket", recordRef: dsp.ticketNumber, recordId: dspId }, { recordType: "invoice", recordRef: invoiceNumber }],
+    });
+    expect(invDoc).toMatchObject({ controlState: "issued", controlNumber: invoiceNumber });
+    expect(invDoc.provenance).toMatch(/LeaseOS|rendered/i);
+    return { dspId, dspNumber: dsp.ticketNumber as string, invoiceNumber, invoiceDocumentRef: invDoc.documentRef, fieldTicketNumber: ft.ticketNumber };
+  }
+
+  it("B — NO LeaseOS disposal template: the facility's paper is the original, the disposal row is the fact, the register ties them; every step and its actor are on the timeline", async () => {
+    const a = await tenant(); const office = await member(a, ["office"]); const driver = await member(a, ["driver"]);
+    const fac = await facility(`ACME Disposal ${rnd()}`); const j = await job(a); const op = await operator(a, "Dana Driver"); const un = await unit(a, `U-${rnd()}`); const l = await load(j.id, op, un);
+    await pool.execute("UPDATE loads SET chainState = 'arrived_disposal' WHERE id = ?", [l.id]);
+    const c = callerFor(office); const cd = callerFor(driver);
+    // No template of any kind for this facility's paper — none in the library, none asked for.
+    expect((await c.documentControl.templates.list({})).filter(t => t.definitionKey === "external_disposal_receipt")).toEqual([]);
+    // The driver photographs what the facility handed over and says what load it was for.
+    const bytes = png(rnd());
+    const cap = await cd.documentControl.documents.capture({ title: "Facility ticket", fileName: "ticket.png", mimeType: "image/png", dataBase64: b64(bytes), importChannel: "device_sync", deviceRef: "DEV-7", links: [{ recordType: "job", recordRef: j.code, recordId: j.id, confirmed: true }, { recordType: "load", recordRef: l.loadNumber, recordId: l.id, confirmed: true }] });
+    expect(cap.controlState).toBe("captured");
+    const x = await cd.documentControl.documents.extract({ documentRef: cap.documentRef, expectedDefinitionKey: "external_disposal_receipt", deviceRef: "DEV-7", ocr: readingOf(l.loadNumber, "874399") });
+    expect(x).toMatchObject({ proposedDefinitionKey: "external_disposal_receipt", formKey: "disposal_ticket", controlState: "proposed" });
+    expect(x.proposalId).toBeTruthy();
+    // The reading made no disposal record and no fact: nothing in the domain yet, the row still unclassified.
+    const [n0] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM disposalTickets WHERE loadId = ?", [l.id]);
+    expect(n0[0]!.n).toBe(0);
+    const before = await c.documentControl.documents.get({ documentRef: cap.documentRef });
+    expect(before.document).toMatchObject({ definitionKey: "unclassified_external_document", issuerKind: "unknown" });
+    // The office confirms: the paper is the facility's receipt, the facility issued it, the number the reading found stands.
+    await c.documentControl.documents.confirm({ documentRef: cap.documentRef, definitionKey: "external_disposal_receipt", issuer: { issuerKind: "facility", issuerFacilityId: fac, issuerName: "ACME Disposal" }, confirmReferenceRefs: [before.references[0]!.referenceRef] });
+    const [prop] = await pool.execute<mysql.RowDataPacket[]>("SELECT facilityId, loadId, jobId, commitState FROM assistantProposals WHERE proposalId = ?", [x.proposalId]);
+    expect(prop[0]).toMatchObject({ facilityId: fac, loadId: l.id, jobId: j.id });   // the proposal follows the confirmed facts — server-resolved, not read off the paper
+    const done = await fromConfirmedScanToInvoice(a, office, { job: j, load: l, fac, op, un, documentRef: cap.documentRef, proposalId: x.proposalId! });
+    // The audit trail: by load, by disposal ticket, by job — the scan and the invoice, each with its own origin; the scan's timeline reconstructs the chain with its actors.
+    const byLoad = await c.documentControl.documents.list({ recordType: "load", recordRef: l.loadNumber });
+    expect(byLoad.map(h => [h.definitionKey, h.originKind, h.issuerKind, h.controlNumber]).sort()).toEqual([["external_disposal_receipt", "external_scanned", "facility", null], ["invoice", "system_rendered", "tenant", done.invoiceNumber]]);
+    const byDsp = await c.documentControl.documents.list({ recordType: "disposal_ticket", recordRef: done.dspNumber });
+    expect(byDsp.map(h => h.documentRef).sort()).toEqual([cap.documentRef, done.invoiceDocumentRef].sort());
+    const chain = await c.documentControl.documents.get({ documentRef: cap.documentRef });
+    expect(chain.timeline.map(e => e.eventType)).toEqual(["document.captured", "document.derivative_added", "document.reference_added", "document.proposed", "document.reference_confirmed", "document.classified", "document.confirmed", "document.link_added", "document.domain_verified"]);
+    expect(chain.timeline.map(e => e.actorUserId)).toEqual([driver, driver, driver, driver, office, office, office, office, office]);
+    expect(chain.timeline.map(e => e.actorSource)).toEqual(["human", "ai", "ai", "ai", "human", "human", "human", "human", "human"]);
+    expect(chain.timeline[8]!.detail).toMatchObject({ domain: "disposal", recordRef: done.dspNumber, outcome: "verified", loadChainState: "disposal_verified" });
+    expect(chain.document.contentHash).toBe(shaB(bytes));
+    expect(chain.provenance).toMatch(/Scanned from paper.*issued by ACME Disposal; no LeaseOS number/);
+    expect(chain.links.map(x => x.recordType).sort()).toEqual(["disposal_ticket", "job", "load"]);
+    // The invoice's own record names the same chain.
+    const invView = await c.documentControl.documents.get({ documentRef: done.invoiceDocumentRef });
+    expect(invView.links.map(x => x.recordType).sort()).toEqual(["disposal_ticket", "invoice", "job", "load"]);
+    expect(invView.document).toMatchObject({ originKind: "system_rendered", issuerKind: "tenant", controlNumber: done.invoiceNumber, templateRevisionRef: null });
+  }, 120_000);
+
+  it("A — the company's own disposal ticket template, uploaded, mapped, released, rendered from the verified facts and issued under the domain's number — beside the facility's paper, never instead of it", async () => {
+    const a = await tenant(); const office = await member(a, ["office"]); const mgr = await member(a, ["management"]); const driver = await member(a, ["driver"]);
+    const fac = await facility(`ACME Disposal ${rnd()}`); const j = await job(a); const op = await operator(a, "Dana Driver"); const un = await unit(a, `U-${rnd()}`); const l = await load(j.id, op, un);
+    await pool.execute("UPDATE loads SET chainState = 'arrived_disposal' WHERE id = ?", [l.id]);
+    const c = callerFor(office); const m = callerFor(mgr); const cd = callerFor(driver);
+    // Template administration: the company uploads its own markdown layout (untrusted bytes: hashed, kept as evidence, read back only against that hash), maps it, releases it.
+    const layout = Buffer.from("# {{title}}\n\nTicket no.: {{ticket_no}}\nLoad: {{load}}\nDriver: {{driver}}\nUnit: {{unit}}\nFacility: {{facility}}\nFacility ticket: {{facility_ticket}}\nNet (kg): {{net_kg}}\n\nSigned: {{customer_rep}}\n", "utf8");
+    const layoutKey = `${mgr}/evidence/${shaB(layout).slice(0, 12)}.md`; objects.set(layoutKey, layout);
+    const [evRow] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, storageKey, mimeType, capturedAt, capturedBy, status, recordType) VALUES ('ACME disposal ticket layout', 'template', ?, 'text/markdown', NOW(), ?, 'needs_review', 'template')", [layoutKey, mgr]);
+    const tpl = await m.documentControl.templates.createCustom({ definitionKey: "disposal_ticket", templateKey: `acme_disposal_ticket_${rnd().toLowerCase()}`, name: "ACME disposal ticket", sourceKind: "organization_custom", evidenceRecordId: evRow.insertId, contentHash: shaB(layout), byteLength: layout.byteLength, fileName: "acme_disposal_ticket.md", mimeType: "text/markdown" });
+    expect(tpl).toMatchObject({ layoutKind: "markdown_text", renderable: true });
+    await m.documentControl.templates.revisionRelease({ revisionRef: tpl.revisionRef });
+    const r2 = await m.documentControl.templates.revisionDraft({ templateRef: tpl.templateRef, fieldMapping: { version: 1, fields: [
+      ["title", "document.title"], ["ticket_no", "document.controlNumber"], ["load", "load.loadNumber"], ["driver", "operator.name"], ["unit", "unit.unitNumber"], ["facility", "facility.name"], ["facility_ticket", "external.facilityTicketNumber"], ["net_kg", "scale.netKg"], ["customer_rep", "signature.customerRepresentative"],
+    ].map(([printedField, semanticKey]) => ({ printedField: printedField!, semanticKey: semanticKey! })) } });
+    await m.documentControl.templates.revisionRelease({ revisionRef: r2.revisionRef });
+    // The facility's paper still goes through the scan, exactly as in B.
+    const cap = await cd.documentControl.documents.capture({ title: "Facility ticket", fileName: "ticket.png", mimeType: "image/png", dataBase64: b64(png(rnd())), importChannel: "device_sync", links: [{ recordType: "job", recordRef: j.code, recordId: j.id, confirmed: true }, { recordType: "load", recordRef: l.loadNumber, recordId: l.id, confirmed: true }] });
+    const x = await cd.documentControl.documents.extract({ documentRef: cap.documentRef, expectedDefinitionKey: "external_disposal_receipt", ocr: readingOf(l.loadNumber, "874399") });
+    const before = await c.documentControl.documents.get({ documentRef: cap.documentRef });
+    await c.documentControl.documents.confirm({ documentRef: cap.documentRef, definitionKey: "external_disposal_receipt", issuer: { issuerKind: "facility", issuerFacilityId: fac, issuerName: "ACME Disposal" }, confirmReferenceRefs: [before.references[0]!.referenceRef] });
+    const done = await fromConfirmedScanToInvoice(a, office, { job: j, load: l, fac, op, un, documentRef: cap.documentRef, proposalId: x.proposalId! });
+    // Now LeaseOS's own disposal ticket, rendered from the records (the load's driver and unit, the facility) and the person's values, proposed until issued under the disposal record's number.
+    const rendered = await c.documentControl.semantic.render({ templateRevisionRef: r2.revisionRef, context: { jobId: j.id, loadId: l.id, facilityId: fac }, humanValues: { facility_ticket: "874399", net_kg: 12000, customer_rep: "M. Johnson" }, requestedState: "proposed", links: [{ recordType: "disposal_ticket", recordRef: done.dspNumber, recordId: done.dspId }] });
+    expect(rendered).toMatchObject({ controlState: "proposed", controlNumber: null });
+    expect(rendered.unfilled).toEqual(["ticket_no"]);   // the number comes at issue, never invented at render
+    expect(rendered.preparation.fields.find(f => f.printedField === "driver")).toMatchObject({ value: "Dana Driver", state: "filled" });
+    expect(rendered.preparation.fields.find(f => f.printedField === "ticket_no")).toMatchObject({ state: "server_at_issue" });
+    expect(objects.get(rendered.storageKey)!.subarray(0, 4).toString()).toBe("%PDF");
+    const issued = await c.documentControl.documents.issue({ documentRef: rendered.documentRef, controlNumber: done.dspNumber });
+    expect(issued).toMatchObject({ controlState: "issued", controlNumber: done.dspNumber });
+    const v = await c.documentControl.documents.get({ documentRef: rendered.documentRef });
+    expect(v.document).toMatchObject({ definitionKey: "disposal_ticket", originKind: "organization_template", issuerKind: "tenant", templateRevisionRef: r2.revisionRef, controlNumber: done.dspNumber });
+    expect(v.links.map(x => x.recordType).sort()).toEqual(["disposal_ticket", "facility", "job", "load", "operator", "unit"]);
+    // Three records on one disposal, each with its own origin: the facility's paper, the company's ticket, the invoice. The paper is not replaced by the rendering.
+    const byDsp = await c.documentControl.documents.list({ recordType: "disposal_ticket", recordRef: done.dspNumber });
+    expect(byDsp.map(h => [h.definitionKey, h.originKind, h.controlNumber]).sort()).toEqual([["disposal_ticket", "organization_template", done.dspNumber], ["external_disposal_receipt", "external_scanned", null], ["invoice", "system_rendered", done.invoiceNumber]]);
+    // A stale layout cannot rewrite the record: re-rendering the same revision after the fact is a new document, and the issued one stays on its revision with its manifest.
+    expect(v.document.renderManifestHash).not.toBeNull();
+    const again = await c.documentControl.semantic.render({ templateRevisionRef: r2.revisionRef, context: { jobId: j.id, loadId: l.id, facilityId: fac }, humanValues: { facility_ticket: "874399", net_kg: 12000 }, requestedState: "proposed" });
+    expect(again.documentRef).not.toBe(rendered.documentRef);
+    expect((await c.documentControl.documents.get({ documentRef: rendered.documentRef })).document.controlNumber).toBe(done.dspNumber);
+  }, 120_000);
 });

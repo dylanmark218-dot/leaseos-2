@@ -151,6 +151,11 @@ export const closeoutRouter = router({
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
       const x = await loadTicket(input.ticketNumber);
       if (x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Ticket is signed — a later addition is a supplement, not an edit" });
+      // DC-G: a disposal line that names a LeaseOS disposal ticket bills a verified one. A number that is nobody's ticket is kept as typed (a facility's own number) — that is a fact, not a claim on the gate.
+      if (input.lineKind === "disposal" && input.sourceTrackingNumber) {
+        const dt = (await x.db.select({ verificationStatus: disposalTickets.verificationStatus }).from(disposalTickets).where(eq(disposalTickets.ticketNumber, input.sourceTrackingNumber)).limit(1))[0];
+        if (dt && dt.verificationStatus !== "verified") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — disposal ticket ${input.sourceTrackingNumber} is ${dt.verificationStatus}; a disposal line bills a verified ticket (commercialOffice.disposal.verifyTicket)` });
+      }
       const ins = await x.db.insert(fieldTicketLines).values({ fieldTicketId: x.t.id, lineKind: input.lineKind, serviceCode: input.serviceCode ?? null, description: input.description, quantity: input.quantity ?? null, quantityUnit: input.quantityUnit ?? null, measurementMethod: input.measurementMethod, sourceTrackingNumber: input.sourceTrackingNumber ?? null, disposition: "not_presented", operatorStatement: input.operatorStatement ?? null });
       const lineId = Number(ins[0]?.insertId ?? 0);
       // v22.8 — a line that names its service is priced as it is recorded; the decision is written once and the line carries it. A line still records a fact: an unknown rate never stops it.

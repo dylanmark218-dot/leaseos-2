@@ -46,6 +46,8 @@ export const DOCUMENT_EVENT_TYPES = [
   "document.number_reserved", "document.number_issued", "document.number_voided", "document.printed", "document.reprinted", "document.viewed", "document.downloaded", "document.template_bound",
   // DC-F: what a scan or import produced beside the original — an extraction (proposal only) and a derivative (its own bytes, never the original's).
   "document.extraction_recorded", "document.derivative_added",
+  // DC-G: the domain a document is linked to verified its own record (a disposal ticket); the register hears, it does not decide.
+  "document.domain_verified",
 ] as const;
 export type DocumentEventType = (typeof DOCUMENT_EVENT_TYPES)[number];
 

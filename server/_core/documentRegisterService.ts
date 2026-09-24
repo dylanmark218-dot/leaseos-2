@@ -15,7 +15,7 @@
  */
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { MySql2Database } from "drizzle-orm/mysql2";
-import { commercialDocumentLinks, commercialDocuments, disposalTickets, documentControlEvents, documentDefinitions, documentDerivatives, documentExternalReferences, documentExtractions, documentTemplateRevisions, documentTemplates, evidenceRecords, facilities, fieldTicketDocuments, fieldTickets, jobs, loads, numberAllocations, recordAmendments, retentionPolicies, trackingReferences, trips, units } from "../../drizzle/schema";
+import { commercialDocumentLinks, commercialDocuments, disposalTickets, assistantProposals, documentControlEvents, documentDefinitions, documentDerivatives, documentExternalReferences, documentExtractions, documentTemplateRevisions, documentTemplates, evidenceRecords, facilities, fieldTicketDocuments, fieldTickets, jobs, loads, numberAllocations, recordAmendments, retentionPolicies, trackingReferences, trips, units } from "../../drizzle/schema";
 import { SINGLE_TENANT_ID } from "./actingScope";
 import { applyOverlay, rowToDefinition, type DocumentDefinitionRow, type DocumentLinkKind, type EffectiveDefinition, type ExternalReferenceType, type IssuerKind, type OriginKind } from "./documentDefinitions";
 import { factsMutable, issuerScopeKey, nextControlState, normaliseReferenceValue, provenanceSentence, referenceDuplicateVerdict, registerRefusals, type ControlState, type DocumentEventType, type ImportChannel, type IssuerInput, type LinkRole, type LinkSource, type ReferenceSource } from "./documentRegister";
@@ -356,6 +356,19 @@ export async function confirmDocument(db: Db, args: { book: Book; actor: Actor; 
     await tx.delete(commercialDocumentLinks).where(and(eq(commercialDocumentLinks.documentId, doc.id), eq(commercialDocumentLinks.confirmationStatus, "proposed")));
     await tx.update(commercialDocuments).set({ controlState: "confirmed", definitionKey: definition.definitionKey, definitionRef: definition.definitionRef, documentType: definition.definitionKey, issuerKind: issuer.issuerKind, issuerOrgRef: issuer.issuerOrgRef ?? null, issuerFacilityId: issuer.issuerFacilityId ?? null, issuerName: issuer.issuerName ?? null, title: args.title ?? doc.title, issuedAt: args.issuedAt === undefined ? doc.issuedAt : args.issuedAt, confirmedByUserId: args.actor.userId, confirmedAt: now, retentionPolicyId: doc.retentionPolicyId ?? definition.retentionPolicyId }).where(eq(commercialDocuments.id, doc.id));
     if (doc.definitionKey !== definition.definitionKey) await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.classified", actor: args.actor, occurredAt: now, previousState: doc.controlState, newState: doc.controlState, detail: { from: doc.definitionKey, to: definition.definitionKey } });
+    // DC-G: a proposal read from this document and not yet committed follows the facts the person confirmed — the facility they named, the records they linked. Server-resolved, never from the reading.
+    const open = await tx.select({ proposalId: documentExtractions.proposalId }).from(documentExtractions).where(and(eq(documentExtractions.documentId, doc.id), sql`${documentExtractions.proposalId} IS NOT NULL`));
+    if (open.length) {
+      const linksNow = await tx.select().from(commercialDocumentLinks).where(and(eq(commercialDocumentLinks.documentId, doc.id), eq(commercialDocumentLinks.confirmationStatus, "confirmed")));
+      const idOf = (kind: string) => linksNow.find(l => l.recordType === kind && l.recordId != null)?.recordId ?? null;
+      const follow = { facilityId: issuer.issuerKind === "facility" ? issuer.issuerFacilityId ?? idOf("facility") : idOf("facility"), jobId: idOf("job"), loadId: idOf("load"), unitId: idOf("unit"), operatorId: idOf("operator") };
+      for (const o of open) {
+        if (!o.proposalId) continue;
+        const p = (await tx.select({ id: assistantProposals.id, commitState: assistantProposals.commitState, facilityId: assistantProposals.facilityId, jobId: assistantProposals.jobId, loadId: assistantProposals.loadId, unitId: assistantProposals.unitId, operatorId: assistantProposals.operatorId }).from(assistantProposals).where(eq(assistantProposals.proposalId, o.proposalId)).limit(1))[0];
+        if (!p || p.commitState === "committed" || p.commitState === "rejected") continue;
+        await tx.update(assistantProposals).set({ facilityId: follow.facilityId ?? p.facilityId, jobId: follow.jobId ?? p.jobId, loadId: follow.loadId ?? p.loadId, unitId: follow.unitId ?? p.unitId, operatorId: follow.operatorId ?? p.operatorId }).where(eq(assistantProposals.id, p.id));
+      }
+    }
     await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.confirmed", actor: args.actor, occurredAt: now, previousState: doc.controlState, newState: "confirmed", detail: { definitionKey: definition.definitionKey, issuerKind: issuer.issuerKind, issuerName: issuer.issuerName ?? null } });
     return { documentRef: doc.documentRef, controlState: "confirmed", definitionKey: definition.definitionKey };
   });

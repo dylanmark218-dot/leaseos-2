@@ -118,15 +118,16 @@ export function definitionKeyForPackage(packageKey: string): string { return res
 export const RENAMED_PACKAGE_KEYS = PACKAGE_KEY_RENAMES;
 
 export type CustomTemplateInput = { mimeType: string; byteLength: number; fileName: string };
-const ACCEPTED_CUSTOM_MIME = new Set(["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]);
+// DC-G: a markdown-text layout is the one kind of company template the present renderer executes (`leaseos_text_v1`); a PDF or DOCX is registered and printable as supplied.
+const ACCEPTED_CUSTOM_MIME = new Set(["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/markdown"]);
 export const MAX_CUSTOM_TEMPLATE_BYTES = 15 * 1024 * 1024;
 
 /** An uploaded company or customer form is untrusted input: a PDF or a DOCX, under the evidence size cap, with a plain file name. It is stored, hashed and registered; it is never executed and never trusted to describe itself. */
 export function customTemplateRefusals(i: CustomTemplateInput): string[] {
   const out: string[] = [];
-  if (!ACCEPTED_CUSTOM_MIME.has(i.mimeType)) out.push(`a template is a PDF or a DOCX; ${i.mimeType} is not accepted`);
+  if (!ACCEPTED_CUSTOM_MIME.has(i.mimeType)) out.push(`a template is a PDF, a DOCX or a markdown-text layout; ${i.mimeType} is not accepted`);
   if (i.byteLength <= 0 || i.byteLength > MAX_CUSTOM_TEMPLATE_BYTES) out.push(`a template is between 1 byte and ${MAX_CUSTOM_TEMPLATE_BYTES} bytes`);
   if (!/^[A-Za-z0-9._ -]{1,220}$/.test(i.fileName)) out.push("the file name carries only letters, digits, dot, dash, underscore and space");
   return out;
 }
-export function layoutKindForMime(mimeType: string): LayoutKind { return mimeType === "application/pdf" ? "pdf_overlay" : "docx_source"; }
+export function layoutKindForMime(mimeType: string): LayoutKind { return mimeType === "application/pdf" ? "pdf_overlay" : mimeType === "text/markdown" ? "markdown_text" : "docx_source"; }

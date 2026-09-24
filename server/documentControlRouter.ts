@@ -28,7 +28,7 @@ import { customTemplateRefusals, EMPTY_MAPPING, layoutKindForMime, mappingHash, 
 import { desc } from "drizzle-orm";
 import { prepareFromTemplate, renderFromTemplate } from "./_core/documentRenderService";
 import { mappingRefusals, SEMANTIC_FIELDS } from "./_core/semanticFields";
-import { storagePut } from "./storage";
+import { storagePut, storageRead } from "./storage";
 import {
   applyOverlay, DEFINITION_KEY_PATTERN, definitionRefusals, DOCUMENT_CLASSES, DOCUMENT_LINK_KINDS, EXTERNAL_REFERENCE_POLICIES, EXTERNAL_REFERENCE_TYPES, ORIGIN_KINDS,
   EXTERNAL_ORIGINS, ISSUER_KINDS, PRINT_POLICIES, READ_CATEGORIES, RENDERED_ORIGINS, representationLabel, REVISION_POLICIES, rowToDefinition, SIGNATURE_POLICIES, TENANT_AUTHORABLE_NUMBERING, TENANT_OVERRIDABLE_COLUMNS,
@@ -367,7 +367,7 @@ export const documentControlRouter = router({
       .input(z.object({ templateRevisionRef: z.string().max(80), context: z.object({ jobId: z.number().int().positive().nullable().optional(), loadId: z.number().int().positive().nullable().optional(), operatorId: z.number().int().positive().nullable().optional(), unitId: z.number().int().positive().nullable().optional(), facilityId: z.number().int().positive().nullable().optional(), customerAccountId: z.number().int().positive().nullable().optional() }).default({}), humanValues: z.record(z.string().max(120), z.union([z.string().max(2000), z.number(), z.null()])).optional(), title: z.string().min(1).max(300).optional(), requestedState: z.enum(["issued", "proposed"]).default("issued"), links: z.array(linkInput).max(20).default([]) }))
       .mutation(async ({ ctx, input }) => {
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
-        return guarded(() => renderFromTemplate(db, { book: { bookOrgRef }, actor: actorOf(ctx), templateRevisionRef: input.templateRevisionRef, context: input.context, humanValues: input.humanValues, title: input.title, requestedState: input.requestedState, links: input.links, storagePut }));
+        return guarded(() => renderFromTemplate(db, { book: { bookOrgRef }, actor: actorOf(ctx), templateRevisionRef: input.templateRevisionRef, context: input.context, humanValues: input.humanValues, title: input.title, requestedState: input.requestedState, links: input.links, storageRead, storagePut }));
       }),
   }),
   /**

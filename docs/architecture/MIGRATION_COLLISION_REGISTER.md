@@ -53,7 +53,8 @@ auth-workspace, work-calendar), `0172`–`0175` (training-academy-workforce), `0
 | 0180 | `0180_document_control_numbering.sql` (C) | same branch | none yet | open branch | none at claim time | consecutive; re-check at PR time |
 | 0181 | `0181_document_control_templates.sql` (D) | same branch | none yet | open branch | none at claim time | consecutive; re-check at PR time |
 | 0182 | `0182_document_control_intake.sql` (F: `documentDerivatives`, `documentExtractions.documentId`, two immutability triggers) | same branch | none yet | open branch | none at claim time | consecutive; re-check at PR time |
-| 0183+ | Document Control G–H if a migration is needed | same branch | none yet | planned | — | consecutive; re-check at PR time |
+| 0183 | `0183_document_control_disposal.sql` (G: `disposalTickets.verifiedByUserId/verifiedAt/verificationNote`) | same branch | none yet | open branch | none at claim time | consecutive; re-check at PR time |
+| 0184+ | Document Control H if a migration is needed | same branch | none yet | planned | — | consecutive; re-check at PR time |
 
 ## Change log
 

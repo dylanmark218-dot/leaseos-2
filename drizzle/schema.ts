@@ -1079,6 +1079,10 @@ export const disposalTickets = mysqlTable("disposalTickets", {
     .default("low")
     .notNull(),
   evidenceRefs: text("evidenceRefs"),
+  // 0183 (DC-G): the verifier's act leaves its name. The disposal domain's own columns.
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  verificationNote: varchar("verificationNote", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

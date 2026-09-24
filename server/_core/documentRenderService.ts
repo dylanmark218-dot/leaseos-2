@@ -20,7 +20,7 @@ import { and, eq } from "drizzle-orm";
 import type { MySql2Database } from "drizzle-orm/mysql2";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { documentSourceArtifacts, documentTemplateArtifacts, documentTemplateRevisions, documentTemplates } from "../../drizzle/schema";
+import { evidenceRecords, documentSourceArtifacts, documentTemplateArtifacts, documentTemplateRevisions, documentTemplates } from "../../drizzle/schema";
 import { MINTING_POLICIES, type OriginKind } from "./documentDefinitions";
 import { type Actor, type Book, definitionFor, DocumentControlRefusal, registerControlledDocument, type LinkInput, type RegisterResult, templateRevisionForRender } from "./documentRegisterService";
 import { fillMarkdown, markdownToLines, renderManifestHash, RENDERERS, type FieldMapping } from "./documentTemplates";
@@ -71,8 +71,20 @@ export async function prepareFromTemplate(db: Db, args: { book: Book; templateRe
   };
 }
 
-/** The layout text of a markdown revision, from the repository's seed data or an uploaded artifact. */
-async function layoutTextOf(db: Db, revisionId: number, layoutArtifactId: number | null): Promise<string> {
+export type StorageRead = (relKey: string) => Promise<Buffer>;
+
+/** The layout text of a markdown revision: the repository's seed artifact, or a business's uploaded layout read back from the evidence store — either way hash-checked against what the revision released. */
+async function layoutTextOf(db: Db, rev: { id: number; layoutArtifactId: number | null; layoutStorageKey: string | null; layoutContentHash: string }, storageRead: StorageRead | undefined): Promise<string> {
+  const { id: revisionId, layoutArtifactId } = rev;
+  if (layoutArtifactId == null && rev.layoutStorageKey?.startsWith("evidence:")) {
+    // DC-G: a company's own markdown layout, uploaded as evidence when the template was created.
+    if (!storageRead) throw new DocumentControlRefusal("PRECONDITION_FAILED", "BLOCKED — this revision's layout is in the evidence store and no reader was given");
+    const ev = (await db.select({ storageKey: evidenceRecords.storageKey }).from(evidenceRecords).where(eq(evidenceRecords.id, Number(rev.layoutStorageKey.slice("evidence:".length)))).limit(1))[0];
+    if (!ev?.storageKey) throw new DocumentControlRefusal("PRECONDITION_FAILED", "BLOCKED — the layout's evidence record has no stored bytes");
+    const bytes = await storageRead(ev.storageKey);
+    if (sha256Hex(bytes) !== rev.layoutContentHash) throw new DocumentControlRefusal("PRECONDITION_FAILED", `BLOCKED — the stored layout does not hash to what the revision released (${rev.layoutContentHash.slice(0, 12)}…); refusing to render from bytes that are not the layout`);
+    return bytes.toString("utf8");
+  }
   if (layoutArtifactId == null) throw new DocumentControlRefusal("PRECONDITION_FAILED", "BLOCKED — this revision has no layout artifact LeaseOS can read");
   const art = (await db.select().from(documentSourceArtifacts).where(eq(documentSourceArtifacts.id, layoutArtifactId)).limit(1))[0];
   if (!art?.repositoryPath) throw new DocumentControlRefusal("PRECONDITION_FAILED", "BLOCKED — the layout's bytes are not in the repository's seed data");
@@ -84,7 +96,7 @@ async function layoutTextOf(db: Db, revisionId: number, layoutArtifactId: number
 
 export type RenderResult = RegisterResult & { contentHash: string; byteLength: number; storageKey: string; unfilled: string[]; preparation: Preparation };
 
-export async function renderFromTemplate(db: Db, args: { book: Book; actor: Actor; templateRevisionRef: string; context: SemanticContext; humanValues?: Record<string, string | number | null>; title?: string; links?: LinkInput[]; requestedState?: "issued" | "proposed"; storagePut: (relKey: string, data: Buffer, contentType: string) => Promise<{ key: string }> }): Promise<RenderResult> {
+export async function renderFromTemplate(db: Db, args: { book: Book; actor: Actor; templateRevisionRef: string; context: SemanticContext; humanValues?: Record<string, string | number | null>; title?: string; links?: LinkInput[]; requestedState?: "issued" | "proposed"; storagePut: (relKey: string, data: Buffer, contentType: string) => Promise<{ key: string }>; storageRead?: StorageRead }): Promise<RenderResult> {
   const prep = await prepareFromTemplate(db, { book: args.book, templateRevisionRef: args.templateRevisionRef, context: args.context, humanValues: args.humanValues });
   if (!prep.renderable) throw new DocumentControlRefusal("PRECONDITION_FAILED", `BLOCKED — LeaseOS cannot render a ${prep.layoutKind} layout: ${prep.rendererNote}. The template is registered and printable as supplied; a document on it is registered from the filled copy.`);
   if (prep.notFound.length) throw new DocumentControlRefusal("NOT_FOUND", `BLOCKED — ${prep.notFound.join(", ")} not in this business's records`);
@@ -110,7 +122,7 @@ export async function renderFromTemplate(db: Db, args: { book: Book; actor: Acto
       else if (f.semanticKey === "document.title") values[f.printedField] = args.title ?? definition.displayName;
       else if (f.semanticKey === "document.templateRevisionRef") values[f.printedField] = rev.revisionRef;
     }
-    const layout = await layoutTextOf(db, rev.id, rev.layoutArtifactId);
+    const layout = await layoutTextOf(db, rev, args.storageRead);
     const filled = fillMarkdown(layout, values);
     const lines = markdownToLines(filled.text);
     const title = args.title ?? definition.displayName;

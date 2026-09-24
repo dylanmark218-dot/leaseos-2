@@ -28,6 +28,9 @@ import {
   disposalTickets,
   documentFingerprints,
   documentExtractions,
+  commercialDocuments,
+  commercialDocumentLinks,
+  documentExternalReferences,
   evidenceRelationships,
   fuelTransactions,
   fleetFuelCards,
@@ -41,6 +44,8 @@ import {
   type PriorCapture,
 } from "./documentFingerprint";
 import { getDb } from "../db";
+import { appendDocumentEvent } from "./documentRegisterService";
+import { normaliseReferenceValue } from "./documentRegister";
 import { FORMS, commitProposal, type CommittedField } from "./aiProposal";
 import { rehydrateProposal } from "./assistantPersistence";
 import {
@@ -285,6 +290,29 @@ export async function executeAssistantCommit(args: {
     // so the cast bought nothing and cost the checking of everything it calls.
     const target = await applyIntent(tx, plan.intent, row, committed.fields);
     if (!target.ok) return { committed: false as const, refusals: target.refusals };
+
+    // DC-G: a disposal ticket read from a photographed facility paper. The register row the
+    // reading came from is linked to the record it became (source: the domain), the facility's
+    // number on that row is marked as mirrored from the domain's column, and the extraction is
+    // committed. The register hears what happened; it decided nothing here.
+    if (plan.intent.kind === "disposal_ticket_create") {
+      const ext = (await tx.select({ id: documentExtractions.id, documentId: documentExtractions.documentId }).from(documentExtractions).where(eq(documentExtractions.proposalId, row.proposalId)).limit(1))[0];
+      if (ext?.documentId != null) {
+        const doc = (await tx.select({ id: commercialDocuments.id, documentRef: commercialDocuments.documentRef }).from(commercialDocuments).where(eq(commercialDocuments.id, ext.documentId)).limit(1))[0];
+        const dsp = (await tx.select({ ticketNumber: disposalTickets.ticketNumber, facilityTicketNumber: disposalTickets.facilityTicketNumber, evidenceRefs: disposalTickets.evidenceRefs }).from(disposalTickets).where(eq(disposalTickets.id, target.targetRecordId)).limit(1))[0];
+        if (doc && dsp) {
+          await tx.insert(commercialDocumentLinks).values({ documentId: doc.id, recordType: "disposal_ticket", recordRef: dsp.ticketNumber, recordId: target.targetRecordId, role: "source_document", source: "domain", confirmationStatus: "confirmed", linkedByUserId: args.actorUserId });
+          if (dsp.facilityTicketNumber) {
+            await tx.update(documentExternalReferences).set({ mirrorOfTable: "disposalTickets", mirrorOfId: target.targetRecordId, mirrorOfColumn: "facilityTicketNumber" })
+              .where(and(eq(documentExternalReferences.documentId, doc.id), eq(documentExternalReferences.referenceType, "facility_ticket_number"), eq(documentExternalReferences.referenceValue, normaliseReferenceValue(dsp.facilityTicketNumber))));
+          }
+          await tx.update(documentExtractions).set({ status: "committed" }).where(eq(documentExtractions.id, ext.id));
+          const refs = (() => { try { return JSON.parse(dsp.evidenceRefs ?? "{}") as Record<string, unknown>; } catch { return {}; } })();
+          await tx.update(disposalTickets).set({ evidenceRefs: JSON.stringify({ ...refs, documentRef: doc.documentRef }) }).where(eq(disposalTickets.id, target.targetRecordId));
+          await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.link_added", actor: { userId: args.actorUserId, source: "human" }, occurredAt: now, detail: { recordType: "disposal_ticket", recordRef: dsp.ticketNumber, recordId: target.targetRecordId, role: "source_document", source: "domain", proposalId: row.proposalId, verificationStatus: "needs_review" } });
+        }
+      }
+    }
 
     // Auto-file. The bytes already live once in the vault under the extraction's
     // evidence record; this attaches that one record to everything it now
