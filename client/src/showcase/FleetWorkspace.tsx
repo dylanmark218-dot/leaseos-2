@@ -440,10 +440,6 @@ function UnitsTab() {
   const { data: documents } =
     trpc.fieldRoute.identity.documents.list.useQuery();
   const { data: jobUnits } = trpc.fieldRoute.identity.jobUnits.list.useQuery();
-  const createJobUnit = trpc.fieldRoute.identity.jobUnits.create.useMutation({
-    onSuccess: () => toast.success("Unit assignment saved to the job crew."),
-    onError: error => toast.error(error.message),
-  });
   const createUnit = trpc.fieldRoute.identity.units.create.useMutation({
     onSuccess: () => toast.success("Unit identity created."),
     onError: error => toast.error(error.message),
@@ -564,25 +560,6 @@ function UnitsTab() {
                 />
               </>
             )}
-            <Button
-              onClick={() =>
-                createJobUnit.mutate({
-                  jobId: 1,
-                  unitId: 247,
-                  operatorId: 1,
-                  role: "support unit",
-                  joinedAt: new Date(),
-                  hours: 0,
-                  mileage: 0,
-                  workPerformed: "Assignment draft",
-                })
-              }
-              variant="outline"
-              className="mt-2 h-9 w-full rounded-lg border-[#cfe8dd] bg-white text-xs text-[#527c70]"
-            >
-              <Truck className="mr-2 h-3.5 w-3.5" />
-              Assign unit 247 to job
-            </Button>
             <div className="mt-4 overflow-x-auto rounded-xl border border-[#cfe8dd] bg-white">
               <div className="grid min-w-[620px] grid-cols-[1.2fr_.9fr_.7fr_.7fr_1.2fr] gap-3 border-b border-[#e2f0ea] px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#8aa79f]">
                 <span>Unit / role</span>
