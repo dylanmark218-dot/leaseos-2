@@ -45,7 +45,7 @@ export type NewFamily = { familyRef: string; verifier: string; absoluteExpiresAt
 export async function createSessionFamily(args: {
   openId: string;
   appId: string | null;
-  authAssurance?: "password" | "mfa";
+  authAssurance?: "single_factor" | "mfa";
   mfaCompletedAt?: Date | null;
   deviceRef?: string | null;
   userAgentHash?: string | null;
@@ -64,7 +64,7 @@ export async function createSessionFamily(args: {
     appId: args.appId,
     refreshVerifierHash: hashVerifier(verifier),
     rotationCounter: 0,
-    authAssurance: args.authAssurance ?? "password",
+    authAssurance: args.authAssurance ?? "single_factor",
     mfaCompletedAt: args.mfaCompletedAt ?? null,
     deviceRef: args.deviceRef ?? null,
     createdAt: now,
@@ -78,7 +78,7 @@ export async function createSessionFamily(args: {
 
 export type RedeemOutcome =
   | { kind: "ok"; verifier: string; openId: string; appId: string | null;
-      authAssurance: "password" | "mfa"; mfaCompletedAt: Date | null }
+      authAssurance: "single_factor" | "mfa"; mfaCompletedAt: Date | null }
   | { kind: "revoked" }
   | { kind: "expired" }
   | { kind: "reuse_detected" };

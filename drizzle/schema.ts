@@ -8917,8 +8917,8 @@ export const sessionFamilies = mysqlTable("sessionFamilies", {
   tenantContext: varchar("tenantContext", { length: 64 }),
   refreshVerifierHash: varchar("refreshVerifierHash", { length: 64 }).notNull(),
   rotationCounter: int("rotationCounter").default(0).notNull(),
-  /** S1 records what a login reached; S6 enforces step-up against it. */
-  authAssurance: mysqlEnum("authAssurance", ["password", "mfa"]).default("password").notNull(),
+  /** S1 records what a login reached; S6 enforces step-up against it. No stored credential is implied. */
+  authAssurance: mysqlEnum("authAssurance", ["single_factor", "mfa"]).default("single_factor").notNull(),
   mfaCompletedAt: timestamp("mfaCompletedAt"),
   /** Reserved for S4/S6: revoking a lost phone must not mean deleting the account. */
   deviceRef: varchar("deviceRef", { length: 64 }),

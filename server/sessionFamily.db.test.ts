@@ -191,9 +191,9 @@ d("F — a family belongs to the surface it was minted for", () => {
     expect(after.mfaCompletedAt).not.toBeNull();
   });
 
-  it("F3b. a password-only session is distinguishable from one that did MFA", async () => {
+  it("F3b. a single-factor session is distinguishable from one that did MFA", async () => {
     const f = await createSessionFamily({ openId: openId(), appId: "app-a" });
-    expect((await rowFor(f.familyRef)).authAssurance).toBe("password");
+    expect((await rowFor(f.familyRef)).authAssurance).toBe("single_factor");
     expect((await rowFor(f.familyRef)).mfaCompletedAt).toBeNull();
   });
 });

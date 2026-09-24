@@ -31,7 +31,10 @@ CREATE TABLE `sessionFamilies` (
 	`refreshVerifierHash` varchar(64) NOT NULL,
 	`rotationCounter` int NOT NULL DEFAULT 0,
 	-- S1 records the assurance a login reached; S6 will enforce step-up against it.
-	`authAssurance` enum('password','mfa') NOT NULL DEFAULT 'password',
+-- Named `single_factor` rather than `password` because LeaseOS delegates authentication to OAuth
+-- and holds no password of its own — `authArchitecture.test.ts` asserts the schema never says the
+-- word, and it was right to.
+	`authAssurance` enum('single_factor','mfa') NOT NULL DEFAULT 'single_factor',
 	`mfaCompletedAt` timestamp NULL,
 	-- Reserved for S4/S6 device binding. A lost phone is then revoked without deleting the account.
 	`deviceRef` varchar(64),
