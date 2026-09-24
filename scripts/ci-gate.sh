@@ -18,6 +18,9 @@ host="${hostport%%:*}"; port="${hostport#*:}"; [ "$port" = "$host" ] && port=330
 gate() { printf '\n== %s ==\n' "$1"; }
 mysqlc() { mysql -h "$host" -P "$port" -u "$user" ${pass:+-p"$pass"} "$@"; }
 
+gate "0a. Runtime version truth"
+node scripts/check-version-truth.mjs
+
 gate "0. Reserved migration slots untouched"
 if ls drizzle/0016_*.sql drizzle/0017_*.sql >/dev/null 2>&1; then
   echo "FAIL: migration slot 0016 or 0017 is occupied. These are reserved for the Spatial and LoadSense branches."
