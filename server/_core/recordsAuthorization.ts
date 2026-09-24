@@ -264,6 +264,8 @@ export type Permission =
   | "timeOff.request" | "timeOff.decide" | "timeOff.schedulingRead"
   // v22.20 — open shifts. Posting work and wanting it are different acts.
   | "shifts.post" | "shifts.read" | "shifts.interest"
+  // 0183 — declaring your own availability is a statement about yourself and nobody else.
+  | "shifts.availability_own"
   // v22.20 — crews. Reading a forecast and changing who is on a crew differ.
   | "crews.read" | "crews.manage"
   // v22.20 — calendar. Your own is not the same act as somebody else's.
@@ -274,6 +276,9 @@ export type Permission =
   | "assistant.ask" | "assistant.curate"
   // v22.20 — the board. Creating a channel is not the same as posting in one.
   | "board.read" | "board.post" | "board.manage"
+  // 0182 — publishing company-wide or emergency is not posting; reading a private conversation as
+  // a moderator is neither reading nor managing, and every use of it is an event.
+  | "board.publish" | "board.moderate"
   // v22.20 — the agent. Asking it to work, acting, and approving differ.
   | "agent.use" | "agent.act" | "agent.approve" | "agent.read"
   // v22.20 — clearing a government data source for operational use.
@@ -431,6 +436,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "board.publish",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -695,6 +701,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "board.publish",
+    "board.moderate",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -978,6 +986,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "board.publish",
+    "board.moderate",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1688,6 +1698,8 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // 0183 — a person's own availability reads and writes `ctx.user.id` and nothing the request could name.
+  "shifts.availability_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -1774,6 +1786,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "crews.manage",
   // A channel decides who may read a conversation.
   "board.manage",
+  // An emergency or company-wide bulletin demands acknowledgement from everyone it reaches.
+  "board.publish",
+  // Reading a private conversation as a moderator is an access nobody in it agreed to.
+  "board.moderate",
   // What is loaded decides what every later answer can cite.
   "assistant.curate",
   // Approving an agent action is authorising a machine to affect the company.
@@ -2712,9 +2728,24 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "timeOff.schedulingRead": "timeOff.schedulingRead",
   "shifts.post": "shifts.post",
   "shifts.list": "shifts.read",
+  "shifts.get": "shifts.read",
   "shifts.eligibility": "shifts.read",
+  "shifts.candidates": "shifts.read",
   "shifts.expressInterest": "shifts.interest",
+  "shifts.respond": "shifts.interest",
+  "shifts.offerRespond": "shifts.interest",
   "shifts.interests": "shifts.read",
+  // 0183 — the post's lifecycle and its offers are the poster's acts; linking a post to a slot is
+  // an assignment act and carries the binding's own permission.
+  "shifts.publish": "shifts.post",
+  "shifts.close": "shifts.post",
+  "shifts.cancel": "shifts.post",
+  "shifts.offer": "shifts.post",
+  "shifts.offerWithdraw": "shifts.post",
+  "shifts.link": "dispatch.assign",
+  "shifts.availabilitySet": "shifts.availability_own",
+  "shifts.availabilityMine": "shifts.availability_own",
+  "shifts.availabilityFor": "shifts.read",
   "crews.create": "crews.manage",
   "crews.addMember": "crews.manage",
   "crews.removeMember": "crews.manage",
@@ -2733,6 +2764,16 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "assistant.passageList": "assistant.curate",
   "assistant.measureRetrieval": "assistant.ask",
   "board.createChannel": "board.manage",
+  "board.direct": "board.post",
+  // Membership of a channel is changed by `board.manage`, or by a moderator or manager OF THAT
+  // CHANNEL — a channel role, decided inside the procedure. The gate is the posting permission so a
+  // group's own moderator can reach it; the procedure refuses anybody who is neither.
+  "board.memberAdd": "board.post",
+  "board.memberRemove": "board.post",
+  "board.members": "board.read",
+  "board.mine": "board.read",
+  "board.moderateRead": "board.moderate",
+  "board.moderateWithdraw": "board.moderate",
   "board.post": "board.post",
   "board.read": "board.read",
   "board.open": "board.read",

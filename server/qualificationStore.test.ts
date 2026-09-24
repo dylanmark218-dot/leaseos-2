@@ -1,8 +1,13 @@
 /**
  * v22.20 (0092) — a ticket on record is not a ticket in force.
  *
- * Exercises the new store through the open-shifts eligibility read, since that
- * is the thing the store exists to make answerable.
+ * Written against `workerQualifications`, the store 0092 added and nothing in production ever
+ * wrote. D-05 (2026-09-23) named the canonical pair — `academyQualifications` (a grant) and
+ * `complianceDocuments` (a verified document) — and 0183 made open work read them through the
+ * same shared rule (`qualificationValidity`). The cases are unchanged; the fixtures now seed the
+ * stores the answer actually comes from. `workerQualifications` itself is untouched: the crew
+ * forecast, the calendar and shift readiness still read it, and D-05 forbids destructive
+ * consolidation until its prerequisites are met.
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
@@ -22,17 +27,31 @@ const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 const STARTS = new Date("2026-11-10T06:00:00Z");
 const ENDS = new Date("2026-11-10T18:00:00Z");
 
+/** The operator record the board reads through `operators.userId`; it also owns the documents. */
 async function operatorWithLicence(userId: number) {
-  await pool.execute("INSERT INTO operators (id, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,NOW())",
-    [userId, `Op ${rnd()}`, "1", new Date("2028-01-01T00:00:00Z")]);
+  await pool.execute("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())",
+    [userId, userId, `Op ${rnd()}`, "1", new Date("2028-01-01T00:00:00Z")]);
 }
+
+/**
+ * A holding, in the canonical store that carries that state. A verified, rejected, unverified or
+ * superseded document is a `complianceDocuments` row (`verified` / `rejected` / `needs_review`);
+ * an OCR extraction nobody has asserted is an Academy grant still `pending`.
+ */
 async function holding(userId: number, code: string, o: { state?: string; expiresAt?: Date | null; recordedAt?: Date } = {}) {
-  const holdingRef = `WQ-${rnd()}${rnd()}`;
-  await pool.execute(
-    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt)
-     VALUES (?,?,?,?,?,?,?,?)`,
-    [holdingRef, "default", userId, code, o.state ?? "verified", o.expiresAt === undefined ? new Date("2027-06-01T00:00:00Z") : o.expiresAt, 1, o.recordedAt ?? new Date("2026-01-01T00:00:00Z")]);
-  return holdingRef;
+  const state = o.state ?? "verified";
+  const expiresAt = o.expiresAt === undefined ? new Date("2027-06-01T00:00:00Z") : o.expiresAt;
+  const recordedAt = o.recordedAt ?? new Date("2026-01-01T00:00:00Z");
+  if (state === "extracted") {
+    const ref = `AQ-${rnd()}${rnd()}`;
+    await pool.execute("INSERT INTO academyQualifications (qualificationRef, userId, qualificationCode, sourceKind, status, validFrom, expiresAt, createdAt) VALUES (?,?,?,?,?,?,?,?)",
+      [ref, userId, code, "external_credential", "pending", recordedAt, expiresAt, recordedAt]);
+    return ref;
+  }
+  const status = state === "verified" || state === "superseded" ? "verified" : state === "rejected" ? "rejected" : "needs_review";
+  await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus, source) VALUES ('operator', ?, ?, ?, ?, ?, ?, 'upload')",
+    [userId, `${code.toLowerCase()}_certificate`, `${code} certificate`, recordedAt, expiresAt, status]);
+  return `CD-${code}`;
 }
 const postDG = async (dispatcher: number) =>
   caller(dispatcher).shifts.post({ title: "DG haul", startsAt: STARTS, endsAt: ENDS, requiredRole: "driver", requiredQualifications: ["TDG"] });

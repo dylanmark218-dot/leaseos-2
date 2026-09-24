@@ -3,6 +3,7 @@ import { startDrainWorker } from "./drainWorker";
 import { createWorkerPorts } from "./workflowRuntime";
 import { startOnce, withHandlers, type Lifecycle } from "./workerLifecycle";
 import { handleClaimedEnforcementEvent } from "./enforcementOutbox";
+import { BOARD_AGGREGATE_TYPES, handleClaimedBoardEvent } from "./boardOutbox";
 import { getDb } from "../db";
 
 export type ProductionWorker = { lifecycle: Lifecycle; close: () => Promise<void> };
@@ -20,6 +21,17 @@ export async function startProductionWorker(): Promise<ProductionWorker | null> 
     handle: async event => {
       await handleClaimedEnforcementEvent(db, {
         aggregateId: event.aggregateId, payloadJson: event.payloadJson, tenantId: event.tenantId, now: new Date(),
+      });
+      return { tasksCreated: 0 };
+    },
+  }, {
+    // 0182/0183 — board and open-work events become in-app notifications, one per recipient.
+    name: "board",
+    matches: event => BOARD_AGGREGATE_TYPES.includes(event.aggregateType),
+    handle: async event => {
+      await handleClaimedBoardEvent(db, {
+        eventId: event.eventId, eventType: event.eventType, aggregateId: event.aggregateId,
+        payloadJson: event.payloadJson, tenantId: event.tenantId, now: new Date(),
       });
       return { tasksCreated: 0 };
     },

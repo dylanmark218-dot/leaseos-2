@@ -27,11 +27,17 @@ const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 const STARTS = new Date("2026-11-10T06:00:00Z");
 const ENDS = new Date("2026-11-10T18:00:00Z");
 
-/** An operator row with a licence, since that is the one credential stored. */
+/**
+ * An operator row with a licence, since that is the one credential stored.
+ *
+ * 0183 — `operators.userId` is the mapping the board reads (design C-10). The row used to be
+ * seeded with `id = userId` and no `userId`, which only worked because the eligibility read
+ * conflated the two; it now names the person it belongs to.
+ */
 async function operatorWithLicence(userId: number, expires: Date | null) {
   await pool.execute(
-    "INSERT INTO operators (id, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,NOW())",
-    [userId, `Op ${rnd()}`, "1", expires]);
+    "INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())",
+    [userId, userId, `Op ${rnd()}`, "1", expires]);
 }
 const postShift = (dispatcher: number, over: Record<string, unknown> = {}) =>
   caller(dispatcher).shifts.post({ title: "Vac truck operator", startsAt: STARTS, endsAt: ENDS, requiredRole: "driver", ...over });

@@ -6969,9 +6969,27 @@ export const shiftPosts = mysqlTable("shiftPosts", {
   requiredRole: varchar("requiredRole", { length: 60 }).notNull(),
   requiredQualificationsJson: text("requiredQualificationsJson").notNull(),
   seats: int("seats").default(1).notNull(),
-  status: mysqlEnum("status", ["open", "filled", "cancelled", "expired"]).default("open").notNull(),
+  status: mysqlEnum("status", ["draft", "open", "closed", "filled", "cancelled", "expired"]).default("open").notNull(),
   postedByUserId: int("postedByUserId").notNull(),
   postedAt: timestamp("postedAt").notNull(),
+  /* 0183 — the slot this post fills. NULL = not yet linked to a job; an unlinked post cannot be filled. */
+  dispatchPostingId: int("dispatchPostingId"),
+  dispatchRoleId: int("dispatchRoleId"),
+  unitId: int("unitId"),
+  requiredEquipmentClass: varchar("requiredEquipmentClass", { length: 60 }),
+  overtime: boolean("overtime").default(false).notNull(),
+  estimatedHours: int("estimatedHours"),
+  regionCode: varchar("regionCode", { length: 60 }),
+  /** Display and sort only; never an input to eligibility. */
+  priority: mysqlEnum("priority", ["normal", "callout", "hotshot", "emergency"]).default("normal").notNull(),
+  publishedAt: timestamp("publishedAt"),
+  closesAt: timestamp("closesAt"),
+  closedAt: timestamp("closedAt"),
+  filledAt: timestamp("filledAt"),
+  filledByUserId: int("filledByUserId"),
+  cancelledAt: timestamp("cancelledAt"),
+  cancelledByUserId: int("cancelledByUserId"),
+  cancelReason: varchar("cancelReason", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type ShiftPostRow = typeof shiftPosts.$inferSelect;
@@ -6982,9 +7000,79 @@ export const shiftInterests = mysqlTable("shiftInterests", {
   userId: int("userId").notNull(),
   expressedAt: timestamp("expressedAt").notNull(),
   withdrawnAt: timestamp("withdrawnAt"),
+  /* 0183 — one standing response per person per post; replaced in place, the previous one audited. */
+  response: mysqlEnum("response", ["interested", "available", "request_assignment", "declined"]).default("interested").notNull(),
+  note: varchar("note", { length: 400 }),
+  deviceCreatedAt: timestamp("deviceCreatedAt"),
+  deviceId: varchar("deviceId", { length: 64 }),
+  clientMutationId: varchar("clientMutationId", { length: 64 }),
+  updatedAt: timestamp("updatedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type ShiftInterestRow = typeof shiftInterests.$inferSelect;
+
+/* ---- 0183: offers, marketplace audit, availability ---- */
+
+export const shiftOffers = mysqlTable("shiftOffers", {
+  id: int("id").autoincrement().primaryKey(),
+  offerRef: varchar("offerRef", { length: 64 }).notNull().unique(),
+  postRef: varchar("postRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  offeredByUserId: int("offeredByUserId").notNull(),
+  offeredAt: timestamp("offeredAt").notNull(),
+  expiresAt: timestamp("expiresAt"),
+  status: mysqlEnum("status", ["offered", "accepted", "declined", "withdrawn", "expired", "awarded", "not_selected"]).default("offered").notNull(),
+  respondedAt: timestamp("respondedAt"),
+  deviceRespondedAt: timestamp("deviceRespondedAt"),
+  responseDeviceId: varchar("responseDeviceId", { length: 64 }),
+  responseClientMutationId: varchar("responseClientMutationId", { length: 64 }),
+  responseNote: varchar("responseNote", { length: 400 }),
+  /** The `dispatchRoleAssignmentEvents.id` the award produced — the one link to the slot. */
+  awardEventId: int("awardEventId"),
+  /** PERSISTENT generated: `postRef:userId` while offered/accepted, NULL otherwise. Never written by the application. */
+  liveOfferKey: varchar("liveOfferKey", { length: 140 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ShiftOfferRow = typeof shiftOffers.$inferSelect;
+
+/** Marketplace audit. Append-only. */
+export const shiftPostEvents = mysqlTable("shiftPostEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  postRef: varchar("postRef", { length: 64 }).notNull(),
+  eventType: mysqlEnum("eventType", ["created", "published", "linked", "closed", "reopened", "cancelled", "expired", "response_recorded", "response_withdrawn", "offer_issued", "offer_accepted", "offer_declined", "offer_withdrawn", "offer_expired", "awarded", "not_selected", "award_refused"]).notNull(),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 60 }).notNull(),
+  subjectUserId: int("subjectUserId"),
+  detail: varchar("detail", { length: 600 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  deviceOccurredAt: timestamp("deviceOccurredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ShiftPostEventRow = typeof shiftPostEvents.$inferSelect;
+
+/** A declaration a person makes about their own willingness. Consumed by the candidate pool, never by readiness. */
+export const workerAvailability = mysqlTable("workerAvailability", {
+  id: int("id").autoincrement().primaryKey(),
+  availabilityRef: varchar("availabilityRef", { length: 64 }).notNull().unique(),
+  /** NULL = the historical single tenant (0132 convention). */
+  orgRef: varchar("orgRef", { length: 64 }),
+  userId: int("userId").notNull(),
+  state: mysqlEnum("state", ["available", "unavailable", "on_call", "available_for_overtime"]).notNull(),
+  windowStartsAt: timestamp("windowStartsAt"),
+  windowEndsAt: timestamp("windowEndsAt"),
+  preferencesJson: text("preferencesJson"),
+  declaredAt: timestamp("declaredAt").notNull(),
+  deviceDeclaredAt: timestamp("deviceDeclaredAt"),
+  deviceId: varchar("deviceId", { length: 64 }),
+  clientMutationId: varchar("clientMutationId", { length: 64 }),
+  source: mysqlEnum("source", ["self", "dispatcher"]).default("self").notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  supersededAt: timestamp("supersededAt"),
+  supersededByRef: varchar("supersededByRef", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type WorkerAvailabilityRow = typeof workerAvailability.$inferSelect;
 
 /* ---- v22.20 (0092): qualifications ---- */
 
@@ -7061,17 +7149,54 @@ export const messageChannels = mysqlTable("messageChannels", {
   id: int("id").autoincrement().primaryKey(),
   channelRef: varchar("channelRef", { length: 64 }).notNull().unique(),
   tenantId: varchar("tenantId", { length: 40 }),
-  type: mysqlEnum("type", ["announcement", "dispatch", "safety", "maintenance", "field_operations", "road_conditions", "training", "general", "job", "client", "private", "emergency"]).notNull(),
+  type: mysqlEnum("type", ["announcement", "dispatch", "safety", "maintenance", "field_operations", "road_conditions", "training", "general", "job", "client", "private", "emergency", "direct", "group", "department", "unit", "shift"]).notNull(),
   name: varchar("name", { length: 220 }).notNull(),
   jobRef: varchar("jobRef", { length: 64 }),
   /** What makes a channel external. Access is decided here, not per message. */
   clientRef: varchar("clientRef", { length: 64 }),
   crewRef: varchar("crewRef", { length: 64 }),
+  /** 0182 — how a person is admitted: today's open rule, the crew rule, or an explicit member row. */
+  membershipMode: mysqlEnum("membershipMode", ["open", "explicit", "crew"]).default("open").notNull(),
   archived: boolean("archived").default(false).notNull(),
   createdByUserId: int("createdByUserId").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type MessageChannelRow = typeof messageChannels.$inferSelect;
+
+/* ---- 0182: board membership ---- */
+
+export const messageChannelMembers = mysqlTable("messageChannelMembers", {
+  id: int("id").autoincrement().primaryKey(),
+  channelRef: varchar("channelRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  /** A channel role, not a domain role. Confers nothing outside this channel. */
+  memberRole: mysqlEnum("memberRole", ["member", "moderator", "dispatcher", "manager", "read_only"]).default("member").notNull(),
+  source: mysqlEnum("source", ["manual", "job_assignment", "crew", "direct"]).default("manual").notNull(),
+  joinedAt: timestamp("joinedAt").notNull(),
+  leftAt: timestamp("leftAt"),
+  mutedAt: timestamp("mutedAt"),
+  addedByUserId: int("addedByUserId").notNull(),
+  /** PERSISTENT generated: `channelRef:userId` while live, NULL once left. Never written by the application. */
+  liveMemberKey: varchar("liveMemberKey", { length: 140 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type MessageChannelMemberRow = typeof messageChannelMembers.$inferSelect;
+
+/** Membership, moderation and emergency audit. Append-only. */
+export const messageChannelEvents = mysqlTable("messageChannelEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  channelRef: varchar("channelRef", { length: 64 }).notNull(),
+  eventType: mysqlEnum("eventType", ["member_added", "member_left", "member_role_changed", "channel_archived", "emergency_posted", "moderator_read", "moderator_withdraw"]).notNull(),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 60 }).notNull(),
+  subjectUserId: int("subjectUserId"),
+  messageRef: varchar("messageRef", { length: 64 }),
+  detail: varchar("detail", { length: 600 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type MessageChannelEventRow = typeof messageChannelEvents.$inferSelect;
 
 export const boardMessages = mysqlTable("boardMessages", {
   id: int("id").autoincrement().primaryKey(),
@@ -7087,6 +7212,8 @@ export const boardMessages = mysqlTable("boardMessages", {
   deviceCreatedAt: timestamp("deviceCreatedAt").notNull(),
   serverReceivedAt: timestamp("serverReceivedAt"),
   deviceId: varchar("deviceId", { length: 64 }),
+  /** 0182 — with `deviceId`, the replay identity: a retried post returns the message it already wrote. */
+  clientMutationId: varchar("clientMutationId", { length: 64 }),
   requiresAcknowledgement: boolean("requiresAcknowledgement").default(false).notNull(),
   withdrawnAt: timestamp("withdrawnAt"),
   withdrawnByUserId: int("withdrawnByUserId"),
@@ -7102,6 +7229,8 @@ export const messageReceipts = mysqlTable("messageReceipts", {
   deliveredAt: timestamp("deliveredAt"),
   openedAt: timestamp("openedAt"),
   acknowledgedAt: timestamp("acknowledgedAt"),
+  /** 0182 — the device's clock at acknowledgement. `acknowledgedAt` stays the server's. */
+  deviceAcknowledgedAt: timestamp("deviceAcknowledgedAt"),
   /** The server witnesses acceptance, so it may record it. */
   acceptedAt: timestamp("acceptedAt"),
   actionedAt: timestamp("actionedAt"),

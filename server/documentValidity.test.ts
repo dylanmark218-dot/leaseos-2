@@ -158,14 +158,16 @@ describe("one rule, shared", () => {
   it("is reached through the adapter by the routers that need it", () => {
     const adapter = readFileSync("server/_core/qualificationValidity.ts", "utf8");
     expect(adapter).toContain('from "./documentValidity"');
-    for (const f of ["openShiftsRouter", "readinessRouter"]) {
-      const src = readFileSync(`server/${f}.ts`, "utf8");
-      expect(src).toContain("_core/qualificationValidity");
-    }
+    expect(readFileSync("server/readinessRouter.ts", "utf8")).toContain("_core/qualificationValidity");
+    // 0183 — open work no longer reads `workerQualifications` at all (D-05: the canonical pair is
+    // academyQualifications and complianceDocuments). Its reader is the service, and it reaches
+    // the same rule directly: the engine decides, the service presents rows as versions.
+    expect(readFileSync("server/openShiftsService.ts", "utf8")).toContain("_core/qualificationValidity");
+    expect(readFileSync("server/openShiftsRouter.ts", "utf8")).not.toContain("workerQualifications");
   });
 
   it("leaves no router deciding a verification state by hand", () => {
-    for (const f of ["openShiftsRouter", "readinessRouter"]) {
+    for (const f of ["openShiftsRouter", "openShiftsService", "readinessRouter"]) {
       const src = readFileSync(`server/${f}.ts`, "utf8");
       // Reading the column to load rows is fine; branching on its values is the
       // second implementation.
@@ -175,7 +177,7 @@ describe("one rule, shared", () => {
   });
 
   it("classifies by a returned code rather than by matching prose", () => {
-    const src = readFileSync("server/openShiftsRouter.ts", "utf8");
+    const src = readFileSync("server/openShiftsService.ts", "utf8");
     expect(src).toContain("gap.why ===");
     // Matching on wording reclassified every unverified ticket the moment the
     // wording improved.

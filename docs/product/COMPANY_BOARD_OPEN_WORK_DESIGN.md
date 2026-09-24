@@ -1,9 +1,19 @@
 # Company Board + Open Work — design
 
-**Status:** PROPOSED — design only. No production code, schema or migration is written by this
-document. It follows the workflow the two dispatch design documents established: the design is
-committed on its own branch, the owner records decisions against the numbered questions in §14, and
-implementation starts after that.
+**Status:** PROPOSED, with **Checkpoint 2 built under the recommended options** for D-1…D-6 (§14)
+because the owner asked for the work to continue before recording decisions. Every recommended option
+is the one implemented; a different answer to any of them is a change to the branch, not to this
+document. Checkpoint 2 (§15) is on the branch: migrations `0182`/`0183`, board membership, publish
+and moderation authorities, replay identity, the post's life with responses, offers and availability,
+the `openShifts` engine wired and its inline copy deleted, the outbox helper, and the refusal suites.
+Checkpoint 3 (the award) is not built.
+
+**One correction from building it (§5.4).** The preview's verdict is the board's own — role, leave,
+rotation, declared availability, licence, required qualifications — and the readiness composer's
+answer travels **beside** it as its own axis, never folded in: a post with no unit or job yet makes
+the composer report a truck nobody has named, and a `review`/`unknown` finding is dispatch's question
+for the stored check at award. Only a `blocking` finding *about the operator* makes the board verdict
+`ineligible`. That is the dispatcher board's staffing-versus-readiness rule applied here.
 
 **Written against:** `main` at `6f52b57` (SPINE item 1 merged, #10), read together with the open
 branches that touch the same ground: `claude/driver-portfolio-api-ya8928` (`0175`–`0177`, the
