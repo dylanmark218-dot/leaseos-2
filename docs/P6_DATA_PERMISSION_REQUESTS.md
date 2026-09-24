@@ -1,4 +1,4 @@
-# Data permission requests — 511 Alberta, AER ST107, Saskatchewan IRIS / Manitoba Petroleum Branch
+# Data permission requests — 511 Alberta, AER ST107, Saskatchewan IRIS / Manitoba Petroleum Branch, Saskatchewan Highway Hotline, and the other 511s
 
 **Purpose.** Three of the eleven P6 items are blocked on a written answer from a data authority:
 P6.3 (511 Alberta), P6.8 (AER ST107), P6.9 (Saskatchewan IRIS and Manitoba Petroleum Branch). These
@@ -140,6 +140,73 @@ cannot store is silence.
 >
 > With thanks,
 > [name, title, company, contact]
+
+---
+
+## 4 — Saskatchewan Highway Hotline
+
+**To:** Saskatchewan Highway Hotline, via https://hotline.gov.sk.ca/contact
+**Re:** Machine-readable access and terms for Highway Hotline information
+**Source record:** `sk_highway_hotline` · no developer API published · the website is not scraped
+
+Unlike the others, this one asks for access before it asks for rights. There is nothing published
+to call, and reading the public website with a script is not a substitute: a page layout is not a
+contract, and it would let LeaseOS read data it has no recorded right to use.
+
+> Subject: Request for data access and terms — Highway Hotline information in a commercial platform
+>
+> Hello,
+>
+> We operate LeaseOS, a commercial trucking and oilfield transportation platform used by carriers
+> working in Saskatchewan. We would like to use official Highway Hotline information for road
+> conditions, closures, construction, over-dimensional load notices, winter and ice-road information
+> and ferries. We would keep it alongside our own routing, showing the source and the time it was
+> retrieved.
+>
+> We understand a public Highway Hotline developer API existed in the past. We could not find one
+> today. We have not scraped the website and will not.
+>
+> Could you tell us whether Saskatchewan offers any of the following, and on what terms?
+>
+> | # | Question | Answer |
+> |---|---|---|
+> | 1 | An API or machine-readable feed (Open511, JSON, XML, GeoJSON, ArcGIS/WFS or similar) | |
+> | 2 | Developer credentials or a key, and how to apply | |
+> | 3 | A licence or terms of use covering display of the information to our commercial customers | |
+> | 4 | Whether the information may be stored, and kept as a record of what was reported at a time | |
+> | 5 | Whether it may be included in an offline package on a driver's device | |
+> | 6 | Required attribution wording or branding | |
+> | 7 | Rate limits or caching requirements | |
+>
+> Our use is operational. We do not want to republish Highway Hotline data as a public feed or resell
+> it. We would never present it as LeaseOS's own information.
+>
+> If the answer to any of these is no, that is a useful answer and we will record it as such.
+>
+> With thanks,
+> [name, title, company, contact]
+
+---
+
+## 5 — Manitoba 511, New Brunswick 511, 511 Yukon, 511 Newfoundland and Labrador
+
+**Source records:** `mb511`, `nb511`, `yt511`, `nl511` · keys available on registration · no licence
+published alongside any of the four APIs
+
+These four run the same 511 platform as Alberta and are in the same position: the developer page
+documents the key and the "Ten calls every 60 seconds" throttle, and the Developer Resources page
+states no licence. Send the §1 letter to each one, changing only the name of the service.
+
+- **Yukon first.** Its API publishes weight restrictions and bridge restrictions, which matter more
+  for trucks than anything else on the four.
+- **Manitoba** publishes winter-road information.
+- **New Brunswick and Newfoundland and Labrador** publish ferry information.
+
+Ontario is not on this list. Its Developer Resources page puts the data under OGL – Ontario and
+names commercial vendors, so `on511` is verified. It still needs a developer key. One question
+remains for Ontario: its page calls the 511 logo "mandatory", but OGL – Ontario excludes logos from
+what it grants. Ask Ontario 511 in writing where, if anywhere, the logo may be shown. Until they
+answer, show the licence attribution line and no logo.
 
 ---
 

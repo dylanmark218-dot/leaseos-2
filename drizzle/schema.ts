@@ -335,6 +335,16 @@ export const maintenanceDefects = mysqlTable("maintenanceDefects", {
   reportedBy: int("reportedBy"),
   workOrderNumber: varchar("workOrderNumber", { length: 80 }),
   completedAt: timestamp("completedAt"),
+  /* 0169 — the resolution act, recorded on the row it changes. */
+  resolvedAt: timestamp("resolvedAt"),
+  resolvedByUserId: int("resolvedByUserId"),
+  /**
+   * The release that evidenced this resolution, when one was required. Readiness reads it so that
+   * revoking that release is visible as the loss of evidence it is, rather than leaving a defect
+   * resolved on a release that no longer stands.
+   */
+  resolvedByReleaseId: int("resolvedByReleaseId"),
+  resolutionNote: varchar("resolutionNote", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -618,6 +628,26 @@ export const tripStops = mysqlTable("tripStops", {
   ticketNumber: varchar("ticketNumber", { length: 100 }),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /*
+   * 0179 — row provenance (leaseos's 0169, reconciled forward; see
+   * docs/register/MIGRATION_0169_RECONCILIATION.md). Both write paths hold the
+   * actor; neither recorded it.
+   *
+   * `recordedSource` reuses `proposalFields.source` rather than minting a second
+   * vocabulary. NULL means the row-level source is not authoritative here: the
+   * assistant commit path holds provenance per FIELD in `proposalFields`,
+   * reachable through `assistantCommitReceipts`, and a row-level guess would be
+   * less true than a null.
+   *
+   * This is not the per-boundary confirmation `siteBaseline` reads. That is
+   * derived from committed receipts by `boundaryConfirmation.ts`; `updatedAt` and
+   * `updatedByUserId` are what `boundaryEvidence.ts` compares a receipt against.
+   */
+  recordedByUserId: int("recordedByUserId"),
+  recordedSource: mysqlEnum("recordedSource", ["driver_voice", "driver_typed", "gps", "photo_ocr", "system_inferred", "imported", "human_corrected"]),
+  updatedByUserId: int("updatedByUserId"),
+  updatedSource: mysqlEnum("updatedSource", ["driver_voice", "driver_typed", "gps", "photo_ocr", "system_inferred", "imported", "human_corrected"]),
+  updatedAt: timestamp("updatedAt"),
 });
 
 export const operatingZones = mysqlTable("operatingZones", {
@@ -1883,6 +1913,68 @@ export const dispatchRoles = mysqlTable("dispatchRoles", {
   ])
     .default("open")
     .notNull(),
+  // 0170 — whether this slot holds the posting back from `staffed`. `assessStaffing` has always
+  // distinguished required from optional; the data could not say which, so the award passed
+  // `required: true` for every row. Default true preserves exactly that.
+  required: boolean("required").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * 0170 — the vocabulary `dispatchRoles.roleCode` is drawn from.
+ *
+ * `orgRef` NULL means "every tenant may use this", which is the opposite of what NULL means
+ * elsewhere in this schema, where it marks the historical single tenant's own rows. A catalog is
+ * shared vocabulary rather than an owned record, so this table is never read with `orgScopeWhere` —
+ * that helper would hide every global row from a real tenant. See `_core/dispatchRoleCatalog.ts`.
+ */
+export const dispatchRoleTypes = mysqlTable("dispatchRoleTypes", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  roleCode: varchar("roleCode", { length: 60 }).notNull(),
+  displayName: varchar("displayName", { length: 120 }).notNull(),
+  description: varchar("description", { length: 500 }),
+  /** Copied onto a new slot at creation. Never read live — see the module comment. */
+  defaultEquipmentClass: varchar("defaultEquipmentClass", { length: 60 }),
+  defaultTrailerClass: varchar("defaultTrailerClass", { length: 60 }),
+  active: boolean("active").default(true).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  // Persistent generated column: CONCAT(COALESCE(orgRef,'*'), ':', roleCode), unique. Never written
+  // by the application — the database derives it. A nullable composite unique would not have
+  // refused a second global row, which is the bug 0021 found and fixed the same way.
+  roleTypeKey: varchar("roleTypeKey", { length: 140 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * 0171 — append-only assignment history for a role slot.
+ *
+ * Deliberately not `dispatchAuditEvents`: that table's `assignment_approved` doubles as the award
+ * transaction's idempotency record, so assignment history written there would be indistinguishable
+ * from an award to the award's own replay check. An assignment writes here and nowhere else.
+ */
+export const dispatchRoleAssignmentEvents = mysqlTable("dispatchRoleAssignmentEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  roleId: int("roleId").notNull(),
+  postingId: int("postingId").notNull(),
+  jobId: int("jobId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  eventType: mysqlEnum("eventType", [
+    "assignment_created",
+    "assignment_reassigned",
+    "assignment_unassigned",
+  ]).notNull(),
+  fromOperatorId: int("fromOperatorId"),
+  fromUnitId: int("fromUnitId"),
+  fromTrailerId: int("fromTrailerId"),
+  toOperatorId: int("toOperatorId"),
+  toUnitId: int("toUnitId"),
+  toTrailerId: int("toTrailerId"),
+  reason: varchar("reason", { length: 500 }),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 60 }).notNull(),
+  occurredAt: timestamp("occurredAt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -1962,7 +2054,8 @@ export const dispatchEligibilityChecks = mysqlTable(
     // Hash of the facts this verdict depended on. A check is reusable only if
     // it is both recent AND still describes the world — freshness alone is
     // worthless if a defect was raised four minutes after the check ran.
-    fingerprint: varchar("fingerprint", { length: 32 }).notNull(),
+    // 0174 (C1a): widened to 80 for `EF2-` + SHA-256.
+    fingerprint: varchar("fingerprint", { length: 80 }).notNull(),
     // v22.18 — the route this check asked about, so the award-time recompute
     // asks the same question rather than a smaller one.
     // 0152: the capability picture this decision was made on, including what was not evaluated.
@@ -1972,6 +2065,9 @@ export const dispatchEligibilityChecks = mysqlTable(
   automationPolicyJson: text("automationPolicyJson"),
   capabilityVerdict: varchar("capabilityVerdict", { length: 16 }),
   routeApprovalRef: varchar("routeApprovalRef", { length: 64 }),
+  // 0174 (C1a): the rules the findings were decided under, and the acting organization. NULL = legacy / single tenant.
+  ruleSetHash: varchar("ruleSetHash", { length: 64 }),
+  orgRef: varchar("orgRef", { length: 64 }),
     evaluatedAt: timestamp("evaluatedAt").notNull(),
     evaluatedByUserId: int("evaluatedByUserId"),
     usedForAward: boolean("usedForAward").default(false).notNull(),
@@ -1993,6 +2089,17 @@ export const dispatchOverrides = mysqlTable("dispatchOverrides", {
   granted: boolean("granted").notNull(),
   refusalReason: varchar("refusalReason", { length: 400 }),
   requestedAt: timestamp("requestedAt").notNull(),
+  // 0174 (C1a-3): the GRANTOR, separately from the requester. NULL on a granted row = not provably granted.
+  grantedByUserId: int("grantedByUserId"),
+  grantedByRole: varchar("grantedByRole", { length: 40 }),
+  grantedAt: timestamp("grantedAt"),
+  grantReason: text("grantReason"),
+  overrideClass: varchar("overrideClass", { length: 32 }),
+  policyRef: varchar("policyRef", { length: 120 }),
+  policyVersion: int("policyVersion"),
+  scopeJson: text("scopeJson"),
+  expiresAt: timestamp("expiresAt"),
+  orgRef: varchar("orgRef", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

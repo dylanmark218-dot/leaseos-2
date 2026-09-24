@@ -23,15 +23,16 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb, listActiveUserRoleNames } from "./db";
-import { assertCallerOwnsEntity } from "./_core/entityScope";
-import { singleOwnershipDomain } from "./ownershipDomain";
+import { getDb, jobInScope, listActiveUserRoleNames } from "./db";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
+import { assertEntityInScope } from "./_core/entityScope";
 import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, dispatchPostings, operators } from "../drizzle/schema";
-import { loadEnforcementMode } from "./dispatchEnforcementService";
+import { assertReadinessSubjectInScope, checkInScope, dispatchScopeFor, loadEnforcementMode, loadGrantedOverrides } from "./dispatchEnforcementService";
+import { asFinding, resolveOverridePolicy } from "./_core/complianceFinding";
 import { asChecklist, composeReadiness } from "./readinessComposer";
 import { requestOverride, type DispatchBlocker, type OverrideRequest } from "./_core/dispatchReadiness";
 import { awardAssignment } from "./_core/dispatchTransaction";
-import type { GrantedOverride } from "./_core/dispatchAward";
+import { addRole, clearRoleAssignment, createPosting, listRoles, scopeOf, setRoleAssignment } from "./dispatchRoleService";
 
 // v22.18 — a readiness may name the route it is about. Optional, so every
 // caller that does not keeps exactly the behaviour it had.
@@ -48,25 +49,184 @@ async function overrideRoleFor(userId: number): Promise<OverrideRequest["request
   return "driver";
 }
 
+/** A role slot draft, as a caller may describe one. */
+const ROLE_DRAFT = z.object({
+  roleCode: z.string().min(1).max(60),
+  roleLabel: z.string().min(1).max(180).optional(),
+  required: z.boolean().optional(),
+  requiredEquipmentClass: z.string().max(60).nullable().optional(),
+  requiredTrailerClass: z.string().max(60).nullable().optional(),
+});
+
+/**
+ * How long a WARNING_ONLY acknowledgement counts. It cannot outlive the longest check reuse window
+ * `award` accepts (240 min), and a fresh check needs its own acknowledgements anyway.
+ */
+const ACKNOWLEDGEMENT_VALIDITY_MINUTES = 240;
+
+async function scopedDb(userId: number) {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  return { db, scope: await dispatchScopeFor(userId) };
+}
+
+/**
+ * The enforcement setting a caller may read or write. The global row (no entity) governs the legacy
+ * path for everyone, so only the historical single tenant may touch it; an entity row must belong to
+ * the caller's organization.
+ */
+async function assertEnforcementScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: Awaited<ReturnType<typeof dispatchScopeFor>>, financialEntityId: number | null) {
+  if (financialEntityId == null) {
+    if (scope.tenantId !== SINGLE_TENANT_ID) throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement setting is not an organization's to change or read — name your own entity" });
+    return;
+  }
+  await assertEntityInScope(db, financialEntityId, scope);
+}
+
+/** A stored check the caller's organization may act on, or "not found". */
+async function scopedCheck(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, checkId: number, scope: Awaited<ReturnType<typeof dispatchScopeFor>>) {
+  const check = (await db.select().from(dispatchEligibilityChecks).where(eq(dispatchEligibilityChecks.id, checkId)).limit(1))[0];
+  if (!check || !checkInScope(check, scope)) throw new TRPCError({ code: "NOT_FOUND", message: "Eligibility check not found" });
+  return check;
+}
+
 export const dispatchGateRouter = router({
+  /**
+   * The creation door — B12's slot model had none.
+   *
+   * `dispatchPostings` and `dispatchRoles` had zero production INSERTs anywhere in the tree, so the
+   * multi-resource model the schema describes ("a rig move is a lead, winch tractors, a bed truck,
+   * a picker and pilot vehicles, each assigned independently") could only ever be populated by a
+   * test fixture. These three procedures are that door.
+   *
+   * Creating a posting is planning, not awarding: nothing here writes a booking, an award audit
+   * event, or an eligibility check.
+   */
+  createPosting: roleProcedure("dispatch.createPosting")
+    .input(z.object({
+      jobId: z.number().int().positive(),
+      distribution: z.enum(["direct_assignment", "public_internal_bid", "invite_only", "selected_pool", "on_call", "emergency", "subcontractor_bid"]).optional(),
+      roles: z.array(ROLE_DRAFT).max(40).optional(),
+    }))
+    .mutation(async ({ ctx, input }) =>
+      createPosting({
+        jobId: input.jobId, distribution: input.distribution, roles: input.roles,
+        actorUserId: ctx.user.id, scope: await scopeOf(ctx.user.id),
+      })),
+
+  addRole: roleProcedure("dispatch.addRole")
+    .input(z.object({ postingId: z.number().int().positive() }).and(ROLE_DRAFT))
+    .mutation(async ({ ctx, input }) =>
+      addRole({
+        postingId: input.postingId,
+        draft: {
+          roleCode: input.roleCode, roleLabel: input.roleLabel, required: input.required,
+          requiredEquipmentClass: input.requiredEquipmentClass, requiredTrailerClass: input.requiredTrailerClass,
+        },
+        scope: await scopeOf(ctx.user.id),
+      })),
+
+  /**
+   * Every slot for a job, with the precise staffing picture beside the persisted lifecycle value.
+   *
+   * The two are never merged. `planningState` cannot express zero-of-N — from `staffed` its only
+   * legal backward transition is `partially_staffed` — so `staffing` is what a screen should read
+   * and `planningState` is reported as itself.
+   */
+  listRoles: roleProcedure("dispatch.listRoles")
+    .input(z.object({
+      jobId: z.number().int().positive().optional(),
+      postingId: z.number().int().positive().optional(),
+      includeHistory: z.boolean().optional(),
+    }))
+    .query(async ({ ctx, input }) =>
+      listRoles({
+        jobId: input.jobId, postingId: input.postingId, includeHistory: input.includeHistory,
+        scope: await scopeOf(ctx.user.id),
+      })),
+
+  /**
+   * Bind or rebind one slot. Which of the two it is, is server state rather than caller intent — a
+   * caller declaring "this is a reassignment" while the slot was open is describing what they meant
+   * to do, not what happened.
+   *
+   * `.strict()` is load-bearing: an `eligibilityCheckId` is *refused*, not stripped. Silently
+   * ignoring it would let a caller believe they had awarded something, which is the precise
+   * confusion `jobUnits.create` created by accepting one and setting `usedForAward`.
+   */
+  setRoleAssignment: roleProcedure("dispatch.setRoleAssignment")
+    .input(z.object({
+      roleId: z.number().int().positive(),
+      operatorId: z.number().int().positive().nullable(),
+      unitId: z.number().int().positive().nullable(),
+      trailerId: z.number().int().positive().nullable().optional(),
+      /** The head of this slot's own history, as the caller last saw it. Null = "it had none". */
+      expectedLastEventId: z.number().int().positive().nullable(),
+      reason: z.string().max(500).optional(),
+    }).strict())
+    .mutation(async ({ ctx, input }) =>
+      setRoleAssignment({
+        roleId: input.roleId,
+        operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null,
+        expectedLastEventId: input.expectedLastEventId,
+        reason: input.reason ?? null,
+        actorUserId: ctx.user.id,
+        actorRole: await overrideRoleFor(ctx.user.id),
+        scope: await scopeOf(ctx.user.id),
+      })),
+
+  /** Return a slot to `open`. Always takes a reason, and destroys nothing. */
+  clearRoleAssignment: roleProcedure("dispatch.clearRoleAssignment")
+    .input(z.object({
+      roleId: z.number().int().positive(),
+      expectedLastEventId: z.number().int().positive().nullable(),
+      reason: z.string().min(1).max(500),
+    }).strict())
+    .mutation(async ({ ctx, input }) =>
+      clearRoleAssignment({
+        roleId: input.roleId,
+        expectedLastEventId: input.expectedLastEventId,
+        reason: input.reason,
+        actorUserId: ctx.user.id,
+        actorRole: await overrideRoleFor(ctx.user.id),
+        scope: await scopeOf(ctx.user.id),
+      })),
+
   readiness: roleProcedure("dispatch.readiness")
     .input(SUBJECT)
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const { db, scope } = await scopedDb(ctx.user.id);
+      await assertReadinessSubjectInScope(db, scope, { operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null, jobId: input.jobId ?? null });
       const r = await composeReadiness({ operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null, jobId: input.jobId ?? null, routeApprovalRef: input.routeApprovalRef ?? null, loneWorker: input.loneWorker });
-      return { verdict: r.eligibility.verdict, explanation: r.eligibility.explanation, blockers: r.eligibility.blockers, contributions: r.contributions };
+      // 0170 — the P8.1 picture travels with the verdict. The composer has always computed it and
+      // `evaluate` has always stored it, but nothing returned it, so a reader could see that
+      // dispatch was blocked and not which capabilities answered, which passed, and which were
+      // never asked. That last distinction is the whole point of the contract: a verdict assembled
+      // from blockers reads an unevaluated capability's silence as consent, and the only thing that
+      // stops a screen doing the same is being told what was not evaluated.
+      //
+      // Passed through as computed. Nothing is reshaped, renamed, filtered or recombined here —
+      // `capabilities` and `capabilityVerdict` are already the consumer-facing vocabulary, their
+      // `detail` is the same blocker labels this response already carries, and a second shape
+      // would be a second place for the statuses to drift. P8.2's policy snapshot is a separate
+      // contract and deliberately stays off this wire.
+      return { verdict: r.eligibility.verdict, explanation: r.eligibility.explanation, blockers: r.eligibility.blockers, contributions: r.contributions, capabilities: r.capabilities, capabilityVerdict: r.capabilityVerdict };
     }),
 
   evaluate: roleProcedure("dispatch.evaluate")
     .input(SUBJECT.extend({ postingId: z.number().int().positive().nullable().optional(), roleId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const { db, scope } = await scopedDb(ctx.user.id);
       // v21.2 — a check is for a posting or for a direct job; it must say which.
       if (!input.postingId && !input.jobId) throw new TRPCError({ code: "BAD_REQUEST", message: "A check needs a postingId or a jobId" });
       const posting = input.postingId ? (await db.select({ id: dispatchPostings.id, jobId: dispatchPostings.jobId }).from(dispatchPostings).where(eq(dispatchPostings.id, input.postingId)).limit(1))[0] : null;
-      if (input.postingId && !posting) throw new TRPCError({ code: "NOT_FOUND", message: "Posting not found" });
+      // C1a — a posting another organization owns is indistinguishable from one that does not exist.
+      if (input.postingId && (!posting || !(await jobInScope(posting.jobId, scope)))) throw new TRPCError({ code: "NOT_FOUND", message: "Posting not found" });
+      if (posting && input.jobId != null && input.jobId !== posting.jobId) throw new TRPCError({ code: "BAD_REQUEST", message: `Posting ${posting.id} is not for job ${input.jobId}` });
       const now = new Date();
       const jobId = input.jobId ?? posting?.jobId ?? null;
+      // C1a — every identity named must belong to the caller's organization; the org is the server's.
+      await assertReadinessSubjectInScope(db, scope, { operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null, jobId });
       const r = await composeReadiness({ operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null, jobId, routeApprovalRef: input.routeApprovalRef ?? null, loneWorker: input.loneWorker }, now);
       const ins = await db.insert(dispatchEligibilityChecks).values({
         postingId: input.postingId ?? null, jobId, roleId: input.roleId ?? null, operatorId: input.operatorId, unitId: input.unitId, trailerId: input.trailerId ?? null,
@@ -77,65 +237,95 @@ export const dispatchGateRouter = router({
         // 0153: and the policy each capability was decided under, for the same reason.
         automationPolicyJson: JSON.stringify(r.automationPolicy), evaluatedAt: now, evaluatedByUserId: ctx.user.id,
         routeApprovalRef: input.routeApprovalRef ?? null,
+        // 0174: the rules these findings were decided under, and whose check this is.
+        ruleSetHash: r.ruleSetHash, orgRef: scope.tenantId,
       });
       return { checkId: Number(ins[0]?.insertId ?? 0), verdict: r.eligibility.verdict, explanation: r.eligibility.explanation, blockers: r.eligibility.blockers, fingerprint: r.fingerprint, evaluatedAt: now, contributions: r.contributions };
     }),
 
   overrideRequest: roleProcedure("dispatch.overrideRequest")
-    .input(z.object({ checkId: z.number().int().positive(), blockerCode: z.string().min(2).max(80), reason: z.string().min(10).max(600) }))
+    .input(z.object({
+      checkId: z.number().int().positive(), blockerCode: z.string().min(2).max(80), reason: z.string().min(10).max(600),
+      /** C1a — for an APPROVED_POLICY_ONLY finding, the owner-approved override policy relied on. */
+      policyRef: z.string().min(1).max(120).nullable().optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const check = (await db.select().from(dispatchEligibilityChecks).where(eq(dispatchEligibilityChecks.id, input.checkId)).limit(1))[0];
-      if (!check) throw new TRPCError({ code: "NOT_FOUND", message: "Eligibility check not found" });
+      const { db, scope } = await scopedDb(ctx.user.id);
+      const check = await scopedCheck(db, input.checkId, scope);
       const blockers = JSON.parse(check.blockersJson ?? "[]") as DispatchBlocker[];
       const blocker = blockers.find(b => b.code === input.blockerCode);
       if (!blocker) throw new TRPCError({ code: "BAD_REQUEST", message: `Blocker ${input.blockerCode} is not on check ${input.checkId}` });
       const role = await overrideRoleFor(ctx.user.id);
-      // A request against a non-overridable blocker is recorded and refused, not silently dropped.
-      const refusal = blocker.overridable ? null : "This blocker is overridable by no one — the underlying condition must be fixed";
-      await db.insert(dispatchOverrides).values({ eligibilityCheckId: check.id, postingId: check.postingId, blockerCode: input.blockerCode, requestedByUserId: ctx.user.id, requestedByRole: role, reason: input.reason, granted: false, refusalReason: refusal, requestedAt: new Date() });
-      return { checkId: check.id, blockerCode: input.blockerCode, requestable: !refusal, refusal, requiredAuthority: blocker.overrideAuthority ?? null };
+      const now = new Date();
+      // C1a-2 — refused by CLASS, recorded either way. There is no general manager override: an
+      // APPROVED_POLICY_ONLY finding is requestable only under an approved policy that covers it.
+      const finding = asFinding(blocker, check.evaluatedAt);
+      const policy = finding.overrideClass === "APPROVED_POLICY_ONLY" ? resolveOverridePolicy(input.policyRef ?? null, finding, now) : null;
+      const refusal = finding.overrideClass === "NEVER_OVERRIDABLE" ? "This blocker is overridable by no one — the underlying condition must be fixed"
+        : finding.overrideClass === "INFORMATIONAL" ? "This finding is informational — there is nothing to override"
+        : policy && !policy.ok ? policy.refusal
+        : null;
+      await db.insert(dispatchOverrides).values({
+        eligibilityCheckId: check.id, postingId: check.postingId, blockerCode: input.blockerCode, requestedByUserId: ctx.user.id, requestedByRole: role,
+        reason: input.reason, granted: false, refusalReason: refusal, requestedAt: now,
+        overrideClass: finding.overrideClass, policyRef: input.policyRef ?? null, orgRef: scope.tenantId,
+      });
+      return {
+        checkId: check.id, blockerCode: input.blockerCode, requestable: !refusal, refusal, overrideClass: finding.overrideClass,
+        requiredAuthority: finding.overrideClass === "WARNING_ONLY" ? finding.overrideAuthority ?? "manager" : policy?.ok ? policy.policy.grantorMinimumRole : null,
+      };
     }),
 
   overrideGrant: roleProcedure("dispatch.overrideGrant")
     .input(z.object({ checkId: z.number().int().positive(), blockerCode: z.string().min(2).max(80), reason: z.string().min(10).max(600) }))
     .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const check = (await db.select().from(dispatchEligibilityChecks).where(eq(dispatchEligibilityChecks.id, input.checkId)).limit(1))[0];
-      if (!check) throw new TRPCError({ code: "NOT_FOUND", message: "Eligibility check not found" });
+      const { db, scope } = await scopedDb(ctx.user.id);
+      const check = await scopedCheck(db, input.checkId, scope);
       const blocker = (JSON.parse(check.blockersJson ?? "[]") as DispatchBlocker[]).find(b => b.code === input.blockerCode);
       if (!blocker) throw new TRPCError({ code: "BAD_REQUEST", message: `Blocker ${input.blockerCode} is not on check ${input.checkId}` });
       const pending = (await db.select().from(dispatchOverrides).where(and(eq(dispatchOverrides.eligibilityCheckId, check.id), eq(dispatchOverrides.blockerCode, input.blockerCode))).orderBy(desc(dispatchOverrides.requestedAt)).limit(1))[0];
       if (!pending) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No override request on record — a grant answers a request" });
       if (pending.requestedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The requester may not grant their own override" });
       const role = await overrideRoleFor(ctx.user.id);
-      const outcome = requestOverride(blocker, { blockerCode: input.blockerCode, requestedByUserId: ctx.user.id, requestedByRole: role, reason: input.reason });
-      await db.update(dispatchOverrides).set({ granted: outcome.granted, refusalReason: outcome.granted ? null : outcome.refusal }).where(eq(dispatchOverrides.id, pending.id));
+      const now = new Date();
+      // Decided on the GRANTOR's authority, under the policy the request named.
+      const outcome = requestOverride(blocker, { blockerCode: input.blockerCode, requestedByUserId: ctx.user.id, requestedByRole: role, reason: input.reason, policyRef: pending.policyRef }, now);
+      /*
+       * C1a-3 — the grant is recorded as the grantor's act: who, in what role, when, why, under which
+       * policy, for which check and code, and until when. Before 0174 only `granted` flipped, and the
+       * award path then named the REQUESTER as the grantor.
+       */
+      await db.update(dispatchOverrides).set(outcome.granted
+        ? {
+            granted: true, refusalReason: null,
+            grantedByUserId: ctx.user.id, grantedByRole: role, grantedAt: now, grantReason: input.reason,
+            overrideClass: outcome.overrideClass, policyRef: outcome.policy?.policyRef ?? null, policyVersion: outcome.policy?.version ?? null,
+            scopeJson: JSON.stringify({ checkId: check.id, blockerCode: input.blockerCode, orgRef: scope.tenantId }),
+            expiresAt: new Date(now.getTime() + 60_000 * (outcome.policy?.maxValidityMinutes ?? ACKNOWLEDGEMENT_VALIDITY_MINUTES)),
+          }
+        : { granted: false, refusalReason: outcome.refusal }).where(eq(dispatchOverrides.id, pending.id));
       return outcome.granted
-        ? { granted: true as const, checkId: check.id, blockerCode: input.blockerCode, grantedByRole: role }
+        ? { granted: true as const, checkId: check.id, blockerCode: input.blockerCode, grantedByRole: role, grantedByUserId: ctx.user.id, requestedByUserId: pending.requestedByUserId }
         : { granted: false as const, checkId: check.id, blockerCode: input.blockerCode, refusal: outcome.refusal };
     }),
 
   award: roleProcedure("dispatch.award")
     .input(z.object({ checkId: z.number().int().positive(), startsAt: z.coerce.date(), endsAt: z.coerce.date(), maxAgeMinutes: z.number().int().positive().max(240).default(30) }))
     .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const check = (await db.select().from(dispatchEligibilityChecks).where(eq(dispatchEligibilityChecks.id, input.checkId)).limit(1))[0];
-      if (!check) throw new TRPCError({ code: "NOT_FOUND", message: "Eligibility check not found" });
+      const { db, scope } = await scopedDb(ctx.user.id);
+      const check = await scopedCheck(db, input.checkId, scope);
       // v21.2 — a check recorded for a direct job assignment is not a posting award.
-      if (check.postingId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This check is for a direct job assignment — use jobUnits.create with its eligibilityCheckId" });
+      if (check.postingId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This check is for a direct job assignment — award applies to a posting. Assign the job's dispatch roles with dispatch.setRoleAssignment, then award the posting those roles belong to" });
       const posting = (await db.select({ jobId: dispatchPostings.jobId }).from(dispatchPostings).where(eq(dispatchPostings.id, check.postingId)).limit(1))[0];
+      if (!posting || !(await jobInScope(posting.jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: "Posting not found" });
       const now = new Date();
       // The facts are recomputed here, never accepted from the caller.
       // v22.18 — the recompute asks the same question the check asked, route
       // included. Without the route the facts would be a smaller set than the
       // ones the fingerprint was taken over, and every award would refuse.
       const current = await composeReadiness({ operatorId: check.operatorId, unitId: check.unitId, trailerId: check.trailerId, jobId: posting?.jobId ?? null, routeApprovalRef: check.routeApprovalRef }, now);
-      const granted = await db.select().from(dispatchOverrides).where(and(eq(dispatchOverrides.eligibilityCheckId, check.id), eq(dispatchOverrides.granted, true)));
-      const grantedOverrides: GrantedOverride[] = granted.map(g => ({ blockerCode: g.blockerCode, grantedByUserId: g.requestedByUserId, grantedByRole: g.requestedByRole, reason: g.reason ?? "", grantedAt: g.requestedAt }));
+      // C1a-3 — the grantor recorded at grant time. This used to read `requestedByUserId` into the grantor.
+      const grantedOverrides = await loadGrantedOverrides(db, check.id);
       const roles = await listActiveUserRoleNames(ctx.user.id);
       const result = await awardAssignment({
         postingId: check.postingId, roleId: check.roleId, operatorId: check.operatorId, unitId: check.unitId, trailerId: check.trailerId,
@@ -149,14 +339,8 @@ export const dispatchGateRouter = router({
   enforcementSet: roleProcedure("dispatch.enforcementSet")
     .input(z.object({ mode: z.enum(["off", "advisory", "enforced"]), reason: z.string().min(10).max(400), financialEntityId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      // F1.1 — a company sets its own mode; only the caller's own entity is accepted. The global mode (no
-      // entity) governs every company's dispatch — legacy jobs carry no entity — so it is platform
-      // configuration: a platform administrator sets it, or anyone with the permission while the deployment
-      // is still one ownership domain. A tenant never does.
-      if (input.financialEntityId != null) await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);
-      else if (ctx.user.role !== "admin" && !(await singleOwnershipDomain())) throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement mode applies to every organization; it is set by a platform administrator. Set your own company's mode with financialEntityId." });
+      const { db, scope } = await scopedDb(ctx.user.id);
+      await assertEnforcementScope(db, scope, input.financialEntityId ?? null);
       const before = await loadEnforcementMode(input.financialEntityId ?? null);
       await db.insert(dispatchEnforcementSettings).values({ financialEntityId: input.financialEntityId ?? null, mode: input.mode, reason: input.reason, setByUserId: ctx.user.id, setAt: new Date() });
       return { scope: input.financialEntityId ?? "global", previous: before.mode, mode: input.mode };
@@ -165,8 +349,8 @@ export const dispatchGateRouter = router({
   enforcementGet: roleProcedure("dispatch.enforcementGet")
     .input(z.object({ financialEntityId: z.number().int().positive().nullable().optional() }).optional())
     .query(async ({ ctx, input }) => {
-      // F1.1 — another company's own mode is not found; the global mode is platform configuration, readable.
-      if (input?.financialEntityId != null) { const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId); }
+      const { db, scope } = await scopedDb(ctx.user.id);
+      await assertEnforcementScope(db, scope, input?.financialEntityId ?? null);
       return loadEnforcementMode(input?.financialEntityId ?? null);
     }),
 
@@ -174,10 +358,11 @@ export const dispatchGateRouter = router({
   whatAmIMissing: roleProcedure("dispatch.whatAmIMissing")
     .input(z.object({ unitId: z.number().int().positive().nullable().optional(), jobId: z.number().int().positive().nullable().optional() }).optional())
     .query(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const { db, scope } = await scopedDb(ctx.user.id);
       const me = (await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, ctx.user.id)).limit(1))[0];
       if (!me) return { verdict: "unknown" as const, items: [], note: "No operator record is linked to your user" };
+      // C1a — the operator is the caller's own, but the unit and job are named by the caller.
+      await assertReadinessSubjectInScope(db, scope, { operatorId: me.id, unitId: input?.unitId ?? null, jobId: input?.jobId ?? null });
       const r = await composeReadiness({ operatorId: me.id, unitId: input?.unitId ?? null, trailerId: null, jobId: input?.jobId ?? null });
       return { ...asChecklist(r.eligibility), note: undefined };
     }),

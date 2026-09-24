@@ -19,6 +19,8 @@
  *   a judgement call a manager gets to make.
  */
 
+import { APPROVED_OVERRIDE_POLICIES, asFinding, resolveOverridePolicy, type OverrideClass, type OverridePolicy } from "./complianceFinding";
+
 export type EligibilityVerdict =
   | "eligible"
   | "eligible_review"
@@ -518,10 +520,15 @@ export type OverrideRequest = {
     | "manager"
     | "administrator";
   reason: string;
+  /**
+   * C1a — for an APPROVED_POLICY_ONLY finding, the owner-approved policy the grantor relies on.
+   * Without one such a finding is released by nobody: there is no general manager override.
+   */
+  policyRef?: string | null;
 };
 
 export type OverrideOutcome =
-  | { granted: true; blockerCode: string; reason: string }
+  | { granted: true; blockerCode: string; reason: string; overrideClass: OverrideClass; policy: OverridePolicy | null }
   | { granted: false; blockerCode: string; refusal: string };
 
 const ROLE_RANK: Record<OverrideRequest["requestedByRole"], number> = {
@@ -538,17 +545,30 @@ const AUTHORITY_RANK = { dispatcher: 1, manager: 2, administrator: 3 } as const;
  * Attempted overrides are recorded whether or not they succeed — a refused
  * attempt to dispatch a unit with an open critical defect is exactly the sort
  * of thing an auditor wants to see.
+ *
+ * C1a — decided by the finding's override CLASS, never by a bare boolean:
+ *   NEVER_OVERRIDABLE     refused for every role
+ *   APPROVED_POLICY_ONLY  only under a named, in-force, owner-approved policy covering this code,
+ *                         and only by a role that policy names
+ *   WARNING_ONLY          an acknowledgement by the producer's stated authority or above
+ *   INFORMATIONAL         nothing to override
  */
 export function requestOverride(
   blocker: DispatchBlocker,
-  request: OverrideRequest
+  request: OverrideRequest,
+  at: Date = new Date(),
+  policies: readonly OverridePolicy[] = APPROVED_OVERRIDE_POLICIES,
 ): OverrideOutcome {
-  if (!blocker.overridable) {
+  const finding = asFinding(blocker, at);
+  if (finding.overrideClass === "NEVER_OVERRIDABLE") {
     return {
       granted: false,
       blockerCode: blocker.code,
       refusal: `${blocker.label} cannot be overridden by any role. The underlying condition must be resolved.`,
     };
+  }
+  if (finding.overrideClass === "INFORMATIONAL") {
+    return { granted: false, blockerCode: blocker.code, refusal: `${blocker.label} is informational; there is nothing to override.` };
   }
   if (!request.reason?.trim()) {
     return {
@@ -557,7 +577,15 @@ export function requestOverride(
       refusal: "An override requires a stated reason.",
     };
   }
-  const required = blocker.overrideAuthority ?? "manager";
+  if (finding.overrideClass === "APPROVED_POLICY_ONLY") {
+    const resolved = resolveOverridePolicy(request.policyRef, finding, at, policies);
+    if (!resolved.ok) return { granted: false, blockerCode: blocker.code, refusal: resolved.refusal };
+    if (ROLE_RANK[request.requestedByRole] < AUTHORITY_RANK[resolved.policy.grantorMinimumRole]) {
+      return { granted: false, blockerCode: blocker.code, refusal: `${request.requestedByRole} may not act under ${resolved.policy.policyRef}; ${resolved.policy.grantorMinimumRole} or above is required.` };
+    }
+    return { granted: true, blockerCode: blocker.code, reason: request.reason, overrideClass: finding.overrideClass, policy: resolved.policy };
+  }
+  const required = finding.overrideAuthority ?? "manager";
   if (ROLE_RANK[request.requestedByRole] < AUTHORITY_RANK[required]) {
     return {
       granted: false,
@@ -565,7 +593,7 @@ export function requestOverride(
       refusal: `${request.requestedByRole} may not override this; ${required} or above is required.`,
     };
   }
-  return { granted: true, blockerCode: blocker.code, reason: request.reason };
+  return { granted: true, blockerCode: blocker.code, reason: request.reason, overrideClass: finding.overrideClass, policy: null };
 }
 
 /* ===================== freshness at award ===================== */

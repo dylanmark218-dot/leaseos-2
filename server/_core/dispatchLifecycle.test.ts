@@ -30,6 +30,21 @@ describe("posting lifecycle", () => {
     expect(canTransitionPosting("in_progress", "completed")).toBe(true);
   });
 
+  /*
+   * A direct-assignment posting is crewed, not awarded. The bid path reaches staffing through
+   * `awarding` because somebody had to be selected first; a direct posting has nobody to select,
+   * and `awarding` must not stand in for "short a truck".
+   */
+  it("lets a direct posting reach staffing by being crewed, without passing through awarding", () => {
+    expect(canTransitionPosting("direct", "partially_staffed")).toBe(true);
+    expect(canTransitionPosting("direct", "staffed")).toBe(true);
+    expect(canTransitionPosting("direct", "cancelled")).toBe(true);
+    // Still reachable for a direct posting that does go out to bid after all.
+    expect(canTransitionPosting("direct", "awarding")).toBe(true);
+    // And losing the last crew never reads as "we are choosing who gets this".
+    expect(canTransitionPosting("staffed", "awarding")).toBe(false);
+  });
+
   it("allows cancellation from any live state but nothing after it", () => {
     for (const s of [
       "draft",

@@ -380,11 +380,9 @@ d("F1.1 — Organization B cannot touch Organization A's insurance, compliance, 
     expect(list).not.toContain(A.opportunityRef);
   });
 
-  it("refuses the global dispatch mode to a tenant; a platform administrator may set it", async () => {
+  it("refuses the global dispatch mode to an organization, to set or to read (main's rule, C1a)", async () => {
     await expect(callerFor(B.mgr).dispatch.enforcementSet({ mode: "off", reason: "attempt to change every company's dispatch" })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    const admin = appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: B.mgr, role: "admin" } as never });
-    const before = await admin.dispatch.enforcementGet();
-    await expect(admin.dispatch.enforcementSet({ mode: before.mode, reason: "platform administrator restates the global mode" })).resolves.toMatchObject({ scope: "global" });
+    await expect(callerFor(B.mgr).dispatch.enforcementGet()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("leaves A's insurance, calibration, funding and expense records as A left them", async () => {

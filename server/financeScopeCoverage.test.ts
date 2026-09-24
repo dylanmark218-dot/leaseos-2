@@ -33,7 +33,7 @@ const MONEY_NAMESPACES = ["bank", "ar", "period", "gst", "roadside", "purchasing
  */
 const MONEY_KEYS = ["financialEntityId", "invoiceNumber", "billRef", "paymentRef", "creditRef", "assetRef", "tankRef", "fuelRef", "distanceRef", "caseNumber", "expenseRef", "opportunityRef"];
 /** A handler that proves the book itself: the payroll / commercial-setup / commercial-office convention, or the F1.1 generic helper. */
-const SELF_SCOPED = /assertEntityInScope|entityIdsInScope|assertPeriodInScope|bookFor\(|assertCallerOwnsEntity|deviceOwnedByCaller|financeScopeFor|requireOwnExpense/;
+const SELF_SCOPED = /assertEntityInScope|entityIdsInScope|assertPeriodInScope|bookFor\(|assertCallerOwnsEntity|deviceOwnedByCaller|financeScopeFor|requireOwnExpense|assertEnforcementScope/;
 const USES_BOUNDARY = /ctx\.money|caller\.money|requireProvableOwnership/;
 
 /** Not gaps: the customer portal is `externalProcedure`, scoped by the portal identity's own account binding (B21.12). */
