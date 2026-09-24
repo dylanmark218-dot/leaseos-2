@@ -33,7 +33,7 @@ d("the sequence under contention", () => {
   it("mints 150 distinct, contiguous numbers across six concurrent callers", async () => {
     const db = drizzle(pool);
     const sequenceType = `TF${rnd()}`;
-    const runs = await Promise.all(Array.from({ length: 6 }, () => Promise.all(Array.from({ length: 25 }, () => nextTrackingNumber(db, { sequenceType, orgRef: null, orgRef: null })))));
+    const runs = await Promise.all(Array.from({ length: 6 }, () => Promise.all(Array.from({ length: 25 }, () => nextTrackingNumber(db, { sequenceType, orgRef: null })))));
     const all = runs.flat();
     expect(new Set(all.map(a => a.trackingNumber)).size).toBe(150);
     const seqs = all.map(a => a.sequence).sort((a, b) => a - b);
