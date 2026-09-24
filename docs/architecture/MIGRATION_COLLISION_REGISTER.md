@@ -40,8 +40,23 @@ and `0157` is historically used twice. None of those is reused.
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
 
+## Claim: 0185 (SEC-004, 2026-09-24)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | SEC-004 PR | `6f52b57` | gated | none | keeps 0185 |
+
+Chosen by scanning `origin/main` and all 57 remote refs immediately before writing: the highest number
+any of them held was `0184` (`integration-hub-subsystem`, `customer-contract-rates`), so `0185` was the
+first number free everywhere. `claude/integration-hub-subsystem-6nzrkw`'s `0183` also adds
+`webhookDeliveries.claimedAt`/`claimedBy`. When that branch rebases onto this one, its `0183` drops those
+two columns rather than this migration being renumbered (see
+`audit/hardening-2026-09-24/SEC-004-WEBHOOK-DELIVERY-INTEGRITY.md`).
+
 ## Change log
 
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
   No other branch was renumbered.
+* **2026-09-24**: `0185` claimed by SEC-004 (`claude/sec-004-webhook-delivery-integrity`); first number free on
+  `main` and every remote branch. No branch renumbered.
