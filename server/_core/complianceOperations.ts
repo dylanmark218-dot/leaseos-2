@@ -1,5 +1,5 @@
 /**
- * 0174 — training compliance operations: escalation, wallet status, delivery,
+ * 0187 — training compliance operations: escalation, wallet status, delivery,
  * source review, and sweep failures. Pure.
  *
  * Nothing here decides whether a credential satisfies work — that remains the

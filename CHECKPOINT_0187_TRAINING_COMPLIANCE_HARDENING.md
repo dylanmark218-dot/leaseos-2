@@ -1,12 +1,12 @@
-# Checkpoint 0174 — Training Compliance Hardening + Automatic Renewal Operations
+# Checkpoint 0187 — Training Compliance Hardening + Automatic Renewal Operations
 
 Branch: `claude/training-academy-workforce-q3mdse` · Release label unchanged: `LEASEOS_RELEASE` v23.25.
 
 | | |
 |---|---|
 | Starting commit | `6e76007` (0172 checkpoint), merged with `origin/main` as `590fa23` before any change |
-| Ending commit | the commit that adds this file (see `git log`) |
-| Migrations | `0174_training_compliance_operations.sql`, `0175_source_review_history_guards.sql` (trigger-only) |
+| Ending commit | see `git log` on the branch. The work was pushed as `7856aa0`, then merged with `origin/main` (`60f3899`) and its migrations renumbered 0174/0175 → 0187/0188 |
+| Migrations | `0187_training_compliance_operations.sql`, `0188_source_review_history_guards.sql` (trigger-only) |
 | New tables | 1: `scheduledJobRuns` |
 | New procedures | 9 (4 `academy.*`, 5 `trainingWallet.*`) |
 | New permissions | none; existing permissions reused |
@@ -33,7 +33,7 @@ Findings that shaped the work:
 5. **Readiness ID-space confusion.** Readiness looked up `operators.id = userId`. A user id could match an unrelated operator row.
 6. **`stableHash` is not a hex format** (it can emit `-`). Its values are persisted and some are recomputed and compared, so it is frozen (§8).
 7. **Architectural conflict (not touched, reported).** Unmerged branch `claude/driver-portfolio-credential-wallet-ya8928` builds a second credential wallet on `complianceDocuments`. This line's wallet is `workerQualifications` behind the canonical rule. The two must not both merge.
-8. **Migration number collision (reported).** `0172` is used on this branch (training wallet) and on `feat/compliance-c1a-readiness-contract` (dispatch_override_provenance). The names differ and the ledger applies both, but the numbering is ambiguous. 0170 and 0171 are claimed by other branches. This checkpoint uses 0174 and 0175, which are free everywhere inspected.
+8. **Migration numbering (resolved).** C1a moved its migration off `0172` to `0174` when it merged, so this branch keeps `0172`/`0173`. The register (`docs/architecture/MIGRATION_COLLISION_REGISTER.md`) confirms this. This checkpoint's migrations were first written as `0174`/`0175`. After main took `0174`, they were renumbered to `0187`/`0188`: the first numbers free on main and on every open branch (register scan, 2026-09-24). The checkpoint is named after its first migration, **0187**. Neither file was ever applied outside development/CI databases, so nothing in a ledger refers to the old names.
 
 ## 1. Tenant isolation fixes
 
@@ -104,7 +104,7 @@ Other scope fixes:
   - what it governs: course versions, lessons, questions, renewal policies and regulatory profiles.
 - **Actions** (`academy.sourceAct`): REVIEW, then APPROVE by a **different person** (same convention as elsewhere). The proposer may do neither, and a vendor or unknown tier is never trusted. REJECT does not apply to a reviewed source. MARK_SUPERSEDED requires a live successor. Every action requires a note of at least 10 characters and is audited on the Academy chain.
 - **Legacy procedure.** `academy.sourceReview` now maps onto the same rule. A first "reviewed" moves the source to `under_review`; a second person's "reviewed" approves it.
-- **Immutability (0175 triggers).** Once a source is reviewed, rejected or superseded, its authority, title, jurisdiction, edition, URL, tier and both fingerprints cannot change. A reviewed source may only move to superseded, naming a successor. Rejected and superseded are final, and deletes are refused.
+- **Immutability (0188 triggers).** Once a source is reviewed, rejected or superseded, its authority, title, jurisdiction, edition, URL, tier and both fingerprints cannot change. A reviewed source may only move to superseded, naming a successor. Rejected and superseded are final, and deletes are refused.
 - **New editions.** A new edition is a **new source**: `academy.sourceProposeVersion` creates `<ref>@vN`, starting unreviewed with a `sha256HexV1` snapshot. Old attempts stay bound to their course version.
 - **Impact** (`academy.sourceImpact`, also returned on supersede) reports SOURCE_CURRENT, SOURCE_SUPERSEDED_REVIEW_REQUIRED, SOURCE_UNREVIEWED or SOURCE_REJECTED. **Nothing is auto-rewritten.**
 - **Tutor.** It still quotes only `reviewed` sources. `under_review` and `unreviewed` sources are "where to look", and the answer is UNKNOWN / REFER TO AUTHORITY.
@@ -143,7 +143,7 @@ Other scope fixes:
 
 - legacy byte stability, including the persisted TDG/WHMIS profile and policy hashes;
 - the hex format and key-order independence;
-- a source scan that new 0174 integrity files do not use `stableHash`;
+- a source scan that new 0187 integrity files do not use `stableHash`;
 - the inspector package hash and new source snapshot hash use `sha256HexV1`;
 - every call site named in the document.
 
@@ -230,6 +230,8 @@ Re-run: all academy, wallet, workforce, dispatch, readiness, exceptions, audit a
 | 7 | Production build passed; 414 tables; 689 role-authorized procedures; 36 externally-gated; 2 integration-gated |
 | 8 | `LEASEOS_CURRENT_STATE.md` regenerated and current |
 
+**After merging `origin/main` (`60f3899`) and renumbering the migrations to 0187/0188**, the gate was run again on a recreated database. Result: **PASS**. Clean DB; all 174 migration files applied; table parity 416 = 416; `tsc` and test-file typecheck clean (0); **347 test files passed; 5079 tests passed, 3 skipped, 0 failed**; build passed; 694 role-authorized procedures; current-state regenerated and current. Procedure pins after the merge: operational map 676 (main 634 + 33 from 0172 + 9 here), router surface 738 (main 696 + 33 + 9).
+
 The first full run on this tree failed 2 tests (`surfaces.test`, `periodClose.test`). Both came from this checkpoint's own money scoping, fixed as defect 10 below. The run above is the rerun after that fix.
 
 ## 14. Defects discovered and fixed
@@ -248,7 +250,6 @@ The first full run on this tree failed 2 tests (`surfaces.test`, `periodClose.te
 ## 15. Unresolved (reported, not changed)
 
 - **Competing credential wallet** on `claude/driver-portfolio-credential-wallet-ya8928` (`complianceDocuments`-based). One of the two must be dropped before either merges.
-- **Migration 0172 collision** with `feat/compliance-c1a-readiness-contract`. Renumber one before merging both.
 - **Webhook retry sweep** runs on every instance without a lock. It can move onto `scheduledJobRuns` the same way; not changed here to keep scope. `webhookDeliveries` has no unique (subscription, event, attempt).
 - **`tdgCoverageApprove`** uses a `!= null` author guard that lets a null author pass the two-person check.
 - **`siteCloseout` canonicalJson** serializes `Date` as `{}`.
@@ -260,7 +261,7 @@ The first full run on this tree failed 2 tests (`surfaces.test`, `periodClose.te
 
 ## 16. Rollback
 
-- **Code:** revert this checkpoint's commits. The 0172 behaviour returns, and nothing in 0172 depends on 0174 columns being absent.
-- **Schema:** manual SQL is in the headers of `0174_*.sql` and `0175_*.sql` (drop the 0175 triggers first, then the table and columns, then remove the ledger rows).
+- **Code:** revert this checkpoint's commits. The 0172 behaviour returns, and nothing in 0172 depends on 0187 columns being absent.
+- **Schema:** manual SQL is in the headers of `0187_*.sql` and `0188_*.sql` (drop the 0188 triggers first, then the table and columns, then remove the ledger rows).
 - **Data safety:** nothing destructive was run. No hash was rewritten, no credential or source row was edited by a migration, and `scheduledJobRuns` is new.
 - **Runtime-only rollback:** set `RENEWAL_SWEEP_DISABLED=true` to stop the scheduled sweep without a deploy.

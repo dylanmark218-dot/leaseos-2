@@ -1,7 +1,7 @@
 /**
- * 0174 — Training Compliance Hardening + Automatic Renewal Operations, through
+ * 0187 — Training Compliance Hardening + Automatic Renewal Operations, through
  * the real routers and services on a migrated database. The numbers are the
- * checkpoint's required-test list (CHECKPOINT_0174_TRAINING_COMPLIANCE_HARDENING.md).
+ * checkpoint's required-test list (CHECKPOINT_0187_TRAINING_COMPLIANCE_HARDENING.md).
  * Pure rules are in _core/complianceOperations.test.ts and integrityHash.test.ts.
  */
 import { readFileSync } from "node:fs";

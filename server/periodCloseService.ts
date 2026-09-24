@@ -100,7 +100,7 @@ export async function loadCloseReadiness(financialEntityId: number, period: stri
 export async function loadFuelLineFindings(scope: TenantScope): Promise<{ statementsWithFindings: { statementRef: string; provider: string; unmatched: number; ambiguous: number; importedAt: Date }[]; tanksOutOfTolerance: { tankRef: string; name: string; variancePct: number; varianceLitres: number; reason: string }[]; periodsSoftClosed: { financialEntityId: number; period: string; reviewItems: number; since: Date }[] }> {
   const db = await getDb();
   if (!db) return { statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [] };
-  // 0174: every row here is keyed to a financial entity — the money boundary — read before the limits.
+  // 0187: every row here is keyed to a financial entity — the money boundary — read before the limits.
   const inScope = (col: Column) => financialEntityScopeWhere(db as never, col, scope);
   const statements = await db.select().from(fuelStatements).where(inScope(fuelStatements.financialEntityId)).orderBy(desc(fuelStatements.importedAt)).limit(100);
   const withFindings: { statementRef: string; provider: string; unmatched: number; ambiguous: number; importedAt: Date }[] = [];

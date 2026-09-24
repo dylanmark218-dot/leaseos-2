@@ -94,7 +94,7 @@ describe("TutorPanel, PathwayPanel, CompliancePanel", () => {
   });
 });
 
-describe("WalletPanel — 0174 statuses", () => {
+describe("WalletPanel — 0187 statuses", () => {
   it("shows the credential's status and the renewal in motion separately; a company review is not an expiry; a correction request is actionable", () => {
     const w = wallet({
       credentials: [

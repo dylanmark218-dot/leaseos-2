@@ -680,13 +680,6 @@ export async function listJobUnits(scope: TenantScope) {
   return db.select().from(jobUnits).where(jobKeyedScope(db, jobUnits.jobId, scope)).orderBy(desc(jobUnits.joinedAt)).limit(100);
 }
 
-export async function createJobUnit(input: InsertJobUnit) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.insert(jobUnits).values(input);
-  return result[0]?.insertId;
-}
-
 export async function listInspections(scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
@@ -722,7 +715,7 @@ const documentOwnerOrg = sql<string | null>`(
     ELSE NULL
   END)`;
 
-/** 0174 — the same owner rule as a WHERE clause, for readers outside this file (the Exception Centre). */
+/** 0187 — the same owner rule as a WHERE clause, for readers outside this file (the Exception Centre). */
 export function complianceDocumentScopeWhere(scope: TenantScope) {
   return scope.tenantId === SINGLE_TENANT_ID
     ? or(sql`${documentOwnerOrg} IS NULL`, sql`${documentOwnerOrg} = ${SINGLE_TENANT_ID}`)
@@ -730,7 +723,7 @@ export function complianceDocumentScopeWhere(scope: TenantScope) {
 }
 
 /**
- * 0174 — rows keyed to a person: the person is in scope under the same rule as `userInScope` — an
+ * 0187 — rows keyed to a person: the person is in scope under the same rule as `userInScope` — an
  * active member of the organization, or (the single tenant) a person with no active membership anywhere.
  */
 export function memberUserScopeWhere(userIdColumn: MySqlColumn, scope: TenantScope) {

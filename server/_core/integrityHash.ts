@@ -1,5 +1,5 @@
 /**
- * 0174 — the integrity hash with a defined format.
+ * 0187 — the integrity hash with a defined format.
  *
  * `stableHash` (trainingAcademy.ts) is a legacy deterministic fingerprint: eight
  * FNV-style lanes stringified before `>>> 0`, so a lane can print as a negative

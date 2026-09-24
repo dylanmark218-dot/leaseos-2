@@ -1,9 +1,10 @@
--- 0174 — Training compliance hardening + automatic renewal operations.
+-- 0187 — Training compliance hardening + automatic renewal operations.
 --
--- Slot: 0169 is on main (defect_resolution) and on driver-portfolio; 0170-0171 are
--- claimed by active dispatch/auth branches; 0172 is claimed twice (this line's
--- training wallet, and feat/compliance-c1a's dispatch_override_provenance —
--- different names, both applied by the ledger); 0173 is this line's. 0174 is free.
+-- Slot: this branch first numbered this file 0174. Main then took 0174 for
+-- dispatch_override_provenance (C1a). Per docs/architecture/MIGRATION_COLLISION_REGISTER.md, the
+-- unmerged claimant renumbers to the first number free on main and on every open branch.
+-- The register scan on 2026-09-24 found 0170-0186 claimed, so this file is 0187 and its
+-- trigger file is 0188. Neither file was ever applied outside development/CI databases.
 --
 -- One new table. There was no lease, lock or job-run table in LeaseOS — the drain
 -- worker's heartbeat runs the webhook retry sweep on every instance with no
@@ -19,12 +20,12 @@
 --   DROP TABLE `scheduledJobRuns`;
 --   ALTER TABLE `workerQualifications` DROP COLUMN `correctionRequestedAt`, DROP COLUMN `correctionRequestedByUserId`,
 --     DROP COLUMN `correctionNote`, DROP COLUMN `correctsHoldingRef`;
---   (first drop 0175's triggers, then) UPDATE `academySourceRecords` SET `reviewStatus`='unreviewed' WHERE `reviewStatus`='under_review';
+--   (first drop 0188's triggers, then) UPDATE `academySourceRecords` SET `reviewStatus`='unreviewed' WHERE `reviewStatus`='under_review';
 --   ALTER TABLE `academySourceRecords` MODIFY `reviewStatus` enum('unreviewed','reviewed','superseded','rejected') NOT NULL DEFAULT 'unreviewed',
 --     DROP COLUMN `proposedByUserId`, DROP COLUMN `firstReviewedByUserId`, DROP COLUMN `firstReviewedAt`, DROP COLUMN `firstReviewNote`,
 --     DROP COLUMN `approvedByUserId`, DROP COLUMN `approvedAt`, DROP COLUMN `rejectionReason`, DROP COLUMN `supersedesSourceRef`, DROP COLUMN `supersededBySourceRef`;
 --   ALTER TABLE `credentialCompanySettings` DROP COLUMN `escalationPolicyJson`;
---   DELETE FROM the migration ledger the row for this file. Code from 0174 must be reverted first.
+--   DELETE FROM the migration ledger the row for this file. Code from 0187 must be reverted first.
 
 CREATE TABLE `scheduledJobRuns` (
   `id` int AUTO_INCREMENT NOT NULL,

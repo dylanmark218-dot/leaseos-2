@@ -45,7 +45,7 @@ export const surfacesRouter = router({
     .input(z.object({ category: z.string().max(40).optional(), limit: z.number().int().positive().max(500).default(200) }).optional())
     .query(async ({ ctx, input }) => {
       const { grants } = await grantsFor(ctx.user.id);
-      // 0174: the sources are read inside the caller's organization; forTenant stays as a second check on tagged items.
+      // 0187: the sources are read inside the caller's organization; forTenant stays as a second check on tagged items.
       const tenantId = await actingTenant(ctx.user.id);
       const all = deriveExceptions(await loadExceptionSources({ tenantId }));
       let mine = forTenant(visibleTo({ exceptions: all, userId: ctx.user.id, grants }), tenantId);

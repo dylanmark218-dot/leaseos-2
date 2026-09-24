@@ -22,7 +22,7 @@ export function entityScopeWhere(scope: MoneyScope) {
   return scope.tenantId === SINGLE_TENANT_ID ? or(isNull(financialEntities.orgRef), eq(financialEntities.orgRef, SINGLE_TENANT_ID)) : eq(financialEntities.orgRef, scope.tenantId);
 }
 /**
- * 0174 — a query-level filter for a row keyed to a financial entity. An organization sees
+ * 0187 — a query-level filter for a row keyed to a financial entity. An organization sees
  * rows on the entities it owns. The default (single-tenant) scope sees every row that is not
  * on an entity some organization owns — including a row with no entity, or with an entity id
  * that has no entity record, which is how the single tenant's older data looks.

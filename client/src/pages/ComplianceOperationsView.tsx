@@ -1,5 +1,5 @@
 /**
- * 0174 — Compliance Operations: the queues safety/admin work from.
+ * 0187 — Compliance Operations: the queues safety/admin work from.
  *
  * Renewal Queue · Verification Queue · Source Review · System Exceptions.
  * (The External Training Queue is the existing `CompliancePanel` request list.)

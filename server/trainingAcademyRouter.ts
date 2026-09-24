@@ -264,7 +264,7 @@ async function synchronizeCatalog(db: Awaited<ReturnType<typeof dbOrThrow>>, act
 }
 
 
-/* ---- 0174: source review, applied through the pure two-person decision ---- */
+/* ---- 0187: source review, applied through the pure two-person decision ---- */
 async function sourceImpactOf(db: Awaited<ReturnType<typeof dbOrThrow>>, sourceRef: string) {
   const status = impactStatus((await db.select({ s: academySourceRecords.reviewStatus }).from(academySourceRecords).where(eq(academySourceRecords.sourceRef, sourceRef)).limit(1))[0]?.s);
   const versions = await db.select({ id: academyCourseVersions.id, versionRef: academyCourseVersions.versionRef, status: academyCourseVersions.status, title: academyCourses.title })
@@ -503,7 +503,7 @@ export const trainingAcademyRouter = router({
     }),
 
   /**
-   * The original single-step review, kept for callers, now bound by the two-person rule (0174): "reviewed"
+   * The original single-step review, kept for callers, now bound by the two-person rule (0187): "reviewed"
    * takes an unreviewed source into review, and only a different person's second "reviewed" approves it.
    */
   sourceReview: roleProcedure("academy.sourceReview")
@@ -516,7 +516,7 @@ export const trainingAcademyRouter = router({
       return applySourceAction(db, ctx.user.id, { sourceRef: input.sourceRef, action, note: input.note.length >= 10 ? input.note : `${input.note} (legacy review)`, successorRef: input.supersededBy ?? null });
     }),
 
-  /** 0174 — the Source Review queue: every source version with its state, reviewers, successor and what it governs. */
+  /** 0187 — the Source Review queue: every source version with its state, reviewers, successor and what it governs. */
   sourceReviewQueue: roleProcedure("academy.sourceReviewQueue").query(async () => {
     const db = await dbOrThrow();
     const rows = await db.select().from(academySourceRecords).limit(500);
@@ -535,12 +535,12 @@ export const trainingAcademyRouter = router({
     return out;
   }),
 
-  /** 0174 — REVIEW, APPROVE, REJECT or MARK_SUPERSEDED. Two people make a source trusted. */
+  /** 0187 — REVIEW, APPROVE, REJECT or MARK_SUPERSEDED. Two people make a source trusted. */
   sourceAct: roleProcedure("academy.sourceAct")
     .input(z.object({ sourceRef: z.string().min(1).max(96), action: z.enum(["REVIEW", "APPROVE", "REJECT", "MARK_SUPERSEDED"]), note: z.string().min(10).max(2000), successorRef: z.string().min(1).max(96).nullable().optional() }).strict())
     .mutation(async ({ ctx, input }) => applySourceAction(await dbOrThrow(), ctx.user.id, { sourceRef: input.sourceRef, action: input.action, note: input.note, successorRef: input.successorRef ?? null })),
 
-  /** 0174 — a new edition is a new source version; the old one is never edited. It starts unreviewed. */
+  /** 0187 — a new edition is a new source version; the old one is never edited. It starts unreviewed. */
   sourceProposeVersion: roleProcedure("academy.sourceProposeVersion")
     .input(z.object({ supersedesSourceRef: z.string().min(1).max(96), edition: z.string().min(2).max(120), sourceUrl: z.string().url().max(1024), retrievedAt: z.coerce.date(), contentHash: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(), note: z.string().min(10).max(2000) }).strict())
     .mutation(async ({ ctx, input }) => {
@@ -558,7 +558,7 @@ export const trainingAcademyRouter = router({
       return { sourceRef, reviewStatus: "unreviewed" as const, notice: "Unreviewed. Nothing uses it until two people have reviewed it; the prior version stays exactly as it was." };
     }),
 
-  /** 0174 — what a source governs. Nothing is rewritten; each item is told the source's status. */
+  /** 0187 — what a source governs. Nothing is rewritten; each item is told the source's status. */
   sourceImpact: roleProcedure("academy.sourceImpact").input(z.object({ sourceRef: z.string().min(1).max(96) }).strict()).query(async ({ input }) => {
     const db = await dbOrThrow();
     const src = (await db.select().from(academySourceRecords).where(eq(academySourceRecords.sourceRef, input.sourceRef)).limit(1))[0];

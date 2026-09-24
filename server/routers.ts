@@ -130,7 +130,6 @@ import {
   listFacilities,
   listMaintenanceDefects,
   listDeliveries,
-  createJobUnit,
   listJobUnits,
   createInspection,
   listInspections,
@@ -600,6 +599,12 @@ export const appRouter = router({
               : undefined;
           return createTripStop({
             ...input,
+            // 0179: the actor was in hand here and discarded. A stop is evidence
+            // on the spine; `driver_typed` because this procedure is a person
+            // entering it directly — the assistant path stamps neither, because
+            // its provenance is per-field in proposalFields.
+            recordedByUserId: ctx.user.id,
+            recordedSource: "driver_typed" as const,
             waitMinutes:
               input.waitMinutes ??
               minutes(input.arrivedAt, input.setupStartedAt),
@@ -633,7 +638,16 @@ export const appRouter = router({
         { const tid = await tripStopTripId(input.id); if (tid != null && !(await tripInScope(tid, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip stop ${input.id} not found` }); }
         
           const { id, ...values } = input;
-          return updateTripStop(id, values);
+          return updateTripStop(id, {
+            ...values,
+            // 0179: an edit left no trace at all before this — no actor, and the
+            // table carried no updatedAt. The receipt reader compares this stamp
+            // with the newest assistant commit, so a hand edit is never mistaken
+            // for committed evidence.
+            updatedByUserId: ctx.user.id,
+            updatedSource: "driver_typed" as const,
+            updatedAt: new Date(),
+          });
         }),
     }),
     operatingZones: router({
@@ -1493,8 +1507,10 @@ export const appRouter = router({
           // records findings, enforced refuses without a valid check.
           .mutation(async ({ ctx, input }) => {
         // P4.1: scope guard
-        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
-         const r = await createJobUnitGated(input); return r.id; }),
+        const actingScope = await scopeFor(ctx.user.id);
+        if (input?.jobId != null && !(await jobInScope(input.jobId, actingScope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+         // C1a — the check relied on must belong to the caller's organization too.
+         const r = await createJobUnitGated({ ...input, actingScope }); return r.id; }),
       }),
       inspections: router({
         list: roleProcedure("inspections.list").query(async ({ ctx }) => listInspections(await scopeFor(ctx.user.id))),

@@ -1,10 +1,10 @@
 /**
- * 0174 — hashing decisions (docs/HASH_CLASSIFICATION.md).
+ * 0187 — hashing decisions (docs/HASH_CLASSIFICATION.md).
  *
  *  - `stableHash` is frozen byte for byte: persisted values are recomputed and
  *    compared (the TDG profile check refuses issuance on a mismatch).
  *  - New integrity values use `sha256HexV1`: 64 lowercase hex, key-order independent.
- *  - New 0174 integrity code does not reach for `stableHash`.
+ *  - New 0187 integrity code does not reach for `stableHash`.
  */
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";

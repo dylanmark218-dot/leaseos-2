@@ -26,7 +26,7 @@ export async function startProductionWorker(): Promise<ProductionWorker | null> 
     },
   }]);
   const workerId = process.env.WORKFLOW_WORKER_ID ?? `leaseos-${process.pid}`;
-  // 0174 — scheduled renewal sweep, on the drain worker's heartbeat (the same hook that runs the webhook
+  // 0187 — scheduled renewal sweep, on the drain worker's heartbeat (the same hook that runs the webhook
   // retry sweep). Ownership is per time slot in scheduledJobRuns, so any number of instances is safe.
   if (process.env.RENEWAL_SWEEP_DISABLED !== "true") {
     const tick = createRenewalSweepTicker({ db, ownerId: workerId, slotMinutes: Number(process.env.RENEWAL_SWEEP_SLOT_MINUTES ?? 60), log: m => console.warn(`[worker] ${m}`) });

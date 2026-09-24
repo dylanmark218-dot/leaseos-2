@@ -356,7 +356,7 @@ export type PlannedReminder = {
   threshold: number | "expired";
   targetKind: "legal_expiry" | "employer_review";
   escalation: "employee" | "supervisor_safety_admin";
-  /** 0174 — from the company's escalation ladder. */
+  /** 0187 — from the company's escalation ladder. */
   urgency?: EscalationUrgency;
   title: string;
   body: string;
@@ -381,7 +381,7 @@ export function planRenewalReminders(args: {
   settings?: Partial<CompanyCredentialSettings> | null;
   now: Date;
   /**
-   * 0174 — the company's notification ladder for this credential's category. Defaults to
+   * 0187 — the company's notification ladder for this credential's category. Defaults to
    * DEFAULT_ESCALATION. Company policy: it says who is told when, never when anything expires.
    */
   escalation?: EscalationPolicy | null;

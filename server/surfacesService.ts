@@ -51,7 +51,7 @@ async function loadFacilityDirectoryExceptions(db: Awaited<ReturnType<typeof get
 }
 
 /**
- * 0174 — every source is read inside the caller's organization. Before this the loader took no scope
+ * 0187 — every source is read inside the caller's organization. Before this the loader took no scope
  * and every exception (security incidents, financial exceptions, defects, credentials…) reached every
  * organization, filtered only by role. The scope is applied in the query, before any LIMIT, so another
  * company's rows are never fetched. Per source (see EXCEPTION_SOURCE_TENANCY):
@@ -197,7 +197,7 @@ async function loadTrainingWalletExceptions(db: NonNullable<Awaited<ReturnType<t
     renewals.push({ tenantId: t, holdingRef: a.holdingRef, userId: a.userId!, code: a.code, displayName: policy.displayName, targetAt: a.expiresAt, targetKind: "legal_expiry", boundToDispatch: bound.has(a.code) });
   }
   const handoffs = await db.select().from(externalTrainingHandoffs).where(and(inArray(externalTrainingHandoffs.status, ["REQUESTED", "ADMIN_REVIEW", "DOCUMENT_UPLOADED_UNVERIFIED", "UNKNOWN"]), eq(externalTrainingHandoffs.tenantId, scope.tenantId))).limit(1000);
-  // 0174 — renewal-sweep failures from the last two days, this organization's and the ones no tenant could be named for.
+  // 0187 — renewal-sweep failures from the last two days, this organization's and the ones no tenant could be named for.
   const failures = (await recentSweepFailures(db, new Date(now.getTime() - 2 * DAY))).filter(f => f.tenantId == null || f.tenantId === scope.tenantId);
   return {
     trainingSweepFailures: failures.map(f => ({ tenantId: f.tenantId, runRef: f.runRef, failureKind: f.kind, subjectRef: f.tenantId == null ? null : f.subjectRef, detail: f.detail.slice(0, 300), at: f.at })),

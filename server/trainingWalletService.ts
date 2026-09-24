@@ -59,7 +59,7 @@ export function canonicalVerdicts(
   holdings: readonly WalletHolding[],
   requirements: readonly { requirementCode: string; qualificationCode: string; conditionsJson?: string | null }[],
   at: Date,
-  /** 0174 — open training handoffs, for the explanation only. They never change a verdict. */
+  /** 0187 — open training handoffs, for the explanation only. They never change a verdict. */
   handoffs: readonly { qualificationCode: string; status: HandoffStatus; appointmentAt: Date | null }[] = [],
 ): Map<string, HeldVerdict & { recoveryLabel: string | null; scope: RequirementScope }> {
   const out = new Map<string, HeldVerdict & { recoveryLabel: string | null; scope: RequirementScope }>();
@@ -98,9 +98,9 @@ export async function syncCredentialPolicies(db: Db): Promise<{ created: number;
 export type TenantSettings = {
   thresholds: number[] | null;
   perCode: Record<string, Partial<CompanyCredentialSettings>>;
-  /** 0174 — the company's escalation ladders by credential category (company policy). */
+  /** 0187 — the company's escalation ladders by credential category (company policy). */
   escalation: Partial<Record<CredentialCategory | "default", EscalationPolicy>> | null;
-  /** 0174 — settings that could not be read. Reported as a system failure, never silently defaulted away. */
+  /** 0187 — settings that could not be read. Reported as a system failure, never silently defaulted away. */
   malformed: string[];
 };
 export async function tenantSettings(db: Db, tenantId: string): Promise<TenantSettings> {
@@ -132,7 +132,7 @@ export async function deliverReminders(
   opts: { channels?: readonly DeliveryChannel[]; adapters?: Partial<Record<Exclude<DeliveryChannel, "IN_APP">, DeliveryAdapter>> } = {},
 ): Promise<{ sent: PlannedReminder[]; suppressed: PlannedReminder[]; external: DeliveryOutcome[] }> {
   if (!planned.length) return { sent: [], suppressed: [], external: [] };
-  // 0174: in-app is the canonical record. External channels (EMAIL/SMS) go through
+  // 0187: in-app is the canonical record. External channels (EMAIL/SMS) go through
   // adapters; none is configured in this codebase, so they report not_configured and
   // their failure never removes or blocks the in-app notification.
   const channels = opts.channels ?? ["IN_APP"];

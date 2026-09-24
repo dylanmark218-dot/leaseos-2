@@ -1,6 +1,6 @@
 # Hash classification — `stableHash` call sites and the migration plan
 
-Checkpoint 0174. This document classifies every use of the Academy's legacy
+Checkpoint 0187. This document classifies every use of the Academy's legacy
 `stableHash` (`server/_core/trainingAcademy.ts`) and states what replaces it for
 new work. **The `stableHash` implementation is unchanged and pinned by tests**
 (`server/integrityHash.test.ts`).
@@ -29,7 +29,7 @@ issuance, mark every module completion stale, and break the Academy audit chain.
 
 The `V1` names the encoding. A different encoding would be a new function, never an edit to this one.
 
-Used by (0174): the inspector package hash (`academy.inspectorRequestAssemble`) and the snapshot hash of a proposed new source version (`academy.sourceProposeVersion`).
+Used by (0187): the inspector package hash (`academy.inspectorRequestAssemble`) and the snapshot hash of a proposed new source version (`academy.sourceProposeVersion`).
 
 ## Classes
 
@@ -51,7 +51,7 @@ Used by (0174): the inspector package hash (`academy.inspectorRequestAssemble`) 
 | 4 | `trainingAcademyRouter.ts` install: `courseHash` / `_core/trainingAcademyCatalog.ts` `courseSeedHash` | Course version content hash; decides whether an install creates a new version | **A** |
 | 5 | `trainingAcademyRouter.ts` `audit()` `eventHash` | Academy audit chain (`academyAuditEvents.previousHash → eventHash`) | **B** |
 | 6 | `trainingWalletService.ts` `academyAudit()` `eventHash` | Same chain, written by wallet, handoff, source and sweep events | **B** |
-| 7 | `trainingAcademyRouter.ts` seeded source `snapshotHash` | `academySourceRecords.snapshotHash` for installed seed sources (immutable once decided, 0175 trigger) | **C** |
+| 7 | `trainingAcademyRouter.ts` seeded source `snapshotHash` | `academySourceRecords.snapshotHash` for installed seed sources (immutable once decided, 0188 trigger) | **C** |
 | 8 | `trainingAcademyRouter.ts` block `contentHash`, question `questionHash` | Content fingerprints on installed blocks and questions | **C** |
 | 9 | `trainingAcademyRouter.ts` certificate `policySnapshotHash`, `provisionalHash`, employer/employee signature hashes, `finalHash` | Certificate and signature payload hashes stored on certificates and signatures | **C** (printed on certificates; treat as frozen) |
 | 10 | `trainingAcademyRouter.ts` statement-of-experience `payloadHash` | Stored on the statement | **C** |
@@ -61,7 +61,7 @@ Used by (0174): the inspector package hash (`academy.inspectorRequestAssemble`) 
 | 14 | `_core/routingCompiler.ts` local `stableHash(value: string)` | Route profile id | **E** |
 | 15 | `_core/dispatchAward.ts` local `stableHash(value: string)` | Evaluation and award ids | **E** |
 
-No **new** 0174 integrity code imports `stableHash`: `integrityHash.ts`,
+No **new** 0187 integrity code imports `stableHash`: `integrityHash.ts`,
 `complianceOperations.ts`, `renewalOperations.ts` and the new source-version
 path. This is enforced by a source scan in `server/integrityHash.test.ts`.
 `academyAudit` (site 6) still writes the chain with `stableHash`, because it
@@ -69,7 +69,7 @@ extends the existing chain (class B).
 
 ## Migration plan (not executed; no destructive conversion)
 
-1. **Now (0174).** New integrity values use `sha256HexV1`. Every legacy value stays byte-for-byte as stored. Readers tell the two apart by format (`isSha256HexV1`); the Source Review screen labels a fingerprint `sha256` or `legacy-stableHash`.
+1. **Now (0187).** New integrity values use `sha256HexV1`. Every legacy value stays byte-for-byte as stored. Readers tell the two apart by format (`isSha256HexV1`); the Source Review screen labels a fingerprint `sha256` or `legacy-stableHash`.
 2. **Tag before switching.** Before any class A, B or C site moves to SHA-256, add a nullable `hashAlgorithm` column (`'stableHash-legacy' | 'sha256-v1'`) to that table. Existing rows are backfilled to `'stableHash-legacy'` in an additive migration; values are not rewritten.
 3. **Class A.** Compute both for a release: compare with the algorithm the row is tagged with, and write new rows with `sha256-v1`. A profile, policy or module whose content changes gets a new version (the existing rule), so no old row ever needs re-hashing.
 4. **Class B (audit chain).** Start a new chain segment. The first `sha256-v1` event's `previousHash` is the last legacy `eventHash`, verbatim, and the verifier switches algorithm at the tagged boundary. The legacy segment is verified with `stableHash` forever.

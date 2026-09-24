@@ -92,7 +92,7 @@ async function awaitingCertificate(db: Db, userId: number, code: string) {
 const dayOf = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
 
 /**
- * 0174 — handoff → certificate closure, run when a holding is verified.
+ * 0187 — handoff → certificate closure, run when a holding is verified.
  * Steps the handoff through the transition rule (never by assertion):
  * TRAINING_COMPLETED / DOCUMENT_PENDING → DOCUMENT_UPLOADED_UNVERIFIED → VERIFIED → ACTIVE
  * (ACTIVE only when the canonical rule now counts the credential as held).
@@ -127,7 +127,7 @@ async function recordHolding(db: Db, args: { callerId: number; subjectId: number
   if (policy?.lifecycle === "no_expiry_endorsement" && args.input.expiresAt) throw new TRPCError({ code: "BAD_REQUEST", message: `${policy.displayName} has no renewal by rule; do not record a fabricated expiry` });
   const holdingRef = ref("WQ");
   const now = new Date();
-  // 0174: an upload for a code with exactly one handoff waiting on its certificate links to it,
+  // 0187: an upload for a code with exactly one handoff waiting on its certificate links to it,
   // so the credential can be traced back to the request that produced it.
   const handoffRef = args.input.handoffRef ?? (await awaitingCertificate(db, args.subjectId, args.input.code))?.handoffRef;
   await db.insert(workerQualifications).values({
@@ -245,7 +245,7 @@ export const trainingWalletRouter = router({
       if (row.userId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Nobody may verify their own credential" });
       if (row.verificationState !== "unverified" && row.verificationState !== "extracted") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Credential is already ${row.verificationState}` });
       if (row.correctionRequestedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A correction was requested on this upload; verify the corrected record the employee submits" });
-      // 0174: the verifier confirms what was uploaded; they cannot edit it into validity. A claimed
+      // 0187: the verifier confirms what was uploaded; they cannot edit it into validity. A claimed
       // date the document does not bear is a correction request, not a verifier's edit. A date the
       // upload left blank is read off the document by the verifier (and audited as such).
       for (const [k, claimed, read] of [["issue date", row.issuedAt, input.issuedAt], ["expiry date", row.expiresAt, input.expiresAt]] as const) {
@@ -293,7 +293,7 @@ export const trainingWalletRouter = router({
     }),
 
   /**
-   * 0174 — "Uploaded — Verification Required". Everything the verifier needs to decide
+   * 0187 — "Uploaded — Verification Required". Everything the verifier needs to decide
    * without leaving the screen, scoped to the caller's organization at the query.
    */
   verificationQueue: roleProcedure("trainingWallet.verificationQueue").query(async ({ ctx }) => {
@@ -396,7 +396,7 @@ export const trainingWalletRouter = router({
       const holdings = (await holdingRowsFor(db, [input.userId])).map(asHolding);
       const open = await db.select({ code: externalTrainingHandoffs.qualificationCode, status: externalTrainingHandoffs.status, appointmentAt: externalTrainingHandoffs.appointmentAt }).from(externalTrainingHandoffs).where(and(eq(externalTrainingHandoffs.userId, input.userId), inArray(externalTrainingHandoffs.qualificationCode, input.codes))).limit(100);
       const results = operationalView({ holdings, codes: input.codes, at: input.at ?? new Date(), scope: { interprovincial: !!input.interprovincial } });
-      // 0174: the renewal in motion is explanation only; `state` is the canonical rule's answer, unchanged.
+      // 0187: the renewal in motion is explanation only; `state` is the canonical rule's answer, unchanged.
       return { userId: input.userId, results: results.map(r => ({ ...r, renewalProgress: r.state === "held" ? null : handoffRecoveryNote(open.find(h => h.code === r.code && !TERMINAL.has(h.status))) })) };
     }),
 
@@ -420,7 +420,7 @@ export const trainingWalletRouter = router({
     .input(z.object({
       thresholds: z.array(z.number().int().min(1).max(730)).min(1).max(12),
       perCode: z.record(z.string().regex(/^[A-Z0-9_]+$/), z.object({ employerReviewMonths: z.number().int().min(1).max(120).nullable().optional(), recommendedRefresherMonths: z.number().int().min(1).max(120).nullable().optional() })).optional(),
-      /** 0174 — escalation ladders by credential category (or "default"). Omitted = unchanged; {} = LeaseOS defaults. */
+      /** 0187 — escalation ladders by credential category (or "default"). Omitted = unchanged; {} = LeaseOS defaults. */
       escalation: z.partialRecord(z.enum(["default", ...ESCALATION_CATEGORIES]), z.object({
         steps: z.array(z.object({ threshold: z.union([z.number().int(), z.literal("expired")]), recipients: z.array(z.enum(["employee", "supervisor", "safety", "hr", "management"])).min(1).max(5), urgency: z.enum(["awareness", "notice", "urgent", "critical", "exception"]) }).strict()).min(1).max(12),
       }).strict()).optional(),
@@ -456,12 +456,12 @@ export const trainingWalletRouter = router({
     const db = await dbOrThrow();
     await syncCredentialPolicies(db);
     const tenantId = await tenantOf(db, ctx.user.id);
-    // 0174: the same engine call the production worker makes on its schedule.
+    // 0187: the same engine call the production worker makes on its schedule.
     const r = await runRenewalSweepForTenant(db, tenantId, input?.at ?? new Date(), ctx.user.id);
     return { planned: r.planned, sent: r.notificationsCreated, suppressed: r.suppressed, sentKeys: r.sentKeys, inspected: r.inspected, actionable: r.actionable, failures: r.failures };
   }),
 
-  /** 0174 — the Renewal Queue: who, what, when, readiness impact, handoff, last reminder, next escalation. */
+  /** 0187 — the Renewal Queue: who, what, when, readiness impact, handoff, last reminder, next escalation. */
   renewalQueue: roleProcedure("trainingWallet.renewalQueue").input(z.object({ at: z.coerce.date().optional() }).optional()).query(async ({ ctx, input }) => {
     const db = await dbOrThrow();
     const tenantId = await tenantOf(db, ctx.user.id);
@@ -471,7 +471,7 @@ export const trainingWalletRouter = router({
     return { rows: rows.map(r => ({ ...r, employeeName: people.find(p => p.id === r.userId)?.name ?? null })), notice: COMPANY_POLICY_LABEL };
   }),
 
-  /** 0174 — the scheduled sweep's own health: recent runs and whether any failed. */
+  /** 0187 — the scheduled sweep's own health: recent runs and whether any failed. */
   sweepRuns: roleProcedure("trainingWallet.sweepRuns").query(async () => {
     const db = await dbOrThrow();
     return { runs: await recentSweepRuns(db, 20), notice: "A failed or partial run is a SYSTEM FAILURE — it says nothing about whether any credential is valid." };

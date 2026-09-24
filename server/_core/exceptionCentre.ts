@@ -101,7 +101,7 @@ export type ExceptionSources = {
   walletRenewals?: { tenantId: string; holdingRef: string; userId: number; code: string; displayName: string; targetAt: Date; targetKind: "legal_expiry" | "employer_review"; boundToDispatch: boolean }[];
   walletUnverified?: { tenantId: string; holdingRef: string; userId: number; code: string; recordedAt: Date }[];
   /**
-   * 0174 — renewal-sweep failures. A SYSTEM failure: the sweep could not evaluate or notify. It says
+   * 0187 — renewal-sweep failures. A SYSTEM failure: the sweep could not evaluate or notify. It says
    * nothing about whether the credential is valid, and is never presented as expiry or as unknown
    * qualification.
    */
@@ -458,7 +458,7 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
       });
     }
   }
-  // 0174 — the renewal machinery failed. SYSTEM FAILURE: it says nothing about the credential.
+  // 0187 — the renewal machinery failed. SYSTEM FAILURE: it says nothing about the credential.
   for (const f of s.trainingSweepFailures ?? []) {
     out.push({
       key: `sweep-failure:${f.runRef}:${f.failureKind}:${f.subjectRef ?? "-"}`, ...(f.tenantId ? { tenantId: f.tenantId } : {}), category: "workforce", severity: "high",
@@ -574,7 +574,7 @@ export function automationPolicyExceptions(
 }
 
 /* ------------------------------------------------------------------ */
-/* 0174 — tenancy of every source, stated rather than inferred         */
+/* 0187 — tenancy of every source, stated rather than inferred         */
 /* ------------------------------------------------------------------ */
 
 /**

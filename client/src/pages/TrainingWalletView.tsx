@@ -70,7 +70,7 @@ export type WalletCredential = {
   verificationState: string; verifiedAt: Date | string | null; boundary: string | null; lifecycle: string; current: boolean; supersededByHoldingRef: string | null;
   correction?: { requestedAt: Date | string; note: string | null } | null;
 };
-/** 0174 — the credential's own status and the renewal in motion are separate fields; a request never extends validity. */
+/** 0187 — the credential's own status and the renewal in motion are separate fields; a request never extends validity. */
 export type WalletStatusCode = "VALID" | "EXPIRING" | "EXPIRED" | "UNVERIFIED" | "COMPANY_REVIEW_DUE" | "UNKNOWN";
 export type RenewalStatusCode = "RENEWAL_REQUESTED" | "BOOKED" | "AWAITING_DOCUMENT" | "NONE";
 export type WalletExpiring = {

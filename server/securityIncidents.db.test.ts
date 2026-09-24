@@ -76,7 +76,7 @@ d("a lost tablet with personal information on it", () => {
     const { loadExceptionSources } = await import("./surfacesService");
     const all = deriveExceptions(await loadExceptionSources({ tenantId: a }));
     expect(all.find(x => x.key === `security-assess:${opened.incidentRef}`)?.action).toMatch(/uncertain is an answer; pending is not/);
-    // 0174: the Exception Centre read for organization B never fetches A's incident.
+    // 0187: the Exception Centre read for organization B never fetches A's incident.
     const other = deriveExceptions(await loadExceptionSources({ tenantId: b }));
     expect(other.some(x => x.key.includes(opened.incidentRef))).toBe(false);
     await expect(callerFor(outsider).securityIncidents.view({ incidentRef: opened.incidentRef })).rejects.toThrow(/not found/);

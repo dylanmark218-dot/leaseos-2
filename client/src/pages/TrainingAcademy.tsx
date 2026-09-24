@@ -84,7 +84,7 @@ export default function TrainingAcademy() {
   const pathway = trpc.trainingWallet.pathway.useQuery();
   const dashboard = trpc.trainingWallet.complianceDashboard.useQuery(undefined, { retry: false });
   const queue = trpc.trainingWallet.handoffQueue.useQuery(undefined, { retry: false, enabled: dashboard.isSuccess });
-  // 0174 — Compliance Operations queues. Each query is permission-gated server-side; a 403 just hides its panel.
+  // 0187 — Compliance Operations queues. Each query is permission-gated server-side; a 403 just hides its panel.
   const ops = { enabled: dashboard.isSuccess, retry: false } as const;
   const renewalQueue = trpc.trainingWallet.renewalQueue.useQuery(undefined, ops);
   const verificationQueue = trpc.trainingWallet.verificationQueue.useQuery(undefined, ops);
@@ -123,7 +123,7 @@ export default function TrainingAcademy() {
       documentRef: f.documentRef || undefined, backDocumentRef: f.backDocumentRef || undefined,
       restrictions: f.restrictions ? f.restrictions.split(",").map(x => x.trim()).filter(Boolean) : undefined,
     };
-    // 0174: a correction is a new record naming the one it corrects; the earlier upload is not edited.
+    // 0187: a correction is a new record naming the one it corrects; the earlier upload is not edited.
     if (f.correctsHoldingRef) submitCorrection.mutate({ ...record, correctsHoldingRef: f.correctsHoldingRef });
     else recordOwn.mutate(record);
   };

@@ -1,8 +1,13 @@
 /**
  * The Readiness Panel — the container.
  *
- * It resolves which unit and driver the job is actually assigned to, asks `dispatch.readiness`
- * about exactly that pair, and hands the answer to the view unchanged. Two rules it keeps:
+ * It resolves which crew the job is actually assigned to, asks `dispatch.readiness` about exactly
+ * that pairing, and hands the answer to the view unchanged. Three rules it keeps:
+ *
+ *   the subject comes from the canonical slot model and from nowhere else. PR #5 had to read
+ *   `jobUnits.list` because `dispatchRoles` had no production door and no reader; now it has both,
+ *   and a readiness verdict computed from the legacy worklog table while assignments are written to
+ *   slots would be a verdict about whoever last filed hours, not about the crew on the job;
  *
  *   a failed query is a failure on screen, never a stale or cached answer — the query is not
  *   allowed to keep a previous result to fall back on, and an error outranks any data held;
@@ -14,24 +19,35 @@
 import { trpc } from "@/lib/trpc";
 import { DispatchReadinessView, type ReadinessPanelState } from "./DispatchReadinessView";
 
-export default function DispatchReadiness({ jobId }: { jobId: number }) {
+export default function DispatchReadiness({ jobId, as }: { jobId: number; as?: "page" | "panel" }) {
   const validJob = Number.isInteger(jobId) && jobId > 0;
 
   /*
-   * `dispatch.readiness` takes an operator and a unit, not a job, so the assignment has to be
-   * read first. `jobUnits.list` is behind `dispatch.read` — the same permission the readiness
-   * query itself uses — so this adds no reach a dispatcher did not already have.
+   * `dispatch.readiness` takes an operator and a unit, not a job, so the binding has to be read
+   * first. `dispatch.listRoles` is behind `dispatch.read` — the same permission the readiness query
+   * itself uses — so this adds no reach a dispatcher did not already have, and unlike the read it
+   * replaces it is keyed by job rather than returning a capped, job-blind window.
    */
-  const assignments = trpc.fieldRoute.identity.jobUnits.list.useQuery(undefined, { enabled: validJob });
-  const assignment = (assignments.data ?? [])
-    .filter(a => a.jobId === jobId && a.operatorId != null)[0] ?? null;
+  const roles = trpc.dispatch.listRoles.useQuery({ jobId }, { enabled: validJob });
 
-  const subject = assignment && assignment.operatorId != null
-    ? { operatorId: assignment.operatorId, unitId: assignment.unitId ?? null, trailerId: null }
+  /*
+   * The first filled slot is the subject. A posting with several filled slots has several crews and
+   * therefore several readiness questions; this panel answers one, and shows which.
+   */
+  const bound = (roles.data?.roles ?? [])
+    .filter(r => r.status === "assigned" && r.operatorId != null)[0] ?? null;
+
+  const subject = bound && bound.operatorId != null
+    ? { operatorId: bound.operatorId, unitId: bound.unitId ?? null, trailerId: bound.trailerId ?? null }
     : null;
 
   const readiness = trpc.dispatch.readiness.useQuery(
-    { operatorId: subject?.operatorId ?? 1, unitId: subject?.unitId ?? null, trailerId: null, jobId },
+    {
+      operatorId: subject?.operatorId ?? 1,
+      unitId: subject?.unitId ?? null,
+      trailerId: subject?.trailerId ?? null,
+      jobId,
+    },
     {
       enabled: subject !== null,
       // A readiness is a point-in-time judgement. It is never served from cache, and a failure
@@ -41,14 +57,14 @@ export default function DispatchReadiness({ jobId }: { jobId: number }) {
   );
 
   const refresh = () => {
-    void assignments.refetch();
+    void roles.refetch();
     if (subject) void readiness.refetch();
   };
 
   const state: ReadinessPanelState =
     !validJob ? { kind: "failed", message: `"${String(jobId)}" is not a job.` }
-    : assignments.isError ? { kind: "failed", message: assignments.error.message }
-    : assignments.isPending ? { kind: "loading" }
+    : roles.isError ? { kind: "failed", message: roles.error.message }
+    : roles.isPending ? { kind: "loading" }
     : readiness.isError ? { kind: "failed", message: readiness.error.message }
     : subject && readiness.isPending ? { kind: "loading" }
     : { kind: "loaded", result: readiness.data ?? null };
@@ -60,8 +76,9 @@ export default function DispatchReadiness({ jobId }: { jobId: number }) {
       state={state}
       capabilities={readiness.data?.capabilities ?? null}
       capabilityVerdict={readiness.data?.capabilityVerdict ?? null}
+      as={as}
       onRefresh={refresh}
-      refreshing={assignments.isFetching || readiness.isFetching}
+      refreshing={roles.isFetching || readiness.isFetching}
     />
   );
 }

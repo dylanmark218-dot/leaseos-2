@@ -70,7 +70,7 @@ d("destination acceptance from the loads' latest assessments", () => {
     expect(ok.assessments.every(a => !a.blocking)).toBe(true);
     // Exception Centre: the Virden conflict and the regulator-evidence and duplicate rows surface with their permissions.
     await callerFor(safety).facilityDirectory.seedBrief();
-    const sources = await loadExceptionSources({ tenantId: "default" });   // 0174: the facility directory is global reference data, present in every scope
+    const sources = await loadExceptionSources({ tenantId: "default" });   // 0187: the facility directory is global reference data, present in every scope
     expect(sources.facilityDirectory?.conflicting.some(c => c.facilityKey === "virden-facility-conflicting")).toBe(true);
     const xs = deriveExceptions(sources);
     expect(xs.find(x => x.key === "facility-conflict:virden-facility-conflicting")).toMatchObject({ category: "dispatch", severity: "high", requiredPermission: "facility.directory.review" });

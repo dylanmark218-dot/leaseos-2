@@ -1,6 +1,6 @@
 -- Compound bodies: this file contains trigger DDL and nothing else.
 --
--- 0175 — a decided source is history.
+-- 0188 — a decided source is history.
 --
 -- Once a source version is reviewed (trusted), rejected or superseded, the facts a
 -- reviewer looked at — authority, title, jurisdiction, edition, URL, tier and both
