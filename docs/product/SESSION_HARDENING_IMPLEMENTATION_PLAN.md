@@ -122,6 +122,37 @@ Strategy: a **cutover instant** `LEGACY_SESSION_CUTOFF`. A token with no `family
 
 Then the 14-mutation battery and the complete clean-DB `scripts/ci-gate.sh` on a uniquely named database.
 
+### S1-I — Browser session refresh integration
+
+**Added after S1-H, because S1-B created the regression S1-I closes.** Cutting the access
+credential to fifteen minutes gave the server a refresh endpoint that nothing in the browser
+called, so a signed-in user dropped into the OAuth portal a quarter of an hour after signing in.
+S1 is not merge-ready while that is true.
+
+The integration handles **no credential**: `auth.refresh` writes the new access token to an
+httpOnly cookie and returns `{ok:true}`, and `sdk.authenticateRequest` reads the cookie before the
+Bearer fallback, so the retry simply works. What the client must get right is control flow.
+
+**Implementation:** `client/src/lib/sessionRefresh.ts` — a tRPC link above `httpBatchLink`, plus a
+module-scope single-flight gate; wired in `client/src/main.tsx`.
+
+**Tests (26):** valid credential does not refresh · expired credential refreshes · one retry, and
+only one · refreshed request avoids the signed-out path · rejected / revoked / expired /
+reuse-detected refresh all end the session rather than recovering · a throwing refresh releases the
+caller · five concurrent expiries produce exactly one rotation · all waiters resume together · a
+rejected rotation releases every waiter · the gate reopens afterwards · non-authentication failures
+never refresh · `auth.logout` / `auth.refresh` / `auth.revokeAll` are excluded by name · a
+repeatedly-unauthorized request stops instead of looping · the module contains no verifier, cookie
+parsing or credential storage.
+
+**Mutations (3):** MR1 single-flight disabled → the five-concurrent test fails · MR2 retry-once
+guard removed → the loop tests fail · MR3 failed refresh treated as success → all four
+cannot-recover tests fail.
+
+**OD-S5 is untouched.** The sessionStorage Bearer mirror is not redesigned here. Where cookies are
+blocked the refresh cookie is not sent either, so those surfaces fall back to the OAuth path
+exactly as before S1 — pre-existing behaviour preserved, not a decision ratified.
+
 ---
 
 ## 5. Mutations (14)
