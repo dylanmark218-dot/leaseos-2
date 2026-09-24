@@ -694,3 +694,539 @@ is item 9 of §18: the plan document the moratorium cites was absent from this r
 moratorium whose primary text is missing is enforced by quotation. The recovered plan's ordering
 (per-boundary confirmation → the four duplications → `offlineCapability` → the rest of the spine)
 is the order this document assumed.
+
+---
+
+## 22. Tools versus Skills
+
+**Documentation only, added 2026-09-24 against `6f52b57`.** No code, type, table, loader or
+registry was added for this section. Since the survey above was written, SPINE item 1 has
+landed as a resolver (`server/_core/boundaryConfirmation.ts`, `boundaryEvidence.ts`; see
+`SPINE_ITEM1_BOUNDARY_CONFIRMATION.md`). Its reader waits on migration `0169` and it is not
+wired. The moratorium still stands. As in §§1–21, `server/_core/ai/` means the PR #7 branch
+(`claude/secretary-model-dialogue-yzszcv`): it is still absent from `main` and from this branch.
+
+### 22.1 The rule
+
+> **A Tool carries authority and executes. A Skill carries procedure and judgement and grants
+> zero authority.**
+
+| Term | Definition | Question it answers |
+|---|---|---|
+| **Tool** | One narrowly defined executable capability, bound server-side to exactly one existing procedure. | "What can be done?" |
+| **Skill** | A reusable operating procedure for a class of tasks: objective, required information, steps, expected tools, decision rules, verification, clarification, approval checkpoints, completion criteria, escalation. | "How should it be done?" |
+| **Prompt** | The instructions supplied to one inference request. A Skill may contribute content to several prompts. | "What does the model read this call?" |
+| **Agent** | The runtime that runs the procedure. In LeaseOS this is the **agent runtime**, `agentRouter.ts` + `actionGateway.ts` (§4). | "Who is executing?" |
+| **Orchestration** | Coordination across jobs, steps and workers. Its homes are listed in §4, and "orchestrator" is not a LeaseOS word. | "What runs next, where?" |
+| **Business workflow** | Deterministic coordination written as code or a state machine. It never becomes a Skill. See 22.13. | "What must always happen?" |
+
+```text
+                 AGENT (agent runtime)
+                   │
+         ┌─────────┴─────────┐
+         ▼                   ▼
+       SKILLS              TOOLS
+   "How to do it"      "What can be done"
+   (grants nothing)          │
+         │                   ▼
+         │           ToolDefinition → ProcedureName
+         │                   │
+         └──────────► Tool selection (tool KEY only)
+                             │
+                             ▼
+              Authorization gate — roleProcedure / decide()
+                             │
+                             ▼
+                          Action
+```
+
+A Skill may recommend or require a Tool. It cannot bypass any of that Tool's controls:
+authentication (`TrpcContext`), authorization (`roleProcedure` → `authorize()`), acting scope
+(`resolveActingScope()`), automation policy (`resolveAutomation()`, `NEVER_AUTONOMOUS`,
+`NEVER_AUTOMATIC`), argument validation (the procedure's zod `.input()`), human approval
+(`agentApprovals`, read-back), budget (`spendStep()`), idempotency (`idempotencyKeyFor()`), or
+audit (`authorizationDecisions`, `agentActions`).
+
+### 22.2 Effective authority is an intersection
+
+```text
+Skill's expected tools        (a Skill can only name — never grant)
+    ∩  Actor permission        roleProcedure → permissionForProcedure()      [live]
+    ∩  Acting scope            resolveActingScope()                          [live]
+    ∩  Tool allowlist          TaskAllowlist + resolveTool()                 [unwired]
+    ∩  Gateway decision        decide(): origin, registry, NEVER_AUTONOMOUS,
+                               compliance, heldPermissions, requiresOnline,
+                               revision, risk ladder, autoExecute            [live, executes nothing]
+    ∩  Automation policy       resolveAutomation(), SAFETY_CEILINGS          [live]
+    ∩  Worker / device ability OfflineClass, CapabilityDefinition.requiresOnline
+    =  Effective authority
+```
+
+Every term in the intersection can only make the set smaller. The code already has this shape
+in three places. `resolveTool()` refuses anything outside the task list and re-checks
+`NEVER_AUTONOMOUS` even for listed tools. `invokeTool()` calls through the driver's own
+`createCaller(ctx)`, so `roleProcedure` refuses exactly what it would refuse the driver.
+`evaluateOperationalOverride()` may narrow toward MANUAL and never widen.
+
+**Worked example: Skill ≠ permission.** Suppose a detailed "Dispatch a vacuum truck to a lease"
+Skill is loaded for a user who holds only Driver authority. The dispatch mutation is a
+`roleProcedure`. The driver lacks its permission, so `authorize()` returns `denied_permission`
+and writes an `authorizationDecisions` row, and the call is refused. The Skill has no field
+that could change that outcome, and no future Skill format may add one.
+
+### 22.3 Tools — the architecture that exists
+
+Two registries exist, as recorded in §18 item 1. Neither refers to the other.
+
+| | Model-facing **Tool** | Gateway-facing **Capability** |
+|---|---|---|
+| Type | `ToolDefinition` (`server/_core/ai/tools/registry.ts`, PR #7) | `CapabilityDefinition` (`server/_core/actionGateway.ts`) |
+| Registry | `SECRETARY_TOOLS` (11 tools: 5 `read.*`, 5 `propose.*`, `human.requestAction`) | `CAPABILITIES` in `agentRouter.ts` (6 entries) |
+| Binds to | one `ProcedureName`, checked by the compiler | a list of permission names + `RiskLevel` |
+| Categories / risk | `read`, `propose`, `human_step`; `FORBIDDEN_CATEGORIES` = commit, delete, permission_change, mode_change, payment, outbound_email, outbound_web | `read` → `restricted` |
+| Status | **DECLARED_UNWIRED** | **IMPLEMENTED** as data and decision, never executes |
+
+These are the actual tool keys. They are used below instead of the illustrative names in the
+request (`read.currentJob`, `notify.dispatch`, `seal.document` do not exist):
+
+| Key | Procedure | Pinned argument |
+|---|---|---|
+| `read.tripStops` | `tripStops.list` | — |
+| `read.loads` | `loads.list` | — |
+| `read.unitSpecs` | `units.list` | — |
+| `read.closeoutState` | `closeout.state` | — |
+| `read.approvedDocuments` | `assistant.passageList` | — |
+| `propose.unloadStop` | `assistant.draft` | `formKey: "unload_stop"` |
+| `propose.disposalTicket` | `assistant.draft` | `formKey: "disposal_ticket"` |
+| `propose.preTripFinding` | `assistant.draft` | `formKey: "defect_report"` |
+| `propose.expenseReceipt` | `assistant.draft` | `formKey: "expense_receipt"` |
+| `propose.fuelReceipt` | `assistant.draft` | `formKey: "fuel_receipt"` |
+| `human.requestAction` | `agent.requestAction` | — |
+
+`PROPOSE_TOOLS_NOT_POSSIBLE_YET` records `propose.dutyEvent`, `propose.workOrder` and
+`propose.billingLine` as blocked on missing `FORMS` entries. No facility-lookup tool, current-job
+tool, notification tool or sealing tool exists.
+
+**Authorization path for a tool, hop by hop.** This is the §5 path with the refusal point at
+each hop:
+
+| Hop | Code | Refuses when | Status |
+|---|---|---|---|
+| model emits key + args | — (no path does this) | — | MISSING |
+| key → definition | `resolveTool(allowlist, key)` | key unknown **or** not on the task list (identical message); procedure on `NEVER_AUTONOMOUS` | DECLARED_UNWIRED |
+| budget | `spendStep()` (after allowlist, so a refusal costs no step) | `stepBudget` spent → `StepBudgetExhausted` | DECLARED_UNWIRED |
+| arguments pinned | `planToolCall()` overwrites `formKey`; derives idempotency key | — | DECLARED_UNWIRED |
+| caller | `invokeTool({ ctx, createCaller })`, driver's own `TrpcContext` | no composition root supplies `createCaller` | DECLARED_UNWIRED |
+| authorization | `roleProcedure(name)` → `permissionForProcedure()` → `authorize()` → `recordAuthorizationDecision()` | `denied_*` outcomes | IMPLEMENTED |
+| validation | the procedure's zod `.input()` | malformed args → `BAD_REQUEST` | IMPLEMENTED |
+| domain | the procedure body; for proposals, later `executeAssistantCommit()` with a second authorization | domain refusal | IMPLEMENTED |
+
+**The requested `ToolDefinition` contract, mapped onto existing fields.** Nothing was added.
+
+| Requested field | Existing home | Status |
+|---|---|---|
+| `key` | `ToolDefinition.key` | DECLARED_UNWIRED |
+| `version` | none (§19 already lists it) | MISSING |
+| `purpose` | `ToolDefinition.description` | DECLARED_UNWIRED |
+| `inputSchema` | the target procedure's zod `.input()`; not restated on the tool, and the tool should not duplicate it | IMPLEMENTED (at the procedure) |
+| `outputSchema` | the procedure's inferred return type; not declared on the tool | PARTIAL |
+| `procedure` | `ToolDefinition.procedure: ProcedureName` | DECLARED_UNWIRED |
+| `fixedArgs` | `ToolDefinition.formKey` only; the one pinned argument kind that exists | PARTIAL |
+| `requiredCapability` | none; tool and capability are not joined (§18.1) | MISSING |
+| `riskClass` | coarse proxy `ToolCategory`; real ladder is `CapabilityDefinition.riskLevel` | PARTIAL |
+| `automationPolicy` | `automationPolicies` keyed by `CAPABILITY.*`, not by tool | PARTIAL |
+| `idempotencyPolicy` | `requiresIdempotencyKey` + `idempotencyKeyFor()` | DECLARED_UNWIRED |
+| `budgetCost` | none; every call costs one step | MISSING (not needed until costs differ) |
+| `auditCategory` | none; audit is keyed by procedure in `authorizationDecisions` | NOT_NEEDED (procedure is the audit key) |
+
+The model supplies none of the following, and the table shows where each is already enforced:
+procedure name (`ProcedureName`, `invokeTool` takes a key), required permission
+(`permissionForProcedure()`), fixed form key (`planToolCall()` overwrite), acting organization
+(`resolveActingScope()`), caller identity (`TrpcContext` handed in; `caller.ts` builds none),
+automation ceiling (`SAFETY_CEILINGS`, `SecretaryProposal.ceiling`), and risk classification
+(server constants).
+
+**Definition → Request → Execution → Result → Receipt.** Each stage already has a separate shape.
+Keep them separate.
+
+| Stage | Registry path | Gateway path | Status |
+|---|---|---|---|
+| ToolDefinition | `ToolDefinition` | `CapabilityDefinition` | unwired / implemented |
+| ToolRequest | `ToolInvocation { toolKey, input, clientCaptureId }` | `ActionRequest` → `agentActions` row | unwired / implemented |
+| ToolExecution | `invokeTool()` | none by design | unwired / DEFERRED |
+| ToolResult | `ToolResult` returned, **not persisted** | `agentActions.outcome` never advanced past `requested` | PARTIAL |
+| ToolReceipt | the `authorizationDecisions` row each `roleProcedure` call writes; `assistantCommitReceipts` for commits only | `agentActions` (refusals included) | PARTIAL — no receipt for a read tool beyond the authorization row |
+
+The requested terminal outcomes map onto existing equivalents. **No new enum is needed.**
+
+| Requested | Existing equivalent |
+|---|---|
+| SUCCEEDED | `ToolResult` returned; `agentActions.outcome` `executed` / `verified` |
+| REFUSED | `ToolNotAllowed`; `StepBudgetExhausted`; `roleProcedure` `FORBIDDEN` + `authorizationDecisions.outcome denied_*`; `Decision` `deny` / `compliance_block` / `stale` |
+| VALIDATION_FAILED | zod `BAD_REQUEST` from the procedure |
+| APPROVAL_REQUIRED | `Decision` `require_approval` → `agentApprovals`; run `waiting_for_approval` |
+| FAILED | `agentActions.outcome failed`; run `failed`; outbox dead-letter |
+| CANCELLED | run `cancelled` (`TRANSITIONS`) |
+
+**Tool discovery is not tool permission.** Four sets already exist:
+
+| Set | Where | Example today |
+|---|---|---|
+| registered tools | `SECRETARY_TOOLS` | 11 |
+| available to the job | `TaskAllowlist.toolKeys` | `LOAD_UNLOAD_NARRATION` 5, `BILL_SCAN` 2 |
+| authorized for the actor | `roleProcedure` at call time | computed per call, not in advance |
+| currently executable | `decide()` + automation policy + `requiresOnline` | computed per call |
+
+The model should be shown the second set at most. Pre-filtering to the third set, by computing
+`permissionForProcedure(tool.procedure)` against the actor's held permissions before rendering
+tool descriptions, is possible from existing functions. It is an optimisation, not a control:
+the call-time check stays authoritative. **DEFERRED** until door 2 is wired.
+
+### 22.4 Does LeaseOS already have Skills?
+
+**Not by name. The parts exist, split across four artifacts that nothing binds together.** For
+the Secretary's form-driven tasks, the Skill is already present in decomposed form:
+
+| Skill element | Existing artifact | Status |
+|---|---|---|
+| key | `TaskAllowlist.taskKey` (`load_unload_narration`, `bill_scan`) | DECLARED_UNWIRED |
+| objective | `FormDefinition.title` + prompt prose | IMPLEMENTED / unwired |
+| required information | `FormFieldDef.required` | IMPLEMENTED |
+| clarification conditions | `precisionSensitive`, `Gap.kind`, `minimumQuestions()` (max 3), `MAX_CLARIFY_ROUNDS` | IMPLEMENTED (gaps) / unwired (rounds) |
+| allowed / expected tools | `TaskAllowlist.toolKeys` | DECLARED_UNWIRED |
+| budget | `TaskAllowlist.stepBudget` | DECLARED_UNWIRED |
+| procedure / decision rules | `secretary-extract.v1.md` (status rules, never-convert rules, injection rule) | DECLARED_UNWIRED |
+| step sequence | `DialoguePhase` LISTEN → … → PROPOSE, `advance()` | DECLARED_UNWIRED |
+| verification | `validateExtraction()`, quote check, normalizers; `detectGaps()`; `checkCommit()` | unwired / IMPLEMENTED |
+| approval checkpoint | read-back → `acknowledge` → `commit`; `SecretaryProposal.ceiling = "HYBRID"` | IMPLEMENTED / unwired |
+| completion criteria | `commitState = "committed"` + `assistantCommitReceipts` row | IMPLEMENTED |
+| escalation | `DRAFT_FOR_OFFICE`, `human.requestAction`, `heldBecause` | unwired |
+| version | `FormDefinition.version` (stored as `assistantProposals.formVersion`); `PromptVersion` + `promptHash()` | PARTIAL — `TaskAllowlist` has none; prompt hash has no column |
+
+Therefore **the §8 recommendation already describes the minimum Skills subsystem**: a
+`PromptContract` binding `PromptVersion` + form key + `TaskAllowlist` + ceiling. A Skill is that
+contract with verification and escalation named explicitly. **Do not build a second, parallel
+"skill" artifact beside `FORMS` and `TaskAllowlist`.** Doing so would create a third
+never-automatic list, a third clarification vocabulary, and one more copy of every duplication
+in §18.
+
+**Could existing forms become Skills instead of being duplicated?** Yes, for the five `FORMS`
+(`unload_stop`, `defect_report`, `expense_receipt`, `disposal_ticket`, `fuel_receipt`). Each is
+already the "required information + clarification" half of a Skill. The form stays the data
+contract, and a Skill *references* a form key and never restates its fields. The request's
+examples map as follows:
+
+| Requested Skill | Existing basis | Verdict |
+|---|---|---|
+| Complete / process a disposal ticket | `disposal_ticket` form, `propose.disposalTicket` | candidate; worked example in 22.6 |
+| Perform a pre-trip inspection | `defect_report` form, `propose.preTripFinding` ("a human signs the inspection") | candidate for *finding capture* only; the inspection itself stays human |
+| Process a driver defect | `defect_report` form → `WORKFLOWS.critical_defect` | AI part = capture; the rest is a deterministic workflow |
+| Prepare a lease departure package | `preDepartureCache`, `tripPassportPackage` | deterministic; not a Skill |
+| Review a dangerous-goods load | `evaluateDangerousGoodsAssist()` (never classifies from free text) | AI may assist extraction only; classification stays deterministic + human |
+| Close out a completed job | `closeout.state`, `fieldTicket`, `siteCloseout` | deterministic |
+| Escalate a safety incident | `escalation.ts`, `DEFAULT_CRITICAL_POLICY` | deterministic |
+| Prepare a billing package | `tripBillingProjection`, `linePricing`, invoice path | deterministic; `propose.billingLine` is blocked on a form anyway |
+
+### 22.5 Skill mechanics — status of each seam
+
+| Seam | Existing | Classification |
+|---|---|---|
+| Skill definition | decomposed across `FORMS` × `TaskAllowlist` × `PromptVersion` × validator (22.4) | PARTIAL |
+| Skill loader | `loadPrompt()` loads one versioned prompt file with a cache; no loader for anything larger | NOT_NEEDED now; DEFERRED. A typed constant module (like `SECRETARY_TOOLS`) is preferable to a runtime file loader, because the compiler then checks tool keys and form keys. Do not assume `SKILL.md`. |
+| Skill registry | two `TaskAllowlist` constants; no lookup by key | PARTIAL / DECLARED_UNWIRED |
+| Skill selection | by entry point: `runSecretaryExtractionJob()` is handed its `FormDefinition` by the caller; `assistant.draft` takes `formKey` from a server route. The model never picks the task. | IMPLEMENTED deterministically — keep it that way |
+| Unsupported Skill | an unknown form key has no schema; an unknown task has no allowlist; `resolveTool()` refuses; `classifyRequest()` refuses off-perimeter | IMPLEMENTED in effect. The requested `SKILL_NOT_AVAILABLE` is `ToolNotAllowed` / a perimeter refusal. No new code. |
+| Skill versioning | `formVersion` stored; `promptHash` computed and **not stored**; tool and allowlist unversioned; policy via append-only `automationPolicies` + `PolicySnapshot` | PARTIAL |
+| Verification | door 1: `detectGaps()`, read-back, `checkCommit()`, commit adapters; door 2: `validateExtraction()` | IMPLEMENTED (door 1) / unwired (door 2) |
+| Progressive loading | by construction: each request loads **one** form schema, **one** prompt, **one** context pack (`buildSystemPrompt(form)`, `runExtraction()`) | IMPLEMENTED at form granularity |
+| Skill tests | `agentTools.test.ts` resolves each tool's procedure through `permissionForProcedure()`; `FORBIDDEN_CATEGORIES` asserted structurally; `goldenSet.test.ts` scores per form | PARTIAL; the pattern exists |
+
+**"Done" is defined by the procedure, not by the model.** This already holds on the live path.
+The model cannot declare a proposal complete. `commitState` reaches `committed` only through
+`assistant.commit` → `executeAssistantCommit()`, after gaps are cleared and a read-back is
+acknowledged, and it leaves an `assistantCommitReceipts` row with `fieldManifestHash` and
+`authorizationDecisionId`.
+
+**Audit provenance ("why did LeaseOS do this, six months later?").** A reply today can name the
+form key and version, the authorization decision, and the committed values. It cannot name
+the prompt version or hash, the model, the tool versions, or the task/Skill version, because
+none of these has a column (§19). The run-provenance columns already recommended in §19 are
+the fix. Adding `taskKey` beside them would record the Skill key. **Do not rely on current
+Skill content**: a Skill, like a prompt, must be a new version rather than an in-place edit.
+`prompts/index.ts` already states this rule for prompts.
+
+### 22.6 Worked example — "Process Disposal Ticket", with real names
+
+```text
+SKILL (not built; composed from what exists): disposal_ticket
+  form: FORMS.disposal_ticket v1   prompt: secretary-extract.v1   ceiling: HYBRID
+
+ 1. Read trip stops ............ Tool read.tripStops     → tripStops.list      [roleProcedure]
+ 2. Read loads ................. Tool read.loads         → loads.list          [roleProcedure]
+ 3. Read closeout state ........ Tool read.closeoutState → closeout.state      [roleProcedure]
+ 4. Extract ticket fields ...... model inference, strict json_schema from FORMS
+ 5. Verify evidence ............ validateExtraction(): quote in transcript,
+                                 ticket_prefix_missing, volume_unit_missing …   (deterministic)
+ 6. Facility known? ............ NO TOOL EXISTS for facility lookup. facilityName stays a
+                                 stated/ambiguous field; a person resolves it.  (gap, not built)
+ 7. Critical value missing? .... facilityTicketNumber / ticketDate / quantities are
+                                 precisionSensitive → Gap → assistantQuestions
+        ├─ yes → NEEDS_CLARIFICATION (awaiting_answers; ≤ 3 questions, ≤ 3 rounds)
+        └─ no
+ 8. Propose .................... Tool propose.disposalTicket → assistant.draft,
+                                 formKey pinned, idempotency key from clientCaptureId
+ 9. Verify ..................... detectGaps() empty → read-back → human acknowledge
+10. COMPLETE ................... assistant.commit → executeAssistantCommit()
+                                 → assistantCommitReceipts row
+```
+
+The Skill supplies the order and the stopping rules. Only the Tools touch records. If the driver
+lacks `assistant.draft`'s permission, step 8 is refused at `roleProcedure`, whatever the Skill
+says.
+
+### 22.7 Guardrails stay layered
+
+| Layer | Example in LeaseOS | Lives in |
+|---|---|---|
+| Skill | "Never finalize without a facility ticket number" | `required` + `precisionSensitive` on the form; prompt rules |
+| Tool | `propose.disposalTicket` can only draft `disposal_ticket` | `ToolDefinition.formKey`, `planToolCall()` |
+| Authorization | who may call `assistant.draft` | `roleProcedure`, `authorizationDecisions` |
+| Automation policy | whether the AI may reach confirmed unattended | `resolveAutomation()`, `SAFETY_CEILINGS`, `NEVER_AUTOMATIC` |
+| Domain validation | whether the record is valid | commit adapters, `checkCommit()` |
+| Database | last-resort integrity | unique `assistantCommitReceipts.proposalId`, FKs, enums |
+| Human approval | sensitive decisions | read-back + acknowledge; `agentApprovals` bound to `payloadHash` |
+
+A Skill adds to these layers and replaces none of them. A rule that exists only in Skill prose
+is a suggestion to a model, not a control.
+
+### 22.8 MCP
+
+**Status: MISSING, and NOT_NEEDED now.** No MCP client, server, SDK dependency or document exists
+anywhere in `server/`, `client/`, `shared/` or `package.json`.
+
+The canonical position if it is ever added:
+
+```text
+MCP                    = a transport for exposing tools/resources
+LeaseOS tool registry  = the canonical list of what the AI may request   (SECRETARY_TOOLS)
+LeaseOS authorization  = whether this actor may execute it              (roleProcedure / decide())
+
+MCP server → discovery/import → LeaseOS allowlist → LeaseOS ToolDefinition wrapper
+           → authorization → execution
+```
+
+Connecting an MCP server must never make its tools reachable automatically. The registry's
+existing property enforces this: a tool must name a compiled `ProcedureName`, and an MCP tool
+has none until someone writes a procedure for it. An MCP tool offering outbound email, web or
+payment would also fall inside `FORBIDDEN_CATEGORIES`. **DEFERRED**, and not to be added simply
+because the protocol is available.
+
+### 22.9 External integrations
+
+| Integration | Existing | Exposed to the agent as a Tool? |
+|---|---|---|
+| Outbound webhooks | `integrationGateway.ts` (HMAC-signed, 6 attempts, dead-letter) via `webhookDispatchService.ts` | no — and outbound categories are forbidden |
+| Inbound feeds (GPS, fuel, ELD, telemetry, faults…) | `intakeDecision()` via `integrationRouter.ts`; each feed "becomes" evidence or a **proposal** | no — feeds arrive as `external_content`, which may never instruct (`MAY_INSTRUCT`) |
+| External data sources | `externalDataRegistry.ts`, `feed*` family (not started) | no |
+| Model providers | `llm.ts` (door 1), `LlmProvider` (door 2) | n/a — the model is not a tool of itself |
+
+Secrets stay server-side and are read from environment variables (`ENV.*`, `LLM_API_KEY`). No
+tool input carries a credential. Integration failures are already typed
+(`deliveryOutcome() → delivered | failed | dead` with a reason; `LlmTransportError`), so no raw
+API error body needs to reach model context. **Status: IMPLEMENTED as integrations, DEFERRED as
+agent tools.** The first integration tool would need a new `ToolCategory`, and the existing
+`FORBIDDEN_CATEGORIES` list is where the owner decides whether to allow it.
+
+### 22.10 Sandbox / code execution
+
+**Status: MISSING, and intentionally NOT_NEEDED.** No `child_process`, `vm`, `new Function` or
+`eval` appears in non-test server, shared or client code. `ModelTask "code"` in `modelGateway.ts`
+is a provider-routing label, not an execution capability. If execution is ever proposed, rank it
+by risk and prefer the narrowest form:
+
+| Form | Risk | LeaseOS preference |
+|---|---|---|
+| deterministic calculator / domain function | lowest | already how LeaseOS works (`money.ts`, `hos.ts`, `iftaEngine.ts`, …) |
+| query abstraction | low if scoped | a read tool over an existing `roleProcedure`; never SQL (§5) |
+| document parser | medium | `documentExtraction.ts` pattern, output → proposal |
+| restricted script sandbox | high | not justified by any current workflow |
+| general OS shell | unacceptable | never |
+
+### 22.11 Offline tool capability
+
+**The classification the request proposes already exists. Do not add a second one.**
+`server/_core/offlineCapability.ts` (DECLARED_UNWIRED: "no device runtime calls them yet") defines
+`OfflineClass` and binds it to the gateway's `RiskLevel` through `validateCapability()` /
+`classRiskDisagreements()`. It states the rule this section needs: *the class is declared, never
+inferred; a model deciding something "seems safe enough to do locally" is the model granting
+itself authority.*
+
+| Requested | Existing `OfflineClass` |
+|---|---|
+| LOCAL_TOOL | `local_capture` (record what the person observed) |
+| OFFLINE_CAPABLE_TOOL | `local_safe` (read what is already on the device), `local_prepare` (draft for later server decision) |
+| CONNECTED_TOOL / SERVER_ONLY_TOOL | `server_authoritative` (one class; LeaseOS draws no distinction between the two) |
+
+Two more seams already exist: `CapabilityDefinition.requiresOnline`, which `decide()` enforces
+live ("Offline, this can be prepared and not performed"), and the six client sync states in
+`client/src/runtime/contracts.ts` (`saved_locally | queued | syncing | synchronized | failed |
+conflict`). A Skill that captures offline therefore ends in `saved_locally` / `queued`, never in
+COMPLETE, and the worker path in the Secretary job header ("the extraction happens after") is
+already designed for that.
+
+**Gap:** `ToolDefinition` carries no `offlineClass`. The consistent fix is the §18.1 join. A tool
+declares its capability, and the capability carries `offlineClass`, so there is one vocabulary.
+This is the HS1 seam that SPINE ordering step 3 already schedules.
+
+### 22.12 Context budget
+
+The target is **base contract + one selected Skill + relevant policy + authorized context +
+current tool results**. Nothing today loads every form, prompt or manual into a request (22.5,
+progressive loading). The record of which Skill ran belongs in the same provenance columns as
+the prompt hash (22.5). Store it on the proposal and, when runs execute, on `agentRuns`/
+`agentSteps`. No new table is needed.
+
+### 22.13 What must stay deterministic
+
+Use a Skill only where AI judgement helps: interpreting unstructured input, selecting relevant
+information, choosing among valid alternatives, asking a clarifying question, summarising,
+understanding documents, or coordinating existing capabilities. The following stay code, and
+never become Skills:
+
+- `WORKFLOWS` / `WorkflowRule` in `workflowEngine.ts`: *"Workflow rules COORDINATE. Domain
+  engines DECIDE."* (e.g. `critical_defect`: reported → inspection → … → mechanic_release).
+- Every domain decision engine: HOS (`hos.ts`), dispatch readiness and enforcement, route
+  approval, DG readiness (`evaluateDangerousGoodsAssist()` explicitly never classifies from free
+  text), compliance validity, pricing and billing (`linePricing`, `tripBillingProjection`), tax
+  (`gstReturn`, `iftaEngine`), payroll, period close.
+- Authorization, automation policy, approval binding, the never-automatic floors.
+- Offline class assignment (22.11).
+- Skill *selection* itself, for now (22.5).
+
+### 22.14 Classification summary
+
+| Concept | Classification | Evidence |
+|---|---|---|
+| Tool registry | PARTIAL | `SECRETARY_TOOLS` unwired (PR #7); `CAPABILITIES` live, unjoined |
+| Tool definition | DECLARED_UNWIRED | `ToolDefinition`; no version, no capability link |
+| Tool request | PARTIAL | `ToolInvocation` unwired; `ActionRequest` live |
+| Tool execution | DECLARED_UNWIRED | `invokeTool()`; no `createCaller` supplier |
+| Tool result | PARTIAL | returned, not persisted; `agentActions.outcome` stuck at `requested` |
+| Tool receipt | PARTIAL | `authorizationDecisions` per call; commit receipts for commits only |
+| Skill definition | PARTIAL | decomposed across `FORMS` × `TaskAllowlist` × `PromptVersion` × validator |
+| Skill loader | NOT_NEEDED (now) | typed constants preferred; `loadPrompt()` covers prompt files |
+| Skill registry | DECLARED_UNWIRED | two `TaskAllowlist` constants |
+| Skill selection | IMPLEMENTED (deterministic) | caller supplies form / task; model never selects |
+| Skill versioning | PARTIAL | `formVersion` stored; prompt hash, tool and task versions not |
+| Verification | IMPLEMENTED (door 1) / DECLARED_UNWIRED (door 2) | `detectGaps`, read-back, `checkCommit`; `validateExtraction` |
+| Progressive loading | IMPLEMENTED (form granularity) | one form + one prompt + one pack per request |
+| MCP | MISSING → DEFERRED | nothing in tree |
+| External integrations | IMPLEMENTED (not as tools) | `integrationGateway.ts`, `integrationRouter.ts` |
+| Sandbox / code execution | NOT_NEEDED | nothing in tree, by design |
+| Offline capability | DECLARED_UNWIRED | `offlineCapability.ts`, `requiresOnline` (live in `decide()`) |
+| Audit trail | IMPLEMENTED; provenance PARTIAL | `authorizationDecisions`, `agentActions`, receipts; no prompt/model/skill columns |
+
+### 22.15 Genuine missing seams (additions to §19)
+
+Only one entry is new. The rest are already in §19 and gain a Skills reason.
+
+| Seam | New or existing | Smallest shape |
+|---|---|---|
+| Tool ↔ capability join | existing (§18.1) | `ToolDefinition` names its `CapabilityDefinition.key`; the capability supplies risk, `offlineClass`, automation ceiling |
+| Tool version | existing (§19) | `version` on `ToolDefinition` |
+| Run provenance columns | existing (§19) | add `taskKey` (the Skill key) beside `promptVersion`/`promptHash` |
+| Persisted tool result | existing (§19) | advance `agentActions.outcome`, store output hash |
+| **Binding contract (the Skill)** | **new, and it is §8's `PromptContract`** | one typed object per task: `taskKey`, `version`, form key, `PromptVersion`, `TaskAllowlist`, ceiling, verification checks (existing function refs), escalation target |
+| Facility lookup read tool | new, domain gap | only if a `roleProcedure` for facilities is on the spine path; not a Skills concern |
+
+### 22.16 The minimum future Skills subsystem
+
+When the SPINE order reaches it, and not before:
+
+1. **One type**, the §8 `PromptContract` renamed `SkillDefinition` or kept as is, which is the
+   owner's call. It *references* existing artifacts by typed key and restates none of them:
+   `taskKey`, `version`, `formKey`, `promptVersion`, `allowlist: TaskAllowlist`, `ceiling`,
+   `verify: (existing validator functions)`, `escalation`.
+2. **A constant registry** in the same shape as `SECRETARY_TOOLS`: typed, compiled and
+   test-asserted. No runtime file loader.
+3. **Registration-time tests** extending `agentTools.test.ts`: every referenced tool key exists;
+   no tool in `FORBIDDEN_CATEGORIES`; every tool's procedure resolves through
+   `permissionForProcedure()`; the form exists in `FORMS`; the ceiling is no wider than
+   `SAFETY_CEILINGS` and never covers a `NEVER_AUTOMATIC` action; `(taskKey, version)` is unique;
+   a clarification path exists; offline classes are consistent via `classRiskDisagreements()`;
+   **and the type has no field that could name a permission, a procedure, a tenant or a mode.**
+   The last property is the structural proof that a Skill grants nothing.
+4. **Provenance**: `taskKey` + `version` recorded with the run-provenance columns.
+
+Nothing else is needed: no Skill agent, no Skill orchestrator, no MCP, no sandbox.
+
+### 22.17 Relationship diagram
+
+```text
+                        USER GOAL
+                            │
+                            ▼
+                  AGENT RUNTIME  (agentRouter.ts + actionGateway.ts)
+                            │
+          Select applicable SKILL — by entry point / form key, not by the model
+          ┊  SKILL SELECTION GRANTS NO AUTHORITY  ┊
+                            │
+                            ▼
+                    PROCEDURAL PLAN  (form + prompt + TaskAllowlist)
+                            │
+               ┌────────────┼────────────┐
+               ▼            ▼            ▼
+      read.tripStops   read.loads   propose.disposalTicket      (tool KEYS)
+               │            │            │
+               ▼            ▼            ▼
+         roleProcedure roleProcedure roleProcedure  ← actor permission, acting scope,
+         (+ decide())  (+ decide())  (+ decide())     automation policy, budget
+               │            │            │
+               └────────────┼────────────┘
+                            ▼
+                         RESULTS
+                            │
+                            ▼
+                 VERIFY  (validateExtraction / detectGaps / checkCommit)
+                            │
+                   ┌────────┼────────┐
+                   ▼        ▼        ▼
+                COMPLETE  CLARIFY  REFUSE
+          (commit+receipt) (assistantQuestions) (deny / ToolNotAllowed)
+```
+
+Conceptual hierarchy. This is not an implementation instruction, and each leaf is named with
+its existing home:
+
+```text
+LeaseOS AI Runtime
+├── Agent runtime ........ agentRuns / agentSteps / agentActions; budgets (§11);
+│                          context (ContextPack, admitSource); evaluation (golden set)
+├── Skills ............... FORMS × TaskAllowlist × PromptVersion × validator  (unbound — 22.4)
+├── Tools ................ SECRETARY_TOOLS: read / propose / human_step
+│                          (no communication or controlled-action category — FORBIDDEN_CATEGORIES)
+├── Integration layer .... existing roleProcedures; integrationGateway; (no MCP)
+└── Authority ............ TrpcContext · resolveActingScope · roleProcedure/authorize ·
+                           automationPolicy + NEVER_AUTOMATIC/NEVER_AUTONOMOUS · agentApprovals
+```
+
+### 22.18 Effect on the SPINE order
+
+**None.** Nothing in this section moves ahead of the existing order:
+
+```text
+BoundaryConfirmation (resolver landed; reader waits on 0169)
+  → the four duplications → offlineCapability / HS1 → rest of the spine
+  → durable AI worker path (Secretary handler, §4)
+  → tool execution (createCaller supply, tool↔capability join, tool version)
+  → single-agent runtime (agentActions.outcome, maxSteps enforcement)
+  → Skills (22.16 — the bound contract)
+  → agentic retrieval
+  → multi-agent only if justified
+```
+
+The discovery *confirms* the order rather than changing it. Skills sit above tool execution
+because a Skill is only as real as the tools it references, and today every one of those tools
+is unwired. The one cross-link worth recording: the offline half of a Skill depends on the
+`offlineCapability` → HS1 seam, which is already SPINE step 3. No new Tools, no Skills runtime,
+no MCP and no sandbox were added.
