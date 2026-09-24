@@ -7,7 +7,8 @@ means verified in the tree at the commit below rather than believed.
 | | |
 |---|---|
 | Surveyed at | branch `claude/live-assist-architecture-qg4jgp` = `main` = `6f52b57` (release `v23.25`) |
-| Migration head | `0174_dispatch_override_provenance.sql`; slots `0172`/`0173` are claimed by an open branch (`docs/architecture/MIGRATION_COLLISION_REGISTER.md:39-41`) |
+| Migration head | `0174_dispatch_override_provenance.sql` on `main`. Open branches claim `0168`–`0184`, several twice; the first number no branch claimed on 2026-09-24 was `0185` (§23.3) |
+| Open branches reconciled | 16 branches overlapping Live Assist, read on 2026-09-24; §23 records what each changes. Where a row below says MISSING, it means missing on `main`; §23 says where an open branch supplies it |
 | Owner source reconciled | `docs/knowledge/source/LeaseOS_Live_Assist_Unified_AI_Build_Plan_v2_0.txt` (19 Sep 2026; v1.0 beside it), indexed **PARTIAL** at `docs/knowledge/INDEX.md:26` |
 | Binding constraints read | `docs/register/SPINE_WIRING_PLAN.md`, `docs/register/AI_RUNTIME_TERMINOLOGY.md`, `docs/REMAINING_BUILD_REGISTER.md` §P1, §P9, `docs/register/SCOPE_RECONCILIATION_2026-09-21.md`, `LEASEOS_MASTER_PROGRAMMING_MANIFEST_V8.md` §1, §28 |
 | Companion | `docs/live-assist/LIVE_ASSIST_LA1_IMPLEMENTATION_PLAN.md` (checkpoint LA-1, §22) |
@@ -54,6 +55,13 @@ These come before any architecture because each one changes what may be built, o
      checks that a key is present. Sending camera and screen images through that path before P9.1 is
      closed would send the most sensitive data LeaseOS handles through its least-hardened seam.
      **P9.1 is a hard precondition for any Live Assist inference** (§22).
+   - Two open branches restate and widen this ordering (§23.2). The hardening audit on
+     `claude/leaseos-code-audit-yvggvw` declares a "Wave 0" in which there is "No major new feature work. Only
+     security, correctness, deployment and release blockers" (`audit/hardening-2026-09-24/BACKLOG.md:2215-2217`)
+     and names P9.1 as AI-001 and P9.6 as AI-006. The security program on
+     `claude/leaseos-security-architecture-f2j1vn` orders SEC-1 (tenant and resource authorization) before
+     SEC-12 (AI hardening: timeouts, allow-listed hosts, an LLM-only credential). Neither is merged; both are
+     read as the direction the owner is being asked to approve.
 3. **Organization-wide isolation is not yet a property of the system.**
    `LEASEOS_CURRENT_STATE.md:1001` says so, and `server/tenantIsolation.test.ts:133-143` asserts that the
    sentence stays until it is fixed. `evidenceRecords` (`drizzle/schema.ts:48`) has no organization
@@ -137,14 +145,14 @@ These come before any architecture because each one changes what may be built, o
 |---|---|---|---|
 | C-1 | Build a major new subsystem. | No new engines until the spine is wired (`docs/register/SPINE_WIRING_PLAN.md:3-4`). | Design now; build only after D-01. |
 | C-2 | Four modes including screen sharing, on "the device". | The owner plan targets Android `MediaProjection` (plan §6). The repository is a web app with no native shell (P1.1 unbuilt). Mobile browsers do not offer `getDisplayMedia` as of this writing. | Screen share is **desktop web first**, Android native later (§17). Phone screen sharing waits for P1.1. |
-| C-3 | "Existing camera/scanner work". | There is none on the client. The only file input is on a showcase page whose writes are refused (`client/src/showcase/Home.tsx:1808-1818`, `client/src/lib/showcaseGuard.ts`). | The first slice builds the first real capture UI. |
+| C-3 | "Existing camera/scanner work". | There is none on the client. The only file input is on a showcase page whose writes are refused (`client/src/showcase/Home.tsx:1808-1818`, `client/src/lib/showcaseGuard.ts`). | The first slice builds the first real capture UI. Open scanner branches add device scanner contracts and a quality verdict, but still no camera acquisition or UI (§23.1). |
 | C-4 | "Existing realtime/voice functionality". | No realtime transport of any kind. `transcribeAudio` exists with no caller. | Recommended approach needs no realtime transport (§4). |
 | C-5 | "Existing AI/vision provider" behind an adapter. | One text-only caller on a gateway with an open security item (P9.1); `modelGateway` has no vision task and is unwired. | Propose a `VisionAdapter` seam and a `vision` task; vendor is **OWNER** (D-03). |
 | C-6 | The session holds voice/chat context. | Conversation store is intentionally unsupported (terminology §20). | Session-scoped Conversation State with hard expiry (§6.3, D-05). |
 | C-7 | "Existing offline/sync" will queue snapshots. | The outbox is real code with in-memory storage and no caller; durable encrypted storage needs the native shell (P1.1, HS1). | Web: no offline evidence queue; say so to the user. Native: reuse the outbox (§9.3). |
 | C-8 | "Existing audit ledger". | No general ledger; per-subsystem tables. | A Live Assist lifecycle table, pointer-only, plus the existing per-subsystem rows (§12). |
 | C-9 | "Existing document scanner / paperwork engine". | Typed forms and the commit path exist; OCR does not; `documentExtractions` has no production writer. | The vision model's reading of a document becomes a `photo_ocr` proposal through the existing forms (§10). No OCR engine is chosen here. |
-| C-10 | Hand off to "Driver Portfolio" and "Fleet/Equipment Portfolio". | Neither exists as a named concept. | Hand off to what exists (compliance passport, safety binder, defects, work orders); name the gap. |
+| C-10 | Hand off to "Driver Portfolio" and "Fleet/Equipment Portfolio". | Neither exists on `main`. The Driver Portfolio exists on open branches (`claude/driver-portfolio-credential-wallet-ya8928`, PR #16, and the API branch stacked on it); the Fleet & Equipment Portfolio is a design on `claude/fleet-equipment-portfolio-design-3d13d5`. | Hand off to `driverPortfolio.submitCredential` once merged; to unit, trailer and equipment evidence links and the `defect_report` form today (§10, §23.1). |
 | C-11 | Risk ladder L0–L5 (owner plan §3). | The gateway has five named levels and a separate `NEVER_AUTONOMOUS` floor. | The gateway's names are canonical; §8.3 maps the plan's ladder onto them. |
 | C-12 | Evidence has tenant ownership. | `evidenceRecords` has no organization column. | A save must link to a scoped entity, or it is refused (§7.3). The column itself is not added here. |
 | C-13 | "Protection from another tenant accessing frames". | Organization-wide isolation is not a system property (§0.3). | Every new table carries `orgRef` NOT NULL; every read is filtered and tested (§14). |
@@ -255,7 +263,7 @@ pilot measures whether turn latency is actually the complaint.
 | S-7 | Stale or hijacked session reuse. | A leaked `sessionRef`, or a session continuing after logout. | `sessionRef` is random and bound to user, organization and (when enrolled) device. Every call re-checks owner, state, expiry and a strictly increasing frame sequence. Idle expiry. The client tears down on any auth error (§6.2). |
 | S-8 | Background or silent capture. | The request forbids it. | Capture starts only from a user gesture. Tracks stop on `visibilitychange` to hidden, page unload, auth loss, session end or track end. There is no server-initiated start. |
 | S-9 | The client-supplied content hash is trusted at seal time. | `records.evidence.seal` takes `contentHash` from the client (`recordsRouter.ts:99`). | A save from Live Assist recomputes SHA-256 on the server from the uploaded bytes and compares it with the frame hash recorded in the session (§7.3). |
-| S-10 | Nobody can view saved evidence. | A saved inspection frame is unreadable today. | Out of scope for the first slice. Recorded as a dependency: a purpose-logged `evidence.view` modelled on `telematics.videoView`. |
+| S-10 | Nobody can view saved evidence. | A saved inspection frame is unreadable today. | Depend on `records.files.get` / `records.files.download` on `claude/leaseos-records-file-manager-bqgyjk` (a signed URL plus an `evidenceAccessEvents` row), not a new `evidence.view`. Unmerged; its record-type visibility rule affects how frames are saved (§15, §23.1). |
 | S-11 | Workplace-monitoring perception. | Camera and screen features look like surveillance to workers. | Audit decisions, not traffic (§12). No per-frame audit rows. `monitoringNotices` (`schema.ts:8800`) records worker notice; a `live_assist` purpose is **OWNER** (D-08). |
 | S-12 | Model confidence presented as fact. | Visual misidentification in a safety context. | A certainty vocabulary chosen by the server contract, not the model's number (§11.1). Safety classes force an escalation notice (§11.3). |
 
@@ -343,7 +351,7 @@ never enter retrieval, evaluation or training.
 2. The user may pinch-zoom and drag a rectangle. The crop is taken from the **full-resolution** frame, not the downscaled preview, so a small placard becomes legible.
 3. The client sends the crop (and, optionally, a low-resolution context frame so the model knows where the crop sits) with the question.
 4. The server records a `liveAssistFrames` row (`kind = inspect` or `crop`, `markedByUser = true`) with SHA-256 of the exact bytes sent.
-5. The answer is anchored to that frame hash, so "save this" later saves exactly what the AI looked at.
+5. The answer is anchored to that frame hash, and the frame row also carries the hash of the **original** capture it was cut from. "Save this" saves the original, never re-encoded, and the crop the AI looked at stays recorded as provenance (§7.3).
 6. **Unfreeze** resumes live sampling. A frozen frame is the natural unit for "Save as evidence".
 
 ---
@@ -380,9 +388,9 @@ worker wiring does not yet allow. This must be verified against the chosen vendo
 ### 7.3 Saving a frame as evidence
 
 1. The user taps **Save as evidence** on a frozen frame, photo or clip.
-2. The user must pick a link: the current job, unit, trip, incident, defect or work order, pre-filled from `contextRefs`. **With no link, the save is refused.** This matches the outbox rule that a capture with no `jobId` or `unitId` is refused (`client/src/runtime/outbox.ts:37-45`), and it gives the evidence an organization through its link (§0.3).
-3. The client uploads the bytes through the existing `fieldRoute.evidence.upload` with `clientCaptureRef = la:{sessionRef}:{frameSeq}`, which makes the save idempotent.
-4. The server recomputes SHA-256 over the stored bytes and compares it with `liveAssistFrames.frameHash`. On a mismatch the save is refused as `hash_mismatch`, closing S-9 for this path.
+2. The user must pick a link: the current job, unit, trailer, equipment, trip, load, incident, inspection or work order, pre-filled from `contextRefs`. A defect is **not** a link target on `main` (`drizzle/schema.ts:2740-2749`); until the mechanic design's CP7 adds one, a defect photo links to the unit and is attached to the defect proposal. **With no link, the save is refused.** This matches the outbox rule that a capture with no `jobId` or `unitId` is refused (`client/src/runtime/outbox.ts:37-45`), and it gives the evidence an organization through its link (§0.3).
+3. The client uploads the **original capture bytes, never re-encoded**, through the existing `fieldRoute.evidence.upload` with `clientCaptureRef = la:{sessionRef}:{frameSeq}`, which makes the save idempotent. This follows the scanner work's rule that the evidence original is stored as captured; the downscaled or cropped image the AI saw is a derivative, and its hash and crop region are kept as provenance.
+4. The server recomputes SHA-256 over the stored bytes and compares it with `liveAssistFrames.originalHash`, which the client declared when it asked about the frame. On a mismatch the save is refused as `hash_mismatch`, closing S-9 for this path. The declaration binds the saved file to the question; it does not prove the crop was cut from it, which is why the crop region and derivative hash are kept beside it.
 5. The server writes `evidenceRelationships` for the chosen link, then sets `liveAssistFrames.savedEvidenceRecordId` and appends `liveAssistEvents.evidence_saved`.
 6. The evidence starts `needs_review` / `draft`, like every upload. Sealing stays the existing driver action.
 7. **AI observations are not copied into the evidence record.** If the user wants the AI's reading kept, it goes through a typed proposal (§10). An observation is an inference, and evidence is what was seen.
@@ -406,11 +414,11 @@ These are **PROPOSED**. Names follow the existing `domain.verb` pattern.
 
 | Permission | Purpose | Sensitive (fail-closed)? | Suggested roles |
 |---|---|---|---|
-| `liveAssist.use` | start, submit, end a session with photo and camera | yes | driver, mechanic, dispatcher, office, management |
+| `liveAssist.use` | start, submit, end a session with photo and camera | yes | driver, dispatcher, mechanic, shop_lead, office, management (today's holders of `assistant.use`) |
 | `liveAssist.screenShare` | the screen source | yes | office, dispatcher, management; driver only when D-06 allows |
 | `liveAssist.video` | the video-clip source | yes | as `liveAssist.use` |
-| `liveAssist.saveEvidence` | save a frame or clip as evidence | yes; the save **also** requires the existing `evidence.upload` | as `liveAssist.use` |
-| `liveAssist.administer` | organization policy: budgets, sources allowed, retention within limits | yes | management, administrator |
+| `liveAssist.saveEvidence` | save a frame or clip as evidence | yes; the save **also** requires the existing `evidence.upload` | driver, mechanic, shop_lead, office, management (today's holders of `evidence.upload` among them) |
+| `liveAssist.administer` | organization policy: budgets, sources allowed, retention within limits | yes | management (there is no `administrator` role in `GRANTS`) |
 | `liveAssist.review` | read another user's session lifecycle, **never** observations or turns | yes | safety, management |
 
 - No role can read another user's frames, turns or observations. There is no procedure for it.
@@ -495,7 +503,7 @@ existing procedure decides. Live Assist never writes a domain table itself.
 |---|---|---|---|
 | AI Secretary typed forms | `aiProposal` forms, read-back, `executeAssistantCommit` | "Fill this from the photo": the frame goes to the vision adapter with the form's output schema (`buildOutputSchema`), fields arrive with `source = photo_ocr`, then the normal gaps, read-back and commit | EXISTS (live); no client page yet |
 | Disposal tickets | `disposal_ticket` form; `disposalTickets` (`schema.ts:1048`); fingerprint duplicate gate | as above; the saved photo is linked with `evidenceRelationships.entityType = disposalTicket` | EXISTS |
-| Defects | `defect_report` form (observation only, no diagnosis field, `aiProposal.ts:213-219`); `maintenanceDefects` | "Report this as a defect": a proposal with the frame saved as evidence | EXISTS; the AI may describe, never diagnose (manifest line 417) |
+| Defects | `defect_report` form (observation only, no diagnosis field, `aiProposal.ts:213-219`); `maintenanceDefects` | "Report this as a defect": a proposal with the frame saved as evidence linked to the unit | EXISTS; the AI may describe, never diagnose (manifest line 417) and never sets severity, lifts a hold or implies return to service (`claude/mechanic-portal-domain-82efa9:docs/register/MECHANIC_PORTAL_FLEET_MAINTENANCE_DESIGN.md:138`, six-step release at `:487-498`) |
 | Work orders / maintenance | `workOrders`, `workOrderReleases`, `mechanicRelease.ts` | reference only in Phase 1; attach evidence via relationship `workOrder` | EXISTS; **release is never proposed by Live Assist** (`maintenance.clearOutOfService` is `NEVER_AUTONOMOUS`) |
 | Expenses and fuel receipts | `expense_receipt`, `fuel_receipt` forms | photo to proposal | EXISTS |
 | Dispatch / jobs | `jobs`, dispatch readiness, `jobInScope` | the current job is the default `contextRef`; answers may cite readiness blockers through `admitSource()` | EXISTS |
@@ -503,8 +511,8 @@ existing procedure decides. Live Assist never writes a domain table itself.
 | Inspections | `inspections` (`schema.ts:298`), no media column | attach through `evidenceRelationships.entityType = inspection`; no pass/fail from AI | EXISTS (server); no client form |
 | Incidents / safety | `records.incident`, `incidentReports`, `nearMissReports` | attach evidence to an incident the user is filing; the AI may draft a description, the person files it | EXISTS |
 | Dangerous goods | `evaluateDangerousGoodsAssist` with disclaimer | a placard photo may be *read*; any TDG determination goes through the existing assist, which returns `needs_review` at best | EXISTS |
-| Driver qualifications | compliance passport, `complianceDocuments`, training academy | a certificate photo becomes evidence plus a review item; **never** a verified credential (`LEASEOS_CURRENT_STATE.md:60`: onboarding credentials enter the registry on a second person's verification) | EXISTS; "Driver Portfolio" is MISSING as a name |
-| Fleet / equipment | `units`, safety binder, `asset.twin`, telematics fault codes | the unit is a `contextRef`; fault codes are admitted context; the AI may explain a warning light **and must say to follow the operator's manual and company procedure** | EXISTS; "Equipment Portfolio" is MISSING as a name |
+| Driver qualifications | compliance passport, `complianceDocuments`, training academy | a certificate photo is saved as evidence, then `driverPortfolio.submitCredential({code, evidenceRecordId})` writes a `needs_review` credential; a second person runs `credentialVerify`; AI-read dates are pre-filled for the verifier, never written as facts | EXISTS on `main` as `complianceDocuments`; the portfolio API is on open branches (PR #16 plus `claude/driver-portfolio-api-ya8928`). Its submit path is self-only, so a safety user photographing someone else's card still uses the older `compliance.credentialRecord` |
+| Fleet / equipment | `units`, safety binder, `asset.twin`, telematics fault codes | the unit is a `contextRef`; fault codes are admitted context; the AI may explain a warning light **and must say to follow the operator's manual and company procedure**; saved photos link to `unit`, `trailer` or `equipment` with the fleet design's photo-purpose `role` values (`front`, `vin_plate`, `serial_plate`, `damage`, `defect`, …) | EXISTS on `main`; the Fleet & Equipment Portfolio is design only (`claude/fleet-equipment-portfolio-design-3d13d5`), and its proposed `fleet.holdRelease` joins `NEVER_AUTONOMOUS` |
 | Document knowledge | `assistantAsk` (full-text, graded, no model) | the AI may cite admitted knowledge passages; `verifyClaim` grading applies | EXISTS |
 | Exception Centre | category `"ai"` (`server/_core/exceptionCentre.ts:206`) | unresolved Live Assist proposals surface there like any AI proposal | EXISTS |
 
@@ -647,7 +655,7 @@ more legible. The UI makes Freeze the primary action for "what is this part?" qu
 | Frames per session | 60 | the session continues in text; Freeze still allowed up to the inference cap |
 | Inference calls per session | 40 | ENDED (`budget_spent`) |
 | Inference calls per user per day | 150 | start refused with a clear message |
-| Organization daily spend ceiling | set by administrator; none means Live Assist is off | start refused |
+| Organization daily spend ceiling | set by a holder of `liveAssist.administer`; none means Live Assist is off | start refused |
 
 - Counters live on the session row and are enforced server-side. The model cannot raise them. This
   follows the direction of P9.5, where `maxSteps` "the model cannot raise".
@@ -758,7 +766,7 @@ after `0174` and clear of `0172`/`0173`.
 
 **`liveAssistFrames`** (only frozen, inspected, cropped or saved frames)
 - `id`, `sessionId`, `orgRef`, `frameSeq`, `kind` (`context` / `inspect` / `crop`)
-- `frameHash` (SHA-256 of the bytes sent), `perceptualHash`, `width`, `height`, `byteSize`, `region` json
+- `frameHash` (SHA-256 of the bytes sent), `originalHash` (SHA-256 of the capture it was derived from, declared by the client), `perceptualHash`, `width`, `height`, `byteSize`, `region` json
 - `markedByUser`, `savedEvidenceRecordId` (null), `createdAt`, `purgeAfter` (cleared when saved)
 
 **`liveAssistObservations`** (transient)
@@ -776,8 +784,8 @@ after `0174` and clear of `0172`/`0173`.
 - spend ceiling, vendor route key, `supersededAt`
 
 **Changes to existing tables**
-- None required.
-- `evidenceRecords.recordType` can carry `live_assist_frame` / `live_assist_clip`.
+- None required on `main`.
+- **Save frames under the domain record type** (`photo`, `defect_report`, `inspection`, `credential`, and so on), with the Live Assist source in provenance, **not** under a new `live_assist_frame` type. The records file manager branch decides visibility by record type, and an unlisted type is visible only to its owner (`claude/leaseos-records-file-manager-bqgyjk:server/_core/recordFiles.ts:46-106`). A saved defect photo must be visible to the mechanic.
 - `proposalFields.source` already has `photo_ocr`.
 - `evidenceRecords` lacking an organization column is the known gap, fixed by the tenancy work in §0.2, not here.
 
@@ -821,8 +829,14 @@ export interface VisionAdapter {
 }
 ```
 
-- The first implementation wraps `invokeLLM` with `ImageContent` parts. It is selected by
-  `modelGateway.route("vision")`, which needs `vision` added to `ModelTask`.
+- **Which model door it sits behind is D-13.** `main` has one door, `invokeLLM`, which carries the P9.1 defect
+  but already types `ImageContent`. The Secretary model layer on `claude/secretary-model-dialogue-yzszcv`
+  (PR #7) has a second door, `LlmProvider`, which refuses to run unconfigured, has a 60 s timeout and no
+  default host, but whose messages are text only ("no tools, no images",
+  `server/_core/ai/llm/provider.ts:31-72` on that branch). The recommended default is to extend
+  `LlmProvider` with image parts and build the adapter on it, so Live Assist never touches the forge
+  fallback. Either way it is selected by `modelGateway.route("vision")`, which needs `vision` added to
+  `ModelTask`.
 - It refuses with `unconfigured` rather than falling back to any default host (P9.1).
 - The output is validated against the schema before anything reads it. `schema_invalid` is a refusal, not
   a retry-until-plausible.
@@ -883,7 +897,7 @@ export interface LiveAssistTransport {
   - `sampler.ts` (§13.1), `linkMonitor.ts` (§9.1), `transport.ts` (§16.3).
 - Entry points: the existing `QuickCapture` Photo action and a Live Assist button in the portal shell for the field portals. Office and dispatch get the screen source on desktop.
 - Teardown in one place: `stopAllTracks()` is called on Stop, `visibilitychange` to hidden, `pagehide`, any tRPC `UNAUTHORIZED` or `CONFLICT` from Live Assist, a session state that is no longer active, and `track.onended`.
-- A Permissions-Policy header allowing `camera` and `display-capture` for the app's own origin only. No such header exists today (`server/_core/index.ts`).
+- A Permissions-Policy header allowing `camera`, `microphone` and `display-capture` for the app's own origin only. None exists on `main`. The hardening branch sets `camera=(self), microphone=(self)` and does not list `display-capture` (`claude/leaseos-code-audit-yvggvw:server/_core/httpHardening.ts:35`); LA-3 adds `display-capture=(self)` explicitly, with a test. The same branch lowers the tRPC body limit to 25 MB and returns 415 for non-JSON mutations, which the frame sizes in §13.2 already respect.
 - Accessibility: large touch targets for gloved use, and a screen-reader label for the sharing state (the repository has `a11yCoverage.test.ts` to extend).
 
 **Native (after P1.1, not in the first slices):** a `CameraAdapter` and `ScreenCaptureAdapter` added to the
@@ -936,6 +950,9 @@ the outbox hand-off for offline saves, ML Kit masking, and MDM restriction detec
 | D-09 | Hash-chain `liveAssistEvents` | Yes, with a locked previous-hash read |
 | D-10 | Build the P9.6 telemetry seam inside LA-1 if not already built | Yes |
 | D-11 | EXIF and GPS on saved evidence | Strip EXIF on transient frames; keep capture time; GPS only when the user attaches a fix |
+| D-12 | Documents: may a document image be read by a cloud vision model, or only on the device? The scanner branches read on the device only ("never uploaded to be read") | Cloud reading allowed only for the five typed forms' document kinds, and only after SEC-6 classification exists; payroll, medical and contract documents never |
+| D-13 | Which model door carries images (§16.1) | Extend the Secretary layer's `LlmProvider` (PR #7) with image parts; never add images to `invokeLLM` |
+| D-14 | Record type of saved frames | The domain type (`photo`, `defect_report`, `credential`, …) with Live Assist provenance; no `live_assist_*` type |
 
 ---
 
@@ -958,10 +975,13 @@ the outbox hand-off for offline saves, ML Kit masking, and MDM restriction detec
 **Checkpoint LA-1 — Photo + Freeze/Inspect + Live Assist session foundation (web).** It may begin only
 when all four LA-0 preconditions hold:
 
-1. D-01 is ruled, allowing LA-1.
-2. P9.1 is closed: the LLM path refuses to run unconfigured and has no hard-coded vendor host.
+1. D-01 is ruled, allowing LA-1, and the hardening "Wave 0" freeze, if adopted, is lifted for it.
+2. P9.1 (AI-001, part of SEC-12) is closed: the model path refuses to run unconfigured and has no hard-coded vendor host.
 3. D-03 names a vendor whose retention terms are on file.
-4. The P9.6 telemetry seam exists, or D-10 puts it inside LA-1.
+4. The P9.6 telemetry seam (AI-006) exists, or D-10 puts it inside LA-1.
+
+The full precondition list, including the open-branch dependencies of §23, the work breakdown and the
+per-file plan are in `docs/live-assist/LIVE_ASSIST_LA1_IMPLEMENTATION_PLAN.md`.
 
 **Build:**
 - The six tables of §15 in one migration.
@@ -979,3 +999,43 @@ when all four LA-0 preconditions hold:
 - a photographed disposal ticket goes photo → `photo_ocr` proposal → gaps → read-back → commit through the existing `executeAssistantCommit` with no new write path;
 - a frozen crop can be saved to a job with a server-verified hash;
 - nothing about the image remains on the server 24 hours after the session ends, except saved evidence.
+
+---
+
+## 23. Open-branch reconciliation (read 2026-09-24)
+
+Sixteen open branches overlap Live Assist. None is merged into `main`. The rows say what each supplies, and
+what this design now does about it. "PR" is given only where a number was found.
+
+### 23.1 Capture, evidence and domain hand-offs
+
+| Branch | What it carries | Effect on this design |
+|---|---|---|
+| `claude/mobile-hardware-scanner-mzp1e1` (one commit on `main`) and `…-v2327` (the same work redone on an unrelated history, with fixes) | A client `ScanSession` (not persisted, no server table); `captureQuality` verdicts `acceptable` / `unjudged` / `reshoot` over platform-reported signals; device OCR and barcode **interfaces** with no engine; `scanAutoLink` (proposes a tracking-number link, never links); `scanReview` checklist; a read-only `paperwork` (or `scanning`) router. No camera acquisition, no UI, no model call. The first version gates review on `compliance.read`, which drivers do not hold; the rework adds `paperwork.read` | Reuse the verdict vocabulary and the "advises, never confiscates" rule in the sampler (§13.1), with a separate floor set for frames; reuse `scanAutoLink` and `scanReview` for photographed tickets instead of a second matcher or checklist; follow its `available()` + `NotOnDeviceError` adapter pattern for LA-5. Its on-device-only reading policy is D-12. Its `ScanSession` is a different thing from a Live Assist session and keeps its name |
+| `claude/driver-portfolio-credential-wallet-ya8928` (PR #16) and `claude/driver-portfolio-api-ya8928` (stacked, no PR) | Requirement bindings, an append-only portfolio event log, and a `driverPortfolio.*` API whose `submitCredential` takes an `evidenceRecordId` and writes a `needs_review` credential; `credentialVerify` refuses the operator and the submitter | The certificate-photo hand-off in §10 |
+| `claude/fleet-equipment-portfolio-design-3d13d5` | Design only: `units` as the canonical asset, holds, components, meters, photo-purpose `role` values; `fleet.holdRelease` in `NEVER_AUTONOMOUS` | Photo-purpose roles for saved unit photos (§10) |
+| `claude/mechanic-portal-domain-82efa9` | Design only: AI never sets severity; a six-step return to service; CP7 adds a `maintenanceDefect` evidence target and a `shop.evidenceRead` viewer | Defect links go to the unit until CP7 (§7.3) |
+| `claude/leaseos-records-file-manager-bqgyjk` | `records.files.list/get/download`: per-record authorization, not-found for anything not visible, a signed URL and an `evidenceAccessEvents` row | The evidence viewer (S-10); frames saved under domain record types (§15, D-14) |
+| `claude/leaseos-sign-attest-design-5993ar` | Design only: server-recomputed hashes, one canonical payload, a hash-chained event table with triggers | §7.3 step 4 already follows its rule; the D-09 chain reuses its shape rather than a new canonicalizer |
+
+### 23.2 AI layer, security and tenancy
+
+| Branch | What it carries | Effect on this design |
+|---|---|---|
+| `claude/secretary-model-dialogue-yzszcv` (PR #7) | The fail-closed `LlmProvider` (text only), `RunProvenance` with prompt and input hashes, injection fences and `scanForInjection`, a dialogue machine, typed tools with `NEVER_AUTONOMOUS` enforced, and the moratorium document, whose carve-out option is limited to "no new AI capability, no new tools wired" | D-13; `RunProvenance` gains a frame hash; §5 S-6 uses its fences; the moratorium ruling for Live Assist must be separate from its carve-out |
+| `claude/document-control-design-imsd3n` | An owner ruling recorded 2026-09-24 for Document Control only: carve out the checkpoints that are spine record-layer work, defer OCR and the rest, "every new module reached or declared", and the AI worker-boundary ruling kept separate | The template for D-01. LA-1 is not spine work, so under that template it would stay deferred unless the owner rules otherwise |
+| `claude/leaseos-code-audit-yvggvw` | Security headers (camera and microphone for self), an outbound-HTTP guard with a host allowlist and timeouts (not yet applied to AI calls), a 25 MB tRPC limit, JSON-only mutations, and a backlog with a Wave 0 feature freeze and AI-001 to AI-008 | §0.2, §17; the vision adapter's vendor calls go through the outbound guard |
+| `claude/leaseos-platform-architecture-uyd8gs` | HS5 client contract headers; drain-only installs may call only evidence upload, seal, sync and auth; `UploadReceipt`; `SessionScope` | Web is exempt; native Live Assist sends the headers; a 426 means "Live Assist unavailable, upgrade"; saves return an `UploadReceipt`-shaped result |
+| `feature/tenant-scope-foundation` (unrelated history) | Nullable `orgRef` on 13 tables (not `evidenceRecords`); per-uploader `clientCaptureRef` uniqueness; a per-user acting-organization selection | The `la:` capture reference relies on per-uploader uniqueness; a selection change in another tab must end the session (`org_changed`) and is tested |
+| `claude/leaseos-security-architecture-f2j1vn` | SEC-0 to SEC-18. SEC-1 items 7 and 8 (per-uploader capture refs; storage-key ownership), SEC-2 server-side sessions, SEC-6 classification (RESTRICTED excluded from AI, HIGHLY_RESTRICTED never), SEC-11 audit triggers, SEC-12 AI hardening, and a shared redaction layer | Preconditions in the LA-1 plan; S-4 uses the shared redactor rather than its own; until SEC-2, "logout ends the session" is enforced by the client and by the per-call re-check only |
+| `docs/identity-secrets-architecture` | A competing server-side session table (`sessionFamilies`) with 15-minute access tokens; does not cover the AI vendor key | §6.2 binds to whichever session table the owner picks; assume up to 15 minutes of residual access after revocation |
+| `claude/leaseos-trust-governance-fx7v2x` | Survey only: `monitoringNotices` cannot be issued by anything yet; AI prompts and outputs have no retention class; proposed `governanceReceipts` | D-08 needs the notice procedures mounted first; D-05's purge period follows the retention-class decision rather than being set here |
+
+### 23.3 Migration numbers
+
+Claimed on open branches at the time of reading: `0168`–`0173` (tenant scope, unregistered, colliding with
+`main`), `0172`–`0175` (training academy), `0175`–`0177` (driver portfolio), `0175` (identity sessions,
+planned), `0178`–`0183` (document control, with SQL for `0182`/`0183`), `0179` (ELD and PR #17),
+`0182`–`0184` (sign-and-attest and governance, planned). The first number no branch claimed was `0185`.
+The rule stays: take the number when the PR opens, check every remote branch, and record the check.
+
