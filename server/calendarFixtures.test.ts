@@ -46,6 +46,16 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   "server/gst.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "period-bound arithmetic (2026-Q3 ends 1 October); no comparison with now" },
   "server/ifta.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "quarter-bound arithmetic; no comparison with now" },
   "server/qualificationStore.test.ts": { dates: ["2026-10-01", "2026-11-10"], verdict: "clock_independent", reason: "the expired holding is evaluated against the shift's explicit STARTS, not now" },
+  // Reviewed 2026-09-24, the day 2026-10-15 came within three weeks. All three dates are fixed and
+  // meet only other fixed dates: 2026-10-31 is a fiscal-year end (a buildSchedule input, and what
+  // fiscalYearFor returns for the fixed 2026-09-10 and for the schedule's asOf); 2026-10-15 is that
+  // explicit asOf; 2026-10-20 is a disposedAt, checked against the fixed acquiredAt and the stored
+  // close state of period 2026-10. The file's own clock reads mint keys, stamp a role grant and feed
+  // two registrations refused for reasons that have nothing to do with dates; the router's (the CCA
+  // rule version, the twin's asOf, review stamps) touch none of the three, and no SQL on these paths
+  // compares with NOW(). Checked by running the file with Date faked to 2026-10-16, 2026-10-21,
+  // 2026-11-01 and 2027-06-01: every case passes.
+  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "fixed deterministic fixtures used only in comparisons against other fixed dates (acquiredAt, the fiscal-year bounds, disposedAt); none models a future real-world deadline, so none needs rolling forward with the wall clock" },
 };
 
 function testFiles(dir: string, out: string[] = []): string[] {
@@ -63,6 +73,28 @@ const genuineClockReads = (src: string) =>
 const DAY = 86_400_000;
 const dayOf = (iso: string) => new Date(`${iso}T00:00:00Z`).getTime();
 
+/**
+ * The decision, apart from the scan, so the narrowness of REVIEWED can be tested on inputs the
+ * calendar does not choose. `exposures` holds each file's future in-window dates.
+ */
+function failingFiles(exposures: Readonly<Record<string, readonly string[]>>, reviewed: typeof REVIEWED, today: number): string[] {
+  const failing: string[] = [];
+  for (const [f, dates] of Object.entries(exposures)) {
+    const r = reviewed[f];
+    // Only dates that are future AND in-window reach `dates`, so a recorded date
+    // going past is already a non-event and cannot fail a file. The one thing
+    // that can is a date ARRIVING in range, which is the review this list is for.
+    const unreviewed = r ? dates.filter(d => !r.dates.includes(d)) : dates;
+    if (unreviewed.length === 0) continue;
+    const nearest = Math.min(...dates.map(dayOf));
+    const daysLeft = Math.round((nearest - today) / DAY);
+    // Name the dates nobody has certified. Saying only "dates changed" sent a
+    // reader looking for an edit to a file that had not been touched.
+    if (daysLeft <= FAIL_WITHIN_DAYS) failing.push(`${f}: ${dates.join(", ")} (${daysLeft} day(s) until the first) — ${r ? `not yet reviewed: ${unreviewed.join(", ")}` : "unreviewed"}`);
+  }
+  return failing;
+}
+
 describe("fixture dates the calendar is about to pass", () => {
   const today = Math.floor(Date.now() / DAY) * DAY;
   const exposures: Record<string, string[]> = {};
@@ -79,21 +111,24 @@ describe("fixture dates the calendar is about to pass", () => {
   }
 
   it("every file with a near-future fixture and a real clock read is reviewed, or has more than three weeks left", () => {
-    const failing: string[] = [];
-    for (const [f, dates] of Object.entries(exposures)) {
-      const r = REVIEWED[f];
-      // Only dates that are future AND in-window reach `dates`, so a recorded date
-      // going past is already a non-event and cannot fail a file. The one thing
-      // that can is a date ARRIVING in range, which is the review this list is for.
-      const unreviewed = r ? dates.filter(d => !r.dates.includes(d)) : dates;
-      if (unreviewed.length === 0) continue;
-      const nearest = Math.min(...dates.map(dayOf));
-      const daysLeft = Math.round((nearest - today) / DAY);
-      // Name the dates nobody has certified. Saying only "dates changed" sent a
-      // reader looking for an edit to a file that had not been touched.
-      if (daysLeft <= FAIL_WITHIN_DAYS) failing.push(`${f}: ${dates.join(", ")} (${daysLeft} day(s) until the first) — ${r ? `not yet reviewed: ${unreviewed.join(", ")}` : "unreviewed"}`);
-    }
-    expect(failing, "A test fixture date is about to be passed by the real clock in a file that also reads the clock. Review it: make the fixture clock-relative, or record it in REVIEWED with the reason the clock never meets it.").toEqual([]);
+    expect(failingFiles(exposures, REVIEWED, today), "A test fixture date is about to be passed by the real clock in a file that also reads the clock. Review it: make the fixture clock-relative, or record it in REVIEWED with the reason the clock never meets it.").toEqual([]);
+  });
+
+  it("a review certifies the dates it names, in the file it names, and nothing else", () => {
+    // A fixed `today` (the day the capitalAssets dates were reviewed), so this case is about the
+    // rule rather than the calendar and never needs rolling forward itself.
+    const onReviewDay = dayOf("2026-09-24");
+    const capital = "server/capitalAssets.test.ts";
+    const certified = REVIEWED[capital]!.dates;
+    expect(failingFiles({ [capital]: certified }, REVIEWED, onReviewDay)).toEqual([]);
+    // A new date in the same file is not covered by the review of the old ones.
+    expect(failingFiles({ [capital]: [...certified, "2026-10-16"].sort() }, REVIEWED, onReviewDay))
+      .toEqual([expect.stringContaining("not yet reviewed: 2026-10-16")]);
+    // The same dates in another file are not covered either: a review is per file.
+    expect(failingFiles({ "server/someOther.test.ts": certified }, REVIEWED, onReviewDay))
+      .toEqual([expect.stringContaining("server/someOther.test.ts: 2026-10-15")]);
+    // The window is what it was: three weeks to fail, sixty days to look.
+    expect([FAIL_WITHIN_DAYS, WINDOW_DAYS]).toEqual([21, 60]);
   });
 
   it("names what is coming, so the next review is not a surprise", () => {
