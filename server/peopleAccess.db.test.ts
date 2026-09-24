@@ -593,11 +593,15 @@ d("B23.2 — an administrator administers their own company and no other", () =>
     const A = await org("Solo Transport");
     const only = await admin(A);
 
-    // Through the role set.
+    // Through the role set, and the refusal costs them nothing else: revoking
+    // `management` is attempted first, so a refusal cannot leave the person
+    // stripped of the roles the loop had already reached.
+    await inOrg(A, () => callerFor(only).people.setRoles({ userId: only, roles: ["management", "driver"], reason: "also driving" }));
+    expect(await liveRoles(only, A)).toEqual(["driver", "management"]);
     await expect(
-      inOrg(A, () => callerFor(only).people.setRoles({ userId: only, roles: ["driver"], reason: "stepping back" }))
+      inOrg(A, () => callerFor(only).people.setRoles({ userId: only, roles: [], reason: "stepping back" }))
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: /last management access/i });
-    expect(await liveRoles(only, A)).toContain("management");
+    expect(await liveRoles(only, A)).toEqual(["driver", "management"]);
 
     // And through membership removal.
     await expect(

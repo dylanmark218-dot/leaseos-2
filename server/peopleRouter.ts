@@ -192,6 +192,12 @@ export const peopleRouter = router({
       const toRevoke = Array.from(held).filter(r => !wanted.has(r));
 
       const now = new Date();
+      // `management` first, so a last-administrator refusal happens before
+      // anything else has been given up. The transactional guard below is what
+      // makes the rule correct under two concurrent administrators; this
+      // ordering is what stops a refusal leaving the person stripped of the
+      // roles that were revoked before the loop reached the one that refused.
+      toRevoke.sort((a, b) => (a === "management" ? -1 : b === "management" ? 1 : 0));
       for (const role of toRevoke) {
         const result = await revokeRoleWithAdminGuard({
           orgRef: org.orgRef,
