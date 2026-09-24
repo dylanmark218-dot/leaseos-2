@@ -69,7 +69,18 @@ export type AdmissionRefusal =
   | { reason: "not_found"; message: string }
   | { reason: "unsupported_kind"; message: string }
   | { reason: "no_tenant_proof"; message: string }
-  | { reason: "missing_source"; message: string };
+  | { reason: "missing_source"; message: string }
+  | { reason: "not_content"; message: string };
+
+/**
+ * AIL-1A.1 — what a resolver may produce. Content kinds only: none of them may instruct
+ * (`contextAssembly` maps each to `workflow_data` or `external_content`). `system_prompt`,
+ * `user_message` and `company_policy` are not here: the first two have their own constructors below,
+ * and company policy is configuration, never something loaded from a learned or retrieved record.
+ */
+export const RESOLVABLE_KINDS: readonly BlockKind[] = ["retrieved_document", "record_data", "external_message"];
+/** Proofs a resolver may give. `system` is not one: it is the system prompt's alone. */
+export const RESOLVABLE_PROOFS: readonly TenantProof["kind"][] = ["row", "parent", "legacy_single_tenant"];
 
 export class AdmissionRefused extends Error {
   constructor(readonly refusal: AdmissionRefusal) { super(refusal.message); }
@@ -134,6 +145,22 @@ export async function admitSource(args: {
   // One answer for absent, foreign, and forbidden. Distinguishing them would
   // turn a reference into an existence oracle.
   if (!resolved) throw new AdmissionRefused({ reason: "not_found", message: `No such ${args.sourceKind}` });
+
+  /* AIL-1A.1 — a resolver produces CONTENT, never authority.
+   *
+   * Everything a resolver returns came from a record: a passage, a document, OCR, an email, an import,
+   * tool output, a model's output, and — from AIL-1B — learned company or user knowledge. None of it
+   * may arrive as our own instruction or as the person speaking. Before this, a resolver could return
+   * `kind: "system_prompt"` (which assembly maps to SYSTEM authority and lets instruct) or
+   * `proof: { kind: "system" }` (which skipped the tenant check below entirely). Both are now refused
+   * here, deterministically, whatever the resolver says. The only way to make a system block is
+   * `systemPromptBlock()`; the only way to make a user block is `authenticatedUserBlock()`. */
+  if (!RESOLVABLE_KINDS.includes(resolved.kind) || !RESOLVABLE_PROOFS.includes(resolved.proof.kind)) {
+    throw new AdmissionRefused({
+      reason: "not_content",
+      message: `A context resolver may only produce content (${RESOLVABLE_KINDS.join(", ")}) proved by a record; "${resolved.kind}" with a "${resolved.proof.kind}" proof is authority, and authority is never loaded from a record.`,
+    });
+  }
 
   if (resolved.proof.kind === "legacy_single_tenant" && args.acting.multiTenant) {
     throw new AdmissionRefused({

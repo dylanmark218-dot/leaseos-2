@@ -253,6 +253,10 @@ adds none and fixes none of them, because they are outside its scope:
 
 ## 8. Follow-ups: for AIL-1B, or recorded separately
 
+> **Update (AIL-1A.1):** each item below is classified, and the category-A/B/C items fixed, in
+> `AIL_1A1_TENANCY_HARDENING.md` §3. The alias correction (§4.2) and the `assistantQueries` scope
+> question are ruled on there.
+
 - **AIL-1B:**
   - an ORGANIZATION-scoped terminology/alias record (§4.2), written only through a proposal and
     looked up organization-first with a GLOBAL fallback;

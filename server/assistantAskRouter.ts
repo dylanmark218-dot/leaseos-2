@@ -354,16 +354,26 @@ export const assistantAskRouter = router({
       };
     }),
 
-  /** What was asked, and what it was told. Read-only, this organization only. */
+  /**
+   * What *I* asked, and what I was told. Read-only.
+   *
+   * AIL-1A.1 (owner ruling): raw assistant history is USER-scoped. Sharing an organization does not
+   * let one person read another's questions, and `assistant.ask` — held by drivers — is not a
+   * privilege to review colleagues. No existing permission means "review other people's AI
+   * conversations" (`assistant.curate` governs what is loaded, not who may be read), so there is no
+   * cross-user path; a privileged review would be its own permission, decided later. Company learning
+   * will consume derived signals, never this raw text. Owner and person come from the session; the
+   * input is strict, so a forged user or organization field is refused rather than ignored.
+   */
   history: roleProcedure("assistant.askHistory")
-    .input(z.object({ limit: z.number().int().min(1).max(100).default(20) }))
+    .input(z.object({ limit: z.number().int().min(1).max(100).default(20) }).strict())
     .query(async ({ ctx, input }) => {
       const d = await db();
       const acting = await resolveActingScope(d, ctx.user.id);
       // Newest first. Unordered with a limit, a curator past thirty questions
       // would have been shown whichever the database happened to return.
       const rows = await d.select().from(assistantQueries)
-        .where(eq(assistantQueries.tenantId, acting.tenantId))
+        .where(and(eq(assistantQueries.tenantId, acting.tenantId), eq(assistantQueries.askedByUserId, ctx.user.id)))
         .orderBy(desc(assistantQueries.id)).limit(input.limit);
       const labelled = new Set((await d.select({ originQueryRef: retrievalProbes.originQueryRef })
         .from(retrievalProbes).where(eq(retrievalProbes.tenantId, acting.tenantId)).limit(2000))
@@ -470,8 +480,10 @@ export const assistantAskRouter = router({
       const d = await db();
       const acting = await resolveActingScope(d, ctx.user.id);
 
+      // AIL-1A.1: only the asker's own question can be labelled. Another person's raw question is
+      // not theirs to copy into the organization's probe set, and "not found" does not say it exists.
       const ask = (await d.select().from(assistantQueries)
-        .where(and(eq(assistantQueries.queryRef, input.queryRef), eq(assistantQueries.tenantId, acting.tenantId)))
+        .where(and(eq(assistantQueries.queryRef, input.queryRef), eq(assistantQueries.tenantId, acting.tenantId), eq(assistantQueries.askedByUserId, ctx.user.id)))
         .limit(1))[0];
       if (!ask) throw new TRPCError({ code: "NOT_FOUND", message: "No such recorded question" });
 

@@ -11,7 +11,7 @@
 import { toCents } from "./money";
 import type { Tx } from "./dbTypes";
 import { createHash } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
   assistantCommitReceipts,
   assistantProposals,
@@ -274,13 +274,21 @@ export async function executeAssistantCommit(args: {
         .limit(1);
       contentSha256 = extraction[0]?.contentSha256 ?? null;
 
+      // AIL-1A.1 — a prior is matched only if it was captured by this organization: its proposal's
+      // proved owner (0185) is the committing tenant. Another organization's document must not
+      // refuse this one, reveal that it exists, or lend it its metadata. A fingerprint whose proposal
+      // has no proved owner (legacy_unresolved) matches nobody — a missing owner is not global.
+      const ownPriors = inArray(
+        documentFingerprints.proposalId,
+        tx.select({ proposalId: assistantProposals.proposalId }).from(assistantProposals).where(eq(assistantProposals.tenantId, actingTenant)),
+      );
       const priorRows = await tx
         .select()
         .from(documentFingerprints)
-        .where(eq(documentFingerprints.structuredKeyHash, fingerprint.structuredKeyHash))
+        .where(and(eq(documentFingerprints.structuredKeyHash, fingerprint.structuredKeyHash), ownPriors))
         .for("update");
       const byContent = contentSha256
-        ? await tx.select().from(documentFingerprints).where(eq(documentFingerprints.contentSha256, contentSha256))
+        ? await tx.select().from(documentFingerprints).where(and(eq(documentFingerprints.contentSha256, contentSha256), ownPriors))
         : [];
       const priors: PriorCapture[] = [...priorRows, ...byContent]
         .filter((r, i, all) => all.findIndex(x => x.id === r.id) === i)

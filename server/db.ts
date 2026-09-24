@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import type { MySqlColumn } from "drizzle-orm/mysql-core";
 import { SINGLE_TENANT_ID, resolveActingScope } from "./_core/actingScope";
 import { drizzle } from "drizzle-orm/mysql2";
@@ -889,6 +889,35 @@ export async function tripInScope(tripId: number, scope: TenantScope): Promise<{
   if (!db) return null;
   return (await db.select({ id: trips.id, jobId: trips.jobId }).from(trips).where(and(eq(trips.id, tripId), orgScopeWhere(trips, scope))).limit(1))[0] ?? null;
 }
+/**
+ * AIL-1A.1 — a row owned through the records it names, for surfaces that read many kinds of record
+ * at once (search, timeline, chain). In scope only when EVERY anchor the row carries is the scope's:
+ * a job (jobs.orgRef), a trip (trips.orgRef), a unit (coreRecordOwnership), a load (through its job)
+ * or a financial entity (financialEntities.orgRef). A row naming none of them is the historical single
+ * tenant's and nobody else's — a missing owner is never global. Checking every anchor, not the first
+ * one set, is what stops a row that names one organization's job and another's unit from being read
+ * through the first.
+ */
+export function anchoredScope(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>> | DbOrTx,
+  scope: TenantScope,
+  anchors: { job?: MySqlColumn; trip?: MySqlColumn; unit?: MySqlColumn; load?: MySqlColumn; entity?: MySqlColumn },
+) {
+  const conditions = [];
+  if (anchors.job) conditions.push(or(isNull(anchors.job), inArray(anchors.job, db.select({ id: jobs.id }).from(jobs).where(orgScopeWhere(jobs, scope)))));
+  if (anchors.trip) conditions.push(or(isNull(anchors.trip), inArray(anchors.trip, db.select({ id: trips.id }).from(trips).where(orgScopeWhere(trips, scope)))));
+  if (anchors.unit) conditions.push(or(isNull(anchors.unit), ownershipScopeWhere("unit", anchors.unit, scope)));
+  if (anchors.load) {
+    const inScopeLoads = db.select({ id: loads.id }).from(loads)
+      .where(inArray(loads.jobId, db.select({ id: jobs.id }).from(jobs).where(orgScopeWhere(jobs, scope))));
+    conditions.push(or(isNull(anchors.load), inArray(anchors.load, inScopeLoads)));
+  }
+  if (anchors.entity) conditions.push(or(isNull(anchors.entity), inArray(anchors.entity, db.select({ id: financialEntities.id }).from(financialEntities).where(entityScopeWhere(scope)))));
+  const present = Object.values(anchors).filter((c): c is MySqlColumn => c != null);
+  if (scope.tenantId !== SINGLE_TENANT_ID) conditions.push(or(...present.map(c => isNotNull(c))));
+  return and(...conditions);
+}
+
 /** Rows keyed to a job: the job in scope, or (no job) only for the single tenant. */
 function jobKeyedScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, jobIdColumn: MySqlColumn, scope: TenantScope) {
   const inScope = inArray(jobIdColumn, jobScopeSubquery(db, scope));

@@ -82,7 +82,7 @@ export const surfacesRouter = router({
     .query(async ({ ctx, input }) => {
       const { grants } = await grantsFor(ctx.user.id);
       const can = may(ctx.user.id, grants);
-      const hits = (await searchEverything(input.q)).filter(h => can(h.readPermission));
+      const hits = (await searchEverything(input.q, await actingScopeFor(ctx.user.id))).filter(h => can(h.readPermission));
       return { q: input.q, total: hits.length, hits };
     }),
 
@@ -110,7 +110,7 @@ export const surfacesRouter = router({
           explanation: "No chain is available for that reference within your access scope.",
         };
       }
-      const { found, unreadable } = await resolveChainAround({ kind: input.entityType, id: input.entityId }, can);
+      const { found, unreadable } = await resolveChainAround({ kind: input.entityType, id: input.entityId }, can, await actingScopeFor(ctx.user.id));
       const walk = walkEvidenceChain({
         anchorKind: input.entityType as ChainNodeKind,
         found: found as Parameters<typeof walkEvidenceChain>[0]["found"],
@@ -125,7 +125,7 @@ export const surfacesRouter = router({
     .query(async ({ ctx, input }) => {
       const { grants } = await grantsFor(ctx.user.id);
       const can = may(ctx.user.id, grants);
-      const events = (await loadTimeline(input)).filter(e => can(e.readPermission));
+      const events = (await loadTimeline({ ...input, scope: await actingScopeFor(ctx.user.id) })).filter(e => can(e.readPermission));
       return { entityType: input.entityType, entityId: input.entityId, total: events.length, events };
     }),
 });

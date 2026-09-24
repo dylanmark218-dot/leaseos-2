@@ -342,10 +342,9 @@ d("a real question is proved, not claimed", () => {
 
   it("copies the question from the recorded ask rather than retyping it", async () => {
     const safety = await withRole("safety");
-    const driver = await withRole("driver");
     const t = token();
     const p = await load(safety, brakeText(t));
-    const ask = await caller(driver).assistantAsk.ask({ question: t, asOf: AT });
+    const ask = await caller(safety).assistantAsk.ask({ question: t, asOf: AT });
 
     const probe = await caller(safety).assistantAsk.addProbeFromAsk({
       queryRef: ask.queryRef, expectedPassageRefs: [p.passageRef],
@@ -357,10 +356,9 @@ d("a real question is proved, not claimed", () => {
 
   it("records which ask a real probe came from", async () => {
     const safety = await withRole("safety");
-    const driver = await withRole("driver");
     const t = token();
     const p = await load(safety, brakeText(t));
-    const ask = await caller(driver).assistantAsk.ask({ question: t, asOf: AT });
+    const ask = await caller(safety).assistantAsk.ask({ question: t, asOf: AT });
     const probe = await caller(safety).assistantAsk.addProbeFromAsk({ queryRef: ask.queryRef, expectedPassageRefs: [p.passageRef] });
     const [rows] = await pool.execute<mysql.RowDataPacket[]>(
       "SELECT origin, originQueryRef FROM retrievalProbes WHERE probeRef = ?", [probe.probeRef]);
@@ -369,12 +367,11 @@ d("a real question is proved, not claimed", () => {
 
   it("lets a curator name a passage retrieval never returned, and says so", async () => {
     const safety = await withRole("safety");
-    const driver = await withRole("driver");
     const t = token();
     await load(safety, brakeText(t));
     // A second passage using entirely different words for the same thing.
     const other = await load(safety, `${token()}: slack adjuster travel is limited to two inches.`);
-    const ask = await caller(driver).assistantAsk.ask({ question: t, asOf: AT });
+    const ask = await caller(safety).assistantAsk.ask({ question: t, asOf: AT });
 
     const probe = await caller(safety).assistantAsk.addProbeFromAsk({
       queryRef: ask.queryRef, expectedPassageRefs: [other.passageRef],
@@ -383,6 +380,19 @@ d("a real question is proved, not claimed", () => {
     // the retriever mark its own homework.
     expect(probe.notRetrievedWhenAsked).toEqual([other.passageRef]);
     expect(probe.note).toContain("That gap is what the measurement is for");
+  });
+
+  // AIL-1A.1 (owner ruling): raw assistant history is the asker's. A curator labels their OWN asks;
+  // `assistant.curate` governs what is loaded, not whose conversations may be read, so a driver's raw
+  // question is not the curator's to copy into the organization's probe set.
+  it("refuses a curator the labelling of someone else's recorded question", async () => {
+    const safety = await withRole("safety");
+    const driver = await withRole("driver");
+    const t = token();
+    const p = await load(safety, brakeText(t));
+    const ask = await caller(driver).assistantAsk.ask({ question: t, asOf: AT });
+    await expect(caller(safety).assistantAsk.addProbeFromAsk({ queryRef: ask.queryRef, expectedPassageRefs: [p.passageRef] }))
+      .rejects.toThrow(/No such recorded question/);
   });
 
   it("refuses a probe against another organization's recorded question", async () => {
@@ -478,10 +488,9 @@ d("a measurement is about one corpus, one retriever, one depth", () => {
 d("one ask is one question", () => {
   it("refuses a second label for the same recorded ask", async () => {
     const safety = await withRole("safety");
-    const driver = await withRole("driver");
     const t = token();
     const p = await load(safety, brakeText(t));
-    const ask = await caller(driver).assistantAsk.ask({ question: t, asOf: AT });
+    const ask = await caller(safety).assistantAsk.ask({ question: t, asOf: AT });
     await caller(safety).assistantAsk.addProbeFromAsk({ queryRef: ask.queryRef, expectedPassageRefs: [p.passageRef] });
     // Five reviews of one question are not five people asking.
     await expect(caller(safety).assistantAsk.addProbeFromAsk({ queryRef: ask.queryRef, expectedPassageRefs: [p.passageRef] }))
@@ -490,13 +499,12 @@ d("one ask is one question", () => {
 
   it("marks which recorded asks have been labelled, newest first", async () => {
     const safety = await withRole("safety");
-    const driver = await withRole("driver");
     const t = token();
     const p = await load(safety, brakeText(t));
-    const ask = await caller(driver).assistantAsk.ask({ question: t, asOf: AT });
+    const ask = await caller(safety).assistantAsk.ask({ question: t, asOf: AT });
     await caller(safety).assistantAsk.addProbeFromAsk({ queryRef: ask.queryRef, expectedPassageRefs: [p.passageRef] });
 
-    const later = await caller(driver).assistantAsk.ask({ question: token(), asOf: AT });
+    const later = await caller(safety).assistantAsk.ask({ question: token(), asOf: AT });
     const history = await caller(safety).assistantAsk.history({ limit: 50 });
     // Newest first, so a curator past thirty questions still sees the new ones.
     expect(history.queries[0].queryRef).toBe(later.queryRef);
