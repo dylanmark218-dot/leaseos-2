@@ -1,10 +1,10 @@
 import {
   AXIOS_TIMEOUT_MS,
   COOKIE_NAME,
-  ONE_YEAR_MS,
   decodeOAuthState,
 } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
+import { ACCESS_TOKEN_TTL_MS } from "./sessionFamily";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
@@ -187,7 +187,15 @@ class SDKServer {
     options: { expiresInMs?: number } = {}
   ): Promise<string> {
     const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
+    /*
+     * S1-B — the default is the access lifetime, not a year.
+     *
+     * The year was never only in `oauth.ts`; it was the fallback here, so every caller that omitted
+     * an expiry minted one, and changing the call site alone would have left that true. An access
+     * token is meant to be short enough that stealing it buys little: revocation bites at refresh
+     * (S1-C/S1-D), which bounds a revoked session's remaining authority to one of these.
+     */
+    const expiresInMs = options.expiresInMs ?? ACCESS_TOKEN_TTL_MS;
     const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
     const secretKey = this.getSessionSecret();
 

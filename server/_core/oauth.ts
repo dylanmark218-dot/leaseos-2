@@ -1,6 +1,5 @@
 import {
   COOKIE_NAME,
-  ONE_YEAR_MS,
   OAUTH_STATE_COOKIE,
   decodeOAuthState,
 } from "@shared/const";
@@ -9,6 +8,7 @@ import type { Express, Request, Response } from "express";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
+import { ACCESS_TOKEN_TTL_MS } from "./sessionFamily";
 
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
@@ -59,15 +59,20 @@ export function registerOAuthRoutes(app: Express) {
         lastSignedIn: new Date(),
       });
 
+      /*
+       * S1-B — a login issues a short access credential, not a year-long bearer token.
+       *
+       * The expiry is left to `createSessionToken`'s default rather than named here, so this call
+       * site cannot drift away from the one place the access lifetime is defined.
+       */
       const sessionToken = await sdk.createSessionToken(userInfo.openId, {
         name: userInfo.name || "",
-        expiresInMs: ONE_YEAR_MS,
       });
 
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, {
         ...cookieOptions,
-        maxAge: ONE_YEAR_MS,
+        maxAge: ACCESS_TOKEN_TTL_MS,
       });
 
       res.redirect(302, "/");
