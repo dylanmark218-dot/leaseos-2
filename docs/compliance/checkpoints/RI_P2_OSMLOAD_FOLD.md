@@ -70,6 +70,16 @@ Not changed: `docs/register/SPINE_WIRING_PLAN.md` still lists `osmLoadPlan` amon
 engines. It is hash-pinned by `server/spineWiringPlan.test.ts` as a dated record and its guard checks
 only the on-spine table, so it is left as written.
 
+## Gate
+
+Full `scripts/ci-gate.sh` against MariaDB 10.11 on the final tree: 333 files, **4,779 passed, 1
+failed, 3 skipped**; test-file type errors 0; migrations 169; tables 410. The one failure is the
+pre-existing calendar tripwire `server/calendarFixtures.test.ts`, which fails identically on the
+untouched `6f52b57` (recorded in RI-P0): `server/capitalAssets.test.ts` holds unreviewed fixture
+dates 2026-10-15, 2026-10-20 and 2026-10-31. Not this checkpoint's; it needs an owner review of that
+fixture. Focused: `osmLoad.test.ts` 31/31; the OSM import, topology, source-neutrality, engine census,
+SPINE-plan guard, documentation and register suites all pass.
+
 ## Follow-ups
 
 The extractor's first real run with the new header should be recorded (Alberta and one other
