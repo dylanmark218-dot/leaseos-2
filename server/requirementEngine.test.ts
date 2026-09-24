@@ -285,10 +285,12 @@ d("a scale found wrong for three weeks", () => {
   it("records an employer authorization as pending until all four elements exist", async () => {
     const safety = await withRole("safety");
     const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1.1 — a real book: a made-up entity id is "not found"
-    const partial = await callerFor(safety).requirement.authorize({ userId: 77, financialEntityId: entityId, equipmentType: "hydrovac", trainingEvidenceId: 1 });
+    // F1.2 — the suite's own (unowned, single-tenant) evidence: "evidence 1" may belong to an organization on a fresh database.
+    const evidenceId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt) VALUES ('Hydrovac training', 'training', NOW())"))[0].insertId);
+    const partial = await callerFor(safety).requirement.authorize({ userId: 77, financialEntityId: entityId, equipmentType: "hydrovac", trainingEvidenceId: evidenceId });
     expect(partial.status).toBe("pending");
     expect(partial.note).toContain("all be on record");
-    const full = await callerFor(safety).requirement.authorize({ userId: 77, financialEntityId: entityId, equipmentType: "hydrovac", trainingEvidenceId: 1, competencyAssessedAt: new Date(), instructionsAcknowledgedAt: new Date() });
+    const full = await callerFor(safety).requirement.authorize({ userId: 77, financialEntityId: entityId, equipmentType: "hydrovac", trainingEvidenceId: evidenceId, competencyAssessedAt: new Date(), instructionsAcknowledgedAt: new Date() });
     expect(full.status).toBe("authorized");
     const [rows] = await pool.execute<mysql.RowDataPacket[]>("SELECT status, authorizedByUserId FROM operatorEquipmentAuthorizations WHERE authorizationRef = ?", [full.authorizationRef]);
     expect(rows[0].status).toBe("authorized");

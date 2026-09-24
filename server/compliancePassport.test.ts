@@ -243,7 +243,8 @@ d("a driver, a unit and a carrier, through the registry", () => {
     const controller = await withRole("controller");
     const dispatcher = await withRole("dispatcher");
     const hr = await withRole("hr");
-    const operatorId = 900000 + Math.floor(Math.random() * 90000);
+    // F1.2 — a real operator: a made-up operator id is "not found".
+    const operatorId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES ('Passport Fixture', NOW())"))[0].insertId);
 
     // Office records a licence. It enters needs_review.
     const rec = await callerFor(office).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: "driver_licence", requirementKey: "ab.driver.licence.class1", title: "Class 1 licence", identifier: "•••1234", expiresAt: new Date("2028-04-21T00:00:00Z"), jurisdiction: "CA-AB" });

@@ -464,3 +464,90 @@ d("F1.1 — inventory and other rows with no owner fail closed once organization
     await expect(callerFor(office).requirement.workAuthorization({ financialEntityId: Number(ent.insertId), jurisdiction: "CA-AB", worker: null, equipment: { id: 1, equipmentType: "hydrovac", attributes: {} }, work: { workType: "hauling", attributes: {} } })).rejects.toThrow(/OWNERSHIP_UNRESOLVED/);
   }, 30_000);
 });
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// F1.2 — compliance subjects: operators, units, trailers, jobs, people and carriers are the caller's own
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+/** One organization's compliance subjects and the credentials its own people filed against them. */
+async function world12(orgRef: string) {
+  const people = { office: await member(orgRef, ["office"]), hr: await member(orgRef, ["hr"]), dispatcher: await member(orgRef, ["dispatcher"]) };
+  const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Op ${rnd()}`]);
+  const operatorId = Number(op.insertId);
+  await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [orgRef, operatorId]);
+  const unitId = await ownedUnit(orgRef);
+  const jobCode = `J-${rnd()}`;
+  const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (orgRef, jobCode, type, mode, customer, location, status, progress) VALUES (?,?,'water_haul','transport','Acme','LSD','dispatched',0)", [orgRef, jobCode]);
+  const [ent] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Carrier Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, orgRef]);
+  const [ev] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt, capturedBy) VALUES ('Licence scan', 'compliance', NOW(), ?)", [people.office]);
+  const cred = await callerFor(people.office).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: "driver_licence", title: "Class 1 licence", expiresAt: days(400), evidenceRecordId: Number(ev.insertId) });
+  await callerFor(people.hr).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: "medical_fitness", title: "Medical — see HR", expiresAt: days(400), privateDetail: true });
+  return { orgRef, ...people, operatorId, unitId, jobId: Number(job.insertId), entityId: Number(ent.insertId), evidenceId: Number(ev.insertId), credentialId: cred.credentialId };
+}
+
+d("F1.2 — Organization B cannot read or file compliance records against Organization A's subjects", () => {
+  let A: Awaited<ReturnType<typeof world12>>, B: Awaited<ReturnType<typeof world12>>, attacker: number;
+  beforeAll(async () => {
+    A = await world12(await org());
+    B = await world12(await org());
+    attacker = await member(B.orgRef, [...ALL_ROLES, "hr"]);
+  }, 60_000);
+  const as = () => callerFor(attacker).compliance;
+  const passport = (subjectType: "operator" | "unit" | "trailer" | "carrier" | "job" | "user", subjectId: number) => as().passport({ subjectType, subjectId, jurisdiction: "CA-AB" });
+  const attempts: [string, () => Promise<unknown>][] = [
+    ["read the passport of A's operator", () => passport("operator", A.operatorId)],
+    ["read the passport of A's unit", () => passport("unit", A.unitId)],
+    ["read the passport of A's unit as a trailer", () => passport("trailer", A.unitId)],
+    ["read the passport of A's job", () => passport("job", A.jobId)],
+    ["read the passport of A's person", () => passport("user", A.office)],
+    ["read the passport of A's company as a carrier", () => passport("carrier", A.entityId)],
+    ["compose a job passport with A's operator beside B's own unit", () => as().jobPassport({ jurisdiction: "CA-AB", carrier: null, operator: { id: A.operatorId }, unit: { id: B.unitId } })],
+    ["compose a job passport with A's carrier", () => as().jobPassport({ jurisdiction: "CA-AB", carrier: { id: A.entityId }, operator: null, unit: null })],
+    ["compose a job passport with A's trailer", () => as().jobPassport({ jurisdiction: "CA-AB", carrier: null, operator: null, unit: null, trailer: { id: A.unitId } })],
+    ["read the medical eligibility of A's operator", () => as().medicalEligibility({ operatorId: A.operatorId })],
+    ["file a credential against A's operator", () => as().credentialRecord({ ownerType: "operator", ownerId: A.operatorId, docType: "driver_licence", title: "Planted licence" })],
+    ["file a credential against A's unit", () => as().credentialRecord({ ownerType: "unit", ownerId: A.unitId, docType: "vehicle_registration", title: "Planted registration" })],
+    ["file a credential against A's company", () => as().credentialRecord({ ownerType: "carrier", ownerId: A.entityId, docType: "sfc", title: "Planted SFC" })],
+    ["file a credential against A's job", () => as().credentialRecord({ ownerType: "job", ownerId: A.jobId, docType: "permit", title: "Planted permit" })],
+    ["file a credential for B's own operator on A's evidence", () => as().credentialRecord({ ownerType: "operator", ownerId: B.operatorId, docType: "driver_licence", title: "Borrowed scan", evidenceRecordId: A.evidenceId })],
+    ["verify A's credential", () => as().credentialVerify({ credentialId: A.credentialId, outcome: "rejected" })],
+    ["record consent for A's person", () => as().consentRecord({ subjectUserId: A.office, consentType: "driver_abstract", purpose: "pull A's driver abstract", signedAt: days(-1) })],
+    ["record consent for B's own person on A's signature evidence", () => as().consentRecord({ subjectUserId: B.office, consentType: "driver_abstract", purpose: "borrowed signature", signedAt: days(-1), signatureEvidenceRecordId: A.evidenceId })],
+  ];
+
+  it.each(attempts)("refuses to %s", async (_label, attempt) => {
+    const e = await attempt().then(() => null, (x: { code?: string }) => x);
+    expect(e, "the attempt succeeded").not.toBeNull();
+    expect(e!.code).toBe("NOT_FOUND");
+  });
+
+  it("answers another company's subject exactly as it answers one that does not exist", async () => {
+    const foreign = await passport("operator", A.operatorId).catch((x: Error) => x.message);
+    const missing = await passport("operator", 2_000_000_000).catch((x: Error) => x.message);
+    expect(foreign).toBe(missing);
+    const foreignCred = await as().credentialVerify({ credentialId: A.credentialId, outcome: "verified" }).catch((x: Error) => x.message);
+    const missingCred = await as().credentialVerify({ credentialId: 2_000_000_000, outcome: "verified" }).catch((x: Error) => x.message);
+    expect(foreignCred).toBe(missingCred);
+  });
+
+  it("refuses equipment credentials while equipment carries no owner", async () => {
+    await expect(as().credentialRecord({ ownerType: "equipment", ownerId: 1, docType: "annual_inspection", title: "Planted inspection" })).rejects.toThrow(/OWNERSHIP_UNRESOLVED/);
+  });
+
+  it("leaves A's credentials and consents as A left them", async () => {
+    expect((await one("SELECT verificationStatus, verifiedByUserId FROM complianceDocuments WHERE id = ?", [A.credentialId])).verificationStatus).toBe("needs_review");
+    expect(Number((await one("SELECT COUNT(*) AS n FROM complianceDocuments WHERE ownerType = 'operator' AND ownerId = ?", [A.operatorId])).n)).toBe(2);
+    expect(Number((await one("SELECT COUNT(*) AS n FROM complianceDocuments WHERE (ownerType = 'unit' AND ownerId = ?) OR (ownerType = 'carrier' AND ownerId = ?) OR (ownerType = 'job' AND ownerId = ?) OR evidenceRecordId = ?", [A.unitId, A.entityId, A.jobId, A.evidenceId])).n)).toBe(1); // A's own licence, on A's own evidence
+    expect(Number((await one("SELECT COUNT(*) AS n FROM complianceConsents WHERE subjectUserId = ? OR requestedByUserId = ?", [A.office, attacker])).n)).toBe(0);
+  });
+
+  it("still lets each organization work its own subjects", async () => {
+    expect((await callerFor(A.dispatcher).compliance.passport({ subjectType: "operator", subjectId: A.operatorId, jurisdiction: "CA-AB" })).verdict).toBeTruthy();
+    // Each owner path resolves for its own organization — a refusal that only works by accident fails here.
+    for (const [subjectType, subjectId] of [["carrier", A.entityId], ["unit", A.unitId], ["trailer", A.unitId], ["job", A.jobId], ["user", A.office]] as const)
+      expect((await callerFor(A.dispatcher).compliance.passport({ subjectType, subjectId, jurisdiction: "CA-AB" })).verdict, subjectType).toBeTruthy();
+    expect((await callerFor(A.dispatcher).compliance.jobPassport({ jurisdiction: "CA-AB", carrier: { id: A.entityId }, operator: { id: A.operatorId }, unit: { id: A.unitId }, trailer: { id: A.unitId } })).verdict).toBeTruthy();
+    expect((await callerFor(A.dispatcher).compliance.medicalEligibility({ operatorId: A.operatorId })).eligible).toBe("unknown");
+    expect((await callerFor(A.office).compliance.credentialVerify({ credentialId: A.credentialId, outcome: "verified" })).verificationStatus).toBe("verified");
+    expect((await callerFor(A.office).compliance.consentRecord({ subjectUserId: A.hr, consentType: "driver_abstract", purpose: "annual abstract", signedAt: days(-1), signatureEvidenceRecordId: A.evidenceId })).consentRef).toBeTruthy();
+  });
+});

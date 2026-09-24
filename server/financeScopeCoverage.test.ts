@@ -13,6 +13,8 @@
  *   3. Every shop procedure is classified: scoped through its unit or work order (P4.1), a shared
  *      public directory, or refused while ownership is unprovable (inventory, until F4). A new shop
  *      procedure fails here until someone decides which it is.
+ *   4. (F1.2) Every compliance procedure is classified the same way, and the ones that name an operator,
+ *      unit, trailer, job, person or carrier prove it through its owner.
  *
  * What this cannot see: a handler that reads `ctx.money` and then also queries a row without it. The
  * refusal suite (`tenantScopeFinance.db.test.ts`) is the behavioural half of this net.
@@ -58,6 +60,23 @@ const SHOP: Record<string, "unit_or_work_order_scoped" | "shared_public_director
   recallRecord: "unit_or_work_order_scoped", recallUnitDecide: "unit_or_work_order_scoped",
   // A recall notice is a manufacturer's or regulator's public notice; verifying it is a fact about the notice, not about any company's records.
   recallVerify: "shared_public_directory",
+};
+
+/**
+ * F1.2 — compliance procedures, each classified. SUBJECT_SCOPED ones prove the operator, unit, trailer,
+ * job, person or carrier they name (`requireSubjectInScope`); BOOK_SCOPED ones prove the company's legal
+ * entity; the rest read no company's records: pure evaluators over their own input, the source-backed
+ * catalog, or the shared regulatory registry.
+ */
+const COMPLIANCE: Record<string, "subject_scoped" | "book_scoped" | "pure_evaluator" | "shared_registry"> = {
+  passport: "subject_scoped", jobPassport: "subject_scoped", medicalEligibility: "subject_scoped",
+  credentialRecord: "subject_scoped", credentialVerify: "subject_scoped", consentRecord: "subject_scoped",
+  programPublish: "book_scoped", profileReviewRecord: "book_scoped",
+  knowledgeCatalog: "pure_evaluator", dangerousGoodsAssist: "pure_evaluator", securementAssist: "pure_evaluator",
+  // Evaluates the licence profile it is handed; `operatorId` is carried, never looked up.
+  driverQualification: "pure_evaluator",
+  // Requirements are regulations, one registry for every company (controller-only). See F1 doc §7.3.
+  requirementLoad: "shared_registry",
 };
 
 /** Top-level input keys, through `.optional()` / `.default()` / `.strict()` wrappers. */
@@ -110,6 +129,26 @@ describe("F1 / F1.1 — anywhere in the API, a procedure that takes a book or na
   it("proves the book in each F1.1 procedure outside the money namespaces that takes one, directly or by reference", () => {
     for (const k of ["funding.opportunitiesList", "funding.opportunityAdvance", "funding.claimRecord", "funding.stackingCheck", "finance.expenseSetTreatment", "compliance.programPublish", "compliance.profileReviewRecord", "requirement.packActivate", "requirement.workAuthorization", "requirement.authorize", "calibration.deviceRegister", "calibration.eventRecord", "calibration.impact", "requirement.calibrationSweep", "dispatch.enforcementSet", "dispatch.enforcementGet"])
       expect(SELF_SCOPED.test(source(procs[k]!)), k).toBe(true);
+  });
+});
+
+describe("F1.2 — every compliance procedure is classified, and the ones that name a subject prove it", () => {
+  const compliance = Object.keys(procs).filter(k => k.startsWith("compliance.")).map(k => k.slice(11)).sort();
+
+  it("has no unclassified compliance procedure (a new one must be decided, not defaulted)", () => {
+    expect(compliance).toEqual(Object.keys(COMPLIANCE).sort());
+  });
+
+  it("proves the subject, or the book, in every procedure classified that way", () => {
+    for (const [name, cls] of Object.entries(COMPLIANCE)) {
+      const src = source(procs[`compliance.${name}`]!);
+      if (cls === "subject_scoped") expect(src.includes("requireSubjectInScope"), name).toBe(true);
+      if (cls === "book_scoped") expect(SELF_SCOPED.test(src), name).toBe(true);
+    }
+  });
+
+  it("reads no table in the pure evaluators", () => {
+    for (const [name, cls] of Object.entries(COMPLIANCE)) if (cls === "pure_evaluator") expect(/getDb|db\.select|db\.insert|db\.update/.test(source(procs[`compliance.${name}`]!)), name).toBe(false);
   });
 });
 

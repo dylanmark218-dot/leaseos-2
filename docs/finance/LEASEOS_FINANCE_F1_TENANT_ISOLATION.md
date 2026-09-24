@@ -1,8 +1,9 @@
-# LeaseOS Finance F1 / F1.1: tenant isolation and security repair
+# LeaseOS Finance F1 / F1.1 / F1.2: tenant isolation and security repair
 
-**Status**: F1 and F1.1 are implemented on `claude/finance-accounting-survey-2mp4h6`. It stops here:
-F2 is not started, and no PR is open.
-**Base**: `main` = `0060690`. **No migration** and no new schema. **No new engine.**
+**Status**: F1, F1.1 and F1.2 are implemented on `claude/finance-accounting-survey-2mp4h6`. It stops
+here: F2 is not started, and no PR is open.
+**Base**: cut from `main` = `0060690`. Current `main` (`60f3899`: dispatch slots, C1a, SPINE item 1,
+migrations to 0179) is merged in. **No migration** and no new schema. **No new engine.**
 
 This is a security prerequisite for every later Finance & Accounting checkpoint.
 
@@ -183,8 +184,8 @@ Covered entities:
 | `calibration.eventRecord` | Sibling by `deviceRef`: the device's book is proved. |
 | `calibration.impact` | Sibling by `deviceRef`: the device's book is proved. |
 | `requirement.calibrationSweep` | Sibling by `calibrationEventId`: the device's book is proved. |
-| `dispatch.enforcementSet` | A company's own mode needs its own book. The **global** mode governs every company's dispatch, because legacy jobs carry no entity. It is set only by a platform administrator (`users.role = admin`), or while the deployment is one ownership domain. **A tenant can no longer switch everyone's dispatch enforcement off.** |
-| `dispatch.enforcementGet` | Another company's own mode is `NOT_FOUND`; the global mode stays readable. |
+| `dispatch.enforcementSet` | **Now `main`'s rule (C1a, `assertEnforcementScope`), which replaced F1.1's on merge.** A company's own mode needs its own book (`NOT_FOUND` otherwise). The **global** mode is `FORBIDDEN` to any organization member; only the historical single tenant (a user with no membership) may set it. **A tenant cannot switch everyone's dispatch enforcement off.** Open question in §11: that single-tenant user can still set it after organizations exist. |
+| `dispatch.enforcementGet` | Same rule: another company's own mode is `NOT_FOUND`, and the global mode is `FORBIDDEN` to organization members. |
 
 **Found by the widened structural scan, and fixed:**
 
@@ -203,7 +204,7 @@ Covered entities:
   - 5 from F1 (`finance.expenseCreate`, `expenseDuplicates`, `commercialSetup` ×3);
   - 11 from F1.1: the 7 reported, 3 calibration siblings, and `dispatch.enforcementGet`, which the optional-input scan found;
   - 5 funding/expense.
-- **105 tenant-isolated procedures in total** (84 + 21).
+- **105 tenant-isolated procedures after F1.1** (84 + 21), and **111 after F1.2** (+6 compliance, §7.3).
 - Separately, the revoked-role defect is fixed in `commercialApprovalService.decide` and in the `commercialOffice.approvalRequirement` preview.
 
 ### 7.2 BLOCKED UNTIL OWNERSHIP MIGRATION: fail closed
@@ -242,21 +243,42 @@ every organization. `workOrderCost` and `unitCost` therefore still report a cost
 other organizations' receipt prices, while reading only the caller's own work orders. F4 fixes this
 when stock carries an owner.
 
-### 7.3 Found, not in the book-id class: reported, not fixed in F1.1
+### 7.3 F1.2: compliance subjects (found in F1.1, fixed in F1.2)
 
-`complianceRouter` has **no tenant scope calls in any procedure**. Beyond the two fixed above, these
-take operator, unit or credential ids unchecked:
+F1.1 found that `complianceRouter` scoped nothing except the two book-id procedures above. **F1.2
+fixes it without a migration**, using owners that already exist. One helper,
+`requireSubjectInScope` in `server/complianceRouter.ts`, proves the named subject through its owner:
 
-- `compliance.passport`, `jobPassport` (operator, unit, trailer, carrier ids);
-- `medicalEligibility` (an operator's medical eligibility);
-- `credentialRecord` (owner type and id), `credentialVerify` (credential id);
-- `driverQualification` (operator id).
+| Subject (`ownerType` / `subjectType`) | Proved through |
+|---|---|
+| `operator` | `operatorInScope` (`coreRecordOwnership`, P4.1) |
+| `unit`, `trailer` | `unitInScope` (trailers are units: `trailerUnitId`) |
+| `job` | `jobInScope` (`jobs.orgRef`, 0132) |
+| `user` | `userInScope` (active membership) |
+| `carrier` | `assertCallerOwnsEntity`: the company's legal entity (0146), the same id `programPublish` and `profileReviewRecord` use for carrier compliance |
+| `equipment` | `requireProvableOwnership`: no owner exists, so it fails closed once organizations exist (as §7.2) |
 
-Their owners **can** be proven: operators and units through `coreRecordOwnership` (P4.1), and
-credentials through their owner. So they are fixable without a migration, using the existing
-`operatorInScope`, `unitInScope` and `evidenceInScope`. They were outside the book-id scope this pass
-was authorized for. **Recommended as the next security pass (F1.2).** They are not in any exception
-list because the structural net keys on book and money identifiers.
+A subject from another company answers `NOT_FOUND`, **with the same message as one that does not exist**.
+
+| Procedure | Before | Now |
+|---|---|---|
+| `compliance.passport` | Any subject's credentials, by id | Subject proved first |
+| `compliance.jobPassport` | Any carrier, operator, unit or trailer | **Every** named subject proved before any is read. One foreign subject refuses the whole job. |
+| `compliance.medicalEligibility` | Any operator's medical eligibility | Operator proved |
+| `compliance.credentialRecord` | Filed a credential against any subject, citing any evidence | Owner proved; evidence proved (`evidenceInScope`) |
+| `compliance.credentialVerify` | Verified or rejected any company's credential | The credential's owner proved; another company's credential is "not found" |
+| `compliance.consentRecord` | Recorded consent for any person, on any signature evidence | Person and signature evidence proved |
+
+**Not changed, and why** (each one classified in the structural net, so a new procedure cannot default):
+
+- `driverQualification`, `dangerousGoodsAssist`, `securementAssist`, `knowledgeCatalog`: pure evaluators.
+  They read no table. `driverQualification` carries an `operatorId` in its input but never looks it up,
+  and evaluates only the profile it is given.
+- `requirementLoad`: **one shared regulatory registry** for every company (controller only). A
+  requirement is a regulation, not a company's record. Note, though, that a controller in one
+  organization can therefore supersede a requirement every company's passports read. This is a
+  **governance question, not a leak**, and is carried in §11 for an owner decision (platform-only
+  loading, or per-company overlays, which would be a schema change).
 
 ## 8. F4 design note: inventory ownership
 
@@ -308,8 +330,8 @@ the F4 migration PR is prepared.
 
 | Test | Kind | Proves |
 |---|---|---|
-| `server/tenantScopeFinance.db.test.ts` | 87 cases (85 DB + 2 pure) | **F1:** 41 cross-tenant attempts against Org A's money are each `NOT_FOUND`. Revoked approvers are refused. A Book B ledger row cannot satisfy Book A. A void is refused in a closed or soft-closed period. Legacy no-book rows fail closed; their classification and backfill are covered. **F1.1:** Org B (holding every relevant role) is refused `NOT_FOUND` on **27 attempts** covering every insurance operation category, compliance, requirements, calibration, dispatch, funding and expenses. B's same-key program cannot supersede A's (`CONFLICT`). The opportunity list excludes A. The global dispatch mode is refused to a tenant and allowed to a platform admin. A's rows are unchanged, and same-organization work succeeds. **Inventory:** the real predicate reports not-one-domain once organizations exist. All 18 ownerless shop operations are refused (`OWNERSHIP_UNRESOLVED`) to an organization's shop lead **and** to the single tenant, with no rows written, while the unit's own work-order cost stays readable. Insurance requirements and equipment credentials are refused, and nothing changes. |
-| `server/financeScopeCoverage.test.ts` | Structural, 11 cases, from the **live router** | The 84 money-namespace procedures (72 + 12 insurance) are marked and use the boundary. The mark is used nowhere else. The scan sees through `.optional()` inputs. **No unscoped money procedure exists anywhere in the API**; the only listed procedures are the 3 portal ones scoped by external identity. Every F1.1 procedure outside the money namespaces proves its book. **Every shop procedure is classified** (unit/work-order scoped, shared public directory, or ownership-gated until F4), so a new one fails until classified. Every gated one calls the gate. |
+| `server/tenantScopeFinance.db.test.ts` | 109 cases (107 DB + 2 pure) | **F1:** 41 cross-tenant attempts against Org A's money are each `NOT_FOUND`. Revoked approvers are refused. A Book B ledger row cannot satisfy Book A. A void is refused in a closed or soft-closed period. Legacy no-book rows fail closed; their classification and backfill are covered. **F1.1:** Org B (holding every relevant role) is refused `NOT_FOUND` on **27 attempts** covering every insurance operation category, compliance, requirements, calibration, dispatch, funding and expenses. B's same-key program cannot supersede A's (`CONFLICT`). The opportunity list excludes A. The global dispatch mode is `FORBIDDEN` to an organization, to set and to read (`main`'s C1a rule). A's rows are unchanged, and same-organization work succeeds. **Inventory:** the real predicate reports not-one-domain once organizations exist. All 18 ownerless shop operations are refused (`OWNERSHIP_UNRESOLVED`) to an organization's shop lead **and** to the single tenant, with no rows written, while the unit's own work-order cost stays readable. Insurance requirements and equipment credentials are refused, and nothing changes. **F1.2:** Org B (every relevant role plus `hr`) is refused `NOT_FOUND` on **18 attempts**: passports of A's operator, unit, trailer, job, person and carrier; job passports mixing A's subjects with B's own; A's medical eligibility; credentials filed against A's subjects or on A's evidence; verifying A's credential; consent for A's person or on A's signature evidence. A foreign subject gets the same message as a missing one. Equipment credentials fail closed. A's credentials and consents are unchanged. Each owner path (carrier, unit, trailer, job, person, operator) resolves for A's own people. |
+| `server/financeScopeCoverage.test.ts` | Structural, 14 cases, from the **live router** | The 84 money-namespace procedures (72 + 12 insurance) are marked and use the boundary. The mark is used nowhere else. The scan sees through `.optional()` inputs. **No unscoped money procedure exists anywhere in the API**; the only listed procedures are the 3 portal ones scoped by external identity. Every F1.1 procedure outside the money namespaces proves its book. **Every shop procedure is classified** (unit/work-order scoped, shared public directory, or ownership-gated until F4), so a new one fails until classified. Every gated one calls the gate. **F1.2: every compliance procedure is classified** (subject scoped, book scoped, pure evaluator, or shared registry). Subject-scoped ones call `requireSubjectInScope`, book-scoped ones prove the book, and pure evaluators touch no table. |
 
 **The structural exception list.** It holds **no** unscoped gaps. `EXTERNALLY_SCOPED` holds only
 `portal.invoiceView`, `portal.invoiceAccept` and `portal.invoiceDispute`: they are `externalProcedure`
@@ -334,6 +356,13 @@ with **F4** named as the resolving checkpoint.
 | **F1.1:** `dispatch.enforcementSet` scope removed | 5 |
 | **F1.1:** inventory fail-closed bypassed | 2 |
 | **F1.1:** `funding.stackingCheck` scope removed | 2 |
+| **F1.2:** `requireSubjectInScope` made a no-op | 19 |
+| **F1.2:** `jobPassport` subject loop removed | 3 |
+| **F1.2:** `credentialVerify` owner check removed | 3 |
+| **F1.2:** `consentRecord` signature-evidence check removed | 2 |
+| **F1.2:** `carrier` resolved as a person instead of a book | 1 |
+| **F1.2:** `trailer` resolved as a person instead of a unit | 1 (this one **survived** at first: B was still refused, by accident. The same-organization success test now drives every owner path.) |
+| **F1.2:** `job` resolved as a unit | 1 |
 
 **Existing suites fixed, not weakened.**
 
@@ -341,7 +370,10 @@ with **F4** named as the resolving checkpoint.
 - **F1.1:**
   - `insuranceRisk` invented book and **unit** ids; `compliancePassport` and `requirementEngine` invented book, operator and job ids. They now create real records.
   - `fleetShop`, `insuranceRisk`, `requirementEngine`, `auditPackage` and `workforce` exercise the single-ownership-domain deployment. Only the ownership predicate is mocked, with a comment pointing to the real-database proof above.
-  - `dispatchEnforcement` and `fieldroute` set the global mode as a platform administrator.
+  - `dispatchEnforcement` and `fieldroute` are `main`'s versions since the merge (C1a's rule).
+  - **F1.2:** `compliancePassport` invented an operator id. It now creates a real operator.
+  - **F1.2:** `fieldroute` used "operator 1", and `purchasingAp` and `requirementEngine` used "evidence 1". On a fresh database those are whichever suite inserted first, and the F1.2 suite's are organization-owned. The gate failed 4 tests exactly that way (reproduced by running F1.2 first). Each suite now uses its own record.
+  - `restrictedVaultApi` (from `main`) drew user ids from 960k–990k, which overlaps `recordsAuthorizationDb` and `assistantCommitService`. One fresh-database gate run collided on a role grant (`activeGrantKey` duplicate, 4 tests). It now has its own range (296M).
   - `tenantScopeShop` expects the ownership refusal for its warranty call.
   - `requirementEngine` used a hard-coded job 1, which collided with whichever suite created the first job. It now uses its own job.
   - `portalFundingApi` advanced an opportunity in invented book 1 and claimed against expenses that did not exist. It now uses a real book and real expenses.
@@ -349,9 +381,9 @@ with **F4** named as the resolving checkpoint.
   - The new suite keeps its refusal-only dates in the past, per the `calendarFixtures` rule.
 - No assertion was loosened.
 
-## 10. What F1 / F1.1 did not do (per instruction)
+## 10. What F1 / F1.1 / F1.2 did not do (per instruction)
 
-F1 and F1.1 add no migration, journals, financial-event engine, export batches, new inventory tables or
+F1, F1.1 and F1.2 add no migration, journals, financial-event engine, export batches, new inventory tables or
 QuickBooks work, make no procurement workflow change and no UI change, and open no PR. The P6.7
 purchase-order decision is recorded in `docs/P6_6_P6_7_DECISION_BRIEF.md`. It is **not implemented**:
 the current self-authorization within the requester's own limit contradicts that decision, but it is not
@@ -362,7 +394,9 @@ scheduled with F4.
 
 | Item | Where |
 |---|---|
-| Compliance operator/unit/credential procedures (§7.3) | **F1.2 recommended**; fixable without migration |
+| Compliance operator/unit/credential procedures (§7.3) | **Done in F1.2** |
+| **Open question (C1a, `main`'s rule):** a user with no membership (the historical single tenant) may still set the **global** dispatch mode after organizations exist. Every organization with no mode of its own falls back to that global mode (`currentMode`). F1.1 had restricted it to a platform admin or a one-domain deployment; the merge took `main`'s rule. | Owner decision; not changed here, since it is `main`'s C1a design |
+| `compliance.requirementLoad` governs one shared registry: any organization's controller can supersede a requirement every company reads (§7.3) | Owner decision (platform-only loading, or per-company overlays = schema) |
 | Parts, stock, tires, tools, warranty ownership: migration, evidence backfill, scoping (§8) | F4, blocker |
 | `insuranceRequirements` book column; program keys scoped per company | Next schema checkpoint (F2) |
 | Equipment and branch owner model | Owner decision |
@@ -370,4 +404,4 @@ scheduled with F4.
 | P6.7 implementation (limit ∧ ladder, no self-approval) | F4 |
 | New finance engines (events, journals, export, generalized inventory) | Frozen until the one-driver / one-job gate passes |
 | Migration numbers | Taken from current `main` + open PRs when each migration PR is prepared. Never reserved early. |
-| Merging current `main` (PR #5 landed after this branch was cut) | Before the PR is opened. Only the generated `LEASEOS_CURRENT_STATE.md` conflicts; `server/dispatchRouter.ts` must be re-verified then. |
+| Merging current `main` | **Done** (`60f3899`). The dispatch conflict was resolved to `main`'s C1a code; F1.1's dispatch tests were adapted to it. |
