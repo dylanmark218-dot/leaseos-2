@@ -16,6 +16,7 @@
 | Parity | 410/410 | **420/420 column-level** |
 | CI gate | PASS | **PASS** (see *Gate* below) |
 
+Implementation commit: `2ed69167d1e08e4c896f483d69f9fc4551b46afd` (this document names it in the commit that follows, as the terminology survey did).
 Every count is read from the source. Reserved slots 0016/0017 untouched. Slots 0175–0181 are claimed
 by open branches (`docs/architecture/MIGRATION_COLLISION_REGISTER.md`); this checkpoint takes 0182–0184.
 
