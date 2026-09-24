@@ -2969,6 +2969,9 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "clientServices.trackingLinkRegenerate": "client_services.link.manage",
   "clientServices.trackingLinkConfigure": "client_services.link.manage",
   "clientServices.trackingLinks": "client_services.read",
+  "clientServices.documentRelease": "client_services.document.release",
+  "clientServices.documentWithdraw": "client_services.document.release",
+  "clientServices.documentReleases": "client_services.read",
   "clientServices.jobCustomerAssign": "client_services.link.manage",
   "clientServices.auditTrail": "client_services.read",
   "clientServices.auditVerify": "client_services.read",
@@ -3111,6 +3114,11 @@ export type TrackingPermission = "tracking.read" | "tracking.loads" | "tracking.
 
 export const TRACKING_PROCEDURE_PERMISSIONS = {
   "tracking.resolve": "tracking.read",
+  "tracking.status": "tracking.read",
+  "tracking.loads": "tracking.loads",
+  "tracking.documents": "tracking.documents",
+  "tracking.documentDownload": "tracking.documents",
+  "tracking.openTicket": "tracking.billing",
 } as const satisfies Record<string, TrackingPermission>;
 
 /** A customer action and a document download are refused when their audit row cannot be written. */

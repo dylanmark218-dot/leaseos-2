@@ -64,9 +64,9 @@ describe("tracking links — pure decisions", () => {
   });
   it("reads a scope strictly — anything unreadable grants nothing — and the QR payload is the URL and nothing else", () => {
     expect(parseScope(null)).toEqual(DEFAULT_SCOPE);
-    expect(parseScope(serializeScope({ status: true, loads: false, documents: true, billing: true, act: false }))).toEqual({ status: true, loads: false, documents: true, billing: true, act: false });
-    expect(parseScope('{"status":"yes","act":1}')).toEqual({ status: false, loads: false, documents: false, billing: false, act: false });
-    expect(parseScope("not json")).toEqual({ status: false, loads: false, documents: false, billing: false, act: false });
+    expect(parseScope(serializeScope({ status: true, loads: false, documents: true, billing: true, act: false, unit: false, operator: true }))).toEqual({ status: true, loads: false, documents: true, billing: true, act: false, unit: false, operator: true });
+    expect(parseScope('{"status":"yes","act":1}')).toEqual({ status: false, loads: false, documents: false, billing: false, act: false, unit: true, operator: true });
+    expect(parseScope("not json")).toEqual({ status: false, loads: false, documents: false, billing: false, act: false, unit: false, operator: false });
     const q = qrPayload("https://leaseos.app/", "tok");
     expect(q).toMatchObject({ payload: "https://leaseos.app/t/tok", encoding: "url" });
     expect(trackingUrl("", "tok")).toBe("/t/tok");
@@ -139,7 +139,7 @@ d("tracking links — through the gate, across two organizations", () => {
     expect(made.url).toBe(`/t/${made.token}`);
     expect(made.qr.payload).toBe(made.url);
     expect(made.qr.payload).not.toContain(jobA.jobCode);
-    expect(made.scope).toEqual({ status: true, loads: true, documents: true, billing: false, act: false });
+    expect(made.scope).toEqual({ status: true, loads: true, documents: true, billing: false, act: false, unit: true, operator: true });
     // Only the hash is stored; the token is nowhere in the row.
     const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT * FROM jobTrackingLinks WHERE linkRef = ?", [made.linkRef]);
     expect(rows[0]!.tokenHash).toBe(hashTrackingToken(made.token));

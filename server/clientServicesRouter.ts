@@ -12,7 +12,8 @@ import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { actingScopeFor, getDb, jobInScope } from "./db";
-import { customerAccounts, customerAuditEvents, jobTrackingLinks, jobs, externalIdentities, LIVE_UNTIL_RULES, LOCATION_MODES, TRACKING_LINK_CONTACT_KINDS } from "../drizzle/schema";
+import { CUSTOMER_DOCUMENT_KINDS, DOCUMENT_SOURCE_TYPES, customerAccounts, customerAuditEvents, customerDocumentReleases, jobTrackingLinks, jobs, externalIdentities, LIVE_UNTIL_RULES, LOCATION_MODES, TRACKING_LINK_CONTACT_KINDS } from "../drizzle/schema";
+import { resolveCatalogueDocument } from "./customerDocuments";
 import { assertEntityInScope } from "./_core/entityScope";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { DEFAULT_SCOPE, LIVE_PRESETS, hashTrackingToken, newTrackingToken, parseScope, qrPayload, serializeScope, trackingUrl, type TrackingScope } from "./_core/trackingLinks";
@@ -43,7 +44,7 @@ async function ownLink(linkRef: string, tenantId: string) {
   return l;
 }
 
-const scopeInput = z.object({ status: z.boolean().optional(), loads: z.boolean().optional(), documents: z.boolean().optional(), billing: z.boolean().optional(), act: z.boolean().optional() }).optional();
+const scopeInput = z.object({ status: z.boolean().optional(), loads: z.boolean().optional(), documents: z.boolean().optional(), billing: z.boolean().optional(), act: z.boolean().optional(), unit: z.boolean().optional(), operator: z.boolean().optional() }).optional();
 const livePresetInput = z.enum(["until_completion", "24h", "7d", "30d", "custom", "manual"]);
 
 function liveRuleFrom(preset: z.infer<typeof livePresetInput>, liveExpiresAt: Date | null | undefined): { liveUntilRule: (typeof LIVE_UNTIL_RULES)[number]; liveGraceHours: number | null; liveExpiresAt: Date | null } {
@@ -219,6 +220,63 @@ export const clientServicesRouter = router({
       const d = await db();
       const rows = await d.select().from(jobTrackingLinks).where(and(eq(jobTrackingLinks.jobId, job.id), eq(jobTrackingLinks.orgRef, scope.tenantId))).orderBy(desc(jobTrackingLinks.id));
       return { jobCode: job.jobCode, links: rows.map(linkView) };
+    }),
+
+  /* ---- customer document releases: pointers into the catalogues, never copies ---- */
+
+  /**
+   * Release one catalogued document to the customer on a job. The record keeps its own number; the
+   * release records who let it out and when. A field-ticket document must belong to a ticket on
+   * this job; an evidence record must be on this job. Idempotent: releasing again returns the release.
+   */
+  documentRelease: roleProcedure("clientServices.documentRelease")
+    .input(z.object({ jobId: z.number().int().positive(), sourceType: z.enum(DOCUMENT_SOURCE_TYPES), sourceId: z.number().int().positive(), kind: z.enum(CUSTOMER_DOCUMENT_KINDS), title: z.string().min(1).max(220).optional(), expiresAt: z.coerce.date().nullable().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = await actingScopeFor(ctx.user.id);
+      const job = await jobInScope(input.jobId, scope);
+      if (!job) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+      const d = await db();
+      const cat = await resolveCatalogueDocument(d, input.sourceType, input.sourceId);
+      // A document that names a job must name this one; a registry document with no job binding is the office's call.
+      if (cat.jobId != null && cat.jobId !== job.id) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found" });
+      const jobRow = (await d.select({ customerAccountId: jobs.customerAccountId }).from(jobs).where(eq(jobs.id, job.id)).limit(1))[0]!;
+      const existing = (await d.select().from(customerDocumentReleases).where(and(eq(customerDocumentReleases.sourceType, input.sourceType), eq(customerDocumentReleases.sourceId, input.sourceId))).limit(1))[0];
+      if (existing && existing.status === "released") return { releaseRef: existing.releaseRef, documentRef: existing.documentRef, kind: existing.kind, status: "released" as const, alreadyReleased: true };
+      const releaseRef = existing?.releaseRef ?? (await nextTrackingNumber(d, { sequenceType: "REL" })).trackingNumber;
+      const now = new Date();
+      await d.transaction(async tx => {
+        if (existing) await tx.update(customerDocumentReleases).set({ status: "released", releasedByUserId: ctx.user.id, releasedAt: now, withdrawnAt: null, withdrawnByUserId: null, withdrawReason: null, expiresAt: input.expiresAt ?? null, kind: input.kind, title: input.title ?? existing.title }).where(eq(customerDocumentReleases.id, existing.id));
+        else await tx.insert(customerDocumentReleases).values({ releaseRef, orgRef: scope.tenantId, jobId: job.id, customerAccountId: jobRow.customerAccountId, sourceType: input.sourceType, sourceId: input.sourceId, documentRef: cat.documentRef, kind: input.kind, title: input.title ?? cat.title, contentHash: cat.contentHash, releasedByUserId: ctx.user.id, releasedAt: now, expiresAt: input.expiresAt ?? null });
+        await appendCustomerAuditEvent(tx, { orgRef: scope.tenantId, eventType: "customer_document_released", subjectType: "document", subjectRef: cat.documentRef, jobId: job.id, actorUserId: ctx.user.id, payload: { releaseRef, sourceType: input.sourceType, sourceId: input.sourceId, kind: input.kind, expiresAt: input.expiresAt ?? null, rereleased: !!existing } });
+      });
+      await queueCustomerAlert({ customerAccountId: jobRow.customerAccountId, kind: "document_ready", ticketNumber: cat.documentRef, jobCode: job.jobCode, subjectRef: releaseRef, tenantId: scope.tenantId });
+      return { releaseRef, documentRef: cat.documentRef, kind: input.kind, status: "released" as const, alreadyReleased: false };
+    }),
+
+  documentWithdraw: roleProcedure("clientServices.documentWithdraw")
+    .input(z.object({ releaseRef: z.string().min(1).max(64), reason: z.string().min(3).max(300) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = await actingScopeFor(ctx.user.id);
+      const d = await db();
+      const r = (await d.select().from(customerDocumentReleases).where(eq(customerDocumentReleases.releaseRef, input.releaseRef)).limit(1))[0];
+      if (!r || r.orgRef !== scope.tenantId) throw new TRPCError({ code: "NOT_FOUND", message: "Release not found" });
+      if (r.status === "withdrawn") return { releaseRef: r.releaseRef, status: "withdrawn" as const, alreadyWithdrawn: true };
+      await d.transaction(async tx => {
+        await tx.update(customerDocumentReleases).set({ status: "withdrawn", withdrawnAt: new Date(), withdrawnByUserId: ctx.user.id, withdrawReason: input.reason }).where(eq(customerDocumentReleases.id, r.id));
+        await appendCustomerAuditEvent(tx, { orgRef: scope.tenantId, eventType: "customer_document_withdrawn", subjectType: "document", subjectRef: r.documentRef, jobId: r.jobId, actorUserId: ctx.user.id, payload: { releaseRef: r.releaseRef, reason: input.reason } });
+      });
+      return { releaseRef: r.releaseRef, status: "withdrawn" as const, alreadyWithdrawn: false };
+    }),
+
+  documentReleases: roleProcedure("clientServices.documentReleases")
+    .input(z.object({ jobId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const scope = await actingScopeFor(ctx.user.id);
+      const job = await jobInScope(input.jobId, scope);
+      if (!job) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+      const d = await db();
+      const rows = await d.select().from(customerDocumentReleases).where(and(eq(customerDocumentReleases.jobId, job.id), eq(customerDocumentReleases.orgRef, scope.tenantId))).orderBy(desc(customerDocumentReleases.id));
+      return { jobCode: job.jobCode, releases: rows.map(r => ({ releaseRef: r.releaseRef, sourceType: r.sourceType, sourceId: r.sourceId, documentRef: r.documentRef, kind: r.kind, title: r.title, contentHash: r.contentHash, status: r.status, releasedAt: r.releasedAt, expiresAt: r.expiresAt, withdrawnAt: r.withdrawnAt, withdrawReason: r.withdrawReason })) };
     }),
 
   /** The customer audit ledger for one job of the caller's organization. */

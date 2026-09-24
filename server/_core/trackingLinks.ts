@@ -28,9 +28,13 @@ export type TrackingScope = {
   billing: boolean;
   /** Acknowledge, approve, dispute, comment, sign. */
   act: boolean;
+  /** Truck / trailer identity on the page. */
+  unit: boolean;
+  /** The operator's first name (never contact details). */
+  operator: boolean;
 };
 
-export const DEFAULT_SCOPE: TrackingScope = { status: true, loads: true, documents: true, billing: false, act: false };
+export const DEFAULT_SCOPE: TrackingScope = { status: true, loads: true, documents: true, billing: false, act: false, unit: true, operator: true };
 
 export type LocationMode = "none" | "approximate" | "live";
 export type LiveUntilRule = "until_completion" | "hours_after_completion" | "custom" | "manual";
@@ -57,14 +61,17 @@ export function parseScope(json: string | null | undefined): TrackingScope {
       documents: raw.documents === true,
       billing: raw.billing === true,
       act: raw.act === true,
+      // Identity flags default ON when a stored scope predates them; a stored false wins.
+      unit: raw.unit !== false,
+      operator: raw.operator !== false,
     };
   } catch {
     // A scope that cannot be read grants nothing.
-    return { status: false, loads: false, documents: false, billing: false, act: false };
+    return { status: false, loads: false, documents: false, billing: false, act: false, unit: false, operator: false };
   }
 }
 
-export const serializeScope = (scope: TrackingScope) => JSON.stringify({ status: scope.status, loads: scope.loads, documents: scope.documents, billing: scope.billing, act: scope.act });
+export const serializeScope = (scope: TrackingScope) => JSON.stringify({ status: scope.status, loads: scope.loads, documents: scope.documents, billing: scope.billing, act: scope.act, unit: scope.unit, operator: scope.operator });
 
 export type LinkRow = {
   status: LinkStatus;

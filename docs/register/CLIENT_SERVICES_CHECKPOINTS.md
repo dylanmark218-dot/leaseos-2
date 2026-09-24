@@ -64,3 +64,43 @@ organization makes its links dead; access limits are enforced atomically; refusa
 **Unresolved risks:** rate limiting of token guessing relies on 256-bit tokens and the decision log, not on a counter
 per address; email/SMS delivery of the `tracking_link_created` alert is still in-app only (the queue's other channels
 exist).
+
+## CP3 — customer-safe tracking API, explicit DTO, leakage tests
+
+**Files:** `server/_core/customerJobView.ts` (pure: status vocabulary, location projection with staleness, job DTO,
+loads, open ticket), `server/customerJobProjection.ts` (loads canonical rows and builds the DTOs; shared with the
+portal in CP7), `server/customerDocuments.ts` (resolves a release to catalogue bytes and verifies the hash),
+`server/trackingRouter.ts` (+5), `server/clientServicesRouter.ts` (+3 release procedures), `server/_core/trackingLinks.ts`
+(scope gains `unit` and `operator` identity flags).
+
+**Migrations / tables:** none (CP2's model covers it).
+
+**API added:** `tracking.{status, loads, documents, documentDownload, openTicket}` (link);
+`clientServices.{documentRelease, documentWithdraw, documentReleases}` (roles). Release refs come from the `REL`
+tracking sequence; a release carries the catalogue record's own number and never mints another.
+
+**Status vocabulary:** Scheduled · Dispatched · En Route · On Location · In Progress · On Hold · Transporting ·
+At Disposal · Returning · Attention · Completed · Cancelled · Unknown. Evidence order: open safety event → open ticket
+event → signed site → `jobs.status` → `dispatchPostings.planningState`. Nothing new is stored; the projection reads.
+
+**Location:** three modes on the link (`none | approximate | live`); approximate rounds to two decimals and drops
+heading and speed; a fix older than 15 minutes is presented as stale with its age; live status, position and ETA end
+under the link's completion rule while documents and the ticket remain.
+
+**Tests added:** `server/customerJobView.test.ts` (10: vocabulary mapping, modes and staleness, loads, open ticket
+estimate / finalized / invoiced distinction and hidden lines, the smuggled-private-data leakage test);
+`server/trackingApi.db.test.ts` (3: through the gate — projection from canonical rows with a private-data sweep,
+location by link mode, identity flags, stale fix, loads, unreleased → not found, release / download / hash check /
+tamper refused / withdraw / re-release, scope refusals by name, open ticket with internal line hidden, ledger; live
+window after completion). Guards: 645 operational, 6 tracking, 713 mounted paths.
+
+**Test results:** 13/13 new; guards green; `tsc` and test-file typecheck clean.
+
+**Decisions:** the DTO's input type has no field for private data, and the leakage test smuggles it in anyway to prove
+the builder projects by name rather than by omission. The customer reference is the ticket's PO, else its AFE.
+
+**Security implications:** a document is served only through a current release on the caller's own job, after a byte
+hash check; every list, download and ticket view is on the ledger with the link and a hashed address.
+
+**Unresolved risks:** `jobs.eta` is a free-text column today; the DTO passes it through only while live tracking is on.
+Position comes from trip breadcrumbs only (no telematics last-known table exists).
