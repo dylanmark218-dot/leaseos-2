@@ -780,6 +780,7 @@ extracts, explains and proposes. Deterministic rules and authorized people decid
 | AIL-1 | Tenant containment: tenant ownership of AI proposals, aliases and learning intake (Gap C) |
 | AIL-2 | Tool → capability binding (R-3) |
 | AIL-3 | Governance enforcement: the Constitution as executable kernel rules; a consumer for `FORBIDDEN_AI_OUTCOMES` (Gap A) |
+| AIL-3R | Governed research gateway: `research()` answers with citations and changes nothing; `learn()` is AIL-4. Split into 3R-a (pure contracts and tests, inside R-4) and 3R-b (live search and fetch, needs its own ruling). See `AIL_3R_RESEARCH_GATEWAY_DESIGN.md`. |
 | AIL-4 | Learning candidate record |
 | AIL-5 | Skill registry |
 | AIL-6 | Evaluation and quarantine (R-8 gates) |
