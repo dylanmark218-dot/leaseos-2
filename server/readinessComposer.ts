@@ -70,7 +70,7 @@ export type ReadinessSubject = {
   /** Working alone, for the policy rule that only applies then. */
   loneWorker?: boolean;
   /**
-   * 0175 — when the work ends, when the caller knows. A mandatory ticket that
+   * 0202 — when the work ends, when the caller knows. A mandatory ticket that
    * lapses before then does not cover the job. Absent, credentials are judged
    * at `now` only, which is what every existing caller already got.
    */
@@ -241,7 +241,7 @@ export type ComposedReadiness = {
    */
   automationPolicy: PolicySnapshot[];
   /**
-   * 0175 — the driver's requirement-by-requirement answer, for the dispatch
+   * 0202 — the driver's requirement-by-requirement answer, for the dispatch
    * view and the wallet. Its blockers are already inside `eligibility`; this is
    * the explanation, not a second verdict.
    */
@@ -511,7 +511,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       }
     }
   }
-  /* ---- 0175: the driver portfolio's requirement set ----
+  /* ---- 0202: the driver portfolio's requirement set ----
    * What the company, the customer, the site, the job type and the unit demand
    * of this operator, evaluated against the credentials above and the
    * operator's equipment authorizations. The findings enter as blockers in

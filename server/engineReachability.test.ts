@@ -26,6 +26,45 @@ import { join } from "path";
  * directions.
  */
 const DECLARED_UNWIRED: Record<string, string> = {
+  /* ----------------------------------------------------------------------
+   * The AI Secretary model layer — 21 modules, every one unwired on purpose.
+   *
+   * These landed as `server/ai/`, OUTSIDE this census, and were moved under
+   * `_core/` for exactly the reason the `coreEngines` header gives about
+   * `server/_core/knowledge/`: a guard against unwired engines that cannot see
+   * a directory reports health about a subsystem it has never looked at. Twenty
+   * one modules were in that position. Being outside `_core` was not a
+   * permission to skip the declaration; it was the declaration going unasked.
+   *
+   * They stay unwired because `docs/register/SPINE_WIRING_PLAN.md:3` says so:
+   * "no new engines until this path is wired". All 13 spine engines are still
+   * on this list, so the moratorium is fully in force, and the plan places the
+   * AI-adjacent engines (`modelGateway`, `voiceTranscription`) off the spine in
+   * "later phases" (line 40). Wiring these ahead of the spine is the thing the
+   * moratorium exists to prevent.
+   * -------------------------------------------------------------------- */
+  "ai/llm/provider": "the model boundary — the LlmProvider interface. Unwired under the SPINE moratorium",
+  "ai/llm/config": "LLM_BASE_URL/LLM_MODEL/LLM_API_KEY, read at call time. No default endpoint, so an unconfigured deployment fails closed rather than reaching a vendor nobody chose",
+  "ai/llm/mockProvider": "deterministic fixtures; the only provider the test suite constructs, which is what keeps CI off the network",
+  "ai/llm/openAiCompatibleProvider": "llama.cpp / Ollama / vLLM over chat-completions. Unwired: nothing may call a model until the spine is wired",
+  "ai/prompts/index": "versioned prompt loader and the run fingerprint (model, prompt version, prompt hash, input hash)",
+  "ai/extraction/contract": "ExtractedField — value, status, evidenceQuote, evidenceRef. A wire contract, not a second stored shape",
+  "ai/extraction/formSchema": "FORMS -> zod -> JSON Schema. Derived twice from one source so no hand-written parallel schema exists",
+  "ai/extraction/runExtraction": "perimeter -> fence -> prompt -> provider -> parse -> scan -> validate. Calls a model, so it stays unwired under the moratorium",
+  "ai/context/contextPack": "the projection a model is handed. Imports nothing at all, which is what lets contextPerimeter.test prove it cannot reach the restricted vault or a medical record",
+  "ai/validate/normalizers": "volume, times, legal land, ticket numbers. Deterministic; the reasoning the prompt forbids the model from doing",
+  "ai/validate/validator": "the judge — the verbatim-quote tripwire and the rule that a missing term never rounds up to PASS",
+  "ai/validate/questions": "templated clarification questions, written by people and chosen by code",
+  "ai/dialogue/machine": "the conversation as pure functions over a state value; one question per turn, three rounds, then a draft for the office",
+  "ai/injection/guard": "fences untrusted text as data and scans it independently of what the model reported",
+  "ai/proposal/bridge": "maps ExtractedField onto the ProposedField the database already holds, so there is one persisted shape and one provenance chain",
+  "ai/tools/registry": "the agent's tool list. Every procedure is typed ProcedureName, so a made-up name does not compile",
+  "ai/tools/caller": "the thin wrappers over a driver-scoped tRPC caller. createCaller is a required dependency, never an appRouter import, so the engine layer does not close a cycle back into the router layer",
+  "ai/worker/secretaryExtractionJob": "the job body for one narration. Returns what should be written; the worker that owns claims and transactions would do the writing, and does not call this yet",
+  "ai/eval/goldenSet": "the 12 golden narrations and their expectations",
+  "ai/eval/scoreCase": "scores one case; shared by the CI suite and eval:secretary so both report the same number",
+  "ai/eval/runEval": "pnpm eval:secretary against a real model. Refuses to start unconfigured; never run by CI",
+
   demoDataset: "the demonstration dataset's rules and step shape; reached from server/demoDataset.db.test.ts and scripts/demo-dataset.ts (the demo path), not from a router — a router that could seed demonstration rows into a customer's database is not something to build",
   // B28 widget engine (v22.23): the v1 service (widgetService/widgetDashboard/widgetLayoutWrite/
   // widgetRegistry/widgetPayload/roleActor) is reached through widgetsRouter. The layer below is
@@ -298,13 +337,26 @@ describe("every engine is reached, or says why not", () => {
       // projection is adapted onto rateResolution/linePricing, or when either is
       // wired for real — see docs/b23/HOOKS_AND_PERSISTENCE.md.
       "billing",
+      // The AI Secretary model layer's internal cluster: these nine are imported
+      // only by other modules in the same unwired subsystem, which is what a
+      // whole subsystem held back by the SPINE moratorium looks like from here.
+      // They leave this list together, when the layer is wired, or not at all.
+      "ai/eval/goldenSet",
+      "ai/eval/scoreCase",
+      "ai/extraction/contract",
+      "ai/extraction/formSchema",
+      "ai/llm/config",
+      "ai/llm/provider",
+      "ai/tools/registry",
+      "ai/validate/normalizers",
+      "ai/validate/validator",
     ].sort());
   });
 
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(62);   // 0175: -1 complianceDocumentValidity, now reached from the readiness composer through driverPortfolio (the documentExpiry tile still decides expiry inline; routing it through the adapter remains its own step)   // Canadian 511 tranche: +6 transport/* (providerRegistry and the parsers it routes to), declared above; unwired for the same reason feedCollector/feedIngest/feedHttp are   // SPINE item 1: +2 boundaryConfirmation (the resolver) and boundaryEvidence (the chain rule), declared above; the receipt reader is not in this repository — tripStops has no updatedAt here   // census repair: -2 +3. externalSourceSeeds and externalDataRegistry left the declared list because they are reached — db.ts loads the first with `await import`, which the old regex could not see, and its declaration read "no application path reaches this engine". knowledge/evaluationState, knowledge/perimeter and knowledge/repository entered it because coreEngines now recurses; server/_core/knowledge/ was outside the census entirely, nine modules that could be neither reached nor declared   // B23.0 closeout: +4 trip-operations engines (safetyBinder, siteBaseline, tripBillingProjection, tripPassportPackage), declared above and wired by nobody yet   // v23.24 merge: their 49 + 1 — the four OSM loader cores landed unwired this line (osmImport, osmTopology, osmLoadPlan, osmLoad: the build runs from scripts, not from a router, and a router that rebuilds the road graph on request is not something to expose), and the union is 50, counted from DECLARED_UNWIRED rather than taken from either pin: the one entry their side still does not carry is complianceDocumentValidity (merged in from the parallel B28 port at v22.24, unwired because the documentExpiry tile decides expiry inline; see its entry above)   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(83);   // driver portfolio: -1 complianceDocumentValidity, now reached from the readiness composer through driverPortfolio (the documentExpiry tile still decides expiry inline);   // +21 AI Secretary model-layer modules. They existed as `server/ai/`, outside this census entirely, and were moved under `_core/` so the guard can see them; every one is declared unwired above under the SPINE moratorium (docs/register/SPINE_WIRING_PLAN.md:3). The number rising is the census becoming honest, not the gap growing: the modules were always unwired, and this is the first run in which that is stated.   // Canadian 511 tranche: +6 transport/* (providerRegistry and the parsers it routes to), declared above; unwired for the same reason feedCollector/feedIngest/feedHttp are   // SPINE item 1: +2 boundaryConfirmation (the resolver) and boundaryEvidence (the chain rule), declared above; the receipt reader is not in this repository — tripStops has no updatedAt here   // census repair: -2 +3. externalSourceSeeds and externalDataRegistry left the declared list because they are reached — db.ts loads the first with `await import`, which the old regex could not see, and its declaration read "no application path reaches this engine". knowledge/evaluationState, knowledge/perimeter and knowledge/repository entered it because coreEngines now recurses; server/_core/knowledge/ was outside the census entirely, nine modules that could be neither reached nor declared   // B23.0 closeout: +4 trip-operations engines (safetyBinder, siteBaseline, tripBillingProjection, tripPassportPackage), declared above and wired by nobody yet   // v23.24 merge: their 49 + 1 — the four OSM loader cores landed unwired this line (osmImport, osmTopology, osmLoadPlan, osmLoad: the build runs from scripts, not from a router, and a router that rebuilds the road graph on request is not something to expose), and the union is 50, counted from DECLARED_UNWIRED rather than taken from either pin: the one entry their side still does not carry is complianceDocumentValidity (merged in from the parallel B28 port at v22.24, unwired because the documentExpiry tile decides expiry inline; see its entry above)   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
     expect(engines.length).toBeGreaterThan(130);
   });
 });

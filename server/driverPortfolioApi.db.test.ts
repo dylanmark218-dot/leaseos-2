@@ -1,5 +1,5 @@
 /**
- * 0177 — the Driver Portfolio API as a security boundary.
+ * 0204 — the Driver Portfolio API as a security boundary.
  *
  * Every call goes through `appRouter.createCaller`, so the role gate, the permission map, the acting
  * scope and the router are the production ones. Each test builds its own organizations, which is
@@ -371,7 +371,7 @@ d("sharing one credential", () => {
 });
 
 d("the portfolio audit trail", () => {
-  it("cannot be updated or deleted, including the columns 0177 added", async () => {
+  it("cannot be updated or deleted, including the columns 0204 added", async () => {
     const c = await company();
     await as(c.driver).driverPortfolio.submitCredential({ code: "whmis", expiresAt: days(100) });
     await expect(pool.execute("UPDATE driverPortfolioEvents SET orgRef = 'ORG-FORGED' WHERE operatorId = ?", [c.operatorId])).rejects.toThrow(/append-only/);

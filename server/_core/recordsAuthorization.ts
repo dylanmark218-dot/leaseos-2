@@ -182,6 +182,12 @@ export type Permission =
   | "compliance.passport.read" | "compliance.credential.record" | "compliance.credential.verify"
   | "compliance.private.read" | "compliance.consent.record" | "compliance.requirement.manage"
   | "compliance.program.publish" | "compliance.profile.review"
+  // C1b-2b — requirement verification through the ledger. Proposing, verifying, second approval of a
+  // dispatch-blocking rule, withdrawal and verification governance are separate acts, held separately.
+  // Separation of duties is additionally enforced by person (proposer ≠ verifier ≠ second verifier),
+  // so holding several of these does not let one person carry a requirement alone.
+  | "compliance.requirement.propose" | "compliance.requirement.verify" | "compliance.requirement.second_approve"
+  | "compliance.requirement.retire" | "compliance.verification.govern"
   // v20.22 — packs, work authorization, equipment authorization, calibration.
   | "compliance.pack.manage" | "compliance.work.evaluate"
   | "equipment.authorize" | "calibration.record" | "calibration.impact"
@@ -330,7 +336,7 @@ export type Permission =
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
   | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
-  // 0177 — Driver Portfolio. The `_own` three are universal and self-scoped in the router: they read
+  // 0204 — Driver Portfolio. The `_own` three are universal and self-scoped in the router: they read
   // the operator linked to ctx.user.id and take no operator id. Reading another driver's portfolio is
   // safety/HR/management's; managing requirements is safety's and management's. Verification reuses
   // compliance.credential.verify, and dispatch's view reuses dispatch.read.
@@ -703,6 +709,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   safety: [
     "portfolio.read",
     "portfolio.requirement.manage",
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -988,6 +997,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   management: [
     "portfolio.read",
     "portfolio.requirement.manage",
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.requirement.retire",
+    "compliance.verification.govern",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1277,6 +1291,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "audit.package.read",
   ],
   legal: [
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.verification.govern",
     "evidence.read_legal",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
@@ -1480,6 +1499,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.requirement.retire",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1699,7 +1723,7 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
-  // 0177 — the Driver Wallet: the caller's own operator record, never one the request names.
+  // 0204 — the Driver Wallet: the caller's own operator record, never one the request names.
   "portfolio.read_own",
   "portfolio.submit_own",
   "portfolio.share_own",
@@ -1750,7 +1774,7 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
-  // 0177 — a submitted credential, a share of one, and the requirements dispatch reads.
+  // 0204 — a submitted credential, a share of one, and the requirements dispatch reads.
   "portfolio.submit_own",
   "portfolio.share_own",
   "portfolio.requirement.manage",
@@ -1874,6 +1898,11 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // v20.22
   "compliance.pack.manage",
   "equipment.authorize",
+  // C1b-2b — each makes a regulatory requirement authoritative, retires one, or changes how it may be verified.
+  "compliance.requirement.verify",
+  "compliance.requirement.second_approve",
+  "compliance.requirement.retire",
+  "compliance.verification.govern",
   // v20.21
   "compliance.credential.verify",
   "compliance.private.read",
@@ -2503,7 +2532,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "compliance.credentialRecord": "compliance.credential.record",
   "compliance.credentialVerify": "compliance.credential.verify",
   "compliance.consentRecord": "compliance.consent.record",
-  "compliance.requirementLoad": "compliance.requirement.manage",
+  // C1b-2b: requirementLoad creates a proposal and nothing more.
+  "compliance.requirementLoad": "compliance.requirement.propose",
+  "compliance.requirementVerify": "compliance.requirement.verify",
+  "compliance.requirementSecondApprove": "compliance.requirement.second_approve",
+  "compliance.requirementWithdraw": "compliance.requirement.retire",
+  "compliance.verificationPolicySet": "compliance.verification.govern",
+  "compliance.requirementProvenance": "compliance.passport.read",
   "compliance.programPublish": "compliance.program.publish",
   "compliance.profileReviewRecord": "compliance.profile.review",
   "compliance.knowledgeCatalog": "compliance.passport.read",
@@ -2956,7 +2991,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
 
-  /* ---- 0177: Driver Portfolio API ---- */
+  /* ---- 0204: Driver Portfolio API ---- */
   "driverPortfolio.myWallet": "portfolio.read_own",
   "driverPortfolio.myCredentialHistory": "portfolio.read_own",
   "driverPortfolio.myShares": "portfolio.read_own",

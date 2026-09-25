@@ -50,7 +50,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/auditRouter.ts` | `ROLE_AUTHORIZED` | **6** |
 | `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **11** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
-| `server/driverPortfolioRouter.ts` | `ROLE_AUTHORIZED` (0177; the three `portfolio.*_own` permissions are universal and self-scoped to the operator linked to the session) | **17** |
+| `server/driverPortfolioRouter.ts` | `ROLE_AUTHORIZED` (0204; the three `portfolio.*_own` permissions are universal and self-scoped to the operator linked to the session) | **17** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | `server/driverPortfolioRouter.ts` | `PUBLIC` | 1 (`shareRedeem`: one credential behind a 256-bit token, only its hash stored; re-read on every redemption; revocable; at most 7 days) |
 | Anywhere | bare `protectedProcedure` | **0** |
