@@ -64,6 +64,32 @@ export const NEVER_AUTONOMOUS: readonly string[] = [
   "maintenance.clearOutOfService",
   "audit.delete",
   "safety.clearViolation",
+  // CP1.5 — releasing a unit hold lets a truck that someone grounded move again. An agent may help
+  // evaluate a hold and assemble its evidence; the release is a person's (`fleet.holdRelease`).
+  "fleet.holdRelease",
+];
+
+/**
+ * CP1.5 — the human-authorization boundary, stated by permission rather than by capability name, so it
+ * covers capabilities nobody has registered yet.
+ *
+ * These permissions authorize the acts that return a unit, a driver or a load to service after
+ * something stopped it: releasing a hold, a mechanic's release (which is the return to service and
+ * the closure of the safety defects it names), revoking one, and clearing a government out-of-service
+ * order. Each is a person's signature on "this may move again". An agent never performs a capability
+ * that requires one of them — at any risk level, with or without an approval on file; the person
+ * performs the act themselves through its procedure.
+ *
+ * Mechanic Portal CP2 (defect → work order → repair evidence → authorized return to service) and any
+ * later work inherit this without further change: a procedure for mechanic release, return to
+ * service, safety-defect closure or out-of-service clearance is authorized by one of these
+ * permissions, or its permission is added here in the same change. Nothing is reserved by name.
+ */
+export const HUMAN_AUTHORIZATION_PERMISSIONS: readonly string[] = [
+  "fleet.hold.release",           // fleet.holdRelease; and an incident's hold, through its safety review
+  "maintenance.record_release",   // mechanic release (return to service) and resolving the defects it names
+  "maintenance.revoke_release",   // withdrawing a return to service
+  "enforcement.release",          // clearing an out-of-service order
 ];
 
 export class CapabilityUnknown extends Error {}
@@ -165,6 +191,12 @@ export function decide(request: ActionRequest, ctx: GatewayContext): Decision {
   // 3. Some acts are the removal of a safeguard.
   if (NEVER_AUTONOMOUS.includes(capability.key) && request.actor.type === "agent") {
     return { decision: "deny", reasons: [`${capability.key} is never performed by an agent. Overriding a safeguard cannot itself be automated.`] };
+  }
+  // 3b. And some are a person's signature that a unit, a driver or a load may move again — whatever
+  //     the capability is called.
+  const humanOnly = capability.requiredPermissions.filter(p => HUMAN_AUTHORIZATION_PERMISSIONS.includes(p));
+  if (humanOnly.length && request.actor.type === "agent") {
+    return { decision: "deny", reasons: [`${capability.key} requires ${humanOnly.join(", ")}: returning something to service is a person's act. An agent may prepare the evidence; it may not perform the release.`] };
   }
 
   // 4. Compliance is authoritative, and unknown is not a pass.

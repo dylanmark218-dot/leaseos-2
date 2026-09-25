@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   approvalCovers, buildRegistry, CapabilityUnknown, decide, detectNoProgress,
-  idempotencyKey, isComplete, MAY_INSTRUCT, NEVER_AUTONOMOUS, outranks, shouldRetry,
+  HUMAN_AUTHORIZATION_PERMISSIONS, idempotencyKey, isComplete, MAY_INSTRUCT, NEVER_AUTONOMOUS, outranks, shouldRetry,
   type ActionRequest, type CapabilityDefinition, type GatewayContext,
 } from "./_core/actionGateway";
 
@@ -64,7 +64,7 @@ describe("there is no default-allow path", () => {
 
   it("refuses an agent the acts that remove a safeguard, at any risk level", () => {
     expect([...NEVER_AUTONOMOUS].sort()).toEqual([
-      "audit.delete", "compliance.override", "hos.ignoreViolation",
+      "audit.delete", "compliance.override", "fleet.holdRelease", "hos.ignoreViolation",
       "inspection.bypassFailure", "maintenance.clearOutOfService", "safety.clearViolation",
     ]);
     const d = decide(request({ capability: "compliance.override" }), ctx());
@@ -231,5 +231,54 @@ describe("a capability cannot require a permission that does not exist", () => {
       .flatMap(c => c.requiredPermissions.map(p => `${c.key} needs ${p}`))
       .filter(x => !everyPermission.has(x.split(" needs ")[1]));
     expect(invented).toEqual([]);
+  });
+});
+
+describe("CP1.5 — returning a unit to service is a person's act", () => {
+  const releaseRegistry = buildRegistry([
+    cap({ key: "fleet.holdRelease", riskLevel: "restricted", requiredPermissions: ["fleet.hold.release"] }),
+    // Names CP2 has not built: the rule is by permission, so it reaches them without reserving them.
+    cap({ key: "maintenance.returnToService", riskLevel: "approval_required", requiredPermissions: ["maintenance.record_release"] }),
+    cap({ key: "defects.closeSafetyDefect", riskLevel: "low_risk_action", requiredPermissions: ["maintenance.record_release"] }),
+    cap({ key: "enforcement.clearOrder", riskLevel: "read", requiredPermissions: ["enforcement.release"] }),
+    cap({ key: "fleet.readUnit", riskLevel: "read", requiredPermissions: ["fleet.read"] }),
+  ]);
+  const everything = { registry: releaseRegistry, heldPermissions: ["fleet.hold.release", "maintenance.record_release", "enforcement.release", "fleet.read"], autoExecute: ["defects.closeSafetyDefect"] };
+
+  it("an agent may not release a hold — at any risk level, with an approval for exactly that payload on file", () => {
+    const d = decide(request({ capability: "fleet.holdRelease", target: { entityType: "unitHold", entityId: "HOLD-1", revision: null } }), ctx({ ...everything, approvalForPayloadHash: "abc123" }));
+    expect(d.decision).toBe("deny");
+    expect(d.reasons[0]).toContain("never performed by an agent");
+  });
+
+  it("an agent may not perform any capability that needs a return-to-service permission, whatever it is called or however it is classed", () => {
+    for (const capability of ["maintenance.returnToService", "defects.closeSafetyDefect", "enforcement.clearOrder"]) {
+      const d = decide(request({ capability }), ctx({ ...everything, approvalForPayloadHash: "abc123" }));
+      expect(d, capability).toMatchObject({ decision: "deny" });
+      expect(d.reasons[0], capability).toMatch(/a person's act/);
+    }
+  });
+
+  it("an agent may still read and assess the unit — assisting is not releasing", () => {
+    expect(decide(request({ capability: "fleet.readUnit" }), ctx(everything)).decision).toBe("allow");
+  });
+
+  it("a person holding the permission is not refused by this rule; the ordinary approval rules apply", () => {
+    const person = { type: "user" as const, id: "USER-7" };
+    expect(decide(request({ capability: "fleet.holdRelease", actor: person }), ctx(everything)).decision).toBe("require_approval");
+    expect(decide(request({ capability: "maintenance.returnToService", actor: person }), ctx({ ...everything, approvalForPayloadHash: "abc123" })).decision).toBe("allow");
+  });
+
+  it("the boundary names the permissions the real release procedures use, and no registered agent capability requires one", async () => {
+    const { permissionForProcedure } = await import("./_core/recordsAuthorization");
+    const releases = ["fleet.holdRelease", "records.incident.review", "records.maintenance.recordRelease", "records.maintenance.resolveDefect", "records.maintenance.revokeRelease", "enforcement.orderRelease"];
+    const used = new Set(releases.map(p => permissionForProcedure(p)));
+    // records.incident.review releases an incident's hold under incident.review, a role the hold rule also checks.
+    used.delete("incident.review");
+    expect([...used].sort()).toEqual([...HUMAN_AUTHORIZATION_PERMISSIONS].sort());
+
+    const { AGENT_CAPABILITIES } = await import("./agentRouter");
+    const reachable = AGENT_CAPABILITIES.filter(c => !NEVER_AUTONOMOUS.includes(c.key) && c.requiredPermissions.some(p => HUMAN_AUTHORIZATION_PERMISSIONS.includes(p)));
+    expect(reachable.map(c => c.key)).toEqual([]);
   });
 });

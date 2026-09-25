@@ -14,6 +14,21 @@ status changed.* Every table and procedure below is checked against it.
 
 ---
 
+## Prerequisite closed before CP2 — Fleet/Unit Security CP1.5 (2026-09-25)
+
+CP2 (Defect → Work Order → Repair Evidence → Authorized Return-to-Service) builds on two things CP1.5
+established (`docs/register/UNIT_SCOPE_SECURITY_CP1_5.md`):
+
+- **Every unit a CP2 mutation names goes through `server/unitScope.ts`** (`requireCallerUnits` /
+  `requireUnitInScope`): another organization's unit is not found, exactly like a missing one, before
+  anything is written. `server/unitScopeGuard.test.ts` fails the build otherwise.
+- **Return to service is a person's act.** A mechanic release, a return to service, a safety-defect
+  closure, an out-of-service clearance and a hold release are authorized by a permission in
+  `HUMAN_AUTHORIZATION_PERMISSIONS` (`server/_core/actionGateway.ts`) — or CP2 adds its permission there
+  in the same change — and the action gateway refuses any agent capability that needs one. A hold CP2
+  places from a defect is `sourceKind: defect`, which `fleet.holdRelease` refuses: it is released by the
+  act that resolves it, by a second person.
+
 ## Revision 2026-09-25 — the owner's decisions, and the foundation delivered
 
 The owner approved the sequence below and ruled (2026-09-25): the portfolio's model is authoritative for
