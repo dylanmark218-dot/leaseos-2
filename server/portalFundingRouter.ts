@@ -24,7 +24,11 @@ import { z } from "zod";
 import { roleProcedure, router } from "./_core/trpc";
 import { listActiveUserRoleNames } from "./db";
 import { isDomainRole, type DomainRole } from "./_core/recordsAuthorization";
-import { composeSession, panelsForPortal, type PortalKey } from "./_core/portalComposition";
+import { composeSession, organizationStateFrom, panelsForPortal, type PortalKey } from "./_core/portalComposition";
+import { resolveActingScope } from "./_core/actingScope";
+import { getDb } from "./db";
+import { and, eq } from "drizzle-orm";
+import { organizationMemberships } from "../drizzle/schema";
 import {
   assessStacking,
   canAdvanceOpportunity,
@@ -86,7 +90,40 @@ export const portalsRouter = router({
   mine: roleProcedure("portals.mine").query(async ({ ctx }) => {
     // Composed from the session's own roles. A second role only ever adds.
     const roles = (await listActiveUserRoleNames(ctx.user.id)).filter(isDomainRole) as DomainRole[];
-    return composeSession(roles);
+    const session = composeSession(roles);
+
+    // The organization the session acts for, and the preference stored beside
+    // it. Both are reported; neither composes a portal. `resolveActingScope`
+    // refuses a user with two live memberships rather than picking one, and
+    // that refusal is delivered as a state so the screen can render a decision
+    // instead of an error — the resolver itself is unchanged.
+    const db = await getDb();
+    let organization;
+    if (!db) {
+      // No database configured, so the question could not be asked. Reporting
+      // the fallback would claim a tenancy answer nothing established, and
+      // throwing would regress a procedure that answers today with no database.
+      organization = organizationStateFrom({ unresolved: "no database configured" });
+    } else {
+      try {
+        const scope = await resolveActingScope(db, ctx.user.id);
+        const membership = scope.membershipRef
+          ? (await db
+              .select({ defaultWorkspace: organizationMemberships.defaultWorkspace })
+              .from(organizationMemberships)
+              .where(and(eq(organizationMemberships.membershipRef, scope.membershipRef)))
+              .limit(1))[0]
+          : undefined;
+        organization = organizationStateFrom({
+          scope,
+          defaultWorkspace: membership?.defaultWorkspace ?? null,
+        });
+      } catch (error) {
+        organization = organizationStateFrom({ error });
+      }
+    }
+
+    return { ...session, organization };
   }),
 
   panelsFor: roleProcedure("portals.panelsFor")

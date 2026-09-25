@@ -181,3 +181,101 @@ d("approval binds to the payload", () => {
     await expect(caller(office).agent.get({ runRef: r.runRef })).rejects.toThrow(/No such run/);
   });
 });
+
+/*
+ * F3A — a finished run stays finished (docs/register/AI_AGENT_RUNTIME_ARCHITECTURE.md §20, §22).
+ *
+ * `TRANSITIONS` gives `completed`, `failed` and `cancelled` no way out, but `requestAction` used to
+ * decide a new action on any run it could find and then write `waiting_for_approval` or `blocked`
+ * over whatever status the run had — reopening a finished run. No procedure reaches a terminal
+ * status yet, so the tests put the run there directly, as the executor eventually will.
+ */
+d("a finished run stays finished", () => {
+  async function finished(status: "completed" | "failed" | "cancelled", capability: string) {
+    const office = await withRole("office");
+    const r = await caller(office).agent.start({ goal: `finished ${status}`, plan: [{ capability }] });
+    await pool.execute("UPDATE agentRuns SET status = ? WHERE runRef = ?", [status, r.runRef]);
+    return { office, runRef: r.runRef };
+  }
+  const actionCount = async (runRef: string) => {
+    const [rows] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM agentActions WHERE runRef = ?", [runRef]);
+    return Number(rows[0].n);
+  };
+
+  // One capability per decision the router writes a status for: allow (none), require_approval
+  // (waiting_for_approval), deny (blocked).
+  const CASES = [
+    ["billing.prepareInvoice", "allow"],
+    ["billing.issueInvoice", "require_approval"],
+    ["compliance.override", "deny"],
+  ] as const;
+
+  for (const status of ["completed", "failed", "cancelled"] as const) {
+    for (const [capability, wouldBe] of CASES) {
+      it(`${status} → requestAction (${capability}, would be ${wouldBe}) is refused and changes nothing`, async () => {
+        const { office, runRef } = await finished(status, capability);
+        await expect(caller(office).agent.requestAction(act(runRef, { capability })))
+          .rejects.toThrow(new RegExp(`${status} and takes no new action`));
+        const got = await caller(office).agent.get({ runRef });
+        expect(got.status).toBe(status);
+        expect(got.blockedReason).toBeNull();
+        expect(await actionCount(runRef)).toBe(0);
+        const [apr] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM agentApprovals WHERE runRef = ?", [runRef]);
+        expect(Number(apr[0].n)).toBe(0);
+      });
+    }
+  }
+
+  it("still returns the original answer to a replay after the run finished, without reopening it", async () => {
+    // A replay is not a new action: it reads back a decision already recorded. Refusing it would
+    // tell a client whose response was lost that the request never happened.
+    const office = await withRole("office");
+    const r = await caller(office).agent.start({ goal: "replay", plan: [{ capability: "billing.issueInvoice" }] });
+    const first = await caller(office).agent.requestAction(act(r.runRef, { capability: "billing.issueInvoice", requestId: "REQ-REPLAY" }));
+    await pool.execute("UPDATE agentRuns SET status = 'cancelled' WHERE runRef = ?", [r.runRef]);
+    const again = await caller(office).agent.requestAction(act(r.runRef, { capability: "billing.issueInvoice", requestId: "REQ-REPLAY" }));
+    expect(again).toMatchObject({ replayed: true, actionRef: first.actionRef, decision: "require_approval" });
+    expect((await caller(office).agent.get({ runRef: r.runRef })).status).toBe("cancelled");
+    expect(await actionCount(r.runRef)).toBe(1);
+  });
+
+  describe("the transitions requestAction already makes are unchanged", () => {
+    it("created → executing on the first allowed action", async () => {
+      const office = await withRole("office");
+      const r = await caller(office).agent.start({ goal: "no plan" });
+      expect((await caller(office).agent.get({ runRef: r.runRef })).status).toBe("created");
+      expect((await caller(office).agent.requestAction(act(r.runRef))).decision).toBe("allow");
+      expect((await caller(office).agent.get({ runRef: r.runRef })).status).toBe("executing");
+    });
+
+    it("ready → executing on the first allowed action", async () => {
+      const office = await withRole("office");
+      const r = await caller(office).agent.start({ goal: "plan", plan: [{ capability: "billing.prepareInvoice" }] });
+      await caller(office).agent.requestAction(act(r.runRef));
+      expect((await caller(office).agent.get({ runRef: r.runRef })).status).toBe("executing");
+    });
+
+    it("executing → waiting_for_approval when a person must decide", async () => {
+      const office = await withRole("office");
+      const r = await caller(office).agent.start({ goal: "issue", plan: [{ capability: "billing.issueInvoice" }] });
+      await caller(office).agent.requestAction(act(r.runRef, { capability: "billing.issueInvoice" }));
+      expect((await caller(office).agent.get({ runRef: r.runRef })).status).toBe("waiting_for_approval");
+    });
+
+    it("executing → blocked on a refusal", async () => {
+      const office = await withRole("office");
+      const r = await caller(office).agent.start({ goal: "override", plan: [{ capability: "compliance.override" }] });
+      await caller(office).agent.requestAction(act(r.runRef, { capability: "compliance.override" }));
+      expect((await caller(office).agent.get({ runRef: r.runRef })).status).toBe("blocked");
+    });
+
+    it("a waiting or blocked run still accepts its next action", async () => {
+      for (const status of ["waiting_for_approval", "waiting_for_input", "waiting_for_event", "blocked", "paused"] as const) {
+        const office = await withRole("office");
+        const r = await caller(office).agent.start({ goal: `resume ${status}`, plan: [{ capability: "billing.prepareInvoice" }] });
+        await pool.execute("UPDATE agentRuns SET status = ? WHERE runRef = ?", [status, r.runRef]);
+        expect((await caller(office).agent.requestAction(act(r.runRef))).decision, status).toBe("allow");
+      }
+    });
+  });
+});

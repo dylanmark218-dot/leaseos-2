@@ -120,6 +120,9 @@ describe("the readiness fingerprint covers the channels", () => {
     trailerStatusVersion: "v0", jobClassificationVersion: "v2", materialClassificationVersion: "v2",
     permitVersion: "v1", destinationAcceptanceVersion: "v3", routeProfileId: "RA-1", routeDecisionVersion: "v1",
     communicationPlanVersion: "unknown:abc",
+  unitCredentialVersion: "none", insuranceVersion: "none", enforcementVersion: "none", roadsideVersion: "none",
+  telematicsFaultVersion: "none", calibrationVersion: "none", medicalVersion: "none", hosVersion: "none",
+  deviceVersion: "none", ruleSetHash: "rules-v1", policyVersion: "policy-v1", expiryStateVersion: "e",
   };
   it("moves when the plan's verdict or its channels move", () => {
     expect(computeEligibilityFingerprint({ ...FACTS, communicationPlanVersion: "covered:abc" })).not.toBe(computeEligibilityFingerprint(FACTS));
