@@ -104,7 +104,8 @@ export type StateReason = {
 };
 
 export type PortfolioFacts = {
-  holds: readonly { holdRef: string; holdType: HoldType; dispatchEffect: HoldEffect; reason: string; placedAt: Date }[];
+  /** `sourceKind` says which act lifts the hold: a hand-placed one by `fleet.holdRelease`, a workflow's by that workflow. */
+  holds: readonly { holdRef: string; holdType: HoldType; dispatchEffect: HoldEffect; reason: string; placedAt: Date; sourceKind?: string; sourceRef?: string | null }[];
   /** Open defects and every critical defect whatever its status — the readiness composer's own read. */
   defects: readonly { id: number; title: string; severity: "advisory" | "inspection_required" | "critical"; status: "open" | "in_progress" | "resolved"; resolvedByReleaseId: number | null; reportedAt: Date }[];
   releases: readonly (StoredRelease & { restrictionDetail: string | null })[];
@@ -120,14 +121,25 @@ export type PortfolioFacts = {
 
 /**
  * What this projection does not evaluate, stated so `available` never claims it (reconciliation
- * R-2, R-7, R-8). Dispatch readiness evaluates documents and insurance; the rest is later work.
+ * R-7, R-8). Dispatch readiness evaluates documents and insurance; the rest is later work. R-2 closed
+ * in CP1.5: an incident that holds its unit places a `unitHolds` row, read here like any other hold.
  */
 export const NOT_EVALUATED = [
   { domain: "documents_and_insurance", reason: "Decided by the dispatch readiness composer, which reads the requirement registry and insurance" },
-  { domain: "incident_unit_held", reason: "Deferred until incident capture checks the unit's organization (unit-scope sweep #19)" },
   { domain: "lifecycle", reason: "Unit lifecycle (active, storage, retired, sold) is not recorded yet" },
   { domain: "dispatched", reason: "Whether the unit is on a job is a booking, not a condition of the unit" },
 ] as const;
+
+/**
+ * CP1.5 — the act that lifts a hold is the act that placed it. A hold placed by hand is released by
+ * hand (`fleet.holdRelease`, which refuses any other). A hold an incident placed is lifted by that
+ * incident's safety review; nothing else releases it.
+ */
+export function liftedByFor(h: { sourceKind?: string; sourceRef?: string | null }): string {
+  if (!h.sourceKind || h.sourceKind === "manual") return "fleet.holdRelease";
+  if (h.sourceKind === "incident") return "records.incident.review";
+  return `the ${h.sourceKind} workflow that placed it${h.sourceRef ? ` (${h.sourceRef})` : ""}`;
+}
 
 export type OperationalState = {
   status: OperationalStatus;
@@ -149,7 +161,7 @@ export function operationalState(f: PortfolioFacts): OperationalState {
   const push = (r: StateReason) => reasons.push(r);
 
   for (const h of f.holds) {
-    push({ code: `hold_${h.holdType}`, status: HOLD_STATUS[h.dispatchEffect], category: h.holdType, label: h.reason, source: { table: "unitHolds", ref: h.holdRef }, since: h.placedAt, liftedBy: "fleet.holdRelease" });
+    push({ code: `hold_${h.holdType}`, status: HOLD_STATUS[h.dispatchEffect], category: h.holdType, label: h.reason, source: { table: "unitHolds", ref: h.holdRef }, since: h.placedAt, liftedBy: liftedByFor(h) });
   }
 
   // The defect and its release, decided separately, exactly as the readiness composer decides them.

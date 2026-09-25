@@ -15,9 +15,10 @@ import { assertPeriodOpen } from "./periodCloseService";
 import { fromCents, toCents } from "./_core/money";
 import { normaliseUnit, priceLineAndRecord } from "./_core/linePricing";
 import { getDb, listActiveUserRoleNames } from "./db";
+import { requireCallerUnits } from "./unitScope";
 import {
   maintenanceDefects, purchaseAuthorizations, roadsideServiceEvents, spendingLimits,
-  vendorBillLines, vendorBills, vendors, customerRecoveryProposals, units, customerAccounts } from "../drizzle/schema";
+  vendorBillLines, vendorBills, vendors, customerRecoveryProposals, customerAccounts } from "../drizzle/schema";
 import {
   assessAccrual, decideApproval, fourWayMatch, proposeCustomerRecovery,
   reconcileBillLines, roadsideConsequences, routeApproval, type SpendingLimit,
@@ -56,10 +57,11 @@ export const roadsideRouter = router({
       driverStatement: z.string().max(4000).nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      // CP1.5 — the unit must be the caller's organization's. Existence alone let one organization open
+      // a defect and a roadside event on another's truck, and readiness blocks a truck with either.
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const unit = await db.select({ id: units.id }).from(units).where(eq(units.id, input.unitId)).limit(1);
-      if (!unit[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Unit not found" });
 
       const consequence = roadsideConsequences(input);
       const now = new Date();
@@ -124,6 +126,7 @@ export const purchasingRouter = router({
       emergency: z.boolean().default(false),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — the unit is the caller's organization's, or it is not found
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (!input.vendorId && !input.vendorNameIfNew) throw new TRPCError({ code: "BAD_REQUEST", message: "Name a vendor or a new vendor" });
@@ -216,6 +219,7 @@ export const vendorRouter = router({
       evidenceRecordId: z.number().int().positive().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 

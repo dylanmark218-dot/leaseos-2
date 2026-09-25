@@ -19,6 +19,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { roleProcedure, router } from "./_core/trpc";
 import * as svc from "./payrollService";
@@ -136,6 +137,7 @@ export const payrollRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — the profile is the caller's own; the unit must be too
       const me = await ownProfileOrThrow(ctx.user.id);
       const minutes = input.endedAt
         ? Math.round((input.endedAt.getTime() - input.startedAt.getTime()) / 60000)
@@ -666,6 +668,7 @@ export const financeRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const allocations = buildAllocations({
         total: input.total,
         businessUsePercent: input.businessUsePercent,

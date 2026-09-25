@@ -177,7 +177,7 @@ export async function portfolioFacts(db: DbOrTx, unitId: number): Promise<Portfo
   ]);
   const mine = new Set([`unit:${unitId}`, `trailer:${unitId}`]);
   return {
-    holds: holds.map(h => ({ holdRef: h.holdRef, holdType: h.holdType, dispatchEffect: h.dispatchEffect, reason: h.reason, placedAt: h.placedAt })),
+    holds: holds.map(h => ({ holdRef: h.holdRef, holdType: h.holdType, dispatchEffect: h.dispatchEffect, reason: h.reason, placedAt: h.placedAt, sourceKind: h.sourceKind, sourceRef: h.sourceRef })),
     defects: defects.map(d => ({ id: d.id, title: d.title, severity: d.severity, status: d.status, resolvedByReleaseId: d.resolvedByReleaseId, reportedAt: d.reportedAt })),
     releases: releases.map(r => ({ id: r.id, workOrderId: r.workOrderId, releaseType: r.releaseType, testResult: r.testResult, resolvedDefectIds: r.resolvedDefectIds, releasedAt: r.releasedAt, restrictionDetail: r.restrictionDetail })),
     activeOrders: (enforcement?.orders ?? []).filter(o => mine.has(o.subjectRef) && (o.scope === "vehicle" || o.scope === "trailer"))

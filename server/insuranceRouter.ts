@@ -8,6 +8,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { and, eq, isNull, or, gte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
@@ -185,6 +186,7 @@ export const insuranceRouter = router({
       claimType: z.enum(["collision","cargo","property","equipment","environmental","theft","glass","liability","other"]), estimatedLoss: z.number().nonnegative().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const p = (await db.select().from(insurancePolicies).where(eq(insurancePolicies.policyRef, input.policyRef)).limit(1))[0];

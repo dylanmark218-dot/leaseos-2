@@ -12,6 +12,7 @@ import { z } from "zod";
 import { assertEntityInScope, entityIdsInScope, type MoneyScope } from "./_core/entityScope";
 import { resolveActingScope } from "./_core/actingScope";
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { chargeDefinitions, commercialSetupProfiles, customerAccounts, customerContractTerms, customerPurchaseOrders, fieldTicketLines, fieldTickets, pricingDecisions, units, vendorBillLines, vendorBills, vendors } from "../drizzle/schema";
 import { getDb } from "./db";
@@ -93,6 +94,7 @@ export const commercialSetupRouter = router({
       effectiveFrom: z.coerce.date(), effectiveTo: z.coerce.date().optional(), sourceKind: z.enum(["human", "ai_extracted", "imported", "negotiated"]), sourceDocumentEvidenceId: z.number().int().optional(), sourceClause: z.string().max(160).optional(), notes: z.string().max(600).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const d = await db();
       if (input.pricingMethod === "per_unit" && input.rateMillis == null) throw new TRPCError({ code: "BAD_REQUEST", message: "A per-unit definition carries a rate; without one it is a question, not a rate" });
       if (input.pricingMethod === "flat" && input.flatCents == null) throw new TRPCError({ code: "BAD_REQUEST", message: "A flat definition carries an amount" });

@@ -3,6 +3,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
@@ -214,7 +215,11 @@ export const closeoutRouter = router({
   /** Observed weather, a road hazard, a hold: contemporaneous evidence, classified by the contract or held at REVIEW. */
   delayRecord: roleProcedure("closeout.delayRecord")
     .input(z.object({ ticketNumber: z.string().max(64).nullable().optional(), jobId: z.number().int().positive().nullable().optional(), tripId: z.number().int().positive().nullable().optional(), unitId: z.number().int().positive().nullable().optional(), kind: z.enum(["customer_hold", "disposal_queue", "weather", "road_hazard", "collision", "driver_break", "breakdown", "other"]), hazardType: z.string().max(60).nullable().optional(), severity: z.enum(["low", "medium", "high"]).default("medium"), observedAt: z.coerce.date(), endedAt: z.coerce.date().nullable().optional(), observedByOperatorId: z.number().int().positive().nullable().optional(), observation: z.string().min(3).max(600), latitude: z.number().nullable().optional(), longitude: z.number().nullable().optional(), externalSourceStatus: z.enum(["available", "unavailable", "not_checked"]).default("not_checked"), externalSourceNote: z.string().max(300).nullable().optional(), evidenceRecordId: z.number().int().positive().nullable().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      // CP1.5 — the unit, and the ticket (which brings its own unit, job and trip), are the caller's
+      // organization's; either one that is not is not found, before anything is read from it.
+      const scope = await requireCallerUnits(ctx.user.id, { unitId: input.unitId });
+      if (input.ticketNumber && !(await fieldTicketInScope(input.ticketNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const x = input.ticketNumber ? await loadTicket(input.ticketNumber) : null;

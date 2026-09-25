@@ -39,7 +39,8 @@ describe("the unit's operational state, derived", () => {
   it("is available with nothing against it, and says what it did not evaluate", () => {
     const s = operationalState(empty);
     expect(s.status).toBe("available");
-    expect(s.notEvaluated.map(n => n.domain)).toEqual(["documents_and_insurance", "incident_unit_held", "lifecycle", "dispatched"]);
+    // CP1.5: incident holds are evaluated now — an incident that holds its unit places a unitHolds row.
+    expect(s.notEvaluated.map(n => n.domain)).toEqual(["documents_and_insurance", "lifecycle", "dispatched"]);
     expect(driverNotice(s)).toBe("Operational");
   });
 

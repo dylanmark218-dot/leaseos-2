@@ -1,5 +1,11 @@
 # Unit scope sweep — mutations that take a unit id from the request (2026-09-25)
 
+> **Closed in Fleet/Unit Security CP1.5** (`UNIT_SCOPE_SECURITY_CP1_5.md`). Every row was revalidated on
+> current code; every unsafe and partial one — and six more the revalidation found — now refuses another
+> organization's unit exactly as a missing one, through `server/unitScope.ts`, and
+> `server/unitScopeGuard.test.ts` fails the build if a new unit-taking mutation skips the check. The table
+> below is the sweep as it was found, kept as the record of the finding.
+
 Found while fixing `fieldRoute.trips.create` (commit `18f3f68`). **Recorded, not fixed**: the owner asked
 for the findings before any wider remediation.
 

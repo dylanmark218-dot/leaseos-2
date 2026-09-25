@@ -220,7 +220,10 @@ d("one policy, fifty trucks, one document; a collision; a customer certificate",
     expect(pol.coverageVerificationStatus).toBe("coverage_reported");
 
     // Cover three units under it. The one document relates to all three.
-    const unitIds = [1001, 1002, 1003].map(n => n + Math.floor(Math.random() * 900000));
+    // CP1.5 — real units of this (historical, unowned) tenant. Random ids named units that usually did not
+    // exist, and a claim may no longer name a unit the caller cannot see.
+    const unitIds: number[] = [];
+    for (let i = 0; i < 3; i++) unitIds.push(Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [`U-${Math.random().toString(36).slice(2, 9).toUpperCase()}`]))[0].insertId));
     const cov = await callerFor(office).insurance.coverageAssign({ policyRef: pol.policyRef, entities: unitIds.map(id => ({ entityType: "unit" as const, entityId: id })), coveredFrom: days(-100) });
     expect(cov.covered).toBe(3);
     const [rels] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM evidenceRelationships WHERE evidenceRecordId = ? AND role = 'insured_under'", [evidenceId]);

@@ -21,6 +21,7 @@ function readRefreshCookie(req: { headers?: { cookie?: string } }): { familyRef:
   return { familyRef: value.slice(0, dot), verifier: value.slice(dot + 1) };
 }
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits, requireUnitInScope } from "./unitScope";
 import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
 /**
@@ -803,6 +804,7 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
+          await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — before the model is asked anything; the proposal would be visible to the unit's owner
           const form = FORMS[input.formKey];
           if (!form) throw new Error(`Unknown form: ${input.formKey}`);
 
@@ -1610,6 +1612,9 @@ export const appRouter = router({
         // P4.1: scope guard
         const actingScope = await scopeFor(ctx.user.id);
         if (input?.jobId != null && !(await jobInScope(input.jobId, actingScope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        // CP1.5 (sweep #22) — the job was scoped, the unit only through a check in enforced mode. A job
+        // may not take another organization's truck, in any mode.
+        await requireUnitInScope(input.unitId, actingScope);
          // C1a — the check relied on must belong to the caller's organization too.
          const r = await createJobUnitGated({ ...input, actingScope }); return r.id; }),
       }),

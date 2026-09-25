@@ -2,6 +2,7 @@
  * Capital assets, CCA and the asset twin — the API.
  */
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
@@ -48,6 +49,7 @@ export const assetRouter = router({
   register: roleProcedure("asset.register")
     .input(z.object({ financialEntityId: z.number().int().positive(), kind: z.enum(["unit", "trailer", "equipment", "building", "leasehold", "other"]), unitId: z.number().int().positive().nullable().optional(), trailerId: z.number().int().positive().nullable().optional(), description: z.string().min(1).max(220), acquiredAt: z.coerce.date(), acquisitionCostCents: z.number().int().positive(), acquisitionVendorBillId: z.number().int().positive().nullable().optional(), acquisitionEvidenceRecordId: z.number().int().positive().nullable().optional(), financing: z.enum(["owned", "financed", "leased"]).default("owned"), lender: z.string().max(160).nullable().optional(), financedPrincipalCents: z.number().int().nonnegative().nullable().optional(), expectedLifeKm: z.number().int().positive().nullable().optional(), expectedLifeYears: z.number().int().positive().max(50).nullable().optional(), capitalizationThresholdCents: z.number().int().nonnegative().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId, trailerId: input.trailerId });   // CP1.5 — both UNIQUE here: a foreign unit took the owner's slot
       const db = await dbOrThrow();
       if (input.kind === "unit" && !input.unitId) throw new TRPCError({ code: "BAD_REQUEST", message: "A unit asset must name the unit the shop maintains — one truck, one identity" });
       if (input.financing !== "owned" && input.financedPrincipalCents == null) throw new TRPCError({ code: "BAD_REQUEST", message: "Financed or leased assets need the principal" });
