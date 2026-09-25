@@ -34,8 +34,8 @@ import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { complianceDocumentValidity } from "./_core/complianceDocumentValidity";
 import type { DbOrTx } from "./_core/dbTypes";
 import type { DocumentType } from "./_core/documentExtraction";
-import { validityOf, type DocumentVersion, type Validity, type ValidityState } from "./_core/documentValidity";
-import { heldFromValidity, qualificationValidity, type NotHeldCode, type QualificationHolding } from "./_core/qualificationValidity";
+import { type Validity, type ValidityState } from "./_core/documentValidity";
+import { academyVerdict, heldFromValidity, qualificationValidity, type NotHeldCode, type QualificationHolding } from "./_core/qualificationValidity";
 import { userInScope } from "./db";
 
 export type QualificationSource = "ACADEMY_QUALIFICATION" | "LEGACY_WORKER_QUALIFICATION";
@@ -79,26 +79,11 @@ type AcademyRow = typeof academyQualifications.$inferSelect;
 type LegacyRow = typeof workerQualifications.$inferSelect;
 type DocRow = typeof complianceDocuments.$inferSelect;
 
-const ACADEMY_STATE: Readonly<Record<AcademyRow["status"], DocumentVersion["state"]>> = {
-  current: "verified", expired: "verified", pending: "uploaded", rejected: "rejected", revoked: "rejected",
-};
-
-/** The Academy's verdict for one code, through the engine. Pure. */
-export function academyVerdict(rows: readonly AcademyRow[], at: Date): { validity: Validity; chosen: AcademyRow | null } {
-  const ordered = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id);
-  const versions: DocumentVersion[] = ordered.map((r, i) => ({
-    documentRef: r.qualificationRef, version: i + 1, type: r.qualificationCode as DocumentType, subjectRef: r.qualificationCode,
-    state: ACADEMY_STATE[r.status], effectiveFrom: r.validFrom, expiresAt: r.expiresAt,
-    verifiedByUserId: r.verifiedByUserId, verifiedAt: r.verifiedAt, supersededByVersion: null, uploadedAt: r.createdAt,
-  }));
-  let validity = validityOf(versions, at);
-  const chosen = validity.version ? ordered[validity.version - 1] ?? null : null;
-  // The Academy said expired. Its dates cannot overrule that into "in force".
-  if (chosen?.status === "expired" && (validity.state === "in_force" || validity.state === "expiring")) {
-    validity = { ...validity, state: "expired", reason: `The Academy records ${chosen.qualificationCode} as expired` };
-  }
-  return { validity, chosen };
-}
+/**
+ * The Academy's verdict for one code, through the engine. Lives in `_core/qualificationValidity` beside
+ * the legacy adapter, so only the canonical modules reach `validityOf` (complianceValidityGuard).
+ */
+export { academyVerdict } from "./_core/qualificationValidity";
 
 /**
  * The legacy verdict for one code. A holding marked verified with no recorded verifier is not evidence

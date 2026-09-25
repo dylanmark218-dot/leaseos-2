@@ -240,7 +240,7 @@ describe("pure verdicts", () => {
   it("a newer pending Academy record does not displace a current one", () => {
     const { validity, chosen } = academyVerdict([aq(1, "current", new Date("2027-01-01"), "2026-01-01"), aq(2, "pending", new Date("2028-01-01"), "2026-06-01")], T);
     expect(validity.state).toBe("in_force");
-    expect((chosen as { qualificationRef: string }).qualificationRef).toBe("AQ1");
+    expect((chosen as unknown as { qualificationRef: string }).qualificationRef).toBe("AQ1");   // academyVerdict is generic over the row now; the fixtures are `as never`
   });
   it("a revoked Academy record is not held", () => {
     expect(academyVerdict([aq(1, "revoked", new Date("2027-01-01"), "2026-01-01")], T).validity.state).toBe("rejected");

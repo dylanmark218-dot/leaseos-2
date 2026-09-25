@@ -193,6 +193,8 @@ const READERS: Record<string, string> = {
   "server/hosRouter.ts": "files a scanned paper log as a needs_review document; decides nothing",
   "server/workforceRouter.ts": "writes a verified credential from verified training; decides nothing",
   "server/trainingAcademyRouter.ts": "foreign TDG recognition requires the named document in force by complianceRequirementValidity",
+  // C1b-3's D-05 read adapter (#57), added on merging main.
+  "server/qualificationReads.ts": "an Academy grant's evidence document through complianceDocumentValidity; the grant itself through academyVerdict (qualificationValidity)",
 };
 
 function readdirTs(dir: string): string[] {

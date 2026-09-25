@@ -101,3 +101,40 @@ export function heldFromValidity(v: Validity, code: string, unverifiedWord = "un
   if (v.state === "expired") return { held: false, code: "expired", reason: `${code} expired ${Math.abs(v.daysRemaining ?? 0)} day(s) before this` };
   return { held: true, code: null, reason: v.reason };
 }
+
+/* ------------------------------------------------------------------ */
+/* The Academy adapter (C1b-3 / D-05)                                   */
+/* ------------------------------------------------------------------ */
+
+/** The Academy grant fields the verdict reads. Structural, so this module stays free of the schema. */
+export type AcademyGrantRow = {
+  id: number; qualificationRef: string; qualificationCode: string;
+  status: "current" | "expired" | "pending" | "rejected" | "revoked";
+  validFrom: Date | null; expiresAt: Date | null; verifiedByUserId: number | null; verifiedAt: Date | null; createdAt: Date;
+};
+
+const ACADEMY_STATE: Readonly<Record<AcademyGrantRow["status"], DocumentVersion["state"]>> = {
+  current: "verified", expired: "verified", pending: "uploaded", rejected: "rejected", revoked: "rejected",
+};
+
+/**
+ * The Academy's verdict for one code, through the engine. Pure. Moved here from
+ * `server/qualificationReads.ts` on merging main, so the canonical modules stay the only callers of
+ * `validityOf`. The one thing it adds is stricter, never looser: an Academy status of `expired` is not
+ * overruled into "in force" by its dates.
+ */
+export function academyVerdict<R extends AcademyGrantRow>(rows: readonly R[], at: Date): { validity: Validity; chosen: R | null } {
+  const ordered = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id);
+  const versions: DocumentVersion[] = ordered.map((r, i) => ({
+    documentRef: r.qualificationRef, version: i + 1, type: r.qualificationCode as DocumentType, subjectRef: r.qualificationCode,
+    state: ACADEMY_STATE[r.status], effectiveFrom: r.validFrom, expiresAt: r.expiresAt,
+    verifiedByUserId: r.verifiedByUserId, verifiedAt: r.verifiedAt, supersededByVersion: null, uploadedAt: r.createdAt,
+  }));
+  let validity = validityOf(versions, at);
+  const chosen = validity.version ? ordered[validity.version - 1] ?? null : null;
+  // The Academy said expired. Its dates cannot overrule that into "in force".
+  if (chosen?.status === "expired" && (validity.state === "in_force" || validity.state === "expiring")) {
+    validity = { ...validity, state: "expired", reason: `The Academy records ${chosen.qualificationCode} as expired` };
+  }
+  return { validity, chosen };
+}
