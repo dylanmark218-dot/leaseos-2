@@ -31,7 +31,7 @@ healthy-looking report cannot be mistaken for this confirmation.
 | Phase 1 merge SHA | `a9a72463d33e6a0dc9d4706a204c7a07554470f9` |
 | PR | #50 |
 | `main` at merge | `a9a7246` |
-| Merge-commit CI | _(success / link)_ |
+| Merge-commit CI | success — [run 345](https://github.com/dylanmark218-dot/leaseos-2/actions/runs/36115115091) |
 
 ## 2. Key provisioning
 
