@@ -7,6 +7,7 @@
  *  3. assessments and practical evidence are bound to one immutable course version;
  *  4. certificate issuance fails closed until the governing source snapshot is reviewed.
  */
+import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -606,10 +607,13 @@ export const trainingAcademyRouter = router({
       const db = await dbOrThrow();
       const document = (await db.select().from(complianceDocuments).where(eq(complianceDocuments.id, input.complianceDocumentId)).limit(1))[0];
       if (!document) throw new TRPCError({ code: "NOT_FOUND", message: "Foreign TDG compliance document not found" });
-      if (document.verificationStatus !== "verified") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Foreign TDG recognition requires a verified compliance document" });
       if (document.ownerType !== "user" || document.ownerId !== input.userId) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Foreign TDG compliance document does not belong to the selected user" });
-      if (!document.expiresAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Foreign TDG recognition requires a verified document expiry" });
-      if (document.expiresAt.getTime() !== input.expiresAt.getTime()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Foreign TDG expiry must match the verified compliance document" });
+      // SPINE item 2: the named document must be in force by the canonical verdict — verified, with
+      // a recorded expiry not yet passed, and already effective. This used to check only that it was
+      // verified and carried a date, so an expired or not-yet-effective certificate was recognized.
+      const standing = complianceRequirementValidity([document], [document.docType], new Date());
+      if (standing.state !== "in_force" && standing.state !== "expiring") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Foreign TDG recognition requires a compliance document in force — ${standing.reason}` });
+      if (document.expiresAt?.getTime() !== input.expiresAt.getTime()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Foreign TDG expiry must match the verified compliance document" });
       const d = foreignTdgRoadCertificateDecision({ issuingJurisdiction: input.issuingJurisdiction, vehicleLicenceJurisdiction: input.vehicleLicenceJurisdiction, trainingStandard: input.trainingStandard, documentValidInIssuingJurisdiction: input.documentValidInIssuingJurisdiction, expiresAt: input.expiresAt });
       if (!d.permitted) throw new TRPCError({ code: "PRECONDITION_FAILED", message: d.blockers.join("; ") });
       const qualificationRef = ref("ACAD-QUAL");
