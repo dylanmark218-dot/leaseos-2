@@ -128,8 +128,16 @@ d("the worker sends the event it processed", () => {
     const eventId = key("EV").slice(0, 40);
     await pool.execute("INSERT INTO domainEventOutbox (eventId, eventType, eventVersion, aggregateType, aggregateId, tenantId, correlationId, actorSource, payloadJson, occurredAt, attemptCount, createdAt) VALUES (?, 'worker.test', 1, 'ticket', 'FT-9', 'default', ?, 'system', '{}', NOW(), 0, NOW())", [eventId, key("C").slice(0, 40)]);
     const ports = createWorkerPorts(pool as never, () => new Date("2026-09-10T12:00:00Z"));
-    const batch = await ports.claimBatch("worker-test", 50);
-    const mine = batch.find(e => e.eventId === eventId);
+    // The outbox is shared by every suite and claimed oldest first, so this event may sit behind a
+    // backlog other suites left. Claim until it turns up, then hand every other row back untouched.
+    const claimer = `worker-test-${key("W").slice(0, 20)}`;
+    let mine: Awaited<ReturnType<typeof ports.claimBatch>>[number] | undefined;
+    for (let i = 0; i < 100 && !mine; i++) {
+      const batch = await ports.claimBatch(claimer, 50);
+      if (!batch.length) break;
+      mine = batch.find(e => e.eventId === eventId);
+    }
+    await pool.execute("UPDATE domainEventOutbox SET claimedAt = NULL, claimedBy = NULL, attemptCount = GREATEST(attemptCount - 1, 0) WHERE claimedBy = ? AND eventId <> ?", [claimer, eventId]);
     expect(mine).toBeTruthy();
     await ports.processEvent(mine!);
     const [d1] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? ORDER BY attempt", [eventId]);
