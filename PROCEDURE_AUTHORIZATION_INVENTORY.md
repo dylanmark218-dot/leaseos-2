@@ -24,16 +24,16 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | Surface | Class | Count |
 |---|---|---|
 | `server/routers.ts` | `ROLE_AUTHORIZED` | **85** |
-| `server/recordsRouter.ts` | `ROLE_AUTHORIZED` | **17** |
+| `server/recordsRouter.ts` | `ROLE_AUTHORIZED` | **18** |
 | `server/payrollRouter.ts` | `ROLE_AUTHORIZED` | **40** |
 | `server/portalFundingRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/purchasingRouter.ts` | `ROLE_AUTHORIZED` | **9** |
-| `server/deviceRouter.ts` | `ROLE_AUTHORIZED` | **6** |
-| `server/complianceRouter.ts` | `ROLE_AUTHORIZED` | **9** |
-| `server/requirementRouter.ts` | `ROLE_AUTHORIZED` | **6** |
+| `server/deviceRouter.ts` | `ROLE_AUTHORIZED` | **7** |
+| `server/complianceRouter.ts` | `ROLE_AUTHORIZED` | **18** |
+| `server/requirementRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/insuranceRouter.ts` | `ROLE_AUTHORIZED` | **12** |
-| `server/surfacesRouter.ts` | `ROLE_AUTHORIZED` | **5** |
-| `server/dispatchRouter.ts` | `ROLE_AUTHORIZED` | **8** |
+| `server/surfacesRouter.ts` | `ROLE_AUTHORIZED` | **6** |
+| `server/dispatchRouter.ts` | `ROLE_AUTHORIZED` | **13** |
 | `server/iftaRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/fuelOpsRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/periodRouter.ts` | `ROLE_AUTHORIZED` | **3** |
@@ -41,21 +41,24 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/cashRouter.ts` | `ROLE_AUTHORIZED` | **11** |
 | `server/commercialRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/closeoutRouter.ts` | `ROLE_AUTHORIZED` | **20** |
-| `server/shopRouter.ts` | `ROLE_AUTHORIZED` | **23** |
+| `server/shopRouter.ts` | `ROLE_AUTHORIZED` | **25** |
 | `server/maintenanceRouter.ts` | `ROLE_AUTHORIZED` | **3** |
 | `server/fleetPortfolioRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/assetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/projectRouter.ts` | `ROLE_AUTHORIZED` | **9** |
-| `server/integrationRouter.ts` | `ROLE_AUTHORIZED` (`integrationRouter`) / `INTEGRATION_CLIENT` (`inboundRouter`, `integrationProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md`) | **7** |
+| `server/integrationRouter.ts` | `ROLE_AUTHORIZED` (`integrationRouter`) / `INTEGRATION_CLIENT` (`inboundRouter`, `integrationProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md`) | **11** |
 | `server/telematicsRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/workforceRouter.ts` | `ROLE_AUTHORIZED` | **16** |
 | `server/auditRouter.ts` | `ROLE_AUTHORIZED` | **6** |
-| `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **11** |
+| `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **15** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**368 role-authorized procedures. Zero on bare `protectedProcedure`.**
+**396 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
+The table lists the surfaces reviewed here, not every router; the system-wide count is generated into
+`LEASEOS_CURRENT_STATE.md`. The numbers in this table are written by `node scripts/procedure-inventory.mjs`,
+which reads them from the routers (CP1.5: nine rows had drifted below their routers and the total said 356).
 
 Baseline in `procedureAuthorization.test.ts` is 0 and must never rise.
 

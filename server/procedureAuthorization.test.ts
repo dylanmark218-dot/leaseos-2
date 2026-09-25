@@ -321,9 +321,20 @@ describe("the untouched API is counted, not forgotten", () => {
     expect(inventory).not.toContain("— next");
   });
 
-  it("keeps the inventory document in step with the code", () => {
+  it("keeps the inventory document in step with the code: every row is its router's count, and the total is their sum", () => {
+    // CP1.5 — this used to pin one hand-written total ("356", then "368") and nothing else, and nine rows
+    // drifted below their routers unseen (complianceRouter listed 9 with 18). Every row is now read from
+    // its router; `node scripts/procedure-inventory.mjs` writes the numbers.
     expect(inventory).toContain("ROLE_AUTHORIZED");
-    expect(inventory).toContain("368");   // 0200: +9 server/fleetPortfolioRouter.ts; 0199: +3 server/maintenanceRouter.ts
+    const rows = Array.from(inventory.matchAll(/^\| `(server\/[^`]+)` \| `ROLE_AUTHORIZED`[^|]*\| \*\*(\d+)\*\* \|$/gm));
+    expect(rows.length).toBeGreaterThanOrEqual(28);
+    const drift = rows
+      .map(r => ({ file: r[1]!, listed: Number(r[2]), actual: (readFileSync(r[1]!, "utf8").match(/roleProcedure\(\s*"/g) ?? []).length }))   // the script's own definition
+      .filter(r => r.listed !== r.actual)
+      .map(r => `${r.file}: listed ${r.listed}, router has ${r.actual}`);
+    expect(drift, "Run: node scripts/procedure-inventory.mjs").toEqual([]);
+    const sum = rows.reduce((n, r) => n + Number(r[2]), 0);
+    expect(inventory).toMatch(new RegExp(`^\\*\\*${sum} role-authorized procedures across the surfaces listed above\\.`, "m"));
   });
 });
 
