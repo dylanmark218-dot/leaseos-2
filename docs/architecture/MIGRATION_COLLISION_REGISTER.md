@@ -68,6 +68,19 @@ branches. Every number from `0175` to `0188` is claimed by at least one open bra
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
 
+## Claim: 0198, 0199, 0200 (mechanic portal CP1 and the Fleet & Equipment Portfolio foundation, 2026-09-25)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0198 | `0198_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | none | `88608f3` | gated on the branch | none | keeps 0198. Drafted as `0175`, then `0189`; both were taken (`0189` by C1b-1, merged to `main` first), and it moved before any environment applied it |
+| 0199 | `0199_fleet_portfolio_foundation.sql` | `claude/mechanic-portal-domain-82efa9` | none | `88608f3` | gated on the branch | none | keeps 0199. The portfolio design's own `0182` was taken long ago |
+| 0200 | `0200_fleet_portfolio_guards.sql` | `claude/mechanic-portal-domain-82efa9` | none | `88608f3` | gated on the branch | none | keeps 0200 (trigger DDL in its own file) |
+
+Chosen by scanning `origin/main` and all 93 remote refs immediately before writing: the highest number any
+other ref held was `0197` (`claude/leaseos-intelligence-engine-cr2fg1`). `0190` is unclaimed everywhere but
+was not taken: it would sort before `main`'s `0191`–`0194`, so a fresh database and a deployed one would
+apply it in different orders.
+
 ## Earlier state (2026-09-23, `main` = `42c454f`, after PR #4, PR #5 and C1a #12)
 
 `main` migration head: **`0174_dispatch_override_provenance.sql`**. `main` holds `0169` (PR #4) and

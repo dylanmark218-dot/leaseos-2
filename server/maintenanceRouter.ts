@@ -6,8 +6,8 @@
  * "forbidden". Who acted is always the authenticated caller, never the request body.
  *
  * Holds, meter readings and the unit's operational state are the Fleet & Equipment Portfolio's
- * (`unitHolds`, `unitMeterReadings`, `fleetPortfolio.operationalState`); this router does not build a
- * second version of any of them.
+ * (`unitHolds`, `unitMeterReadings`, `fleetPortfolio.operationalState`); this router reads them through
+ * `fleetPortfolioService` and does not build a second version of any of them.
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import { roleProcedure, router } from "./_core/trpc";
 import { actingScopeFor, getDb, listActiveUserRoles, orgScopeWhere, userInScope, workOrderInScope } from "./db";
 import { facilities, workOrderAssignments, workOrderReleases, workOrders } from "../drizzle/schema";
 import { assignmentHistory, newRef, workOrderRow } from "./maintenanceService";
+import { operationalStateFor } from "./fleetPortfolioService";
 
 async function dbOrThrow() {
   const db = await getDb();
@@ -103,8 +104,10 @@ export const maintenanceRouter = router({
       const res = await db.update(workOrders).set({ status: "cancelled", cancelledAt: new Date(), cancelledByUserId: ctx.user.id, cancelReason: input.reason })
         .where(and(eq(workOrders.id, wo.id), notInArray(workOrders.status, ["closed", "cancelled"])));
       if ((res as unknown as [{ affectedRows: number }])[0]?.affectedRows !== 1) throw new TRPCError({ code: "CONFLICT", message: `Work order ${wo.workOrderNumber} changed while it was being cancelled` });
+      // The unit's state after the cancellation, from the portfolio's one projection.
+      const unit = await operationalStateFor(db, wo.unitId);
       return {
-        workOrderId: wo.id, workOrderNumber: wo.workOrderNumber, status: "cancelled" as const,
+        workOrderId: wo.id, workOrderNumber: wo.workOrderNumber, status: "cancelled" as const, unitStatus: unit.status,
         note: wo.defectId
           ? `Defect ${wo.defectId} stays open, and a unit held for it stays held; cancelling the work does not repair it.`
           : "Nothing was repaired under this work order.",

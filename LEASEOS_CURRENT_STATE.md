@@ -7,16 +7,16 @@ here can be added rather than read.
 | Measure | Value | Read from |
 |---|---|---|
 | Release | **v23.25** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **414** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **178** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **655** | `roleProcedure(` call sites across all routers |
+| Tables | **417** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **180** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **664** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **357** | the `Permission` union |
-| Sensitive (fail-closed) permissions | **126** | `SENSITIVE_PERMISSIONS` |
+| Permissions | **361** | the `Permission` union |
+| Sensitive (fail-closed) permissions | **129** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **350 / 4798** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **353 / 4825** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -49,7 +49,18 @@ every assignment kept as history; a cancelled work order that repairs
 nothing, releases nothing and leaves its defect open; a legacy update that
 can no longer move a status; a forward-only advance that stamps when work
 started and finished and keeps its note; telematics answering not-found
-across an organization) · capital assets (one
+across an organization) · Fleet & Equipment Portfolio foundation (typed
+holds whose effect is a warning, a block releasable only under an approved
+policy, or — for a safety hold — out of service with no override, placed
+and released by different people with the hold's type deciding who, never
+edited and never deleted, read into dispatch readiness and its
+fingerprint; a unit's meters read where each figure already lives —
+telemetry, work orders, fuel, trips, tire service — beside a ledger for
+readings with no other home, nothing copied, a reading that went below an
+accepted one kept as evidence while any service count from before it
+answers METER_REGRESSION rather than a due figure; the unit's operational
+state derived on every read, indeterminate when a source cannot be read,
+and naming what it does not evaluate) · capital assets (one
 identity per unit, two-person capital review, CCA class as a verified
 candidate, pool arithmetic with the claim UNKNOWN until the rate is
 verified, year-end schedule reviewed by a second person, the asset twin) ·

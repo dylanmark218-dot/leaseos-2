@@ -74,7 +74,7 @@ describe("the generated current state agrees with the tree", () => {
   it("names as implemented every subsystem whose router exists — a lost narrative fails the gate", () => {
     const implemented = state.slice(state.indexOf("## Implemented on the server"), state.indexOf("## Implemented on the client"));
     const must: [string, RegExp][] = [
-      ["server/portalRouter.ts", /portal/i], ["server/closeoutRouter.ts", /sign-off chain/i], ["server/shopRouter.ts", /fleet shop/i], ["server/maintenanceRouter.ts", /fleet maintenance/i], ["server/assetRouter.ts", /capital assets/i],
+      ["server/portalRouter.ts", /portal/i], ["server/closeoutRouter.ts", /sign-off chain/i], ["server/shopRouter.ts", /fleet shop/i], ["server/maintenanceRouter.ts", /fleet maintenance/i], ["server/fleetPortfolioRouter.ts", /fleet & equipment portfolio/i], ["server/assetRouter.ts", /capital assets/i],
       ["server/projectRouter.ts", /commercial projects/i], ["server/integrationRouter.ts", /integration gateway/i], ["server/telematicsRouter.ts", /telematics/i],
       ["server/workforceRouter.ts", /workforce lifecycle/i], ["server/auditRouter.ts", /audit packages/i], ["server/spatialRouter.ts", /spatial foundation/i],
       ["server/_core/contractTerms.ts", /contract terms/i], ["server/_core/money.ts", /money precision/i], ["server/customerAlertService.ts", /customer transaction/i],

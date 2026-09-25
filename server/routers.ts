@@ -112,6 +112,7 @@ import { hosRouter } from "./hosRouter";
 import { portalRouter } from "./portalRouter";
 import { shopRouter } from "./shopRouter";
 import { maintenanceRouter } from "./maintenanceRouter";
+import { fleetPortfolioRouter } from "./fleetPortfolioRouter";
 import { assetRouter } from "./assetRouter";
 import { projectRouter } from "./projectRouter";
 import { inboundRouter, integrationRouter } from "./integrationRouter";
@@ -396,6 +397,8 @@ export const appRouter = router({
   shop: shopRouter,
   // 0198 — fleet maintenance, checkpoint 1: who owns a work order, and cancelling one.
   maintenance: maintenanceRouter,
+  // 0199 — the Fleet & Equipment Portfolio: holds, the meter record, the unit's operational state.
+  fleet: fleetPortfolioRouter,
   asset: assetRouter,
   project: projectRouter,
   integration: integrationRouter,

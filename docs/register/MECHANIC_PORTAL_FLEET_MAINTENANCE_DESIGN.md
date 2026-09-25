@@ -14,6 +14,23 @@ status changed.* Every table and procedure below is checked against it.
 
 ---
 
+## Revision 2026-09-25 — the owner's decisions, and the foundation delivered
+
+The owner approved the sequence below and ruled (2026-09-25): the portfolio's model is authoritative for
+unit holds, meter readings and operational status; the Mechanic Portal does not recreate or dual-write
+them and consumes the portfolio's projections and APIs; a meter reading that regresses below an accepted
+one makes distance-based maintenance evaluation return cannot-evaluate, with the reason
+`METER_REGRESSION`, keeping the reading as evidence (O-11 and O-12 below are therefore decided).
+
+Step 2 of the sequence — the portfolio's foundation — is built on this branch: `unitHolds` (warning,
+block, and out of service for safety holds), the meter ledger and the read-in-place union with its
+`meterProgress` seam, `operationalState`, trigger-protected history, and holds in dispatch readiness.
+Record: `docs/fleet/FLEET_PORTFOLIO_FOUNDATION_CHECKPOINT.md`; reconciliation:
+`docs/fleet/FLEET_PORTFOLIO_FOUNDATION_RECONCILIATION.md`. The mechanic portal's checkpoint 2 —
+Defect → Work Order → Repair Evidence → Authorized Return-to-Service — is next, and places and releases
+its holds through `fleetPortfolioService.placeHold` / `releaseHold` with `sourceKind: "defect"` or
+`"work_order"`. Preventive maintenance, parts and UI wait until that workflow stands.
+
 ## Revision 2026-09-24 — built on the Fleet & Equipment Portfolio, not beside it
 
 The first version of this document was written from a survey of `main` and missed an unmerged design
@@ -34,7 +51,8 @@ Two further facts changed since the first version:
 - **The 0169 release blocker is closed.** `claude/migration-0169-reconciliation` merged (PR #17)
   and renumbered the trip-stop provenance migration forward as `0179`.
 - **Migration numbers.** `0175`–`0188` are all claimed by open branches. The first number free on
-  `main` and every branch is `0189`, which checkpoint 1 took.
+  `main` and every branch was `0189`, which checkpoint 1 took; C1b-1 then merged its own `0189` to
+  `main` first, and checkpoint 1's migration moved to `0198` (2026-09-25).
 
 **Consequence for the sequence (§9).** The portfolio's own plan runs Fleet Asset Core → Inspections
 and Defects → Documents → a mechanic work-order portal. That overlaps this document's CP2–CP6. The
@@ -663,7 +681,7 @@ router's phrase, and `documentationTruth` extended with that phrase.
 Narrowed from the original CP1 once the portfolio design was found; the withdrawn parts are listed in
 the revision at the top. The record is `docs/register/MECHANIC_PORTAL_CP1_WORK_ORDER_OWNERSHIP.md`.
 
-- Migration `0189_work_order_ownership.sql`: `workOrderAssignments` (append-only), `workOrders`
+- Migration `0198_work_order_ownership.sql` (drafted `0175`, then `0189`): `workOrderAssignments` (append-only), `workOrders`
   gains `cancelled`, `openedByUserId`, `cancelledAt`, `cancelledByUserId`, `cancelReason`.
 - `server/maintenanceRouter.ts` (mounted as `maintenance`): `workOrderAssignment` (read),
   `workOrderAssign`, `workOrderCancel`. Two permissions, `maintenance.workorder.assign` and
@@ -804,8 +822,8 @@ the revision at the top. The record is `docs/register/MECHANIC_PORTAL_CP1_WORK_O
 | O-8 | Trailers and equipment get schedules exactly as trucks (they are `units`) | yes; catalogue rows carry an `appliesToVehicleTypes` hint only |
 | O-9 | Who may place a `manual` hold | shop_lead, safety, management; dispatcher may not |
 | O-10 | The retired `records.maintenance.recordRelease` refuses with a pointer rather than being deleted | refuse with pointer (the `hos.limitVerify` precedent) |
-| O-11 | Run the mechanic portal and the Fleet & Equipment Portfolio as one sequence (revision at the top), with the portfolio's Fleet Asset Core next | yes — every later mechanic checkpoint reads the portfolio's holds, meters and state |
-| O-12 | Meter regression: the portfolio records a reading below the last verified one as `meter_regression`, flagged and never rejected; the withdrawn draft here read the meter as unknown until corrected. Which does a service interval see? | the portfolio's flag, plus: a service interval reading a regressed meter reports `not_evaluable` rather than a due figure |
+| O-11 | Run the mechanic portal and the Fleet & Equipment Portfolio as one sequence (revision at the top), with the portfolio's Fleet Asset Core next | **Decided 2026-09-25: yes.** The foundation is built |
+| O-12 | Meter regression: the portfolio records a reading below the last verified one as `meter_regression`, flagged and never rejected; the withdrawn draft here read the meter as unknown until corrected. Which does a service interval see? | **Decided 2026-09-25:** cannot-evaluate with `METER_REGRESSION`, the reading kept as evidence (`_core/fleetMeters.ts meterProgress`) |
 
 ---
 

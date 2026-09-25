@@ -82,7 +82,8 @@ d("who owns a work order, and what cancelling does not do", () => {
     const wo = await workOrder(unitId, "in_progress", defectId);
     await expect(caller(mechanic).maintenance.workOrderCancel({ workOrderId: wo, reason: "customer pulled it" })).rejects.toMatchObject({ code: "FORBIDDEN" });
     const c = await caller(shopLead).maintenance.workOrderCancel({ workOrderId: wo, reason: "Unit going to the dealer under warranty" });
-    expect(c).toMatchObject({ status: "cancelled" });
+    // The unit stays held for its open critical defect — read from the portfolio's projection.
+    expect(c).toMatchObject({ status: "cancelled", unitStatus: "maintenance_hold" });
     expect(c.note).toMatch(new RegExp(`Defect ${defectId} stays open`));
     const [row] = (await pool.execute<mysql.RowDataPacket[]>("SELECT d.status AS defectStatus, w.cancelledByUserId, w.cancelReason FROM workOrders w JOIN maintenanceDefects d ON d.id = w.defectId WHERE w.id = ?", [wo]))[0];
     expect(row).toMatchObject({ defectStatus: "open", cancelledByUserId: shopLead, cancelReason: "Unit going to the dealer under warranty" });

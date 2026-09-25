@@ -99,7 +99,18 @@ every assignment kept as history; a cancelled work order that repairs
 nothing, releases nothing and leaves its defect open; a legacy update that
 can no longer move a status; a forward-only advance that stamps when work
 started and finished and keeps its note; telematics answering not-found
-across an organization) · capital assets (one
+across an organization) · Fleet & Equipment Portfolio foundation (typed
+holds whose effect is a warning, a block releasable only under an approved
+policy, or — for a safety hold — out of service with no override, placed
+and released by different people with the hold's type deciding who, never
+edited and never deleted, read into dispatch readiness and its
+fingerprint; a unit's meters read where each figure already lives —
+telemetry, work orders, fuel, trips, tire service — beside a ledger for
+readings with no other home, nothing copied, a reading that went below an
+accepted one kept as evidence while any service count from before it
+answers METER_REGRESSION rather than a due figure; the unit's operational
+state derived on every read, indeterminate when a source cannot be read,
+and naming what it does not evaluate) · capital assets (one
 identity per unit, two-person capital review, CCA class as a verified
 candidate, pool arithmetic with the claim UNKNOWN until the rate is
 verified, year-end schedule reviewed by a second person, the asset twin) ·

@@ -43,6 +43,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/closeoutRouter.ts` | `ROLE_AUTHORIZED` | **20** |
 | `server/shopRouter.ts` | `ROLE_AUTHORIZED` | **23** |
 | `server/maintenanceRouter.ts` | `ROLE_AUTHORIZED` | **3** |
+| `server/fleetPortfolioRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/assetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/projectRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/integrationRouter.ts` | `ROLE_AUTHORIZED` (`integrationRouter`) / `INTEGRATION_CLIENT` (`inboundRouter`, `integrationProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md`) | **7** |
@@ -54,7 +55,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**359 role-authorized procedures. Zero on bare `protectedProcedure`.**
+**368 role-authorized procedures. Zero on bare `protectedProcedure`.**
 
 Baseline in `procedureAuthorization.test.ts` is 0 and must never rise.
 
@@ -402,6 +403,15 @@ missed them.
   the closing UCC are UNKNOWN until a person verifies the class rate, and an
   unknown schedule cannot be reviewed as a tax fact or carry balances
   forward. The schedule is prepared by one person and reviewed by another.
+- **A hold is typed, its release is a second person's, and a meter is read where it lives.** (0199,
+  Fleet & Equipment Portfolio foundation) Placing and releasing a hold are sensitive
+  (`fleet.hold.place`, `fleet.hold.release`); below the permission, the hold's TYPE decides who may
+  act — a mechanic places and releases maintenance holds only, a safety hold is placed and released
+  by safety or management, and the placer never releases their own. A safety hold is out of service
+  and blocks dispatch with no override. Recording a ledger meter reading is an observation
+  (`fleet.meter.record`, mechanic, shop lead, office — not the driver yet); verifying or rejecting
+  one is a second person's and sensitive (`fleet.meter.verify`). Every read is `fleet.read`, and
+  another organization's unit, hold or reading answers NOT_FOUND worded as for one that does not exist.
 - **A work order is owned by a person, and cancelling it repairs nothing.** (0198, fleet
   maintenance checkpoint 1) Assigning, reassigning and unassigning a work order is
   history, not an edit: the assignee is a user holding a shop role in the unit's

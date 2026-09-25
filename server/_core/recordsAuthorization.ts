@@ -332,7 +332,11 @@ export type Permission =
   | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
   // 0198 — fleet maintenance, checkpoint 1. Assigning a work order names who owns the repair; cancelling
   // one can leave a defect unrepaired, so it is sensitive.
-  | "maintenance.workorder.assign" | "maintenance.workorder.cancel";
+  | "maintenance.workorder.assign" | "maintenance.workorder.cancel"
+  // 0199 — the Fleet & Equipment Portfolio's foundation. Placing and releasing a hold decide whether a
+  // unit may move, and verifying a meter reading makes it count; all three are sensitive. Which hold
+  // TYPES a role may place or release is decided in `_core/fleetPortfolio.ts`, below the permission.
+  | "fleet.hold.place" | "fleet.hold.release" | "fleet.meter.record" | "fleet.meter.verify";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -609,6 +613,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "telematics.fault.acknowledge",
     "spatial.read",
     "spatial.vehicle.manage",
+    // 0199 — Fleet & Equipment Portfolio foundation.
+    "fleet.hold.place",
+    "fleet.hold.release",
+    "fleet.meter.record",
+    "fleet.meter.verify",
   ],
   shop_lead: [
     "facility.directory.read",
@@ -699,6 +708,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // 0198 — fleet maintenance, checkpoint 1.
     "maintenance.workorder.assign",
     "maintenance.workorder.cancel",
+    // 0199 — Fleet & Equipment Portfolio foundation.
+    "fleet.hold.place",
+    "fleet.hold.release",
+    "fleet.meter.record",
+    "fleet.meter.verify",
   ],
   safety: [
     "device.verifySeal",
@@ -820,6 +834,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
       // 0163 (P4.2): the designated compliance authority named in the owner decision.
     "loadsense.calibration.sweep",
+    // 0199 — Fleet & Equipment Portfolio foundation.
+    "fleet.hold.place",
+    "fleet.hold.release",
   ],
   office: [
     "device.verifySeal",
@@ -982,6 +999,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.access.decide",
     "geo.access.passage",
     "spatial.structure.record",
+    // 0199 — Fleet & Equipment Portfolio foundation.
+    "fleet.meter.record",
   ],
   management: [
     "device.verifySeal",
@@ -1237,6 +1256,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // 0198 — fleet maintenance, checkpoint 1.
     "maintenance.workorder.assign",
     "maintenance.workorder.cancel",
+    // 0199 — Fleet & Equipment Portfolio foundation.
+    "fleet.hold.place",
+    "fleet.hold.release",
+    "fleet.meter.verify",
   ],
   hr: [
     "academy.assign",
@@ -1928,6 +1951,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "restricted.read",
   // 0198 — a cancelled work order can leave a defect unrepaired. It may not happen unrecorded.
   "maintenance.workorder.cancel",
+  // 0199 — a hold placed or released decides whether a unit may move; a verified meter reading counts.
+  "fleet.hold.place",
+  "fleet.hold.release",
+  "fleet.meter.verify",
 ] as const;
 
 export function isSensitivePermission(p: Permission): boolean {
@@ -2952,6 +2979,17 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "maintenance.workOrderAssignment": "maintenance.read_defect",
   "maintenance.workOrderAssign": "maintenance.workorder.assign",
   "maintenance.workOrderCancel": "maintenance.workorder.cancel",
+
+  /* ---- 0199: Fleet & Equipment Portfolio foundation ---- */
+  "fleet.unitState": "fleet.read",
+  "fleet.holdList": "fleet.read",
+  "fleet.holdPlace": "fleet.hold.place",
+  "fleet.holdRelease": "fleet.hold.release",
+  "fleet.meterReadings": "fleet.read",
+  "fleet.meterProgress": "fleet.read",
+  "fleet.meterRecord": "fleet.meter.record",
+  "fleet.meterDecide": "fleet.meter.verify",
+  "fleet.history": "fleet.read",
 } as const satisfies Record<string, Permission>;
 
 /**

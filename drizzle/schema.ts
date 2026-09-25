@@ -9088,3 +9088,78 @@ export const providerCredentials = mysqlTable("providerCredentials", {
   providerStatusIdx: index("providerCredentials_provider_status_idx").on(t.providerKey, t.status),
   tenantIdx: index("providerCredentials_tenant_idx").on(t.orgRef, t.providerKey),
 }));
+
+/* ------------------------------------------------------------------ */
+/* 0199 — Fleet & Equipment Portfolio, foundation slice                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A manual or workflow-placed hold on a unit. Holds that are other records (a critical defect, a
+ * government order, an open roadside event, a critical fault) are read from their source and are not
+ * rows here. `out_of_service` exactly when `holdType` is `safety`. Placement is immutable and a hold is
+ * released once (0200 triggers). See docs/fleet/FLEET_PORTFOLIO_FOUNDATION_RECONCILIATION.md.
+ */
+export const unitHolds = mysqlTable("unitHolds", {
+  id: int("id").autoincrement().primaryKey(),
+  holdRef: varchar("holdRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  unitId: int("unitId").notNull(),
+  holdType: mysqlEnum("holdType", ["safety", "maintenance", "inspection", "compliance", "damage", "administrative"]).notNull(),
+  dispatchEffect: mysqlEnum("dispatchEffect", ["warn", "block", "out_of_service"]).notNull(),
+  reason: varchar("reason", { length: 600 }).notNull(),
+  sourceKind: mysqlEnum("sourceKind", ["manual", "incident", "damage_report", "inspection", "document_expiry", "defect", "work_order", "enforcement"]).default("manual").notNull(),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  evidenceRecordId: int("evidenceRecordId"),
+  placedByUserId: int("placedByUserId").notNull(),
+  placedByRole: varchar("placedByRole", { length: 40 }).notNull(),
+  placedAt: timestamp("placedAt").notNull(),
+  status: mysqlEnum("status", ["active", "released"]).default("active").notNull(),
+  releasedAt: timestamp("releasedAt"),
+  releasedByUserId: int("releasedByUserId"),
+  releasedByRole: varchar("releasedByRole", { length: 40 }),
+  releaseReason: varchar("releaseReason", { length: 600 }),
+  releaseEvidenceRecordId: int("releaseEvidenceRecordId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * Meter readings with no other home (mechanic, inspection, job closeout, import). Telemetry, work
+ * order, fuel, trip and tire figures stay in their own tables and are read beside these; nothing is
+ * copied here. What was observed is immutable (0200); verification is decided once, by a second person.
+ */
+export const unitMeterReadings = mysqlTable("unitMeterReadings", {
+  id: int("id").autoincrement().primaryKey(),
+  readingRef: varchar("readingRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  unitId: int("unitId").notNull(),
+  meterType: mysqlEnum("meterType", ["odometer_km", "engine_hours", "pto_hours", "pump_hours", "blower_hours", "compressor_hours", "generator_hours", "other"]).notNull(),
+  reading: double("reading").notNull(),
+  recordedAt: timestamp("recordedAt").notNull(),
+  source: mysqlEnum("source", ["driver_manual", "mechanic", "inspection", "job_closeout", "imported"]).notNull(),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  enteredByUserId: int("enteredByUserId").notNull(),
+  confidence: mysqlEnum("confidence", ["low", "medium", "high"]).default("medium").notNull(),
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "rejected"]).default("unverified").notNull(),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  note: varchar("note", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** The portfolio's append-only history (0200 refuses UPDATE and DELETE). */
+export const fleetPortfolioEvents = mysqlTable("fleetPortfolioEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  unitId: int("unitId").notNull(),
+  subjectType: varchar("subjectType", { length: 40 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  eventType: mysqlEnum("eventType", ["asset_created", "asset_edited", "lifecycle_changed", "hold_placed", "hold_released", "component_attached", "component_detached", "meter_recorded", "meter_verified", "meter_rejected", "document_recorded", "document_verified", "inspection_recorded", "defect_reported", "portfolio_viewed", "used_for_dispatch"]).notNull(),
+  previousState: varchar("previousState", { length: 80 }),
+  newState: varchar("newState", { length: 80 }),
+  detail: varchar("detail", { length: 600 }),
+  actorUserId: int("actorUserId"),
+  actorRole: varchar("actorRole", { length: 40 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});

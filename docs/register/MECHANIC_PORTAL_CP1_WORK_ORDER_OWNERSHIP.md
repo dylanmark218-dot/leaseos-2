@@ -6,7 +6,7 @@ Branch `claude/mechanic-portal-domain-82efa9`, on `main` at `1680e94`. **No new 
 | | `main` `1680e94` | **This checkpoint** |
 |---|---|---|
 | Tables | 410 | **411** (+1 `workOrderAssignments`) |
-| Migrations | 170 | **171** (`0189_work_order_ownership.sql`) |
+| Migrations | 170 | **171** (`0189_work_order_ownership.sql` at the time; **renumbered `0198` on 2026-09-25**, when C1b-1 merged `0189` to `main` first) |
 | Role-authorized procedures | 652 | **655** (+3, `server/maintenanceRouter.ts`) |
 | Operational procedure map | 634 | **637** |
 | Permissions | 355 | **357** (+2) |
