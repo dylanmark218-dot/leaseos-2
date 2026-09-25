@@ -22,7 +22,22 @@ other claimant takes the next number free on `main` *and* on all open branches a
 Reserved slots `0016`/`0017` are never used (CI gate 0). `0094`, `0095` and `0098` are historical gaps,
 and `0157` is historically used twice. None of those is reused.
 
-## Current state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
+## Current state (2026-09-25, `main` = `88608f3`, scan at C1b-2b)
+
+`main` migration head: **`0194_webhook_secret_ref.sql`**. `main` holds `0189` (C1b-1) and `0191`–`0194`
+(secret management). Numbers claimed by open branches above the head:
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| 0195 | `0195_document_control_register.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
+| 0196 | `0196_document_control_numbering.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
+| 0197 | `0197_knowledge_provenance.sql` | `claude/leaseos-intelligence-engine-cr2fg1` | open branch | none (touches `knowledgeSources`/`knowledgeChunks`, new `knowledgeSnapshots`; C1b-2b does not touch those) | — |
+| 0198 | `0198_requirement_verification.sql` | `claude/leaseos-compliance-survey-5faxe8` (C1b-2b) | this branch | none | keeps 0198 |
+
+**Next free number for new work: `0199`** (re-check with the scan before committing). The 2026-09-24 table below
+is kept for history; several of its claims have since merged or been renumbered by their authors.
+
+## Earlier state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
 
 `main` migration head: **`0179_trip_stop_provenance.sql`** (#17). `main` holds `0169`, `0170`/`0171`
 (PR #9), `0174` (C1a) and `0179`; `0172`, `0173` and `0175`–`0178` are open on `main` and claimed only by
@@ -56,7 +71,7 @@ branches. Every number from `0175` to `0188` is claimed by at least one open bra
 | 0189 | `0189_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | with C1b-1, document-control-design | first to merge keeps it |
 | 0190 | `0190_document_control_numbering.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
 
-**Next free number for new work: `0191`** (re-check with the scan above before committing).
+Next free number at that time: `0191` (superseded above).
 
 ### Change log
 

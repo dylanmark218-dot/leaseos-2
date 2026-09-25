@@ -4160,6 +4160,57 @@ export const complianceRequirements = mysqlTable("complianceRequirements", {
   verifiedAt: timestamp("verifiedAt"),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /* ---- 0198 (C1b-2b): who proposed the revision, and what it cites. Rows are immutable. ---- */
+  /** The proposer's acting organization, from server scope. NULL on rows written before 0198. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  proposedByUserId: int("proposedByUserId"),
+  instrumentTitle: varchar("instrumentTitle", { length: 400 }),
+  /** law | official_guidance | recognized_standard | manufacturer (the knowledge authority level). */
+  authorityType: varchar("authorityType", { length: 40 }),
+  /** The proposer recorded that the effective date is not known; `effectiveFrom` is the proposal time. */
+  effectiveDateUnknown: boolean("effectiveDateUnknown").default(false).notNull(),
+  /** sha256 of the revision's content and citation, as proposed. Every verification event repeats it. */
+  citationHash: varchar("citationHash", { length: 64 }),
+});
+
+/** 0198 (C1b-2b) — every step in a requirement revision's verification. Append-only (triggers). */
+export const requirementVerificationEvents = mysqlTable("requirementVerificationEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  requirementId: int("requirementId").notNull(),
+  requirementKey: varchar("requirementKey", { length: 120 }).notNull(),
+  version: int("version").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  eventType: mysqlEnum("eventType", ["proposed", "approved", "rejected", "promoted", "withdrawn"]).notNull(),
+  targetLevel: varchar("targetLevel", { length: 32 }),
+  step: tinyint("step"),
+  actorUserId: int("actorUserId").notNull(),
+  reason: text("reason"),
+  citationHash: varchar("citationHash", { length: 64 }),
+  sourceRevisionRef: varchar("sourceRevisionRef", { length: 64 }),
+  sourceHash: varchar("sourceHash", { length: 64 }),
+  comparisonJson: text("comparisonJson"),
+  promotionRef: varchar("promotionRef", { length: 64 }),
+  verifierUserIdsJson: text("verifierUserIdsJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  requirementIdx: index("requirementVerificationEvents_requirement_idx").on(t.requirementId),
+  keyIdx: index("requirementVerificationEvents_key_idx").on(t.requirementKey, t.version),
+}));
+export type RequirementVerificationEventRow = typeof requirementVerificationEvents.$inferSelect;
+
+/** 0198 (C1b-2b) — citation allowed, or source document required, by authority / domain / jurisdiction. Append-only. */
+export const sourceVerificationPolicies = mysqlTable("sourceVerificationPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  policyRef: varchar("policyRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  issuingAuthority: varchar("issuingAuthority", { length: 220 }),
+  domain: varchar("domain", { length: 60 }),
+  jurisdiction: varchar("jurisdiction", { length: 80 }),
+  mode: mysqlEnum("mode", ["CITATION_ALLOWED", "SOURCE_DOCUMENT_REQUIRED"]).notNull(),
+  reason: text("reason").notNull(),
+  setByUserId: int("setByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export const complianceConsents = mysqlTable("complianceConsents", {
@@ -8138,6 +8189,9 @@ export const hosRuleLimitHistory = mysqlTable("hosRuleLimitHistory", {
   consolidationDate: date("consolidationDate"),
   verificationMethod: mysqlEnum("verificationMethod", [
     "OFFICIAL_WEB", "OFFICIAL_PDF", "OFFICIAL_PRINT", "LEGAL_COUNSEL", "REGULATOR_CONFIRMATION",
+    // 0198 (C1b-2b): a requirement verified against a named instrument, citation and official URL,
+    // without an admitted source document.
+    "OFFICIAL_CITATION",
   ]).notNull(),
   establishedByVersionRef: varchar("establishedByVersionRef", { length: 64 }),
 
@@ -8178,6 +8232,8 @@ export const hosRuleLimitHistory = mysqlTable("hosRuleLimitHistory", {
   secondVerifiedAt: timestamp("secondVerifiedAt"),
   /** A non-numeric rule's content. */
   payloadJson: text("payloadJson"),
+  /** 0198: CITATION_VERIFIED or SOURCE_DOCUMENT_VERIFIED for a requirement promotion; NULL for HOS. */
+  verificationLevel: varchar("verificationLevel", { length: 32 }),
 }, (t) => ({
   familyRuleIdx: index("hosRuleLimitHistory_family_rule_idx").on(t.ruleFamily, t.ruleRef),
 }));

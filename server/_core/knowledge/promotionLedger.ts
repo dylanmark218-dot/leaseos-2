@@ -50,7 +50,11 @@ const isHos = () => eq(hosRuleLimitHistory.ruleFamily, HOS_RULE_FAMILY);
 /* ------------------------------------------------------------------ */
 
 export type VerificationMethod =
-  | "OFFICIAL_WEB" | "OFFICIAL_PDF" | "OFFICIAL_PRINT" | "LEGAL_COUNSEL" | "REGULATOR_CONFIRMATION";
+  | "OFFICIAL_WEB" | "OFFICIAL_PDF" | "OFFICIAL_PRINT" | "LEGAL_COUNSEL" | "REGULATOR_CONFIRMATION"
+  // 0198 (C1b-2b): verified against a named instrument, citation and official URL, with no admitted
+  // source document. Only a CITATION_VERIFIED rule promotion may use it; the citation guard still
+  // requires an official domain.
+  | "OFFICIAL_CITATION";
 
 export type BindingAuthority = Extract<AuthorityLevel, "law" | "official_guidance" | "recognized_standard" | "manufacturer">;
 
@@ -467,8 +471,17 @@ export type RuleEvidence = {
   citationUrl: string;
   instrumentVersion?: string;
   verificationMethod: VerificationMethod;
-  /** → `knowledgeVersions.versionRef`. */
+  /** → `knowledgeVersions.versionRef`. Empty for a CITATION_VERIFIED promotion, which has none. */
   sourceRevisionRef: string;
+  /**
+   * C1b-2b: how deep the evidence goes. SOURCE_DOCUMENT_VERIFIED (the default, and C1b-1's only
+   * level) binds the rule to an admitted source revision. CITATION_VERIFIED is the transitional level
+   * (owner decision C1b-Q2 = B): a named instrument, citation and official URL, no source document,
+   * and therefore no automated change detection.
+   */
+  verificationLevel?: "CITATION_VERIFIED" | "SOURCE_DOCUMENT_VERIFIED";
+  /** Mark the rule's current promotion superseded even when this one is not yet in force (a level upgrade). */
+  supersedesPrevious?: boolean;
 
   proposedByUserId: number;
   verifiedByUserId: number;
@@ -483,7 +496,8 @@ export type RuleEvidence = {
 export type RuleRefusal = PromotionRefusal
   | "HOS_FAMILY_USES_PROMOTE" | "NO_RULE_REF" | "NO_PROPOSER" | "SELF_VERIFICATION"
   | "NO_SECOND_VERIFIER" | "SECOND_VERIFIER_NOT_DISTINCT" | "NO_AUTHORITY_TIER"
-  | "EFFECT_EXCEEDS_AUTHORITY" | "NO_SOURCE_REVISION" | "SOURCE_NOT_VERIFIED" | "SOURCE_REPEALED";
+  | "EFFECT_EXCEEDS_AUTHORITY" | "NO_SOURCE_REVISION" | "SOURCE_NOT_VERIFIED" | "SOURCE_REPEALED"
+  | "CITATION_METHOD_MISMATCH";
 
 export type SourceRevision = {
   versionRef: string;
@@ -545,6 +559,18 @@ export function validateRuleEvidence(
     }
   }
 
+  // C1b-2b: the citation level is its own evidence class, and says so in the method. It cannot borrow
+  // a source revision it does not claim, and a source-level promotion cannot call itself a citation.
+  if ((e.verificationLevel ?? "SOURCE_DOCUMENT_VERIFIED") === "CITATION_VERIFIED") {
+    if (e.verificationMethod !== "OFFICIAL_CITATION" || e.sourceRevisionRef.trim()) {
+      return { ok: false, code: "CITATION_METHOD_MISMATCH", reason: "a citation-verified rule is verified by OFFICIAL_CITATION and names no source revision" };
+    }
+    return { ok: true, tier };
+  }
+  if (e.verificationMethod === "OFFICIAL_CITATION") {
+    return { ok: false, code: "CITATION_METHOD_MISMATCH", reason: "OFFICIAL_CITATION is the citation level's method; a source-document promotion records how the source was read" };
+  }
+
   if (!e.sourceRevisionRef.trim() || !source) {
     return { ok: false, code: "NO_SOURCE_REVISION", reason: "a rule is verified against a source revision; name one that exists" };
   }
@@ -581,7 +607,11 @@ const sourceFor = async (versionRef: string): Promise<SourceRevision | null> => 
  * Record a verified rule revision. Same guarantees as the HOS ledger: one row per promoted state,
  * the departing row marked and never rewritten, corrections pointing at what they correct.
  */
-export async function promoteRule(e: RuleEvidence, now: Date): Promise<RulePromotionOutcome> {
+export async function promoteRule(
+  e: RuleEvidence, now: Date,
+  /** C1b-2b: the caller's own writes (a verification event), committed or rolled back with the promotion. */
+  alsoInTransaction?: (tx: Parameters<Parameters<Awaited<ReturnType<typeof dbOrThrow>>["transaction"]>[0]>[0], promotionRef: string) => Promise<void>,
+): Promise<RulePromotionOutcome> {
   const source = await sourceFor(e.sourceRevisionRef);
   const valid = validateRuleEvidence(e, source, now);
   if (!valid.ok) return { promoted: false, code: valid.code, reason: valid.reason };
@@ -616,7 +646,10 @@ export async function promoteRule(e: RuleEvidence, now: Date): Promise<RulePromo
   const changeReason = e.correctsPromotionRef ? "CORRECTED_VERIFICATION" : previous ? "VERIFIED_REVISION" : "INITIAL_VERIFICATION";
 
   await db.transaction(async (tx) => {
-    if (previous && previous.status === "CURRENT" && status === "CURRENT") {
+    const supersede = previous && (
+      (previous.status === "CURRENT" && status === "CURRENT") ||
+      (e.supersedesPrevious && (previous.status === "CURRENT" || previous.status === "FUTURE")));
+    if (supersede) {
       await tx.update(hosRuleLimitHistory).set({ status: "SUPERSEDED" }).where(eq(hosRuleLimitHistory.id, previous.id));
     }
     await tx.insert(hosRuleLimitHistory).values({
@@ -644,14 +677,17 @@ export async function promoteRule(e: RuleEvidence, now: Date): Promise<RulePromo
       domain: e.domain,
       authorityTier: valid.tier,
       dispatchEffect: e.dispatchEffect,
-      sourceRevisionRef: e.sourceRevisionRef,
-      // Copied, not referenced: the hash the verifier actually read against.
-      sourceHash: source!.contentHash,
+      sourceRevisionRef: e.sourceRevisionRef.trim() ? e.sourceRevisionRef : null,
+      // Copied, not referenced: the hash the verifier actually read against. A citation-level
+      // promotion has none, which is exactly why it cannot claim source monitoring.
+      sourceHash: source?.contentHash ?? null,
       proposedByUserId: e.proposedByUserId,
       secondVerifierUserId: e.secondVerifierUserId ?? null,
       secondVerifiedAt: e.secondVerifiedAt ?? null,
       payloadJson,
+      verificationLevel: e.verificationLevel ?? "SOURCE_DOCUMENT_VERIFIED",
     });
+    if (alsoInTransaction) await alsoInTransaction(tx, promotionRef);
   });
 
   return { promoted: true, promotionRef, status, lifecycle: lifecycleOf({ status, effectiveFrom: e.effectiveFrom ?? null, effectiveUntil: e.effectiveUntil ?? null }, now), tier: valid.tier };
