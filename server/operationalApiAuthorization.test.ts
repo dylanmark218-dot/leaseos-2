@@ -9,6 +9,12 @@ import {
 } from "./_core/recordsAuthorization";
 import { grantUserRole, listActiveUserRoleNames } from "./db";
 
+// A unit id no test creates. These rows only need a unitId to satisfy the column;
+// the literal 1 used here before collided with whichever suite happened to create
+// the first unit in a fresh database, handing that suite's truck open critical
+// defects (complianceReadinessC1a failed on exactly that, order-dependently).
+const NO_SUCH_UNIT = 2_000_000_000;
+
 /**
  * The migrated operational surface, exercised the way a client meets it.
  *
@@ -261,7 +267,7 @@ d("safety and maintenance writes stay with the people who do them", () => {
     expect(
       await attempt(() =>
         caller.fieldRoute.compliance.maintenance.create({
-          unitId: 1,
+          unitId: NO_SUCH_UNIT,
           title: "Pump grinding on PTO",
           // Required by the input and omitted here, so the call was failing validation rather than
           // reaching the procedure. This suite asserts the authorization gate, which a validation

@@ -116,7 +116,7 @@ d("tenants see the platform catalog and change only their own layer", () => {
   }, 60_000);
 });
 
-/* ===================== Checkpoint B (0189) — the origin-aware register ===================== */
+/* ===================== Checkpoint B (0195) — the origin-aware register ===================== */
 
 async function evidence(userId: number, hash: string) {
   const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, storageKey, mimeType, capturedAt, capturedBy, status, recordType) VALUES (?,?,?,?,NOW(),?,'needs_review','disposal_ticket')", [`scan ${hash.slice(0, 8)}`, "disposal", `${userId}/evidence/${hash.slice(0, 12)}.jpg`, "image/jpeg", userId]);

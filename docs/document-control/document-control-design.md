@@ -3,7 +3,7 @@
 Status: **implemented and adopted.** Written as a design-only checkpoint on
 `claude/document-control-architecture-jlffzk` and built there as checkpoints A–H. On 2026-09-24 the owner
 adopted it as the Document Control implementation (`DC_RECONCILIATION_BRIEF_2026-09-24.md`); **A–C are on
-`main`** with migrations `0178`, `0189` and `0190` (built as 0178–0180), and D–H stay on that branch under
+`main`** with migrations `0178`, `0195` and `0196` (built as 0178–0180), and D–H stay on that branch under
 the D-00 carve-out. What runs, and where it departs from this text, is in
 `checkpoints/DC_IMPLEMENTATION_RECORD.md`; the approved intent and the owner's rulings are in
 `DOCUMENT_CONTROL_NUMBERING_DESIGN_2026-09-23.md`. The original status line follows.

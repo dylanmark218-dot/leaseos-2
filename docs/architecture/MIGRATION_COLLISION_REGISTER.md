@@ -40,6 +40,18 @@ and `0157` is historically used twice. None of those is reused.
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
 
+## Claim: 0185 (SEC-004, 2026-09-24)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | SEC-004 PR | `6f52b57` | gated | none | keeps 0185 |
+
+Chosen by scanning `origin/main` and all 57 remote refs immediately before writing: the highest number
+any of them held was `0184` (`integration-hub-subsystem`, `customer-contract-rates`), so `0185` was the
+first number free everywhere. `claude/integration-hub-subsystem-6nzrkw`'s `0183` also adds
+`webhookDeliveries.claimedAt`/`claimedBy`. When that branch rebases onto this one, its `0183` drops those
+two columns rather than this migration being renumbered (see
+`audit/hardening-2026-09-24/SEC-004-WEBHOOK-DELIVERY-INTEGRITY.md`).
 ## State at Document Control Checkpoint A (2026-09-23, `main` = `0cd4817`)
 
 Scan run with the command above against every remote branch. Claims found: `0170` (eld-compliance,
@@ -59,6 +71,8 @@ auth-workspace, work-calendar), `0172`–`0175` (training-academy-workforce), `0
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
   No other branch was renumbered.
+* **2026-09-24**: `0185` claimed by SEC-004 (`claude/sec-004-webhook-delivery-integrity`); first number free on
+  `main` and every remote branch. No branch renumbered.
 
 ## State at the 0169 reconciliation (2026-09-23, `main` = `6f52b574`, after PR #10 and PR #13)
 
@@ -77,6 +91,28 @@ by open branches (`0175` by `claude/driver-portfolio-*` and `claude/training-aca
 * **2026-09-23 (0169 reconciliation)**: added the cross-repository 0169 row, the academy branch's
   `0174` collision (new since C1a), and 0179. No file renamed.
 
+## State at the S2 integration (2026-09-25, `main` = `e291f28`, after PR #45, #47 and #48)
+
+`main` migration head: **`0193_mfa_secret_ref.sql`**. `main` carries **no `018x` migration at all** —
+the 0181–0190 range is held entirely by open branches.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | #20 | reconciled onto `main`; integrating | **`claude/relaxed-carson-qfcopf` also claims `0185`** (`0185_assistant_proposal_tenancy.sql`) | **SEC-004 keeps `0185`**: it claimed the number at 2026-09-24 07:52 when it was free on `main` and every branch; the other claim followed 77 minutes later and did not meet the "free everywhere" standard. That branch renumbers at its own integration, as the academy branch's `0174` does |
+| 0191 | `0191_encrypted_secrets.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
+| 0192 | `0192_provider_credentials.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
+| 0193 | `0193_mfa_secret_ref.sql` | `feature/mfa-secret-migration` | #47 | **merged** | none | recorded late — see change log |
+
+Next number free on `main` and on every open branch: **`0194`** — to be re-scanned at the moment of
+claiming, not taken from this line.
+
+## Change log
+
+* **2026-09-25 (S2 integration)**: recorded `0191`, `0192` and `0193`, which were **merged without
+  being entered here** — a bookkeeping defect in S2-A/B/C and S2-D, not a numbering one: all three
+  numbers were verified free across every branch before use, and none collided. The register is the
+  repository's record of that verification, and three merges' worth of it was missing. Also recorded
+  the `0185` double-claim, resolved in SEC-004's favour on claim order. No migration file renamed.
 ## State at Document Control adoption (2026-09-24, `main` = `1680e94`)
 
 The owner adopted `claude/document-control-architecture-jlffzk` as the Document Control implementation
@@ -88,10 +124,15 @@ its number.
 
 | Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|
-| 0178 | `0178_document_control_definitions.sql` | `claude/document-control-design-imsd3n` (from `…-jlffzk`) | this PR | only claimant | none | keeps 0178 |
-| 0189 | `0189_document_control_register.sql` | same | this PR | first number free after every claim | none | **renamed from 0179** (collided with `main`'s trip-stop provenance); content unchanged, header says so |
-| 0190 | `0190_document_control_numbering.sql` | same | this PR | next free | none | **renamed from 0180** to stay after 0189; content unchanged |
+| 0178 | `0178_document_control_definitions.sql` | `claude/document-control-design-imsd3n` (from `…-jlffzk`) | #29 | only claimant | none | keeps 0178 |
+| 0195 | `0195_document_control_register.sql` | same | #29 | first number free after every claim at the 2026-09-25 rebase | none | **built as 0179**, adopted as 0189, **renamed 0195** (see change log); content unchanged, header says so |
+| 0196 | `0196_document_control_numbering.sql` | same | #29 | next free | none | **built as 0180**, adopted as 0190, **renamed 0196** to stay after 0195; content unchanged |
 | 0181–0183 | Document Control D–H (templates, intake, disposal) | `claude/document-control-architecture-jlffzk` | none | held under the D-00 carve-out | 0182/0183 also claimed by four and three other branches | renumber past every claim when that work is ruled in |
 
 * **2026-09-24 (Document Control adoption)**: `0179 → 0189` and `0180 → 0190` for Document Control;
   `0178` kept. No other branch's file renamed.
+* **2026-09-25 (Document Control rebase onto `main` `14b5df2`)**: `0189` turned out to be claimed three
+  times — C1b-1 (`claude/leaseos-compliance-survey-5faxe8`, PR #15) first, then this PR and
+  `claude/mechanic-portal-domain-82efa9`. Following the rule of thumb and the SEC-004 claim-order
+  precedent, this PR moved off it at its own rebase: `0189 → 0195` and `0190 → 0196` (`0191`–`0193` are
+  on `main`; `0194` is held by PR #50). `0178` unchanged. No other branch's file renamed.

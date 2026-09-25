@@ -1,5 +1,5 @@
 /**
- * Document Control — the register's rules (DC-B, 0189).
+ * Document Control — the register's rules (DC-B, 0195).
  *
  * The authoritative controlled record is the 0144 `commercialDocuments` row,
  * extended with what a reader must always be able to tell: how the document

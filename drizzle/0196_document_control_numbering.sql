@@ -1,7 +1,7 @@
--- 0190 — Document Control, Checkpoint C: controlled numbering with a ledger, per business, offline blocks.
+-- 0196 — Document Control, Checkpoint C: controlled numbering with a ledger, per business, offline blocks.
 --
--- Slot: built as 0180 on claude/document-control-architecture-jlffzk; renumbered 0190 when adopted onto
--- main (2026-09-24), after 0189 (Checkpoint B). Content unchanged.
+-- Slot: built as 0180 on claude/document-control-architecture-jlffzk; adopted as 0190 (2026-09-24) and
+-- renumbered 0196 at the rebase of 2026-09-25, to stay directly after 0195 (Checkpoint B). Content unchanged.
 --
 -- The counter stays `trackingSequences` (project rule §18) — one row-locked
 -- `UPDATE … LAST_INSERT_ID(nextNumber)+n`, the discipline the sheet-serial allocator measured

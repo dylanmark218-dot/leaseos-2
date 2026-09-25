@@ -1,7 +1,7 @@
 # Document Control — implementation record
 
 > **On `main`: checkpoints A–C** (adopted 2026-09-24; migrations built as 0178/0179/0180 land as
-> 0178/0189/0190). The sections for D and later live on `claude/document-control-architecture-jlffzk`
+> 0178/0195/0196). The sections for D and later live on `claude/document-control-architecture-jlffzk`
 > until the owner rules them in. SHAs below are the original branch's; the adopted commits carry the
 > same content.
 
@@ -81,7 +81,7 @@ storage receives them in D).
 
 ---
 
-## Checkpoint B — the origin-aware register (migration 0179 as built; 0189 on main)
+## Checkpoint B — the origin-aware register (migration 0179 as built; 0195 on main)
 
 **What it adds.** The 0144 `commercialDocuments` row now carries `originKind` (eight values; NULL on
 legacy rows reads as "unrecorded", never a guess), `issuerKind` with its resolution (`issuerOrgRef`,
@@ -146,7 +146,7 @@ suites green, current state regenerated, build clean.
 
 ---
 
-## Checkpoint C — controlled numbering with a ledger (migration 0180 as built; 0190 on main)
+## Checkpoint C — controlled numbering with a ledger (migration 0180 as built; 0196 on main)
 
 **What it adds.** Nothing replaces the counter. `trackingSequences` gains `orgRef`/`scopeKey`
 (COALESCE(orgRef,'default')) and its unique index gains the scope, so a business's `JSA` series is

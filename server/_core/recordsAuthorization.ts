@@ -2347,7 +2347,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "documentControl.definitionCreate": "document.catalog.manage",
   "documentControl.definitionRetire": "document.catalog.manage",
   "documentControl.sourceArtifactsList": "document.read",
-  // DC-B (0189) — the register: intake creates a row, confirmation creates a fact, issue consumes a number.
+  // DC-B (0195) — the register: intake creates a row, confirmation creates a fact, issue consumes a number.
   "documentControl.documentIntake": "document.intake",
   "documentControl.documentRegisterRendered": "document.issue",
   "documentControl.documentConfirm": "document.confirm",
@@ -2358,7 +2358,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "documentControl.documentAmend": "document.confirm",
   "documentControl.documentGet": "document.read",
   "documentControl.documentsList": "document.read",
-  // DC-C (0190) — the series ledger. Reading what was handed out is a read; cutting blocks and voiding numbers is series management.
+  // DC-C (0196) — the series ledger. Reading what was handed out is a read; cutting blocks and voiding numbers is series management.
   "documentControl.seriesList": "document.read",
   "documentControl.seriesGapReport": "document.read",
   "documentControl.seriesBlocks": "document.read",

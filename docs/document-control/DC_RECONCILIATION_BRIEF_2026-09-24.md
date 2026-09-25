@@ -83,7 +83,7 @@ cost more than it protects.
 
 * Checkpoints **A (definitions and catalog), B (origin-aware register) and C (numbering ledger and device
   blocks)** land first, from `claude/document-control-design-imsd3n`, rebased onto `main` `1680e94`.
-  Migrations `0178` kept, `0179 → 0189`, `0180 → 0190` (content unchanged; see the collision register).
+  Migrations `0178` kept, `0179 → 0195`, `0180 → 0196` (content unchanged; see the collision register).
 * **G (disposal slice)** is the next PR under the carve-out. It depends on F's capture procedures, so
   its PR states exactly which part of F it needs and nothing more.
 * **D, E, F, H** stay built on `claude/document-control-architecture-jlffzk`, unmerged, until the spine
