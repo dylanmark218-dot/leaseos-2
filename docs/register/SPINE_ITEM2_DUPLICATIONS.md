@@ -175,4 +175,36 @@ a narrow integrity fix, and not inside a consolidation.
 
 ## Net effect of this checkpoint
 
-This section is filled in once the deletions and gates are complete.
+Three duplicate answers were removed, one commit each. Every removed symbol had no production caller,
+so no caller migrated and no behaviour changed. The survivors were already the live paths, and where a
+survivor was untested it was pinned first.
+
+| | Removed | Survivor |
+|---|---|---|
+| 1 | `detectBookingConflicts`, `Booking`, `BookingConflict` (`_core/dispatchMatching.ts`) | `awardAssignment` → `decideAward` |
+| 2 | `splitByDisposition` (`_core/fieldTicket.ts`) | `draftFromTicket` |
+| 3 | `buildSignedScopeStatement`, `SignedScopeInput`, private `hhmm` (`_core/fieldTicket.ts`) | `recordSignature`'s statement |
+
+**Totals**
+
+- Production code: 102 lines removed and 4 added. The 4 are a header comment in `dispatchMatching.ts` naming where booking conflicts are decided.
+- Exports removed: 6. No file was deleted, because both engines keep concepts with no live counterpart.
+- Tests:
+  - 105 lines of tests of the deleted copies were removed.
+  - Added: 3 DB tests of the award's conflict refusal, each checked against a mutation; 1 assertion pinning the stored signed-scope statement on the real portal signing path; the structural guard `server/spineItem2Duplicates.test.ts`.
+  - The guard parses server, shared and client code, and fails if a removed name is declared again or a survivor disappears.
+- Reachability notes corrected: `dispatchMatching` and `fieldTicket`.
+
+The reduction is smaller than "four duplications" suggested. Most of the four engines turned out not to be
+duplicates at all but unwired concepts with nothing to consolidate against. The remaining real
+duplications are the ones that change refusals or billing, and those wait for a ruling:
+
+- `openShifts` eligibility;
+- `fieldTicket` signature status;
+- `complianceDocumentValidity`, on its own branch.
+
+**Item 2 is not complete.** It completes when:
+
+- the openShifts ruling is made and applied;
+- the signature-status ruling is made and applied;
+- `claude/item2-compliance-validity` lands, including the `documentExpiry` tile.

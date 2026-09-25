@@ -123,7 +123,7 @@ const DECLARED_UNWIRED: Record<string, string> = {
   "transport/placement": "publisher geometry to the point-and-radius advisoryImpact places; used only by the parsers above",
   "transport/fields": "date, severity and column-width coercions shared by the parsers above",
   feedScheduler: "backoff scheduler; nothing starts it from an entry point",
-  fieldTicket: "ticket engine; router path predates it",
+  fieldTicket: "scope validation and job reconciliation have no live counterpart (job close). Its disposition split and statement builder duplicated closeout/invoicing and were removed (SPINE item 2); signature status still differs from closeoutRouter's and waits for a ruling",
   heartbeat: "liveness helper; no monitor calls it",
   imageGeneration: "unused capability",
   jurisdiction: "profile lookup; callers use their own",
