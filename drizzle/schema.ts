@@ -8921,3 +8921,46 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
+
+/* ---- S1-A (0175): a session is a row, so a session can be revoked ---- */
+
+/**
+ * One login, and every credential it goes on to mint.
+ *
+ * Before this table `verifySession` was a stateless `jwtVerify` against a token minted with
+ * `expiresInMs: ONE_YEAR_MS`. Logout cleared the cookie and nothing else, so a copy taken out of
+ * the browser kept working for the rest of its year — there was no record to revoke.
+ *
+ * `refreshVerifierHash` is a SHA-256; the verifier the client holds is never stored, following the
+ * rule `externalIdentityPolicy` already states for portal bearer tokens. `absoluteExpiresAt` is
+ * written once at login and never moved, because an expiry that advanced on use would mean "thirty
+ * days after you stop". `appId` is kept so a refresh cannot cross the surface the family was minted
+ * for — the same distinction `sdk.verifySession` enforces for access tokens.
+ */
+export const sessionFamilies = mysqlTable("sessionFamilies", {
+  id: int("id").autoincrement().primaryKey(),
+  familyRef: varchar("familyRef", { length: 64 }).notNull().unique(),
+  openId: varchar("openId", { length: 191 }).notNull(),
+  appId: varchar("appId", { length: 128 }),
+  /** Reserved. A session proves identity; acting scope is still resolved per request. */
+  tenantContext: varchar("tenantContext", { length: 64 }),
+  refreshVerifierHash: varchar("refreshVerifierHash", { length: 64 }).notNull(),
+  rotationCounter: int("rotationCounter").default(0).notNull(),
+  /** S1 records what a login reached; S6 enforces step-up against it. No stored credential is implied. */
+  authAssurance: mysqlEnum("authAssurance", ["single_factor", "mfa"]).default("single_factor").notNull(),
+  mfaCompletedAt: timestamp("mfaCompletedAt"),
+  /** Reserved for S4/S6: revoking a lost phone must not mean deleting the account. */
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  lastUsedAt: timestamp("lastUsedAt"),
+  absoluteExpiresAt: timestamp("absoluteExpiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokeReason: mysqlEnum("revokeReason", [
+    "logout", "revoked_all", "device_revoked", "reuse_detected", "credential_change", "admin", "expired",
+  ]),
+  userAgentHash: varchar("userAgentHash", { length: 64 }),
+  ipHash: varchar("ipHash", { length: 64 }),
+}, t => ({
+  ownerIdx: index("sessionFamilies_openId_idx").on(t.openId, t.revokedAt),
+  verifierIdx: index("sessionFamilies_verifier_idx").on(t.refreshVerifierHash),
+}));
