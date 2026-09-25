@@ -4907,7 +4907,13 @@ export const externalIdentities = mysqlTable("externalIdentities", {
   previousTokenHash: varchar("previousTokenHash", { length: 64 }),
   previousTokenExpiresAt: timestamp("previousTokenExpiresAt"),
   mfaEnabled: boolean("mfaEnabled").default(false).notNull(),
+  /**
+   * 0049 — legacy inline ciphertext under `LEASEOS_PORTAL_MFA_KEY`. Read-only from S2-D onward:
+   * new enrollments write `mfaSecretRef` instead, and this is cleared once migration is verified.
+   */
   mfaSecretEnc: varchar("mfaSecretEnc", { length: 400 }),
+  /** 0193 — pointer into `encryptedSecrets` under purpose `MFA_SECRET`. Preferred when present. */
+  mfaSecretRef: varchar("mfaSecretRef", { length: 64 }),
   failedAttempts: int("failedAttempts").default(0).notNull(),
   lockedUntil: timestamp("lockedUntil"),
   revokedAt: timestamp("revokedAt"),
