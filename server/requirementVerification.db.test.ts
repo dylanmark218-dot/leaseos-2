@@ -6,7 +6,7 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import mysql from "mysql2/promise";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
 import { isSensitivePermission, type DomainRole } from "./_core/recordsAuthorization";
@@ -17,6 +17,27 @@ import {
   eventsByRequirement,
 } from "./requirementVerification";
 import { appRouter } from "./routers";
+
+/**
+ * F1.1 refuses to evaluate equipment credentials while any organization exists: equipment rows carry no
+ * owner, so nothing proves whose they are (`requireProvableOwnership`). The pack cases below are about the
+ * registry reaching work authorization, which only has a meaning where that ownership is provable — one
+ * ownership domain. They switch it on for themselves alone, and each first asserts the refusal while an
+ * organization exists, so the gate is pinned rather than bypassed.
+ */
+const ownership = vi.hoisted(() => ({ singleDomain: false }));
+vi.mock("./ownershipDomain", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./ownershipDomain")>();
+  return {
+    ...actual,
+    singleOwnershipDomain: async () => ownership.singleDomain || actual.singleOwnershipDomain(),
+    requireProvableOwnership: async (what: string, until: string) => (ownership.singleDomain ? undefined : actual.requireProvableOwnership(what, until)),
+  };
+});
+async function asOneOwnershipDomain<T>(body: () => Promise<T>): Promise<T> {
+  ownership.singleDomain = true;
+  try { return await body(); } finally { ownership.singleDomain = false; }
+}
 
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
@@ -46,6 +67,21 @@ async function org() {
   await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [orgRef, `o ${orgRef}`]);
   return orgRef;
 }
+/**
+ * F1.2 — a real operator: `compliance.passport` and `credentialRecord` prove the subject is in the
+ * caller's scope, and a made-up id is "not found". Unowned (the single tenant's) unless an
+ * organization is named, in which case only that organization sees it.
+ */
+async function operatorRow(orgRef?: string) {
+  const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES ('Requirement fixture', NOW())");
+  if (orgRef) await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [orgRef, r.insertId]);
+  return Number(r.insertId);
+}
+/** F1.1 — a real book: a made-up financial entity is "not found". */
+async function entityRow() {
+  const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${rnd()}${rnd()}`]);
+  return Number(r.insertId);
+}
 
 /** A complete, fixture citation. The authority is unique per call so a policy row never leaks between tests. */
 const cite = () => ({
@@ -56,13 +92,14 @@ const cite = () => ({
   authorityType: "law" as const,
 });
 
-type Cast = { proposer: number; v1: number; v2: number; safety: number; dispatcher: number; office: number };
+type Cast = { proposer: number; v1: number; v2: number; safety: number; dispatcher: number; office: number; subject: number };
 let cast: Cast;
 beforeAll(async () => {
   if (!DB_URL) return;
   cast = {
     proposer: await withRole("controller"), v1: await withRole("legal"), v2: await withRole("management"),
     safety: await withRole("safety"), dispatcher: await withRole("dispatcher"), office: await withRole("office"),
+    subject: await operatorRow(),
   };
 });
 
@@ -79,7 +116,7 @@ async function proposal(o: { blocked?: boolean; effectiveFrom?: Date; key?: stri
 }
 const approval = (p: { requirementKey: string; version: number }, target: "CITATION_VERIFIED" | "SOURCE_DOCUMENT_VERIFIED" = "CITATION_VERIFIED", sourceRevisionRef?: string) =>
   ({ requirementKey: p.requirementKey, version: p.version, target, decision: "approve" as const, reason: "Checked against the cited section", sourceRevisionRef });
-const passportItem = async (p: { requirementKey: string; jurisdiction: string }, subjectId = 1, as = cast.dispatcher) =>
+const passportItem = async (p: { requirementKey: string; jurisdiction: string }, subjectId = cast.subject, as = cast.dispatcher) =>
   (await callerFor(as).compliance.passport({ subjectType: "operator", subjectId, jurisdiction: p.jurisdiction, attributes: {} }))
     .items.find((i) => i.requirementKey === p.requirementKey);
 
@@ -152,8 +189,8 @@ d("who may verify", () => {
     await expect(callerFor(verifierB).compliance.requirementVerify(approval(p))).rejects.toThrow(/NOT_FOUND/);
     await expect(callerFor(dispatcherB).compliance.requirementProvenance({ requirementKey: p.requirementKey })).rejects.toThrow(/NOT_FOUND/);
     await callerFor(verifierA).compliance.requirementVerify(approval(p));
-    // Organization B's registry does not contain organization A's requirement.
-    expect(await passportItem(p, 1, dispatcherB)).toBeUndefined();
+    // Organization B's registry does not contain organization A's requirement — asked about B's own operator.
+    expect(await passportItem(p, await operatorRow(orgB), dispatcherB)).toBeUndefined();
     const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT orgRef FROM complianceRequirements WHERE requirementKey = ?", [p.requirementKey]);
     expect(rows[0].orgRef).toBe(orgA);
   });
@@ -168,7 +205,7 @@ d("citation verification", () => {
     const p = await proposal({ blocked: true });
     await callerFor(cast.v1).compliance.requirementVerify(approval(p));
     await callerFor(cast.v2).compliance.requirementSecondApprove(approval(p));
-    const operatorId = 950_000_000 + Math.floor(Math.random() * 1_000_000);
+    const operatorId = await operatorRow();
     expect((await passportItem(p, operatorId))?.status).toBe("missing");
     const rec = await callerFor(cast.office).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: p.doc, title: "Fixture credential", expiresAt: days(400) });
     await callerFor(cast.office).compliance.credentialVerify({ credentialId: rec.credentialId, outcome: "verified" });
@@ -360,22 +397,28 @@ d("packs, withdrawal and the removed one-step path", () => {
     await callerFor(cast.v2).compliance.requirementSecondApprove(approval(verified));
     const unverified = await proposal({ blocked: true, packKey, subjectType: "equipment", jurisdiction });
 
-    const entity = 700_000_000 + Math.floor(Math.random() * 1_000_000);
+    const entity = await entityRow();
     const ask = () => callerFor(cast.dispatcher).requirement.workAuthorization({
       financialEntityId: entity, jurisdiction, companyAttributes: {}, worker: null,
       equipment: { id: 999_999_999, equipmentType: "fixture", attributes: {} }, work: { workType: "fixture", attributes: {} },
     });
     const mentions = (r: Awaited<ReturnType<typeof ask>>, key: string) => r.reasons.some((x) => x.includes(`Fixture ${key}`));
-    const before = await ask();
-    expect(mentions(before, verified.requirementKey)).toBe(false);
-    expect(before.activePacks).not.toContain(packKey);
+    // With an organization present, unowned equipment credentials are refused (F1.1), not evaluated.
+    await org();
+    await expect(ask()).rejects.toThrow(/OWNERSHIP_UNRESOLVED/);
 
-    await callerFor(cast.proposer).requirement.packActivate({ financialEntityId: entity, packKey });
-    const after = await ask();
-    expect(mentions(after, verified.requirementKey)).toBe(true);
-    expect(after.parts.equipment).toBe("blocked");
-    // The unverified one in the same active pack still says it cannot tell.
-    expect(after.reasons.some((x) => x.includes(`Fixture ${unverified.requirementKey}`) && x.includes("has not been verified"))).toBe(true);
+    await asOneOwnershipDomain(async () => {
+      const before = await ask();
+      expect(mentions(before, verified.requirementKey)).toBe(false);
+      expect(before.activePacks).not.toContain(packKey);
+
+      await callerFor(cast.proposer).requirement.packActivate({ financialEntityId: entity, packKey });
+      const after = await ask();
+      expect(mentions(after, verified.requirementKey)).toBe(true);
+      expect(after.parts.equipment).toBe("blocked");
+      // The unverified one in the same active pack still says it cannot tell.
+      expect(after.reasons.some((x) => x.includes(`Fixture ${unverified.requirementKey}`) && x.includes("has not been verified"))).toBe(true);
+    });
   });
 
   it("19. a withdrawn requirement no longer applies, and its history stays", async () => {
