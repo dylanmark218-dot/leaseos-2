@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  addressRefusal, checkEgressUrl, EgressRefused, guardedGet, hostNameRefusal,
-  type EgressLimits, type EgressTransport, type ResolvedAddress, type TransportResponse,
+  addressRefusal, checkEgressUrl, EgressRefused, guardedGet, guardedPost, hostNameRefusal,
+  type EgressLimits, type EgressPostTransport, type EgressTransport, type ResolvedAddress, type TransportResponse,
 } from "./egressGuard";
 
 const LIMITS: EgressLimits = { timeoutMs: 1_000, maxBytes: 1024, maxRedirects: 3, accept: "application/json", contentTypes: ["application/json", "text/plain"] };
@@ -245,5 +245,143 @@ describe("a guarded GET", () => {
     const e = await refusal(guardedGet(LAYER, { resolve: dns({ "gis.example.ca": [PUBLIC] }).resolve, transport: w.transport }, LIMITS));
     expect(e).toMatchObject({ code: "transport", destination: false });
     expect(e.message).toContain("gis.example.ca");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* POST — webhook delivery                                             */
+/* ------------------------------------------------------------------ */
+
+const HOOK = "https://hooks.example.ca/leaseos";
+
+/** A POST transport with one reply per URL, recording what was actually sent. */
+function poster(routes: Record<string, Reply>) {
+  const sent: { url: string; addresses: string[]; headers: Record<string, string>; body: string }[] = [];
+  let closed = 0;
+  let read = 0;
+  const transport: EgressPostTransport = {
+    async post({ url, addresses, headers, body }) {
+      sent.push({ url: url.href, addresses: addresses.map(a => a.address), headers, body });
+      const reply = routes[url.href];
+      if (reply === undefined) throw new Error(`no route for ${url.href}`);
+      if (reply === "hang") return new Promise<TransportResponse>(() => undefined);
+      if (reply instanceof Error) throw reply;
+      const chunks = reply.chunks ?? ["{}"];
+      const stream = (async function* () { read++; for (const c of chunks) yield new TextEncoder().encode(c); })();
+      return { status: reply.status ?? 200, headers: reply.headers ?? {}, body: stream, close: () => { closed++; } };
+    },
+  };
+  return { transport, sent, closed: () => closed, read: () => read };
+}
+const ok = (routes: Record<string, Reply> = { [HOOK]: { status: 204 } }) => poster(routes);
+const hookDns = (answers: string[] = [PUBLIC]) => dns({ "hooks.example.ca": answers });
+
+describe("a delivery goes only where a fetch would not", () => {
+  it("delivers to a public destination and reports its status", async () => {
+    const w = ok();
+    const r = await guardedPost(HOOK, { resolve: hookDns().resolve, transport: w.transport }, { body: "{}", timeoutMs: 1_000 });
+    // 204 is a delivered webhook: `ok` means 2xx, not "had a body".
+    expect(r).toMatchObject({ ok: true, status: 204, url: HOOK });
+    expect(w.sent[0]!.addresses).toEqual([PUBLIC]);
+  });
+
+  it("refuses the cloud metadata endpoint, by name and by literal", async () => {
+    const byName = await refusal(guardedPost(HOOK, { resolve: hookDns(["169.254.169.254"]).resolve, transport: ok().transport }, { body: "{}", timeoutMs: 1_000 }));
+    expect(byName.code).toBe("blocked_address");
+    const byLiteral = await refusal(guardedPost("https://169.254.169.254/latest/meta-data/", { resolve: hookDns().resolve, transport: ok().transport }, { body: "{}", timeoutMs: 1_000 }));
+    expect(byLiteral.destination).toBe(true);
+  });
+
+  it("refuses loopback and private destinations", async () => {
+    for (const address of ["127.0.0.1", "::1", "10.0.0.7", "192.168.1.4"]) {
+      const e = await refusal(guardedPost(HOOK, { resolve: hookDns([address]).resolve, transport: ok().transport }, { body: "{}", timeoutMs: 1_000 }));
+      expect(e.destination, address).toBe(true);
+    }
+  });
+
+  it("refuses a name that answers public and private together — round-robin does not help", async () => {
+    const e = await refusal(guardedPost(HOOK, { resolve: hookDns([PUBLIC, "127.0.0.1"]).resolve, transport: ok().transport }, { body: "{}", timeoutMs: 1_000 }));
+    expect(e.code).toBe("blocked_address");
+  });
+
+  it("connects to the addresses it checked, so a second lookup cannot answer differently", async () => {
+    const d = hookDns([PUBLIC]);
+    const w = ok();
+    await guardedPost(HOOK, { resolve: d.resolve, transport: w.transport }, { body: "{}", timeoutMs: 1_000 });
+    expect(d.asked).toEqual(["hooks.example.ca"]);
+    expect(w.sent[0]!.addresses).toEqual([PUBLIC]);
+  });
+
+  it("refuses plain http, and credentials in the URL", async () => {
+    expect((await refusal(guardedPost("http://hooks.example.ca/x", { resolve: hookDns().resolve, transport: ok().transport }, { body: "{}", timeoutMs: 1_000 }))).code).toBe("scheme");
+    expect((await refusal(guardedPost("https://u:p@hooks.example.ca/x", { resolve: hookDns().resolve, transport: ok().transport }, { body: "{}", timeoutMs: 1_000 }))).code).toBe("credentials_in_url");
+  });
+});
+
+describe("a delivery is narrower than a fetch", () => {
+  it("never follows a redirect — the body was signed for the first destination", async () => {
+    const w = ok({ [HOOK]: { status: 307, headers: { location: "https://elsewhere.example.ca/x" } } });
+    const r = await guardedPost(HOOK, { resolve: hookDns().resolve, transport: w.transport }, { body: "{}", timeoutMs: 1_000 });
+    expect(r.status).toBe(307);
+    expect(r.ok).toBe(false);
+    // One request, to the destination the caller named. Nothing was re-sent anywhere.
+    expect(w.sent.map(s => s.url)).toEqual([HOOK]);
+  });
+
+  it("never reads the answer's body, and always closes it", async () => {
+    const w = ok({ [HOOK]: { status: 200, chunks: ["an internal service's response"] } });
+    await guardedPost(HOOK, { resolve: hookDns().resolve, transport: w.transport }, { body: "{}", timeoutMs: 1_000 });
+    expect(w.read()).toBe(0);
+    expect(w.closed()).toBe(1);
+  });
+
+  it("closes the connection even when the destination is refused mid-flight", async () => {
+    const w = ok({ [HOOK]: new Error("ECONNRESET") });
+    const e = await refusal(guardedPost(HOOK, { resolve: hookDns().resolve, transport: w.transport }, { body: "{}", timeoutMs: 1_000 }));
+    expect(e.code).toBe("transport");
+  });
+
+  it("gives up on a destination that never answers", async () => {
+    const w = ok({ [HOOK]: "hang" });
+    const e = await refusal(guardedPost(HOOK, { resolve: hookDns().resolve, transport: w.transport }, { body: "{}", timeoutMs: 50 }));
+    expect(e.code).toBe("timeout");
+  });
+});
+
+describe("the headers a delivery may carry", () => {
+  it("sends the caller's signature headers and the ones it sets itself", async () => {
+    const w = ok();
+    await guardedPost(HOOK, { resolve: hookDns().resolve, transport: w.transport }, {
+      body: '{"a":1}', timeoutMs: 1_000,
+      headers: { "content-type": "application/json", "x-leaseos-signature": "abc123" },
+    });
+    expect(w.sent[0]!.headers).toMatchObject({
+      "content-type": "application/json",
+      "x-leaseos-signature": "abc123",
+      "user-agent": "LeaseOS",
+      "accept-encoding": "identity",
+      "content-length": "7",
+    });
+  });
+
+  it("measures content-length in bytes, not characters", async () => {
+    const w = ok();
+    await guardedPost(HOOK, { resolve: hookDns().resolve, transport: w.transport }, { body: '{"n":"é"}', timeoutMs: 1_000 });
+    // Nine characters, ten bytes: a length in characters would truncate the body at the peer.
+    expect(w.sent[0]!.headers["content-length"]).toBe("10");
+  });
+
+  it("refuses a header that would redirect the request or attach a credential", async () => {
+    for (const name of ["Host", "content-length", "connection", "cookie", "authorization", "transfer-encoding"]) {
+      const e = await refusal(guardedPost(HOOK, { resolve: hookDns().resolve, transport: ok().transport }, { body: "{}", timeoutMs: 1_000, headers: { [name]: "x" } }));
+      expect(e.message, name).toMatch(/set by the egress guard/);
+    }
+  });
+
+  it("refuses a header name or value carrying a line break — one request must not become two", async () => {
+    const bad = await refusal(guardedPost(HOOK, { resolve: hookDns().resolve, transport: ok().transport }, { body: "{}", timeoutMs: 1_000, headers: { "x-a\r\nx-b": "1" } }));
+    expect(bad.message).toMatch(/is not a header name/);
+    const split = await refusal(guardedPost(HOOK, { resolve: hookDns().resolve, transport: ok().transport }, { body: "{}", timeoutMs: 1_000, headers: { "x-a": "1\r\nx-b: 2" } }));
+    expect(split.message).toMatch(/line break/);
   });
 });
