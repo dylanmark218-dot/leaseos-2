@@ -28,6 +28,8 @@ const NOT_A_SURFACE: Record<string, string> = {
   "client/src/portal/QuickCapture.tsx": "a live tRPC caller; needs a client harness",
   "client/src/portal/SyncIndicator.tsx": "a status chip with no interactive content of its own",
   "client/src/session/SessionGate.tsx": "a live tRPC caller; the three screens it renders — SignInView, WorkspaceChooserView, AccessDeniedView — are each surfaces in the suite",
+  "client/src/dispatch/DispatchReadiness.tsx": "the readiness panel's container: a live tRPC caller that resolves the job's assignment and queries the gate; the panel it renders, DispatchReadinessView, is a surface in the suite",
+  "client/src/dispatch/DispatchJobDetail.tsx": "the detail screen's container: a live tRPC caller that reads the job, its crew slots and the name lists, writes slot assignments, and composes the readiness panel; the screen it renders, DispatchJobDetailView, is a surface in the suite",
 };
 
 describe("the accessibility suite keeps up with the screens", () => {

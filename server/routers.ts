@@ -1,5 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, REFRESH_COOKIE_NAME } from "@shared/const";
+import { redeemRefresh, revokeAllForOpenId, revokeFamily } from "./sessionFamilyService";
+import { ACCESS_TOKEN_TTL_MS, REFRESH_ABSOLUTE_TTL_MS } from "./_core/sessionFamily";
+import { sdk } from "./_core/sdk";
+import { isTrustedOrigin } from "./_core/csrf";
+
+/**
+ * The refresh cookie carries `familyRef.verifier`. Split on the FIRST dot only: the reference is
+ * base64url of random bytes and contains no dot, while splitting greedily would mangle a verifier
+ * that happens to contain one.
+ */
+function readRefreshCookie(req: { headers?: { cookie?: string } }): { familyRef: string; verifier: string } | null {
+  const raw = req?.headers?.cookie;
+  if (!raw) return null;
+  const pair = raw.split(";").map(s => s.trim()).find(s => s.startsWith(`${REFRESH_COOKIE_NAME}=`));
+  if (!pair) return null;
+  const value = decodeURIComponent(pair.slice(REFRESH_COOKIE_NAME.length + 1));
+  const dot = value.indexOf(".");
+  if (dot <= 0 || dot === value.length - 1) return null;
+  return { familyRef: value.slice(0, dot), verifier: value.slice(dot + 1) };
+}
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
@@ -57,6 +77,7 @@ import {
   evidenceInScope,
   jobInScope,
   operatorInScope,
+  operatorForUserInScope,
   tripInScope,
   unitInScope,
   workOrderInScope,
@@ -133,7 +154,6 @@ import {
   listFacilities,
   listMaintenanceDefects,
   listDeliveries,
-  createJobUnit,
   listJobUnits,
   createInspection,
   listInspections,
@@ -318,6 +338,8 @@ const widgetDeps: WidgetDeps = {
   },
   readerFor: (actor) => widgetReaderFor(actor, (userId) =>
     appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId } as never }) as never,
+    // The caller's own operator record, in the scope the actor was resolved in — not their user id.
+    () => operatorForUserInScope(actor.userId, { tenantId: actor.tenantId }),
     (subject) => composeReadiness(subject)),
 };
 
@@ -394,9 +416,24 @@ export const appRouter = router({
   session: sessionRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+
+    /**
+     * S1-D — logout ends the session, rather than forgetting where it was kept.
+     *
+     * This used to clear the cookie and return success. A token already copied out of the browser
+     * kept working for the rest of its year, because nothing recorded the session and nothing could
+     * revoke it. Now the family named by the refresh cookie is revoked, so the next refresh fails
+     * and the access token expires within its fifteen minutes.
+     */
     logout: publicProcedure.mutation(async ({ ctx }) => {
+      const presented = readRefreshCookie(ctx.req);
+      if (presented) await revokeFamily(presented.familyRef, "logout");
+
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie(REFRESH_COOKIE_NAME, {
+        ...getSessionCookieOptions(ctx.req, { refresh: true }), maxAge: -1,
+      });
       // v23.26 — the organization selection is part of the session, so it ends
       // with it. Leaving it behind would hand the next person to use this
       // browser a pre-selected tenant, which is a confusing way to start and a
@@ -415,6 +452,57 @@ export const appRouter = router({
         occurredAt: new Date(),
       });
       return { success: true } as const;
+    }),
+
+    /**
+     * S1-C — spend the refresh credential, get the next one.
+     *
+     * Every outcome other than `ok` is one refusal, deliberately: a caller cannot tell a revoked
+     * family from an expired one from a verifier that never matched, so the endpoint gives nothing
+     * away about which families exist or why one died.
+     */
+    refresh: publicProcedure.mutation(async ({ ctx }) => {
+      /*
+       * The cookie is sameSite "none" so embedded surfaces keep working, which means a page on any
+       * origin can cause this call. It could read nothing — the cookies are httpOnly — but it
+       * could rotate the family and strand the real browser, or trip reuse detection and kill it.
+       */
+      if (!isTrustedOrigin(ctx.req)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Cross-site refresh refused" });
+      }
+      const presented = readRefreshCookie(ctx.req);
+      if (!presented) throw new TRPCError({ code: "UNAUTHORIZED", message: "No refresh credential" });
+
+      const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date());
+      if (out.kind !== "ok") {
+        ctx.res.clearCookie(REFRESH_COOKIE_NAME, {
+          ...getSessionCookieOptions(ctx.req, { refresh: true }), maxAge: -1,
+        });
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Session expired. Sign in again." });
+      }
+
+      const accessToken = await sdk.createSessionToken(out.openId, { name: "" });
+      ctx.res.cookie(COOKIE_NAME, accessToken, {
+        ...getSessionCookieOptions(ctx.req), maxAge: ACCESS_TOKEN_TTL_MS,
+      });
+      ctx.res.cookie(REFRESH_COOKIE_NAME, `${presented.familyRef}.${out.verifier}`, {
+        ...getSessionCookieOptions(ctx.req, { refresh: true }),
+        maxAge: REFRESH_ABSOLUTE_TTL_MS,
+      });
+      return { ok: true as const };
+    }),
+
+    /** Sign out everywhere — the control a stolen-laptop report needs. */
+    revokeAll: publicProcedure.mutation(async ({ ctx }) => {
+      if (!isTrustedOrigin(ctx.req)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Cross-site revocation refused" });
+      }
+      const presented = readRefreshCookie(ctx.req);
+      if (!presented) throw new TRPCError({ code: "UNAUTHORIZED", message: "No refresh credential" });
+      const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date());
+      if (out.kind !== "ok") throw new TRPCError({ code: "UNAUTHORIZED", message: "Session expired." });
+      await revokeAllForOpenId(out.openId, "revoked_all");
+      return { ok: true as const };
     }),
   }),
   fieldRoute: router({
@@ -626,6 +714,12 @@ export const appRouter = router({
               : undefined;
           return createTripStop({
             ...input,
+            // 0179: the actor was in hand here and discarded. A stop is evidence
+            // on the spine; `driver_typed` because this procedure is a person
+            // entering it directly — the assistant path stamps neither, because
+            // its provenance is per-field in proposalFields.
+            recordedByUserId: ctx.user.id,
+            recordedSource: "driver_typed" as const,
             waitMinutes:
               input.waitMinutes ??
               minutes(input.arrivedAt, input.setupStartedAt),
@@ -659,7 +753,16 @@ export const appRouter = router({
         { const tid = await tripStopTripId(input.id); if (tid != null && !(await tripInScope(tid, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip stop ${input.id} not found` }); }
         
           const { id, ...values } = input;
-          return updateTripStop(id, values);
+          return updateTripStop(id, {
+            ...values,
+            // 0179: an edit left no trace at all before this — no actor, and the
+            // table carried no updatedAt. The receipt reader compares this stamp
+            // with the newest assistant commit, so a hand edit is never mistaken
+            // for committed evidence.
+            updatedByUserId: ctx.user.id,
+            updatedSource: "driver_typed" as const,
+            updatedAt: new Date(),
+          });
         }),
     }),
     operatingZones: router({
@@ -710,9 +813,30 @@ export const appRouter = router({
             jobId: z.number().int().optional(),
             unitId: z.number().int().optional(),
             capturedOffline: z.boolean().default(false),
+            idempotencyKey: z.string().min(1).max(40).optional(),
           })
         )
         .mutation(async ({ ctx, input }) => {
+          if (input.idempotencyKey) {
+            const existing = await getAssistantProposal(input.idempotencyKey);
+            if (existing) {
+              if (existing.createdByUserId !== ctx.user.id) {
+                throw new TRPCError({
+                  code: "FORBIDDEN",
+                  message: "Idempotency key already belongs to another user",
+                });
+              }
+              const proposal = await loadProposal(input.idempotencyKey);
+              if (proposal) {
+                return {
+                  proposal,
+                  notes: existing.notes,
+                  overreachDetected: !!existing.overreachFlags,
+                };
+              }
+            }
+          }
+
           const form = FORMS[input.formKey];
           if (!form) throw new Error(`Unknown form: ${input.formKey}`);
 
@@ -737,7 +861,7 @@ export const appRouter = router({
             form,
             input.targetRef,
             extraction.values,
-            `P-${randomUUID()}`
+            input.idempotencyKey ?? `P-${randomUUID()}`
           );
 
           await createAssistantProposal({
@@ -1519,8 +1643,10 @@ export const appRouter = router({
           // records findings, enforced refuses without a valid check.
           .mutation(async ({ ctx, input }) => {
         // P4.1: scope guard
-        if (input?.jobId != null && !(await jobInScope(input.jobId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
-         const r = await createJobUnitGated(input); return r.id; }),
+        const actingScope = await scopeFor(ctx.user.id);
+        if (input?.jobId != null && !(await jobInScope(input.jobId, actingScope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+         // C1a — the check relied on must belong to the caller's organization too.
+         const r = await createJobUnitGated({ ...input, actingScope }); return r.id; }),
       }),
       inspections: router({
         list: roleProcedure("inspections.list").query(async ({ ctx }) => listInspections(await scopeFor(ctx.user.id))),
@@ -1545,7 +1671,13 @@ export const appRouter = router({
       }),
       }),
       documents: router({
-        list: roleProcedure("documents.list").query(async ({ ctx }) => listComplianceDocuments(await scopeFor(ctx.user.id))),
+        list: roleProcedure("documents.list")
+          // Optional: one owner's documents. Narrows the organization's list; it never widens it —
+          // the scope predicate still applies. The documentExpiry tile reads this, because the
+          // canonical verdict needs an owner's whole history, not whatever of it made the org's
+          // newest hundred.
+          .input(z.object({ ownerType: z.enum(["operator", "unit", "trailer", "equipment", "job"]), ownerId: z.number().int().positive() }).optional())
+          .query(async ({ ctx, input }) => listComplianceDocuments(await scopeFor(ctx.user.id), input)),
         create: roleProcedure("documents.create")
           .input(
             z.object({

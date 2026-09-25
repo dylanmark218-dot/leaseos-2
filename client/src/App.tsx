@@ -32,6 +32,7 @@ import AssistantAsk from "./pages/AssistantAsk";
 import AssistantCalibration from "./pages/AssistantCalibration";
 import TripOperationsWorkspace from "./showcase/TripOperationsWorkspace";
 import TrainingAcademy from "./pages/TrainingAcademy";
+import DispatchJobDetail from "./dispatch/DispatchJobDetail";
 
 function DashboardRoute({ children }: { children: ReactNode }) {
   return <DashboardLayout>{children}</DashboardLayout>;
@@ -67,6 +68,8 @@ function Router() {
       <Route path="/comms/package" component={() => <CommunicationsPackage />} />
       <Route path="/comms/transmit" component={() => <TransmitCheck />} />
       <Route path="/comms/status" component={() => <CommunicationsPackageStatus />} />
+      {/* The dispatcher's detail screen: read-only, one job — header, assignment and the readiness the gate decided. */}
+      <Route path="/dispatch/:jobId">{(p: { jobId: string }) => <DispatchJobDetail jobId={Number(p.jobId)} />}</Route>
       <Route path="/route/preview" component={() => <RoutePreview />} />
       <Route path="/documents/ask" component={() => <AssistantAsk />} />
       <Route path="/documents/calibration" component={() => <AssistantCalibration />} />

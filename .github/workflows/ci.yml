@@ -2,20 +2,19 @@ name: CI
 
 on: [push, pull_request]
 
-# B23.1B — least privilege. The gate reads the repository, runs a throwaway
-# database and builds; it writes nothing back to GitHub, so it does not need the
-# default token's write scopes. Nothing here reads `secrets.*`: the database is
-# a service container with an empty root password that exists for the length of
-# one job, and no production or deployment credential is available to it.
+# The gate reads the repository and nothing else: no comment, no status, no package, no
+# commit. Declaring that here means a compromised dependency or action in this workflow
+# cannot use the job's token to write to the repository.
 permissions:
   contents: read
 
-# One run per ref. A push that supersedes another cancels it rather than leaving
-# two full gates racing for runners; the in-progress run for the DEFAULT branch
-# is never cancelled, because its result is the record of whether main is green.
+# Cancel superseded runs of the same stream. `push` and `pull_request` are deliberately
+# NOT collapsed into one group: a pull_request run tests the merge result while a push run
+# tests the branch tip, so they are different questions and cancelling one for the other
+# would discard an answer nobody else provides.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # The required status check is `CI / test`. Renaming this job renames that
@@ -40,7 +39,9 @@ jobs:
         image: mariadb:10.11
         env:
           MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
-          MARIADB_DATABASE: leaseos
+          # Unique per run, per attempt, per job — the same name DATABASE_URL below
+          # points at. See the note there for why a static name is unsafe.
+          MARIADB_DATABASE: leaseos_${{ github.run_id }}_${{ github.run_attempt }}_${{ github.job }}
         ports: ["3306:3306"]
         options: >-
           --health-cmd="healthcheck.sh --connect --innodb_initialized"
@@ -48,8 +49,19 @@ jobs:
 
     # root, not a scoped user: scripts/ci-gate.sh starts from an empty database
     # by issuing DROP DATABASE / CREATE DATABASE, which a scoped user cannot do.
+    #
+    # The name is unique per run, attempt and job because the gate DROPs and recreates
+    # whatever DATABASE_URL names, plus a `<name>_widgets` companion it derives from it.
+    # With a static name, two runs overlapping — a re-run started before the first
+    # finished, or two branches building at once against one server — have the second
+    # drop the first's schema mid-suite. That produces failures in suites the change never
+    # touched, which read as unrelated product bugs; it cost a real misdiagnosis locally
+    # before this was fixed.
+    #
+    # Worst-case length is 35 characters including the `_widgets` suffix, against
+    # MariaDB's 64-character limit.
     env:
-      DATABASE_URL: mysql://root@127.0.0.1:3306/leaseos
+      DATABASE_URL: mysql://root@127.0.0.1:3306/leaseos_${{ github.run_id }}_${{ github.run_attempt }}_${{ github.job }}
 
     steps:
       # Full history, not the default depth of 1. registerClaims.test.ts checks
@@ -60,7 +72,13 @@ jobs:
 
       # No `version` input: package.json pins packageManager (pnpm@10.4.1+sha512)
       # and pnpm/action-setup@v4 refuses to run when both are given.
-      - uses: pnpm/action-setup@v4
+      #
+      # Pinned to the v4 commit rather than the mutable `@v4` tag: a tag can be moved to
+      # point at different code, so a third-party action referenced by tag is code this
+      # workflow has not reviewed. Same implementation, immutable reference — not an
+      # upgrade. actions/checkout and actions/setup-node stay on their current majors;
+      # pinning those is separate work.
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
 

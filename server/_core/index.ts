@@ -1,7 +1,6 @@
 import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
-import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
@@ -10,25 +9,8 @@ import { serveStatic, setupVite } from "./vite";
 import { startProductionWorker } from "./productionWorker";
 import { ENV, assertProductionSecrets } from "./env";
 import { organizationSelectionMiddleware } from "./organizationSelection";
-
-function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise(resolve => {
-    const server = net.createServer();
-    server.listen(port, () => {
-      server.close(() => resolve(true));
-    });
-    server.on("error", () => resolve(false));
-  });
-}
-
-async function findAvailablePort(startPort: number = 3000): Promise<number> {
-  for (let port = startPort; port < startPort + 20; port++) {
-    if (await isPortAvailable(port)) {
-      return port;
-    }
-  }
-  throw new Error(`No available port found starting from ${startPort}`);
-}
+import { listenOnPort, resolveListenPort } from "./listen";
+import { createReadinessState, registerHealthRoutes } from "./health";
 
 async function startServer() {
   // One decision, read twice. Which bundle gets served and which configuration
@@ -39,12 +21,21 @@ async function startServer() {
   // in the gap — production assets, no secret check.
   const isDevelopment = process.env.NODE_ENV === "development";
 
+  const app = express();
+  const server = createServer(app);
+
+  // The operational probes go on before anything else, and deliberately before the secret
+  // check: while startup is still running — or failing — `/readyz` must be able to say so.
+  // Registered here they are also never subject to application authorization, which
+  // matters because a readiness endpoint that needs a session cannot report that sessions
+  // are unavailable.
+  const readiness = createReadinessState();
+  registerHealthRoutes(app, readiness);
+
   // Before anything binds a port or starts a worker: a server that cannot
   // authenticate anyone should not reach the point of accepting requests.
   assertProductionSecrets(ENV, !isDevelopment);
 
-  const app = express();
-  const server = createServer(app);
   const worker = await startProductionWorker();
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
@@ -73,21 +64,38 @@ async function startServer() {
   }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+
+  // Production binds the configured port or refuses to start; only development searches.
+  // The old search ran everywhere, so a busy 3000 silently became 3001 — under an
+  // orchestrator, a container bound to a port nothing routes to, restarted forever by a
+  // probe that could never succeed.
+  const port = await resolveListenPort(preferredPort, isDevelopment);
 
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-    if (worker) console.log(`[worker] started ${worker.lifecycle.workerId}`);
-  });
+  // `await`, because `server.listen()` reports a bind failure by emitting `error` rather
+  // than throwing. Awaiting the old call caught nothing, so EADDRINUSE never reached the
+  // `startServer().catch` below and the process lingered with no server and exit code 0.
+  await listenOnPort(server, port);
+
+  console.log(`Server running on http://localhost:${port}/`);
+  if (worker) console.log(`[worker] started ${worker.lifecycle.workerId}`);
+
+  // Everything required to serve — the secret check, the worker, the asset handler — has
+  // completed above, and the port is bound. Nothing asynchronous that startup depends on
+  // happens after this point, so this is the moment the process can honestly accept work.
+  readiness.markReady();
 
   let closing = false;
   const shutdown = async () => {
     if (closing) return;
     closing = true;
+    // First, before draining anything: stop being a candidate for new work. A load
+    // balancer polling `/readyz` sees 503 and takes this process out of rotation while the
+    // existing shutdown below finishes what is already in flight.
+    readiness.markNotReady();
     if (worker) await worker.close();
     await new Promise<void>(resolve => server.close(() => resolve()));
   };

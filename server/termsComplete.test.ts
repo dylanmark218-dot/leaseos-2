@@ -68,7 +68,7 @@ d("terms complete the closeout", () => {
     const office = await withRole("office");
     const controller = await withRole("controller");
     const driver = await withRole("driver");
-    const entityId = 4_100_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'ABC Energy')", [acctRef, entityId]);
     const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress, createdAt) VALUES (?, 'hydrovac', 'hydrovac', 'ABC Energy', '10-22-045-06-W5', 'on_site', 0, NOW())", [key("JOB").slice(0, 40)]);
@@ -93,7 +93,7 @@ d("terms complete the closeout", () => {
 
   it("builds a COR package with a no-incidents statement and an insurance package over policies and claims, both naming their gaps", async () => {
     const safety = await withRole("safety");
-    const entityId = 4_200_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     await pool.execute("INSERT INTO writtenProgramVersions (programKey, version, title, programType, financialEntityId, effectiveFrom, approvedByUserId, approvedAt, contentHash, createdAt) VALUES (?, 1, 'Hazard assessment program', 'safety', ?, '2026-01-01', 1, '2026-01-01', ?, NOW())", [key("HAZ").slice(0, 40), entityId, "b".repeat(64)]);
     const from = new Date("2026-08-01T00:00:00Z"), to = new Date("2026-08-31T23:59:59Z");
     const cor = await callerFor(safety).audit.packagePrepare({ kind: "cor", subjectRef: String(entityId), periodFrom: from, periodTo: to, recipient: "COR auditor — Energy Safety Canada", purpose: "Annual COR maintenance audit" });

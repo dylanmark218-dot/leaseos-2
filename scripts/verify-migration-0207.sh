@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# B23.1A — migration 0170, verified against a real database rather than read.
+# B23.1A — migration 0207 (formerly 0170), verified against a real database rather than read.
 #
 # 0170 is an AUTHORIZATION migration: it decides, per existing grant, which
 # company that grant will speak for from now on. Reading the SQL proves the
@@ -19,7 +19,7 @@
 #
 # No category gains authority. That is the property this script exists to prove.
 #
-# Usage: DATABASE_URL=mysql://user:pass@host:port/db bash scripts/verify-migration-0170.sh
+# Usage: DATABASE_URL=mysql://user:pass@host:port/db bash scripts/verify-migration-0207.sh
 # The database named is NOT touched; a scratch database beside it is used.
 set -euo pipefail
 
@@ -30,7 +30,7 @@ user="${creds%%:*}"; pass="${creds#*:}"; [ "$pass" = "$creds" ] && pass=""
 hostport="${hostpart%%/*}"; db="${hostpart#*/}"
 host="${hostport%%:*}"; port="${hostport#*:}"; [ "$port" = "$host" ] && port=3306
 
-scratch="${db}_m0170"
+scratch="${db}_m0207"
 mysqlc() { mysql --default-character-set=utf8mb4 -h "$host" -P "$port" -u "$user" ${pass:+-p"$pass"} "$@"; }
 q() { mysqlc -N -B "$scratch" -e "$1"; }
 
@@ -48,7 +48,7 @@ echo "== 1. the world before 0170 =="
 # Every migration except the one under test. Applied the way the runner applies
 # them, so this is the real pre-0170 schema and not a hand-written guess.
 for f in $(ls drizzle/*.sql | sort); do
-  case "$(basename "$f")" in 0170_*) continue ;; esac
+  case "$(basename "$f")" in 0207_organization_scoped_role_grants.sql) continue ;; esac
   if grep -qE '^BEGIN$' "$f"; then
     { printf 'DELIMITER $$\n'
       sed -e 's/-->[[:space:]]*statement-breakpoint//' -e 's/^END;$/END$$/' "$f"
@@ -101,7 +101,7 @@ pre_revoked_key=$(q "SELECT COALESCE(activeGrantKey,'<null>') FROM userRoleAssig
 expect "revoked row has no grant key before" "$pre_revoked_key" "<null>"
 
 echo "== 3. apply 0170, alone =="
-sed 's/-->[[:space:]]*statement-breakpoint//' drizzle/0170_organization_scoped_role_grants.sql | mysqlc "$scratch"
+sed 's/-->[[:space:]]*statement-breakpoint//' drizzle/0207_organization_scoped_role_grants.sql | mysqlc "$scratch"
 echo "applied"
 
 echo "== 4. the schema it produced =="

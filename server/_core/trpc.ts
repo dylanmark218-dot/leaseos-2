@@ -3,7 +3,14 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 
-const t = initTRPC.context<TrpcContext>().create({
+/**
+ * Procedure metadata. `moneyScoped` marks a procedure whose handler receives the caller's money
+ * boundary (`ctx.money`); `financeScopeCoverage.test.ts` reads the mark from the live router, so a
+ * finance procedure added without it fails CI rather than a code review.
+ */
+export type ProcedureMeta = { moneyScoped?: true };
+
+const t = initTRPC.context<TrpcContext>().meta<ProcedureMeta>().create({
   transformer: superjson,
 });
 
@@ -295,6 +302,31 @@ export function sessionProcedure(procedureName: SessionProcedureName) {
 }
 
 /* ==================================================================
+ * F1 — the money boundary on a role-authorized procedure
+ * ================================================================== */
+
+import { financeScopeFor, type FinanceScope } from "./entityScope";
+import { getDb } from "../db";
+
+/**
+ * `roleProcedure` answers "may this person do this kind of thing"; this answers "in which books".
+ * The caller's organization, and the financial entities (books) it owns, are resolved from the
+ * membership — never from input — and handed to the handler as `ctx.money`. Every record the handler
+ * reads or writes is proved against it (`server/financeScope.ts`); one that fails is "not found".
+ *
+ * Wraps rather than replaces `roleProcedure(...)` so the permission map, the authorization trail and
+ * the pinned procedure counts are untouched.
+ */
+export function moneyScoped(procedure: ReturnType<typeof roleProcedure>) {
+  return procedure.meta({ moneyScoped: true }).use(async ({ ctx, next }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const money: FinanceScope = await financeScopeFor(db, ctx.user.id);
+    return next({ ctx: { ...ctx, money } });
+  });
+}
+
+/* ==================================================================
  * v21.10 — externalProcedure: the portal gate.
  *
  * Built like roleProcedure and no weaker: the permission map is consulted at
@@ -308,7 +340,10 @@ export function sessionProcedure(procedureName: SessionProcedureName) {
 import { createHash } from "node:crypto";
 import { EXTERNAL_KIND_PERMISSIONS, EXTERNAL_SENSITIVE_PERMISSIONS, externalPermissionForProcedure, type ExternalPermission } from "./recordsAuthorization";
 import { findExternalIdentityByAnyTokenHash, findExternalIdentityByInvitationHash, touchExternalIdentity, updateExternalIdentity } from "../db";
-import { credentialCheck, decryptSecret, failureUpdate, invitationCheck, mfaKey, totpVerify } from "./externalIdentityPolicy";
+import { credentialCheck, failureUpdate, invitationCheck, totpVerify } from "./externalIdentityPolicy";
+import { environmentSecretKeys, legacyMfaKey } from "./secretKeys";
+import { resolveMfaSeed } from "../mfaSecretService";
+import { ENV } from "./env";
 
 export type ExternalContext = { identityId: number; identityRef: string; kind: "customer" | "vendor" | "facility"; accountId: number; displayName: string };
 
@@ -344,9 +379,23 @@ export function externalProcedure(procedureName: string) {
         // MFA, when enabled, guards every sensitive write.
         if (identity.mfaEnabled && EXTERNAL_SENSITIVE_PERMISSIONS.includes(permission)) {
           const codeRaw = headers["x-portal-mfa"]; const code = Array.isArray(codeRaw) ? codeRaw[0] : codeRaw;
-          const key = mfaKey();
-          if (!key || !identity.mfaSecretEnc) return refuse("denied_scope", "MFA is enabled but cannot be verified on this server", "FORBIDDEN");
-          if (!code || !totpVerify(decryptSecret(identity.mfaSecretEnc, key), code, now)) {
+          /*
+           * 0193 — the seed comes from whichever store this identity uses. `resolveMfaSeed` prefers
+           * `mfaSecretRef`, and when one is present but unreadable it throws rather than reading
+           * the legacy column, so a damaged or tampered new record cannot hand verification back to
+           * a seed the user already replaced.
+           *
+           * The throw is answered here as a refusal rather than allowed to become a 500: an
+           * unreadable secret must deny the request, and it must deny it the same way a missing key
+           * always did.
+           */
+          let seed: string;
+          try {
+            seed = await resolveMfaSeed(identity, { keys: environmentSecretKeys(), legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
+          } catch {
+            return refuse("denied_scope", "MFA is enabled but cannot be verified on this server", "FORBIDDEN");
+          }
+          if (!code || !totpVerify(seed, code, now)) {
             const f = failureUpdate(identity.failedAttempts, now);
             await updateExternalIdentity(identity.id, f);
             return refuse("denied_scope", f.lockedUntil ? `MFA code rejected — locked until ${f.lockedUntil.toISOString()}` : "MFA code required or rejected", "FORBIDDEN");

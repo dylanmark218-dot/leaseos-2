@@ -33,6 +33,21 @@ host="${hostport%%:*}"; port="${hostport#*:}"; [ "$port" = "$host" ] && port=330
 gate() { printf '\n== %s ==\n' "$1"; }
 mysqlc() { mysql -h "$host" -P "$port" -u "$user" ${pass:+-p"$pass"} "$@"; }
 
+# Process-unique scratch files. These used to be fixed names under /tmp, which meant two
+# gates running at once — a second checkout, a re-run started before the first finished —
+# read each other's output. The current-state snapshot was the dangerous one: gate 8
+# compares the committed document against a copy taken before regeneration, so a colliding
+# run could have it compare against the *other* branch's document and either pass a stale
+# file or fail a current one. Neither failure looks like a temp-file collision.
+VITEST_GATE_OUT="$(mktemp "${TMPDIR:-/tmp}/leaseos-vitest-gate.XXXXXX")"
+VITEST_GATE_JSON="$(mktemp "${TMPDIR:-/tmp}/leaseos-vitest-gate-json.XXXXXX")"
+CURRENT_STATE_BEFORE="$(mktemp "${TMPDIR:-/tmp}/leaseos-current-state.XXXXXX")"
+cleanup() { rm -f "$VITEST_GATE_OUT" "$VITEST_GATE_JSON" "$CURRENT_STATE_BEFORE"; }
+trap cleanup EXIT
+
+gate "0a. Runtime version truth"
+node scripts/check-version-truth.mjs
+
 gate "0. Reserved migration slots untouched"
 if ls drizzle/0016_*.sql drizzle/0017_*.sql >/dev/null 2>&1; then
   echo "FAIL: migration slot 0016 or 0017 is occupied. These are reserved for the Spatial and LoadSense branches."
@@ -68,8 +83,8 @@ bash scripts/verify-parity.sh
 # classification. It builds the pre-0170 world in a scratch database, seeds a
 # row of every legacy shape, applies 0170 alone, and asserts what each became —
 # including that NO category gained cross-company authority.
-gate "3b. Migration 0170 backfill, verified against this database"
-bash scripts/verify-migration-0170.sh
+gate "3b. Migration 0207 (formerly 0170) backfill, verified against this database"
+bash scripts/verify-migration-0207.sh
 
 gate "4. Typecheck"
 pnpm exec tsc --noEmit
@@ -111,9 +126,9 @@ gate "6. Test suite (includes column-level parity and reserved-word audit)"
 # Removed first: if vitest dies before writing the report, a file left by an
 # earlier run would be read as this run's result — a green gate describing a
 # suite that never executed, which is the whole failure mode being closed here.
-rm -f /tmp/vitest-gate.json
+rm -f "$VITEST_GATE_JSON"
 LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run \
-  --reporter=basic --reporter=json --outputFile.json=/tmp/vitest-gate.json 2>&1 | tee /tmp/vitest-gate.out
+  --reporter=basic --reporter=json --outputFile.json="$VITEST_GATE_JSON" 2>&1 | tee "$VITEST_GATE_OUT"
 # pipefail is on, so a failing vitest still fails the gate through the pipe.
 
 # The verdict, read from the report written for machines. It checks three
@@ -130,7 +145,7 @@ LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run \
 # The list and the logic live in server/_core/requiredSuites.ts, and
 # server/requiredSuites.test.ts exercises them against synthetic reports
 # containing each failure — so the guard is tested without breaking the repo.
-pnpm exec tsx scripts/verify-gate-run.ts /tmp/vitest-gate.json
+pnpm exec tsx scripts/verify-gate-run.ts "$VITEST_GATE_JSON"
 
 # B23.1B — gate 1's clean database is what makes the suite above honest, and it
 # also hides a defect: a test that names a record id it did not create passes
@@ -138,6 +153,18 @@ pnpm exec tsx scripts/verify-gate-run.ts /tmp/vitest-gate.json
 # in a scratch database, so the class cannot come back silently.
 gate "6b. Fixture isolation: no suite depends on a record id it did not create"
 bash scripts/verify-fixture-isolation.sh
+# This is why the check exists: widgetPersistence.db.test.ts (24 cases) and
+# widgetConflict.db.test.ts (10 cases) gate on WIDGET_DB_URL, nothing set it,
+# and they had never run — in CI or anywhere. The first of them exists to guard
+# a cross-tenant board overwrite, and it reported "skipped" the whole time.
+skipped_db=$(grep -E '^ *↓ .*\.db\.test\.ts' "$VITEST_GATE_OUT" || true)
+if [ -n "$skipped_db" ]; then
+  echo "FAIL: a .db.test.ts suite skipped while a database is configured:"
+  echo "$skipped_db"
+  echo "Either its guard reads an environment variable this gate does not set, or the gate stopped setting one."
+  exit 1
+fi
+echo "no database-backed suite skipped"
 
 gate "7. Production build"
 pnpm build
@@ -157,7 +184,7 @@ echo "integration-gated procedures: $INB"
 if [ "$ROLE_IN_INBOUND" != "0" ] || [ "$EXT_IN_INBOUND" != "0" ]; then echo "FAIL: inboundRouter mounts a role or external procedure"; exit 1; fi
 if [ "$INB" = "0" ]; then echo "FAIL: no integrationProcedure in integrationRouter"; exit 1; fi
 echo "== 8. Current-state document is generated, not claimed =="
-cp LEASEOS_CURRENT_STATE.md /tmp/current-state.before
+cp LEASEOS_CURRENT_STATE.md "$CURRENT_STATE_BEFORE"
 # No argument, so the release comes from LEASEOS_RELEASE — the file the document
 # names as where its Release row is read from. This used to scrape the release
 # out of the document and hand it straight back to the generator, which meant
@@ -165,6 +192,6 @@ cp LEASEOS_CURRENT_STATE.md /tmp/current-state.before
 # It went unnoticed for exactly that reason: the document said v22.21 while
 # LEASEOS_RELEASE still said v22.20, and every gate run passed.
 bash scripts/current-state.sh >/dev/null
-if ! diff -q /tmp/current-state.before LEASEOS_CURRENT_STATE.md >/dev/null; then echo "LEASEOS_CURRENT_STATE.md is stale — regenerate with scripts/current-state.sh"; diff /tmp/current-state.before LEASEOS_CURRENT_STATE.md | head -20; exit 1; fi
+if ! diff -q "$CURRENT_STATE_BEFORE" LEASEOS_CURRENT_STATE.md >/dev/null; then echo "LEASEOS_CURRENT_STATE.md is stale — regenerate with scripts/current-state.sh"; diff "$CURRENT_STATE_BEFORE" LEASEOS_CURRENT_STATE.md | head -20; exit 1; fi
 echo "current"
 echo "== PASS =="

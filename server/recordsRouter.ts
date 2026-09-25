@@ -50,7 +50,7 @@ import {
   planEscalation,
   ROADSIDE_INSPECTION_SCOPE,
 } from "./_core/incidentReport";
-import { evaluateMechanicRelease } from "./_core/mechanicRelease";
+import { currentReleaseEvidenceFor, evaluateMechanicRelease } from "./_core/mechanicRelease";
 import * as svc from "./recordsService";
 import {
   bootstrapManagementRole,
@@ -781,6 +781,88 @@ export const recordsRouter = router({
           restricted: decision.restricted,
           unitId: wo.unitId,
           dispatchRecalculationRequired: true,
+        };
+      }),
+
+    /**
+     * Resolve one named maintenance defect.
+     *
+     * This did not exist, and its absence was load-bearing: `maintenanceDefects.status` has carried
+     * `resolved` since the table was created and nothing could ever write it, so readiness inferred
+     * resolution from release chronology instead — any release newer than a defect cleared it, a
+     * revocation included. The owner decision is that a release is evidence about a repair and is
+     * not, by itself, the resolution of a defect. So the transition is explicit, names one defect,
+     * and leaves an observable change on the row.
+     *
+     * Authority is `maintenance.record_release` — the permission that already governs mechanic and
+     * work-order release (mechanic, shop_lead). Deliberately NOT `maintenance.write_defect`, which
+     * drivers and office staff hold so that they can *report* a defect: whoever may raise one must
+     * not thereby be able to close it.
+     *
+     * The authorization trail is `roleProcedure`'s, as everywhere else, and
+     * `maintenance.record_release` is a sensitive permission, so an unrecordable decision refuses
+     * rather than acting unrecorded.
+     */
+    resolveDefect: roleProcedure("records.maintenance.resolveDefect")
+      .input(
+        z.object({
+          defectId: z.number().int().positive(),
+          /** The release that evidences the repair. Required for a critical defect. */
+          releaseId: z.number().int().positive().nullable().default(null),
+          note: z.string().min(3).max(400),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const defect = await svc.loadDefect(input.defectId);
+        // P4.1: out of scope is "not found", never "forbidden" — and the unit is what carries scope.
+        const scope = await actingScopeFor(ctx.user.id);
+        if (!defect || !(await unitInScope(defect.unitId, scope))) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `Defect ${input.defectId} not found` });
+        }
+        if (defect.status === "resolved") {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Defect ${defect.id} is already resolved` });
+        }
+
+        /*
+         * A critical defect needs release evidence that names it. "Names it" is the whole point:
+         * accepting any release on the unit would rebuild the failure this replaces, one layer up.
+         */
+        let evidenceId: number | null = null;
+        if (defect.severity === "critical") {
+          if (input.releaseId == null) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A critical defect is resolved on the evidence of a mechanic release — supply the release that repaired it" });
+          }
+          const release = await svc.loadRelease(input.releaseId);
+          if (!release || release.unitId !== defect.unitId) {
+            throw new TRPCError({ code: "NOT_FOUND", message: `Release ${input.releaseId} not found for this unit` });
+          }
+          const stands = currentReleaseEvidenceFor(defect.id, [{
+            id: release.id, workOrderId: release.workOrderId, releaseType: release.releaseType,
+            testResult: release.testResult, resolvedDefectIds: release.resolvedDefectIds, releasedAt: release.releasedAt,
+          }]);
+          if (!stands) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `Release ${release.id} does not name defect ${defect.id}, or is revoked or failed — it cannot resolve it`,
+            });
+          }
+          evidenceId = release.id;
+        } else if (input.releaseId != null) {
+          const release = await svc.loadRelease(input.releaseId);
+          if (release && release.unitId === defect.unitId) evidenceId = release.id;
+        }
+
+        const changed = await svc.resolveMaintenanceDefect({
+          defectId: defect.id, resolvedByUserId: ctx.user.id,
+          resolvedByReleaseId: evidenceId, note: input.note, at: new Date(),
+        });
+        if (!changed) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Defect ${defect.id} is already resolved` });
+        }
+        return {
+          defectId: defect.id, unitId: defect.unitId, severity: defect.severity,
+          status: "resolved" as const, resolvedByReleaseId: evidenceId, resolvedByUserId: ctx.user.id,
+          note: "A resolved defect no longer holds the unit. It does not lift a government out-of-service order, and it does not release any other defect.",
         };
       }),
 

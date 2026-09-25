@@ -1,3 +1,6 @@
+-- RENUMBERED 0175 -> 0208 when main was merged into this branch (2026-09-25): main had taken 0175
+-- (0175_session_families, #30). 0208 follows 0207 (this branch's role-grant migration, formerly 0170)
+-- and was free on main and every open branch. The notes below explain the original choice.
 -- B23.2 — organization invitations.
 --
 -- The hole this fills: nothing in LeaseOS has ever created an

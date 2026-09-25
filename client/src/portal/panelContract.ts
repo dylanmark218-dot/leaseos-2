@@ -35,6 +35,12 @@ export const PANEL_CONTRACTS: readonly PanelContract[] = [
   // that refuses a workspace the caller does not hold.
   { file: "PortalShell.tsx", procedures: ["session.selectWorkspace", "surfaces.myDay", "surfaces.exceptions", "surfaces.inbox"], portals: "every_portal" },
   { file: "UniversalSearch.tsx", procedures: ["surfaces.search"], portals: "every_portal" },
+  // The chooser and its neighbouring states are rendered BEFORE a portal is
+  // settled, so "every_portal" is the only honest restriction: at the moment it
+  // is on screen there is no portal to restrict it to. It calls nothing — every
+  // option arrives as a prop from PortalShell's own `portals.mine` — which is
+  // what keeps that true rather than merely stated.
+  { file: "PortalChooser.tsx", procedures: [], portals: "every_portal" },
   { file: "QuickCapture.tsx", procedures: [], portals: "every_portal" },
   { file: "SyncIndicator.tsx", procedures: [], portals: "every_portal" },
   { file: "panels/MyDayPanel.tsx", procedures: [], portals: "every_portal" },

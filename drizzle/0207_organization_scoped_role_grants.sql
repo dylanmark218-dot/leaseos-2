@@ -1,3 +1,6 @@
+-- RENUMBERED 0170 -> 0207 when main was merged into this branch (2026-09-25): main had taken 0170
+-- (0170_dispatch_role_types, #9). 0207 was the first slot free on main and on every open branch
+-- (docs/architecture/MIGRATION_COLLISION_REGISTER.md). The notes below explain the original choice.
 -- B23.1 — organization-scoped role grants.
 --
 -- MIGRATION SLOT. The head on this branch is 0168. 0169 is NOT free: it is

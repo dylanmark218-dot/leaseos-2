@@ -43,14 +43,16 @@ describe("the real tree", () => {
     // 0169 — the slot the B23.0 report suggested — is occupied by two different
     // migrations in other lineages (`0169_defect_resolution` in three,
     // `0169_print_audit` in a fourth). 0170 was the first free everywhere.
-    expect(files).toContain("0170_organization_scoped_role_grants.sql");
-    expect(files.filter(f => f.startsWith("0169_"))).toEqual([]);
+    expect(files).toContain("0207_organization_scoped_role_grants.sql");   // renumbered from 0170 on merging main, which took 0170
+    // Since then main has carried one 0169 of its own (the reconciled defect-resolution migration);
+    // what this checkpoint promised is that it added none.
+    expect(files.filter(f => f.startsWith("0169_"))).toEqual(["0169_defect_resolution.sql"]);
     // B23.2: 0175. By the time this checkpoint allocated, `origin/main` had
     // reached 0174 and 0170 itself had become a three-way collision across
     // lineages (dispatch_role_types and driver_portfolio_events took it too).
     // head+1 on this branch would have collided three times over.
-    expect(files).toContain("0175_organization_invitations.sql");
-    expect(headSlot(files)).toBe("0175");
+    expect(files).toContain("0208_organization_invitations.sql");   // renumbered from 0175 on merging main, which took 0175
+    expect(headSlot(files)).toBe("0208");
   });
 
   it("keeps the reserved slots empty", () => {
@@ -101,8 +103,8 @@ describe("the guard catches what it exists to catch", () => {
   });
 
   it("accepts a correctly allocated next migration", () => {
-    expect(auditMigrationSlots([...files, "0176_the_next_one.sql"])).toEqual([]);
-    expect(headSlot([...files, "0176_the_next_one.sql"])).toBe("0176");
+    expect(auditMigrationSlots([...files, "0209_the_next_one.sql"])).toEqual([]);
+    expect(headSlot([...files, "0209_the_next_one.sql"])).toBe("0209");
   });
 
   it("gives every tolerated duplicate a reason that says something", () => {

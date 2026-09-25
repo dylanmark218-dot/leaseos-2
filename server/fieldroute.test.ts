@@ -83,7 +83,15 @@ beforeAll(async () => {
       // Already granted by a concurrent run — the unique index is doing its job.
     }
   }
-  await appRouter.createCaller(createContext()).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
+  // F1.3 — the global mode is the fallback for every organization, so a platform administrator (a real users row
+  // with role "admin", holding the domain permission too) sets it; the suite's own user is not one.
+  if (db) {
+    // An explicit id from the suite's own window: auto-increment lands wherever other suites' explicit ids pushed it.
+    const adminId = 297_000_000 + Math.floor(Math.random() * 50_000);
+    await db.insert(users).values({ id: adminId, openId: `fieldroute-admin-${adminId}`, role: "admin" } as never);
+    await grantUserRole({ userId: adminId, role: "management", scopeType: "global", grantedByUserId: TEST_USER_ID, grantedAt: new Date() });
+    await appRouter.createCaller({ ...createContext(), user: { ...createContext().user!, id: adminId, role: "admin" } }).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
+  }
 });
 
 function createContext(): TrpcContext {

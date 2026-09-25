@@ -39,7 +39,8 @@ describe("the newer engines' findings merge in B12's vocabulary", () => {
       blk({ code: "insurance_coverage_expired", label: "Policy expired" }),
     ]));
     expect(c.verdict).toBe("blocked");
-    expect(c.items.find(i => i.code === "route_not_evaluated")!.fixable).toContain("manager override");
+    // C1a / D-02 — a route-legality unknown is not a manager's call.
+    expect(c.items.find(i => i.code === "route_not_evaluated")!.fixable).toBe("Needs verification — released only under an owner-approved override policy");
     expect(c.items.find(i => i.code === "insurance_coverage_expired")!.fixable).toBe("Must be resolved — no override");
   });
 });
@@ -48,37 +49,56 @@ describe("the newer engines' findings merge in B12's vocabulary", () => {
 /* The B12 award bug                                                    */
 /* ------------------------------------------------------------------ */
 
-describe("a granted override resolves an overridable unknown — the bug the wiring found", () => {
+describe("a granted override resolves only what its class allows — C1a", () => {
   const route = blk({ code: "route_not_evaluated", label: "Route not evaluated", severity: "unknown", subject: "route", overridable: true, overrideAuthority: "manager" });
   const ctx = (over: Partial<Parameters<typeof decideAward>[0]> = {}): Parameters<typeof decideAward>[0] => ({
     postingState: "direct", bidState: null,
     eligibility: { ...base("unknown", [route]), checkId: 1, fingerprint: "EF-1", operatorId: 1 },
     validity: { valid: true, ageMinutes: 1, reason: "fresh", requiresReEvaluation: false, invalidatedBy: "none" },
-    conflicts: [], grantedOverrides: [], ...over,
+    conflicts: [], grantedOverrides: [], at: NOW, ...over,
   });
+  const grant = (blockerCode: string, over: Partial<Parameters<typeof decideAward>[0]["grantedOverrides"][number]> = {}) => ({
+    blockerCode, requestedByUserId: 4, grantedByUserId: 5, grantedByRole: "manager", reason: "Reason on record", grantedAt: NOW, policyRef: null, expiresAt: null, ...over,
+  });
+  const policy = { policyRef: "OP-TEST-ROUTE", version: 1, findingCodes: ["route_not_evaluated"], grantorMinimumRole: "manager" as const, maxValidityMinutes: 60, approvedBy: ["Owner A", "Owner B"] as const, approvedAt: "2026-09-01T00:00:00Z", effectiveFrom: "2026-09-01T00:00:00Z", effectiveUntil: null, rationale: "test" };
 
   it("still refuses an unknown with no override", () => {
     const d = decideAward(ctx());
     expect(d.permitted).toBe(false);
-    if (!d.permitted) expect(d.refusals.join(" ")).toContain("UNKNOWN — Route not evaluated (no authorised override)");
+    if (!d.permitted) expect(d.refusals.join(" ")).toContain("UNKNOWN — Route not evaluated");
   });
 
-  it("awards when a manager granted the override the readiness engine offered", () => {
-    const d = decideAward(ctx({ grantedOverrides: [{ blockerCode: "route_not_evaluated", grantedByUserId: 5, grantedByRole: "manager", reason: "Known local route, verified by phone with the lease operator", grantedAt: NOW }] }));
+  it("D-02: a manager's grant alone never releases a route-legality unknown — there is no general manager override", () => {
+    const d = decideAward(ctx({ grantedOverrides: [grant("route_not_evaluated")] }));
+    expect(d.permitted).toBe(false);
+    if (!d.permitted) expect(d.refusals.join(" ")).toMatch(/approved override policy/);
+  });
+
+  it("an owner-approved policy that names the code, in force, releases it — and only then", () => {
+    const d = decideAward(ctx({ grantedOverrides: [grant("route_not_evaluated", { policyRef: "OP-TEST-ROUTE" })], overridePolicies: [policy] }));
     expect(d.permitted, (d as { refusals?: string[] }).refusals?.join(" | ")).toBe(true);
+    const expired = decideAward(ctx({ grantedOverrides: [grant("route_not_evaluated", { policyRef: "OP-TEST-ROUTE", expiresAt: new Date(NOW.getTime() - 1) })], overridePolicies: [policy] }));
+    expect(expired.permitted).toBe(false);
   });
 
   it("never lets an override cover an unknown nobody may override", () => {
     const hard = blk({ code: "medical_fitness_not_current", label: "Medical", severity: "unknown", subject: "operator", overridable: false });
-    const d = decideAward(ctx({ eligibility: { ...base("unknown", [hard]), checkId: 1, fingerprint: "EF-1", operatorId: 1 }, grantedOverrides: [{ blockerCode: "medical_fitness_not_current", grantedByUserId: 5, grantedByRole: "administrator", reason: "x", grantedAt: NOW }] }));
+    const d = decideAward(ctx({ eligibility: { ...base("unknown", [hard]), checkId: 1, fingerprint: "EF-1", operatorId: 1 }, grantedOverrides: [grant("medical_fitness_not_current", { grantedByRole: "administrator" })] }));
     expect(d.permitted).toBe(false);
   });
 
-  it("checks review blockers even when the verdict is unknown — previously skipped", () => {
+  it("checks review findings even when the verdict is unknown — previously skipped", () => {
     const review = blk({ code: "insurance_proof_missing", label: "Proof missing", severity: "review", overridable: true, overrideAuthority: "dispatcher" });
-    const d = decideAward(ctx({ eligibility: { ...base("unknown", [route, review]), checkId: 1, fingerprint: "EF-1", operatorId: 1 }, grantedOverrides: [{ blockerCode: "route_not_evaluated", grantedByUserId: 5, grantedByRole: "manager", reason: "r", grantedAt: NOW }] }));
+    const d = decideAward(ctx({ eligibility: { ...base("unknown", [route, review]), checkId: 1, fingerprint: "EF-1", operatorId: 1 }, grantedOverrides: [grant("route_not_evaluated", { policyRef: "OP-TEST-ROUTE" })], overridePolicies: [policy] }));
     expect(d.permitted).toBe(false);
     if (!d.permitted) expect(d.refusals.join(" ")).toContain("REVIEW — Proof missing");
+  });
+
+  it("a warning acknowledged by someone other than the requester is covered; one 'granted' by the requester is not", () => {
+    const review = blk({ code: "insurance_proof_missing", label: "Proof missing", severity: "review", overridable: true, overrideAuthority: "dispatcher" });
+    const e = { ...base("eligible_review", [review]), checkId: 1, fingerprint: "EF-1", operatorId: 1 };
+    expect(decideAward(ctx({ eligibility: e, grantedOverrides: [grant("insurance_proof_missing")] })).permitted).toBe(true);
+    expect(decideAward(ctx({ eligibility: e, grantedOverrides: [grant("insurance_proof_missing", { grantedByUserId: 4 })] })).permitted).toBe(false);
   });
 });
 
@@ -111,7 +131,7 @@ const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never,
 async function withRole(role: DomainRole) { const id = nextUser(); await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
 
 d("can Unit 142 take this job tomorrow?", () => {
-  it("refuses a held unit, lifts on mechanic release, needs a manager for the unknown route, and refuses when the facts move", async () => {
+  it("refuses a held unit, lifts on mechanic release, refuses a manager for the unknown route, and awards once the facts are established", async () => {
     const dispatcher = await withRole("dispatcher");
     const manager = await withRole("management");
     const mechanic = await withRole("mechanic");
@@ -121,6 +141,9 @@ d("can Unit 142 take this job tomorrow?", () => {
     const unitId = Number(u.insertId);
     const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name, licenseExpiresAt) VALUES (?, 'D. Reid', DATE_ADD(NOW(), INTERVAL 400 DAY))", [driverUser]);
     const operatorId = Number(op.insertId);
+    // Established means verified: since SPINE item 2 the legacy licenseExpiresAt date alone is an
+    // unverified licence (operator_licence_unknown), so the licence is on file and checked.
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Class 1', NOW(), DATE_ADD(NOW(), INTERVAL 400 DAY), 'verified')", [operatorId]);
     const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Acme', 'LSD 04-12-052-09W5', 'dispatched', 0)", [key("JOB").slice(0, 40)]);
     const jobId = Number(j.insertId);
     const [p] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO dispatchPostings (postingNumber, jobId, distribution, planningState, planningBlocker, priority, crewSize, rateVisible, createdByUserId) VALUES (?, ?, 'direct_assignment', 'direct', 'none', 'normal', 1, 0, ?)", [key("POST").slice(0, 40), jobId, dispatcher]);
@@ -170,50 +193,57 @@ d("can Unit 142 take this job tomorrow?", () => {
     expect(c2.blockers.filter(b => b.severity === "blocking")).toEqual([]);
     expect(c2.blockers.map(b => b.code)).toContain("route_not_evaluated");
 
-    // 5. Dispatcher requests the route override; dispatcher may not grant it (manager authority); the requester may not grant their own.
+    // 5. C1a / D-02 — the unknown route is a route-LEGALITY unknown. It blocks, and no role may
+    //    release it by itself: without an owner-approved override policy the request is refused and
+    //    recorded, and a manager's grant is refused too. (Before C1a a manager could.)
     const req2 = await callerFor(dispatcher).dispatch.overrideRequest({ checkId: c2.checkId, blockerCode: "route_not_evaluated", reason: "Lease road verified by phone with Acme site lead; 14 km gravel, no bridges" });
-    expect(req2.requestable).toBe(true);
-    expect(req2.requiredAuthority).toBe("manager");
+    expect(req2.requestable).toBe(false);
+    expect(req2.overrideClass).toBe("APPROVED_POLICY_ONLY");
+    expect(req2.refusal).toMatch(/approved override policy/);
     await expect(callerFor(dispatcher).dispatch.overrideGrant({ checkId: c2.checkId, blockerCode: "route_not_evaluated", reason: "Granting my own request" })).rejects.toThrow(/own override/);
-    const dispatcher2 = await withRole("dispatcher");
-    const g1 = await callerFor(dispatcher2).dispatch.overrideGrant({ checkId: c2.checkId, blockerCode: "route_not_evaluated", reason: "I agree with the dispatcher" });
-    expect(g1.granted).toBe(false); // a second dispatcher lacks manager authority
     const g2 = await callerFor(manager).dispatch.overrideGrant({ checkId: c2.checkId, blockerCode: "route_not_evaluated", reason: "Known route; I accept responsibility until routing data is loaded" });
-    expect(g2.granted).toBe(true);
+    expect(g2.granted).toBe(false);
 
-    // 6. One override is not dispatch. The award still names everything else
-    //    that is unknown or unresolved — HOS state, availability, destination
-    //    acceptance, medical fitness — and refuses. Each must be resolved or
-    //    overridden by the right authority; nothing rounds up.
+    // 6. The award names every safety unknown and refuses — HOS, medical fitness and the route.
     const a3 = await callerFor(dispatcher).dispatch.award({ checkId: c2.checkId, startsAt: new Date(Date.now() + 3_600_000), endsAt: new Date(Date.now() + 7_200_000) });
     expect(a3.ok).toBe(false);
     if (!a3.ok) {
       expect(a3.refusals.join(" ")).toMatch(/hours-of-service/i);
       expect(a3.refusals.join(" ")).toMatch(/medical fitness/i);
-      expect(a3.refusals.join(" ")).not.toMatch(/Route not evaluated/); // the granted one is covered
-    }
-    const remaining = c2.blockers.filter(b => b.code !== "route_not_evaluated");
-    expect(remaining.every(b => b.overridable)).toBe(true); // all overridable — none is a safety/legal blocker
-    for (const b of remaining) {
-      const rq = await callerFor(dispatcher).dispatch.overrideRequest({ checkId: c2.checkId, blockerCode: b.code, reason: `Confirmed by phone with the operator and the facility — ${b.code}` });
-      expect(rq.requestable).toBe(true);
-      const granter = b.overrideAuthority === "administrator" ? await withRole("controller") : manager;
-      const gr = await callerFor(granter).dispatch.overrideGrant({ checkId: c2.checkId, blockerCode: b.code, reason: `Accepted with reason on record — ${b.code}` });
-      expect(gr.granted, b.code).toBe(true);
+      expect(a3.refusals.join(" ")).toMatch(/Route not evaluated/);
     }
 
-    // 7. Now the award proceeds — and marks the check used, with every override on record.
-    const a4 = await callerFor(dispatcher).dispatch.award({ checkId: c2.checkId, startsAt: new Date(Date.now() + 3_600_000), endsAt: new Date(Date.now() + 7_200_000) });
+    // 7. The unknowns are ESTABLISHED, not overridden: an approved route, today's paper-log
+    //    attestation, a verified medical. What remains is warning-grade and is acknowledged by a
+    //    manager — never by the dispatcher who asked — and then the award proceeds.
+    const approvalRef = key("RA").slice(0, 60);
+    await pool.execute("INSERT INTO routeApprovals (approvalRef, jobId, unitId, originRef, destinationRef, dispatchStatus, segmentIdsJson, fingerprintJson, fingerprintHash, explanation, status, approvedByUserId) VALUES (?, ?, ?, 'yard', 'lease', 'clear', '[]', '{}', ?, 'Approved local route', 'approved', ?)", [approvalRef, jobId, unitId, "a".repeat(64), manager]);
+    await pool.execute("INSERT INTO hosAttestations (operatorId, dutyDate, method, statement, hoursAvailableMinutesStated, attestedByUserId) VALUES (?, UTC_DATE(), 'paper_log_reviewed', 'Reviewed the paper log for today', 600, ?)", [operatorId, manager]);
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'medical_fitness', 'Medical', NOW(), DATE_ADD(NOW(), INTERVAL 300 DAY), 'verified')", [operatorId]);
+    const c3 = await callerFor(dispatcher).dispatch.evaluate({ operatorId, unitId, trailerId: null, jobId, postingId, routeApprovalRef: approvalRef });
+    const hard = c3.blockers.filter(b => b.severity === "blocking" || (b as { dispatchEffect?: string }).dispatchEffect === "BLOCK");
+    expect(hard.map(b => b.code), JSON.stringify(c3.blockers.map(b => b.code))).toEqual([]);
+    for (const b of c3.blockers) {
+      expect((b as { overrideClass?: string }).overrideClass, b.code).toBe("WARNING_ONLY");
+      const rq = await callerFor(dispatcher).dispatch.overrideRequest({ checkId: c3.checkId, blockerCode: b.code, reason: `Confirmed by phone with the operator and the facility — ${b.code}` });
+      expect(rq.requestable, b.code).toBe(true);
+      const granter = b.overrideAuthority === "administrator" ? await withRole("controller") : manager;
+      const gr = await callerFor(granter).dispatch.overrideGrant({ checkId: c3.checkId, blockerCode: b.code, reason: `Accepted with reason on record — ${b.code}` });
+      expect(gr.granted, b.code).toBe(true);
+    }
+    const a4 = await callerFor(dispatcher).dispatch.award({ checkId: c3.checkId, startsAt: new Date(Date.now() + 3_600_000), endsAt: new Date(Date.now() + 7_200_000) });
     expect(a4.ok, (a4 as { refusals?: string[] }).refusals?.join(" | ")).toBe(true);
-    const [used] = await pool.execute<mysql.RowDataPacket[]>("SELECT usedForAward, verdict FROM dispatchEligibilityChecks WHERE id = ?", [c2.checkId]);
+    const [used] = await pool.execute<mysql.RowDataPacket[]>("SELECT usedForAward, verdict FROM dispatchEligibilityChecks WHERE id = ?", [c3.checkId]);
     expect(Number(used[0].usedForAward)).toBe(1);
-    const [ovr] = await pool.execute<mysql.RowDataPacket[]>("SELECT blockerCode, granted FROM dispatchOverrides WHERE eligibilityCheckId = ? AND granted = 1", [c2.checkId]);
-    expect(new Set(ovr.map(o => o.blockerCode))).toEqual(new Set(c2.blockers.map(b => b.code)));
+    const [ovr] = await pool.execute<mysql.RowDataPacket[]>("SELECT blockerCode, requestedByUserId, grantedByUserId FROM dispatchOverrides WHERE eligibilityCheckId = ? AND granted = 1", [c3.checkId]);
+    expect(new Set(ovr.map(o => o.blockerCode))).toEqual(new Set(c3.blockers.map(b => b.code)));
+    for (const o of ovr) { expect(Number(o.requestedByUserId)).toBe(dispatcher); expect(Number(o.grantedByUserId)).not.toBe(dispatcher); }
 
     // 8. The operator's own checklist: reads their own record, says what is missing, and carries nothing private.
     const mine = await callerFor(driverUser).dispatch.whatAmIMissing({ unitId, jobId });
     expect(mine.items.some(i => i.code === "route_not_evaluated")).toBe(true);
-    expect(mine.items.some(i => i.code === "medical_fitness_unknown")).toBe(true);
+    // Established in step 7, so no longer missing; the medical detail itself never reaches the list.
+    expect(mine.items.some(i => i.code === "medical_fitness_unknown")).toBe(false);
     expect(JSON.stringify(mine)).not.toMatch(/storageKey|identifier|diagnos/i);
     // A user with no operator record gets an honest note, not someone else's readiness.
     const stranger = await withRole("office");
