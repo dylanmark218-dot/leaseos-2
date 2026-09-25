@@ -55,6 +55,9 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
   const requested = routeParams?.portal ?? null;
 
   const organization = session.data?.organization ?? null;
+  // The Board queue's organization key: the resolved organization, or the historical single tenant.
+  // An ambiguous or unresolved organization opens no queue — nothing is written for nobody.
+  const boardOrgKey = organization?.state === "resolved" ? organization.orgRef : organization?.state === "single_tenant_fallback" ? "default" : null;
   const savedDefault =
     organization && organization.state !== "ambiguous" && organization.state !== "unresolved"
       ? organization.defaultWorkspace
@@ -149,7 +152,7 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
         {panel === "exceptions" && <ExceptionsPanel items={(exceptions.data?.items ?? []) as never} summary={myDay.data?.attention as never} onGo={go} />}
         {panel === "inbox" && <InboxPanel items={(inbox.data?.items ?? []) as never} counts={inbox.data?.counts ?? {}} onGo={go} />}
         {/* 0182/0183 — conversations and open work; writes go through the device's board queue. */}
-        {panel === "board" && <BoardPanel online={online} />}
+        {panel === "board" && <BoardPanel online={online} orgKey={boardOrgKey} />}
         {panel === "timeline" && <TimelinePanel />}
         {panel === "setup" && OFFICE_PORTALS.has(portal) && <SetupPanel />}
         {view && view.quickCapture.length > 0 && <QuickCapture actions={view.quickCapture} />}

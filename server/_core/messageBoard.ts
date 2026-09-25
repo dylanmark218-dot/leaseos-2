@@ -328,7 +328,10 @@ export const PUBLISH_CHANNEL_TYPES: readonly ChannelType[] = ["announcement", "e
  * in, and an announcement channel is a publication whatever priority the poster chose.
  */
 export function requiresPublishAuthority(channelType: ChannelType, priority: Priority): boolean {
-  return priority === "emergency" || PUBLISH_CHANNEL_TYPES.includes(channelType);
+  return priority === "emergency" || PUBLISH_CHANNEL_TYPES.includes(channelType)
+    // Checkpoint 5 — a safety channel is where anyone reports a hazard, but a post there that demands
+    // a roll-call of acknowledgements is a safety bulletin, and a bulletin is published, not sent.
+    || (channelType === "safety" && ACKNOWLEDGEMENT_REQUIRED.includes(priority));
 }
 
 /** Channel types that are explicit by construction: a conversation between named people. */

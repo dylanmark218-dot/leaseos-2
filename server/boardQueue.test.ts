@@ -49,6 +49,7 @@ async function rig(online = true) {
   const connectivity = new FlagConnectivity(online);
   const server = fakeServer();
   const queue = new BoardQueue({ store, vault, clock, connectivity, transport: server.transport });
+  await queue.open({ orgKey: "ORG-A", userId: 7 });
   return { clock, keystore, vault, store, connectivity, server, queue };
 }
 

@@ -28,7 +28,7 @@ import { domainEventOutbox, workflowNotifications } from "../../drizzle/schema";
 
 export type BoardEventType =
   | "work.posted" | "work.offered" | "work.awarded" | "work.cancelled"
-  | "message.critical.created" | "message.acknowledged" | "board.member.added";
+  | "message.critical.created" | "message.posted" | "message.acknowledged" | "board.member.added";
 
 export type BoardAggregateType = "shiftPost" | "boardMessage" | "messageChannel";
 

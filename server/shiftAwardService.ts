@@ -44,7 +44,7 @@ import { enqueueBoardEvent } from "./_core/boardOutbox";
 
 export type AwardRefusalCode =
   | "post_unlinked" | "post_not_awardable" | "no_operator_record" | "check_subject_mismatch"
-  | "readiness_stale" | "readiness_refused" | "offer_not_live" | "no_offer";
+  | "readiness_stale" | "readiness_refused" | "offer_not_live" | "offer_unanswered" | "no_offer";
 
 export type ShiftAwardResult =
   | { ok: true; postRef: string; roleId: number; eventId: number; lastEventId: number; planningState: string; staffing: AssignmentOutcome["staffing"]; jobRoomChannelRef: string | null; notSelected: number[]; explanation: string }
@@ -148,8 +148,14 @@ export async function awardPost(input: ShiftAwardInput): Promise<ShiftAwardResul
         const latest = (await tx.select().from(shiftOffers).where(and(eq(shiftOffers.postRef, post.postRef), eq(shiftOffers.userId, input.userId))).limit(50))
           .sort((a, b) => b.id - a.id)[0];
         const latestStatus: OfferStatus | null = latest ? effectiveOfferStatus({ status: latest.status, expiresAt: latest.expiresAt }, now) : null;
-        if (latestStatus && !input.reason?.trim()) return refuseIn("offer_not_live", [`${input.userId}'s latest offer on this post is ${latestStatus}; awarding over a recorded answer needs a reason`]);
+        // A recorded answer is not overridden by a reason (§5.5, D-1): the dispatcher withdraws nothing and
+        // issues a new offer, and the award follows that. A reason stands in only where no offer ever existed.
+        if (latestStatus) return refuseIn("offer_not_live", [`${input.userId}'s latest offer on this post is ${latestStatus}; issue a new offer before awarding`]);
         if (!latestStatus && !input.reason?.trim()) return refuseIn("no_offer", [`${input.userId} was never offered this post; awarding without an offer needs a reason`]);
+      } else if (live.effective === "offered" && !input.reason?.trim()) {
+        // §5.5, D-1: the award follows an accepted offer. One the person has not answered is not a yes;
+        // a dispatcher who has one another way (the phone, the yard) says so, and the reason is recorded.
+        return refuseIn("offer_unanswered", [`${input.userId} has not answered the offer; awarding before they accept needs a reason`]);
       }
 
       // 5. The binding — the canonical one, unchanged, inside this transaction.

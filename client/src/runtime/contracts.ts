@@ -78,7 +78,19 @@ export type LocalCapture = {
   packagedIn: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Checkpoint 5 — whose it is: the organization and the signed-in person it was written under. Set
+   * on direct captures (board messages, acknowledgements, open-work responses), which are sent as
+   * that person into that organization; absent on evidence captures, which the vault and the
+   * device's enrolment already scope. A capture is listed and sent only under the scope that wrote it.
+   */
+  scope?: CaptureScope | null;
 };
+
+/** The organization key (`orgRef`, or `default` for the historical single tenant) and the person. */
+export type CaptureScope = { orgKey: string; userId: number };
+export const sameScope = (a: CaptureScope | null | undefined, b: CaptureScope | null | undefined): boolean =>
+  !!a && !!b && a.orgKey === b.orgKey && a.userId === b.userId;
 
 export type LocalPackage = { packageRef: string; captureIds: string[]; queuedAt: string; state: "queued" | "sent" | "accepted" | "rejected" | "partial"; receipt: unknown; attempts: number };
 

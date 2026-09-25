@@ -206,6 +206,7 @@ const surfaces = [
   { name: "no workspace available", render: () => render(<NoPortalAvailable notReached={a11yPortals} onSignOut={() => {}} />) },
   { name: "organization selection required", render: () => render(<OrganizationSelectionRequired detail="member of 2 organizations" />) },
   { name: "board — offline conversation with a queued message and a bulletin to acknowledge", render: () => render(<BoardPanelView {...board()} />) },
+  { name: "board — a write the device refused and conversations that failed to load", render: () => render(<BoardPanelView {...board({ online: true, writeNotice: "Not signed in to an organization on this device — nothing was kept", channels: { kind: "failed", message: "Network down" }, visibleChannels: [] })} />) },
   { name: "board — open-work card with an offer", render: () => render(<BoardPanelView {...board({ online: true, tab: "open_work", selectedPost: "OS-1", card: { kind: "loaded", value: boardCard }, pendingResponse: { response: "interested", state: "queued", lastError: null } })} />) },
 ];
 

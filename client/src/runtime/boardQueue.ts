@@ -20,9 +20,31 @@
  *
  *   ACKNOWLEDGEMENTS GO FIRST. A safety acknowledgement queued behind forty chat messages is a
  *   supervisor chasing somebody who already said yes.
+ *
+ * Checkpoint 5 — whose queue it is, and what a restart finds.
+ *
+ *   SCOPED. Every capture is written under a scope — the organization key and the signed-in person —
+ *   and is listed and sent only under that same scope. With no scope open (signed out, organization
+ *   unsettled) the queue lists nothing, sends nothing and accepts nothing. Switching from
+ *   organization A to B hides A's waiting messages and does not send them as B; signing out and in as
+ *   somebody else shows that person none of the previous person's. The records are not deleted —
+ *   nothing unaccepted ever is — they wait, encrypted where the store is, for their own scope.
+ *
+ *   HONEST AFTER A RESTART. `hydrate()` is the first thing a queue does under a scope. A capture
+ *   found `syncing` was sent and never answered; it goes back to `queued` with that said, and the
+ *   next flush resends it with the same mutation id, which the server answers with what it already
+ *   wrote. Nothing is ever marked sent from the device's own records: `synchronized` comes only from
+ *   a server reply. A refused capture keeps its refusal until somebody retries it.
+ *
+ *   NO BODIES IN ERRORS. `lastError` is shown on screen and may reach diagnostics. A transport error
+ *   that echoes the text it failed to send is scrubbed before it is kept.
+ *
+ * Durability is the store's, not this class's: over the native encrypted store the queue survives a
+ * restart; over the browser fallback's memory store it lasts as long as the page, and the screen says
+ * so. This class behaves the same over both, which is what the restart tests exercise.
  */
 import { Outbox } from "./outbox";
-import { isDirectCapture, type Clock, type Connectivity, type FileVault, type LocalCapture, type LocalStore } from "./contracts";
+import { isDirectCapture, sameScope, type CaptureScope, type Clock, type Connectivity, type FileVault, type LocalCapture, type LocalStore } from "./contracts";
 
 export type BoardPriority = "normal" | "important" | "urgent" | "emergency";
 export type ShiftResponse = "interested" | "available" | "request_assignment" | "declined";
@@ -47,13 +69,98 @@ export function errorCode(e: unknown): string | null {
 const ORDER: Record<string, number> = { board_acknowledgement: 0, board_message: 1, shift_response: 2 };
 
 export type FlushOutcome = { attempted: boolean; reason: string; sent: number; requeued: number; failed: number; conflicts: number };
+export type HydrateOutcome = { restored: number; interrupted: number; refused: number };
+
+/** What a capture found mid-send after a restart is told. */
+export const INTERRUPTED = "Interrupted before the server answered — will be resent with the same id, and the server will not record it twice";
+
+/** A queue with no scope open refuses to take anything: there is nobody to send it as. */
+export class NoScope extends Error {
+  constructor() { super("Not signed in to an organization on this device — nothing was kept"); this.name = "NoScope"; }
+}
+
+/** Keep an error message without the text it failed to send. */
+function scrub(message: string, c: LocalCapture): string {
+  const body = typeof c.fields.body === "string" ? c.fields.body.trim() : "";
+  const out = body.length >= 3 ? message.split(body).join("[message text]") : message;
+  return out.slice(0, 300);
+}
 
 export class BoardQueue {
   private outbox: Outbox;
   private flushing: Promise<FlushOutcome> | null = null;
+  private current: CaptureScope | null = null;
 
   constructor(private deps: { store: LocalStore; vault: FileVault; clock: Clock; connectivity: Connectivity; transport: BoardTransport }) {
     this.outbox = new Outbox(deps.store, deps.vault, deps.clock);
+  }
+
+  /** The scope the queue is open under, or null. */
+  scope(): CaptureScope | null { return this.current ? { ...this.current } : null; }
+
+  /**
+   * Open the queue for a person in an organization, and restore what they left waiting. Opening a
+   * different scope closes the previous one first: its captures stay stored and stop being visible.
+   */
+  async open(scope: CaptureScope): Promise<HydrateOutcome> {
+    if (!scope.orgKey || !Number.isInteger(scope.userId) || scope.userId <= 0) throw new Error("A queue scope names an organization and a signed-in person");
+    if (!sameScope(this.current, scope)) {
+      // Switch first, then let a running flush notice and stop: the previous scope's captures must
+      // not go out under the new session.
+      this.current = { orgKey: scope.orgKey, userId: scope.userId };
+      if (this.flushing) await this.flushing.catch(() => undefined);
+    }
+    return this.hydrate();
+  }
+
+  /** Sign-out, or an organization that is not settled: list nothing, send nothing, take nothing. */
+  async close(): Promise<void> {
+    this.current = null;
+    if (this.flushing) await this.flushing.catch(() => undefined);
+  }
+
+  /**
+   * Restore honest states for this scope after a restart. `syncing` → `queued` with the reason;
+   * a capture written but never queued (the app died between the two writes) → `queued`. Refused
+   * and conflicting captures keep their reason. Nothing becomes `synchronized` here.
+   */
+  async hydrate(): Promise<HydrateOutcome> {
+    const out: HydrateOutcome = { restored: 0, interrupted: 0, refused: 0 };
+    for (const c of await this.mine()) {
+      if (c.syncState === "syncing") { await this.outbox.requeue(c.localId, INTERRUPTED); out.interrupted++; out.restored++; }
+      else if (c.syncState === "saved_locally") { await this.outbox.queue(c.localId); out.restored++; }
+      else if (c.syncState === "queued") out.restored++;
+      else if (c.syncState === "failed" || c.syncState === "conflict") out.refused++;
+    }
+    return out;
+  }
+
+  /** Retry one refused or conflicting capture, by the person who wrote it. */
+  async retry(localId: string): Promise<LocalCapture> {
+    const c = (await this.mine()).find(x => x.localId === localId);
+    if (!c) throw new Error("No such capture waiting on this device");
+    if (c.syncState === "conflict") {
+      // The outbox moves a conflict back only through failed; the reason stays until the resend answers.
+      await this.outbox.markFailed(c.localId, c.lastError ?? "Conflict");
+    }
+    return this.outbox.queue(c.localId);
+  }
+
+  private async mine(): Promise<LocalCapture[]> {
+    const scope = this.current;
+    if (!scope) return [];
+    return (await this.deps.store.listCaptures()).filter(c => isDirectCapture(c.kind) && sameScope(c.scope, scope));
+  }
+
+  private async write(draft: Parameters<Outbox["saveDraft"]>[0]): Promise<LocalCapture> {
+    const scope = this.current;
+    if (!scope) throw new NoScope();
+    const c = await this.outbox.saveDraft(draft);
+    // Scoped before it is queued: a capture that crashed between the two writes is unscoped, and an
+    // unscoped capture is never listed or sent — the safe way for that to fail.
+    c.scope = { ...scope };
+    await this.deps.store.putCapture(c);
+    return this.outbox.queue(c.localId);
   }
 
   /**
@@ -72,25 +179,22 @@ export class BoardQueue {
 
   /** Compose a message. Saved and queued at once: a message is complete when it is written. */
   async message(args: { channelRef: string; body: string; priority?: BoardPriority }): Promise<LocalCapture> {
-    const c = await this.outbox.saveDraft({ kind: "board_message", formKey: null, title: "Message", category: "board", fields: { channelRef: args.channelRef, body: args.body, priority: args.priority ?? "normal" } });
-    return this.outbox.queue(c.localId);
+    return this.write({ kind: "board_message", formKey: null, title: "Message", category: "board", fields: { channelRef: args.channelRef, body: args.body, priority: args.priority ?? "normal" } });
   }
 
   /** Acknowledge a bulletin. The device's clock travels with it; the server keeps its own beside it. */
   async acknowledge(args: { messageRef: string; channelRef?: string }): Promise<LocalCapture> {
-    const c = await this.outbox.saveDraft({ kind: "board_acknowledgement", formKey: null, title: "Acknowledgement", category: "board", fields: { messageRef: args.messageRef, channelRef: args.channelRef ?? null } });
-    return this.outbox.queue(c.localId);
+    return this.write({ kind: "board_acknowledgement", formKey: null, title: "Acknowledgement", category: "board", fields: { messageRef: args.messageRef, channelRef: args.channelRef ?? null } });
   }
 
   /** Answer an open-work post. Assigns nothing, here or on the server. */
   async respond(args: { postRef: string; response: ShiftResponse; note?: string }): Promise<LocalCapture> {
-    const c = await this.outbox.saveDraft({ kind: "shift_response", formKey: null, title: "Response", category: "open_work", fields: { postRef: args.postRef, response: args.response, note: args.note ?? null } });
-    return this.outbox.queue(c.localId);
+    return this.write({ kind: "shift_response", formKey: null, title: "Response", category: "open_work", fields: { postRef: args.postRef, response: args.response, note: args.note ?? null } });
   }
 
-  /** Every board capture on this device, oldest first, whatever its state. */
+  /** This scope's board captures on this device, oldest first, whatever their state. Nobody else's. */
   async list(): Promise<LocalCapture[]> {
-    return (await this.deps.store.listCaptures()).filter(c => isDirectCapture(c.kind)).sort((a, b) => a.capturedAt.localeCompare(b.capturedAt) || a.localId.localeCompare(b.localId));
+    return (await this.mine()).sort((a, b) => a.capturedAt.localeCompare(b.capturedAt) || a.localId.localeCompare(b.localId));
   }
 
   /**
@@ -105,15 +209,19 @@ export class BoardQueue {
 
   private async flushOnce(): Promise<FlushOutcome> {
     const out: FlushOutcome = { attempted: false, reason: "", sent: 0, requeued: 0, failed: 0, conflicts: 0 };
+    const scope = this.current;
+    if (!scope) return { ...out, reason: "Not signed in to an organization — nothing is sent" };
     if (!(await this.deps.connectivity.online())) return { ...out, reason: "Offline — kept on this device and sent when a connection returns" };
     const waiting = (await this.deps.store.listCaptures({ syncState: ["queued", "syncing"] }))
-      .filter(c => isDirectCapture(c.kind))
+      .filter(c => isDirectCapture(c.kind) && sameScope(c.scope, scope))
       .sort((a, b) => (ORDER[a.kind] ?? 9) - (ORDER[b.kind] ?? 9) || a.capturedAt.localeCompare(b.capturedAt) || a.localId.localeCompare(b.localId));
     if (!waiting.length) return { ...out, reason: "Nothing waiting" };
     out.attempted = true;
     const deviceId = await this.deviceId();
 
     for (const c of waiting) {
+      // Signed out or switched organization mid-flush: stop. What is left waits for its own scope.
+      if (!sameScope(this.current, scope)) break;
       if (c.syncState === "queued") await this.outbox.markSyncing(c.localId, `direct:${c.kind}`);
       try {
         const serverRef = await this.send(c, deviceId);
@@ -122,7 +230,7 @@ export class BoardQueue {
         out.sent++;
       } catch (e) {
         const code = errorCode(e);
-        const message = (e as Error)?.message ?? String(e);
+        const message = scrub((e as Error)?.message ?? String(e), c);
         if (code === "CONFLICT") { await this.outbox.markConflict(c.localId, message); out.conflicts++; }
         else if (code && REFUSALS.has(code)) { await this.outbox.markFailed(c.localId, `${code}: ${message}`); out.failed++; }
         else {

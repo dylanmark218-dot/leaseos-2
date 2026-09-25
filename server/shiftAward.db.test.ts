@@ -129,6 +129,9 @@ d("the award binds the slot through the canonical binding", () => {
     const members = await caller(s.driverUser).board.members({ channelRef: a.jobRoomChannelRef! });
     expect(members.members.map(m => m.userId).sort()).toEqual([s.dispatcher, s.driverUser].sort());
     await expect(caller(s.driverUser).board.read({ channelRef: a.jobRoomChannelRef! })).resolves.toBeTruthy();
+    // Membership follows the binding, not the org chart: a driver not on the job and a manager are not in it.
+    await expect(caller(await withRole("driver")).board.read({ channelRef: a.jobRoomChannelRef! })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller(s.manager).board.read({ channelRef: a.jobRoomChannelRef! })).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     // Nothing the dispatcher's own award writes: no booking, no assignment_approved, usedForAward untouched.
     expect((await rows("SELECT id FROM resourceBookings WHERE postingId = ?", [s.postingId]))).toHaveLength(0);
@@ -175,10 +178,11 @@ d("readiness is the gate", () => {
     const c = await caller(s.dispatcher).dispatch.evaluate(s.subject);
     // The established subject carries warning-grade findings only; unacknowledged, they are uncovered.
     expect((c.blockers as unknown as Finding[]).length).toBeGreaterThan(0);
-    await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: s.driverUser });
+    const o = await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: s.driverUser });
     const refused = await award(s, { checkId: c.checkId });
     expect(refused).toMatchObject({ ok: false, code: "readiness_refused" });
     await acknowledgeWarnings(s, c.checkId, c.blockers as unknown as Finding[]);
+    await caller(s.driverUser).shifts.offerRespond({ offerRef: o.offerRef, decision: "accepted" });
     const a = await award(s, { checkId: c.checkId });
     expect(a.ok, (a as { refusals?: string[] }).refusals?.join(" | ")).toBe(true);
   });
@@ -216,14 +220,28 @@ d("the post and the offer are the gate too", () => {
     expect(await award(s, { checkId: c.checkId })).toMatchObject({ ok: false, code: "post_not_awardable" });
   });
 
-  it("refuses awarding over a declined offer, or with no offer, unless the dispatcher says why", async () => {
+  it("refuses awarding over an unanswered offer unless the dispatcher says why, and records the reason", async () => {
+    const s = await establishedScene();
+    const c = await acknowledgedCheck(s);
+    await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: s.driverUser });
+    expect(await award(s, { checkId: c.checkId })).toMatchObject({ ok: false, code: "offer_unanswered" });
+    expect((await rows("SELECT status FROM dispatchRoles WHERE id = ?", [s.roleId]))[0]!.status).toBe("open");
+    const a = await award(s, { checkId: c.checkId, reason: "accepted by phone at 06:10" });
+    expect(a.ok, (a as { refusals?: string[] }).refusals?.join(" | ")).toBe(true);
+  });
+
+  it("refuses awarding over a declined offer even with a reason, and with no offer unless the dispatcher says why", async () => {
     const s = await establishedScene();
     const c = await acknowledgedCheck(s);
     expect(await award(s, { checkId: c.checkId })).toMatchObject({ ok: false, code: "no_offer" });
     const o = await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: s.driverUser });
     await caller(s.driverUser).shifts.offerRespond({ offerRef: o.offerRef, decision: "declined" });
     expect(await award(s, { checkId: c.checkId })).toMatchObject({ ok: false, code: "offer_not_live" });
-    const a = await award(s, { checkId: c.checkId, reason: "phoned and confirmed after declining by mistake" });
+    // §5.5: a reason does not override a recorded answer. The dispatcher issues a new offer instead.
+    expect(await award(s, { checkId: c.checkId, reason: "phoned and confirmed after declining by mistake" })).toMatchObject({ ok: false, code: "offer_not_live" });
+    const again = await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: s.driverUser });
+    await caller(s.driverUser).shifts.offerRespond({ offerRef: again.offerRef, decision: "accepted" });
+    const a = await award(s, { checkId: c.checkId });
     expect(a.ok, (a as { refusals?: string[] }).refusals?.join(" | ")).toBe(true);
   });
 
@@ -231,7 +249,7 @@ d("the post and the offer are the gate too", () => {
     const s = await establishedScene();
     const c = await acknowledgedCheck(s);
     await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: s.driverUser });
-    await expect(award(s, { checkId: c.checkId, expectedLastEventId: 999_999_999 })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(award(s, { checkId: c.checkId, expectedLastEventId: 999_999_999, reason: "confirmed by radio" })).rejects.toMatchObject({ code: "CONFLICT" });
     expect((await rows("SELECT detail FROM shiftPostEvents WHERE postRef = ? AND eventType = 'award_refused'", [s.postRef]))[0]!.detail).toContain("CONFLICT");
     expect((await rows("SELECT status FROM shiftPosts WHERE postRef = ?", [s.postRef]))[0]!.status).toBe("open");
   });

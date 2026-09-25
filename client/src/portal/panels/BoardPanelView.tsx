@@ -63,6 +63,8 @@ export type BoardPanelViewProps = {
   onAnswerOffer: (offerRef: string, decision: "accepted" | "declined") => void;
   queueSummary: { waiting: number; refused: number };
   onRetry: () => void;
+  /** A write this device could not keep (signed out, organization not settled). Stays until the next write. */
+  writeNotice?: string | null;
 };
 
 const when = (d: Date) => `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
@@ -77,7 +79,7 @@ const PRIORITY_TONE: Record<MessageRow["priority"], string> = {
 function Failed({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div role="alert" className="rounded-lg bg-[#fdecec] p-3 text-sm text-[#b42318]">
-      Could not load: {message} <button onClick={onRetry} className="ml-2 underline">Try again</button>
+      Could not load: {message} <button onClick={onRetry} className="min-h-[44px] inline-flex items-center ml-2 underline">Try again</button>
     </div>
   );
 }
@@ -111,7 +113,7 @@ function Conversation(props: BoardPanelViewProps) {
                 {m.requiresAcknowledgement && m.acknowledgedByMe === false && (
                   m.pendingAcknowledgement
                     ? <div className="mt-2 text-xs">Your acknowledgement: <SendBadge state={m.pendingAcknowledgement} /></div>
-                    : <button onClick={() => props.onAcknowledge(m.messageRef)} className="mt-2 rounded-lg bg-[#132a4a] px-3 py-1 text-sm text-white">Acknowledge</button>
+                    : <button onClick={() => props.onAcknowledge(m.messageRef)} className="min-h-[44px] mt-2 rounded-lg bg-[#132a4a] px-3 py-1 text-sm text-white">Acknowledge</button>
                 )}
                 {m.requiresAcknowledgement && m.acknowledgedByMe === true && <div className="mt-2 text-xs text-[#1e6b3a]">You acknowledged this.</div>}
               </li>
@@ -132,8 +134,8 @@ function Conversation(props: BoardPanelViewProps) {
             <textarea id="board-compose" value={draft} onChange={e => setDraft(e.target.value)} rows={3} maxLength={4000}
               className="w-full rounded-lg border border-[#c9d6ea] p-2 text-sm" />
             <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={important} onChange={e => setImportant(e.target.checked)} /> Important</label>
-              <button type="submit" disabled={!draft.trim()} className="ml-auto rounded-lg bg-[#132a4a] px-4 py-1.5 text-sm text-white disabled:opacity-50">
+              <label className="flex min-h-[44px] items-center gap-2 text-sm"><input type="checkbox" className="h-5 w-5" checked={important} onChange={e => setImportant(e.target.checked)} /> Important</label>
+              <button type="submit" disabled={!draft.trim()} className="min-h-[44px] ml-auto rounded-lg bg-[#132a4a] px-4 py-1.5 text-sm text-white disabled:opacity-50">
                 {props.online ? "Send" : "Queue to send"}
               </button>
             </div>
@@ -156,7 +158,7 @@ function OpenWork(props: BoardPanelViewProps) {
             {work.value.map(w => (
               <li key={w.postRef}>
                 <button onClick={() => props.onSelectPost(w.postRef)} aria-pressed={props.selectedPost === w.postRef}
-                  className={`w-full rounded-xl border p-3 text-left ${props.selectedPost === w.postRef ? "border-[#132a4a] bg-[#f4f7fc]" : "border-[#dfe5ee] bg-white"}`}>
+                  className={`min-h-[44px] w-full rounded-xl border p-3 text-left ${props.selectedPost === w.postRef ? "border-[#132a4a] bg-[#f4f7fc]" : "border-[#dfe5ee] bg-white"}`}>
                   <span className="block font-medium">{w.title}</span>
                   <span className="block text-xs text-[#5b6b82]">{w.requiredRole} · {w.place} · {when(w.startsAt)}{w.overtime ? " · overtime" : ""}</span>
                   {w.myResponse && <span className="mt-1 block text-xs text-[#1e6b3a]">{presentResponse(w.myResponse)}</span>}
@@ -199,8 +201,8 @@ function Card(props: BoardPanelViewProps & { shown: OpenWorkCard }) {
           <p>{c.offer.label}</p>
           {c.offer.answerable && (
             <div className="mt-2 flex gap-2">
-              <button onClick={() => props.onAnswerOffer(c.offer!.offerRef, "accepted")} disabled={!props.online || props.offerAnswer.kind === "pending"} className="rounded-lg bg-[#132a4a] px-3 py-1 text-white disabled:opacity-50">Accept offer</button>
-              <button onClick={() => props.onAnswerOffer(c.offer!.offerRef, "declined")} disabled={!props.online || props.offerAnswer.kind === "pending"} className="rounded-lg bg-[#eef2f7] px-3 py-1 disabled:opacity-50">Decline offer</button>
+              <button onClick={() => props.onAnswerOffer(c.offer!.offerRef, "accepted")} disabled={!props.online || props.offerAnswer.kind === "pending"} className="min-h-[44px] rounded-lg bg-[#132a4a] px-3 py-1 text-white disabled:opacity-50">Accept offer</button>
+              <button onClick={() => props.onAnswerOffer(c.offer!.offerRef, "declined")} disabled={!props.online || props.offerAnswer.kind === "pending"} className="min-h-[44px] rounded-lg bg-[#eef2f7] px-3 py-1 disabled:opacity-50">Decline offer</button>
             </div>
           )}
           {c.offer.answerable && !props.online && <p className="mt-1 text-xs text-[#5b6b82]">Answering an offer needs a connection.</p>}
@@ -213,9 +215,9 @@ function Card(props: BoardPanelViewProps & { shown: OpenWorkCard }) {
           {props.pendingResponse.lastError && <span className="ml-1 text-[#b42318]">{props.pendingResponse.lastError}</span>}</p>
       )}
       <div className="mt-3 flex flex-wrap gap-2">
-        <button onClick={() => props.onRespond(c.postRef, "interested")} disabled={!c.canRespond} className="rounded-lg bg-[#132a4a] px-3 py-1.5 text-sm text-white disabled:opacity-50">Interested</button>
-        <button onClick={() => props.onRespond(c.postRef, "available")} disabled={!c.canRespond} className="rounded-lg bg-[#eef2f7] px-3 py-1.5 text-sm disabled:opacity-50">Available</button>
-        <button onClick={() => props.onRespond(c.postRef, "declined")} disabled={!c.canDecline} className="rounded-lg bg-[#eef2f7] px-3 py-1.5 text-sm disabled:opacity-50">Decline</button>
+        <button onClick={() => props.onRespond(c.postRef, "interested")} disabled={!c.canRespond} className="min-h-[44px] rounded-lg bg-[#132a4a] px-3 py-1.5 text-sm text-white disabled:opacity-50">Interested</button>
+        <button onClick={() => props.onRespond(c.postRef, "available")} disabled={!c.canRespond} className="min-h-[44px] rounded-lg bg-[#eef2f7] px-3 py-1.5 text-sm disabled:opacity-50">Available</button>
+        <button onClick={() => props.onRespond(c.postRef, "declined")} disabled={!c.canDecline} className="min-h-[44px] rounded-lg bg-[#eef2f7] px-3 py-1.5 text-sm disabled:opacity-50">Decline</button>
       </div>
       {c.actionNote && <p className="mt-2 text-xs text-[#5b6b82]">{c.actionNote}</p>}
       <p className="mt-2 text-xs text-[#5b6b82]">Answering records what you would take. Dispatch gives the work, and the readiness check runs then.</p>
@@ -233,11 +235,14 @@ export function BoardPanelView(props: BoardPanelViewProps) {
           {!props.durableQueue && " This browser keeps it only while this page is open."}
         </p>
       )}
+      {props.writeNotice && (
+        <p role="alert" className="mb-3 rounded-lg bg-[#fdecec] p-2 text-sm text-[#b42318]">Not kept: {props.writeNotice}</p>
+      )}
       {(props.queueSummary.waiting > 0 || props.queueSummary.refused > 0) && (
         <p role="status" className="mb-3 text-xs text-[#5b6b82]">
           {props.queueSummary.waiting > 0 && `${props.queueSummary.waiting} waiting on this device. `}
           {props.queueSummary.refused > 0 && `${props.queueSummary.refused} refused by the server and kept. `}
-          <button onClick={props.onRetry} className="underline">Send now</button>
+          <button onClick={props.onRetry} className="min-h-[44px] inline-flex items-center underline">Send now</button>
         </p>
       )}
       <nav aria-label="Board sections" className="mb-4 flex flex-wrap gap-1">
@@ -245,7 +250,7 @@ export function BoardPanelView(props: BoardPanelViewProps) {
           const badge = tabBadge(t, channels);
           return (
             <button key={t} onClick={() => props.onTab(t)} aria-pressed={props.tab === t}
-              className={`rounded-full px-3 py-1 text-sm ${props.tab === t ? "bg-[#132a4a] text-white" : "bg-[#eef2f7] text-[#172033]"}`}>
+              className={`min-h-[44px] rounded-full px-3 py-1 text-sm ${props.tab === t ? "bg-[#132a4a] text-white" : "bg-[#eef2f7] text-[#172033]"}`}>
               {TAB_LABELS[t]}{badge > 0 && <span className="ml-1">· {badge}<span className="sr-only"> waiting for your acknowledgement</span></span>}
             </button>
           );
@@ -261,7 +266,7 @@ export function BoardPanelView(props: BoardPanelViewProps) {
                 {props.visibleChannels.map(c => (
                   <li key={c.channelRef}>
                     <button onClick={() => props.onSelectChannel(c.channelRef)} aria-pressed={props.selectedChannel === c.channelRef}
-                      className={`w-full rounded-lg px-3 py-2 text-left text-sm ${props.selectedChannel === c.channelRef ? "bg-[#f4f7fc] font-medium" : ""}`}>
+                      className={`min-h-[44px] w-full rounded-lg px-3 py-2 text-left text-sm ${props.selectedChannel === c.channelRef ? "bg-[#f4f7fc] font-medium" : ""}`}>
                       {c.name}{c.unacknowledged > 0 && <span className="ml-1 text-[#b42318]">· {c.unacknowledged}<span className="sr-only"> waiting for your acknowledgement</span></span>}
                     </button>
                   </li>

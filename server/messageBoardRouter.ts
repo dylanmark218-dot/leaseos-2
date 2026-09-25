@@ -31,6 +31,7 @@ import { z } from "zod";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb, listActiveUserRoleNames, userInScope } from "./db";
+import { displayIdentities, labelOf, type DisplayIdentity } from "./boardIdentity";
 import {
   boardMessages, crewMembers, crews, messageAttachments, messageChannelEvents, messageChannelMembers, messageChannels,
   messageReceipts, messageRevisions, organizationMemberships,
@@ -495,9 +496,10 @@ export const messageBoardRouter = router({
       const opened = await openChannel(d, { channelRef: input.channelRef, tenantId: acting.tenantId, viewer });
       if (opened.row.membershipMode !== "explicit") return { channelRef: input.channelRef, membershipMode: opened.row.membershipMode as MembershipMode, members: [], note: "Not an explicit channel — admission is by the channel rule, not a member list." };
       const rows = await d.select().from(messageChannelMembers).where(eq(messageChannelMembers.channelRef, input.channelRef)).orderBy(asc(messageChannelMembers.joinedAt)).limit(MAX_EXPLICIT_MEMBERS + 50);
+      const names = await displayIdentities(d, rows.map(r => r.userId), { tenantId: acting.tenantId });
       return {
         channelRef: input.channelRef, membershipMode: "explicit" as const,
-        members: rows.map(r => ({ userId: r.userId, memberRole: r.memberRole, source: r.source, joinedAt: r.joinedAt, leftAt: r.leftAt, mutedAt: r.mutedAt })),
+        members: rows.map(r => ({ userId: r.userId, label: labelOf(names, r.userId), memberRole: r.memberRole, source: r.source, joinedAt: r.joinedAt, leftAt: r.leftAt, mutedAt: r.mutedAt })),
         note: "A former member stays listed with the date they left; what they were sent stays theirs to read.",
       };
     }),
@@ -519,6 +521,11 @@ export const messageBoardRouter = router({
       if (opened.channel.type === "direct") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A direct channel is two people; a third makes a group" });
       await assertMayManageMembers(d, { opened, userId: ctx.user.id, roles });
       await assertUserInScope(input.userId, acting);
+      // D-3: a private conversation is read by its members. The manage authority may name others into a
+      // group; it may not name its holder, or `board.manage` would be a key to every group by self-invitation.
+      if (input.userId === ctx.user.id && EXPLICIT_ONLY_TYPES.includes(opened.channel.type as ChannelType) && opened.member?.standing !== "current") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "A private conversation is joined by a member's invitation; the manage authority does not admit its own holder" });
+      }
       const existing = await explicitRelationship(d, { channelRef: input.channelRef, userId: input.userId, at: now });
       if (existing.standing === "current") return { channelRef: input.channelRef, userId: input.userId, added: false, note: "Already a member." };
       const current = await currentExplicitMembers(d, input.channelRef, now);
@@ -750,6 +757,15 @@ export const messageBoardRouter = router({
               tenantId: acting.tenantId, actorUserId: ctx.user.id, occurredAt: now, jobId: channelRow.jobRef ?? null,
               payload: { recipientUserIds: recipients, title: `${input.priority === "emergency" ? "Emergency" : "Urgent"} — ${opened.channel.name}`, line: "A bulletin requires your acknowledgement.", deepLink: `/board/${input.channelRef}/${messageRef}`, refs: { channelRef: input.channelRef, messageRef, priority: input.priority } },
             });
+          } else if (recipients.some(u => u !== ctx.user.id)) {
+            // Checkpoint 5 — an ordinary message is a business fact too: a delivery adapter (push, SMS)
+            // reads this row later and decides on its own schedule. The post never waits on it, the
+            // author is not told of their own message, and the row carries refs only — never the body.
+            await enqueueBoardEvent(tx as Tx, {
+              eventType: "message.posted", aggregateType: "boardMessage", aggregateId: messageRef, transition: "posted",
+              tenantId: acting.tenantId, actorUserId: ctx.user.id, occurredAt: now, jobId: channelRow.jobRef ?? null,
+              payload: { recipientUserIds: recipients.filter(u => u !== ctx.user.id), title: `New message — ${opened.channel.name}`, line: "A new message is waiting.", deepLink: `/board/${input.channelRef}/${messageRef}`, refs: { channelRef: input.channelRef, messageRef, priority: input.priority, channelType: opened.channel.type } },
+            });
           }
         });
       } catch (e) {
@@ -824,6 +840,11 @@ export const messageBoardRouter = router({
             .where(and(eq(messageReceipts.userId, ctx.user.id), inArray(messageReceipts.messageRef, visible.map(m => m.messageRef))))
         : [];
       const receiptOf = new Map(myReceipts.map(r => [r.messageRef, r.acknowledgedAt]));
+      // Checkpoint 5 — authors by name, in one batch, within the organization. Outside the company a
+      // viewer sees the reference only: the workforce's names are not a client portal's to read.
+      const identities = viewer.internal
+        ? await displayIdentities(d, visible.map(m => m.authorUserId), { tenantId: acting.tenantId })
+        : new Map<number, DisplayIdentity>();
 
       return {
         channelRef: channel.channelRef,
@@ -831,6 +852,8 @@ export const messageBoardRouter = router({
         messages: visible.map(m => ({
           attachments: byMessage.get(m.messageRef) ?? [],
           messageRef: m.messageRef, authorUserId: m.authorUserId, priority: m.priority, body: m.body,
+          authorLabel: labelOf(identities, m.authorUserId),
+          authorStanding: identities.get(m.authorUserId)?.standing ?? ("unresolved" as const),
           deviceCreatedAt: m.deviceCreatedAt, serverReceivedAt: m.serverReceivedAt,
           requiresAcknowledgement: m.requiresAcknowledgement,
           acknowledgedByMe: receiptOf.has(m.messageRef) ? receiptOf.get(m.messageRef) != null : null,

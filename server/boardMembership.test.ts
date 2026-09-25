@@ -49,6 +49,10 @@ describe("publishing is not posting", () => {
     expect(requiresPublishAuthority("announcement", "normal")).toBe(true);
     expect(requiresPublishAuthority("emergency", "normal")).toBe(true);
     expect(requiresPublishAuthority("dispatch", "urgent")).toBe(false);
+    // A safety channel takes anyone's report; a bulletin that demands acknowledgement there is published.
+    expect(requiresPublishAuthority("safety", "normal")).toBe(false);
+    expect(requiresPublishAuthority("safety", "important")).toBe(false);
+    expect(requiresPublishAuthority("safety", "urgent")).toBe(true);
     expect(requiresPublishAuthority("direct", "important")).toBe(false);
   });
 

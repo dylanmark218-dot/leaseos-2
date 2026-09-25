@@ -12,13 +12,18 @@
  * in memory — the adapter this runtime has always used for exactly that — and the screen says the
  * queue lasts only while the page is open. It does not pretend to be the vault.
  *
+ * Checkpoint 5 — the queue is opened for the signed-in person in the organization the session acts
+ * for (`orgKey` from PortalShell's `portals.mine`, the person from `auth.me`) and closed when either is
+ * missing. Opening restores what that person left waiting — queued stays queued, never "sent" — and
+ * nobody else's captures are listed or sent. A write with no scope open is refused on screen.
+ *
  * Answering an offer is the one write that goes straight to the server: an accepted offer is read
  * by a dispatcher deciding who gets the work, and one queued on a phone for hours is an answer
  * nobody can see. The button says it needs a connection.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { BoardQueue, errorCode, type BoardTransport, type ShiftResponse } from "@/runtime/boardQueue";
+import { BoardQueue, errorCode, NoScope, type BoardTransport, type ShiftResponse } from "@/runtime/boardQueue";
 import { MemoryKeystore, MemoryStore, MemoryVault } from "@/runtime/adapters/memory";
 import type { LocalCapture } from "@/runtime/contracts";
 import { channelsForTab, presentOpenWork, type BoardTab } from "../boardModel";
@@ -62,12 +67,14 @@ function queueFor(): { queue: BoardQueue; durable: boolean } {
 const loadable = <T,>(q: { isPending: boolean; isError: boolean; error: { message: string } | null }, value: () => T): Loadable<T> =>
   q.isError ? { kind: "failed", message: q.error?.message ?? "Request failed" } : q.isPending ? { kind: "loading" } : { kind: "loaded", value: value() };
 
-export function BoardPanel({ online }: { online: boolean }) {
+export function BoardPanel({ online, orgKey }: { online: boolean; orgKey: string | null }) {
   const utils = trpc.useUtils();
   const [tab, setTab] = useState<BoardTab>("inbox");
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
   const [selectedPost, setSelectedPost] = useState<string | null>(null);
   const [local, setLocal] = useState<LocalCapture[]>([]);
+  const [writeNotice, setWriteNotice] = useState<string | null>(null);
+  const [scopeOpen, setScopeOpen] = useState<string | null>(null);
   const [offerAnswer, setOfferAnswer] = useState<{ kind: "idle" } | { kind: "pending" } | { kind: "failed"; message: string }>({ kind: "idle" });
 
   // The three writes the queue makes, as hooks, so the portal contract can see them.
@@ -91,11 +98,27 @@ export function BoardPanel({ online }: { online: boolean }) {
     await Promise.all([utils.board.read.invalidate(), utils.board.mine.invalidate(), utils.shifts.list.invalidate(), utils.shifts.get.invalidate()]);
   }, [queue, refreshLocal, utils]);
 
-  // On mount, and every time signal returns: send what is waiting.
-  useEffect(() => { void refreshLocal(); }, [refreshLocal]);
-  useEffect(() => { if (online) void flush(); }, [online, flush]);
+  // Open the queue for this person in this organization — restoring what they left — or close it.
+  const userId = me.data?.id ?? null;
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      if (orgKey && userId) await queue.open({ orgKey, userId });
+      else await queue.close();
+      if (!live) return;
+      setScopeOpen(orgKey && userId ? `${orgKey}:${userId}` : null);
+      await refreshLocal();
+    })();
+    return () => { live = false; };
+  }, [queue, orgKey, userId, refreshLocal]);
+  // Every time signal returns, and once the scope is open: send what is waiting.
+  useEffect(() => { if (online && scopeOpen) void flush(); }, [online, scopeOpen, flush]);
 
-  const enqueue = async (write: () => Promise<unknown>) => { await write(); await refreshLocal(); if (online) await flush(); };
+  const enqueue = async (write: () => Promise<unknown>) => {
+    try { await write(); setWriteNotice(null); } catch (e) { setWriteNotice(e instanceof NoScope ? e.message : "This device could not keep it; nothing was sent"); return; }
+    await refreshLocal();
+    if (online) await flush();
+  };
 
   const answerOffer = trpc.shifts.offerRespond.useMutation({
     onMutate: () => setOfferAnswer({ kind: "pending" }),
@@ -107,7 +130,7 @@ export function BoardPanel({ online }: { online: boolean }) {
   const channels = loadable(mine, () => mine.data!.channels.map(c => ({ channelRef: c.channelRef, type: c.type, name: c.name, unacknowledged: c.unacknowledged })));
   const visibleChannels = channels.kind === "loaded" ? channelsForTab(tab, channels.value) : [];
 
-  const myId = me.data?.id ?? null;
+  const myId = userId;
   const pendingAckFor = (messageRef: string) => {
     const a = local.filter(c => c.kind === "board_acknowledgement" && c.fields.messageRef === messageRef).pop();
     return a && a.syncState !== "synchronized" ? a.syncState : null;
@@ -115,7 +138,7 @@ export function BoardPanel({ online }: { online: boolean }) {
   const serverRefs = new Set((read.data?.messages ?? []).map(m => m.messageRef));
   const messages: Loadable<MessageRow[]> | { kind: "none" } = !selectedChannel ? { kind: "none" } : loadable(read, () => read.data!.messages.map(m => ({
     messageRef: m.messageRef,
-    authorLabel: m.authorUserId === myId ? "You" : `User ${m.authorUserId}`,
+    authorLabel: m.authorUserId === myId ? "You" : m.authorStanding === "former" ? `${m.authorLabel} (former member)` : m.authorLabel,
     mine: m.authorUserId === myId,
     priority: m.priority,
     body: m.body,
@@ -178,6 +201,7 @@ export function BoardPanel({ online }: { online: boolean }) {
       offerAnswer={offerAnswer}
       onAnswerOffer={(offerRef, decision) => answerOffer.mutate({ offerRef, decision })}
       queueSummary={queueSummary}
+      writeNotice={writeNotice}
       onRetry={() => { void flush(); void mine.refetch(); void work.refetch(); if (selectedChannel) void read.refetch(); if (selectedPost) void post.refetch(); }}
     />
   );

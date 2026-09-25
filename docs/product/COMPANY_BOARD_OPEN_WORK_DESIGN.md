@@ -1,6 +1,6 @@
 # Company Board + Open Work — design
 
-**Status:** PROPOSED, with **Checkpoint 2 built under the recommended options** for D-1…D-6 (§14)
+**Status:** PROPOSED, D-1…D-6 **recorded in Checkpoint 5** (§14), with **Checkpoint 2 built under the recommended options** for D-1…D-6 (§14)
 because the owner asked for the work to continue before recording decisions. Every recommended option
 is the one implemented; a different answer to any of them is a change to the branch, not to this
 document. Checkpoint 2 (§15) is on the branch: migrations `0182`/`0183`, board membership, publish
@@ -19,6 +19,21 @@ their own procedure with the capture's `localId` as the mutation id and are excl
 `SyncEngine` packaging. Without the native shell the queue is in memory and the screen says so.
 Answering an offer is online-only, and says so. `board.read` now returns `acknowledgedByMe`.
 All four checkpoints are built; nothing is merged.
+
+**Checkpoint 5 (decision freeze and field hardening) is on the branch.** D-1…D-6 are recorded with
+their final disposition in §14. Three places where the built code was looser than the decision it
+implements were tightened toward the decision (§14, "Contradictions found"): a reason no longer
+overrides a declined, withdrawn or expired offer; an unanswered offer needs a recorded reason to be
+awarded over; and `board.manage` can no longer make its holder a member of a private group. A fourth
+gap outside D-1…D-6 was found by the new privacy suite and closed: a driver could post an
+acknowledgement-demanding bulletin into a `safety` channel. The Board queue is now scoped to
+(organization, person) and restores honest states after a restart; authors are shown by name from
+the existing directory; an ordinary message is a provider-neutral outbox fact (`message.posted`).
+§16 records the persistence architecture, the connected-only offer boundary, the identity source,
+retry and hydration semantics, the privacy boundary and what remains. **The native encrypted store
+is still not built in this repository** (`client/src/runtime/adapters/capacitor.ts` throws
+`NotOnDeviceError`; its plugins are not installed): the queue is durable wherever the store it is
+given is durable, and in the browser it is memory-only and says so.
 
 **One correction from building it (§5.4).** The preview's verdict is the board's own — role, leave,
 rotation, declared availability, licence, required qualifications — and the readiness composer's
@@ -212,7 +227,7 @@ Access, in `openChannel` (one door, as today): `open` → `mayOpen` as now; `cre
 | `open` company channels (`general`, `announcement`, `dispatch`, `safety`, `maintenance`, `department`, `unit`) | every internal member of the organization | `board.post`; `announcement` and `emergency` priority need `board.publish` (§8) | as any member |
 | `crew` channels | current and historical crew members | current members whose `crewRole` carries `crew.post` | as today |
 | `job` rooms (`explicit`, `source = job_assignment`) | members: dispatcher(s) on the posting, bound operators, added supervisor/mechanic | members not `read_only` | dispatcher role of the posting is a member by construction |
-| `direct`, `group` (`explicit`) | members only | members only | **not readable by `board.manage` or `management`.** Moderation is a separate, sensitive `board.moderate`, and every moderator read or withdraw writes a `messageChannelEvents` row (`moderator_read`, `moderator_withdraw`) the audit surface can list. |
+| `direct`, `group` (`explicit`) | members only | members only | **not readable by `board.manage` or `management`.** Moderation is a separate, sensitive `board.moderate`, and every moderator read or withdraw writes a `messageChannelEvents` row (`moderator_read`, `moderator_withdraw`) the audit surface can list. **Checkpoint 5:** `board.manage` may name *others* into a group; it may not name its own holder (`FORBIDDEN`), so the manage authority is not a key to every group by self-invitation. |
 | `client` | as today | as today | as today |
 
 Retention: nothing is deleted (`withdraw` keeps text and revisions; `messageRevisions` is append-only). Archive is `archived = true`. A retention *policy* column is not added: the audit-package kinds (`auditPackage.ts:14`) already decide what leaves the building per kind, and a per-channel retention flag with no engine reading it would read as enforced and enforce nothing.
@@ -222,6 +237,7 @@ Retention: nothing is deleted (`withdraw` keeps text and revisions; `messageRevi
 The board's four priorities stay (`normal | important | urgent | emergency`); `requiresAcknowledgement` stays derived. The request's `dispatch` and `safety` "priorities" are channel types here (C-4). What changes:
 
 - posting `emergency`, or posting at all into an `emergency` channel, requires `board.publish` (new, sensitive); `board.post` alone is refused with `FORBIDDEN` — today it is not (`messageBoardRouter.ts:300`–`:376`);
+- **Checkpoint 5:** posting `urgent` into a `safety` channel — a bulletin that demands a roll-call of acknowledgements — requires `board.publish` too. A `normal`/`important` hazard report there stays anyone's with `board.post`;
 - an `announcement` channel post with `recipients: []` is refused: an announcement with no audience has no roll-call. The audience resolver fills it from organization membership (bounded at 500 as crews are; a larger company gets branch channels, refused beyond rather than truncated);
 - `emergency_posted` is written to `messageChannelEvents` and `message.critical.created` to the outbox in the post transaction.
 
@@ -325,7 +341,8 @@ Then **one transaction**, lock order fixed and documented in the module header b
    - slot `cancelled` or posting terminal → the binding's own refusals;
    - `assessEligibilityValidity(check, currentFacts, now, 30)` invalid → `readiness_stale` with its reason (`age` / `dependency_change`);
    - `uncoveredFindings(check.blockers, grantedOverrides, now)` non-empty → `readiness_refused` listing the codes. This is where `blocked` and `unknown` stop the award: a `*_unknown` finding is a finding, and with no grant it is uncovered. **Unknown never passes.**
-   - a live `shiftOffers` row for this person in `declined`/`withdrawn`/`expired` → `offer_not_live` (a declined person can still be awarded by a dispatcher? — no: the dispatcher withdraws the old offer and issues a new one; the award follows an `accepted` offer or, with `reason`, no offer at all — the "interest confers no claim, absence of interest is no bar" rule from `intendToAssign`).
+   - a live `shiftOffers` row for this person in `declined`/`withdrawn`/`expired` → `offer_not_live` (a declined person can still be awarded by a dispatcher? — no: the dispatcher withdraws the old offer and issues a new one; the award follows an `accepted` offer or, with `reason`, no offer at all — the "interest confers no claim, absence of interest is no bar" rule from `intendToAssign`). **Checkpoint 5:** a `reason` does **not** override this refusal (the Checkpoint 3 code let it); the dispatcher issues a new offer.
+   - **Checkpoint 5:** an `offered` offer the person has not answered → `offer_unanswered` unless the dispatcher gives a `reason` (an acceptance by phone or in the yard), which is recorded on the `awarded` event. An unanswered offer is neither "accepted" nor "no offer", so it takes the stricter of the two rules above.
 6. `applyBinding` **with the caller's `tx`** (a one-line refactor: `applyBinding(args, tx?)`, default opens its own — the resolver over something already written). It performs steps 3–9 of the canonical binding unchanged: scope on resources, head-event `CONFLICT`, OD-1 siblings under lock, the binding, the append-only event, staffing.
 7. `shiftOffers`: the person's live offer → `awarded`, `awardEventId = event.id`; every other live offer → `not_selected`; `shiftPosts.status = filled`, `filledAt`, `filledByUserId`.
 8. `shiftPostEvents`: `awarded` with `subjectUserId`, `roleId`, `eventId`, `checkId`.
@@ -421,7 +438,7 @@ Ordinary employees hold `board.post`, `shifts.interest`, `shifts.availability_ow
 
 ### 8.3 Outbox
 
-`enqueueBoardEvent(tx, { eventType, aggregateType, aggregateId, tenantId, actorUserId, occurredAt, payload })` in `server/_core/boardOutbox.ts`, modelled line for line on `enqueueEnforcementEvent`: same `tx`, event id derived from the aggregate and transition, no I/O. Event types: `work.posted`, `work.offered`, `work.awarded`, `work.cancelled`, `message.critical.created`, `message.acknowledged`, `board.member.added`. Payloads carry refs and codes, **never message bodies** (the request's leak rule; the outbox row is readable by every consumer). The drain worker's consumer writes `workflowNotifications` (`channel: in_app`, `notificationKey` derived so a re-run tells nobody twice) — that is the whole notification system today. Push, SMS and email remain adapters behind the same event; none is built here. Wiring `eventEmitter.emitDomainEvent` instead of a third enqueue helper is the right consolidation and is out of this checkpoint's scope only because it is its own declared-unwired resolution; the helper's signature is `emitDomainEvent`-shaped so the swap is mechanical.
+`enqueueBoardEvent(tx, { eventType, aggregateType, aggregateId, tenantId, actorUserId, occurredAt, payload })` in `server/_core/boardOutbox.ts`, modelled line for line on `enqueueEnforcementEvent`: same `tx`, event id derived from the aggregate and transition, no I/O. Event types: `work.posted`, `work.offered`, `work.awarded`, `work.cancelled`, `message.critical.created`, `message.posted` (Checkpoint 5 — an ordinary message with a recorded audience, author excluded, `jobId` set for a job room), `message.acknowledged`, `board.member.added`. Payloads carry refs and codes, **never message bodies** (the request's leak rule; the outbox row is readable by every consumer). The drain worker's consumer writes `workflowNotifications` (`channel: in_app`, `notificationKey` derived so a re-run tells nobody twice) — that is the whole notification system today. Push, SMS and email remain adapters behind the same event; none is built here. Wiring `eventEmitter.emitDomainEvent` instead of a third enqueue helper is the right consolidation and is out of this checkpoint's scope only because it is its own declared-unwired resolution; the helper's signature is `emitDomainEvent`-shaped so the swap is mechanical.
 
 ---
 
@@ -508,6 +525,30 @@ Existing suites that must keep passing untouched: `openShifts.test.ts` (16), `op
 
 ## 14. Owner decisions requested
 
+### 14.1 Final disposition (Checkpoint 5)
+
+Recorded against the code as built, not as proposed. "Schema now" = changing the answer today needs a schema change; "migration later" = changing it after merge needs a data migration. Each was applied at the recommended (safer, reversible) value; none needed the owner to stop the work, because none is irreversible or widens anyone's access.
+
+| ID | Question | Final value | Alternatives | Schema now / migration later | Security / safety | Offline | Recommendation |
+|---|---|---|---|---|---|---|---|
+| **D-1** | What does a marketplace award mean? | Slot binding through the canonical `setRoleAssignmentIn` behind a fresh, covered readiness check; `filled` ≠ booked; `dispatch.award` stays the booking. The award follows an **accepted** offer; an unanswered offer or no offer needs a recorded `reason`; a declined/withdrawn/expired offer is refused whatever the reason. | Award also books (`awardAssignment` in the same transaction). | No / No (booking stays a separate act; switching later is code only) | Readiness fail-closed; unknown never passes; interest ≠ assignment, acceptance ≠ award | Award is dispatcher-side and online-only | **Keep** |
+| **D-2** | Where does an offer live? | `shiftOffers` keyed `(postRef, userId)` with one live offer per person (`liveOfferKey`). | Extend `dispatchInvitations`. | Yes / Yes (moving offers would migrate rows) | Offer carries no authority; the award re-checks everything | Offer *answer* is connected-only (§16.3) | **Keep** |
+| **D-3** | Who may read private conversations? | Members only. `board.manage`/`management` do not read `direct`/`group`; `board.moderate` reads with a recorded `moderator_read` the members can see; `board.manage` cannot self-join a group. | Management reads everything. | No / No | Privacy-sensitive: the stricter reading is the one applied | None | **Keep** (stricter) |
+| **D-4** | Announcement with no audience? | Refused; resolved from organization membership, bounded at 500; the single tenant's silence refused. | Allow audience-less posts. | No / No | A bulletin nobody must acknowledge is not a bulletin | None | **Keep** |
+| **D-5** | Availability preference shape | The eight declared fields in §6, zod-validated, append-and-supersede, never credentials, never a readiness input. | Free-form JSON; scheduler-owned shape. | No (it is JSON) / No for additions, Yes to rename | Declarations never feed readiness | `availabilitySet` carries the replay key | **Keep** |
+| **D-6** | `shifts.expressInterest` alias | Kept for one release beside `shifts.respond`; removal adjusts the inventory count. | Remove now. | No / No | Same authorization as `respond` | None | **Keep; remove in the release after merge** |
+
+**Contradictions found, and what was done.**
+
+1. *D-1, §5.5 vs `shiftAwardService.ts`:* a `reason` let a dispatcher award over a **declined/withdrawn/expired** offer. §5.5 says no. Fixed: `offer_not_live` whatever the reason (`shiftAward.db.test.ts`, "refuses awarding over a declined offer even with a reason").
+2. *D-1, §5.5 vs `shiftAwardService.ts`:* an **unanswered** offer was awarded over with no reason. §5.5 says the award follows an *accepted* offer. Fixed toward the reversible middle: `offer_unanswered` unless a reason is given and recorded. Requiring the tap itself was not chosen because it would stop a dispatcher from recording a phone acceptance at all — a product change for the owner, not a guess for this checkpoint.
+3. *D-3, §4.3 vs `messageBoardRouter.ts` `memberAdd`:* `board.manage` opened explicit channels for membership changes and could add its holder to a group, which is reading by another door. Fixed: self-add to `direct`/`group` refused (`boardPrivacy.db.test.ts`).
+4. *Not a D-decision, found by the privacy suite:* a driver could post `urgent` into a `safety` channel, which makes every recipient owe an acknowledgement. Fixed in `requiresPublishAuthority` (§4.4).
+
+The offer-answer policy (connected-only) is **not** one of D-1…D-6; it is recorded in §16.3 as its own boundary.
+
+### 14.2 The decisions as requested (Checkpoint 1 text, unchanged)
+
 - **D-1 — Award semantics.** Marketplace award = slot binding behind a valid readiness check (§5.5), with `dispatch.award` remaining the dispatcher's booking step. *Alternative:* the marketplace award calls `awardAssignment` too, in the same transaction, which makes `filled` mean "booked" and doubles the work the dispatcher's screen already does.
 - **D-2 — Offer record.** New `shiftOffers` keyed by `(postRef, userId)` (§5.2). *Alternative:* extend `dispatchInvitations` (Alternative B).
 - **D-3 — Moderation of private channels.** `direct`/`group` unreadable by management; `board.moderate` (sensitive) reads with an access event (§4.3). *Alternative:* management reads everything, which the request rules out.
@@ -526,4 +567,87 @@ Existing suites that must keep passing untouched: `openShifts.test.ts` (16), `op
 | 3 | `shifts.award` on `applyBinding(tx)`; job-room resolver; concurrency suite; `work.awarded` | `shiftAward*.db.test.ts`, `dispatchRoleAssignment.db.test.ts` unchanged |
 | 4 | Field Mobile slice: `BoardPanel`, Open Work list + card, respond, job room, three capture kinds, queue state | dom tests; `commPackage`/runtime suites unchanged |
 
-Nothing merges until the owner records D-1…D-6.
+| 5 | Decision freeze and field hardening: D-1…D-6 recorded (§14.1) and the three contradictions tightened; queue scope + hydration; display identity; `message.posted`; privacy suite; touch targets | `boardPrivacy.db.test.ts`, `boardQueueDurable.test.ts`, `BoardPanelView.dom.test.tsx`, a11y suite; full `ci-gate.sh` |
+
+Nothing merges until the owner accepts the D-1…D-6 disposition in §14.1.
+
+---
+
+## 16. Checkpoint 5 — field hardening, as built
+
+### 16.1 Native persistence: what exists and what the queue does over it
+
+Surveyed before writing anything:
+
+| Concern | What the tree has | Used here |
+|---|---|---|
+| Encrypted local persistence | `LocalStore` / `FileVault` / `Keystore` contracts (`client/src/runtime/contracts.ts`); memory adapters (`adapters/memory.ts`); native bindings in `adapters/capacitor.ts` **throw `NotOnDeviceError`** — `@capacitor-community/sqlite`, `@capacitor/filesystem` and the secure-storage plugin are not installed, and the P1.1 Android shell is not built | The queue takes a `LocalStore`; nothing new is invented beside it |
+| Device identity | `deviceRef` meta (enrolment), `boardDeviceId` minted once otherwise | Unchanged |
+| Outbox persistence | `Outbox` over `LocalStore`, six states, "nothing unaccepted is deleted" | Unchanged; board captures are its three direct kinds |
+| Startup hydration | `mountBrowserFallbackRuntime` mounts memory adapters on `globalThis.leaseosRuntime` | `BoardQueue.open(scope)` hydrates (§16.5) |
+| Logout / account switch / tenant switch | **none** — `useAuth` logout touches no runtime state | `BoardQueue.open`/`close` scope (§16.6) |
+| Schema/version migration of the local store | none | Not needed: `scope` is an optional field; an unscoped capture is never listed or sent |
+| Sync worker, connectivity | `SyncEngine.syncOnce` (no backoff scheduler; retries are driven by the `online` event and callers); `Connectivity.online()` | Same: flush on mount, on `online`, and on "Send now" |
+
+So: **there is no native encrypted store to wire into in this repository.** The Board does not create a second local database. `BoardPanel` uses `globalThis.leaseosRuntime.boardQueue` when the native shell provides one (constructed over the shell's encrypted `LocalStore`), and otherwise the browser fallback over `MemoryStore`, and the screen says the browser keeps it "only while this page is open". `boardQueueDurable.test.ts` proves the queue's behaviour over a store whose only state is serialized text (a restart is a new store and a new queue over the same "disk"); that is the property the native store will supply, and it is **not** a claim that the native store exists.
+
+What a capture persists: `localId` (the client mutation id), `kind`, `fields` (channel/message/post ref, body, priority, response), `capturedAt` (device occurrence time), `syncState`, `attempts`, `lastError` (the last refusal or transport reason), `fields.serverRef` (the server's acknowledgement), and — new — `scope: { orgKey, userId }`.
+
+### 16.2 Board capture kinds
+
+`board_message`, `board_acknowledgement`, `shift_response` — exactly three (`DIRECT_CAPTURE_KINDS`). Each is sent to its own procedure, never packaged: `SyncEngine.syncOnce` filters them out, they carry no files (nothing for `evictSynchronizedFiles`), are never sealed and never get a `serverEvidenceId`. The regression is `boardQueueDurable.test.ts` "a board capture is never evidence, whichever kind". Exhaustive switches reviewed: `syncEngine.ts` priority (`board_*` → 10, excluded from packages), `boardQueue.ts` `send` (default throws), `boardModel.ts` `presentSend` over `SyncState` (unchanged — kinds share the six states). No other `CaptureKind` switch exists in `client/src`.
+
+### 16.3 Answering a dispatcher's offer is connected-only — a deliberate boundary
+
+"Interested"/"Available"/"Decline" on a post, acknowledgements and ordinary messages queue offline. **Accepting or declining a dispatcher's formal offer does not**: `shifts.offerRespond` is called directly, the buttons are disabled offline and say "Answering an offer needs a connection", and there is no capture kind or queue method for it (asserted in `boardQueueDurable.test.ts`). An acceptance is read by a dispatcher deciding who gets the work; one sitting on a phone for hours is an answer nobody can see, and replayed later it can land on an offer that was withdrawn, re-issued or expired in between. Making it queueable later needs, at minimum: the offer's version or fingerprint carried with the answer; its expiry checked against the **server's** receive time; a compare-and-set on `(offerRef, version)`; an explicit stale-offer refusal code; and a conflict state on the card. None of that is built, so the write stays online.
+
+### 16.4 Display identity
+
+Source: the directory that exists — `users.name`, then `operators.name` (linked by `operators.userId`, read only through `ownershipScopeWhere`), then `User N`. `server/boardIdentity.ts` resolves a page of authors in three batched queries (memberships, users, operators; no N+1), writes nothing, and reads no other column: no email, phone, licence or emergency contact. A value that looks like an email is not used as a name. Boundary: a name is shown for a person the viewer's organization holds a membership for (active → `member`; suspended/ended → `former`, shown as "Name (former member)"), and for the historical single tenant only for people with no active membership elsewhere; anyone else, and any deleted account, is `User N` (`unresolved`). A client-portal viewer gets no names. Used by `board.read` (`authorLabel`, `authorStanding`) and `board.members` (`label`).
+
+### 16.5 Retry and startup hydration semantics
+
+Order on start: the session resolves the person (`auth.me`) and the organization (`portals.mine` → `orgRef`, or `default` for the single tenant; ambiguous/unresolved opens nothing) → `BoardQueue.open(scope)` → `hydrate()` over that scope → the panel lists what is waiting → a flush runs only when online. `hydrate()`:
+
+- `syncing` (sent, never answered) → `queued`, `lastError` = "Interrupted before the server answered — will be resent with the same id…"; the resend carries the same `(deviceId, localId)` and the server answers with what it already wrote;
+- `saved_locally` (died between the two writes) → `queued`;
+- `failed` / `conflict` keep their reason until `retry(localId)`; a flush does not resend them on its own;
+- **nothing becomes `synchronized` from local records** — only from a server reply carrying its reference.
+
+Retry: single-flight; acknowledgements first, then messages, then responses; a code the server uses to refuse → `failed` (kept, with the code); `CONFLICT` → `conflict`; no code (transport) → back to `queued` and stop the pass, since the rest would fail the same way. There is no timed backoff: the runtime has none to reuse (`SyncEngine` retries on the `online` event and on demand) and adding a scheduler is not this checkpoint's.
+
+### 16.6 Privacy boundary
+
+- **Queue scope.** Every capture is written under `{ orgKey, userId }` and listed/sent only under the same scope. Switching organization hides and holds the other organization's captures; sign-out (`close()`) lists, sends and accepts nothing; the next person on the device sees none of the previous person's. Captures are **not deleted** at sign-out — the outbox rule is that nothing unaccepted is — they wait, in whatever encryption the store provides, for their own scope. A flush overtaken by a sign-out stops.
+- **Bodies.** No outbox payload carries a body (`message.posted` asserted); `lastError` is scrubbed of the text it failed to send; the queue writes nothing to the console.
+- **Server.** Organization is resolved server-side on every read and write (`resolveActingScope`); no Board or open-work input accepts `orgRef`/`tenantId`/`organizationId` (static assertion in `boardPrivacy.db.test.ts`); another organization's channel is `NOT_FOUND`. Management and dispatchers do not read `direct`/`group`; dispatchers do not hold `board.moderate`; `board.manage` cannot self-join a group; a job room admits its binding's people, not the org chart; publishing `emergency`, into `announcement`/`emergency`, or an `urgent` safety bulletin needs `board.publish`.
+
+### 16.7 Notification events (provider-neutral)
+
+DOMAIN TRANSACTION → `domainEventOutbox` (same transaction) → drain worker → `handleClaimedBoardEvent` (in-app `workflowNotifications`, keyed so a re-run tells nobody twice) → future delivery adapters. No push, SMS or email provider is integrated, and no business write waits on one.
+
+| Business event | Outbox event |
+|---|---|
+| New dispatch / job / group message | `message.posted` (new) |
+| Acknowledgement required | `message.critical.created` |
+| Acknowledged | `message.acknowledged` |
+| New open work | `work.posted` |
+| Offer received | `work.offered` |
+| Posting cancelled | `work.cancelled` |
+| Award completed | `work.awarded` |
+| Job communication update | `message.posted` with `jobId` = the room's `jobRef` |
+| Added to a conversation | `board.member.added` |
+| **Mention** | **not emitted** — the Board has no mention model; adding one is its own design |
+
+### 16.8 Accessibility
+
+The Board stays in the axe suite (three scenes, every viewport the harness runs). Every Board control carries a 44px minimum touch target (asserted); tabs are buttons with `aria-pressed`; send states are words ("Saved on this device", "Queued on this device — not sent", "Not sent — refused, kept on this device", "Needs attention — kept on this device", the server's own "Sent"), never colour alone and never "delivered"; ✓/✗/? on an Open Work card sit beside the requirement named in words; load failures and refused writes are `role="alert"` and stay until the next action.
+
+### 16.9 Remaining work
+
+- The native encrypted store (P1.1 shell + the three Capacitor plugins) — until it exists the Board queue is durable only in tests and in whatever store a shell supplies; the browser is memory-only and says so.
+- A timed retry/backoff scheduler for the runtime as a whole (not Board-specific).
+- A mention model, if wanted, and its event.
+- Queueable offer answers, only with the guards in §16.3.
+- Removing the `shifts.expressInterest` alias (D-6) in the release after merge.
+- Delivery adapters (push/SMS/email) behind the outbox events in §16.7.

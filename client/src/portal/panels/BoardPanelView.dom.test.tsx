@@ -123,3 +123,48 @@ describe("the open-work card", () => {
     expect(screen.getByText("Answering an offer needs a connection.")).toBeInTheDocument();
   });
 });
+
+describe("usable on a phone and without colour", () => {
+  it("gives every control a touch target of at least 44px, on the conversation and on an open-work card with an offer", () => {
+    const withOffer = presentOpenWork(
+      { postRef: "OS-1", title: "Hydrovac operator", status: "open", requiredRole: "driver", requiredQualifications: [], requiredEquipmentClass: null,
+        location: "Hinton area", regionCode: "HINTON", startsAt: new Date("2026-10-21T06:00:00Z"), endsAt: new Date("2026-10-21T18:00:00Z"), estimatedHours: 12, overtime: false, priority: "normal" },
+      { verdict: "eligible", reasons: [], availability: "available", interestExpressed: false, readinessNotEvaluated: [] },
+      { offerRef: "OFF-1", status: "offered", expiresAt: null },
+    );
+    for (const props of [
+      boardProps({ messages: { kind: "loaded", value: [msg({ requiresAcknowledgement: true, acknowledgedByMe: false })] }, queueSummary: { waiting: 1, refused: 0 } }),
+      boardProps({ tab: "open_work", selectedPost: "OS-1", card: { kind: "loaded", value: withOffer } }),
+      boardProps({ channels: { kind: "failed", message: "Network down" } }),
+    ]) {
+      const { unmount } = render(<BoardPanelView {...props} />);
+      const buttons = screen.getAllByRole("button");
+      expect(buttons.length).toBeGreaterThan(3);
+      for (const b of buttons) expect(b.className, b.textContent ?? "").toContain("min-h-[44px]");
+      unmount();
+    }
+  });
+
+  it("says in words what the send states and the ✓ / ? marks mean", async () => {
+    const states = ["saved_locally", "queued", "syncing", "synchronized", "failed", "conflict"] as const;
+    render(<BoardPanelView {...boardProps({ pendingMessages: states.map((state, i) => ({ localId: `L-${i}`, body: `m${i}`, state, lastError: null, capturedAt: AT })) })} />);
+    const conversation = screen.getByRole("region", { name: "Conversation" });
+    // Each state has its own words; none relies on a colour and none says delivered.
+    const text = conversation.textContent ?? "";
+    const { presentSend } = await import("../boardModel");
+    const labels = states.map(st => presentSend(st).label);
+    expect(new Set(labels).size).toBe(states.length);
+    for (const words of labels) expect(text).toContain(words);
+    for (const words of ["Saved on this device", "Queued on this device — not sent", "Not sent — refused, kept on this device", "Needs attention — kept on this device"]) expect(labels).toContain(words);
+    expect(text).not.toMatch(/deliver/i);
+    cleanup();
+    render(<BoardPanelView {...boardProps({ tab: "open_work", selectedPost: "OS-1", card: { kind: "loaded", value: card } })} />);
+    // The ? is never alone: the unknown requirement is named in words beside it.
+    expect(screen.getByText(/unknown is not satisfied/)).toBeInTheDocument();
+  });
+
+  it("keeps a write the device could not take on screen, as an alert", () => {
+    render(<BoardPanelView {...boardProps({ writeNotice: "Not signed in to an organization on this device — nothing was kept" })} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Not kept: Not signed in to an organization on this device — nothing was kept");
+  });
+});
