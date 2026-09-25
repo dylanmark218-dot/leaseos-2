@@ -785,9 +785,30 @@ export const appRouter = router({
             jobId: z.number().int().optional(),
             unitId: z.number().int().optional(),
             capturedOffline: z.boolean().default(false),
+            idempotencyKey: z.string().min(1).max(40).optional(),
           })
         )
         .mutation(async ({ ctx, input }) => {
+          if (input.idempotencyKey) {
+            const existing = await getAssistantProposal(input.idempotencyKey);
+            if (existing) {
+              if (existing.createdByUserId !== ctx.user.id) {
+                throw new TRPCError({
+                  code: "FORBIDDEN",
+                  message: "Idempotency key already belongs to another user",
+                });
+              }
+              const proposal = await loadProposal(input.idempotencyKey);
+              if (proposal) {
+                return {
+                  proposal,
+                  notes: existing.notes,
+                  overreachDetected: !!existing.overreachFlags,
+                };
+              }
+            }
+          }
+
           const form = FORMS[input.formKey];
           if (!form) throw new Error(`Unknown form: ${input.formKey}`);
 
@@ -812,7 +833,7 @@ export const appRouter = router({
             form,
             input.targetRef,
             extraction.values,
-            `P-${randomUUID()}`
+            input.idempotencyKey ?? `P-${randomUUID()}`
           );
 
           await createAssistantProposal({
