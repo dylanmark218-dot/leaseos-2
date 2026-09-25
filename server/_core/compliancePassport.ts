@@ -44,13 +44,36 @@ export type Requirement = {
   effectiveUntil?: Date | null;
   /** C1b-2: a stored registry revision, or a seed constant. Absent on a requirement built in code. */
   origin?: "registry" | "seed";
+  /** C1b-2b: how, and by whom, the revision was verified. Registry revisions only. */
+  provenance?: RequirementProvenance;
+};
+
+/**
+ * C1b-2b — why LeaseOS trusts a requirement revision, carried with every finding it produces.
+ * `level` is the evidence depth: CITATION_VERIFIED (named instrument, citation, official URL; no source
+ * document, so `sourceMonitoringAvailable` is false) or SOURCE_DOCUMENT_VERIFIED (bound to an admitted,
+ * versioned source document). UNVERIFIED revisions are never authoritative.
+ */
+export type RequirementProvenance = {
+  level: "UNVERIFIED" | "CITATION_VERIFIED" | "SOURCE_DOCUMENT_VERIFIED" | "SUPERSEDED" | "WITHDRAWN";
+  promotionRef: string | null;
+  verifierUserIds: number[];
+  proposedByUserId: number | null;
+  citation: { instrumentTitle: string | null; issuingAuthority: string | null; citation: string | null; officialUrl: string | null; jurisdiction: string } | null;
+  sourceRevisionRef: string | null;
+  sourceMonitoringAvailable: boolean;
+  citationHash: string | null;
 };
 
 /**
  * C1b-2: which exact requirement revision produced a finding. `version` is the revision the
  * registry chose at evaluation time, so a later reload never changes what an earlier answer used.
  */
-export type RequirementRef = { key: string; version: number; origin: "registry" | "seed" | "code" };
+export type RequirementRef = {
+  key: string; version: number; origin: "registry" | "seed" | "code";
+  /** C1b-2b: present for a registry revision; a seed or code requirement has none and is unverified. */
+  provenance?: RequirementProvenance;
+};
 
 export type Credential = {
   docType: string;
@@ -154,7 +177,10 @@ export function evaluateRequirement(args: {
   const r = args.requirement;
   const base = {
     requirementKey: r.requirementKey, family: r.family, title: r.title,
-    requirementRef: { key: r.requirementKey, version: r.version, origin: r.origin ?? "code" } as RequirementRef,
+    requirementRef: {
+      key: r.requirementKey, version: r.version, origin: r.origin ?? "code",
+      ...(r.provenance ? { provenance: r.provenance } : {}),
+    } as RequirementRef,
   };
 
   if (r.verificationStatus === "unverified") {
