@@ -54,6 +54,29 @@ describe("anything that is a decision is handed back", () => {
   });
 });
 
+describe("a merge that never started is not a merge that worked", () => {
+  /*
+   * The first version sent the merge's output to /dev/null and its status to `|| true`. A
+   * merge stopped by conflicts and a merge git REFUSED TO START then looked identical: no
+   * conflicted paths either way, so the script regenerated the file from the unmerged tree
+   * and reported "merged and staged" having merged nothing. It was caught doing that by an
+   * untracked file standing where the merge wanted to write, and the counts it would have
+   * committed were wrong for the merge — the exact mistake the script exists to prevent.
+   */
+  it("keeps the merge's output and status instead of discarding both", () => {
+    expect(CODE).not.toMatch(/git merge[^\n]*\|\|\s*true/);
+    expect(CODE).not.toMatch(/git merge[^\n]*>\s*\/dev\/null/);
+    expect(CODE).toMatch(/merge_rc/);
+  });
+
+  it("refuses when git declined and left no merge behind", () => {
+    // Both signals, because either alone is satisfied by the other case: conflicts leave
+    // MERGE_HEAD, and a refusal leaves neither MERGE_HEAD nor conflicted paths.
+    expect(CODE).toMatch(/merged_in_progress/);
+    expect(CODE).toMatch(/refused to start the merge/);
+  });
+});
+
 describe("it looks for the merge state where git actually keeps it", () => {
   /*
    * `.git/MERGE_HEAD` does not exist inside a linked worktree: `.git` is a file there and the real

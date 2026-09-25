@@ -56,10 +56,27 @@ if git merge-base --is-ancestor "$BASE" HEAD; then
 fi
 
 echo "reconcile-main: merging $BASE ($(git rev-parse --short "$BASE"))"
-# A conflicting merge exits non-zero, which is the case this script exists for.
-git merge --no-commit --no-ff "$BASE" >/dev/null 2>&1 || true
-
+# A conflicting merge exits non-zero, which is the case this script exists for — but so
+# does a merge that REFUSES TO START, and the first version of this script could not tell
+# them apart. It sent git's output to /dev/null and its status to `|| true`, so when an
+# untracked file in the way made git decline ("would be overwritten by merge"), the script
+# found no conflicted paths, regenerated the file from the UNMERGED tree, and reported
+# "merged and staged" having merged nothing. It was caught doing exactly that, and the
+# counts it would have committed were wrong for the merge — which is the mistake this whole
+# script exists to prevent, so it is not allowed to make it.
+#
+# The difference is observable: a merge stopped by conflicts leaves MERGE_HEAD behind, and
+# one that never started does not. Both are checked, and git's own message is what the
+# reader sees.
+merge_output="$(git merge --no-commit --no-ff "$BASE" 2>&1)" && merge_rc=0 || merge_rc=$?
+merged_in_progress() { [ -e "$(git rev-parse --git-path MERGE_HEAD)" ]; }
 conflicts="$(git diff --name-only --diff-filter=U)"
+
+if [ "$merge_rc" -ne 0 ] && [ -z "$conflicts" ] && ! merged_in_progress; then
+  echo "reconcile-main: git refused to start the merge — nothing was merged:" >&2
+  printf '%s\n' "$merge_output" >&2
+  exit 1
+fi
 
 if [ -n "$conflicts" ]; then
   others="$(printf '%s\n' "$conflicts" | grep -vFx "$GENERATED" || true)"
