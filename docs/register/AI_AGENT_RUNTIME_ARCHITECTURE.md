@@ -7,7 +7,10 @@ context, memory, workers, idempotency, durability, observability, cancellation, 
 this repository, so the eventual runtime is built from parts that exist rather than beside them.
 
 **Surveyed against:** `6f52b57` (`claude/compassionate-mendel-8sa4vg`: `main` + SPINE item 1's
-resolver and chain rule). **PR #7 (the Secretary model layer, `server/_core/ai/`) is still open
+resolver and chain rule), then re-checked after merging `main` at `88608f3` into this branch: the
+agent runtime, `llm.ts`, the worker and `0100_agent_runs.sql` are unchanged on `main`; the one
+request-handler model call moved from `routers.ts:690` to `routers.ts:794` with no second call
+added. **PR #7 (the Secretary model layer, `server/_core/ai/`) is still open
 and is not in this tree.** Everything this document attributes to `server/_core/ai/` is described
 from PR #7's head (`929f721`), exactly as the terminology survey did, and is marked
 `DECLARED_UNWIRED (PR #7)`. That includes `server/_core/ai/workerBoundary.test.ts`, the test that
@@ -77,7 +80,7 @@ Authorized context assembly ...... PARTIAL       admitSource() live for knowledg
   │                                              ContextPack (PR #7) unwired; assembleContext() no caller
   ▼
 Model inference .................. PARTIAL       door 1 live but synchronous in a request handler
-  │                                              (routers.ts:690); door 2 unwired (PR #7)
+  │                                              (routers.ts, assistant.draft); door 2 unwired (PR #7)
   ▼
 Structured decision .............. PARTIAL       door 1 proposal path live; no decision envelope
   │                                              with COMPLETE / CLARIFY / REFUSE / TOOL_REQUEST exists
@@ -545,11 +548,11 @@ except the budget reason string.
 ## 18. SPINE remains first
 
 ```
-BoundaryConfirmation            ← in progress (resolver + chain rule landed; reader waits on 0169 → PR #17)
+BoundaryConfirmation            ← resolver, chain rule and reader on main (#10, #17; 0169 reconciled forward as 0179)
       ↓
 remaining SPINE wiring          ← four duplications → offlineCapability → dispatch gate … job close
       ↓
-remove synchronous request-handler LLM call (routers.ts:690, owner's carve-out ruling)
+remove synchronous request-handler LLM call (assistant.draft, owner's carve-out ruling)
       ↓
 durable AI worker path          ← register the Secretary handler (PR #7 lands first)
       ↓
@@ -576,12 +579,12 @@ Added to `AI_RUNTIME_TERMINOLOGY.md` §22 with status beside each term.
 
 ## 20. Findings
 
-**F1 — the synchronous LLM pin is not on this branch.** `server/routers.ts:690` calls
-`invokeLLM()` inside `fieldRoute.assistant.draft`. The test that pins that at exactly one call
+**F1 — the synchronous LLM pin is not on this branch.** `server/routers.ts` (line 794 on `main`)
+calls `invokeLLM()` inside `fieldRoute.assistant.draft`. The test that pins that at exactly one call
 (`server/_core/ai/workerBoundary.test.ts`) and the moratorium document it cites
 (`docs/register/SECRETARY_SPINE_MORATORIUM.md`) arrive with PR #7, which is open. Until #7 lands,
-nothing on `main`-line branches stops a second in-request model call. Not fixed here (the pin is
-PR #7's to carry); recorded.
+nothing on `main`-line branches stops a second in-request model call. **Decision (2026-09-25):**
+port only the guard, independently of PR #7, on its own branch (§22).
 
 **F2 — `agentActions.idempotencyKey` is not unique.** `drizzle/0100_agent_runs.sql` line 16 says
 "`idempotencyKey` is unique", but line 90 creates a plain `INDEX`. `agent.requestAction` does
@@ -596,7 +599,7 @@ for this checkpoint and would land in the contested migration range
 may set `waiting_for_approval` (line 253) or `blocked` (line 256) without consulting
 `TRANSITIONS`. A `completed`, `failed` or `cancelled` run can be re-opened that way, which
 contradicts `TRANSITIONS[cancelled] = []`. Harmless while nothing executes; a correctness
-prerequisite for cancellation. Recorded as P9.12.
+prerequisite for cancellation. Recorded as P9.12 (F3A, terminal runs) and P9.13 (F3B, the cancel action).
 
 **F4 — hidden reasoning: none persisted or requested.** Re-verified on this tree:
 `InvokeParams.thinking` / `.reasoning` in `llm.ts` are passthroughs **no caller sets**;
@@ -650,12 +653,80 @@ is also dropped, which is the wrong half to drop (P9.10).
     b. persist tool results by advancing `agentActions.outcome` + result hash, and give tools a
        version (P9.3);
     c. enforce `maxSteps`/`stepsUsed` with `blocked` + budget reason (P9.5);
-    d. unique index on `agentActions.idempotencyKey` (P9.11) and a terminal-run guard + `agent.cancel`
-       procedure that writes an audit row (P9.12);
+    d. unique index on `agentActions.idempotencyKey` (P9.11) and a terminal-run guard (P9.12, F3A) and, later,
+       an `agent.cancel` procedure that writes an audit row (P9.13, F3B);
     e. provenance + inference telemetry columns (P9.2, P9.6);
     f. join tool → capability (P9.8); persist `evidenceRefs` (P9.10);
     g. only then, a bounded multi-step executor over `agentSteps`.
 13. **Does anything change the SPINE sequence?** No. F1 argues for landing PR #7 (declared
     unwired) before any further in-request AI work, which is already the moratorium's intent.
-    F2 and F3 are agent-runtime defects that nothing executes on; they belong at step (d), after
-    the SPINE.
+    F2 and F3 are agent-runtime defects that nothing executes on. After owner review (§22), F1's
+    guard and F3A's state-integrity repair go ahead as narrow fixes on their own branches; F2 and
+    F3B stay at step (d), after the SPINE.
+
+---
+
+## 22. Decisions recorded (owner review, 2026-09-25)
+
+The documentation checkpoint is accepted. The architectural conclusions stand: no new
+orchestrator; `workflowEngine` already performs much of the orchestration role; multi-agent and
+embeddings stay deferred; hidden chain-of-thought is never stored; `evidenceRefs` should
+eventually be retained; existing LeaseOS records are the authoritative memory; durable execution
+reuses the existing outbox/worker. The findings are handled by risk, **not** as one AI bugfix
+branch, and none of them moves ahead of the SPINE except narrow integrity fixes.
+
+**Architecture is a composition, not a module.** The runtime is
+
+```
+durable outbox/worker  +  workflowEngine  +  agent router  +  authorization  +  automation policy
+```
+
+No `orchestrator.ts` is created for naming consistency. If the post-SPINE executor needs one
+coordinating function, it adds the smallest controller required at that time and does not
+duplicate the live workflow engine.
+
+| Finding | Decision | Where |
+|---|---|---|
+| **F1** request-handler model guard | Fix now, guard only. Pin the known violation (`assistant.draft → invokeLLM`) at exactly 1; fail at 2+; fail at 0 with a message to lower the pin. The call itself is not refactored. Not obtained by merging PR #7. | own branch, `claude/ai-request-boundary-guard` |
+| **F2** `agentActions.idempotencyKey` not unique | **Deferred, release-blocking.** Migration-bearing, and migration numbering is contended (`docs/architecture/MIGRATION_COLLISION_REGISTER.md`: every number from 0175 to 0188 is claimed by at least one open branch). No migration number is chosen now. | P9.11 |
+| **F3A** terminal runs can reopen | Fix now as a state-integrity repair of existing code, using the existing `TRANSITIONS` table; RED tests first; no second transition table. | own branch |
+| **F3B** no cancellation action | **Deferred** to the post-SPINE executor. No cancel procedure in this checkpoint. | P9.13 |
+| **P9.10** `evidenceRefs` dropped | Kept. Evidence references matter more than any reasoning text. No schema change yet. | P9.10 |
+| Budgets | No second budget representation. | P9.5 |
+
+**F2 — the eventual fix, in order.** (1) Identify the exact intended key (today
+`runId:requestId:capability:targetId`, derived server-side). (2) Inspect existing rows for
+duplicates. (3) Decide deterministic remediation if any exist. (4) Add the UNIQUE constraint —
+never by flipping the existing index to unique without step 2. (5) Keep application-level
+handling: a duplicate-key error on insert is a replay and returns the original decision, with the
+existing `payloadHash` conflict check preserved. (6) A concurrency test proving two simultaneous
+attempts produce one authoritative action.
+
+**F3B — the semantics a cancellation must have** (designed with the worker executor):
+
+- a cancelled job receives no new inference calls and executes no new tools;
+- domain actions already committed stay committed — cancellation never rolls back a receipt;
+- cancellation writes an audit event;
+- cancellation is idempotent: cancelling a cancelled job returns the same outcome;
+- cancellation requires authorization, like every other `agent.*` procedure;
+- a completed or failed job cannot be reopened, or relabelled, through cancellation;
+- a worker that observes cancellation between steps stops cleanly and records where it stopped.
+
+**Budget invariant for the post-SPINE executor.** `stepsUsed <= maxSteps` is server-enforced, and
+the loop consumes budget atomically (a conditional `UPDATE … SET stepsUsed = stepsUsed + 1 WHERE
+stepsUsed < maxSteps`) *before* performing a step. The model never supplies or raises `maxSteps`.
+Inference, token, cost and deadline budgets are designed later, on the same row.
+
+**Evidence provenance, when the worker path is built,** is recorded alongside: model identifier,
+provider, prompt version, tool results, authorization decision, human approval and the resulting
+receipt. `evidenceRefs` is preferred over `reasoningSummary` for audit; model reasoning is never
+persisted.
+
+**The main sequence, unchanged:**
+
+```
+BoundaryConfirmation → SPINE item 1 → remaining SPINE wiring → remove assistant.draft synchronous
+model call → register durable AI job → save tool results / evidence refs → enforce step budget →
+database-backed idempotency → cancellation → multi-step agent executor → advanced RAG / context
+management → only then reconsider multi-agent
+```

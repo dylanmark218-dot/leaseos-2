@@ -116,7 +116,7 @@ no restricted-records vault, no break-glass path.
 ## P9 — AI runtime backlog, from the terminology survey (2026-09-23)
 
 Recorded so they do not disappear. None is started; none is SPINE work, and none may be built ahead
-of the spine. Source: `docs/register/AI_RUNTIME_TERMINOLOGY.md`; P9.10–P9.12 from `docs/register/AI_AGENT_RUNTIME_ARCHITECTURE.md`. No status word on any row, on
+of the spine. Source: `docs/register/AI_RUNTIME_TERMINOLOGY.md`; P9.10–P9.13 from `docs/register/AI_AGENT_RUNTIME_ARCHITECTURE.md`. No status word on any row, on
 purpose: nothing here is claimed.
 
 | # | Item | What is wrong | Definition of done |
@@ -131,8 +131,9 @@ purpose: nothing here is claimed.
 | P9.8 | AI-REGISTRY-1 — capability/tool key relationship | `SECRETARY_TOOLS` (tool key → `ProcedureName`) and the gateway `CAPABILITIES` (capability key → permissions + risk) are two unrelated namespaces. | An explicit mapping from tool to the capability it exercises. **Not merged**; the registry already consults `NEVER_AUTONOMOUS`, so the dependency direction is set. |
 | P9.9 | Hidden reasoning — none, keep it that way | The survey found no persisted model deliberation. `reasoningSummary`, notes, plans, decisions, tool results and receipts are observable artifacts. | No table, column or type for chain-of-thought, thoughts, scratchpads or reasoning transcripts is added. `reasoningSummary` on `agent.requestAction` stays unpersisted; `evidenceRefs` is the auditable substitute. |
 | P9.10 | AI-AUDIT-1 — `evidenceRefs` dropped | `agent.requestAction` accepts `evidenceRefs` and places them on `ActionRequest`; `agentActions` has no column, so the auditable substitute for reasoning is lost. | Evidence references persisted with the decision; `reasoningSummary` stays unpersisted. |
-| P9.11 | AI-IDEM-1 — `agentActions.idempotencyKey` not unique | `drizzle/0100_agent_runs.sql` comments that the key is unique but creates a plain `INDEX`; `requestAction` does check-then-insert, so concurrent replays can write two decisions. | A unique index (migration, placed per `docs/architecture/MIGRATION_COLLISION_REGISTER.md`) and the insert treats a duplicate-key error as a replay. |
-| P9.12 | AI-CANCEL-1 — cancellation unreachable, terminal runs reopenable | No procedure moves a run to `cancelled`; `requestAction` does not consult `TRANSITIONS` and can set `waiting_for_approval`/`blocked` on a `completed`/`failed`/`cancelled` run. | Terminal-run guard in `requestAction`; an `agent.cancel` procedure that stops future work, never rolls back commits, and writes an audit row. |
+| P9.11 | AI-IDEM-1 — `agentActions.idempotencyKey` not unique — **release-blocking; deferred until migration numbering is reconciled** | `drizzle/0100_agent_runs.sql` comments that the key is unique but creates a plain `INDEX`; `requestAction` does check-then-insert, so concurrent replays can write two decisions. No migration number is chosen while 0175–0188 are contended (`docs/architecture/MIGRATION_COLLISION_REGISTER.md`). | Intended key confirmed; existing rows inspected for duplicates and any remediation decided; a UNIQUE constraint (never the existing index flipped blind); a duplicate-key error on insert handled as a replay; a concurrency test proving two simultaneous attempts produce one action. Steps in `docs/register/AI_AGENT_RUNTIME_ARCHITECTURE.md` §22. |
+| P9.12 | AI-STATE-1 (F3A) — terminal runs can reopen | `agent.requestAction` does not consult `TRANSITIONS`; it can set `waiting_for_approval`/`blocked` on a `completed`/`failed`/`cancelled` run. | Fixed on its own branch against the existing `TRANSITIONS` table, RED tests first; terminal states stay terminal. |
+| P9.13 | AI-CANCEL-1 (F3B) — no cancellation action — **deferred to the post-SPINE executor** | No procedure moves a run to `cancelled`. | An authorized, idempotent, audited cancel that stops future inference and tools, never rolls back commits, cannot reopen a finished run, and is observed cleanly by the worker (§22 semantics). |
 
 ## P6 — the human-only items (no code completes these)
 
