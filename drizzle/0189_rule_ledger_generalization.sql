@@ -47,10 +47,6 @@ UPDATE `hosRuleLimitHistory`
 --> statement-breakpoint
 CREATE INDEX `hosRuleLimitHistory_family_rule_idx` ON `hosRuleLimitHistory` (`ruleFamily`, `ruleRef`);
 --> statement-breakpoint
-CREATE INDEX `hosRuleLimitHistory_family_status_idx` ON `hosRuleLimitHistory` (`ruleFamily`, `status`);
---> statement-breakpoint
-CREATE INDEX `hosRuleLimitHistory_source_revision_idx` ON `hosRuleLimitHistory` (`sourceRevisionRef`);
---> statement-breakpoint
 -- The source half. A rule revision cannot be verified without a verified source revision whose hash it
 -- records, so the revision needs to say what it is a revision of and whether a person has checked it.
 -- `status` is backfilled from the one fact the table already had: a version with a verifier is verified.

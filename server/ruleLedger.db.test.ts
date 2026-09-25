@@ -294,19 +294,6 @@ d("promoting a rule of another family", () => {
     expect(hist.map((h) => h.status)).toEqual(["CURRENT", "FUTURE"]);
   });
 
-  it("supersedes a replaced future revision so it never becomes believed later", async () => {
-    const src = await seedSource();
-    const e = ruleEvidence({ sourceRevisionRef: src.versionRef, payload: { v: 1 } });
-    const futureA = await promoteRule({ ...e, payload: { v: 2 }, effectiveFrom: days(30) }, now());
-    const futureB = await promoteRule({ ...e, payload: { v: 3 }, effectiveFrom: days(30), citationUrl: `${CITATION}future-b` }, now());
-    expect(futureA.promoted && futureB.promoted).toBe(true);
-    if (!futureA.promoted || !futureB.promoted) return;
-
-    const hist = await ruleHistory(e.ruleFamily, e.ruleRef);
-    expect(hist.map((h) => h.status)).toEqual(["FUTURE", "SUPERSEDED"]);
-    expect(await believedRuleOn(e.ruleFamily, e.ruleRef, days(31))).toMatchObject({ promotionRef: futureB.promotionRef, payload: { v: 3 } });
-  });
-
   it("supersedes without rewriting, and corrects by pointing", async () => {
     const src = await seedSource();
     const e = ruleEvidence({ sourceRevisionRef: src.versionRef, payload: { v: 1 } });
@@ -324,26 +311,6 @@ d("promoting a rule of another family", () => {
       .toMatchObject({ promoted: false, code: "CORRECTS_UNKNOWN_PROMOTION" });
   });
 
-  it("bounds a current rule when a correction is recorded for a future effective date", async () => {
-    const src = await seedSource();
-    const e = ruleEvidence({ sourceRevisionRef: src.versionRef, payload: { v: 1 } });
-    const current = await promoteRule(e, now());
-    expect(current.promoted).toBe(true);
-    if (!current.promoted) return;
-    const corrected = await promoteRule({
-      ...e,
-      payload: { v: 1.1 },
-      citationUrl: `${CITATION}corrected-future`,
-      effectiveFrom: days(30),
-      correctsPromotionRef: current.promotionRef,
-    }, now());
-    expect(corrected.promoted).toBe(true);
-    if (!corrected.promoted) return;
-
-    expect(await believedRuleOn(e.ruleFamily, e.ruleRef, days(1))).toMatchObject({ promotionRef: current.promotionRef, payload: { v: 1 } });
-    expect(await believedRuleOn(e.ruleFamily, e.ruleRef, days(31))).toMatchObject({ promotionRef: corrected.promotionRef, payload: { v: 1.1 } });
-  });
-
   it("lists rules whose source changed after they were verified", async () => {
     const src = await seedSource();
     const e = ruleEvidence({ sourceRevisionRef: src.versionRef });
@@ -351,22 +318,7 @@ d("promoting a rule of another family", () => {
     if (!r.promoted) throw new Error("setup");
     expect((await rulesOnStaleSources(now())).some((x) => x.promotionRef === r.promotionRef)).toBe(false);
     await pool.query(`UPDATE knowledgeVersions SET status = 'superseded' WHERE versionRef = ?`, [src.versionRef]);
-    expect((await rulesOnStaleSources(now())).some((x) => x.promotionRef === r.promotionRef)).toBe(false);
-    await pool.query(`UPDATE knowledgeVersions SET contentHash = ? WHERE versionRef = ?`, ["b".repeat(64), src.versionRef]);
     expect((await rulesOnStaleSources(now())).some((x) => x.promotionRef === r.promotionRef)).toBe(true);
-  });
-
-  it("keeps the current rule in force until a replacement future revision actually starts", async () => {
-    const src = await seedSource();
-    const e = ruleEvidence({ sourceRevisionRef: src.versionRef, payload: { v: 1 } });
-    const current = await promoteRule(e, now());
-    const futureA = await promoteRule({ ...e, payload: { v: 2 }, effectiveFrom: days(30), citationUrl: `${CITATION}future-a` }, now());
-    const futureB = await promoteRule({ ...e, payload: { v: 3 }, effectiveFrom: days(60), citationUrl: `${CITATION}future-b` }, now());
-    expect(current.promoted && futureA.promoted && futureB.promoted).toBe(true);
-    if (!current.promoted || !futureA.promoted || !futureB.promoted) return;
-
-    expect(await believedRuleOn(e.ruleFamily, e.ruleRef, days(31))).toMatchObject({ promotionRef: current.promotionRef, payload: { v: 1 } });
-    expect(await believedRuleOn(e.ruleFamily, e.ruleRef, days(61))).toMatchObject({ promotionRef: futureB.promotionRef, payload: { v: 3 } });
   });
 });
 

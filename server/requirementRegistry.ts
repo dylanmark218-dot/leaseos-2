@@ -21,7 +21,7 @@
  * Rows the old path marked `superseded` in place keep that mark (no history is rewritten). Their
  * original status is recovered from `verifiedByUserId`, which the old path never cleared.
  */
-import { eq, lte } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { complianceRequirements, compliancePacks } from "../drizzle/schema";
 import type { Requirement, RequirementStatus } from "./_core/compliancePassport";
 import { COMPLIANCE_PACK_SEEDS } from "./_core/complianceRequirementSeeds";
@@ -52,11 +52,9 @@ export function governingRevisions(rows: readonly RequirementRow[], at: Date): {
   for (const versions of Array.from(byKey.values())) {
     versions.sort((a, b) => b.version - a.version);
     const inForce = versions.find((v) => v.effectiveFrom <= at);
-    // Nothing effective yet: the newest non-withdrawn revision still stands for the key (and applies
-    // from its date), so the seed it replaced does not come back in the meantime. A future-dated
-    // withdrawn revision does not withdraw the key early; the latest earlier non-withdrawn revision
-    // keeps governing until that withdrawn revision's own date.
-    const chosen = inForce ?? versions.find((v) => v.verificationStatus !== "withdrawn") ?? versions[0];
+    // Nothing effective yet: the newest revision stands for the key (and applies from its date),
+    // so the seed it replaced does not come back in the meantime.
+    const chosen = inForce ?? versions[0];
     const status = statusOf(chosen, chosen !== versions[0]);
     if (status === "withdrawn") continue;
     // `effectiveUntil` is kept as stored. Where the old path set it on loading the next revision, it
@@ -90,8 +88,8 @@ export async function loadRequirementRegistry(seeds: readonly Requirement[], at:
   const seeded: RegistryRequirement[] = seeds.map((s) => ({ ...s, origin: "seed" as const }));
   const db = await getDb();
   if (!db) return seeded;
-  const rows = await db.select().from(complianceRequirements).where(lte(complianceRequirements.createdAt, at));
-  const storedKeys = new Set(rows.map((r) => r.requirementKey));
+  const rows = await db.select().from(complianceRequirements);
+  const storedKeys = new Set(rows.filter((r) => r.createdAt <= at).map((r) => r.requirementKey));
   const loaded = governingRevisions(rows, at).map(({ row, status }) => fromRow(row, status));
   return [...loaded, ...seeded.filter((s) => !storedKeys.has(s.requirementKey))];
 }
@@ -105,14 +103,8 @@ export async function knownPacks(): Promise<Pack[]> {
         activatesWhen: p.activatesWhenJson ? JSON.parse(p.activatesWhenJson) : null,
       }))
     : [];
-  const merged = new Map(COMPLIANCE_PACK_SEEDS.map((p) => [p.packKey, { ...p }]));
-  for (const p of stored) {
-    const seed = merged.get(p.packKey);
-    merged.set(p.packKey, seed
-      ? { ...seed, ...p, activatesWhen: p.activatesWhen ?? seed.activatesWhen }
-      : p);
-  }
-  return Array.from(merged.values());
+  const keys = new Set(stored.map((p) => p.packKey));
+  return [...stored, ...COMPLIANCE_PACK_SEEDS.filter((p) => !keys.has(p.packKey))];
 }
 
 export async function packExists(packKey: string): Promise<boolean> {

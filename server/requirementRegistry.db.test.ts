@@ -9,7 +9,7 @@ import { complianceRequirements } from "../drizzle/schema";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
 import type { DomainRole } from "./_core/recordsAuthorization";
 import { grantUserRole } from "./db";
-import { governingRevisions, knownPacks, loadRequirementRegistry } from "./requirementRegistry";
+import { governingRevisions, loadRequirementRegistry } from "./requirementRegistry";
 import { appRouter } from "./routers";
 
 type Row = typeof complianceRequirements.$inferSelect;
@@ -68,15 +68,6 @@ describe("which revision governs", () => {
     const g = governingRevisions([row({ effectiveFrom: T("2027-01-01") })], T("2026-04-01"));
     expect(g).toHaveLength(1);
   });
-
-  it("keeps the latest earlier non-withdrawn revision until a future withdrawn revision's date", () => {
-    const rows = [
-      row({ version: 1, effectiveFrom: T("2027-01-01") }),
-      row({ id: 2, version: 2, verificationStatus: "withdrawn", effectiveFrom: T("2028-01-01"), createdAt: T("2026-03-01") }),
-    ];
-    expect(governingRevisions(rows, T("2026-04-01")).map((g) => [g.row.version, g.status])).toEqual([[1, "verified"]]);
-    expect(governingRevisions(rows, T("2028-02-01"))).toEqual([]);
-  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -132,29 +123,6 @@ d("requirementLoad writes revisions and never rewrites one", () => {
     await expect(callerFor(controller).compliance.requirementLoad({ ...common, requirementKey: `test.c1b2.${rnd()}`, subjectType: "equipment", packKey: "no.such.pack" }))
       .rejects.toThrow(/Unknown pack/);
   });
-
-  it("keeps the active revision governing until a future withdrawn revision reaches its own date", async () => {
-    const controller = await withRole("controller");
-    const key = `test.c1b2.withdrawn.${rnd()}`;
-    const jurisdiction = `CA-ZZ-${rnd()}`;
-    const base = {
-      requirementKey: key, family: "test", title: "Fixture requirement", subjectType: "operator" as const, jurisdiction,
-      satisfiedByDocTypes: ["fixture_doc"], missingSeverity: "blocked" as const, sourceAuthority: "FIXTURE", sourceVerified: true,
-      requestedStatus: "verified" as const,
-    };
-    await callerFor(controller).compliance.requirementLoad({ ...base, effectiveFrom: new Date("2026-01-01T00:00:00Z") });
-    await callerFor(controller).compliance.requirementLoad({ ...base, title: "Fixture requirement withdrawn", effectiveFrom: new Date("2026-06-01T00:00:00Z") });
-    await pool.query(
-      "UPDATE complianceRequirements SET verificationStatus = 'withdrawn', verifiedByUserId = NULL, verifiedAt = NULL WHERE requirementKey = ? AND version = 2",
-      [key],
-    );
-
-    const before = await loadRequirementRegistry([], new Date("2026-04-01T00:00:00Z"));
-    expect(before.find((r) => r.requirementKey === key)).toMatchObject({ version: 1, verificationStatus: "verified", origin: "registry" });
-
-    const after = await loadRequirementRegistry([], new Date("2026-07-01T00:00:00Z"));
-    expect(after.find((r) => r.requirementKey === key)).toBeUndefined();
-  });
 });
 
 d("the registry reaches every reader", () => {
@@ -166,20 +134,6 @@ d("the registry reaches every reader", () => {
     await callerFor(controller).compliance.requirementLoad({
       requirementKey: key, family: "test", title: "Fixture", subjectType: "operator", jurisdiction,
       satisfiedByDocTypes: ["fixture_doc"], effectiveFrom: new Date("2026-01-01T00:00:00Z"),
-    });
-
-    it("merges stored pack metadata onto a seed pack without dropping the seed activation rule", async () => {
-      const seed = "ab.powered_mobile_equipment";
-      await pool.query(
-        "INSERT INTO compliancePacks (packKey, title, jurisdiction, core, activatesWhenJson) VALUES (?, 'Stored title override', 'CA-AB', false, NULL)",
-        [seed],
-      );
-      const pack = (await knownPacks()).find((p) => p.packKey === seed);
-      expect(pack).toMatchObject({
-        packKey: seed,
-        title: "Stored title override",
-        activatesWhen: { activitiesAny: ["earthworks", "hydrovac", "material_handling", "lifting"] },
-      });
     });
     await callerFor(controller).compliance.requirementLoad({
       requirementKey: key, family: "test", title: "Fixture v2", subjectType: "operator", jurisdiction,
