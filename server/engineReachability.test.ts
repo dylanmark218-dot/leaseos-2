@@ -110,7 +110,7 @@ const DECLARED_UNWIRED: Record<string, string> = {
   billingAdjustment: "adjustment rules; same unestablished reachability as billing",
   dataApi: "shape declarations only",
   dataIngestion: "import path not wired",
-  dispatchMatching: "matching engine; dispatch surface uses its own path",
+  dispatchMatching: "suitability match and posting visibility; no live counterpart (no posting feed or capability data yet). Booking conflicts were a duplicate of the award's own check and were removed (SPINE item 2)",
   disposalReconciliation: "reconciliation engine; no procedure calls it",
   domainEmitters: "event vocabulary; emitted from raw SQL paths",
   feedHttp: "HTTP edge; scheduler not started in production",
