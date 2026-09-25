@@ -88,11 +88,6 @@ describe("A6/A11 — purpose is enforced, and it is enforced by the tag", () => 
   });
 
   it("A11. refuses an envelope whose purpose field was edited", () => {
-    /*
-     * The important one. Rewriting the purpose to point at another key does not merely fail a
-     * string comparison — the field is authenticated, so the tag no longer verifies. A future
-     * refactor that drops an `if (purpose !== …)` check cannot reopen this.
-     */
     const keys = providerWith();
     const envelope = encryptSecret({ purpose: "WEBHOOK_SECRET", plaintext: "s", context: ctx(), keys });
     const tampered = envelope.replace("WEBHOOK_SECRET", "MFA_SECRET");
@@ -100,15 +95,50 @@ describe("A6/A11 — purpose is enforced, and it is enforced by the tag", () => 
     expect(tampered).not.toBe(envelope);
     expect(() => decryptSecret({ purpose: "MFA_SECRET", envelope: tampered, context: ctx(), keys })).toThrow();
   });
+
+  it("A11b. the purpose is bound by the tag, not merely by the key lookup", () => {
+    /*
+     * A11 alone proves less than it appears to. Relabelling the purpose leaves `keyId` pointing at
+     * another purpose's key, so the key lookup refuses first and the AAD is never reached — a
+     * mutation that removes the purpose from the AAD *and* deletes the explicit comparison
+     * survives A11 untouched. That was found by planting exactly that mutation.
+     *
+     * So this constructs the one case where the lookup cannot help: two purposes sharing the same
+     * key id AND the same key material. The relabelled envelope finds a perfectly valid key, and
+     * the only thing left that can refuse it is the authenticated purpose.
+     */
+    const shared = { keyId: "shared-v1", hex: hexKey("f") };
+    const keys = createEnvironmentKeyProvider({
+      MFA_SECRET: { active: shared },
+      WEBHOOK_SECRET: { active: shared },
+    });
+
+    const envelope = encryptSecret({ purpose: "WEBHOOK_SECRET", plaintext: "signing-secret", context: ctx(), keys });
+    const relabelled = envelope.replace("WEBHOOK_SECRET", "MFA_SECRET");
+
+    // Same key id, so `getDecryptKey("MFA_SECRET", "shared-v1")` succeeds — no lookup refusal.
+    expect(parseEnvelope(relabelled).keyId).toBe("shared-v1");
+    expect(() =>
+      decryptSecret({ purpose: "MFA_SECRET", envelope: relabelled, context: ctx(), keys })
+    ).toThrow(/authentication failed/i);
+  });
 });
 
 describe("A7/A12 — key identity is enforced", () => {
   it("A7. refuses an unknown keyId rather than falling back to the active key", () => {
+    /*
+     * Asserted on the *configuration* refusal specifically, not on "it threw". A mutation that
+     * falls back to the active key when the id is unknown still throws — the AAD carries the
+     * unknown id, so the tag fails — and a looser assertion passes while the explicit lookup is
+     * gone. Two layers protect this; the test has to say which one it is checking.
+     */
     const keys = providerWith();
     const envelope = encryptSecret({ purpose: "MFA_SECRET", plaintext: "s", context: ctx(), keys });
     const unknown = envelope.replace("mfa-v2", "mfa-v9");
 
-    expect(() => decryptSecret({ purpose: "MFA_SECRET", envelope: unknown, context: ctx(), keys })).toThrow(/key/i);
+    expect(() => decryptSecret({ purpose: "MFA_SECRET", envelope: unknown, context: ctx(), keys })).toThrow(
+      /no key "mfa-v9" configured/
+    );
   });
 
   it("A12. refuses an envelope whose keyId was edited to a real other key", () => {
