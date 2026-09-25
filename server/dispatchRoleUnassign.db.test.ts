@@ -20,7 +20,7 @@ describe("role unassignment — preconditions", () => {
 
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 880_000_000 + Math.floor(Math.random() * 50_000);
+let seq = 883_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 const caller = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 
