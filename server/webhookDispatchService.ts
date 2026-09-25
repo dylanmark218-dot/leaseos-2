@@ -50,7 +50,10 @@ import { and, desc, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import { getDb } from "./db";
 import { domainEventOutbox, webhookDeliveries, webhookSubscriptions } from "../drizzle/schema";
 import { deliveryOutcome, signPayload, subscribed } from "./_core/integrationGateway";
-import { decryptSecret, mfaKey } from "./_core/externalIdentityPolicy";
+import { mfaKey } from "./_core/externalIdentityPolicy";
+import { resolveWebhookSigningSecret } from "./webhookSecretService";
+import { environmentSecretKeys } from "./_core/secretKeys";
+import { ENV } from "./_core/env";
 import { affectedRows } from "./_core/enforcementCommit";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -159,12 +162,30 @@ export async function dispatchWebhooks(args: DispatchArgs = {}): Promise<Dispatc
   const results: DispatchResult["results"] = [];
   for (const s of subs) {
     const types = JSON.parse(s.eventTypesJson) as string[];
-    // Decrypted on first use, not up front: a subscription whose secret cannot be read is
-    // skipped on its own instead of aborting dispatch for every other subscription.
+    /*
+     * Resolved on first use, not up front: a subscription whose secret cannot be read is skipped on
+     * its own instead of aborting dispatch for every other subscription (SEC-004).
+     *
+     * 0194 — resolution now goes through `resolveWebhookSigningSecret`, the single compatibility
+     * boundary: canonical `secretRef` first, legacy `secretEnc` only when no reference is present,
+     * and a refusal — never a fallback — when a reference is present but unreadable. Every signing
+     * path reaches the secret through that one function; if this loop kept its own `decryptSecret`
+     * call, "fail closed" would be true elsewhere in the application and false right here.
+     *
+     * The caught error's message is logged because the resolver and the secret store both guarantee
+     * their refusals carry neither plaintext nor envelope (pinned by B15/B16, and by E21 here) — and
+     * an operator looking at a silently skipped subscription needs to know whether it is a missing
+     * key, a wrong purpose, or a damaged record.
+     */
     let secret: string | null | undefined;
-    const secretFor = () => {
+    const secretFor = async () => {
       if (secret === undefined) {
-        try { secret = decryptSecret(s.secretEnc, key); } catch { secret = null; console.warn(`[webhooks] ${s.subscriptionRef}: signing secret cannot be decrypted with the configured key; skipped`); }
+        try {
+          secret = await resolveWebhookSigningSecret(s, { keys: environmentSecretKeys(), legacyKey: key, isProduction: ENV.isProduction });
+        } catch (e) {
+          secret = null;
+          console.warn(`[webhooks] ${s.subscriptionRef}: signing secret unavailable; skipped — ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
       return secret;
     };
@@ -178,7 +199,7 @@ export async function dispatchWebhooks(args: DispatchArgs = {}): Promise<Dispatc
       if (last && last.status === "failed" && last.nextAttemptAt && now < last.nextAttemptAt) continue;
       if (last && last.status === "queued" && claimIsLive(last, leaseNow)) continue; // someone holds it
 
-      const signingSecret = secretFor();
+      const signingSecret = await secretFor();
       if (signingSecret === null) continue;
       const body = JSON.stringify({ eventId: ev.eventId, eventType: ev.eventType, version: ev.eventVersion, aggregate: { type: ev.aggregateType, id: ev.aggregateId }, occurredAt: ev.occurredAt, payload: JSON.parse(ev.payloadJson) });
       const timestamp = Math.floor(now.getTime() / 1000);

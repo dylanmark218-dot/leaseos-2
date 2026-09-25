@@ -100,3 +100,20 @@ claiming, not taken from this line.
   numbers were verified free across every branch before use, and none collided. The register is the
   repository's record of that verification, and three merges' worth of it was missing. Also recorded
   the `0185` double-claim, resolved in SEC-004's favour on claim order. No migration file renamed.
+
+## State at the S2-E Phase 1 claim (2026-09-25, `main` = `14b5df2`, after PR #20 and #49)
+
+`main` migration head: **`0193_mfa_secret_ref.sql`**, 175 migrations. Re-scanned across `main`,
+every remote branch and every open-PR head at the moment of claiming: the highest number held
+anywhere is `0193`, so `0194` is the first free everywhere.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0194 | `0194_webhook_secret_ref.sql` | `feature/webhook-secret-migration-phase1` | S2-E Phase 1 | claiming | none | keeps 0194 |
+
+## Change log
+
+* **2026-09-25 (S2-E Phase 1)**: claimed `0194` and recorded it **in the commit that creates the
+  migration**, rather than afterwards. That ordering is the correction for the `0191`–`0193`
+  omission recorded above: those numbers were each verified free before use, but the verification
+  went unrecorded, and this register is the only place that verification survives.
