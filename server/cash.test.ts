@@ -162,7 +162,7 @@ d("cash, through the ledger", () => {
   it("receives a payment, applies it, imports the bank statement that shows it, leaves the unknown withdrawal as the finding, ages what is left, and writes off only by a second person", async () => {
     const bookkeeper = await withRole("bookkeeper");
     const controller = await withRole("controller");
-    const entityId = 1_600_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO billingBooks (bookNumber, jobId, customer, billingState, openedAt, createdAt, updatedAt) VALUES (?, 1, 'Acme', 'invoiced', NOW(), NOW(), NOW())", [key("BB").slice(0, 40)]);
     const inv1 = key("INV").slice(0, 40), inv2 = key("INV").slice(0, 40);
     await pool.execute("INSERT INTO invoices (invoiceNumber, financialEntityId, issuedAt, billingBookId, jobId, customer, subtotalCents, taxCents, totalCents, currency, status, dueAt) VALUES (?, ?, '2026-08-05 00:00:00', ?, 1, 'Acme', 100000, 5000, 105000, 'CAD', 'sent', '2026-09-04 00:00:00')", [inv1, entityId, Number(book.insertId)]);
@@ -218,7 +218,7 @@ d("cash, through the ledger", () => {
     await expect(callerFor(bookkeeper).ar.collectionEvent({ invoiceNumber: inv2, eventType: "promise_to_pay" })).rejects.toThrow(/amount and a date/);
 
     // v21.9.1 — Company B has an "Acme" too. Its payment cannot touch Company A's invoice, by identity, not by name.
-    const entityB = entityId + 1;
+    const entityB = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Second Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a second real book
     const payB = await callerFor(bookkeeper).ar.paymentRecord({ financialEntityId: entityB, customer: "Acme", receivedAt: new Date("2026-09-12T00:00:00Z"), amountCents: 16_000, method: "eft" });
     await expect(callerFor(bookkeeper).ar.paymentAllocate({ paymentRef: payB.paymentRef, invoiceNumber: inv2, amountCents: 16_000 })).rejects.toThrow(/never crosses entities/);
     const [acctRows] = await pool.execute<mysql.RowDataPacket[]>("SELECT financialEntityId, name FROM customerAccounts WHERE name = 'Acme' AND financialEntityId IN (?, ?) ORDER BY financialEntityId", [entityId, entityB]);

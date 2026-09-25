@@ -26,6 +26,8 @@ import { roleProcedure, router } from "./_core/trpc";
 import { getDb, jobInScope, listActiveUserRoleNames } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { assertEntityInScope } from "./_core/entityScope";
+import { singleOwnershipDomain } from "./ownershipDomain";
+import { platformAuthorityProven } from "./platformAuthority";
 import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, dispatchPostings, operators } from "../drizzle/schema";
 import { assertReadinessSubjectInScope, checkInScope, dispatchScopeFor, loadEnforcementMode, loadGrantedOverrides } from "./dispatchEnforcementService";
 import { asFinding, resolveOverridePolicy } from "./_core/complianceFinding";
@@ -71,16 +73,23 @@ async function scopedDb(userId: number) {
 }
 
 /**
- * The enforcement setting a caller may read or write. The global row (no entity) governs the legacy
- * path for everyone, so only the historical single tenant may touch it; an entity row must belong to
- * the caller's organization.
+ * The enforcement setting a caller may read or write. An entity row must belong to the caller's
+ * organization (NOT_FOUND otherwise).
+ *
+ * The global row (no entity) is the fallback for every organization without a mode of its own, and the
+ * mode of the legacy path. F1.3 — it is PLATFORM-GOVERNED: once any organization exists, only platform
+ * authority (`platformAuthorityProven`, read from the users row) may change it. Being unaffiliated is
+ * not authority. While no organization exists, the one tenant governs its own deployment, as before.
+ * Reading it keeps C1a's rule (the single tenant, not an organization), plus platform authority.
  */
-async function assertEnforcementScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: Awaited<ReturnType<typeof dispatchScopeFor>>, financialEntityId: number | null) {
-  if (financialEntityId == null) {
-    if (scope.tenantId !== SINGLE_TENANT_ID) throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement setting is not an organization's to change or read — name your own entity" });
-    return;
+async function assertEnforcementScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: Awaited<ReturnType<typeof dispatchScopeFor>>, financialEntityId: number | null, userId: number, access: "read" | "write") {
+  if (financialEntityId != null) return assertEntityInScope(db, financialEntityId, scope);
+  if (await platformAuthorityProven(userId)) return;
+  if (access === "write") {
+    if (await singleOwnershipDomain()) return;
+    throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement setting is the fallback for every organization; only platform authority may change it — name your own entity" });
   }
-  await assertEntityInScope(db, financialEntityId, scope);
+  if (scope.tenantId !== SINGLE_TENANT_ID) throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement setting is not an organization's to read — name your own entity" });
 }
 
 /** A stored check the caller's organization may act on, or "not found". */
@@ -340,7 +349,7 @@ export const dispatchGateRouter = router({
     .input(z.object({ mode: z.enum(["off", "advisory", "enforced"]), reason: z.string().min(10).max(400), financialEntityId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       const { db, scope } = await scopedDb(ctx.user.id);
-      await assertEnforcementScope(db, scope, input.financialEntityId ?? null);
+      await assertEnforcementScope(db, scope, input.financialEntityId ?? null, ctx.user.id, "write");
       const before = await loadEnforcementMode(input.financialEntityId ?? null);
       await db.insert(dispatchEnforcementSettings).values({ financialEntityId: input.financialEntityId ?? null, mode: input.mode, reason: input.reason, setByUserId: ctx.user.id, setAt: new Date() });
       return { scope: input.financialEntityId ?? "global", previous: before.mode, mode: input.mode };
@@ -350,7 +359,7 @@ export const dispatchGateRouter = router({
     .input(z.object({ financialEntityId: z.number().int().positive().nullable().optional() }).optional())
     .query(async ({ ctx, input }) => {
       const { db, scope } = await scopedDb(ctx.user.id);
-      await assertEnforcementScope(db, scope, input?.financialEntityId ?? null);
+      await assertEnforcementScope(db, scope, input?.financialEntityId ?? null, ctx.user.id, "read");
       return loadEnforcementMode(input?.financialEntityId ?? null);
     }),
 
