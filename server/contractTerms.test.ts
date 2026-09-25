@@ -122,6 +122,9 @@ d("the worker sends the event it processed", () => {
   it("delivers a subscribed webhook from the worker's processEvent, and the retry sweep on heartbeat picks up a failed one when it is due", async () => {
     const controller = await withRole("controller");
     const sub = await callerFor(controller).integration.webhookSubscribe({ name: "ERP", url: "https://erp.example/hook", eventTypes: ["worker.*"] });
+    // Revoked whatever happens: a live subscription left behind is encrypted under this file's key and
+    // breaks the next suite that dispatches webhooks under its own.
+    try {
     const seen: string[] = [];
     let failing = true;
     setWebhookPoster(async (_url, body) => { seen.push(body); return failing ? { status: 503 } : { status: 200 }; });
@@ -130,14 +133,20 @@ d("the worker sends the event it processed", () => {
     const ports = createWorkerPorts(pool as never, () => new Date("2026-09-10T12:00:00Z"));
     // The outbox is shared by every suite and claimed oldest first, so this event may sit behind a
     // backlog other suites left. Claim until it turns up, then hand every other row back untouched.
+    // The search claims on the real clock: the lease is compared with the database's NOW(), and a claim
+    // stamped with this test's fixed 2026-09-10 would read as expired and hand back the same rows forever.
     const claimer = `worker-test-${key("W").slice(0, 20)}`;
+    const searching = createWorkerPorts(pool as never, () => new Date());
     let mine: Awaited<ReturnType<typeof ports.claimBatch>>[number] | undefined;
-    for (let i = 0; i < 100 && !mine; i++) {
-      const batch = await ports.claimBatch(claimer, 50);
-      if (!batch.length) break;
-      mine = batch.find(e => e.eventId === eventId);
+    try {
+      for (let i = 0; i < 200 && !mine; i++) {
+        const batch = await searching.claimBatch(claimer, 50);
+        if (!batch.length) break;
+        mine = batch.find(e => e.eventId === eventId);
+      }
+    } finally {
+      await pool.execute("UPDATE domainEventOutbox SET claimedAt = NULL, claimedBy = NULL, attemptCount = GREATEST(attemptCount - 1, 0) WHERE claimedBy = ? AND eventId <> ?", [claimer, eventId]);
     }
-    await pool.execute("UPDATE domainEventOutbox SET claimedAt = NULL, claimedBy = NULL, attemptCount = GREATEST(attemptCount - 1, 0) WHERE claimedBy = ? AND eventId <> ?", [claimer, eventId]);
     expect(mine).toBeTruthy();
     await ports.processEvent(mine!);
     const [d1] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? ORDER BY attempt", [eventId]);
@@ -150,6 +159,8 @@ d("the worker sends the event it processed", () => {
     const [d3] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? ORDER BY attempt", [eventId]);
     expect(d3.map(x => [x.attempt, x.status])).toEqual([[1, "failed"], [2, "delivered"]]);   // due at +1 min, delivered by the sweep
     expect(seen.filter(b => b.includes(eventId))).toHaveLength(2);
-    await callerFor(controller).integration.webhookSetStatus({ subscriptionRef: sub.subscriptionRef, status: "revoked" });
+    } finally {
+      await callerFor(controller).integration.webhookSetStatus({ subscriptionRef: sub.subscriptionRef, status: "revoked" });
+    }
   });
 });
