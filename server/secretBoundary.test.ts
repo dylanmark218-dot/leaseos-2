@@ -110,25 +110,76 @@ describe("resolution happens in services, never in a router body", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("the store and the credential service are the only importers of the crypto core", () => {
+  it("only the store and the key module import the crypto core by value", () => {
     /*
-     * `_core/secretCrypto` is the only module that can produce or open an envelope. Keeping its
-     * importers to a named pair means a third caller is a deliberate act with a name on it, rather
-     * than something that accreted.
+     * `_core/secretCrypto` is the only module that can produce or open an envelope, and this keeps
+     * the list of things that can do so to two: `secretStore`, which makes and opens them, and
+     * `_core/secretKeys`, which assembles the keys. A third is a deliberate act with a name on it.
+     *
+     * TYPE-ONLY IMPORTS ARE NOT COUNTED, and that is a tightening rather than a loophole. The
+     * question this guard asks is "who can call `encryptSecret` or `decryptSecret`" — and
+     * `import type { SecretKeyProvider }` erases at compile time, so the answer for it is "nobody".
+     * Counting a type annotation as access would mean every service that merely passes a provider
+     * through has to be listed, and a list that long stops being read.
      *
      * `externalIdentityPolicy.ts` defines its own `encryptSecret`/`decryptSecret` — the legacy pair
-     * S2-D and S2-E will retire — so this matches on the import path, not on the function names.
+     * S2-D reads and a later checkpoint retires — so this matches the import path, not the names.
      */
-    const importers = serverSources().filter(p => /["'](?:\.{1,2}\/)*(?:server\/)?_core\/secretCrypto["']/.test(code(p)));
+    const CRYPTO_CORE = /["'](?:\.{1,2}\/)*(?:server\/)?(?:_core\/)?secretCrypto["']/;
+    /*
+     * Matched over whole `import … from "…"` statements rather than line by line: `secretStore`
+     * imports the core across six lines, so a per-line test sees the specifier without the `import`
+     * keyword and silently concludes there is no importer. A guard that fails to see its most
+     * important subject is worse than no guard.
+     */
+    const valueImport = (body: string) =>
+      [...body.matchAll(/import\s+[\s\S]*?from\s*["'][^"']+["']/g)]
+        .filter(m => CRYPTO_CORE.test(m[0]))
+        .some(m => !/^import\s+type\b/.test(m[0]));
+
+    const importers = serverSources().filter(p => valueImport(code(p)));
     expect(importers.sort()).toEqual([
-      "server/providerCredentialService.ts",
+      "server/_core/secretKeys.ts",
       "server/secretStore.ts",
     ]);
   });
 
-  it("the credential service is the only importer of the store", () => {
+  it("only named domain services import the store", () => {
+    /*
+     * One entry per class of secret LeaseOS holds, each owning its own domain's rules:
+     *
+     *   providerCredentialService — outbound provider credentials (S2-C)
+     *   mfaSecretService          — portal MFA/TOTP seeds (S2-D)
+     *   mfaSecretMigration        — the one-time backfill that moves them (S2-D)
+     *
+     * A fourth appearing means a new secret class arrived, or an existing domain grew a second
+     * entry point into the store — both worth a conversation rather than a silent pass. S2-E adds
+     * webhook secrets and will add its own line here, deliberately.
+     */
     const importers = serverSources().filter(p => /["'](?:\.{1,2}\/)*(?:server\/)?secretStore["']/.test(code(p)));
-    expect(importers).toEqual(["server/providerCredentialService.ts"]);
+    expect(importers.sort()).toEqual([
+      "server/mfaSecretMigration.ts",
+      "server/mfaSecretService.ts",
+      "server/providerCredentialService.ts",
+    ]);
+  });
+
+  it("no module outside the key provider reads a master-key environment variable", () => {
+    /*
+     * The design's invariant, now enforceable because S2-D introduces the module it names: "No
+     * master-key environment variable referenced outside the key-provider module."
+     *
+     * `externalIdentityPolicy.ts` is the one legacy exception, and it is listed rather than
+     * pattern-matched away so that removing it is a visible edit to this line — which is exactly
+     * what the final step of the MFA cutover will be.
+     */
+    const readers = serverSources().filter(p =>
+      /process\.env\.LEASEOS_(?:KEY_|PORTAL_MFA_KEY)/.test(code(p)) || /env\.LEASEOS_(?:KEY_|PORTAL_MFA_KEY)/.test(code(p))
+    );
+    expect(readers.sort()).toEqual([
+      "server/_core/externalIdentityPolicy.ts",
+      "server/_core/secretKeys.ts",
+    ]);
   });
 });
 
