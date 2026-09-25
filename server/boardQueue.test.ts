@@ -139,7 +139,10 @@ describe("a refusal is kept, not dropped", () => {
     r.server.failNext(trpcError("FORBIDDEN", "Not a member of this channel"));
     const out = await r.queue.flush();
     expect(out).toMatchObject({ failed: 1, sent: 1 });
-    const [msg, resp] = await r.queue.list();
+    // Both were written at the same clock tick, so list order falls to the random local id: find each by kind.
+    const all = await r.queue.list();
+    const msg = all.find(c => c.kind === "board_message");
+    const resp = all.find(c => c.kind === "shift_response");
     expect(msg!.syncState).toBe("failed");
     expect(msg!.lastError).toBe("FORBIDDEN: Not a member of this channel");
     expect(resp!.syncState).toBe("synchronized");
