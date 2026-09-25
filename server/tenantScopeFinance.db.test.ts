@@ -551,3 +551,84 @@ d("F1.2 — Organization B cannot read or file compliance records against Organi
     expect((await callerFor(A.office).compliance.consentRecord({ subjectUserId: A.hr, consentType: "driver_abstract", purpose: "annual abstract", signedAt: days(-1), signatureEvidenceRecordId: A.evidenceId })).consentRef).toBeTruthy();
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// F1.3 — the global dispatch mode is platform-governed
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+d("F1.3 — once organizations exist, only platform authority changes the global dispatch mode", () => {
+  /** A caller whose session claims `claimed`; what counts is the users row, if any. */
+  const session = (userId: number, claimed: "user" | "admin") => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: claimed } as never });
+  const usersRow = (userId: number, role: "user" | "admin") => pool.execute("INSERT INTO users (id, openId, role) VALUES (?, ?, ?)", [userId, `f13-${userId}-${rnd()}`, role]);
+  const book = async (orgRef: string) => Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Dispatch Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, orgRef]))[0].insertId);
+  const latestGlobal = async () => (await one("SELECT mode, setByUserId FROM dispatchEnforcementSettings WHERE financialEntityId IS NULL ORDER BY setAt DESC, id DESC LIMIT 1", [])) as { mode: string; setByUserId: number };
+  let orgA: string, orgB: string, admin: number, orgAdmin: number, unaffiliated: number, mgrA: number, mgrB: number, bookA: number, bookA2: number, bookB: number;
+
+  beforeAll(async () => {
+    orgA = await org(); orgB = await org();
+    admin = await member(null, ["management"]); await usersRow(admin, "admin");            // platform admin, no membership
+    orgAdmin = await member(orgA, ["management"]); await usersRow(orgAdmin, "admin");      // platform admin who also works for A
+    unaffiliated = await member(null, ["management"]); await usersRow(unaffiliated, "user"); // ordinary, unaffiliated, holds the permission
+    mgrA = await member(orgA, ["management"]); mgrB = await member(orgB, ["management"]);
+    bookA = await book(orgA); bookA2 = await book(orgA); bookB = await book(orgB);
+  }, 30_000);
+  afterAll(async () => { if (admin) await session(admin, "admin").dispatch.enforcementSet({ mode: "off", reason: "F1.3 teardown — restore the global default" }); });
+
+  it("1. lets a platform administrator set the global mode — unaffiliated or a member of an organization", async () => {
+    expect((await session(admin, "admin").dispatch.enforcementSet({ mode: "advisory", reason: "platform: advisory everywhere by default" })).scope).toBe("global");
+    expect((await session(orgAdmin, "admin").dispatch.enforcementSet({ mode: "advisory", reason: "platform: same default, set by an admin in org A" })).scope).toBe("global");
+    expect(await latestGlobal()).toMatchObject({ mode: "advisory", setByUserId: orgAdmin });
+  });
+
+  it("2. refuses an ordinary unaffiliated user, though they hold the dispatch permission", async () => {
+    await expect(session(unaffiliated, "user").dispatch.enforcementSet({ mode: "off", reason: "unaffiliated, so surely mine to change" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(session(mgrA, "user").dispatch.enforcementSet({ mode: "off", reason: "org A trying the global switch" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("3. lets Organization A's authorized user set A's own mode", async () => {
+    expect((await session(mgrA, "user").dispatch.enforcementSet({ financialEntityId: bookA, mode: "enforced", reason: "A enforces its own dispatch" })).scope).toBe(bookA);
+  });
+
+  it("4. refuses Organization A's user on Organization B's mode, as not found", async () => {
+    await expect(session(mgrA, "user").dispatch.enforcementSet({ financialEntityId: bookB, mode: "off", reason: "A switching B's gate off" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(session(mgrA, "user").dispatch.enforcementGet({ financialEntityId: bookB })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(session(mgrB, "user").dispatch.enforcementSet({ financialEntityId: bookB, mode: "advisory", reason: "B sets its own mode" })).resolves.toBeTruthy();
+  });
+
+  it("5. resolves an organization with no mode of its own through the global fallback", async () => {
+    expect(await session(mgrA, "user").dispatch.enforcementGet({ financialEntityId: bookA2 })).toMatchObject({ mode: "advisory", source: "global" });
+  });
+
+  it("6. lets an organization's explicit mode override the global one", async () => {
+    expect(await session(mgrA, "user").dispatch.enforcementGet({ financialEntityId: bookA })).toMatchObject({ mode: "enforced", source: "entity" });
+    expect((await latestGlobal()).mode).toBe("advisory");
+  });
+
+  it("7. cannot be bypassed: a claimed session role, extra input, a demotion, a missing users row, or no domain permission", async () => {
+    const before = await latestGlobal();
+    // A session that claims admin, over a users row that says otherwise.
+    await expect(session(unaffiliated, "admin").dispatch.enforcementSet({ mode: "off", reason: "my session says admin" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // Authority smuggled in the input: stripped, and it would not count anyway.
+    await expect(session(unaffiliated, "user").dispatch.enforcementSet({ mode: "off", reason: "input says admin", role: "admin", platformAdmin: true, isAdmin: true } as never)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // An explicit null entity is the global row, not a loophole.
+    await expect(session(mgrA, "user").dispatch.enforcementSet({ financialEntityId: null, mode: "off", reason: "null entity, maybe unchecked" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // No users row at all.
+    const ghost = await member(null, ["management"]);
+    await expect(session(ghost, "admin").dispatch.enforcementSet({ mode: "off", reason: "no row, but my session says admin" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // Platform authority is not a domain permission: an admin without it is refused by the role gate.
+    const bareAdmin = await member(null, []); await usersRow(bareAdmin, "admin");
+    await expect(session(bareAdmin, "admin").dispatch.enforcementSet({ mode: "off", reason: "admin, but no dispatch permission" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // Demotion takes effect on the next call, though the session was minted while they were an admin.
+    const demoted = await member(null, ["management"]); await usersRow(demoted, "admin");
+    await session(demoted, "admin").dispatch.enforcementSet({ mode: "advisory", reason: "while still an administrator" });
+    await pool.execute("UPDATE users SET role = 'user' WHERE id = ?", [demoted]);
+    await expect(session(demoted, "admin").dispatch.enforcementSet({ mode: "off", reason: "after demotion, same session" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await latestGlobal()).toMatchObject({ mode: before.mode, setByUserId: demoted });
+    expect((await latestGlobal()).mode).toBe("advisory");
+  });
+
+  it("keeps C1a's read rule: an organization member cannot read the global row; the single tenant and platform authority can", async () => {
+    await expect(session(mgrA, "user").dispatch.enforcementGet()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect((await session(unaffiliated, "user").dispatch.enforcementGet()).mode).toBe("advisory");
+    expect((await session(orgAdmin, "admin").dispatch.enforcementGet()).mode).toBe("advisory");
+  });
+});

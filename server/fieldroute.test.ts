@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import { getDb, grantUserRole, listActiveUserRoleNames } from "./db";
-import { jobs, operators, units } from "../drizzle/schema";
+import { jobs, operators, units, users } from "../drizzle/schema";
 
 // P4.1: creates that name a job or unit must name one the caller may see. These were `jobId: FIXTURE_JOB_ID` / `unitId: FIXTURE_UNIT_ID`,
 // placeholders no row necessarily had; the suite now creates a real, unowned job and unit (the single tenant's).
@@ -59,7 +59,15 @@ beforeAll(async () => {
       // Already granted by a concurrent run — the unique index is doing its job.
     }
   }
-  await appRouter.createCaller(createContext()).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
+  // F1.3 — the global mode is the fallback for every organization, so a platform administrator (a real users row
+  // with role "admin", holding the domain permission too) sets it; the suite's own user is not one.
+  if (db) {
+    // An explicit id from the suite's own window: auto-increment lands wherever other suites' explicit ids pushed it.
+    const adminId = 297_000_000 + Math.floor(Math.random() * 50_000);
+    await db.insert(users).values({ id: adminId, openId: `fieldroute-admin-${adminId}`, role: "admin" } as never);
+    await grantUserRole({ userId: adminId, role: "management", scopeType: "global", grantedByUserId: TEST_USER_ID, grantedAt: new Date() });
+    await appRouter.createCaller({ ...createContext(), user: { ...createContext().user!, id: adminId, role: "admin" } }).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
+  }
 });
 
 function createContext(): TrpcContext {

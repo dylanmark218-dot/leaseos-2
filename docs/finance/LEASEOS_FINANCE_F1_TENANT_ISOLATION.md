@@ -1,6 +1,6 @@
-# LeaseOS Finance F1 / F1.1 / F1.2: tenant isolation and security repair
+# LeaseOS Finance F1 / F1.1 / F1.2 / F1.3: tenant isolation and security repair
 
-**Status**: F1, F1.1 and F1.2 are implemented on `claude/finance-accounting-survey-2mp4h6`. It stops
+**Status**: F1, F1.1, F1.2 and F1.3 are implemented on `claude/finance-accounting-survey-2mp4h6`. It stops
 here: F2 is not started, and no PR is open.
 **Base**: cut from `main` = `0060690`. Current `main` (`60f3899`: dispatch slots, C1a, SPINE item 1,
 migrations to 0179) is merged in. **No migration** and no new schema. **No new engine.**
@@ -184,8 +184,8 @@ Covered entities:
 | `calibration.eventRecord` | Sibling by `deviceRef`: the device's book is proved. |
 | `calibration.impact` | Sibling by `deviceRef`: the device's book is proved. |
 | `requirement.calibrationSweep` | Sibling by `calibrationEventId`: the device's book is proved. |
-| `dispatch.enforcementSet` | **Now `main`'s rule (C1a, `assertEnforcementScope`), which replaced F1.1's on merge.** A company's own mode needs its own book (`NOT_FOUND` otherwise). The **global** mode is `FORBIDDEN` to any organization member; only the historical single tenant (a user with no membership) may set it. **A tenant cannot switch everyone's dispatch enforcement off.** Open question in §11: that single-tenant user can still set it after organizations exist. |
-| `dispatch.enforcementGet` | Same rule: another company's own mode is `NOT_FOUND`, and the global mode is `FORBIDDEN` to organization members. |
+| `dispatch.enforcementSet` | A company's own mode needs its own book (`NOT_FOUND` otherwise). The **global** mode is **platform-governed since F1.3** (§7.4): once organizations exist, only platform authority may change it. |
+| `dispatch.enforcementGet` | Another company's own mode is `NOT_FOUND`. The global mode is `FORBIDDEN` to organization members (C1a), and readable by the single tenant and by platform authority. |
 
 **Found by the widened structural scan, and fixed:**
 
@@ -204,7 +204,7 @@ Covered entities:
   - 5 from F1 (`finance.expenseCreate`, `expenseDuplicates`, `commercialSetup` ×3);
   - 11 from F1.1: the 7 reported, 3 calibration siblings, and `dispatch.enforcementGet`, which the optional-input scan found;
   - 5 funding/expense.
-- **105 tenant-isolated procedures after F1.1** (84 + 21), and **111 after F1.2** (+6 compliance, §7.3).
+- **105 tenant-isolated procedures after F1.1** (84 + 21), and **111 after F1.2** (+6 compliance, §7.3). F1.3 changes who may write one row (the global dispatch mode), not the procedure count.
 - Separately, the revoked-role defect is fixed in `commercialApprovalService.decide` and in the `commercialOffice.approvalRequirement` preview.
 
 ### 7.2 BLOCKED UNTIL OWNERSHIP MIGRATION: fail closed
@@ -280,6 +280,41 @@ A subject from another company answers `NOT_FOUND`, **with the same message as o
   **governance question, not a leak**, and is carried in §11 for an owner decision (platform-only
   loading, or per-company overlays, which would be a schema change).
 
+### 7.4 F1.3: the global dispatch mode is platform-governed
+
+**Owner decision.** The global dispatch mode is the fallback for every organization without a mode of
+its own, and the mode of the legacy path. Once organizations exist, only **platform authority** may
+change it. Being unaffiliated is not authority.
+
+**The authority.** LeaseOS already has exactly one platform-level authority: `users.role = "admin"`,
+the one `adminProcedure` and `records.roles.bootstrapManagement` use. F1.3 adds no second hierarchy.
+`server/platformAuthority.ts` (`platformAuthorityProven`) reads it **from the `users` row at the moment
+of the change**, not from the session. So:
+
+- a demotion takes effect on the next call;
+- a session minted while the user was an admin carries no authority afterwards;
+- nothing in the request can stand in for it: a role the context claims, or extra input fields (which the
+  schema strips anyway);
+- a missing row, a missing database or any error answers **no** (fail closed).
+
+**Who may do what** (`assertEnforcementScope` in `server/dispatchRouter.ts`):
+
+| Caller | Global mode, write | Global mode, read | Own organization's mode | Another organization's mode |
+|---|---|---|---|---|
+| Platform administrator (users row), with the domain permission | ✅ | ✅ | per existing permissions | `NOT_FOUND` |
+| Organization user with the domain permission | `FORBIDDEN` | `FORBIDDEN` (C1a) | ✅ | `NOT_FOUND` |
+| Unaffiliated ordinary user with the domain permission, organizations exist | **`FORBIDDEN`** (was allowed under C1a) | ✅ (C1a read rule kept) | — | `NOT_FOUND` |
+| Anyone, while **no** organization exists | the one tenant governs its own deployment, as before | as before | — | — |
+
+Platform authority is **not** a domain permission, and the domain permission is not platform authority.
+Changing the global mode needs **both**: `dispatch.enforcementSet` (the `roleProcedure` gate, management
+or controller) **and** the users row. An administrator without the permission is refused by the role
+gate. This is the conservative reading of "use the existing concept". The bootstrap comment in
+`recordsRouter` says the same thing: "an admin is not thereby a mechanic".
+
+**Fallback behaviour is unchanged** (`currentMode`): an organization's explicit mode wins, and an
+organization with none resolves through the global mode.
+
 ## 8. F4 design note: inventory ownership
 
 **Target model: explicit ownership, never inferred from whoever asks.**
@@ -330,7 +365,7 @@ the F4 migration PR is prepared.
 
 | Test | Kind | Proves |
 |---|---|---|
-| `server/tenantScopeFinance.db.test.ts` | 109 cases (107 DB + 2 pure) | **F1:** 41 cross-tenant attempts against Org A's money are each `NOT_FOUND`. Revoked approvers are refused. A Book B ledger row cannot satisfy Book A. A void is refused in a closed or soft-closed period. Legacy no-book rows fail closed; their classification and backfill are covered. **F1.1:** Org B (holding every relevant role) is refused `NOT_FOUND` on **27 attempts** covering every insurance operation category, compliance, requirements, calibration, dispatch, funding and expenses. B's same-key program cannot supersede A's (`CONFLICT`). The opportunity list excludes A. The global dispatch mode is `FORBIDDEN` to an organization, to set and to read (`main`'s C1a rule). A's rows are unchanged, and same-organization work succeeds. **Inventory:** the real predicate reports not-one-domain once organizations exist. All 18 ownerless shop operations are refused (`OWNERSHIP_UNRESOLVED`) to an organization's shop lead **and** to the single tenant, with no rows written, while the unit's own work-order cost stays readable. Insurance requirements and equipment credentials are refused, and nothing changes. **F1.2:** Org B (every relevant role plus `hr`) is refused `NOT_FOUND` on **18 attempts**: passports of A's operator, unit, trailer, job, person and carrier; job passports mixing A's subjects with B's own; A's medical eligibility; credentials filed against A's subjects or on A's evidence; verifying A's credential; consent for A's person or on A's signature evidence. A foreign subject gets the same message as a missing one. Equipment credentials fail closed. A's credentials and consents are unchanged. Each owner path (carrier, unit, trailer, job, person, operator) resolves for A's own people. |
+| `server/tenantScopeFinance.db.test.ts` | 117 cases (115 DB + 2 pure) | **F1:** 41 cross-tenant attempts against Org A's money are each `NOT_FOUND`. Revoked approvers are refused. A Book B ledger row cannot satisfy Book A. A void is refused in a closed or soft-closed period. Legacy no-book rows fail closed; their classification and backfill are covered. **F1.1:** Org B (holding every relevant role) is refused `NOT_FOUND` on **27 attempts** covering every insurance operation category, compliance, requirements, calibration, dispatch, funding and expenses. B's same-key program cannot supersede A's (`CONFLICT`). The opportunity list excludes A. The global dispatch mode is `FORBIDDEN` to an organization, to set and to read (`main`'s C1a rule). A's rows are unchanged, and same-organization work succeeds. **Inventory:** the real predicate reports not-one-domain once organizations exist. All 18 ownerless shop operations are refused (`OWNERSHIP_UNRESOLVED`) to an organization's shop lead **and** to the single tenant, with no rows written, while the unit's own work-order cost stays readable. Insurance requirements and equipment credentials are refused, and nothing changes. **F1.2:** Org B (every relevant role plus `hr`) is refused `NOT_FOUND` on **18 attempts**: passports of A's operator, unit, trailer, job, person and carrier; job passports mixing A's subjects with B's own; A's medical eligibility; credentials filed against A's subjects or on A's evidence; verifying A's credential; consent for A's person or on A's signature evidence. A foreign subject gets the same message as a missing one. Equipment credentials fail closed. A's credentials and consents are unchanged. Each owner path (carrier, unit, trailer, job, person, operator) resolves for A's own people. **F1.3:** (1) a platform admin sets the global mode, both unaffiliated and as a member of Org A; (2) an unaffiliated ordinary user holding the permission is `FORBIDDEN`, as is an organization user; (3) Org A's manager sets A's own mode; (4) Org A cannot set or read B's mode (`NOT_FOUND`), while B can; (5) an Org A book with no mode resolves `source: global`; (6) A's explicit mode overrides it (`source: entity`) and the global mode is unchanged; (7) **no bypass**: a session claiming admin over a users row that says `user`, admin flags in the input, an explicit `financialEntityId: null`, no users row at all, an admin without the domain permission, and an admin demoted mid-session are all `FORBIDDEN`, and the global row is exactly as the last legitimate write left it. C1a's read rule is kept. |
 | `server/financeScopeCoverage.test.ts` | Structural, 14 cases, from the **live router** | The 84 money-namespace procedures (72 + 12 insurance) are marked and use the boundary. The mark is used nowhere else. The scan sees through `.optional()` inputs. **No unscoped money procedure exists anywhere in the API**; the only listed procedures are the 3 portal ones scoped by external identity. Every F1.1 procedure outside the money namespaces proves its book. **Every shop procedure is classified** (unit/work-order scoped, shared public directory, or ownership-gated until F4), so a new one fails until classified. Every gated one calls the gate. **F1.2: every compliance procedure is classified** (subject scoped, book scoped, pure evaluator, or shared registry). Subject-scoped ones call `requireSubjectInScope`, book-scoped ones prove the book, and pure evaluators touch no table. |
 
 **The structural exception list.** It holds **no** unscoped gaps. `EXTERNALLY_SCOPED` holds only
@@ -363,6 +398,12 @@ with **F4** named as the resolving checkpoint.
 | **F1.2:** `carrier` resolved as a person instead of a book | 1 |
 | **F1.2:** `trailer` resolved as a person instead of a unit | 1 (this one **survived** at first: B was still refused, by accident. The same-organization success test now drives every owner path.) |
 | **F1.2:** `job` resolved as a unit | 1 |
+| **F1.3:** global write reverted to C1a (any unaffiliated user) | 5 |
+| **F1.3:** platform authority always granted | 5 |
+| **F1.3:** platform authority never proven | 5 |
+| **F1.3:** entity ownership skipped for an entity mode | 1 |
+| **F1.3:** organization members allowed to read the global mode | 1 |
+| **F1.3:** a write checked with the read rule | 5 |
 
 **Existing suites fixed, not weakened.**
 
@@ -374,6 +415,7 @@ with **F4** named as the resolving checkpoint.
   - **F1.2:** `compliancePassport` invented an operator id. It now creates a real operator.
   - **F1.2:** `fieldroute` used "operator 1", and `purchasingAp` and `requirementEngine` used "evidence 1". On a fresh database those are whichever suite inserted first, and the F1.2 suite's are organization-owned. The gate failed 4 tests exactly that way (reproduced by running F1.2 first). Each suite now uses its own record.
   - `restrictedVaultApi` (from `main`) drew user ids from 960k–990k, which overlaps `recordsAuthorizationDb` and `assistantCommitService`. One fresh-database gate run collided on a role grant (`activeGrantKey` duplicate, 4 tests). It now has its own range (296M).
+  - **F1.3:** `dispatchEnforcement`'s manager and `fieldroute`'s setup set the global mode, so each is now a real platform administrator (a users row with role `admin`), not a session claim. `fieldroute` uses an explicit id from its own window (297M): the users auto-increment lands wherever explicit ids pushed it, and an auto-numbered admin collided with another suite's role grant.
   - `tenantScopeShop` expects the ownership refusal for its warranty call.
   - `requirementEngine` used a hard-coded job 1, which collided with whichever suite created the first job. It now uses its own job.
   - `portalFundingApi` advanced an opportunity in invented book 1 and claimed against expenses that did not exist. It now uses a real book and real expenses.
@@ -381,9 +423,9 @@ with **F4** named as the resolving checkpoint.
   - The new suite keeps its refusal-only dates in the past, per the `calendarFixtures` rule.
 - No assertion was loosened.
 
-## 10. What F1 / F1.1 / F1.2 did not do (per instruction)
+## 10. What F1 / F1.1 / F1.2 / F1.3 did not do (per instruction)
 
-F1, F1.1 and F1.2 add no migration, journals, financial-event engine, export batches, new inventory tables or
+F1, F1.1, F1.2 and F1.3 add no migration, journals, financial-event engine, export batches, new inventory tables or
 QuickBooks work, make no procurement workflow change and no UI change, and open no PR. The P6.7
 purchase-order decision is recorded in `docs/P6_6_P6_7_DECISION_BRIEF.md`. It is **not implemented**:
 the current self-authorization within the requester's own limit contradicts that decision, but it is not
@@ -395,7 +437,8 @@ scheduled with F4.
 | Item | Where |
 |---|---|
 | Compliance operator/unit/credential procedures (§7.3) | **Done in F1.2** |
-| **Open question (C1a, `main`'s rule):** a user with no membership (the historical single tenant) may still set the **global** dispatch mode after organizations exist. Every organization with no mode of its own falls back to that global mode (`currentMode`). F1.1 had restricted it to a platform admin or a one-domain deployment; the merge took `main`'s rule. | Owner decision; not changed here, since it is `main`'s C1a design |
+| Global dispatch mode governance (C1a let any unaffiliated user change it after organizations exist) | **Decided and done in F1.3** (§7.4): platform-governed |
+| The single-domain branch of the global write (no organization exists) is covered by reasoning, not a DB test: every shared test database has organizations | Covered when a single-domain deployment test harness exists |
 | `compliance.requirementLoad` governs one shared registry: any organization's controller can supersede a requirement every company reads (§7.3) | Owner decision (platform-only loading, or per-company overlays = schema) |
 | Parts, stock, tires, tools, warranty ownership: migration, evidence backfill, scoping (§8) | F4, blocker |
 | `insuranceRequirements` book column; program keys scoped per company | Next schema checkpoint (F2) |
