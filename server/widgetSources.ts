@@ -45,7 +45,7 @@ const byRef = <T extends { id: number }>(rows: readonly T[], ref: string, code: 
 const numericRef = (ref: string | null): number | null => ref && /^\d{1,10}$/.test(ref) ? Number(ref) : null;
 
 /** Document expiry states, as the records vault names them; the tile shows the state, not a number. */
-function expiryState(doc: DocRow, now: Date, warnDays: number): "current" | "expiring" | "expired" | "unverified" | "rejected" | "missing" {
+export function expiryState(doc: DocRow, now: Date, warnDays: number): "current" | "expiring" | "expired" | "unverified" | "rejected" | "missing" {
   if (doc.verificationStatus === "rejected") return "rejected";
   if (doc.verificationStatus && doc.verificationStatus !== "verified") return "unverified";
   if (!doc.expiresAt) return "current";

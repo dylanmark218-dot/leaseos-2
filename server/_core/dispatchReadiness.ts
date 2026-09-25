@@ -123,7 +123,7 @@ export type ReadinessInput = {
 };
 
 /** Expired or missing credential → blocking. No record at all → unknown. */
-function credentialBlocker(
+export function credentialBlocker(
   c: CredentialState,
   asOf: Date,
   subject: DispatchBlocker["subject"],

@@ -342,7 +342,7 @@ function bindingHasUnevaluatedConditions(conditionsJson: string | null): boolean
 }
 
 /** Best credential of a type: verified before needs_review; latest expiry; rejected never counts as present. */
-function credentialState(rows: readonly CredRow[], docTypes: readonly string[], label: string): CredentialState {
+export function credentialState(rows: readonly CredRow[], docTypes: readonly string[], label: string): CredentialState {
   const c = rows
     .filter(r => docTypes.includes(r.docType) && r.verificationStatus !== "rejected")
     .sort((a, b) => (b.verificationStatus === "verified" ? 1 : 0) - (a.verificationStatus === "verified" ? 1 : 0) || (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
