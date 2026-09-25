@@ -81,6 +81,11 @@ export async function scoreCase(
   }
 
   const { validation, injection, envelope, run } = outcome;
+  if (validation.outOfScope !== testCase.expect.outOfScope) {
+    mismatches.push(
+      `outOfScope ${validation.outOfScope}, expected ${testCase.expect.outOfScope}`
+    );
+  }
   const byKey = new Map(validation.fields.map(f => [f.key, f]));
 
   let fieldsCorrect = 0;

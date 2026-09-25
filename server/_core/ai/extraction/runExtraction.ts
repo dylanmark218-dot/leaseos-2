@@ -34,6 +34,7 @@ import {
 } from "../prompts";
 import {
   combineInjectionSignals,
+  DOCUMENT_FENCE,
   fence,
   scanForInjection,
   type InjectionScan,
@@ -104,7 +105,7 @@ export async function runExtraction(args: RunExtractionArgs): Promise<Extraction
     loadPrompt(promptVersion),
     "",
     "Context pack — facts you may cite by id in evidenceRef:",
-    renderedContext,
+    fence(renderedContext, DOCUMENT_FENCE),
   ].join("\n");
 
   // The transcript goes in fenced and labelled. Anything inside it that reads
@@ -138,7 +139,7 @@ export async function runExtraction(args: RunExtractionArgs): Promise<Extraction
 
   const injection = combineInjectionSignals(
     envelope.injectionSuspected,
-    scanForInjection(transcript)
+    scanForInjection([transcript, renderedContext].join("\n"))
   );
 
   const validation = validateExtraction({

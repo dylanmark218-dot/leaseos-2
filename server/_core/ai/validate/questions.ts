@@ -25,10 +25,7 @@ import type { FieldVerdict } from "./validator";
 
 /** Ticket numbers and anything else a person should hear digit by digit. */
 export const spellDigits = (value: string | number): string =>
-  String(value)
-    .split("")
-    .map(c => (/[0-9]/.test(c) ? c : c))
-    .join("-");
+  String(value).replace(/\d+/g, run => run.split("").join("-"));
 
 type Template = (f: FieldVerdict) => string;
 

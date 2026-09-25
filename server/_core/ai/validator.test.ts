@@ -47,6 +47,10 @@ describe("the quote check", () => {
     expect(quoteIsInTranscript("nine thousand litres", transcript)).toBe(false);
   });
 
+  it("rejects a quote with altered capitalization", () => {
+    expect(quoteIsInTranscript("twelve thousand litres", transcript)).toBe(false);
+  });
+
   it("rejects an empty quote rather than treating it as trivially present", () => {
     expect(quoteIsInTranscript("", transcript)).toBe(false);
     expect(quoteIsInTranscript(null, transcript)).toBe(false);
@@ -101,6 +105,22 @@ describe("a missing term never rounds up to PASS", () => {
       envelope: envelope({ quantity }),
       transcript,
       pack: pack({ unitTankCapacityLitres: null }),
+    });
+
+    describe("type mismatches", () => {
+      it("does not let an enum pass when the value type is wrong", () => {
+        const result = validateExtraction({
+          form,
+          envelope: envelope({
+            measurementMethod: stated(true, "on the meter"),
+          }),
+          transcript: "Reading on the meter.",
+          pack: pack(),
+        });
+        const field = result.fields.find(f => f.key === "measurementMethod");
+        expect(field?.verdict).toBe("REVIEW");
+        expect(field?.reasonCodes).toContain("value_type_mismatch");
+      });
     });
     const field = result.fields.find(f => f.key === "quantity");
     expect(field?.verdict).toBe("NOT_EVALUATED");

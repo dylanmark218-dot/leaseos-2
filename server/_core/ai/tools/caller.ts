@@ -99,7 +99,11 @@ export function planToolCall(args: {
 
   return {
     path: tool.procedure.split("."),
-    input: { ...input, ...pinned },
+    input: {
+      ...input,
+      ...pinned,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    },
     idempotencyKey,
   };
 }

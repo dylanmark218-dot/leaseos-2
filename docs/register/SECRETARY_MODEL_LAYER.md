@@ -224,7 +224,7 @@ against MariaDB 10.11.
 deep each — while vitest's include is `server/**/*.test.ts`. The first suite in a deeper directory
 would have run in CI and been **absent from the document's count**, which is precisely the shape of
 false claim gate 8 exists to catch. The counter now enumerates what the runner enumerates:
-296 / 3989 → **307 / 4146**.
+296 / 3989 → **308 / 4149**.
 
 ---
 

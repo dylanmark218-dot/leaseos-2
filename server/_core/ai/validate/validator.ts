@@ -116,7 +116,7 @@ export type ValidationResult = {
  * match. Those would start letting a nearly-right quote through, and a
  * nearly-right quote is the thing being guarded against.
  */
-const collapse = (s: string): string => s.replace(/\s+/g, " ").trim().toLowerCase();
+const collapse = (s: string): string => s.replace(/\s+/g, " ").trim();
 
 /** The hallucination tripwire. */
 export function quoteIsInTranscript(quote: string | null, transcript: string): boolean {
@@ -283,6 +283,31 @@ function validateField(args: {
 
   const quote = field.evidenceQuote;
 
+  if (field.value !== null) {
+    const isExpectedType =
+      (def.type === "quantity" || def.type === "number"
+        ? typeof field.value === "number"
+        : def.type === "boolean"
+          ? typeof field.value === "boolean"
+          : TICKET_KEYS.has(def.key)
+            ? typeof field.value === "string" || typeof field.value === "number"
+            : typeof field.value === "string");
+
+    if (!isExpectedType) {
+      return {
+        key: def.key,
+        label: def.label,
+        verdict: "REVIEW",
+        reasonCodes: ["value_type_mismatch"],
+        details: [
+          `${def.label} expected a ${def.type} value but got ${typeof field.value}.`,
+        ],
+        normalizedValue: field.value,
+        basis,
+      };
+    }
+  }
+
   if (def.type === "quantity") {
     const r = normalizeVolume({
       amount: typeof field.value === "number" ? field.value : null,
@@ -322,8 +347,12 @@ function validateField(args: {
       if (r.detail) details.push(r.detail);
     }
     if (r.value !== null) normalizedValue = r.value;
-  } else if (def.type === "enum" && def.options && typeof field.value === "string") {
-    if (!def.options.includes(field.value)) {
+  } else if (def.type === "enum" && def.options) {
+    if (typeof field.value !== "string") {
+      terms.push("REVIEW");
+      reasonCodes.push("value_type_mismatch");
+      details.push(`${def.label} expected an enum string value but got ${typeof field.value}.`);
+    } else if (!def.options.includes(field.value)) {
       terms.push("REVIEW");
       reasonCodes.push("enum_value_not_an_option");
       details.push(`"${field.value}" is not one of: ${def.options.join(", ")}.`);

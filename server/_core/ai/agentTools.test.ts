@@ -194,6 +194,7 @@ describe("what a tool call actually does", () => {
       clientCaptureId: "CAP-1",
     });
     expect(plan.input.formKey).toBe("unload_stop");
+    expect(plan.input.idempotencyKey).toBe("propose.unloadStop:CAP-1");
   });
 
   it("resolves the procedure to a caller path", () => {
