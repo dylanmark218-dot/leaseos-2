@@ -20,52 +20,49 @@ const row = (o: Partial<Row>): Row => ({
   jurisdiction: "CA-ZZ", appliesWhenJson: null, satisfiedByDocTypes: "[\"d\"]", renewalIntervalDays: null,
   warnDaysBeforeExpiry: 30, missingSeverity: "blocked", sourceAuthority: null, sourceUrl: null, sourceReference: null,
   effectiveFrom: T("2026-01-01"), effectiveUntil: null, verificationStatus: "verified", verifiedByUserId: 5,
-  verifiedAt: T("2026-01-01"), notes: null, createdAt: T("2026-01-01"), ...o,
+  verifiedAt: T("2026-01-01"), notes: null, createdAt: T("2026-01-01"),
+  // Written before 0198: no proposer, no organization, no verification events.
+  orgRef: null, proposedByUserId: null, instrumentTitle: null, authorityType: null, effectiveDateUnknown: false, citationHash: null,
+  ...o,
 });
+const NONE = new Map();
 
-describe("which revision governs", () => {
+// C1b-2a's selection rules, on rows written before C1b-2b. Since C1b-2b those rows are not evidence
+// of anything: a one-step controller verification is UNVERIFIED (requirementVerification.db.test.ts
+// covers the verified paths). Which revision stands for a key is unchanged.
+describe("which revision stands for a key (rows written before C1b-2b)", () => {
   it("takes the highest version in force, and keeps the earlier one until a later one's date", () => {
     const rows = [
       row({ version: 1 }),
       row({ id: 2, version: 2, effectiveFrom: T("2026-06-01"), createdAt: T("2026-03-01") }),
     ];
-    expect(governingRevisions(rows, T("2026-04-01")).map((g) => g.row.version)).toEqual([1]);
-    expect(governingRevisions(rows, T("2026-07-01")).map((g) => g.row.version)).toEqual([2]);
+    expect(governingRevisions(rows, NONE, T("2026-04-01")).map((g) => g.row.version)).toEqual([1]);
+    expect(governingRevisions(rows, NONE, T("2026-07-01")).map((g) => g.row.version)).toEqual([2]);
   });
 
   it("never applies a revision recorded after the date asked about", () => {
     const rows = [row({ version: 1 }), row({ id: 2, version: 2, createdAt: T("2026-05-01") })];
-    expect(governingRevisions(rows, T("2026-04-01")).map((g) => g.row.version)).toEqual([1]);
-    expect(governingRevisions(rows, T("2025-06-01"))).toEqual([]);
+    expect(governingRevisions(rows, NONE, T("2026-04-01")).map((g) => g.row.version)).toEqual([1]);
+    expect(governingRevisions(rows, NONE, T("2025-06-01"))).toEqual([]);
   });
 
-  it("undoes the old path's in-place supersession while the later revision is not yet in force", () => {
-    // As the pre-C1b-2 requirementLoad left them: v1 overwritten to superseded, with effectiveUntil
-    // set to v2's effectiveFrom, the moment v2 was loaded.
+  it("reads a one-step controller verification, and the old in-place supersession, as UNVERIFIED", () => {
     const rows = [
       row({ version: 1, verificationStatus: "superseded", effectiveUntil: T("2026-06-01") }),
-      row({ id: 2, version: 2, verificationStatus: "unverified", verifiedByUserId: null, effectiveFrom: T("2026-06-01"), createdAt: T("2026-03-01") }),
+      row({ id: 2, version: 2, verificationStatus: "verified", effectiveFrom: T("2026-06-01"), createdAt: T("2026-03-01") }),
     ];
-    const before = governingRevisions(rows, T("2026-04-01"));
-    expect(before.map((g) => [g.row.version, g.status])).toEqual([[1, "verified"]]);
-    const after = governingRevisions(rows, T("2026-07-01"));
-    expect(after.map((g) => [g.row.version, g.status])).toEqual([[2, "unverified"]]);
-  });
-
-  it("recovers an overwritten unverified revision as unverified, never as verified", () => {
-    const rows = [
-      row({ version: 1, verificationStatus: "superseded", verifiedByUserId: null }),
-      row({ id: 2, version: 2, effectiveFrom: T("2027-01-01") }),
-    ];
-    expect(governingRevisions(rows, T("2026-04-01"))[0].status).toBe("unverified");
+    const before = governingRevisions(rows, NONE, T("2026-04-01"));
+    expect(before.map((g) => [g.row.version, g.level, g.status])).toEqual([[1, "UNVERIFIED", "unverified"]]);
+    const after = governingRevisions(rows, NONE, T("2026-07-01"));
+    expect(after.map((g) => [g.row.version, g.level, g.status])).toEqual([[2, "UNVERIFIED", "unverified"]]);
   });
 
   it("drops a key whose governing revision is withdrawn", () => {
-    expect(governingRevisions([row({ verificationStatus: "withdrawn" })], T("2026-04-01"))).toEqual([]);
+    expect(governingRevisions([row({ verificationStatus: "withdrawn" })], NONE, T("2026-04-01"))).toEqual([]);
   });
 
   it("keeps a key whose only revision is not yet effective, so its seed does not return", () => {
-    const g = governingRevisions([row({ effectiveFrom: T("2027-01-01") })], T("2026-04-01"));
+    const g = governingRevisions([row({ effectiveFrom: T("2027-01-01") })], NONE, T("2026-04-01"));
     expect(g).toHaveLength(1);
   });
 });
@@ -104,9 +101,10 @@ d("requirementLoad writes revisions and never rewrites one", () => {
     expect(after[0]).toEqual(before[0]);
 
     // v1 governs until v2's date — not "neither", as the in-place supersession made it.
-    const now = await loadRequirementRegistry([], new Date());
-    expect(now.find((r) => r.requirementKey === key)).toMatchObject({ version: 1, verificationStatus: "verified", origin: "registry" });
-    const later = await loadRequirementRegistry([], new Date(Date.now() + 31 * 86_400_000));
+    // Both are proposals (C1b-2b: asking for "verified" is ignored), so both are unverified.
+    const now = await loadRequirementRegistry([], new Date(), "default");
+    expect(now.find((r) => r.requirementKey === key)).toMatchObject({ version: 1, verificationStatus: "unverified", origin: "registry" });
+    const later = await loadRequirementRegistry([], new Date(Date.now() + 31 * 86_400_000), "default");
     expect(later.find((r) => r.requirementKey === key)).toMatchObject({ version: 2, title: "Fixture requirement, amended" });
   });
 
@@ -143,13 +141,13 @@ d("the registry reaches every reader", () => {
     const mine = p.items.filter((i) => i.requirementKey === key);
     // One item, from the governing revision — not one per stored version, as before.
     expect(mine).toHaveLength(1);
-    expect(mine[0].requirementRef).toEqual({ key, version: 2, origin: "registry" });
+    expect(mine[0].requirementRef).toMatchObject({ key, version: 2, origin: "registry", provenance: { level: "UNVERIFIED", sourceMonitoringAvailable: false } });
   });
 
   it("marks a seed as a seed, and lets a stored revision of the same key replace it", async () => {
     const seedKey = `test.c1b2.seed.${rnd()}`;
     const seed = { ...COMPLIANCE_REQUIREMENT_SEEDS[0], requirementKey: seedKey };
-    const [fromSeed] = (await loadRequirementRegistry([seed])).filter((r) => r.requirementKey === seedKey);
+    const [fromSeed] = (await loadRequirementRegistry([seed], new Date(), "default")).filter((r) => r.requirementKey === seedKey);
     expect(fromSeed).toMatchObject({ origin: "seed", version: seed.version });
 
     const controller = await withRole("controller");
@@ -158,7 +156,7 @@ d("the registry reaches every reader", () => {
       satisfiedByDocTypes: ["fixture_doc"], effectiveFrom: new Date(Date.now() + 60 * 86_400_000),
     });
     // Not yet effective, and still the seed does not come back.
-    const mine = (await loadRequirementRegistry([seed])).filter((r) => r.requirementKey === seedKey);
+    const mine = (await loadRequirementRegistry([seed], new Date(), "default")).filter((r) => r.requirementKey === seedKey);
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({ origin: "registry", title: "Stored over the seed" });
   });
@@ -194,8 +192,8 @@ d("the registry reaches every reader", () => {
     expect(act.requirementsInPack).toBe(1);
     const r = await ask();
     expect(seen(r)).toBe(true);
-    expect(r.verdict).toBe("blocked");
-    expect(r.parts.equipment).toBe("blocked");
+    // A proposal, so UNKNOWN — the verified path is requirementVerification.db.test.ts.
+    expect(r.parts.equipment).toBe("unknown");
 
     await expect(callerFor(controller).requirement.packActivate({ financialEntityId: entity, packKey: "no.such.pack" })).rejects.toThrow(/Unknown pack/);
   });

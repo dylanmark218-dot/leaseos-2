@@ -12,14 +12,17 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, getDb } from "./db";
 import { carrierProfileReviews, complianceConsents, complianceDocuments, complianceRequirements, writtenProgramVersions } from "../drizzle/schema";
 import {
   abstractRequestPermitted, buildPassport, composeJobPassport, medicalFitnessForDispatch, nextRenewalDue,
   type Credential, type Passport, type Requirement, type Subject,
 } from "./_core/compliancePassport";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
-import { loadRequirementRegistry, packExists } from "./requirementRegistry";
+import { loadRequirementRegistry } from "./requirementRegistry";
+import {
+  VerificationError, proposeRequirement, recordApproval, requirementProvenance, setVerificationPolicy, withdrawRevision,
+} from "./requirementVerification";
 import {
   COMPLIANCE_KNOWLEDGE_CATALOG,
   evaluateDangerousGoodsAssist,
@@ -36,8 +39,29 @@ const SUBJECT = z.enum(["operator", "unit", "trailer", "carrier", "job", "user"]
  */
 const REQUIREMENT_SUBJECT = z.enum(["operator", "unit", "trailer", "carrier", "job", "user", "equipment", "attachment", "work_context"]);
 
-/** The registry at `now`: governing stored revisions, then unreplaced seeds (`requirementRegistry.ts`). */
-const loadRequirements = (): Promise<Requirement[]> => loadRequirementRegistry(COMPLIANCE_REQUIREMENT_SEEDS);
+/** The registry at `now` for the caller's organization: governing stored revisions, then unreplaced seeds. */
+const loadRequirements = (tenantId: string): Promise<Requirement[]> => loadRequirementRegistry(COMPLIANCE_REQUIREMENT_SEEDS, new Date(), tenantId);
+
+const VERIFY_INPUT = z.object({
+  requirementKey: z.string().min(3).max(120), version: z.number().int().positive(),
+  target: z.enum(["CITATION_VERIFIED", "SOURCE_DOCUMENT_VERIFIED"]),
+  decision: z.enum(["approve", "reject"]), reason: z.string().min(10).max(2000),
+  /** Required for SOURCE_DOCUMENT_VERIFIED: the admitted source revision it was checked against. */
+  sourceRevisionRef: z.string().max(64).nullable().optional(),
+});
+
+/** A verification refusal as the API reports it: another organization's revision is simply not found. */
+async function asTrpc<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!(e instanceof VerificationError)) throw e;
+    const code = e.code === "NOT_FOUND" || e.code === "UNKNOWN_PACK" ? "NOT_FOUND"
+      : e.code === "SELF_VERIFICATION" || e.code === "SAME_VERIFIER" ? "FORBIDDEN"
+      : e.code === "OVERLAPPING_REVISION" ? "CONFLICT" : "PRECONDITION_FAILED";
+    throw new TRPCError({ code, message: `${e.code}: ${e.message}` });
+  }
+}
 
 async function loadCredentials(ownerType: string, ownerId: number): Promise<Credential[]> {
   const db = await getDb();
@@ -49,16 +73,17 @@ async function loadCredentials(ownerType: string, ownerId: number): Promise<Cred
   }));
 }
 
-async function passportFor(subjectType: Subject["subjectType"], subjectId: number, jurisdiction: string, attributes: Record<string, unknown>): Promise<Passport> {
-  const [requirements, credentials] = await Promise.all([loadRequirements(), loadCredentials(subjectType, subjectId)]);
+async function passportFor(tenantId: string, subjectType: Subject["subjectType"], subjectId: number, jurisdiction: string, attributes: Record<string, unknown>): Promise<Passport> {
+  const [requirements, credentials] = await Promise.all([loadRequirements(tenantId), loadCredentials(subjectType, subjectId)]);
   return buildPassport({ subject: { subjectType, jurisdiction, attributes }, requirements, credentials, now: new Date() });
 }
 
 export const complianceRouter = router({
   passport: roleProcedure("compliance.passport")
     .input(z.object({ subjectType: SUBJECT, subjectId: z.number().int().positive(), jurisdiction: z.string().min(2).max(80), attributes: z.record(z.string(), z.unknown()).default({}) }))
-    .query(async ({ input }) => {
-      const p = await passportFor(input.subjectType, input.subjectId, input.jurisdiction, input.attributes);
+    .query(async ({ ctx, input }) => {
+      const tenantId = (await actingScopeFor(ctx.user.id)).tenantId;
+      const p = await passportFor(tenantId, input.subjectType, input.subjectId, input.jurisdiction, input.attributes);
       // Private detail never rides out on a passport. Items are requirement
       // level; the credential row is not included.
       return p;
@@ -72,13 +97,14 @@ export const complianceRouter = router({
       unit: z.object({ id: z.number().int().positive(), attributes: z.record(z.string(), z.unknown()).default({}) }).nullable(),
       trailer: z.object({ id: z.number().int().positive(), attributes: z.record(z.string(), z.unknown()).default({}) }).nullable().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const tenantId = (await actingScopeFor(ctx.user.id)).tenantId;
       const parts: Record<string, Passport | null> = {
-        carrier: input.carrier ? await passportFor("carrier", input.carrier.id, input.jurisdiction, input.carrier.attributes) : null,
-        operator: input.operator ? await passportFor("operator", input.operator.id, input.jurisdiction, input.operator.attributes) : null,
-        unit: input.unit ? await passportFor("unit", input.unit.id, input.jurisdiction, input.unit.attributes) : null,
+        carrier: input.carrier ? await passportFor(tenantId, "carrier", input.carrier.id, input.jurisdiction, input.carrier.attributes) : null,
+        operator: input.operator ? await passportFor(tenantId, "operator", input.operator.id, input.jurisdiction, input.operator.attributes) : null,
+        unit: input.unit ? await passportFor(tenantId, "unit", input.unit.id, input.jurisdiction, input.unit.attributes) : null,
       };
-      if (input.trailer !== undefined) parts.trailer = input.trailer ? await passportFor("trailer", input.trailer.id, input.jurisdiction, input.trailer.attributes) : null;
+      if (input.trailer !== undefined) parts.trailer = input.trailer ? await passportFor(tenantId, "trailer", input.trailer.id, input.jurisdiction, input.trailer.attributes) : null;
       return composeJobPassport(parts);
     }),
 
@@ -150,9 +176,12 @@ export const complianceRouter = router({
     }),
 
   /**
-   * Load or verify a requirement. Controller-only and sensitive, for the same
-   * reason as tax rules: this is the act that lets a passport say READY. An
-   * unverified source cannot produce a verified requirement.
+   * Propose a requirement revision (C1b-2b). The name is kept for existing callers; what it does is
+   * proposal creation, and nothing else. It used to let a controller store a requirement as `verified`
+   * in one step by saying its source was verified — the proposer verifying their own rule. That path is
+   * gone: `sourceVerified` and `requestedStatus` are still accepted so old callers do not break, and are
+   * ignored. Verification is `requirementVerify` (and `requirementSecondApprove` for a blocking rule),
+   * by other people, through the ledger.
    */
   requirementLoad: roleProcedure("compliance.requirementLoad")
     .input(z.object({
@@ -162,28 +191,84 @@ export const complianceRouter = router({
       subjectType: REQUIREMENT_SUBJECT, jurisdiction: z.string().min(1).max(80), appliesWhen: z.record(z.string(), z.unknown()).nullable().optional(),
       satisfiedByDocTypes: z.array(z.string().min(1)).min(1), renewalIntervalDays: z.number().int().positive().nullable().optional(),
       warnDaysBeforeExpiry: z.number().int().nonnegative().default(30), missingSeverity: z.enum(["review", "blocked"]).default("review"),
+      /** The citation: issuing authority, section or equally precise citation, official URL, instrument. */
       sourceAuthority: z.string().max(220).nullable().optional(), sourceUrl: z.string().max(600).nullable().optional(), sourceReference: z.string().max(300).nullable().optional(),
-      sourceVerified: z.boolean().default(false), requestedStatus: z.enum(["unverified", "verified"]).default("unverified"), effectiveFrom: z.coerce.date(),
+      instrumentTitle: z.string().max(400).nullable().optional(),
+      authorityType: z.enum(["law", "official_guidance", "recognized_standard", "manufacturer"]).nullable().optional(),
+      /** The date the rule takes effect, or `effectiveDateUnknown: true` — recorded, never guessed. */
+      effectiveFrom: z.coerce.date().nullable().optional(), effectiveDateUnknown: z.boolean().default(false),
+      effectiveUntil: z.coerce.date().nullable().optional(),
+      /** Accepted for old callers; ignored. A proposal is never verified. */
+      sourceVerified: z.boolean().default(false), requestedStatus: z.enum(["unverified", "verified"]).default("unverified"),
     }))
     .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      if (input.packKey && !(await packExists(input.packKey))) throw new TRPCError({ code: "NOT_FOUND", message: `Unknown pack ${input.packKey}` });
-      const stored = input.requestedStatus === "verified" && input.sourceVerified && input.sourceAuthority?.trim() ? "verified" : "unverified";
-      const prior = await db.select({ version: complianceRequirements.version }).from(complianceRequirements).where(eq(complianceRequirements.requirementKey, input.requirementKey)).orderBy(desc(complianceRequirements.version)).limit(1);
-      const version = (prior[0]?.version ?? 0) + 1;
-      // C1b-2: revisions are immutable. The previous version is not touched — not its status, not
-      // its dates. Which revision governs on a date is read from the versions by
-      // `requirementRegistry.governingRevisions`, so the earlier one keeps applying until this one's
-      // `effectiveFrom`, instead of stopping the moment this one is loaded.
-      await db.insert(complianceRequirements).values({
-        requirementKey: input.requirementKey, version, family: input.family, packKey: input.packKey ?? null, title: input.title, subjectType: input.subjectType, jurisdiction: input.jurisdiction,
-        appliesWhenJson: input.appliesWhen ? JSON.stringify(input.appliesWhen) : null, satisfiedByDocTypes: JSON.stringify(input.satisfiedByDocTypes),
-        renewalIntervalDays: input.renewalIntervalDays ?? null, warnDaysBeforeExpiry: input.warnDaysBeforeExpiry, missingSeverity: input.missingSeverity,
-        sourceAuthority: input.sourceAuthority ?? null, sourceUrl: input.sourceUrl ?? null, sourceReference: input.sourceReference ?? null,
-        effectiveFrom: input.effectiveFrom, verificationStatus: stored, verifiedByUserId: stored === "verified" ? ctx.user.id : null, verifiedAt: stored === "verified" ? new Date() : null,
-      });
-      return { requirementKey: input.requirementKey, version, storedStatus: stored, note: stored === "unverified" && input.requestedStatus === "verified" ? "Stored unverified: a requirement cannot be verified unless its source is verified and names an authority" : undefined };
+      if (!input.effectiveFrom && !input.effectiveDateUnknown) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Record the effective date, or record explicitly that it is unknown (effectiveDateUnknown)" });
+      }
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      const r = await asTrpc(() => proposeRequirement({
+        requirementKey: input.requirementKey, family: input.family, title: input.title, packKey: input.packKey ?? null,
+        subjectType: input.subjectType, jurisdiction: input.jurisdiction, appliesWhen: input.appliesWhen ?? null,
+        satisfiedByDocTypes: input.satisfiedByDocTypes, renewalIntervalDays: input.renewalIntervalDays ?? null,
+        warnDaysBeforeExpiry: input.warnDaysBeforeExpiry, missingSeverity: input.missingSeverity,
+        instrumentTitle: input.instrumentTitle ?? null, issuingAuthority: input.sourceAuthority ?? null,
+        citation: input.sourceReference ?? null, officialUrl: input.sourceUrl ?? null, authorityType: input.authorityType ?? null,
+        effectiveFrom: input.effectiveFrom ?? null, effectiveDateUnknown: input.effectiveDateUnknown, effectiveUntil: input.effectiveUntil ?? null,
+      }, ctx.user.id, orgRef, new Date()));
+      return {
+        requirementKey: r.requirementKey, version: r.version, storedStatus: "unverified" as const, level: r.level,
+        note: input.requestedStatus === "verified" || input.sourceVerified
+          ? "Stored as a proposal. A requirement is verified by people other than its proposer (requirementVerify), never by the proposer's own flag"
+          : undefined,
+      };
+    }),
+
+  /** First verification of a revision — citation or source document. Never the proposer. */
+  requirementVerify: roleProcedure("compliance.requirementVerify")
+    .input(VERIFY_INPUT)
+    .mutation(async ({ ctx, input }) => {
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      return asTrpc(() => recordApproval({ ...input, step: 1 }, ctx.user.id, orgRef, new Date()));
+    }),
+
+  /** Second, independent verification of a dispatch-blocking revision. Neither the proposer nor the first verifier. */
+  requirementSecondApprove: roleProcedure("compliance.requirementSecondApprove")
+    .input(VERIFY_INPUT)
+    .mutation(async ({ ctx, input }) => {
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      return asTrpc(() => recordApproval({ ...input, step: 2 }, ctx.user.id, orgRef, new Date()));
+    }),
+
+  /** Withdraw a revision. Recorded as an event; the revision and its verification history remain. */
+  requirementWithdraw: roleProcedure("compliance.requirementWithdraw")
+    .input(z.object({ requirementKey: z.string().min(3).max(120), version: z.number().int().positive(), reason: z.string().min(10).max(1000) }))
+    .mutation(async ({ ctx, input }) => {
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      return asTrpc(() => withdrawRevision(input.requirementKey, input.version, input.reason, ctx.user.id, orgRef, new Date()));
+    }),
+
+  /**
+   * Governance policy: whether an authority / domain / jurisdiction may still be verified by citation
+   * alone. Append-only; a change is a new row. Not a UI toggle: it is the act that closes the
+   * citation route for an authority once its source documents are admitted.
+   */
+  verificationPolicySet: roleProcedure("compliance.verificationPolicySet")
+    .input(z.object({
+      issuingAuthority: z.string().max(220).nullable().optional(), domain: z.string().max(60).nullable().optional(),
+      jurisdiction: z.string().max(80).nullable().optional(),
+      mode: z.enum(["CITATION_ALLOWED", "SOURCE_DOCUMENT_REQUIRED"]), reason: z.string().min(20).max(2000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      return setVerificationPolicy(input, input.mode, input.reason, ctx.user.id, orgRef);
+    }),
+
+  /** Why LeaseOS trusted each revision of a requirement: citation, fingerprint and every event. */
+  requirementProvenance: roleProcedure("compliance.requirementProvenance")
+    .input(z.object({ requirementKey: z.string().min(3).max(120) }))
+    .query(async ({ ctx, input }) => {
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      return asTrpc(() => requirementProvenance(input.requirementKey, orgRef));
     }),
 
   programPublish: roleProcedure("compliance.programPublish")
