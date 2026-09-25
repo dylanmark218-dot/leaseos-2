@@ -3,7 +3,12 @@
  *
  * Every requirement below is a **test fixture** in a made-up jurisdiction, not a verified rule.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+// F1.1 — work authorization reads equipment credentials, whose rows carry no owner: refused (OWNERSHIP_UNRESOLVED)
+// once organizations exist. This suite is about the registry, so it runs as the single-ownership-domain deployment;
+// only the ownership predicate is mocked. The fail-closed behaviour is proven on a real database in
+// tenantScopeFinance.db.test.ts and platformBootstrap.db.test.ts.
+vi.mock("./ownershipDomain", async importOriginal => ({ ...(await importOriginal<typeof import("./ownershipDomain")>()), singleOwnershipDomain: async () => true, requireProvableOwnership: async () => undefined }));
 import mysql from "mysql2/promise";
 import { complianceRequirements } from "../drizzle/schema";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
@@ -78,6 +83,15 @@ let userSeq = 884_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 beforeAll(async () => { if (DB_URL) pool = mysql.createPool({ uri: DB_URL, connectionLimit: 4 }); });
 afterAll(async () => { await pool?.end(); });
+/** F1.1/F1.2 — real, single-tenant subjects: a made-up operator or book id is "not found". */
+async function ownOperator(orgRef: string | null = null) {
+  const id = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES ('Registry fixture', NOW())"))[0].insertId);
+  if (orgRef) await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [orgRef, id]);
+  return id;
+}
+async function ownBook() {
+  return Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);
+}
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 async function withRole(role: DomainRole) {
   const id = userSeq++;
@@ -137,7 +151,7 @@ d("the registry reaches every reader", () => {
       requirementKey: key, family: "test", title: "Fixture v2", subjectType: "operator", jurisdiction,
       satisfiedByDocTypes: ["fixture_doc"], effectiveFrom: new Date("2026-02-01T00:00:00Z"),
     });
-    const p = await callerFor(dispatcher).compliance.passport({ subjectType: "operator", subjectId: 1, jurisdiction, attributes: {} });
+    const p = await callerFor(dispatcher).compliance.passport({ subjectType: "operator", subjectId: await ownOperator(), jurisdiction, attributes: {} });
     const mine = p.items.filter((i) => i.requirementKey === key);
     // One item, from the governing revision — not one per stored version, as before.
     expect(mine).toHaveLength(1);
@@ -176,7 +190,7 @@ d("the registry reaches every reader", () => {
       satisfiedByDocTypes: ["fixture_doc"], missingSeverity: "blocked", sourceAuthority: "FIXTURE", sourceVerified: true,
       requestedStatus: "verified", effectiveFrom: new Date("2026-01-01T00:00:00Z"),
     });
-    const entity = 700_000_000 + Math.floor(Math.random() * 1_000_000);
+    const entity = await ownBook();
     const ask = () => callerFor(dispatcher).requirement.workAuthorization({
       financialEntityId: entity, jurisdiction, companyAttributes: {}, worker: null,
       equipment: { id: 999_999_999, equipmentType: "fixture", attributes: {} }, work: { workType: "fixture", attributes: {} },

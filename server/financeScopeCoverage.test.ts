@@ -15,15 +15,22 @@
  *      procedure fails here until someone decides which it is.
  *   4. (F1.2) Every compliance procedure is classified the same way, and the ones that name an operator,
  *      unit, trailer, job, person or carrier prove it through its owner.
+ *   5. (F1.3) Configuration shared by every organization is PLATFORM-GOVERNED, read from procedure meta
+ *      that only the governance wrapper sets; every writer of a global table in the source tree is one of
+ *      those procedures; the requirement registry's only writer stamps the caller's organization; and the
+ *      four authority classes (tenant-scoped, platform-governed, bootstrap, schema-blocked) are declared
+ *      separately and never overlap.
  *
  * What this cannot see: a handler that reads `ctx.money` and then also queries a row without it. The
  * refusal suite (`tenantScopeFinance.db.test.ts`) is the behavioural half of this net.
  */
 import { describe, expect, it } from "vitest";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { appRouter } from "./routers";
 
 type ZodLike = { shape?: Record<string, unknown>; _def?: { innerType?: ZodLike; schema?: ZodLike }; unwrap?: () => ZodLike };
-type Proc = { _def: { meta?: { moneyScoped?: true }; inputs?: ZodLike[]; resolver?: unknown } };
+type Proc = { _def: { meta?: { moneyScoped?: true; platformGoverned?: "global_target"; bootstrap?: "zero_organizations" }; inputs?: ZodLike[]; resolver?: unknown } };
 const procs = (appRouter as unknown as { _def: { procedures: Record<string, Proc> } })._def.procedures;
 
 /** The ten F1 routers as mounted (CCA lives under `asset`), plus insurance (F1.1). */
@@ -68,15 +75,18 @@ const SHOP: Record<string, "unit_or_work_order_scoped" | "shared_public_director
  * entity; the rest read no company's records: pure evaluators over their own input, the source-backed
  * catalog, or the shared regulatory registry.
  */
-const COMPLIANCE: Record<string, "subject_scoped" | "book_scoped" | "pure_evaluator" | "shared_registry"> = {
+const COMPLIANCE: Record<string, "subject_scoped" | "book_scoped" | "pure_evaluator" | "organization_registry"> = {
   passport: "subject_scoped", jobPassport: "subject_scoped", medicalEligibility: "subject_scoped",
   credentialRecord: "subject_scoped", credentialVerify: "subject_scoped", consentRecord: "subject_scoped",
   programPublish: "book_scoped", profileReviewRecord: "book_scoped",
   knowledgeCatalog: "pure_evaluator", dangerousGoodsAssist: "pure_evaluator", securementAssist: "pure_evaluator",
   // Evaluates the licence profile it is handed; `operatorId` is carried, never looked up.
   driverQualification: "pure_evaluator",
-  // Requirements are regulations, one registry for every company (controller-only). See F1 doc §7.3.
-  requirementLoad: "shared_registry",
+  // F1.3 (owner decision: keep C1b-2's model) — the registry is read per organization: NULL-org legacy rows
+  // plus the caller's own organization's revisions. Every writer stamps the caller's acting organization from
+  // server scope (`actingScopeFor`), never input; another organization's revision is "not found". F1 doc §7.5.
+  requirementLoad: "organization_registry", requirementVerify: "organization_registry", requirementSecondApprove: "organization_registry",
+  requirementWithdraw: "organization_registry", verificationPolicySet: "organization_registry", requirementProvenance: "organization_registry",
 };
 
 /** Top-level input keys, through `.optional()` / `.default()` / `.strict()` wrappers. */
@@ -144,6 +154,8 @@ describe("F1.2 — every compliance procedure is classified, and the ones that n
       const src = source(procs[`compliance.${name}`]!);
       if (cls === "subject_scoped") expect(src.includes("requireSubjectInScope"), name).toBe(true);
       if (cls === "book_scoped") expect(SELF_SCOPED.test(src), name).toBe(true);
+      // The organization comes from server scope, and nothing in the input can name another one.
+      if (cls === "organization_registry") { expect(src.includes("actingScopeFor"), name).toBe(true); expect(/input\.(orgRef|tenantId|organization)/.test(src), name).toBe(false); }
     }
   });
 
@@ -168,5 +180,116 @@ describe("F1.1 — every shop procedure is classified, and the unowned ones fail
 
   it("gates unowned insurance requirements and equipment credentials the same way", () => {
     for (const k of ["insurance.requirementSet", "insurance.requirementMatch", "requirement.workAuthorization"]) expect(source(procs[k]!).includes("requireProvableOwnership"), k).toBe(true);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// F1.3 — the authority model, as classes rather than one exception list
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+/**
+ * PLATFORM_GOVERNED: configuration shared by every organization. "global_target" = platform authority for
+ * the global row, the organization's own permission and ownership for its own row
+ * (`platformOrOrganizationProcedure`). Decided, not defaulted: adding or removing one fails here.
+ */
+const PLATFORM_GOVERNED: Record<string, "global_target"> = {
+  "dispatch.enforcementSet": "global_target",
+  "dispatch.enforcementGet": "global_target",
+};
+/** BOOTSTRAP: the only exception to platform governance, and what ends it. Nothing else may carry one. */
+const BOOTSTRAP: Record<string, "zero_organizations"> = {
+  "dispatch.enforcementSet": "zero_organizations",
+  "dispatch.enforcementGet": "zero_organizations",
+};
+/**
+ * SCHEMA_BLOCKED: rows with no owner; refused (OWNERSHIP_UNRESOLVED) once organizations exist. A procedure
+ * can be both money-scoped and schema-blocked (insurance requirements: the book is proven, the rows are
+ * not ownable) — schema-blocked refines tenant-scoped. It can never be platform-governed.
+ */
+const SCHEMA_BLOCKED = [
+  ...Object.entries(SHOP).filter(([, c]) => c === "ownership_gated_until_F4").map(([n]) => `shop.${n}`),
+  "insurance.requirementSet", "insurance.requirementMatch",
+];
+/** The global tables and the only procedures that may write them. */
+const GLOBAL_TABLES: Record<string, string[]> = {
+  dispatchEnforcementSettings: ["dispatch.enforcementSet"],
+};
+
+function serverSources(dir = "server"): string[] {
+  return readdirSync(dir).flatMap(f => {
+    const p = join(dir, f);
+    if (statSync(p).isDirectory()) return serverSources(p);
+    return p.endsWith(".ts") && !p.endsWith(".test.ts") ? [p] : [];
+  });
+}
+const writesTable = (src: string, table: string) =>
+  new RegExp(`\\.(insert|update|delete)\\(\\s*(?:[\\w$]+\\.)?${table}\\s*\\)|(INSERT\\s+INTO|UPDATE|DELETE\\s+FROM|REPLACE\\s+INTO)\\s+\\\`?${table}\\b`, "i").test(src);
+
+describe("F1.3 — platform governance is declared in procedure meta, and only the wrappers can declare it", () => {
+  it("marks exactly the decided platform-governed procedures, with the decided kind", () => {
+    const marked = Object.fromEntries(Object.entries(procs).filter(([, p]) => p._def.meta?.platformGoverned).map(([k, p]) => [k, p._def.meta!.platformGoverned]));
+    expect(marked).toEqual(PLATFORM_GOVERNED);
+  });
+
+  it("gives the bootstrap exception only where it is decided, and says what ends it", () => {
+    const marked = Object.fromEntries(Object.entries(procs).filter(([, p]) => p._def.meta?.bootstrap).map(([k, p]) => [k, p._def.meta!.bootstrap]));
+    expect(marked).toEqual(BOOTSTRAP);
+  });
+
+  it("sets the governance meta nowhere but the wrappers in _core/trpc.ts", () => {
+    const setters = serverSources().filter(f => /platformGoverned\s*:|bootstrap\s*:\s*"zero_organizations"/.test(readFileSync(f, "utf8")));
+    expect(setters).toEqual([join("server", "_core", "trpc.ts")]);
+  });
+
+  it("reads platform authority from the users row in the wrappers, not from the session", () => {
+    const trpc = readFileSync(join("server", "_core", "trpc.ts"), "utf8");
+    const gov = trpc.slice(trpc.indexOf("F1.3 — platform governance"), trpc.indexOf("v21.10 — externalProcedure"));
+    expect(gov).toContain("platformAuthorityProven");
+    expect(gov).not.toMatch(/ctx\.user\??\.role/);
+    const pa = readFileSync(join("server", "platformAuthority.ts"), "utf8");
+    expect(pa).toMatch(/from\(users\)/);
+  });
+});
+
+describe("F1.3 — no other path writes a global table", () => {
+  for (const [table, allowed] of Object.entries(GLOBAL_TABLES)) {
+    it(`writes ${table} only from ${allowed.join(", ")}`, () => {
+      // Every live procedure whose handler writes the table is a decided, platform-governed one…
+      const writers = Object.entries(procs).filter(([, p]) => writesTable(source(p), table)).map(([k]) => k).sort();
+      expect(writers).toEqual([...allowed].sort());
+      for (const k of writers) expect(procs[k]!._def.meta?.platformGoverned, k).toBeTruthy();
+      // …and no service, job or helper elsewhere in the server writes it behind a procedure's back.
+      const files = serverSources().filter(f => writesTable(readFileSync(f, "utf8"), table));
+      expect(files.length, files.join(", ")).toBe(1);
+    });
+  }
+});
+
+describe("F1.3 — the requirement registry is organization-scoped: no writer creates a row another organization reads", () => {
+  const writers = serverSources().filter(f => writesTable(readFileSync(f, "utf8"), "complianceRequirements"));
+  it("has exactly one writer in the whole server, the proposal service", () => {
+    expect(writers).toEqual([join("server", "requirementVerification.ts")]);
+  });
+  it("stamps every revision it writes with the proposer's organization, passed in from server scope", () => {
+    const svc = readFileSync(join("server", "requirementVerification.ts"), "utf8");
+    const insert = svc.slice(svc.indexOf("insert(complianceRequirements)"), svc.indexOf("insert(complianceRequirements)") + 200);
+    expect(insert).toMatch(/\borgRef\b/);
+    expect(insert).not.toMatch(/orgRef:\s*null/);
+    expect(source(procs["compliance.requirementLoad"]!)).toMatch(/actingScopeFor\(ctx\.user\.id\)\)\.tenantId/);
+  });
+  it("reads it per organization: NULL-org legacy rows plus the caller's own", () => {
+    expect(readFileSync(join("server", "requirementRegistry.ts"), "utf8")).toMatch(/r\.orgRef == null \|\| r\.orgRef === tenantId/);
+  });
+});
+
+describe("F1.3 — the four authority classes never overlap", () => {
+  const tenantScoped = [
+    ...Object.entries(procs).filter(([, p]) => p._def.meta?.moneyScoped).map(([k]) => k),
+    ...Object.entries(COMPLIANCE).filter(([, c]) => c === "subject_scoped" || c === "book_scoped" || c === "organization_registry").map(([n]) => `compliance.${n}`),
+  ];
+  it("keeps platform-governed procedures apart from tenant-scoped and schema-blocked ones; bootstrap only inside platform-governed", () => {
+    const platform = Object.keys(PLATFORM_GOVERNED);
+    for (const k of Object.keys(BOOTSTRAP)) expect(platform, `${k}: a bootstrap exception belongs to a platform-governed procedure`).toContain(k);
+    expect(platform.filter(k => tenantScoped.includes(k) || SCHEMA_BLOCKED.includes(k))).toEqual([]);
+    for (const k of SCHEMA_BLOCKED) expect(procs[k], k).toBeTruthy();   // every schema-blocked name is a live procedure
   });
 });

@@ -6,7 +6,12 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+// F1.1 — work authorization reads equipment credentials, whose rows carry no owner: refused (OWNERSHIP_UNRESOLVED)
+// once organizations exist. This suite is about the registry, so it runs as the single-ownership-domain deployment;
+// only the ownership predicate is mocked. The fail-closed behaviour is proven on a real database in
+// tenantScopeFinance.db.test.ts and platformBootstrap.db.test.ts.
+vi.mock("./ownershipDomain", async importOriginal => ({ ...(await importOriginal<typeof import("./ownershipDomain")>()), singleOwnershipDomain: async () => true, requireProvableOwnership: async () => undefined }));
 import mysql from "mysql2/promise";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
 import { isSensitivePermission, type DomainRole } from "./_core/recordsAuthorization";
@@ -27,6 +32,15 @@ const DAY = 86_400_000;
 const days = (n: number) => new Date(Date.now() + n * DAY);
 beforeAll(async () => { if (DB_URL) pool = mysql.createPool({ uri: DB_URL, connectionLimit: 4 }); });
 afterAll(async () => { await pool?.end(); });
+/** F1.1/F1.2 — real, single-tenant subjects: a made-up operator or book id is "not found". */
+async function ownOperator(orgRef: string | null = null) {
+  const id = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES ('Registry fixture', NOW())"))[0].insertId);
+  if (orgRef) await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [orgRef, id]);
+  return id;
+}
+async function ownBook() {
+  return Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);
+}
 
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 async function withRole(role: DomainRole) {
@@ -79,8 +93,8 @@ async function proposal(o: { blocked?: boolean; effectiveFrom?: Date; key?: stri
 }
 const approval = (p: { requirementKey: string; version: number }, target: "CITATION_VERIFIED" | "SOURCE_DOCUMENT_VERIFIED" = "CITATION_VERIFIED", sourceRevisionRef?: string) =>
   ({ requirementKey: p.requirementKey, version: p.version, target, decision: "approve" as const, reason: "Checked against the cited section", sourceRevisionRef });
-const passportItem = async (p: { requirementKey: string; jurisdiction: string }, subjectId = 1, as = cast.dispatcher) =>
-  (await callerFor(as).compliance.passport({ subjectType: "operator", subjectId, jurisdiction: p.jurisdiction, attributes: {} }))
+const passportItem = async (p: { requirementKey: string; jurisdiction: string }, subjectId?: number, as = cast.dispatcher) =>
+  (await callerFor(as).compliance.passport({ subjectType: "operator", subjectId: subjectId ?? await ownOperator(), jurisdiction: p.jurisdiction, attributes: {} }))
     .items.find((i) => i.requirementKey === p.requirementKey);
 
 /* ------------------------------------------------------------------ */
@@ -153,7 +167,7 @@ d("who may verify", () => {
     await expect(callerFor(dispatcherB).compliance.requirementProvenance({ requirementKey: p.requirementKey })).rejects.toThrow(/NOT_FOUND/);
     await callerFor(verifierA).compliance.requirementVerify(approval(p));
     // Organization B's registry does not contain organization A's requirement.
-    expect(await passportItem(p, 1, dispatcherB)).toBeUndefined();
+    expect(await passportItem(p, await ownOperator(orgB), dispatcherB)).toBeUndefined();
     const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT orgRef FROM complianceRequirements WHERE requirementKey = ?", [p.requirementKey]);
     expect(rows[0].orgRef).toBe(orgA);
   });
@@ -168,7 +182,7 @@ d("citation verification", () => {
     const p = await proposal({ blocked: true });
     await callerFor(cast.v1).compliance.requirementVerify(approval(p));
     await callerFor(cast.v2).compliance.requirementSecondApprove(approval(p));
-    const operatorId = 950_000_000 + Math.floor(Math.random() * 1_000_000);
+    const operatorId = await ownOperator();
     expect((await passportItem(p, operatorId))?.status).toBe("missing");
     const rec = await callerFor(cast.office).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: p.doc, title: "Fixture credential", expiresAt: days(400) });
     await callerFor(cast.office).compliance.credentialVerify({ credentialId: rec.credentialId, outcome: "verified" });
@@ -360,7 +374,7 @@ d("packs, withdrawal and the removed one-step path", () => {
     await callerFor(cast.v2).compliance.requirementSecondApprove(approval(verified));
     const unverified = await proposal({ blocked: true, packKey, subjectType: "equipment", jurisdiction });
 
-    const entity = 700_000_000 + Math.floor(Math.random() * 1_000_000);
+    const entity = await ownBook();
     const ask = () => callerFor(cast.dispatcher).requirement.workAuthorization({
       financialEntityId: entity, jurisdiction, companyAttributes: {}, worker: null,
       equipment: { id: 999_999_999, equipmentType: "fixture", attributes: {} }, work: { workType: "fixture", attributes: {} },

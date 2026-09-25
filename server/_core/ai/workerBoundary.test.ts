@@ -58,7 +58,8 @@ describe("the job body", () => {
 
   it("writes nothing — the worker that owns the transaction does that", () => {
     const source = readFileSync("server/_core/ai/worker/secretaryExtractionJob.ts", "utf8");
-    expect(source).not.toMatch(/getDb|drizzle\/schema|\.insert\(|\.update\(/);
+    // `createHash(...).update(...)` feeds a hash, not a table; every database write shape is still refused.
+    expect(source).not.toMatch(/getDb|drizzle\/schema|\.insert\(|(?<!createHash\("[a-z0-9]+"\))\.update\(/);
   });
 
   it("claims exactly one event type, so a filter can be exact", () => {

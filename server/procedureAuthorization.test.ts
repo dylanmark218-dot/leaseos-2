@@ -139,10 +139,17 @@ describe("records surface is fully role-authorized", () => {
   });
 });
 
+/**
+ * Builders that enforce the declared domain permission: `roleProcedure`, and (F1.3) the mixed builder for
+ * procedures serving one organization's row and the global one — it enforces the same permission for the
+ * organization's row and during bootstrap, and platform authority for the global row.
+ */
+const ROLE_GATED = /(?:roleProcedure|platformOrOrganizationProcedure)\("([^"]+)"/g;
+
 describe("migrated operational procedures", () => {
   it("gates every declared operational procedure in routers.ts", () => {
     const wired = new Set(
-      Array.from(OPERATIONAL_SOURCES.matchAll(/roleProcedure\("([^"]+)"\)/g)).map(m => m[1])
+      Array.from(OPERATIONAL_SOURCES.matchAll(ROLE_GATED)).map(m => m[1])
     );
     for (const declared of Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS)) {
       expect(wired.has(declared), `${declared} declared but not wired`).toBe(true);
@@ -152,7 +159,7 @@ describe("migrated operational procedures", () => {
 
   it("has no roleProcedure in routers.ts without a declared permission", () => {
     const wired = Array.from(
-      OPERATIONAL_SOURCES.matchAll(/roleProcedure\("([^"]+)"\)/g)
+      OPERATIONAL_SOURCES.matchAll(ROLE_GATED)
     ).map(m => m[1]);
     for (const name of wired) {
       expect(
@@ -171,9 +178,10 @@ describe("migrated operational procedures", () => {
   });
 
   it("wires exactly as many roleProcedures as it declares permissions for", () => {
-    const wired = (OPERATIONAL_SOURCES.match(/roleProcedure\(/g) ?? []).length;
+    const wired = (OPERATIONAL_SOURCES.match(/(?:roleProcedure|platformOrOrganizationProcedure)\(/g) ?? []).length;
     expect(wired).toBe(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length);
   });
+
 
   it("has no bare protectedProcedure in the payroll or finance surface", () => {
     expect(countBuilders(payrollRouter, "protectedProcedure")).toBe(0);
