@@ -28,7 +28,7 @@ const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
 
 let pool: mysql.Pool;
-let seq = 883_000_000 + Math.floor(Math.random() * 40_000);
+let seq = 884_000_000 + Math.floor(Math.random() * 40_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 
 beforeAll(() => {

@@ -11,7 +11,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", async importOriginal => ({
   ...(await importOriginal<typeof import("./db")>()),
-  listActiveUserRoles: async () => [{ role: "safety", scopeRef: null }],
+  // The gate reads the acting organization's grants (B23.1), not the account's.
+  listRoleGrantsInActingOrganization: async () => ({
+    grants: [{ role: "safety", scopeType: "organization", orgRef: "default", scopeRef: null }],
+    organization: "default",
+  }),
   recordAuthorizationDecision: async () => 1,
 }));
 
