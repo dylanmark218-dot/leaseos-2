@@ -51,12 +51,19 @@ branches. Every number from `0175` to `0188` is claimed by at least one open bra
 | 0186 | `0186_external_source_categories.sql` | `claude/canadian-govt-apis-leaseos-q33l42` | open branch | none | — |
 | 0187 | `0187_training_compliance_operations.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none (was 0174, collided with main) | — |
 | 0188 | `0188_source_review_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none | — |
-| 0189 | `0189_rule_ledger_generalization.sql` | `claude/leaseos-compliance-survey-5faxe8` (C1b-1) | this branch | none | keeps 0189 |
+| 0189 | `0189_rule_ledger_generalization.sql` | `claude/leaseos-compliance-survey-5faxe8` (C1b-1, PR #15) | open PR | with the two rows below (claimed after 2026-09-24 12:00) | first to merge keeps it |
+| 0189 | `0189_document_control_register.sql` | `claude/document-control-design-imsd3n` | open branch | with C1b-1, mechanic-portal | first to merge keeps it |
+| 0189 | `0189_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | with C1b-1, document-control-design | first to merge keeps it |
+| 0190 | `0190_document_control_numbering.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
 
-**Next free number for new work: `0190`** (re-check with the scan above before committing).
+**Next free number for new work: `0191`** (re-check with the scan above before committing).
 
 ### Change log
 
+* **2026-09-25**: `main` (`242b619`) now carries `0175_session_families.sql` (#30), so the `0175` rows above
+  now collide with `main` and their authors renumber at rebase. Since the C1b-1 scan, `0189` has also been
+  claimed by `claude/document-control-design-imsd3n` and `claude/mechanic-portal-domain-82efa9`. No file was
+  renamed.
 * **2026-09-24 (C1b-1)**: rescanned after #6, #9, #11, #10, #13, #17, #18, #21, #23–#25 merged. C1b-1 takes
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.

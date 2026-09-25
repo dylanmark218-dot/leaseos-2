@@ -1,6 +1,6 @@
 # C1b-1 — One rule ledger
 
-*2026-09-24. Branch `claude/leaseos-compliance-survey-5faxe8`, on `main` = `1680e94`. Migration `0189`.*
+*2026-09-24, re-gated 2026-09-25. Branch `claude/leaseos-compliance-survey-5faxe8`, on `main` = `242b619`. Migration `0189`.*
 
 ## Owner questions: what this slice assumed
 
@@ -124,3 +124,18 @@ concurrently, so two suites sometimes hand out the same id.
 * It does not touch anything C1b-1 changed.
 * **Proposed fix** (not made here, because it is outside this slice): give each file its own window, e.g.
   `880_`, `881_`, `882_` and `883_000_000`.
+
+**Re-gate on `main` = `242b619`** (S1 session hardening and repository hardening merged in; `main` added
+`0175_session_families.sql`):
+* 172 migrations applied. Parity is 411/411. Typecheck is clean, with 0 test-file type errors.
+* 356 files: 5155 passed, 3 skipped, and 1 failed. The failure was `widgetPersistence.db.test.ts`, whose
+  table-rebuild step hit the 5 s timeout under full-suite load. That suite uses its own database and
+  touches nothing in this change. It passes 22/22 alone.
+* The build passes and `LEASEOS_CURRENT_STATE.md` is current.
+
+**CI on `da8aadf`.** Both runs failed in about 3 s. The job was never assigned a runner (`runner_id` 0, and the
+logs return 404), so no step ran. The merge of `main` above re-triggers CI.
+
+**Migration number.** Since the 2026-09-24 scan, two more branches have claimed `0189`
+(`claude/document-control-design-imsd3n` and `claude/mechanic-portal-domain-82efa9`). The register records
+this. Under its rule the first to merge keeps the number, and nothing is renamed pre-emptively.
