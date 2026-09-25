@@ -470,10 +470,10 @@ d("seeding into the database", () => {
     expect(second.existing).toHaveLength(35);
   });
 
-  it("persists status, rate limit and retrieval date", async () => {
+  it("persists status, source URL, rate limit and retrieval date", async () => {
     await seedExternalDataSources();
     const [rows] = await pool.execute<mysql.RowDataPacket[]>(
-      "SELECT sourceKey, status, rateLimitCalls, rateLimitWindowSeconds, requiresApiKey, retrievedAt, verifiedAt FROM externalDataSources WHERE sourceKey IN ('ab511','osm','aer_st37')"
+      "SELECT sourceKey, status, sourceUrl, rateLimitCalls, rateLimitWindowSeconds, requiresApiKey, retrievedAt, verifiedAt FROM externalDataSources WHERE sourceKey IN ('ab511','on511','osm','aer_st37')"
     );
     const map = new Map(rows.map(r => [r.sourceKey, r]));
 
@@ -487,7 +487,23 @@ d("seeding into the database", () => {
     expect(map.get("osm")!.verifiedAt).not.toBeNull();
     expect(map.get("osm")!.retrievedAt).not.toBeNull();
 
+    expect(map.get("on511")!.sourceUrl).toBe("https://511on.ca/developers/doc");
+
     expect(map.get("aer_st37")!.status).toBe("unverified");
+  });
+
+  it("backfills a seeded source URL when an existing row still has NULL", async () => {
+    await seedExternalDataSources();
+    await pool.execute(
+      "UPDATE externalDataSources SET sourceUrl=NULL WHERE sourceKey='on511'"
+    );
+
+    await seedExternalDataSources();
+
+    const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+      "SELECT sourceUrl FROM externalDataSources WHERE sourceKey='on511'"
+    );
+    expect(rows[0].sourceUrl).toBe("https://511on.ca/developers/doc");
   });
 
   it("does not downgrade a row somebody has since verified", async () => {
