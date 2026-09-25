@@ -5594,6 +5594,9 @@ export const webhookDeliveries = mysqlTable("webhookDeliveries", {
   responseStatus: int("responseStatus"),
   error: varchar("error", { length: 400 }),
   nextAttemptAt: timestamp("nextAttemptAt"),
+  // 0185 (SEC-004): the claim on an in-flight ('queued') attempt. See webhookDispatchService.ts.
+  claimedAt: timestamp("claimedAt"),
+  claimedBy: varchar("claimedBy", { length: 64 }),
   at: timestamp("at").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

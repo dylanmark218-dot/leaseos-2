@@ -16,6 +16,12 @@ import {
 } from "./_core/domainEmitters";
 import { startDrainWorker } from "./_core/drainWorker";
 
+// A unit id no test creates. These rows only need a unitId to satisfy the column;
+// the literal 1 used here before collided with whichever suite happened to create
+// the first unit in a fresh database, handing that suite's truck open critical
+// defects (complianceReadinessC1a failed on exactly that, order-dependently).
+const NO_SUCH_UNIT = 2_000_000_000;
+
 /**
  * The chain end to end.
  *
@@ -94,7 +100,7 @@ d("end to end: critical defect", () => {
     await conn.beginTransaction();
     await conn.execute(
       "INSERT INTO maintenanceDefects (unitId, title, severity, status, reportedAt) VALUES (?,?,?,?,NOW())",
-      [1, `Grinding on start-up — ${unit}`, "critical", "open"]
+      [NO_SUCH_UNIT, `Grinding on start-up — ${unit}`, "critical", "open"]
     );
     await emitCriticalDefectOpened(conn as never, ctx(), {
       unitId: unit,
