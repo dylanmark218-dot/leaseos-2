@@ -28,12 +28,10 @@ import {
 } from "./webhookSecretService";
 import { migrateWebhookSecrets, webhookSecretReadiness } from "./webhookSecretMigration";
 import { createEnvironmentKeyProvider } from "./_core/secretCrypto";
-import { encryptSecret as legacyEncrypt, signPayload, verifySignature } from "./_core/integrationGateway";
+import { signPayload, verifySignature } from "./_core/integrationGateway";
 import { encryptSecret as legacyEnc } from "./_core/externalIdentityPolicy";
 import { createSecret, describeSecret } from "./secretStore";
 import { dispatchWebhooks, setWebhookPoster, sweepWebhookRetries } from "./webhookDispatchService";
-
-void legacyEncrypt;
 
 /*
  * The dispatcher builds its own keys from the environment — `mfaKey()` for the legacy shared key and
