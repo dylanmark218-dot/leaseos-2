@@ -228,6 +228,11 @@ d("the post and the offer are the gate too", () => {
     expect((await rows("SELECT status FROM dispatchRoles WHERE id = ?", [s.roleId]))[0]!.status).toBe("open");
     const a = await award(s, { checkId: c.checkId, reason: "accepted by phone at 06:10" });
     expect(a.ok, (a as { refusals?: string[] }).refusals?.join(" | ")).toBe(true);
+    // Auditable in both records: the marketplace's and the binding's.
+    const awarded = await rows("SELECT detail FROM shiftPostEvents WHERE postRef = ? AND eventType = 'awarded'", [s.postRef]);
+    expect(String(awarded[0]!.detail)).toContain("unanswered in the app; acceptance recorded by the dispatcher: accepted by phone at 06:10");
+    const bound = await rows("SELECT reason FROM dispatchRoleAssignmentEvents WHERE roleId = ? ORDER BY id DESC LIMIT 1", [s.roleId]);
+    expect(bound[0]!.reason).toBe("accepted by phone at 06:10");
   });
 
   it("refuses awarding over a declined offer even with a reason, and with no offer unless the dispatcher says why", async () => {

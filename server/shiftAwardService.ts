@@ -178,7 +178,11 @@ export async function awardPost(input: ShiftAwardInput): Promise<ShiftAwardResul
       }
       await tx.update(shiftPosts).set({ status: "filled", filledAt: now, filledByUserId: input.actorUserId }).where(eq(shiftPosts.id, post.id));
       await postEvent(tx, { postRef: post.postRef, eventType: "awarded", actorUserId: input.actorUserId, actorRole, subjectUserId: input.userId,
-        detail: `role ${role.id} event ${bound.eventId} check ${check.id}${live ? ` offer ${live.offerRef}` : ` without an offer: ${input.reason}`}`.slice(0, 600), at: now });
+        // The marketplace's own record says how the person's yes arrived: in the app, or — an unanswered
+        // offer — outside it, with the dispatcher's reason (the binding's event keeps the reason too).
+        detail: `role ${role.id} event ${bound.eventId} check ${check.id}${live
+          ? ` offer ${live.offerRef} ${live.effective === "accepted" ? "accepted in the app" : `unanswered in the app; acceptance recorded by the dispatcher: ${input.reason}`}`
+          : ` without an offer: ${input.reason}`}`.slice(0, 600), at: now });
 
       // 7. The event, in the same transaction; refs only.
       await enqueueBoardEvent(tx, {
