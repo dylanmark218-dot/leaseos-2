@@ -84,7 +84,20 @@ const BEFORE: Record<string, unknown> = {
  * Where the four disagreed, and what the canonical rule decides. Empty until the reconciliation;
  * every entry is a documented semantic difference (docs/compliance/checkpoints/C1B_3_…md).
  */
-const RESOLVED: Record<string, unknown> = {};
+const RESOLVED: Record<string, unknown> = {
+  // 1. The exact expiry instant. The passport said expired (`<=`); dispatch, the tile and the engine
+  //    said still in force (`<`). The dispatch rule is canonical — dispatch behaviour must not change —
+  //    so the passport moves, by one instant, to "expiring".
+  "exactInstant|verified": { widget: "expiring", dispatch: null, passport: "expiring:0" },
+  "exactInstant|needs_review": { widget: "unverified", dispatch: null, passport: "evidence_unverified:0" },
+  // 2. The tile's warning window counted milliseconds (30.5 days > 30 days → current); the passport and
+  //    the engine count whole days (30.5 → 30 → expiring). Whole days are canonical.
+  "window30_5d|verified": { widget: "expiring", dispatch: null, passport: "expiring:30" },
+  // 3. A row with no verification status read as verified on the tile (`if (status && status !==
+  //    "verified")`). A missing status is not evidence: it now reads unverified. The column is NOT NULL,
+  //    so only a malformed serialized row can reach this.
+  "noExpiry|null": { widget: "unverified" },
+};
 
 describe("document validity — characterization across the four callers", () => {
   it("matches the recorded behaviour, except where a difference was resolved on purpose", () => {

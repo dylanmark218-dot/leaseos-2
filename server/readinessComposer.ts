@@ -17,6 +17,7 @@
  * about a person's medical fitness is "eligible" and nothing more.
  */
 
+import { complianceDocumentValidity } from "./_core/complianceDocumentValidity";
 import { type CapabilityResult, type CombinedVerdict } from "./_core/interEngineStatus";
 import { CAPABILITY, dispatchContractFor, pictureFor, type EvaluationMap } from "./_core/readinessCapabilities";
 import { entitlementToEvaluation, snapshotOf, type PolicySnapshot } from "./_core/automationPolicy";
@@ -341,13 +342,15 @@ function bindingHasUnevaluatedConditions(conditionsJson: string | null): boolean
   }
 }
 
-/** Best credential of a type: verified before needs_review; latest expiry; rejected never counts as present. */
-export function credentialState(rows: readonly CredRow[], docTypes: readonly string[], label: string): CredentialState {
-  const c = rows
-    .filter(r => docTypes.includes(r.docType) && r.verificationStatus !== "rejected")
-    .sort((a, b) => (b.verificationStatus === "verified" ? 1 : 0) - (a.verificationStatus === "verified" ? 1 : 0) || (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
-  if (!c) return { label, present: false, expiresAt: null };
-  return { label, present: true, expiresAt: c.expiresAt ?? undefined };
+/**
+ * The governing credential of a type (C1b-3: `complianceDocumentValidity` chooses it — verified before
+ * needs_review, then the latest expiry). A rejected credential never counts as present. The expiry
+ * itself is judged by the dispatch blocker, through the same engine.
+ */
+export function credentialState(rows: readonly CredRow[], docTypes: readonly string[], label: string, at: Date): CredentialState {
+  const v = complianceDocumentValidity(rows, docTypes, at);
+  if (!v.claim || v.state === "rejected") return { label, present: false, expiresAt: null };
+  return { label, present: true, expiresAt: v.claim.expiresAt ?? undefined };
 }
 
 async function policiesCovering(entityType: "unit" | "trailer", entityId: number, now: Date): Promise<PolicyRecord[]> {
@@ -401,7 +404,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   const opCreds = await credentialsFor("operator", op.id);
   for (const c of opCreds) governingExpiries.push({ what: `operatorDoc:${c.id}`, at: c.expiresAt });
   governingExpiries.push({ what: "legacyLicence", at: op.licenseExpiresAt });
-  let licence = credentialState(opCreds, ["driver_licence"], "Driver licence");
+  let licence = credentialState(opCreds, ["driver_licence"], "Driver licence", now);
   if (!licence.present && op.licenseExpiresAt) {
     // The flat legacy field is a weak signal: present, unverified. It keeps an
     // unmigrated operator from reading as "no licence" while the structured
@@ -497,7 +500,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       }
     }
   }
-  if (dangerousGoods) required.push(credentialState(opCreds, ["tdg_certificate"], "TDG certificate"));
+  if (dangerousGoods) required.push(credentialState(opCreds, ["tdg_certificate"], "TDG certificate", now));
   // Medical fitness reaches dispatch as a projection only.
   const medRow = opCreds.filter(c => c.docType === "medical_fitness").sort((a, b) => (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
   const med = medicalFitnessForDispatch(medRow ? { docType: "medical_fitness", expiresAt: medRow.expiresAt, verificationStatus: medRow.verificationStatus, privateDetail: true } : null, now);
@@ -568,8 +571,8 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     const withoutEvidence = owingEvidence.filter(d => currentReleaseEvidenceFor(d.id, storedReleases) == null);
     truck = {
       unitNumber: unit.unitNumber,
-      inspection: credentialState(uCreds, ["cvip_certificate", "annual_inspection"], "Annual inspection"),
-      registration: credentialState(uCreds, ["vehicle_registration"], "Registration"),
+      inspection: credentialState(uCreds, ["cvip_certificate", "annual_inspection"], "Annual inspection", now),
+      registration: credentialState(uCreds, ["vehicle_registration"], "Registration", now),
       insurance: { label: "Insurance", present: pols.length > 0, expiresAt: pols.length ? new Date(Math.max(...pols.map(p => p.expiresAt.getTime()))) : null },
       maintenanceOverdue: unit.maintenanceStatus === "blocked",
       criticalDefectOpen: unresolvedCritical.length > 0,
@@ -640,8 +643,8 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     const [tCreds, pols] = await Promise.all([credentialsFor("trailer", tr.id), policiesCovering("trailer", tr.id, now)]);
     trailer = {
       trailerNumber: tr.unitNumber,
-      inspection: credentialState(tCreds, ["cvip_certificate", "annual_inspection"], "Trailer inspection"),
-      registration: credentialState(tCreds, ["vehicle_registration"], "Trailer registration"),
+      inspection: credentialState(tCreds, ["cvip_certificate", "annual_inspection"], "Trailer inspection", now),
+      registration: credentialState(tCreds, ["vehicle_registration"], "Trailer registration", now),
       insurance: { label: "Trailer insurance", present: pols.length > 0, expiresAt: pols.length ? new Date(Math.max(...pols.map(p => p.expiresAt.getTime()))) : null },
       maintenanceOverdue: false,
       compatibleWithTruck: null,

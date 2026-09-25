@@ -153,11 +153,11 @@ OHS systems. C1b builds the regulatory authority that they will consume later.
 | C1b-1 | ledger generalization + source fields + lifecycle; HOS equivalence tests; `promote()` generalized. **Implemented** (`0189`; the next free number was re-scanned, see the register) | one |
 | C1b-2 | requirements under the ledger; immutable revisions; two-person for dispatch-blocking statute; loader fixes; `requirementRef` on findings and checks; point-in-time query. **Split:** C1b-2a (immutable revisions, one registry reader for passport, work authorization and packs, the loader and subject/pack fixes, `requirementRef` on passport items) is **implemented** (`checkpoints/C1B_2A_REQUIREMENT_REGISTRY.md`). C1b-2b (verification through the ledger) needs an owner decision on sources, recorded in that document | 2a none; 2b one |
 | C1b-2b | verification levels (UNVERIFIED / CITATION_VERIFIED / SOURCE_DOCUMENT_VERIFIED / SUPERSEDED / WITHDRAWN) read from append-only events; citation and source-document routes through the ledger; two independent verifiers for dispatch-blocking; `CITATION_ALLOWED` / `SOURCE_DOCUMENT_REQUIRED` governance policy; one-step self-verification removed. **Implemented** (`checkpoints/C1B_2B_REQUIREMENT_VERIFICATION.md`) | `0198` |
-| C1b-3 | SPINE item 2 `complianceDocumentValidity` reconciliation (equivalence first); D-05 credential read adapter, non-destructive, with equivalence tests for the four `workerQualifications` readers | none expected |
+| C1b-3 | SPINE item 2 `complianceDocumentValidity` reconciliation (equivalence first); D-05 credential read adapter, non-destructive, with equivalence tests for the four `workerQualifications` readers. **Implemented** (`checkpoints/C1B_3_DOCUMENT_VALIDITY_AND_QUALIFICATION_READS.md`): four rules routed through `documentValidity.readExpiry` / `complianceDocumentValidity`; `server/qualificationReads.ts` read-only, organization-scoped; dispatch output unchanged | none |
 
 **SPINE items this advances**
 
-* **Item 2** (the four duplications): C1b-3 resolves `complianceDocumentValidity`. The D-05 adapter moves
+* **Item 2** (the four duplications): C1b-3 resolves `complianceDocumentValidity` (**done**; removed from `DECLARED_UNWIRED`, 62 remain). Remaining: `dispatchMatching`, `openShifts`, `fieldTicket`; deferred to C2: `medicalFitnessForDispatch` `<=` and composer Academy acceptance. The D-05 adapter moves
   `openShiftsRouter`'s qualification reads onto the canonical projection, which is a step towards the
   `openShifts` duplication but **does not resolve it**: the eligibility decision itself stays inline.
   `dispatchMatching` and `fieldTicket` are untouched.

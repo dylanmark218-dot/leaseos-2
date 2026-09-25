@@ -53,6 +53,36 @@ export type DocumentVersion = {
 
 export type ValidityState = "in_force" | "expiring" | "expired" | "unverified" | "rejected" | "none";
 
+/* ------------------------------------------------------------------ */
+/* The expiry decision                                                  */
+/* ------------------------------------------------------------------ */
+
+/** Where an expiry date stands at a moment, before anything about verification is considered. */
+export type ExpiryClass = "no_expiry" | "current" | "expiring" | "expired";
+
+/**
+ * C1b-3 — the one expiry calculation in LeaseOS. Every "is this document or credential still in date"
+ * answer is built on it; nothing else does day arithmetic on an expiry.
+ *
+ * * **Expired** means the expiry instant has passed: `expiresAt < at`. At the instant itself the document
+ *   is still in force. (The passport used `<=`; the dispatch blocker, the widget tile and `validityOf`
+ *   used `<`. The dispatch rule is kept.)
+ * * **Days remaining** are whole days, rounded down: 30.5 days left is 30.
+ * * **Expiring** means not expired and at most `noticeDays` whole days left. `noticeDays <= 0` means no
+ *   warning window at all — a 24-hour inspection is valid or it is not.
+ * * **No expiry** is reported as such. What it means (in force, or currency unknown) is the caller's
+ *   policy and stays visible at the call site.
+ *
+ * Deterministic: `at` is explicit, never the clock.
+ */
+export function readExpiry(expiresAt: Date | null | undefined, at: Date, noticeDays: number): { expiry: ExpiryClass; daysRemaining: number | null } {
+  if (!expiresAt) return { expiry: "no_expiry", daysRemaining: null };
+  const days = Math.floor((expiresAt.getTime() - at.getTime()) / 86_400_000);
+  if (expiresAt.getTime() < at.getTime()) return { expiry: "expired", daysRemaining: days };
+  if (noticeDays > 0 && days <= noticeDays) return { expiry: "expiring", daysRemaining: days };
+  return { expiry: "current", daysRemaining: days };
+}
+
 export type Validity = {
   state: ValidityState;
   version: number | null;
@@ -92,9 +122,10 @@ export function validityOf(versions: readonly DocumentVersion[], at: Date, notic
   if (!current.expiresAt) {
     return { state: "in_force", version: current.version, expiresAt: null, daysRemaining: null, reason: `Version ${current.version}, verified, no expiry recorded` };
   }
-  const days = Math.floor((current.expiresAt.getTime() - at.getTime()) / 86_400_000);
-  if (days < 0) return { state: "expired", version: current.version, expiresAt: current.expiresAt, daysRemaining: days, reason: `Expired ${Math.abs(days)} day(s) ago` };
-  if (days <= noticeDays) return { state: "expiring", version: current.version, expiresAt: current.expiresAt, daysRemaining: days, reason: `Expires in ${days} day(s)` };
+  const { expiry, daysRemaining } = readExpiry(current.expiresAt, at, noticeDays);
+  const days = daysRemaining!;
+  if (expiry === "expired") return { state: "expired", version: current.version, expiresAt: current.expiresAt, daysRemaining: days, reason: `Expired ${Math.abs(days)} day(s) ago` };
+  if (expiry === "expiring") return { state: "expiring", version: current.version, expiresAt: current.expiresAt, daysRemaining: days, reason: `Expires in ${days} day(s)` };
   return { state: "in_force", version: current.version, expiresAt: current.expiresAt, daysRemaining: days, reason: `Verified and current for another ${days} day(s)` };
 }
 

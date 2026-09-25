@@ -22,6 +22,8 @@
  *   it never learns why not.
  */
 
+import { claimValidity } from "./complianceDocumentValidity";
+
 export type RequirementStatus = "unverified" | "verified" | "superseded" | "withdrawn";
 export type CredentialVerification = "needs_review" | "verified" | "rejected";
 
@@ -202,9 +204,11 @@ export function evaluateRequirement(args: {
     };
   }
 
-  // Best candidate: verified beats needs_review beats rejected; then latest expiry.
-  const rank = (c: Credential) => (c.verificationStatus === "verified" ? 2 : c.verificationStatus === "needs_review" ? 1 : 0);
-  const best = [...candidates].sort((a, b) => rank(b) - rank(a) || (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0]!;
+  // C1b-3: the governing candidate and its expiry are the canonical decision
+  // (`complianceDocumentValidity`: verified beats needs_review beats rejected, then the latest
+  // expiry; expired means the instant has passed). This function only words it for a passport.
+  const validity = claimValidity(candidates, args.now, r.warnDaysBeforeExpiry);
+  const best = validity.claim!;
 
   /**
    * `privateDetail` was declared on Credential and read nowhere — a field that
@@ -232,25 +236,24 @@ export function evaluateRequirement(args: {
     reason: `${r.title} is not satisfied. The evidence is held privately — the reason is with the office, not on this passport.`,
   });
 
-  if (best.verificationStatus === "rejected" && candidates.every(c => c.verificationStatus === "rejected")) {
+  if (validity.state === "rejected") {
     if (best.privateDetail) return withheld("blocked", null);
     return { ...base, status: "evidence_rejected", effect: "blocked", expiresAt: best.expiresAt ?? null, daysToExpiry: null, reason: `${r.title} evidence was rejected on review` };
   }
 
-  const expiresAt = best.expiresAt ?? null;
-  const days = expiresAt ? Math.floor((expiresAt.getTime() - args.now.getTime()) / 86_400_000) : null;
+  const expiresAt = validity.expiresAt;
+  const days = validity.daysRemaining;
 
-  if (expiresAt && expiresAt <= args.now) {
+  // Expiry is named before verification: an expired document is expired whether or not anybody checked it.
+  if (validity.expiry === "expired") {
     return { ...base, status: "expired", effect: "blocked", expiresAt, daysToExpiry: days, reason: `${r.title} expired ${Math.abs(days!)} day(s) ago` };
   }
   if (best.verificationStatus === "needs_review") {
     if (best.privateDetail) return withheld("review", expiresAt);
     return { ...base, status: "evidence_unverified", effect: "review", expiresAt, daysToExpiry: days, reason: `${r.title} is on record but has not been verified` };
   }
-  // A warn window of zero means "never warn": a 24-hour inspection is valid
-  // or it is not, and twelve hours left is not an exception to raise. Without
-  // this, floor(0.5 days) = 0 <= 0 would flag every daily item as expiring.
-  if (r.warnDaysBeforeExpiry > 0 && days !== null && days <= r.warnDaysBeforeExpiry) {
+  // A warn window of zero means "never warn" — now the canonical rule (`readExpiry`), not a special case here.
+  if (validity.expiry === "expiring") {
     return { ...base, status: "expiring", effect: "review", expiresAt, daysToExpiry: days, reason: `${r.title} expires in ${days} day(s)` };
   }
   return { ...base, status: "satisfied", effect: "none", expiresAt, daysToExpiry: days, reason: `${r.title} current${days !== null ? ` (${days} days)` : ""}` };

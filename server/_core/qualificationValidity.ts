@@ -68,7 +68,9 @@ export function qualificationValidity(holdings: readonly QualificationHolding[],
 }
 
 /**
- * The stricter reading the operational paths want.
+ * The stricter reading the operational paths want. (C1b-3: the per-router helpers `countsAsHeld` and
+ * `missingFrom` are gone; every reader goes through `server/qualificationReads.ts`, which applies
+ * `heldFromValidity` to Academy and legacy records alike.)
  *
  * A ticket the work requires counts only while it is in force *and* has an
  * establishable end. `validityOf` reports a verified holding with no expiry as
@@ -78,32 +80,20 @@ export function qualificationValidity(holdings: readonly QualificationHolding[],
  */
 export type NotHeldCode = "unknown" | "unverified" | "expired" | "rejected";
 
-export function countsAsHeld(
-  holdings: readonly QualificationHolding[], code: string, at: Date,
-): { held: boolean; reason: string; code: NotHeldCode | null } {
-  const v = qualificationValidity(holdings, code, at);
+export type HeldVerdict = { held: boolean; reason: string; code: NotHeldCode | null };
+
+/**
+ * The operational reading of any qualification verdict (C1b-3: shared by the legacy holdings below and
+ * the Academy-first read adapter, so both sources are held to one rule). `unverifiedWord` names which
+ * not-yet-checked state it is.
+ */
+export function heldFromValidity(v: Validity, code: string, unverifiedWord = "unverified"): HeldVerdict {
   if (v.state === "none") return { held: false, code: "unknown", reason: `No ${code} on record — unknown is not satisfied` };
   if (v.state === "rejected") return { held: false, code: "rejected", reason: `${code} was reviewed and rejected` };
   if (v.state === "unverified") {
-    // Naming which non-verified state it is: "extracted" and "uploaded" are
-    // both short of an assertion, and a reader chasing it needs to know which.
-    const actual = holdings.filter(h => h.code === code).sort((x, y) => y.recordedAt.getTime() - x.recordedAt.getTime())[0];
-    const word = actual?.verificationState === "extracted" ? "extracted" : "unverified";
-    return { held: false, code: "unverified", reason: `${code} is on file but ${word}; nobody has checked it against the certificate` };
+    return { held: false, code: "unverified", reason: `${code} is on file but ${unverifiedWord}; nobody has checked it against the certificate` };
   }
   if (v.expiresAt == null) return { held: false, code: "unknown", reason: `${code} is verified with no expiry recorded — currency cannot be established` };
   if (v.state === "expired") return { held: false, code: "expired", reason: `${code} expired ${Math.abs(v.daysRemaining ?? 0)} day(s) before this` };
   return { held: true, code: null, reason: v.reason };
-}
-
-/** Which of a required set a person is missing, with the reason for each. */
-export function missingFrom(
-  holdings: readonly QualificationHolding[],
-  required: readonly string[],
-  at: Date,
-): { code: string; reason: string; why: NotHeldCode }[] {
-  return required
-    .map(qualification => ({ qualification, ...countsAsHeld(holdings, qualification, at) }))
-    .filter(r => !r.held)
-    .map(r => ({ code: r.qualification, reason: r.reason, why: r.code! }));
 }

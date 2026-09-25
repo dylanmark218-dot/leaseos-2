@@ -10,6 +10,8 @@
  * an empty list, a zero, or a guess. (`myDay` is promoted first because it is
  * self-scoped, wired, and depends on no regulatory figure.)
  */
+import { asClaimVerification, complianceDocumentValidity } from "./_core/complianceDocumentValidity";
+import type { ValidityState } from "./_core/documentValidity";
 import type { TileReader } from "./_core/widgetService";
 import type { RoleActor } from "./_core/roleActor";
 import type { WidgetPayload } from "./_core/widgetPayload";
@@ -44,15 +46,18 @@ const byRef = <T extends { id: number }>(rows: readonly T[], ref: string, code: 
   rows.find(r => code(r) === ref || String(r.id) === ref) ?? null;
 const numericRef = (ref: string | null): number | null => ref && /^\d{1,10}$/.test(ref) ? Number(ref) : null;
 
-/** Document expiry states, as the records vault names them; the tile shows the state, not a number. */
+/** The records vault's words for the engine's states. Presentation only; the decision is the engine's. */
+const VAULT_WORD: Readonly<Record<ValidityState, "current" | "expiring" | "expired" | "unverified" | "rejected" | "missing">> = {
+  in_force: "current", expiring: "expiring", expired: "expired", unverified: "unverified", rejected: "rejected", none: "missing",
+};
+
+/**
+ * Document expiry states, as the records vault names them; the tile shows the state, not a number.
+ * C1b-3: decided by `complianceDocumentValidity` for this one row, then worded for the vault.
+ */
 export function expiryState(doc: DocRow, now: Date, warnDays: number): "current" | "expiring" | "expired" | "unverified" | "rejected" | "missing" {
-  if (doc.verificationStatus === "rejected") return "rejected";
-  if (doc.verificationStatus && doc.verificationStatus !== "verified") return "unverified";
-  if (!doc.expiresAt) return "current";
-  const at = new Date(doc.expiresAt).getTime();
-  if (at < now.getTime()) return "expired";
-  if (at - now.getTime() <= warnDays * 86_400_000) return "expiring";
-  return "current";
+  const claim = { docType: doc.docType, expiresAt: doc.expiresAt == null ? null : new Date(doc.expiresAt), verificationStatus: asClaimVerification(doc.verificationStatus) };
+  return VAULT_WORD[complianceDocumentValidity([claim], doc.docType, now, warnDays).state];
 }
 
 const SYSTEM = () => ({ source: "system_inferred" as const, verification: "unverified" as const, exact: true, observedAt: new Date() });

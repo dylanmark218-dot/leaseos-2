@@ -19,6 +19,7 @@
  *   a judgement call a manager gets to make.
  */
 
+import { readExpiry } from "./documentValidity";
 import { APPROVED_OVERRIDE_POLICIES, asFinding, resolveOverridePolicy, type OverrideClass, type OverridePolicy } from "./complianceFinding";
 
 export type EligibilityVerdict =
@@ -148,7 +149,8 @@ export function credentialBlocker(
       overrideAuthority: "manager",
     };
   }
-  if (c.expiresAt.getTime() < asOf.getTime()) {
+  // C1b-3: the canonical expiry decision (expired once the instant has passed).
+  if (readExpiry(c.expiresAt, asOf, 0).expiry === "expired") {
     return {
       code: `${codePrefix}_expired`,
       label: `${c.label} expired ${c.expiresAt.toISOString().slice(0, 10)}`,
