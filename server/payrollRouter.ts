@@ -26,8 +26,8 @@ import * as svc from "./payrollService";
 import { getDb } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
 import { assertAdjustmentInScope, assertDisputeInScope, assertEntityInScope, assertPeriodInScope, assertProfileInScope, assertRunInScope, assertSettlementInScope, entityIdsInScope, entityOwnerFor, type MoneyScope } from "./_core/entityScope";
-import { employeePayrollProfiles } from "../drizzle/schema";
-import { inArray } from "drizzle-orm";
+import { employeePayrollProfiles, expenseRecords } from "../drizzle/schema";
+import { eq, inArray } from "drizzle-orm";
 import {
   assertPayrollEligibility,
   assertSettlementEligibility,
@@ -669,6 +669,8 @@ export const financeRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
+      // F1 — the book must be the caller's organization's; any other id is "not found".
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
       const allocations = buildAllocations({
         total: input.total,
         businessUsePercent: input.businessUsePercent,
@@ -726,6 +728,8 @@ export const financeRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // F1.1 — the expense is looked up and its book proved before its treatment changes.
+      { const m = await moneyScope(ctx.user.id); const exp = (await m.db.select({ financialEntityId: expenseRecords.financialEntityId }).from(expenseRecords).where(eq(expenseRecords.expenseRef, input.expenseRef)).limit(1))[0]; if (!exp) throw notFound("Expense not found"); try { await assertEntityInScope(m.db, exp.financialEntityId, m.scope); } catch { throw notFound("Expense not found"); } }
       const applied = applyHumanTreatment({
         treatment: input.treatment,
         determinedByUserId: ctx.user.id,
@@ -749,7 +753,9 @@ export const financeRouter = router({
         transactionDate: z.coerce.date(),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      // F1 — another book's expenses are not duplicate candidates; they are not found.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
       const existing = await svc.listExpenses(input.financialEntityId);
       // Candidates, never an automatic merge — merging the wrong pair loses a
       // real cost silently.

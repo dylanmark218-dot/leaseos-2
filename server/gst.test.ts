@@ -113,7 +113,7 @@ d("a quarter's GST/HST, through the ledger", () => {
   it("assembles the return, blocks on an unclassified sale, withholds an ITC without evidence, prepares a snapshot, and finalizes only when acknowledged by another person", async () => {
     const bookkeeper = await withRole("bookkeeper");
     const preparer = await withRole("tax_preparer");
-    const entityId = 1_400_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     await pool.execute("INSERT INTO taxRegistrations (financialEntityId, registrationType, jurisdiction, registered, registeredAt, identifierPresent) VALUES (?, 'gst_hst', 'CA', 1, '2020-01-01 00:00:00', 1)", [entityId]);
     const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO billingBooks (bookNumber, jobId, customer, billingState, openedAt, createdAt, updatedAt) VALUES (?, 1, 'Acme', 'invoiced', NOW(), NOW(), NOW())", [key("BB").slice(0, 40)]);
     const bookId = Number(book.insertId);

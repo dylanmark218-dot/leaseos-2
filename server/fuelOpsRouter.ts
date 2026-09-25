@@ -14,7 +14,9 @@ import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
-import { roleProcedure, router } from "./_core/trpc";
+import { moneyScoped, roleProcedure, router } from "./_core/trpc";
+import { requireOwnedEntity } from "./_core/entityScope";
+import { fuelStatementInScope, fuelTankInScope, fuelTransactionInScope, requireEvidence, requireFuelAccountOfEntity } from "./financeScope";
 import { toCents } from "./_core/money";
 import { getDb } from "./db";
 import { bulkFuelDispenses, bulkFuelReadings, bulkFuelTanks, fleetFuelCards, fuelStatementLines, fuelStatements, fuelTransactions, units } from "../drizzle/schema";
@@ -26,25 +28,26 @@ const JUR = z.string().regex(/^(CA|US)-[A-Z]{2}$/);
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 export const fuelOpsRouter = router({
-  tankRegister: roleProcedure("fuel.tankRegister")
+  tankRegister: moneyScoped(roleProcedure("fuel.tankRegister"))
     .input(z.object({ financialEntityId: z.number().int().positive(), name: z.string().min(1).max(120), location: z.string().max(300).nullable().optional(), jurisdiction: JUR, fuelType: z.enum(["diesel", "gasoline", "def", "propane", "other"]), capacityLitres: z.number().positive(), varianceTolerancePct: z.number().min(0).max(25).default(2), fuelAccountId: z.number().int().positive().nullable().optional(), meterDeviceId: z.number().int().positive().nullable().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      await requireFuelAccountOfEntity(db, input.fuelAccountId, input.financialEntityId);
       const tankRef = ref("TANK");
       const ins = await db.insert(bulkFuelTanks).values({ tankRef, financialEntityId: input.financialEntityId, fuelAccountId: input.fuelAccountId ?? null, name: input.name, location: input.location ?? null, jurisdiction: input.jurisdiction, fuelType: input.fuelType, capacityLitres: input.capacityLitres, meterDeviceId: input.meterDeviceId ?? null, varianceTolerancePct: input.varianceTolerancePct });
       return { tankRef, tankId: Number(ins[0]?.insertId ?? 0) };
     }),
 
   /** A dispense is a fuel transaction: unit, litres, the tank's jurisdiction, inventory treatment. */
-  dispenseRecord: roleProcedure("fuel.dispenseRecord")
+  dispenseRecord: moneyScoped(roleProcedure("fuel.dispenseRecord"))
     .input(z.object({ tankRef: z.string().min(1).max(64), unitId: z.number().int().positive().nullable(), equipmentId: z.number().int().positive().nullable().optional(), litres: z.number().positive(), quantitySource: z.enum(["meter", "stick_before_after", "stated"]), meterBefore: z.number().nonnegative().nullable().optional(), meterAfter: z.number().nonnegative().nullable().optional(), odometerKm: z.number().nonnegative().nullable().optional(), occurredAt: z.coerce.date(), evidenceRecordId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — a dispense's odometer joins the unit's meter sequence
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const tank = (await db.select().from(bulkFuelTanks).where(eq(bulkFuelTanks.tankRef, input.tankRef)).limit(1))[0];
-      if (!tank) throw new TRPCError({ code: "NOT_FOUND", message: "Tank not found" });
+      const tank = await fuelTankInScope(db, ctx.money, input.tankRef);
       if (tank.status !== "active") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Tank is ${tank.status}` });
       if (input.litres > tank.capacityLitres) throw new TRPCError({ code: "BAD_REQUEST", message: `${input.litres} L exceeds the tank's ${tank.capacityLitres} L capacity` });
       if (input.quantitySource === "meter") {
@@ -53,6 +56,7 @@ export const fuelOpsRouter = router({
         if (Math.abs(metered - input.litres) > 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: `Meter says ${metered} L, dispense says ${input.litres} L` });
       }
       if (!input.unitId && !input.equipmentId) throw new TRPCError({ code: "BAD_REQUEST", message: "A dispense goes into a unit or a piece of equipment" });
+      await requireEvidence(ctx.money, input.evidenceRecordId);
       await assertPeriodOpen(tank.financialEntityId, input.occurredAt, "Dispense");
       const dispenseRef = ref("DISP");
       const fuelRef = `FUEL-${dispenseRef}`;
@@ -68,26 +72,25 @@ export const fuelOpsRouter = router({
       return { dispenseRef, fuelRef, jurisdiction: tank.jurisdiction, status: input.quantitySource === "stated" ? "needs_review" : "confirmed" };
     }),
 
-  readingRecord: roleProcedure("fuel.readingRecord")
+  readingRecord: moneyScoped(roleProcedure("fuel.readingRecord"))
     .input(z.object({ tankRef: z.string().min(1).max(64), readAt: z.coerce.date(), litresOnHand: z.number().nonnegative(), method: z.enum(["stick", "gauge", "meter_total", "delivery_ticket"]), evidenceRecordId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const tank = (await db.select().from(bulkFuelTanks).where(eq(bulkFuelTanks.tankRef, input.tankRef)).limit(1))[0];
-      if (!tank) throw new TRPCError({ code: "NOT_FOUND", message: "Tank not found" });
+      const tank = await fuelTankInScope(db, ctx.money, input.tankRef);
+      await requireEvidence(ctx.money, input.evidenceRecordId);
       if (input.litresOnHand > tank.capacityLitres) throw new TRPCError({ code: "BAD_REQUEST", message: `A reading of ${input.litresOnHand} L exceeds the tank's ${tank.capacityLitres} L capacity` });
       const ins = await db.insert(bulkFuelReadings).values({ bulkFuelTankId: tank.id, readAt: input.readAt, litresOnHand: input.litresOnHand, method: input.method, readByUserId: ctx.user.id, evidenceRecordId: input.evidenceRecordId ?? null });
       return { readingId: Number(ins[0]?.insertId ?? 0) };
     }),
 
   /** Between the two most recent readings (or a given pair): in − out versus measured. */
-  tankReconcile: roleProcedure("fuel.tankReconcile")
+  tankReconcile: moneyScoped(roleProcedure("fuel.tankReconcile"))
     .input(z.object({ tankRef: z.string().min(1).max(64) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const tank = (await db.select().from(bulkFuelTanks).where(eq(bulkFuelTanks.tankRef, input.tankRef)).limit(1))[0];
-      if (!tank) throw new TRPCError({ code: "NOT_FOUND", message: "Tank not found" });
+      const tank = await fuelTankInScope(db, ctx.money, input.tankRef);
       const readings = await db.select().from(bulkFuelReadings).where(eq(bulkFuelReadings.bulkFuelTankId, tank.id)).orderBy(desc(bulkFuelReadings.readAt)).limit(2);
       const closing = readings[0] ?? null, opening = readings[1] ?? null;
       const [disp, purchases] = await Promise.all([
@@ -103,7 +106,7 @@ export const fuelOpsRouter = router({
     }),
 
   /** Import a statement; match every line against the ledger; link what matches; leave the rest as findings. Idempotent by content. */
-  statementImport: roleProcedure("fuel.statementImport")
+  statementImport: moneyScoped(roleProcedure("fuel.statementImport"))
     .input(z.object({
       financialEntityId: z.number().int().positive(), fuelAccountId: z.number().int().positive(), provider: z.string().min(1).max(120),
       periodStart: z.coerce.date(), periodEnd: z.coerce.date(), evidenceRecordId: z.number().int().positive().nullable().optional(),
@@ -113,6 +116,9 @@ export const fuelOpsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      await requireFuelAccountOfEntity(db, input.fuelAccountId, input.financialEntityId);
+      await requireEvidence(ctx.money, input.evidenceRecordId);
       const canonical = JSON.stringify({ a: input.fuelAccountId, p: input.provider, s: input.periodStart, e: input.periodEnd, l: input.lines.map(l => [l.transactionAt, l.cardLastFour, l.total, l.quantity]) });
       const contentHash = sha(canonical);
       const dup = (await db.select({ statementRef: fuelStatements.statementRef }).from(fuelStatements).where(eq(fuelStatements.contentHash, contentHash)).limit(1))[0];
@@ -152,13 +158,12 @@ export const fuelOpsRouter = router({
     }),
 
   /** A person resolves an ambiguous or unmatched line to a transaction, or confirms there is none. */
-  statementLineResolve: roleProcedure("fuel.statementLineResolve")
+  statementLineResolve: moneyScoped(roleProcedure("fuel.statementLineResolve"))
     .input(z.object({ statementRef: z.string().min(1).max(64), lineNo: z.number().int().positive(), fuelRef: z.string().min(1).max(64).nullable(), reason: z.string().min(5).max(400) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const st = (await db.select({ id: fuelStatements.id }).from(fuelStatements).where(eq(fuelStatements.statementRef, input.statementRef)).limit(1))[0];
-      if (!st) throw new TRPCError({ code: "NOT_FOUND", message: "Statement not found" });
+      const st = await fuelStatementInScope(db, ctx.money, input.statementRef);
       const line = (await db.select().from(fuelStatementLines).where(and(eq(fuelStatementLines.fuelStatementId, st.id), eq(fuelStatementLines.lineNo, input.lineNo))).limit(1))[0];
       if (!line) throw new TRPCError({ code: "NOT_FOUND", message: "Line not found" });
       if (line.matchedFuelTransactionId != null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Line is already matched" });
@@ -166,19 +171,21 @@ export const fuelOpsRouter = router({
         await db.update(fuelStatementLines).set({ matchReason: `Confirmed no receipt: ${input.reason}` }).where(eq(fuelStatementLines.id, line.id));
         return { lineNo: input.lineNo, outcome: "unmatched" as const, note: "Recorded as a purchase with no receipt — it stays a finding until a receipt is captured" };
       }
-      const t = (await db.select({ id: fuelTransactions.id, statementLineId: fuelTransactions.statementLineId }).from(fuelTransactions).where(eq(fuelTransactions.fuelRef, input.fuelRef)).limit(1))[0];
-      if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Fuel transaction not found" });
+      // F1 — the transaction must be in the statement's own book, not merely one the caller can see.
+      const t = await fuelTransactionInScope(db, ctx.money, input.fuelRef);
+      if (t.financialEntityId !== st.financialEntityId) throw new TRPCError({ code: "NOT_FOUND", message: "Fuel transaction not found" });
       if (t.statementLineId != null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "That transaction is already matched to a statement line" });
       await db.update(fuelStatementLines).set({ matchedFuelTransactionId: t.id, matchOutcome: "match_with_variance", matchReason: `Resolved by a person: ${input.reason}` }).where(eq(fuelStatementLines.id, line.id));
       await db.update(fuelTransactions).set({ statementLineId: line.id, status: "reconciled" }).where(eq(fuelTransactions.id, t.id));
       return { lineNo: input.lineNo, outcome: "match_with_variance" as const, fuelRef: input.fuelRef };
     }),
 
-  anomalies: roleProcedure("fuel.anomalies")
+  anomalies: moneyScoped(roleProcedure("fuel.anomalies"))
     .input(z.object({ financialEntityId: z.number().int().positive(), from: z.coerce.date(), to: z.coerce.date() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
       const tx = await db.select({ fuelRef: fuelTransactions.fuelRef, unitId: fuelTransactions.unitId, occurredAt: fuelTransactions.occurredAt, quantity: fuelTransactions.quantity, quantityUnit: fuelTransactions.quantityUnit, odometerKm: fuelTransactions.odometerKm, cardLastFourHint: fuelTransactions.cardLastFourHint })
         .from(fuelTransactions).where(and(eq(fuelTransactions.financialEntityId, input.financialEntityId), gte(fuelTransactions.occurredAt, input.from), lte(fuelTransactions.occurredAt, input.to)));
       const fills = tx.map(t => ({ fuelRef: t.fuelRef, unitId: t.unitId, occurredAt: t.occurredAt, quantityLitres: t.quantity != null ? (t.quantityUnit === "gal" ? t.quantity * 3.785411784 : t.quantity) : null, odometerKm: t.odometerKm, cardLastFour: t.cardLastFourHint }));
