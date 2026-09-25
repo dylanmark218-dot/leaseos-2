@@ -1,10 +1,11 @@
 import {
   AXIOS_TIMEOUT_MS,
   COOKIE_NAME,
-  ONE_YEAR_MS,
   decodeOAuthState,
 } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
+import { ACCESS_TOKEN_TTL_MS, assessLegacyAccess } from "./sessionFamily";
+import { LEGACY_CUTOVER_AT } from "@shared/const";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
@@ -187,7 +188,15 @@ class SDKServer {
     options: { expiresInMs?: number } = {}
   ): Promise<string> {
     const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
+    /*
+     * S1-B — the default is the access lifetime, not a year.
+     *
+     * The year was never only in `oauth.ts`; it was the fallback here, so every caller that omitted
+     * an expiry minted one, and changing the call site alone would have left that true. An access
+     * token is meant to be short enough that stealing it buys little: revocation bites at refresh
+     * (S1-C/S1-D), which bounds a revoked session's remaining authority to one of these.
+     */
+    const expiresInMs = options.expiresInMs ?? ACCESS_TOKEN_TTL_MS;
     const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
     const secretKey = this.getSessionSecret();
 
@@ -222,6 +231,20 @@ class SDKServer {
         !isNonEmptyString(name)
       ) {
         console.warn("[Auth] Session payload missing required fields");
+        return null;
+      }
+
+      /*
+       * S1-G — a pre-cutover token is refused once the grace window has closed.
+       *
+       * These are the year-long sessions minted before S1-B. Honouring them until they expired
+       * would have left the defect live for a year; the window gives a fleet time to come back
+       * into coverage and then ends. No new claim is needed to spot one — nothing this build mints
+       * can carry an expiry further out than the access lifetime.
+       */
+      const legacy = assessLegacyAccess(payload as { exp?: number }, new Date(), LEGACY_CUTOVER_AT);
+      if (legacy.kind === "legacy" && !legacy.withinGrace) {
+        console.warn("[Auth] Refusing a pre-S1 session past the transition window");
         return null;
       }
 
