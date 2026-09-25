@@ -1,4 +1,9 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
+
+// F1.1 — this suite exercises a deployment that is one ownership domain (no organization yet), where the
+// ownerless tire registry rows are provably the single tenant's. The predicate itself, and the refusal once organizations
+// exist, are proved against the real database in tenantScopeFinance.db.test.ts.
+vi.mock("./ownershipDomain", async importOriginal => ({ ...(await importOriginal<typeof import("./ownershipDomain")>()), singleOwnershipDomain: async () => true, requireProvableOwnership: async () => undefined }));
 import mysql from "mysql2/promise";
 import { COMPLETENESS, REDACTION_POLICIES, assemble, canonicalJson, redact, releaseDecision, sha256 } from "./_core/auditPackage";
 import { appRouter } from "./routers";

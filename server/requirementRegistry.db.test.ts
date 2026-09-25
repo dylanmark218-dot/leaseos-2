@@ -3,7 +3,7 @@
  *
  * Every requirement below is a **test fixture** in a made-up jurisdiction, not a verified rule.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import mysql from "mysql2/promise";
 import { complianceRequirements } from "../drizzle/schema";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
@@ -11,6 +11,27 @@ import type { DomainRole } from "./_core/recordsAuthorization";
 import { grantUserRole } from "./db";
 import { governingRevisions, loadRequirementRegistry } from "./requirementRegistry";
 import { appRouter } from "./routers";
+
+/**
+ * F1.1 refuses to evaluate equipment credentials while any organization exists: equipment rows carry no
+ * owner, so nothing proves whose they are (`requireProvableOwnership`). The pack cases below are about the
+ * registry reaching work authorization, which only has a meaning where that ownership is provable — one
+ * ownership domain. They switch it on for themselves alone, and each first asserts the refusal while an
+ * organization exists, so the gate is pinned rather than bypassed.
+ */
+const ownership = vi.hoisted(() => ({ singleDomain: false }));
+vi.mock("./ownershipDomain", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./ownershipDomain")>();
+  return {
+    ...actual,
+    singleOwnershipDomain: async () => ownership.singleDomain || actual.singleOwnershipDomain(),
+    requireProvableOwnership: async (what: string, until: string) => (ownership.singleDomain ? undefined : actual.requireProvableOwnership(what, until)),
+  };
+});
+async function asOneOwnershipDomain<T>(body: () => Promise<T>): Promise<T> {
+  ownership.singleDomain = true;
+  try { return await body(); } finally { ownership.singleDomain = false; }
+}
 
 type Row = typeof complianceRequirements.$inferSelect;
 const T = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -137,7 +158,9 @@ d("the registry reaches every reader", () => {
       requirementKey: key, family: "test", title: "Fixture v2", subjectType: "operator", jurisdiction,
       satisfiedByDocTypes: ["fixture_doc"], effectiveFrom: new Date("2026-02-01T00:00:00Z"),
     });
-    const p = await callerFor(dispatcher).compliance.passport({ subjectType: "operator", subjectId: 1, jurisdiction, attributes: {} });
+    // F1.2 — a real operator in the dispatcher's scope: a made-up subject is "not found".
+    const subjectId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES ('Registry fixture', NOW())"))[0].insertId);
+    const p = await callerFor(dispatcher).compliance.passport({ subjectType: "operator", subjectId, jurisdiction, attributes: {} });
     const mine = p.items.filter((i) => i.requirementKey === key);
     // One item, from the governing revision — not one per stored version, as before.
     expect(mine).toHaveLength(1);
@@ -176,7 +199,8 @@ d("the registry reaches every reader", () => {
       satisfiedByDocTypes: ["fixture_doc"], missingSeverity: "blocked", sourceAuthority: "FIXTURE", sourceVerified: true,
       requestedStatus: "verified", effectiveFrom: new Date("2026-01-01T00:00:00Z"),
     });
-    const entity = 700_000_000 + Math.floor(Math.random() * 1_000_000);
+    // F1.1 — a real book: a made-up financial entity is "not found".
+    const entity = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${rnd()}${rnd()}`]))[0].insertId);
     const ask = () => callerFor(dispatcher).requirement.workAuthorization({
       financialEntityId: entity, jurisdiction, companyAttributes: {}, worker: null,
       equipment: { id: 999_999_999, equipmentType: "fixture", attributes: {} }, work: { workType: "fixture", attributes: {} },
@@ -184,16 +208,23 @@ d("the registry reaches every reader", () => {
     // Work authorization reports a requirement by its title in `reasons`.
     const seen = (r: Awaited<ReturnType<typeof ask>>) => r.reasons.some((x) => x.includes(title));
 
-    // Pack not active: the requirement is not in force for this company.
-    expect(seen(await ask())).toBe(false);
+    // With an organization present, unowned equipment credentials are refused (F1.1), not evaluated.
+    const orgRef = `ORG-${rnd()}`;
+    await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [orgRef, `o ${orgRef}`]);
+    await expect(ask()).rejects.toThrow(/OWNERSHIP_UNRESOLVED/);
 
-    // A stored pack can be activated (it was refused before: only seed packs were known).
-    const act = await callerFor(controller).requirement.packActivate({ financialEntityId: entity, packKey });
-    expect(act.requirementsInPack).toBe(1);
-    const r = await ask();
-    expect(seen(r)).toBe(true);
-    // A proposal, so UNKNOWN — the verified path is requirementVerification.db.test.ts.
-    expect(r.parts.equipment).toBe("unknown");
+    await asOneOwnershipDomain(async () => {
+      // Pack not active: the requirement is not in force for this company.
+      expect(seen(await ask())).toBe(false);
+
+      // A stored pack can be activated (it was refused before: only seed packs were known).
+      const act = await callerFor(controller).requirement.packActivate({ financialEntityId: entity, packKey });
+      expect(act.requirementsInPack).toBe(1);
+      const r = await ask();
+      expect(seen(r)).toBe(true);
+      // A proposal, so UNKNOWN — the verified path is requirementVerification.db.test.ts.
+      expect(r.parts.equipment).toBe("unknown");
+    });
 
     await expect(callerFor(controller).requirement.packActivate({ financialEntityId: entity, packKey: "no.such.pack" })).rejects.toThrow(/Unknown pack/);
   });
