@@ -102,7 +102,7 @@ export async function currentCommunicationPolicy(db: NonNullable<Awaited<ReturnT
 }
 
 /* ------------------------------------------------------------------ */
-/* Fleet portfolio holds (0199)                                        */
+/* Fleet portfolio holds (0200)                                        */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -562,7 +562,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       db.select().from(roadsideServiceEvents).where(and(eq(roadsideServiceEvents.unitId, unit.id), inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"]))),
       policiesCovering("unit", unit.id, now),
       db.select().from(measurementDeviceAssignments).where(and(eq(measurementDeviceAssignments.assignedToType, "unit"), eq(measurementDeviceAssignments.assignedToId, unit.id))),
-      // 0199 — the Fleet & Equipment Portfolio's active holds on this unit (the canonical hold table).
+      // 0200 — the Fleet & Equipment Portfolio's active holds on this unit (the canonical hold table).
       db.select().from(unitHolds).where(and(eq(unitHolds.unitId, unit.id), eq(unitHolds.status, "active"))),
     ]);
     /*

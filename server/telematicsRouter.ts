@@ -12,7 +12,7 @@ import { storageGetSignedUrl } from "./storage";
 
 async function dbOrThrow() { const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return db; }
 /*
- * 0198 — telematics had no tenant scope: any caller holding the permission read and acted on every
+ * 0199 — telematics had no tenant scope: any caller holding the permission read and acted on every
  * organization's faults, driving events and video. Every row here keys to a unit, so the unit's owner
  * decides, as in the shop; out of scope is "not found", never "forbidden".
  */

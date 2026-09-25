@@ -45,7 +45,7 @@ export type FindingDomain =
   | "permit" | "destination" | "route" | "communications" | "capability" | "unclassified";
 
 /** Bumped whenever CLASSIFICATION changes meaning. Part of the rule-set hash, so a change stales every check. */
-export const CLASSIFICATION_VERSION = "c1a.3";   // 0199: fleet portfolio hold rules
+export const CLASSIFICATION_VERSION = "c1a.3";   // 0200: fleet portfolio hold rules
 
 /**
  * A readiness finding. It IS a `DispatchBlocker` — every existing consumer (the checklist, the
@@ -136,7 +136,7 @@ export const CLASSIFICATION: readonly Rule[] = [
   r("insurance.proof", /^insurance_proof_missing$/, "insurance", "statute_regulation", ...WARN_ACK),
   r("defect.critical", /^(critical_defect|mechanic_release_missing)$/, "defect", "carrier_safety_policy", ...HARD),
   /*
-   * 0199 — Fleet & Equipment Portfolio holds (unitHolds). A safety hold is out of service: nobody
+   * 0200 — Fleet & Equipment Portfolio holds (unitHolds). A safety hold is out of service: nobody
    * overrides it. A blocking hold of any other type is releasable only under an approved override
    * policy. A warning hold is acknowledged. In every case the hold itself is released by a second person.
    */

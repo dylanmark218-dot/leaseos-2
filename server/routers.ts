@@ -395,9 +395,9 @@ export const appRouter = router({
   // v21.10 — external identities only; gated by externalProcedure, never by roles.
   portal: portalRouter,
   shop: shopRouter,
-  // 0198 — fleet maintenance, checkpoint 1: who owns a work order, and cancelling one.
+  // 0199 — fleet maintenance, checkpoint 1: who owns a work order, and cancelling one.
   maintenance: maintenanceRouter,
-  // 0199 — the Fleet & Equipment Portfolio: holds, the meter record, the unit's operational state.
+  // 0200 — the Fleet & Equipment Portfolio: holds, the meter record, the unit's operational state.
   fleet: fleetPortfolioRouter,
   asset: assetRouter,
   project: projectRouter,
@@ -1122,7 +1122,7 @@ export const appRouter = router({
         // P4.1: scope guard
         const scope = await scopeFor(ctx.user.id);
         if (input?.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
-        // 0198 — without a unit this listed every organization's work orders. It lists the caller's.
+        // 0199 — without a unit this listed every organization's work orders. It lists the caller's.
         return listWorkOrders(input?.unitId, scope);
       }),
       create: roleProcedure("workOrders.create")
@@ -1167,7 +1167,7 @@ export const appRouter = router({
           z.object({
             id: z.number().int().positive(),
             /*
-             * 0198 — status is not editable here. This took any status, including backwards, and so
+             * 0199 — status is not editable here. This took any status, including backwards, and so
              * walked around `shop.workOrderAdvance`'s forward-only rule; a status sent now is refused
              * at the schema, not dropped quietly. Moving a work order is `shop.workOrderAdvance`;
              * cancelling one is `maintenance.workOrderCancel`.

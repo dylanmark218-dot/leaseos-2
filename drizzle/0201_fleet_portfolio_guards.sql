@@ -1,6 +1,6 @@
 -- Compound bodies: this file contains trigger DDL and nothing else.
 --
--- 0200 — what the portfolio records cannot be rewritten, by the application or by hand.
+-- 0201 — what the portfolio records cannot be rewritten, by the application or by hand.
 --
 -- fleetPortfolioEvents: append-only. unitMeterReadings: what was observed — unit, meter, value, time,
 -- source, who entered it — never changes; only the verification decision may be written, once, from

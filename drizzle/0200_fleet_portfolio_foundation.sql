@@ -1,6 +1,6 @@
--- 0199 — Fleet & Equipment Portfolio, foundation slice: holds, the meter ledger, and the portfolio's history.
+-- 0200 — Fleet & Equipment Portfolio, foundation slice: holds, the meter ledger, and the portfolio's history.
 -- Design: docs/fleet/FLEET_EQUIPMENT_PORTFOLIO_SURVEY_AND_DESIGN.md §A.14, as reconciled in
--- docs/fleet/FLEET_PORTFOLIO_FOUNDATION_RECONCILIATION.md. The trigger DDL is 0200, in its own file.
+-- docs/fleet/FLEET_PORTFOLIO_FOUNDATION_RECONCILIATION.md. The trigger DDL is 0201, in its own file.
 --
 -- Deliberately not here (reconciliation R-7): the identity and lifecycle columns on `units`, and
 -- `unitComponents`. Nothing here copies a figure another table already holds.
@@ -43,7 +43,7 @@ CREATE INDEX `unitHolds_unit_active_idx` ON `unitHolds` (`unitId`, `status`, `ho
 -- Meter readings that have no home elsewhere: a mechanic's, an inspection's, a job closeout's, an
 -- import. Telemetry, work-order, fuel, trip and tire figures stay where they are and are read beside
 -- these with their source (master-manifest rule 3: one fact, one source). A reading is never edited:
--- 0200 refuses any change to what was observed. Verification is a separate decision on the row, by a
+-- 0201 refuses any change to what was observed. Verification is a separate decision on the row, by a
 -- second person, and a rejected reading stays on record.
 CREATE TABLE `unitMeterReadings` (
   `id` int AUTO_INCREMENT NOT NULL,
@@ -69,7 +69,7 @@ CREATE TABLE `unitMeterReadings` (
 CREATE INDEX `unitMeterReadings_unit_idx` ON `unitMeterReadings` (`unitId`, `meterType`, `recordedAt`);
 --> statement-breakpoint
 
--- The portfolio's own append-only record (the driverPortfolioEvents pattern). 0200 refuses UPDATE and
+-- The portfolio's own append-only record (the driverPortfolioEvents pattern). 0201 refuses UPDATE and
 -- DELETE on it.
 CREATE TABLE `fleetPortfolioEvents` (
   `id` int AUTO_INCREMENT NOT NULL,

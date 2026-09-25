@@ -52,7 +52,8 @@ Two further facts changed since the first version:
   and renumbered the trip-stop provenance migration forward as `0179`.
 - **Migration numbers.** `0175`–`0188` are all claimed by open branches. The first number free on
   `main` and every branch was `0189`, which checkpoint 1 took; C1b-1 then merged its own `0189` to
-  `main` first, and checkpoint 1's migration moved to `0198` (2026-09-25).
+  `main` first, and checkpoint 1's migration moved to `0198`; C1b-2b then merged its own `0198`, and it
+  moved again to `0199` (both 2026-09-25).
 
 **Consequence for the sequence (§9).** The portfolio's own plan runs Fleet Asset Core → Inspections
 and Defects → Documents → a mechanic work-order portal. That overlaps this document's CP2–CP6. The
@@ -681,7 +682,7 @@ router's phrase, and `documentationTruth` extended with that phrase.
 Narrowed from the original CP1 once the portfolio design was found; the withdrawn parts are listed in
 the revision at the top. The record is `docs/register/MECHANIC_PORTAL_CP1_WORK_ORDER_OWNERSHIP.md`.
 
-- Migration `0198_work_order_ownership.sql` (drafted `0175`, then `0189`): `workOrderAssignments` (append-only), `workOrders`
+- Migration `0199_work_order_ownership.sql` (drafted `0175`, then `0189`, then `0198`): `workOrderAssignments` (append-only), `workOrders`
   gains `cancelled`, `openedByUserId`, `cancelledAt`, `cancelledByUserId`, `cancelReason`.
 - `server/maintenanceRouter.ts` (mounted as `maintenance`): `workOrderAssignment` (read),
   `workOrderAssign`, `workOrderCancel`. Two permissions, `maintenance.workorder.assign` and

@@ -22,7 +22,25 @@ other claimant takes the next number free on `main` *and* on all open branches a
 Reserved slots `0016`/`0017` are never used (CI gate 0). `0094`, `0095` and `0098` are historical gaps,
 and `0157` is historically used twice. None of those is reused.
 
-## Current state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
+## Current state (2026-09-25, `main` = `88608f3`, scan at C1b-2b)
+
+`main` migration head: **`0194_webhook_secret_ref.sql`**. `main` holds `0189` (C1b-1) and `0191`–`0194`
+(secret management). Numbers claimed by open branches above the head:
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| 0195 | `0195_document_control_register.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
+| 0196 | `0196_document_control_numbering.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
+| 0197 | `0197_knowledge_provenance.sql` | `claude/leaseos-intelligence-engine-cr2fg1` | open branch | none (touches `knowledgeSources`/`knowledgeChunks`, new `knowledgeSnapshots`; C1b-2b does not touch those) | — |
+| 0198 | `0198_requirement_verification.sql` | `claude/leaseos-compliance-survey-5faxe8` (C1b-2b) | this branch | none | keeps 0198 |
+| 0199 | `0199_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | keeps 0199 (moved from `0198` when C1b-2b merged first; see the claim below) |
+| 0200 | `0200_fleet_portfolio_foundation.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | keeps 0200 |
+| 0201 | `0201_fleet_portfolio_guards.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | keeps 0201 |
+
+**Next free number for new work: `0202`** (re-check with the scan before committing). The 2026-09-24 table below
+is kept for history; several of its claims have since merged or been renumbered by their authors.
+
+## Earlier state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
 
 `main` migration head: **`0179_trip_stop_provenance.sql`** (#17). `main` holds `0169`, `0170`/`0171`
 (PR #9), `0174` (C1a) and `0179`; `0172`, `0173` and `0175`–`0178` are open on `main` and claimed only by
@@ -56,7 +74,7 @@ branches. Every number from `0175` to `0188` is claimed by at least one open bra
 | 0189 | `0189_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | with C1b-1, document-control-design | first to merge keeps it |
 | 0190 | `0190_document_control_numbering.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
 
-**Next free number for new work: `0191`** (re-check with the scan above before committing).
+Next free number at that time: `0191` (superseded above).
 
 ### Change log
 
@@ -68,16 +86,18 @@ branches. Every number from `0175` to `0188` is claimed by at least one open bra
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
 
-## Claim: 0198, 0199, 0200 (mechanic portal CP1 and the Fleet & Equipment Portfolio foundation, 2026-09-25)
+## Claim: 0199, 0200, 0201 (mechanic portal CP1 and the Fleet & Equipment Portfolio foundation, 2026-09-25)
 
 | Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|---|
-| 0198 | `0198_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | none | `88608f3` | gated on the branch | none | keeps 0198. Drafted as `0175`, then `0189`; both were taken (`0189` by C1b-1, merged to `main` first), and it moved before any environment applied it |
-| 0199 | `0199_fleet_portfolio_foundation.sql` | `claude/mechanic-portal-domain-82efa9` | none | `88608f3` | gated on the branch | none | keeps 0199. The portfolio design's own `0182` was taken long ago |
-| 0200 | `0200_fleet_portfolio_guards.sql` | `claude/mechanic-portal-domain-82efa9` | none | `88608f3` | gated on the branch | none | keeps 0200 (trigger DDL in its own file) |
+| 0199 | `0199_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | none | `3d05d32` | gated on the branch | none | keeps 0199. Drafted as `0175`, then `0189`, then `0198`; each was taken first (`0189` by C1b-1, `0198` by C1b-2b, both merged to `main`), and it moved before any environment applied it |
+| 0200 | `0200_fleet_portfolio_foundation.sql` | `claude/mechanic-portal-domain-82efa9` | none | `3d05d32` | gated on the branch | none | keeps 0200. The portfolio design's own `0182` was taken long ago |
+| 0201 | `0201_fleet_portfolio_guards.sql` | `claude/mechanic-portal-domain-82efa9` | none | `3d05d32` | gated on the branch | none | keeps 0201 (trigger DDL in its own file) |
 
-Chosen by scanning `origin/main` and all 93 remote refs immediately before writing: the highest number any
-other ref held was `0197` (`claude/leaseos-intelligence-engine-cr2fg1`). `0190` is unclaimed everywhere but
+First chosen as `0198`–`0200` by scanning `origin/main` and all 93 remote refs, when the highest number any
+other ref held was `0197` (`claude/leaseos-intelligence-engine-cr2fg1`). The scan repeated immediately
+before finalizing (94 refs, `main` = `3d05d32`) found C1b-2b's `0198_requirement_verification.sql` merged to
+`main` (#54), so all three moved up one; no other ref holds anything above `0198`. `0190` is unclaimed everywhere but
 was not taken: it would sort before `main`'s `0191`–`0194`, so a fresh database and a deployed one would
 apply it in different orders.
 

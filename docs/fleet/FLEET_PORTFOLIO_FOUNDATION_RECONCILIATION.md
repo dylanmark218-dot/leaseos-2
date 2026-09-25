@@ -21,8 +21,9 @@ Owner decisions of 2026-09-25 that govern this slice:
   fetched branches; the design branch still holds only its document.
 - **The readiness composer is unchanged** on `main` since the mechanic portal's checkpoint 1
   (`git diff 5936108 origin/main -- server/readinessComposer.ts` is empty).
-- **Migrations.** The complete corpus (main plus every fetched branch) holds numbers up to `0197`;
-  `0198` is this branch's work-order ownership. This slice takes **`0199`** (tables) and **`0200`**
+- **Migrations.** The complete corpus (main plus every fetched branch) holds numbers up to `0198`
+  (C1b-2b's `0198_requirement_verification.sql`, merged to `main` in #54 while this slice was being
+  gated); `0199` is this branch's work-order ownership, moved up from `0198`. This slice takes **`0200`** (tables) and **`0201`**
   (trigger DDL, in its own file as the portfolio design asks). The design's `0182` / `0183` were
   taken long ago.
 

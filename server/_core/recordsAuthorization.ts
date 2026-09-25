@@ -182,6 +182,12 @@ export type Permission =
   | "compliance.passport.read" | "compliance.credential.record" | "compliance.credential.verify"
   | "compliance.private.read" | "compliance.consent.record" | "compliance.requirement.manage"
   | "compliance.program.publish" | "compliance.profile.review"
+  // C1b-2b — requirement verification through the ledger. Proposing, verifying, second approval of a
+  // dispatch-blocking rule, withdrawal and verification governance are separate acts, held separately.
+  // Separation of duties is additionally enforced by person (proposer ≠ verifier ≠ second verifier),
+  // so holding several of these does not let one person carry a requirement alone.
+  | "compliance.requirement.propose" | "compliance.requirement.verify" | "compliance.requirement.second_approve"
+  | "compliance.requirement.retire" | "compliance.verification.govern"
   // v20.22 — packs, work authorization, equipment authorization, calibration.
   | "compliance.pack.manage" | "compliance.work.evaluate"
   | "equipment.authorize" | "calibration.record" | "calibration.impact"
@@ -330,10 +336,10 @@ export type Permission =
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
   | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
-  // 0198 — fleet maintenance, checkpoint 1. Assigning a work order names who owns the repair; cancelling
+  // 0199 — fleet maintenance, checkpoint 1. Assigning a work order names who owns the repair; cancelling
   // one can leave a defect unrepaired, so it is sensitive.
   | "maintenance.workorder.assign" | "maintenance.workorder.cancel"
-  // 0199 — the Fleet & Equipment Portfolio's foundation. Placing and releasing a hold decide whether a
+  // 0200 — the Fleet & Equipment Portfolio's foundation. Placing and releasing a hold decide whether a
   // unit may move, and verifying a meter reading makes it count; all three are sensitive. Which hold
   // TYPES a role may place or release is decided in `_core/fleetPortfolio.ts`, below the permission.
   | "fleet.hold.place" | "fleet.hold.release" | "fleet.meter.record" | "fleet.meter.verify";
@@ -613,7 +619,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "telematics.fault.acknowledge",
     "spatial.read",
     "spatial.vehicle.manage",
-    // 0199 — Fleet & Equipment Portfolio foundation.
+    // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.hold.place",
     "fleet.hold.release",
     "fleet.meter.record",
@@ -705,16 +711,19 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.read",
     "spatial.vehicle.manage",
     "spatial.vehicle.verify",
-    // 0198 — fleet maintenance, checkpoint 1.
+    // 0199 — fleet maintenance, checkpoint 1.
     "maintenance.workorder.assign",
     "maintenance.workorder.cancel",
-    // 0199 — Fleet & Equipment Portfolio foundation.
+    // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.hold.place",
     "fleet.hold.release",
     "fleet.meter.record",
     "fleet.meter.verify",
   ],
   safety: [
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -834,7 +843,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
       // 0163 (P4.2): the designated compliance authority named in the owner decision.
     "loadsense.calibration.sweep",
-    // 0199 — Fleet & Equipment Portfolio foundation.
+    // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.hold.place",
     "fleet.hold.release",
   ],
@@ -999,10 +1008,15 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.access.decide",
     "geo.access.passage",
     "spatial.structure.record",
-    // 0199 — Fleet & Equipment Portfolio foundation.
+    // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.meter.record",
   ],
   management: [
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.requirement.retire",
+    "compliance.verification.govern",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1253,10 +1267,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
     "spatial.route.approve",
     "geo.graph.build",
-    // 0198 — fleet maintenance, checkpoint 1.
+    // 0199 — fleet maintenance, checkpoint 1.
     "maintenance.workorder.assign",
     "maintenance.workorder.cancel",
-    // 0199 — Fleet & Equipment Portfolio foundation.
+    // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.hold.place",
     "fleet.hold.release",
     "fleet.meter.verify",
@@ -1298,6 +1312,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "audit.package.read",
   ],
   legal: [
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.verification.govern",
     "evidence.read_legal",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
@@ -1501,6 +1520,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.requirement.retire",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1887,6 +1911,11 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // v20.22
   "compliance.pack.manage",
   "equipment.authorize",
+  // C1b-2b — each makes a regulatory requirement authoritative, retires one, or changes how it may be verified.
+  "compliance.requirement.verify",
+  "compliance.requirement.second_approve",
+  "compliance.requirement.retire",
+  "compliance.verification.govern",
   // v20.21
   "compliance.credential.verify",
   "compliance.private.read",
@@ -1949,9 +1978,9 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // self-service grant into the restricted sector with no row saying the glass was
   // broken is that category, and without this it proceeded when the audit insert failed.
   "restricted.read",
-  // 0198 — a cancelled work order can leave a defect unrepaired. It may not happen unrecorded.
+  // 0199 — a cancelled work order can leave a defect unrepaired. It may not happen unrecorded.
   "maintenance.workorder.cancel",
-  // 0199 — a hold placed or released decides whether a unit may move; a verified meter reading counts.
+  // 0200 — a hold placed or released decides whether a unit may move; a verified meter reading counts.
   "fleet.hold.place",
   "fleet.hold.release",
   "fleet.meter.verify",
@@ -2522,7 +2551,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "compliance.credentialRecord": "compliance.credential.record",
   "compliance.credentialVerify": "compliance.credential.verify",
   "compliance.consentRecord": "compliance.consent.record",
-  "compliance.requirementLoad": "compliance.requirement.manage",
+  // C1b-2b: requirementLoad creates a proposal and nothing more.
+  "compliance.requirementLoad": "compliance.requirement.propose",
+  "compliance.requirementVerify": "compliance.requirement.verify",
+  "compliance.requirementSecondApprove": "compliance.requirement.second_approve",
+  "compliance.requirementWithdraw": "compliance.requirement.retire",
+  "compliance.verificationPolicySet": "compliance.verification.govern",
+  "compliance.requirementProvenance": "compliance.passport.read",
   "compliance.programPublish": "compliance.program.publish",
   "compliance.profileReviewRecord": "compliance.profile.review",
   "compliance.knowledgeCatalog": "compliance.passport.read",
@@ -2975,12 +3010,12 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
 
-  /* ---- 0198: fleet maintenance, checkpoint 1 ---- */
+  /* ---- 0199: fleet maintenance, checkpoint 1 ---- */
   "maintenance.workOrderAssignment": "maintenance.read_defect",
   "maintenance.workOrderAssign": "maintenance.workorder.assign",
   "maintenance.workOrderCancel": "maintenance.workorder.cancel",
 
-  /* ---- 0199: Fleet & Equipment Portfolio foundation ---- */
+  /* ---- 0200: Fleet & Equipment Portfolio foundation ---- */
   "fleet.unitState": "fleet.read",
   "fleet.holdList": "fleet.read",
   "fleet.holdPlace": "fleet.hold.place",

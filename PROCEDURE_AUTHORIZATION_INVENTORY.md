@@ -403,7 +403,7 @@ missed them.
   the closing UCC are UNKNOWN until a person verifies the class rate, and an
   unknown schedule cannot be reviewed as a tax fact or carry balances
   forward. The schedule is prepared by one person and reviewed by another.
-- **A hold is typed, its release is a second person's, and a meter is read where it lives.** (0199,
+- **A hold is typed, its release is a second person's, and a meter is read where it lives.** (0200,
   Fleet & Equipment Portfolio foundation) Placing and releasing a hold are sensitive
   (`fleet.hold.place`, `fleet.hold.release`); below the permission, the hold's TYPE decides who may
   act — a mechanic places and releases maintenance holds only, a safety hold is placed and released
@@ -412,7 +412,7 @@ missed them.
   (`fleet.meter.record`, mechanic, shop lead, office — not the driver yet); verifying or rejecting
   one is a second person's and sensitive (`fleet.meter.verify`). Every read is `fleet.read`, and
   another organization's unit, hold or reading answers NOT_FOUND worded as for one that does not exist.
-- **A work order is owned by a person, and cancelling it repairs nothing.** (0198, fleet
+- **A work order is owned by a person, and cancelling it repairs nothing.** (0199, fleet
   maintenance checkpoint 1) Assigning, reassigning and unassigning a work order is
   history, not an edit: the assignee is a user holding a shop role in the unit's
   organization, and the assigner is the caller. Assigning is the shop lead's and
