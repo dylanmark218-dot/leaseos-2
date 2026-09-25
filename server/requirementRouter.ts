@@ -8,7 +8,7 @@ import { sweepSuspectReadings } from "./_core/calibrationEvidence";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, getDb } from "./db";
 import {
   calibrationEvents, calibrationSweepFindings, calibrationSweeps, companyPackActivations, complianceDocuments, disposalTickets, invoices, loadSenseWeightSnapshots, loads,
   measurementDevices, operatorEquipmentAuthorizations,
@@ -112,7 +112,8 @@ export const requirementRouter = router({
       // C1b-2: a pack defined in `compliancePacks` is a pack, not only a seed.
       if (!(await packExists(input.packKey))) throw new TRPCError({ code: "NOT_FOUND", message: "Unknown pack" });
       await db.insert(companyPackActivations).values({ financialEntityId: input.financialEntityId, packKey: input.packKey, activatedAt: new Date(), activatedByUserId: ctx.user.id, reason: input.reason ?? null });
-      const registry = await loadRequirementRegistry([...COMPLIANCE_REQUIREMENT_SEEDS, ...EQUIPMENT_REQUIREMENT_SEEDS]);
+      // Activating a pack makes its requirements applicable to this company; it verifies none of them.
+      const registry = await loadRequirementRegistry([...COMPLIANCE_REQUIREMENT_SEEDS, ...EQUIPMENT_REQUIREMENT_SEEDS], new Date(), (await actingScopeFor(ctx.user.id)).tenantId);
       return { packKey: input.packKey, requirementsInPack: registry.filter(r => r.packKey === input.packKey).length };
     }),
 
@@ -129,7 +130,7 @@ export const requirementRouter = router({
       cargo: z.object({ classification: z.string().nullable(), dangerousGoods: z.boolean() }).nullable().optional(),
       customer: z.object({ ref: z.string().nullable(), requiredDocTypes: z.array(z.string()).optional() }).nullable().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx: call, input }) => {
       const activePacks = await activePacksFor(input.financialEntityId, { jurisdiction: input.jurisdiction, attributes: input.companyAttributes });
       const ctx: WorkContext = {
         jurisdiction: input.jurisdiction, at: input.at ?? new Date(),
@@ -140,7 +141,8 @@ export const requirementRouter = router({
       };
       // C1b-2: the registry, not the seed constants. A requirement loaded or revised through
       // `compliance.requirementLoad` now reaches work authorization, as it already reached the passport.
-      const requirements = await loadRequirementRegistry([...COMPLIANCE_REQUIREMENT_SEEDS, ...EQUIPMENT_REQUIREMENT_SEEDS], ctx.at);
+      // C1b-2b: the caller's organization's registry, as it stood at ctx.at.
+      const requirements = await loadRequirementRegistry([...COMPLIANCE_REQUIREMENT_SEEDS, ...EQUIPMENT_REQUIREMENT_SEEDS], ctx.at, (await actingScopeFor(call.user.id)).tenantId);
       const result = evaluateWorkContext({ ctx, requirements, activePacks });
       return { ...result, activePacks: Array.from(activePacks).sort() };
     }),
