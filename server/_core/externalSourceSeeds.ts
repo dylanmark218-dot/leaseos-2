@@ -7,12 +7,11 @@
  * null or `"unknown"` and the licence gate treats it as a refusal rather than a
  * permission.
  *
- * **Eight sources are verified. Twenty-one are not.** AER ST37, AER ST102 and
- * Alberta 511 are not published under a standard open licence — they are
- * governed by their own terms of use, and neither commercial fleet use nor
- * offline redistribution to field tablets could be confirmed. They stay
- * `unverified`, which under `evaluateSourceUsage` means inspection only, as
- * does every later candidate nobody has yet reviewed.
+ * **Ten sources are verified. Twenty-five are not.** Ontario 511 and Québec's
+ * roadworks cleared on their published licences in the later transport tranche.
+ * Alberta 511 and the other unresolved providers stay `unverified`, which
+ * under `evaluateSourceUsage` means inspection only, as do every later
+ * candidate nobody has yet reviewed.
  *
  * The research summary said "nine of eleven are clean" while separately
  * flagging three as unresolved. Eleven minus three is eight. Seeding nine would
@@ -41,6 +40,15 @@ const OGL_ALBERTA_ATTRIBUTION =
   "Contains information licensed under the Open Government Licence – Alberta";
 const OGL_BC_ATTRIBUTION =
   "Contains information licensed under the Open Government Licence – British Columbia";
+const OGL_ONTARIO_ATTRIBUTION =
+  "Contains information licensed under the Open Government Licence – Ontario";
+
+/**
+ * The Canadian 511 tranche was checked against each publisher on this date — a
+ * later date than the original eleven, and recorded separately so neither
+ * retrieval date is quietly moved to cover the other.
+ */
+export const TRANSPORT_RETRIEVAL_DATE = new Date("2026-09-24T00:00:00Z");
 
 /**
  * Sources whose licence, attribution, commercial-use and redistribution terms
@@ -214,6 +222,66 @@ export const VERIFIED_DATA_SOURCES: readonly ExternalDataSource[] = [
     updateIntervalHours: 24,
     retrievedAt: SOURCE_RETRIEVAL_DATE,
     verifiedAt: SOURCE_RETRIEVAL_DATE,
+    status: "verified",
+  },
+  {
+    /*
+     * Ontario 511's Developer Resources page says its data "is available to the general public,
+     * commercial vendors" and that using it is acceptance of the Open Government Licence, linking
+     * to OGL – Ontario, which permits commercial use. So this one clears where Alberta's does not.
+     *
+     * It still needs a key. The developer page says "Requires a developer key" and "Ten calls every
+     * 60 seconds" in the same words as every other 511 on this platform — a licence that permits
+     * use is not the same fact as an API that admits anonymous callers.
+     */
+    sourceKey: "on511",
+    displayName: "Ontario 511 Developer API",
+    authority: "Government of Ontario — Ministry of Transportation",
+    sourceUrl: "https://511on.ca/developers/doc",
+    category: "road_conditions",
+    jurisdiction: "CA-ON",
+    licenceName: "Open Government Licence – Ontario",
+    licenceUrl: "https://www.ontario.ca/page/open-government-licence-ontario",
+    attributionRequired: true,
+    attributionText: OGL_ONTARIO_ATTRIBUTION,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "yes",
+    redistributionPermitted: "yes",
+    rateLimitCalls: 10,
+    rateLimitWindowSeconds: 60,
+    updateIntervalHours: 1,
+    retrievedAt: TRANSPORT_RETRIEVAL_DATE,
+    verifiedAt: TRANSPORT_RETRIEVAL_DATE,
+    status: "verified",
+  },
+  {
+    /*
+     * Québec 511's roadworks are published through Données Québec as the `travaux-routiers`
+     * dataset, CC BY 4.0, by the Ministère des Transports et de la Mobilité durable, as a WFS
+     * that answers GeoJSON with no key. CC BY 4.0 permits commercial use and adaptation with
+     * credit, a licence notice and an indication of changes — the attribution below carries all
+     * three, because LeaseOS normalizes the records and that is a change.
+     */
+    sourceKey: "qc_mtmd_roadworks",
+    displayName: "Québec 511 — Travaux routiers (MTMD, Données Québec)",
+    authority: "Gouvernement du Québec — Ministère des Transports et de la Mobilité durable",
+    category: "road_conditions",
+    jurisdiction: "CA-QC",
+    licenceName: "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+    licenceUrl: "https://www.donneesquebec.ca/licence/#cc-by",
+    attributionRequired: true,
+    attributionText:
+      "Source : ministère des Transports et de la Mobilité durable du Québec, via Données Québec, sous licence CC BY 4.0 — données normalisées par LeaseOS",
+    shareAlikeObligation: false,
+    commercialUsePermitted: "yes",
+    redistributionPermitted: "yes",
+    // No numeric limit published for the WFS.
+    rateLimitCalls: null,
+    rateLimitWindowSeconds: null,
+    // Données Québec lists the update frequency as "continuous"; hourly is the most this polls.
+    updateIntervalHours: 1,
+    retrievedAt: TRANSPORT_RETRIEVAL_DATE,
+    verifiedAt: TRANSPORT_RETRIEVAL_DATE,
     status: "verified",
   },
 ];
@@ -506,22 +574,19 @@ export const UNVERIFIED_DATA_SOURCES: readonly ExternalDataSource[] = [
     verifiedAt: null,
     status: "unverified",
   },
-  /*
-   * 2026-09-24 candidates. Each licence named below is the one the publisher's
-   * catalogue entry states; commercial use and redistribution stay `unknown`
-   * and attribution text stays null until a person reads the terms and clears
-   * the row. Both barriers hold exactly as they do for the rows above.
-   */
   {
-    sourceKey: "on511",
-    displayName: "Ontario 511 Developer API",
-    authority: "Government of Ontario — Ministry of Transportation",
-    sourceUrl: "https://511on.ca/developers/doc",
+    /*
+     * Same platform, same position as `ab511`: the developer page states the key requirement and
+     * "Ten calls every 60 seconds", and its Developer Resources page states no licence. A key buys
+     * access; it does not record a right. Written permission request drafted in
+     * `docs/P6_DATA_PERMISSION_REQUESTS.md`.
+     * Carries winter-road information, which matters in the north.
+     */
+    sourceKey: "mb511",
+    displayName: "Manitoba 511 Developer API",
+    authority: "Government of Manitoba — Transportation and Infrastructure",
     category: "road_conditions",
-    jurisdiction: "CA-ON",
-    // The developer page states no licence. The same road-condition, incident
-    // and roadwork feeds are catalogued on data.ontario.ca under OGL – Ontario,
-    // which is a lead for the reviewer and not a finding about this API.
+    jurisdiction: "CA-MB",
     licenceName: null,
     licenceUrl: null,
     attributionRequired: true,
@@ -529,15 +594,124 @@ export const UNVERIFIED_DATA_SOURCES: readonly ExternalDataSource[] = [
     shareAlikeObligation: false,
     commercialUsePermitted: "unknown",
     redistributionPermitted: "unknown",
-    // Verbatim on the developer page: "Requires a developer key." and
-    // "Throttling is enabled. Ten calls every 60 seconds."
     rateLimitCalls: 10,
     rateLimitWindowSeconds: 60,
     updateIntervalHours: 1,
-    retrievedAt: CANDIDATE_RETRIEVAL_DATE,
+    retrievedAt: TRANSPORT_RETRIEVAL_DATE,
     verifiedAt: null,
     status: "unverified",
   },
+  {
+    /*
+     * Same platform, same position as `ab511`: the developer page states the key requirement and
+     * "Ten calls every 60 seconds", and its Developer Resources page states no licence. A key buys
+     * access; it does not record a right. Written permission request drafted in
+     * `docs/P6_DATA_PERMISSION_REQUESTS.md`.
+     */
+    sourceKey: "nb511",
+    displayName: "New Brunswick 511 Developer API",
+    authority: "Government of New Brunswick — Transportation and Infrastructure",
+    category: "road_conditions",
+    jurisdiction: "CA-NB",
+    licenceName: null,
+    licenceUrl: null,
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: 10,
+    rateLimitWindowSeconds: 60,
+    updateIntervalHours: 1,
+    retrievedAt: TRANSPORT_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
+  {
+    /*
+     * Same platform, same position as `ab511`: the developer page states the key requirement and
+     * "Ten calls every 60 seconds", and its Developer Resources page states no licence. A key buys
+     * access; it does not record a right. Written permission request drafted in
+     * `docs/P6_DATA_PERMISSION_REQUESTS.md`.
+     * The one with weight- and bridge-restriction endpoints, which is why its rights are worth asking for first.
+     */
+    sourceKey: "yt511",
+    displayName: "511 Yukon Developer API",
+    authority: "Government of Yukon — Highways and Public Works",
+    category: "road_conditions",
+    jurisdiction: "CA-YT",
+    licenceName: null,
+    licenceUrl: null,
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: 10,
+    rateLimitWindowSeconds: 60,
+    updateIntervalHours: 1,
+    retrievedAt: TRANSPORT_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
+  {
+    /*
+     * Same platform, same position as `ab511`: the developer page states the key requirement and
+     * "Ten calls every 60 seconds", and its Developer Resources page states no licence. A key buys
+     * access; it does not record a right. Written permission request drafted in
+     * `docs/P6_DATA_PERMISSION_REQUESTS.md`.
+     */
+    sourceKey: "nl511",
+    displayName: "511 Newfoundland and Labrador Developer API",
+    authority: "Government of Newfoundland and Labrador — Transportation and Infrastructure",
+    category: "road_conditions",
+    jurisdiction: "CA-NL",
+    licenceName: null,
+    licenceUrl: null,
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: 10,
+    rateLimitWindowSeconds: 60,
+    updateIntervalHours: 1,
+    retrievedAt: TRANSPORT_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
+  {
+    /*
+     * Saskatchewan Highway Hotline publishes no developer API today, and nothing here polls its
+     * website: a page scraper is not a licence, and a page layout is not a contract. Registered so
+     * the request has somewhere to land — letter drafted in `docs/P6_DATA_PERMISSION_REQUESTS.md`.
+     * The rate limit and interval are null because nothing has been published to read them from.
+     */
+    sourceKey: "sk_highway_hotline",
+    displayName: "Saskatchewan Highway Hotline",
+    authority: "Government of Saskatchewan — Ministry of Highways",
+    category: "road_conditions",
+    jurisdiction: "CA-SK",
+    licenceName: null,
+    licenceUrl: null,
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: null,
+    rateLimitWindowSeconds: null,
+    updateIntervalHours: null,
+    retrievedAt: TRANSPORT_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
+  /*
+   * 2026-09-24 catalogue candidates. Each licence named below is the one the publisher's
+   * page or catalogue entry states; commercial use and redistribution stay `unknown`
+   * and attribution text stays null until a person reads the terms and clears
+   * the row. Both barriers hold exactly as they do for the rows above.
+   */
   {
     sourceKey: "tc_vehicle_recalls",
     displayName: "Transport Canada Vehicle Recalls Database (last 60 days, daily)",
@@ -702,7 +876,7 @@ export const ALL_DATA_SOURCES: readonly ExternalDataSource[] = [
 ];
 
 /** Requires an account and key, independent of licence status. */
-export const SOURCES_REQUIRING_API_KEY: readonly string[] = ["ab511", "on511"];
+export const SOURCES_REQUIRING_API_KEY: readonly string[] = ["ab511", "on511", "mb511", "nb511", "yt511", "nl511"];
 
 /**
  * Publisher-stated caveats that must travel with the data wherever it is shown.
@@ -727,11 +901,15 @@ export const SOURCE_CAVEATS: Record<string, string> = {
     "Share-alike attaches to a Derivative Database. An offline extract bundled to a device is a Derivative Database; the rendered map is a Produced Work needing attribution only.",
   ab511:
     "Throttled at ten calls per sixty seconds. Poll into a central cache; never proxy the raw API to devices.",
+  on511:
+    "Throttled at ten calls per sixty seconds and requires a developer key, although the licence is open. Poll into a central cache; never proxy the raw API to devices. The publisher calls the Ontario 511 logo mandatory while OGL – Ontario excludes logos and official marks from the grant, so the logo is not used until Ontario says in writing where it may appear; the licence attribution line is shown instead.",
+  qc_mtmd_roadworks:
+    "Records are in French with an English description field. CC BY 4.0 requires that changes be indicated — the attribution says the records were normalized.",
+  sk_highway_hotline:
+    "No developer API is currently published and the website is not scraped. Nothing is collected until Saskatchewan answers the access request.",
   msc_geomet:
     "Do not send no-cache headers, do not bulk-scrape WMS tiles, and set a descriptive User-Agent.",
   nrn: "Spatial resolution is approximately 1:10,000 and is a general estimate across multiple source contributions.",
-  on511:
-    "Throttled at ten calls per sixty seconds and keyed per developer account. Poll into a central cache; never proxy the raw API to devices. The developer page states no licence — the matching OGL – Ontario datasets on data.ontario.ca are a lead for the review, not a clearance of this API.",
   tc_vehicle_recalls:
     "A recall match is information for a person to act on, not a determination that a unit is safe or unsafe. Match on VIN or make, model and year; a unit with no match is not thereby recall-free.",
   hc_recalls_safety_alerts:

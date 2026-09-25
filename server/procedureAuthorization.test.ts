@@ -93,7 +93,15 @@ const countBuilders = (src: string, builder: string) =>
  * an ungated operational endpoint, and this is the thing that notices.
  */
 const UNREVIEWED_BASELINE = 0;
-const PUBLIC_BASELINE = 2;
+/*
+ * S1: 2 → 4. `auth.refresh` and `auth.revokeAll` are public **necessarily**, not by oversight —
+ * a refresh exists precisely because the access credential has expired, so requiring an
+ * authenticated session to obtain one would be circular. They are not ungated: both demand
+ * possession of a single-use refresh verifier whose hash is stored server-side, and both refuse
+ * identically whatever the reason, so neither reveals which families exist. The other two remain
+ * `auth.me` and `auth.logout`.
+ */
+const PUBLIC_BASELINE = 4;
 
 describe("records surface is fully role-authorized", () => {
   it("uses roleProcedure for every records procedure", () => {
@@ -262,14 +270,16 @@ describe("migrated operational procedures", () => {
 });
 
 describe("the data source document matches the seeded registry", () => {
-  it("states the corrected count of eight verified and thirteen not", () => {
+  it("states the merged count of ten verified and twenty-five not", () => {
     // The research summary said nine of eleven were clean; three were unresolved,
     // so it was eight. v22.17 added six spectrum and coverage sources, none of
     // them licence-cleared, so nine are now blocked. The document and the seed
-    // must agree or a future reader trusts the wrong number.
-    expect(dataSources).toContain("Eight verified, twenty-one not");
-    expect(VERIFIED_DATA_SOURCES).toHaveLength(8);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(21);
+    // must agree or a future reader trusts the wrong number. The Canadian 511 tranche cleared two
+    // (Ontario, Québec) and blocked five (MB, NB, YT, NL, SK); the later catalogue candidates add
+    // seven more inspection-only rows without changing the verified count.
+    expect(dataSources).toContain("Ten verified, twenty-five not");
+    expect(VERIFIED_DATA_SOURCES).toHaveLength(10);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(25);
   });
 
   it("lists exactly the blocked sources as blocked", () => {

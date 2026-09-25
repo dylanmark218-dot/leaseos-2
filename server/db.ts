@@ -1,6 +1,8 @@
 import { and, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import type { MySqlColumn } from "drizzle-orm/mysql-core";
 import { SINGLE_TENANT_ID, resolveActingScope } from "./_core/actingScope";
+import type { OperatorResolution } from "./_core/operatorIdentity";
+import { operatorIdFromRecord } from "./_core/operatorIdentity";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   userRoleAssignments,
@@ -846,6 +848,21 @@ export async function operatorInScope(operatorId: number, scope: TenantScope): P
   const db = await getDb();
   if (!db) return null;
   return (await db.select({ id: operators.id }).from(operators).where(and(eq(operators.id, operatorId), ownershipScopeWhere("operator", operators.id, scope))).limit(1))[0] ?? null;
+}
+/**
+ * This person's own operator record in the scope: `operators.userId`, filtered by the same
+ * ownership rule as `operatorInScope`. A record owned by another organization is not theirs here.
+ * `operators.userId` is not unique, so two records naming the same person is `ambiguous` — a
+ * refusal, never the first row. Fetches two rows at most, which is all that question needs.
+ */
+export async function operatorForUserInScope(userId: number, scope: TenantScope): Promise<OperatorResolution> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const rows = await db.select({ id: operators.id }).from(operators)
+    .where(and(eq(operators.userId, userId), ownershipScopeWhere("operator", operators.id, scope))).limit(2);
+  if (rows.length === 0) return { kind: "none" };
+  if (rows.length > 1) return { kind: "ambiguous" };
+  return { kind: "resolved", operatorId: operatorIdFromRecord(rows[0]!.id) };
 }
 /**
  * An evidence record the scope may see, or null: through its job when it has one, else through the

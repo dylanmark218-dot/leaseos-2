@@ -7,8 +7,8 @@ here can be added rather than read.
 | Measure | Value | Read from |
 |---|---|---|
 | Release | **v23.25** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **410** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **170** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Tables | **413** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **177** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
 | Role-authorized procedures | **652** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
@@ -16,13 +16,13 @@ here can be added rather than read.
 | Permissions | **355** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **125** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **319 / 4359** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **346 / 4772** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
 
 Records vault · roles and server-side authorization · payroll, finance, tax
-rules (unverified) · geospatial source registry (8 verified licences, 10
+rules (unverified) · geospatial source registry (10 verified licences, 25
 blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card
 statements, anomalies · roadside, purchasing, AP · compliance registry,

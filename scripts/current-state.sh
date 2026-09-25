@@ -72,7 +72,7 @@ here can be added rather than read.
 ## Implemented on the server (each with schema, authorization, audit, tests)
 
 Records vault · roles and server-side authorization · payroll, finance, tax
-rules (unverified) · geospatial source registry (8 verified licences, 10
+rules (unverified) · geospatial source registry (10 verified licences, 25
 blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card
 statements, anomalies · roadside, purchasing, AP · compliance registry,

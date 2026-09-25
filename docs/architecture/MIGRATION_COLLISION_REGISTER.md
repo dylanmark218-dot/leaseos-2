@@ -40,21 +40,83 @@ and `0157` is historically used twice. None of those is reused.
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
 
-## Claim added 2026-09-24 (`main` = migration head `0174`)
+## Claim: 0185 (SEC-004, 2026-09-24)
 
-A fresh scan of every remote branch found claims through `0185`: `0175` (auth-workspace, client-portal,
-driver-portfolio, training-academy), `0176`–`0177` (driver-portfolio), `0178`–`0183` (document-control),
-`0179` (eld-compliance, migration-0169-reconciliation), `0182`–`0184` (communications-marketplace,
-customer-contract-rates, integration-hub, safety-program-builder), `0185` (relaxed-carson, sec-004).
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | SEC-004 PR | `6f52b57` | gated | none | keeps 0185 |
 
-| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
-|---|---|---|---|---|---|---|
-| 0186 | `0186_external_source_categories.sql` | `claude/canadian-govt-apis-leaseos-q33l42` | none | open branch | none at scan time | first number no branch held; re-check at PR time |
+Chosen by scanning `origin/main` and all 57 remote refs immediately before writing: the highest number
+any of them held was `0184` (`integration-hub-subsystem`, `customer-contract-rates`), so `0185` was the
+first number free everywhere. `claude/integration-hub-subsystem-6nzrkw`'s `0183` also adds
+`webhookDeliveries.claimedAt`/`claimedBy`. When that branch rebases onto this one, its `0183` drops those
+two columns rather than this migration being renumbered (see
+`audit/hardening-2026-09-24/SEC-004-WEBHOOK-DELIVERY-INTEGRITY.md`).
 
 ## Change log
 
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
   No other branch was renumbered.
-* **2026-09-24**: `0186` claimed by `claude/canadian-govt-apis-leaseos-q33l42` (external source categories).
-  No other branch was renumbered.
+* **2026-09-24**: `0185` claimed by SEC-004 (`claude/sec-004-webhook-delivery-integrity`); first number free on
+  `main` and every remote branch. No branch renumbered.
+* **2026-09-24**: `0186` claimed by `claude/canadian-govt-apis-leaseos-q33l42` (external source categories);
+  first number free after the `0185` claims above. No branch renumbered.
+
+## State at the 0169 reconciliation (2026-09-23, `main` = `6f52b574`, after PR #10 and PR #13)
+
+`main` migration head: **`0174_dispatch_override_provenance.sql`**. Numbers 0175–0178 are claimed
+by open branches (`0175` by `claude/driver-portfolio-*` and `claude/training-academy-workforce-q3mdse`,
+`0176`/`0177` by `claude/driver-portfolio-*`, `0178` by `claude/document-control-architecture-jlffzk`).
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0169 | `0169_trip_stop_provenance.sql` | **sibling repository `leaseos`, `main`** (`9e1a75f`) | — | applied history there | with this repository's `0169_defect_resolution.sql` | **neither renamed**; this repository converges by forward migration 0179 — see `docs/register/MIGRATION_0169_RECONCILIATION.md` |
+| 0174 | `0174_training_compliance_operations.sql` | `claude/training-academy-workforce-q3mdse` | none | open branch | **collides with main's `0174_dispatch_override_provenance.sql`** | renumber at that branch's rebase (its author) |
+| 0179 | `0179_trip_stop_provenance.sql` | `claude/migration-0169-reconciliation` | this PR | first number free on `main` and on every open branch | none | keeps 0179 |
+
+## Change log
+
+* **2026-09-23 (0169 reconciliation)**: added the cross-repository 0169 row, the academy branch's
+  `0174` collision (new since C1a), and 0179. No file renamed.
+
+## State at the S2 integration (2026-09-25, `main` = `e291f28`, after PR #45, #47 and #48)
+
+`main` migration head: **`0193_mfa_secret_ref.sql`**. `main` carries **no `018x` migration at all** —
+the 0181–0190 range is held entirely by open branches.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | #20 | reconciled onto `main`; integrating | **`claude/relaxed-carson-qfcopf` also claims `0185`** (`0185_assistant_proposal_tenancy.sql`) | **SEC-004 keeps `0185`**: it claimed the number at 2026-09-24 07:52 when it was free on `main` and every branch; the other claim followed 77 minutes later and did not meet the "free everywhere" standard. That branch renumbers at its own integration, as the academy branch's `0174` does |
+| 0186 | `0186_external_source_categories.sql` | `claude/canadian-govt-apis-leaseos-q33l42` | #26 | open branch | none seen in the S2 scan | keeps `0186` unless a later branch proves an earlier claim |
+| 0191 | `0191_encrypted_secrets.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
+| 0192 | `0192_provider_credentials.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
+| 0193 | `0193_mfa_secret_ref.sql` | `feature/mfa-secret-migration` | #47 | **merged** | none | recorded late — see change log |
+
+Next number free on `main` and on every open branch: **`0194`** — to be re-scanned at the moment of
+claiming, not taken from this line.
+
+## Change log
+
+* **2026-09-25 (S2 integration)**: recorded `0191`, `0192` and `0193`, which were **merged without
+  being entered here** — a bookkeeping defect in S2-A/B/C and S2-D, not a numbering one: all three
+  numbers were verified free across every branch before use, and none collided. The register is the
+  repository's record of that verification, and three merges' worth of it was missing. Also recorded
+  the `0185` double-claim, resolved in SEC-004's favour on claim order. No migration file renamed.
+
+## State at the S2-E Phase 1 claim (2026-09-25, `main` = `14b5df2`, after PR #20 and #49)
+
+`main` migration head: **`0193_mfa_secret_ref.sql`**, 175 migrations. Re-scanned across `main`,
+every remote branch and every open-PR head at the moment of claiming: the highest number held
+anywhere is `0193`, so `0194` is the first free everywhere.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0194 | `0194_webhook_secret_ref.sql` | `feature/webhook-secret-migration-phase1` | S2-E Phase 1 | claiming | none | keeps 0194 |
+
+## Change log
+
+* **2026-09-25 (S2-E Phase 1)**: claimed `0194` and recorded it **in the commit that creates the
+  migration**, rather than afterwards. That ordering is the correction for the `0191`–`0193`
+  omission recorded above: those numbers were each verified free before use, but the verification
+  went unrecorded, and this register is the only place that verification survives.
