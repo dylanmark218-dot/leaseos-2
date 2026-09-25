@@ -22,6 +22,8 @@
  *   it never learns why not.
  */
 
+import type { ComplianceVerdict } from "./complianceDocumentValidity";
+
 export type RequirementStatus = "unverified" | "verified" | "superseded" | "withdrawn";
 export type CredentialVerification = "needs_review" | "verified" | "rejected";
 
@@ -308,13 +310,39 @@ export function composeJobPassport(parts: Record<string, Passport | null>): { ve
  * What dispatch may know about a driver's medical fitness. The credential
  * row is private detail; this is the only shape that leaves HR.
  */
-export function medicalFitnessForDispatch(credential: Credential | null, now: Date): { eligible: "yes" | "no" | "unknown"; reviewDue: Date | null } {
-  if (!credential) return { eligible: "unknown", reviewDue: null };
-  if (credential.verificationStatus === "rejected") return { eligible: "no", reviewDue: credential.expiresAt ?? null };
-  if (credential.expiresAt && credential.expiresAt <= now) return { eligible: "no", reviewDue: credential.expiresAt };
-  if (credential.verificationStatus === "needs_review") return { eligible: "unknown", reviewDue: credential.expiresAt ?? null };
-  return { eligible: "yes", reviewDue: credential.expiresAt ?? null };
+/**
+ * SPINE item 2 — medical fitness is a PROJECTION of the canonical verdict
+ * (`complianceRequirementValidity` over the operator's `medical_fitness` rows), not a second
+ * decision. This used to take one row — whichever sorted first by expiry — and read it here:
+ * a verified medical with no expiry came out "yes", a not-yet-effective one "yes", and an older
+ * verified row could be passed over for a newer unchecked one with a later date. The verdict
+ * decides; this only narrows it to the three words dispatch may learn.
+ *
+ *   in_force, expiring                       → yes
+ *   expired, rejected, not_yet_effective     → no
+ *   unverified whose own claimed date passed → no   (evidence of expiry is never softened)
+ *   unverified, incomplete, none             → unknown
+ */
+export function medicalFitnessForDispatch(verdict: ComplianceVerdict): { eligible: "yes" | "no" | "unknown"; reviewDue: Date | null } {
+  const reviewDue = verdict.claimedExpiresAt;
+  switch (verdict.state) {
+    case "in_force":
+    case "expiring":
+      return { eligible: "yes", reviewDue };
+    case "expired":
+    case "rejected":
+    case "not_yet_effective":
+      return { eligible: "no", reviewDue };
+    case "unverified":
+      return { eligible: verdict.claimLapsed ? "no" : "unknown", reviewDue };
+    case "incomplete":
+    case "none":
+      return { eligible: "unknown", reviewDue };
+  }
 }
+
+/** The one document type medical fitness is read from. */
+export const MEDICAL_FITNESS_DOC_TYPES: readonly string[] = ["medical_fitness"];
 
 /** Everything a private credential must never expose beyond HR. */
 export const PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED = ["title", "identifier", "storageKey", "storageUrl", "source", "notes"] as const;

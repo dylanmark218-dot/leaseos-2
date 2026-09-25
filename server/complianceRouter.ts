@@ -8,14 +8,15 @@
  * overwritten.
  */
 
+import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { actingScopeFor, getDb } from "./db";
 import { carrierProfileReviews, complianceConsents, complianceDocuments, complianceRequirements, writtenProgramVersions } from "../drizzle/schema";
 import {
-  abstractRequestPermitted, buildPassport, composeJobPassport, medicalFitnessForDispatch, nextRenewalDue,
+  abstractRequestPermitted, buildPassport, composeJobPassport, MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch, nextRenewalDue,
   type Credential, type Passport, type Requirement, type Subject,
 } from "./_core/compliancePassport";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
@@ -114,11 +115,11 @@ export const complianceRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return { eligible: "unknown" as const, reviewDue: null };
+      // Every medical_fitness row, not the one with the latest date: which row is in force is the
+      // canonical verdict's decision, and the dispatch composer asks it the same way.
       const rows = await db.select().from(complianceDocuments)
-        .where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, input.operatorId), eq(complianceDocuments.docType, "medical_fitness")))
-        .orderBy(desc(complianceDocuments.expiresAt)).limit(1);
-      const r = rows[0];
-      return medicalFitnessForDispatch(r ? { docType: r.docType, expiresAt: r.expiresAt, verificationStatus: r.verificationStatus, privateDetail: r.privateDetail } : null, new Date());
+        .where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, input.operatorId), inArray(complianceDocuments.docType, [...MEDICAL_FITNESS_DOC_TYPES])));
+      return medicalFitnessForDispatch(complianceRequirementValidity(rows, MEDICAL_FITNESS_DOC_TYPES, new Date()));
     }),
 
   credentialRecord: roleProcedure("compliance.credentialRecord")

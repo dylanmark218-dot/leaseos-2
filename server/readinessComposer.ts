@@ -43,11 +43,10 @@ import {
   evaluateDispatchReadiness, type CredentialState, type DispatchBlocker, type DispatchEligibility, type EligibilityVerdict, type ReadinessInput,
 } from "./_core/dispatchReadiness";
 import { computeEligibilityFingerprint, type EligibilityFacts } from "./_core/dispatchAward";
-import { assessCoverage, type PolicyRecord } from "./_core/insuranceRisk";
+import { assessCoverage, INSURANCE_PROOF_DOC_TYPES, proofFromDocuments, type PolicyRecord, type ProofOfCoverage } from "./_core/insuranceRisk";
 import { calibrationEffectOnUse, calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
-import { medicalFitnessForDispatch } from "./_core/compliancePassport";
-import { complianceDocumentValidity } from "./_core/complianceDocumentValidity";
-import type { ValidityState } from "./_core/documentValidity";
+import { MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch } from "./_core/compliancePassport";
+import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
 import { trainingDispatchDecision } from "./_core/trainingAcademy";
 import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
@@ -244,6 +243,12 @@ export type ComposedReadiness = {
 
 const versionOf = (parts: (string | number | null | undefined)[]) => parts.map(p => (p == null ? "∅" : String(p))).join("/");
 
+/** What the fingerprint records of a proof: the verdict and the row it names, never a re-read of a row. */
+const proofVersion = (d: ProofOfCoverage | null) =>
+  !d ? "∅" : d.source === "policy_record" ? "policy_record"
+    : versionOf([d.verdict.state, d.verdict.documentId, d.verdict.expiresAt?.toISOString(), d.verdict.claimedExpiresAt?.toISOString()]);
+const proofExpiry = (d: ProofOfCoverage | null) => (d?.source === "compliance_document" ? d.verdict.claimedExpiresAt : null);
+
 async function credentialsFor(ownerType: "operator" | "unit" | "trailer", ownerId: number) {
   const db = await getDb();
   if (!db) return [];
@@ -354,20 +359,14 @@ function bindingHasUnevaluatedConditions(conditionsJson: string | null): boolean
  * each is judged on its own rows and the most favourable verdict stands, because any one of them
  * satisfies the requirement.
  */
-const FAVOURABLE: Readonly<Record<ValidityState, number>> = {
-  in_force: 0, expiring: 1, incomplete: 2, unverified: 3, not_yet_effective: 4, expired: 5, rejected: 6, none: 7,
-};
 function credentialState(rows: readonly CredRow[], docTypes: readonly string[], label: string, at: Date): CredentialState {
-  const judged = docTypes.map(docType => ({ docType, v: complianceDocumentValidity(rows, docType, at) }))
-    .sort((a, b) => FAVOURABLE[a.v.state] - FAVOURABLE[b.v.state]);
-  const best = judged[0]!;
-  const present = best.v.state !== "none" && best.v.state !== "rejected";
-  // An unverified verdict carries no date of its own. The newest row's date is still evidence the
-  // gate may use to block on — never to clear on.
-  const evidence = best.v.state === "unverified"
-    ? rows.filter(r => r.docType === best.docType).sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime())[0]?.expiresAt ?? null
-    : best.v.expiresAt;
-  return { label, present, expiresAt: evidence, validity: { state: best.v.state, reason: best.v.reason } };
+  const v = complianceRequirementValidity(rows, docTypes, at);
+  // An unverified verdict carries the date its newest row claims — evidence the gate may use to
+  // block on, never to clear on. The canonical verdict names it; nothing here re-derives it.
+  return {
+    label, present: v.state !== "none" && v.state !== "rejected", expiresAt: v.claimedExpiresAt,
+    validity: { state: v.state, reason: v.reason },
+  };
 }
 
 async function policiesCovering(entityType: "unit" | "trailer", entityId: number, now: Date): Promise<PolicyRecord[]> {
@@ -381,14 +380,16 @@ async function policiesCovering(entityType: "unit" | "trailer", entityId: number
   const [pols, covs, docs] = await Promise.all([
     db.select().from(insurancePolicies).where(inArray(insurancePolicies.id, policyIds)),
     db.select().from(insurancePolicyCoverages).where(inArray(insurancePolicyCoverages.insurancePolicyId, policyIds)),
-    db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, entityType), eq(complianceDocuments.ownerId, entityId), inArray(complianceDocuments.docType, ["insurance_proof", "insurance_card"]))),
+    db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, entityType), eq(complianceDocuments.ownerId, entityId), inArray(complianceDocuments.docType, [...INSURANCE_PROOF_DOC_TYPES]))),
   ]);
-  const proof = docs.sort((a, b) => (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
+  // SPINE item 2: the proof is the canonical verdict over every proof row this entity owns — not
+  // the row with the latest date, which let an unverified or rejected upload stand as the proof.
+  const proof = proofFromDocuments(docs, now);
   return pols.map(p => ({
     policyRef: p.policyRef, policyType: p.policyType, effectiveAt: p.effectiveAt, expiresAt: p.expiresAt, status: p.status,
     coverageVerificationStatus: p.coverageVerificationStatus,
     coverages: covs.filter(c => c.insurancePolicyId === p.id).map(c => ({ coverageType: c.coverageType, limitAmount: c.limitAmount, additionalInsuredEndorsement: c.additionalInsuredEndorsement })),
-    document: proof ? { expiresAt: proof.expiresAt, verificationStatus: proof.verificationStatus } : null,
+    document: proof,
   }));
 }
 
@@ -523,12 +524,13 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   }
   if (dangerousGoods) required.push(credentialState(opCreds, ["tdg_certificate"], "TDG certificate", now));
   // Medical fitness reaches dispatch as a projection only.
-  const medRow = opCreds.filter(c => c.docType === "medical_fitness").sort((a, b) => (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
-  const med = medicalFitnessForDispatch(medRow ? { docType: "medical_fitness", expiresAt: medRow.expiresAt, verificationStatus: medRow.verificationStatus, privateDetail: true } : null, now);
+  const med = medicalFitnessForDispatch(complianceRequirementValidity(opCreds, MEDICAL_FITNESS_DOC_TYPES, now));
   if (med.eligible === "no") extra.push({ code: "medical_fitness_not_current", label: "Commercial medical fitness not current", severity: "blocking", subject: "operator", overridable: false });
   else if (med.eligible === "unknown") extra.push({ code: "medical_fitness_unknown", label: "Commercial medical fitness not verified", severity: "unknown", subject: "operator", overridable: true, overrideAuthority: "manager" });
   contributions.push({ engine: "compliance", finding: `Medical fitness: ${med.eligible}` });
-  const medicalVersion = medRow ? versionOf([medRow.id, medRow.verificationStatus, medRow.expiresAt?.toISOString()]) : "none";
+  // Every medical row the verdict read, not one: a change to any of them can change the answer.
+  const medRows = opCreds.filter(c => MEDICAL_FITNESS_DOC_TYPES.includes(c.docType));
+  const medicalVersion = medRows.length ? versionOf(medRows.map(r => `${r.id}:${r.verificationStatus}:${r.issuedAt?.toISOString() ?? "∅"}:${r.expiresAt?.toISOString() ?? "∅"}:${r.capturedAt.toISOString()}`).sort()) : "none";
 
   const device = (await db.select({ status: fieldDevices.status }).from(fieldDevices).where(eq(fieldDevices.userId, op.userId ?? -1)).orderBy(desc(fieldDevices.enrolledAt)).limit(1))[0];
   const deviceVersion = device ? device.status : "none";
@@ -539,7 +541,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   let unitVersion = "none", releaseVersion = "none", criticalCount = 0;
   let unitCredentialVersion = "none", insuranceVersion = "none", roadsideVersion = "none", calibrationVersion = "none";
   const credentialVersionOf = (rows: readonly CredRow[]) => versionOf(rows.map(c => `${c.id}:${c.docType}:${c.verificationStatus}:${c.expiresAt?.toISOString() ?? "∅"}`).sort());
-  const insuranceVersionOf = (pols: readonly PolicyRecord[]) => versionOf(pols.map(p => `${p.policyRef}:${p.status}:${p.coverageVerificationStatus}:${p.expiresAt.toISOString()}:${p.document?.verificationStatus ?? "∅"}:${p.document?.expiresAt?.toISOString() ?? "∅"}`).sort());
+  const insuranceVersionOf = (pols: readonly PolicyRecord[]) => versionOf(pols.map(p => `${p.policyRef}:${p.status}:${p.coverageVerificationStatus}:${p.expiresAt.toISOString()}:${proofVersion(p.document)}`).sort());
   if (subject.unitId) {
     const unit = (await db.select().from(units).where(eq(units.id, subject.unitId)).limit(1))[0];
     if (!unit) throw new Error(`Unit ${subject.unitId} not found`);
@@ -604,7 +606,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     releaseVersion = versionOf(releases.map(r => `${r.id}:${r.releaseType}:${r.testResult ?? "∅"}:${r.resolvedDefectIds ?? "∅"}`));
     unitCredentialVersion = credentialVersionOf(uCreds);
     for (const c of uCreds) governingExpiries.push({ what: `unitDoc:${c.id}`, at: c.expiresAt });
-    for (const p of pols) governingExpiries.push({ what: `unitPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `unitPolicyProof:${p.policyRef}`, at: p.document?.expiresAt });
+    for (const p of pols) governingExpiries.push({ what: `unitPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `unitPolicyProof:${p.policyRef}`, at: proofExpiry(p.document) });
     insuranceVersion = `unit=${insuranceVersionOf(pols)}`;
     roadsideVersion = versionOf(roadside.map(r => `${r.id}:${r.status}`).sort());
 
@@ -674,7 +676,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     trailerVersion = versionOf([tr.id, credentialVersionOf(tCreds)]);
     insuranceVersion = `${insuranceVersion};trailer=${insuranceVersionOf(pols)}`;
     for (const c of tCreds) governingExpiries.push({ what: `trailerDoc:${c.id}`, at: c.expiresAt });
-    for (const p of pols) governingExpiries.push({ what: `trailerPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `trailerPolicyProof:${p.policyRef}`, at: p.document?.expiresAt });
+    for (const p of pols) governingExpiries.push({ what: `trailerPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `trailerPolicyProof:${p.policyRef}`, at: proofExpiry(p.document) });
   }
 
   /* ---- job ---- */

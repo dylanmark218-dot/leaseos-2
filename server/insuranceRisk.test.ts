@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import {
   assessCoverage, certificatesAffectedByRenewal, claimFinancials, dispatchInsuranceGate, matchCustomerRequirements,
-  renewalCalendar, roadsideInsuranceItems, type PolicyRecord,
+  proofFromDocuments, renewalCalendar, roadsideInsuranceItems, type PolicyRecord,
 } from "./_core/insuranceRisk";
 import { appRouter } from "./routers";
 import { grantUserRole } from "./db";
@@ -10,11 +10,17 @@ import { authorize, type DomainRole } from "./_core/recordsAuthorization";
 
 const NOW = new Date("2026-09-10T12:00:00Z");
 const days = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
+/**
+ * SPINE item 2: a proof is the canonical verdict on proof rows, so fixtures build it the same way
+ * production does — from a row, through `proofFromDocuments` — rather than hand-writing a verdict.
+ */
+const proofDoc = (expiresAt: Date | null, verificationStatus: "needs_review" | "verified" | "rejected", at: Date) =>
+  proofFromDocuments([{ id: 1, docType: "insurance_proof", title: "Proof", issuedAt: null, expiresAt, verificationStatus, capturedAt: new Date(at.getTime() - 86_400_000) }], at);
 const policy = (over: Partial<PolicyRecord> = {}): PolicyRecord => ({
   policyRef: "POL-1", policyType: "commercial_auto", effectiveAt: days(-200), expiresAt: days(165), status: "active",
   coverageVerificationStatus: "coverage_verified",
   coverages: [{ coverageType: "commercial_auto", limitAmount: 5_000_000, additionalInsuredEndorsement: true }],
-  document: { expiresAt: days(165), verificationStatus: "verified" }, ...over,
+  document: proofDoc(days(165), "verified", NOW), ...over,
 });
 
 /* ------------------------------------------------------------------ */
@@ -36,7 +42,7 @@ describe("document_missing is not coverage_expired", () => {
   });
 
   it("reviews when the proof expired but the policy has not", () => {
-    const a = assessCoverage({ coverageType: "commercial_auto", policies: [policy({ document: { expiresAt: days(-5), verificationStatus: "verified" } })], now: NOW });
+    const a = assessCoverage({ coverageType: "commercial_auto", policies: [policy({ document: proofDoc(days(-5), "verified", NOW) })], now: NOW });
     expect(a.status).toBe("document_expired");
     expect(a.effect).toBe("review");
     expect(a.reason).toContain("refresh the document");
@@ -336,17 +342,17 @@ describe("when the policy and the document disagree, the policy decides first", 
   const pol = (over: Partial<import("./_core/insuranceRisk").PolicyRecord> = {}): import("./_core/insuranceRisk").PolicyRecord => ({
     policyRef: "POL-1", policyType: "commercial_auto", effectiveAt: d(-300), expiresAt: d(65), status: "active",
     coverageVerificationStatus: "coverage_verified", coverages: [{ coverageType: "commercial_auto", limitAmount: 5_000_000, additionalInsuredEndorsement: true }],
-    document: { expiresAt: d(65), verificationStatus: "verified" }, ...over,
+    document: proofDoc(d(65), "verified", NOWP), ...over,
   });
 
   it("calls an expired policy with a perfectly verified current proof card coverage_expired — the card does not resurrect the policy", () => {
-    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ expiresAt: d(-2), document: { expiresAt: d(300), verificationStatus: "verified" } })], now: NOWP });
+    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ expiresAt: d(-2), document: proofDoc(d(300), "verified", NOWP) })], now: NOWP });
     expect(a.status).toBe("coverage_expired");
     expect(a.effect).toBe("blocked");
   });
 
   it("calls a current policy with an expired proof card document_expired — review, the truck is still insured", () => {
-    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ document: { expiresAt: d(-10), verificationStatus: "verified" } })], now: NOWP });
+    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ document: proofDoc(d(-10), "verified", NOWP) })], now: NOWP });
     expect(a.status).toBe("document_expired");
     expect(a.effect).toBe("review");
     expect(a.reason).toContain("refresh the document");
