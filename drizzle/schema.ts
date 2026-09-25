@@ -8178,9 +8178,7 @@ export const hosRuleLimitHistory = mysqlTable("hosRuleLimitHistory", {
   secondVerifiedAt: timestamp("secondVerifiedAt"),
   /** A non-numeric rule's content. */
   payloadJson: text("payloadJson"),
-}, (t) => ({
-  familyRuleIdx: index("hosRuleLimitHistory_family_rule_idx").on(t.ruleFamily, t.ruleRef),
-}));
+});
 export type HosRuleLimitHistoryRow = typeof hosRuleLimitHistory.$inferSelect;
 
 

@@ -614,10 +614,29 @@ export async function promoteRule(e: RuleEvidence, now: Date): Promise<RulePromo
   const status = statusFor(e, now);
   const promotionRef = ref("RULE-PROM");
   const changeReason = e.correctsPromotionRef ? "CORRECTED_VERIFICATION" : previous ? "VERIFIED_REVISION" : "INITIAL_VERIFICATION";
+  const current = (previous && previous.status === "CURRENT")
+    ? previous
+    : (await db.select().from(hosRuleLimitHistory).where(and(sameRule, eq(hosRuleLimitHistory.status, "CURRENT")))
+      .orderBy(desc(hosRuleLimitHistory.id)).limit(1))[0];
 
   await db.transaction(async (tx) => {
-    if (previous && previous.status === "CURRENT" && status === "CURRENT") {
-      await tx.update(hosRuleLimitHistory).set({ status: "SUPERSEDED" }).where(eq(hosRuleLimitHistory.id, previous.id));
+    if (current && status === "FUTURE" && e.effectiveFrom) {
+      await tx.update(hosRuleLimitHistory)
+        .set({ effectiveUntil: e.effectiveFrom })
+        .where(eq(hosRuleLimitHistory.id, current.id));
+    }
+    if (previous) {
+      const supersedesCurrentNow = previous.status === "CURRENT" && status === "CURRENT";
+      const replacesFuture = previous.status === "FUTURE";
+      const futureCorrectionReplacesCurrent = !!e.correctsPromotionRef && previous.status === "CURRENT" && status === "FUTURE" && !!e.effectiveFrom;
+      if (supersedesCurrentNow || replacesFuture || futureCorrectionReplacesCurrent) {
+        await tx.update(hosRuleLimitHistory)
+          .set({
+            status: "SUPERSEDED",
+            effectiveUntil: replacesFuture ? previous.effectiveFrom ?? previous.effectiveUntil : e.effectiveFrom ?? previous.effectiveUntil,
+          })
+          .where(eq(hosRuleLimitHistory.id, previous.id));
+      }
     }
     await tx.insert(hosRuleLimitHistory).values({
       promotionRef,
@@ -720,7 +739,9 @@ export async function rulesOnStaleSources(now: Date) {
     .innerJoin(knowledgeVersions, eq(knowledgeVersions.versionRef, hosRuleLimitHistory.sourceRevisionRef));
   return rows.filter((r) =>
     (r.ruleStatus === "CURRENT" || r.ruleStatus === "FUTURE") &&
-    (r.sourceStatus !== "verified" || r.sourceContentHash !== r.sourceHash || (r.repealedAt != null && r.repealedAt <= now)));
+    ((r.sourceStatus !== "verified" && r.sourceStatus !== "superseded")
+      || r.sourceContentHash !== r.sourceHash
+      || (r.repealedAt != null && r.repealedAt <= now)));
 }
 
 /* ------------------------------------------------------------------ */
