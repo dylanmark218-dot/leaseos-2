@@ -1,5 +1,16 @@
 # C1b-3 — one document-validity decision, and qualification reads through D-05
 
+> **Reconciled with #52 (2026-09-25).** #52 (SPINE item 2) unified the same four document-validity
+> decisions first and was merged. The owner ruled that #52's model governs, so on merging main the
+> document-validity half of this checkpoint was resolved to main: `complianceDocumentValidity.ts`,
+> `compliancePassport.ts`, `dispatchReadiness.ts`, `readinessComposer.ts`, `widgetSources.ts` and the body
+> of `validityOf` are main's. Dropped with it: `claimValidity`/`governingClaim`/`asClaimVerification`, the
+> exported per-surface helpers, `documentValidityCharacterization.test.ts`, and the document-validity cases
+> and census 1/10 in `documentValidityCanonical.test.ts`. Kept: `readExpiry` (the qualification readers
+> use it), `heldFromValidity`, and the whole D-05 qualification read adapter (`qualificationReads.ts`
+> and the readiness/crew/open-shift/calendar routers reading through it), adapted to main's
+> `complianceDocumentValidity` row type. The sections below describe the branch as first written.
+
 **Status:** implemented on `claude/leaseos-compliance-survey-5faxe8`; not merged.
 **Base:** `main` @ `3d05d32` (merge of #54, C1b-2b). **Migration head:** `0198_requirement_verification` (unchanged).
 **Migration:** none. Nothing needed a schema change: the adapter reads existing columns, and every

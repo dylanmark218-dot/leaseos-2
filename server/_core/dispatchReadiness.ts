@@ -19,8 +19,8 @@
  *   a judgement call a manager gets to make.
  */
 
-import { readExpiry } from "./documentValidity";
 import { APPROVED_OVERRIDE_POLICIES, asFinding, resolveOverridePolicy, type OverrideClass, type OverridePolicy } from "./complianceFinding";
+import type { ValidityState } from "./documentValidity";
 
 export type EligibilityVerdict =
   | "eligible"
@@ -57,6 +57,13 @@ export type CredentialState = {
   /** null = we hold no record, which is `unknown`, never `satisfied`. */
   expiresAt: Date | null | undefined;
   present: boolean;
+  /**
+   * The canonical verdict (`documentValidity`) on the documents behind this credential, when
+   * the composer judged documents. The gate then maps the verdict and does not re-decide it.
+   * Absent only for a credential built by hand (a test, or a caller with no documents); those
+   * keep the date-only reading below.
+   */
+  validity?: { state: ValidityState; reason: string };
 };
 
 export type ReadinessInput = {
@@ -123,13 +130,28 @@ export type ReadinessInput = {
   };
 };
 
-/** Expired or missing credential → blocking. No record at all → unknown. */
-export function credentialBlocker(
+/**
+ * Expired or missing credential → blocking. No record at all → unknown.
+ *
+ * When the composer supplied the canonical verdict, this maps it onto the gate's three existing
+ * codes and never re-decides it:
+ *
+ *   none, rejected, not_yet_effective  → `_missing`  (nothing in force: blocking)
+ *   expired                            → `_expired`  (blocking)
+ *   unverified, incomplete             → `_unknown`  (not established: manager-overridable)
+ *   in_force, expiring                 → clear, unless the date has passed by `asOf`
+ *
+ * Evidence of expiry still blocks when the verdict is only unverified or incomplete: an
+ * unchecked document whose own date is already past is not a reason to relax a hard block
+ * into an overridable one.
+ */
+function credentialBlocker(
   c: CredentialState,
   asOf: Date,
   subject: DispatchBlocker["subject"],
   codePrefix: string
 ): DispatchBlocker | null {
+  if (c.validity) return verdictBlocker(c, c.validity, asOf, subject, codePrefix);
   if (!c.present) {
     return {
       code: `${codePrefix}_missing`,
@@ -149,8 +171,7 @@ export function credentialBlocker(
       overrideAuthority: "manager",
     };
   }
-  // C1b-3: the canonical expiry decision (expired once the instant has passed).
-  if (readExpiry(c.expiresAt, asOf, 0).expiry === "expired") {
+  if (c.expiresAt.getTime() < asOf.getTime()) {
     return {
       code: `${codePrefix}_expired`,
       label: `${c.label} expired ${c.expiresAt.toISOString().slice(0, 10)}`,
@@ -160,6 +181,38 @@ export function credentialBlocker(
     };
   }
   return null;
+}
+
+/** The canonical verdict, onto the gate's codes. See `credentialBlocker` for the table. */
+function verdictBlocker(
+  c: CredentialState,
+  v: NonNullable<CredentialState["validity"]>,
+  asOf: Date,
+  subject: DispatchBlocker["subject"],
+  codePrefix: string
+): DispatchBlocker | null {
+  const missing = (why: string): DispatchBlocker =>
+    ({ code: `${codePrefix}_missing`, label: `${c.label} ${why}`, severity: "blocking", subject, overridable: false });
+  const expired = (at: Date): DispatchBlocker =>
+    ({ code: `${codePrefix}_expired`, label: `${c.label} expired ${at.toISOString().slice(0, 10)}`, severity: "blocking", subject, overridable: false });
+  const pastDate = c.expiresAt instanceof Date && c.expiresAt.getTime() < asOf.getTime() ? c.expiresAt : null;
+  switch (v.state) {
+    case "none": return missing("not on file");
+    case "rejected": return missing("rejected on review — nothing else on file");
+    case "not_yet_effective": return missing(`not yet in force — ${v.reason}`);
+    case "expired": return expired(c.expiresAt instanceof Date ? c.expiresAt : asOf);
+    case "unverified":
+    case "incomplete":
+      if (pastDate) return expired(pastDate);
+      return {
+        code: `${codePrefix}_unknown`,
+        label: v.state === "unverified" ? `${c.label} not verified — ${v.reason}` : `${c.label} expiry unknown — ${v.reason}`,
+        severity: "unknown", subject, overridable: true, overrideAuthority: "manager",
+      };
+    case "in_force":
+    case "expiring":
+      return pastDate ? expired(pastDate) : null;
+  }
 }
 
 export function evaluateDispatchReadiness(

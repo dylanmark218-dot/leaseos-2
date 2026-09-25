@@ -31,7 +31,7 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { academyQualifications, complianceDocuments, workerQualifications } from "../drizzle/schema";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
-import { asClaimVerification, complianceDocumentValidity } from "./_core/complianceDocumentValidity";
+import { complianceDocumentValidity } from "./_core/complianceDocumentValidity";
 import type { DbOrTx } from "./_core/dbTypes";
 import type { DocumentType } from "./_core/documentExtraction";
 import { validityOf, type DocumentVersion, type Validity, type ValidityState } from "./_core/documentValidity";
@@ -174,7 +174,7 @@ export async function effectiveQualifications(
       if (chosen?.complianceDocumentId != null) {
         const doc = docById.get(chosen.complianceDocumentId);
         const ev = doc
-          ? complianceDocumentValidity([{ docType: doc.docType, expiresAt: doc.expiresAt, verificationStatus: asClaimVerification(doc.verificationStatus) }], doc.docType, args.at)
+          ? complianceDocumentValidity([doc], doc.docType, args.at)
           : null;
         evidence = { complianceDocumentId: chosen.complianceDocumentId, docType: doc?.docType ?? null, state: ev?.state ?? "none" };
         const docInForce = ev && (ev.state === "in_force" || ev.state === "expiring");

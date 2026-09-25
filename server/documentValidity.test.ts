@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
  */
 import { describe, expect, it } from "vitest";
 import {
-  capabilityStatus, capabilitySummary, NotVerifiable, reject, validityOf, verify,
+  capabilityStatus, capabilitySummary, EXPIRY_OPTIONAL_TYPES, NotVerifiable, reject, validityOf, verify,
   type DocumentVersion,
 } from "./_core/documentValidity";
 import type { DocumentType } from "./_core/documentExtraction";
@@ -63,15 +63,59 @@ describe("a new version is not automatically the valid one", () => {
   });
 
   it("does not treat a version as in force before its effective date", () => {
+    // Checked but not yet current is its own state now. It used to read "unverified", with a
+    // reason saying nobody had checked a document somebody had.
     const future = verify({ versions: [version(1)], version: 1, byUserId: 9, at: AT, effectiveFrom: days(30), expiresAt: days(400) });
-    expect(validityOf(future, AT).state).toBe("unverified");
+    expect(validityOf(future, AT)).toMatchObject({ state: "not_yet_effective", version: 1 });
+    expect(validityOf(future, AT).reason).toContain(`not in force until ${days(30).toISOString().slice(0, 10)}`);
     expect(validityOf(future, days(31)).state).toBe("in_force");
+  });
+
+  it("keeps the earlier verified version in force while the next waits for its effective date", () => {
+    const first = verify({ versions: [version(1), version(2)], version: 1, byUserId: 9, at: AT, effectiveFrom: null, expiresAt: days(40) });
+    const both = verify({ versions: first, version: 2, byUserId: 9, at: AT, effectiveFrom: days(30), expiresAt: days(400) });
+    expect(validityOf(both, AT)).toMatchObject({ state: "in_force", version: 1 });
+    expect(validityOf(both, days(31))).toMatchObject({ state: "in_force", version: 2 });
   });
 
   it("refuses to verify something already verified, superseded or absent", () => {
     const v = inForce();
     expect(() => verify({ versions: v, version: 1, byUserId: 9, at: AT, effectiveFrom: null, expiresAt: null })).toThrow(NotVerifiable);
     expect(() => verify({ versions: v, version: 9, byUserId: 9, at: AT, effectiveFrom: null, expiresAt: null })).toThrow(/No version 9/);
+  });
+});
+
+describe("a missing expiry is not a permanent one", () => {
+  // Owner's ruling, 2026-09-25: a verified document with no expiry is in force only when its type
+  // is named as never-expiring. No type is named yet, so every one fails closed.
+  const noExpiry = (type = TYPE) =>
+    verify({ versions: [version(1, { type })], version: 1, byUserId: 9, at: AT, effectiveFrom: null, expiresAt: null });
+
+  it("reports a verified document with no expiry as incomplete, not in force", () => {
+    const v = validityOf(noExpiry(), AT);
+    expect(v).toMatchObject({ state: "incomplete", version: 1, expiresAt: null });
+    expect(v.reason).toContain("no expiry is recorded");
+  });
+
+  it("names no never-expiring type yet — the list is added to one type at a time, with a reason", () => {
+    expect(Array.from(EXPIRY_OPTIONAL_TYPES)).toEqual([]);
+  });
+
+  it("would read a named never-expiring type as in force", () => {
+    const optional = "__test_never_expires" as DocumentType;
+    (EXPIRY_OPTIONAL_TYPES as Set<DocumentType>).add(optional);
+    try {
+      expect(validityOf(noExpiry(optional), AT)).toMatchObject({ state: "in_force", expiresAt: null });
+      expect(validityOf(noExpiry(TYPE), AT).state).toBe("incomplete");
+    } finally {
+      (EXPIRY_OPTIONAL_TYPES as Set<DocumentType>).delete(optional);
+    }
+  });
+
+  it("blocks the capability that depends on an incomplete document", () => {
+    const s = capabilityStatus({ requirements: [{ capability: "haul", requires: [TYPE] }], at: AT, documents: { [TYPE]: noExpiry() } });
+    expect(s[0]).toMatchObject({ allowed: false });
+    expect(s[0]!.blockedBy[0]).toMatchObject({ state: "incomplete" });
   });
 });
 

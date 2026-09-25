@@ -73,10 +73,11 @@ export function qualificationValidity(holdings: readonly QualificationHolding[],
  * `heldFromValidity` to Academy and legacy records alike.)
  *
  * A ticket the work requires counts only while it is in force *and* has an
- * establishable end. `validityOf` reports a verified holding with no expiry as
- * in force with no expiry, which is the right answer for a document library and
- * the wrong one for "may this person haul dangerous goods today" — currency
- * that cannot be established is not currency.
+ * establishable end — currency that cannot be established is not currency.
+ * `validityOf` now says the same thing itself (`incomplete`, unless the type is
+ * named in `EXPIRY_OPTIONAL_TYPES`); the `expiresAt == null` check below stays so
+ * that a type ever added to that list still cannot clear a ticket this path needs
+ * a date for.
  */
 export type NotHeldCode = "unknown" | "unverified" | "expired" | "rejected";
 
@@ -93,7 +94,10 @@ export function heldFromValidity(v: Validity, code: string, unverifiedWord = "un
   if (v.state === "unverified") {
     return { held: false, code: "unverified", reason: `${code} is on file but ${unverifiedWord}; nobody has checked it against the certificate` };
   }
-  if (v.expiresAt == null) return { held: false, code: "unknown", reason: `${code} is verified with no expiry recorded — currency cannot be established` };
+  // Checked, but its effective date has not come: not held yet. The code stays "unverified", which
+  // is what this case reported before the engine named it separately.
+  if (v.state === "not_yet_effective") return { held: false, code: "unverified", reason: `${code} ${v.reason.replace(/^Version \d+ /, "")}` };
+  if (v.state === "incomplete" || v.expiresAt == null) return { held: false, code: "unknown", reason: `${code} is verified with no expiry recorded — currency cannot be established` };
   if (v.state === "expired") return { held: false, code: "expired", reason: `${code} expired ${Math.abs(v.daysRemaining ?? 0)} day(s) before this` };
   return { held: true, code: null, reason: v.reason };
 }
