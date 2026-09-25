@@ -69,6 +69,7 @@ async function loadCredentials(ownerType: string, ownerId: number): Promise<Cred
   if (!db) return [];
   const rows = await db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, ownerType as never), eq(complianceDocuments.ownerId, ownerId)));
   return rows.map(r => ({
+    id: r.id, capturedAt: r.capturedAt, ownerKey: `${r.ownerType}:${r.ownerId}`,
     docType: r.docType, requirementKey: r.requirementKey, issuedAt: r.issuedAt, expiresAt: r.expiresAt,
     verificationStatus: r.verificationStatus, privateDetail: r.privateDetail, jurisdiction: r.jurisdiction,
   }));

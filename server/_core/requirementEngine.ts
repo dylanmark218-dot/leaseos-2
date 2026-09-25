@@ -25,7 +25,7 @@
  */
 
 import {
-  buildPassport, requirementApplies,
+  buildPassport, candidateVerdict, requirementApplies,
   type Credential, type Passport, type PassportVerdict, type Requirement, type Subject,
 } from "./compliancePassport";
 
@@ -162,9 +162,14 @@ export function evaluateWorkContext(args: {
 
   // Customer-required documents are a requirement the customer wrote, not the law.
   if (args.ctx.customer?.requiredDocTypes?.length) {
-    const have = new Set(allCredentials.filter(c => c.verificationStatus === "verified").map(c => c.docType));
-    const missing = args.ctx.customer.requiredDocTypes.filter(t => !have.has(t));
-    if (missing.length) { bump("review"); reasons.push(`customer: requires ${missing.join(", ")} — not verified on record`); }
+    // SPINE item 2: "on record" means in force by the canonical verdict. This used to count any
+    // verified row of the type, expired or not.
+    const inForce = (t: string) => {
+      const v = candidateVerdict(allCredentials.filter(c => c.docType === t), args.ctx.at, 30).verdict;
+      return v.state === "in_force" || v.state === "expiring";
+    };
+    const missing = args.ctx.customer.requiredDocTypes.filter(t => !inForce(t));
+    if (missing.length) { bump("review"); reasons.push(`customer: requires ${missing.join(", ")} — not in force on record`); }
   }
 
   const verdict = worst === "ready" ? "authorized" : worst;

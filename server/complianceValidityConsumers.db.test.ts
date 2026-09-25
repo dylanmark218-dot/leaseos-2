@@ -18,6 +18,7 @@ import { composeReadiness } from "./readinessComposer";
 import { widgetReaderFor } from "./widgetSources";
 import { loadExceptionSources } from "./surfacesService";
 import { deriveExceptions } from "./_core/exceptionCentre";
+import { authorize, type DomainRole } from "./_core/recordsAuthorization";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { complianceRequirementValidity, type ComplianceDocumentRow } from "./_core/complianceDocumentValidity";
 import type { ValidityState } from "./_core/documentValidity";
@@ -180,5 +181,24 @@ d("the exception centre raises expiry from the verdict, over the owner's whole h
     const about = (id: number) => xs.filter(x => x.subjectType === "operator" && x.subjectId === id && x.key.startsWith("cred:")).map(x => x.key.split(":").pop());
     expect(about(w.operatorId)).toEqual([]);
     expect(about(lapsed.insertId)).toEqual(["expired"]);
+  }, 30_000);
+});
+
+d("foreign TDG recognition requires the named document in force", () => {
+  it("refuses a verified certificate that has expired, or that has no expiry recorded", async () => {
+    const roles: DomainRole[] = ["safety", "hr", "office", "management"];
+    const role = roles.find(r => authorize({ userId: 1, roles: [r], permission: "compliance.credential.verify" }).allowed)!;
+    const actor = userSeq++;
+    await grantUserRole({ userId: actor, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() });
+    const learner = userSeq++;
+    for (const [expires, why] of [[-10, /in force/], [null, /in force/]] as const) {
+      const [doc] = await pool.execute<mysql.ResultSetHeader>(
+        "INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('user', ?, 'tdg_certificate', 'US TDG', ?, ?, 'verified')",
+        [learner, at(-30), at(expires)]);
+      await expect(callerFor(actor).academy.foreignTdgRoadRecognize({
+        userId: learner, complianceDocumentId: doc.insertId, issuingJurisdiction: "US", vehicleLicenceJurisdiction: "US",
+        trainingStandard: "49 CFR 172.700 to 172.704 hazmat training", documentValidInIssuingJurisdiction: true, expiresAt: at(expires ?? 100)!,
+      })).rejects.toThrow(why);
+    }
   }, 30_000);
 });

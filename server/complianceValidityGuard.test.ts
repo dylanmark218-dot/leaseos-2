@@ -98,7 +98,8 @@ function inlineValidity(node: ts.Node, receiver?: (r: ts.Expression) => boolean)
   return out;
 }
 
-const CANONICAL = ["complianceRequirementValidity", "documentExpiry", "proofFromDocuments", "complianceDocumentValidity"] as const;
+/** The canonical entry points. `candidateVerdict` is the passport's grouping over `complianceRequirementValidity`. */
+const CANONICAL = ["complianceRequirementValidity", "documentExpiry", "proofFromDocuments", "complianceDocumentValidity", "candidateVerdict"] as const;
 
 /**
  * Every place a compliance-document verdict is consumed. `mustCall` is false only for a pure
@@ -120,6 +121,15 @@ const CONSUMERS: { file: string; name: string; kind: "fn" | "case"; mustCall: bo
   { file: "server/_core/compliancePassport.ts", name: "medicalFitnessForDispatch", kind: "fn", mustCall: false },
   { file: "server/complianceRouter.ts", name: "medicalEligibility", kind: "fn", mustCall: true },
   { file: "server/surfacesService.ts", name: "loadExceptionSources", kind: "fn", mustCall: true },
+  { file: "server/_core/compliancePassport.ts", name: "evaluateRequirement", kind: "fn", mustCall: true,
+    // The requirement's own dates (effectiveFrom, its verificationStatus) are the requirement's
+    // standing, not a document's. A credential reaches it as a candidate, `best`, or `c`.
+    receiver: r => /^(c|best|candidate|candidates|named|v)$/.test(r.getText()) },
+  { file: "server/_core/compliancePassport.ts", name: "candidateVerdict", kind: "fn", mustCall: true },
+  { file: "server/_core/requirementEngine.ts", name: "evaluateWorkContext", kind: "fn", mustCall: true,
+    receiver: r => /^(c|allCredentials)$/.test(r.getText()) },
+  { file: "server/trainingAcademyRouter.ts", name: "foreignTdgRoadRecognize", kind: "fn", mustCall: true,
+    receiver: r => /^document$/.test(r.getText()) },
   { file: "server/_core/exceptionCentre.ts", name: "deriveExceptions", kind: "fn", mustCall: false,
     // The centre dates bills, purchase requests and policies too; a credential reaches it as `c` / `v`.
     receiver: r => /^(c|v|c\.verdict)$/.test(r.getText()) },
@@ -175,14 +185,14 @@ describe("one place decides whether a compliance document is in force", () => {
 const READERS: Record<string, string> = {
   "server/readinessComposer.ts": "dispatch: credentials, medical fitness and insurance proof, each through complianceRequirementValidity / proofFromDocuments",
   "server/insuranceRouter.ts": "insurance office: the entity's proof through proofFromDocuments",
-  "server/complianceRouter.ts": "medicalEligibility through complianceRequirementValidity; writes (record, verify) decide nothing; the passport is read by evaluateRequirement — see SPINE_ITEM2_COMPLIANCE_VALIDITY.md, still open",
+  "server/complianceRouter.ts": "medicalEligibility through complianceRequirementValidity; the passport's credentials (with id, capture time and owner) for evaluateRequirement → candidateVerdict; writes decide nothing",
   "server/db.ts": "listComplianceDocuments (the documentExpiry tile's source) and writes; decides nothing",
   "server/surfacesService.ts": "the exception centre: flagged owners' whole history per type through complianceRequirementValidity; exceptionCentre.ts maps the verdicts",
-  "server/requirementRouter.ts": "requirement-engine credentials for evaluateRequirement — still open, as above",
+  "server/requirementRouter.ts": "requirement-engine credentials (with id, capture time and owner) for evaluateRequirement → candidateVerdict",
   "server/auditRouter.ts": "copies rows into an audit package verbatim; decides nothing",
   "server/hosRouter.ts": "files a scanned paper log as a needs_review document; decides nothing",
   "server/workforceRouter.ts": "writes a verified credential from verified training; decides nothing",
-  "server/trainingAcademyRouter.ts": "foreign TDG recognition checks one named document's verification and expiry as a precondition — still open, as above",
+  "server/trainingAcademyRouter.ts": "foreign TDG recognition requires the named document in force by complianceRequirementValidity",
 };
 
 function readdirTs(dir: string): string[] {

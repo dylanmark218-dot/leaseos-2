@@ -110,7 +110,7 @@ export const FAVOURABLE: Readonly<Record<ValidityState, number>> = {
 export function complianceRequirementValidity(
   rows: readonly ComplianceDocumentRow[], docTypes: readonly string[], at: Date, noticeDays = 30,
 ): ComplianceVerdict {
-  const judged = docTypes.map((docType, order) => {
+  return mostFavourableVerdict(docTypes.map(docType => {
     const versions = versionsOf(rows, docType);
     const v = validityOf(versions.map(asVersion), at, noticeDays);
     const named = v.version != null ? versions[v.version - 1] ?? null : null;
@@ -119,10 +119,20 @@ export function complianceRequirementValidity(
       ...v, docType, documentId: named?.id ?? null, claimedExpiresAt,
       claimLapsed: v.state === "unverified" && claimedExpiresAt !== null && claimedExpiresAt.getTime() < at.getTime(),
     };
-    return { verdict, order };
-  });
-  judged.sort((a, b) => FAVOURABLE[a.verdict.state] - FAVOURABLE[b.verdict.state] || a.order - b.order);
-  return judged[0]?.verdict ?? {
+    return verdict;
+  }));
+}
+
+/**
+ * Of several verdicts on things that each satisfy the same requirement, the one that stands: the
+ * most favourable, ties in the order given. Used by `complianceRequirementValidity` across types,
+ * and by the passport across the subjects of a work combination. It chooses between verdicts; it
+ * never reaches one.
+ */
+export function mostFavourableVerdict(verdicts: readonly ComplianceVerdict[]): ComplianceVerdict {
+  const ranked = verdicts.map((verdict, order) => ({ verdict, order }))
+    .sort((a, b) => FAVOURABLE[a.verdict.state] - FAVOURABLE[b.verdict.state] || a.order - b.order);
+  return ranked[0]?.verdict ?? {
     state: "none", version: null, expiresAt: null, daysRemaining: null, reason: "No document type was asked about",
     docType: null, documentId: null, claimedExpiresAt: null, claimLapsed: false,
   };

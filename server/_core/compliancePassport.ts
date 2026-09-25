@@ -22,7 +22,7 @@
  *   it never learns why not.
  */
 
-import type { ComplianceVerdict } from "./complianceDocumentValidity";
+import { complianceRequirementValidity, mostFavourableVerdict, type ComplianceDocumentRow, type ComplianceVerdict } from "./complianceDocumentValidity";
 
 export type RequirementStatus = "unverified" | "verified" | "superseded" | "withdrawn";
 export type CredentialVerification = "needs_review" | "verified" | "rejected";
@@ -78,6 +78,15 @@ export type RequirementRef = {
 };
 
 export type Credential = {
+  /**
+   * SPINE item 2 — identity and order, so the candidates can be judged canonically. Loaders from
+   * `complianceDocuments` supply all three. A credential built by hand without them is ordered as
+   * given and treated as one subject's.
+   */
+  id?: number;
+  capturedAt?: Date;
+  /** Whose document this is (`ownerType:ownerId`). A work combination mixes several subjects' credentials. */
+  ownerKey?: string;
   docType: string;
   requirementKey?: string | null;
   issuedAt?: Date | null;
@@ -107,6 +116,10 @@ export type ItemStatus =
    * private part.
    */
   | "evidence_withheld"
+  /** Verified, but no expiry is recorded for a type that must have one (SPINE item 2, ruling B). */
+  | "evidence_incomplete"
+  /** Verified, but its effective date has not come and nothing earlier is in force. */
+  | "not_yet_effective"
   | "requirement_unverified"
   | "not_applicable";
 
@@ -204,9 +217,13 @@ export function evaluateRequirement(args: {
     };
   }
 
-  // Best candidate: verified beats needs_review beats rejected; then latest expiry.
-  const rank = (c: Credential) => (c.verificationStatus === "verified" ? 2 : c.verificationStatus === "needs_review" ? 1 : 0);
-  const best = [...candidates].sort((a, b) => rank(b) - rank(a) || (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0]!;
+  // SPINE item 2: which candidate stands, and whether it is in force, is the canonical verdict's call
+  // — per subject and document type, then the most favourable. This used to rank the rows itself
+  // (verified, then needs_review, then latest expiry) and read the winner's date: a verified
+  // document with no expiry was "satisfied", one not yet effective was "satisfied", and an older
+  // verified row with a later date outranked a newer verified correction that had expired.
+  const { verdict: v, named } = candidateVerdict(candidates, args.now, r.warnDaysBeforeExpiry);
+  const isPrivate = named?.privateDetail ?? candidates.some(c => c.privateDetail);
 
   /**
    * `privateDetail` was declared on Credential and read nowhere — a field that
@@ -234,28 +251,73 @@ export function evaluateRequirement(args: {
     reason: `${r.title} is not satisfied. The evidence is held privately — the reason is with the office, not on this passport.`,
   });
 
-  if (best.verificationStatus === "rejected" && candidates.every(c => c.verificationStatus === "rejected")) {
-    if (best.privateDetail) return withheld("blocked", null);
-    return { ...base, status: "evidence_rejected", effect: "blocked", expiresAt: best.expiresAt ?? null, daysToExpiry: null, reason: `${r.title} evidence was rejected on review` };
+  /*
+   * The verdict, mapped onto the passport's statuses:
+   *
+   *   in_force                                  → satisfied
+   *   expiring                                  → expiring (review), or satisfied when the warn window is zero
+   *   expired, or unverified with a lapsed claim → expired (blocked)
+   *   unverified                                → evidence_unverified (review)
+   *   rejected                                  → evidence_rejected (blocked)
+   *   not_yet_effective                         → not_yet_effective (blocked: nothing is in force)
+   *   incomplete                                → evidence_incomplete (unknown: never rounded up to satisfied)
+   */
+  switch (v.state) {
+    case "rejected":
+      if (isPrivate) return withheld("blocked", null);
+      return { ...base, status: "evidence_rejected", effect: "blocked", expiresAt: named?.expiresAt ?? null, daysToExpiry: null, reason: `${r.title} evidence was rejected on review` };
+    case "expired":
+      return { ...base, status: "expired", effect: "blocked", expiresAt: v.expiresAt, daysToExpiry: v.daysRemaining, reason: `${r.title} expired ${Math.abs(v.daysRemaining ?? 0)} day(s) ago` };
+    case "unverified": {
+      const claimed = v.claimedExpiresAt;
+      const claimedDays = claimed ? Math.floor((claimed.getTime() - args.now.getTime()) / 86_400_000) : null;
+      if (v.claimLapsed) {
+        return { ...base, status: "expired", effect: "blocked", expiresAt: claimed, daysToExpiry: claimedDays, reason: `${r.title} expired ${Math.abs(claimedDays ?? 0)} day(s) ago` };
+      }
+      if (isPrivate) return withheld("review", claimed);
+      return { ...base, status: "evidence_unverified", effect: "review", expiresAt: claimed, daysToExpiry: claimedDays, reason: `${r.title} is on record but has not been verified` };
+    }
+    case "not_yet_effective":
+      if (isPrivate) return withheld("blocked", null);
+      return { ...base, status: "not_yet_effective", effect: "blocked", expiresAt: v.expiresAt, daysToExpiry: null, reason: `${r.title}: ${v.reason}` };
+    case "incomplete":
+      if (isPrivate) return withheld("unknown", null);
+      return { ...base, status: "evidence_incomplete", effect: "unknown", expiresAt: null, daysToExpiry: null, reason: `${r.title}: ${v.reason}` };
+    case "expiring":
+      // A warn window of zero means "never warn": a 24-hour inspection is valid
+      // or it is not, and twelve hours left is not an exception to raise.
+      if (r.warnDaysBeforeExpiry > 0) {
+        return { ...base, status: "expiring", effect: "review", expiresAt: v.expiresAt, daysToExpiry: v.daysRemaining, reason: `${r.title} expires in ${v.daysRemaining} day(s)` };
+      }
+      return { ...base, status: "satisfied", effect: "none", expiresAt: v.expiresAt, daysToExpiry: v.daysRemaining, reason: `${r.title} current (${v.daysRemaining} days)` };
+    case "in_force":
+      return { ...base, status: "satisfied", effect: "none", expiresAt: v.expiresAt, daysToExpiry: v.daysRemaining, reason: `${r.title} current${v.daysRemaining !== null ? ` (${v.daysRemaining} days)` : ""}` };
+    case "none":
+      return { ...base, status: "missing", effect: r.missingSeverity, expiresAt: null, daysToExpiry: null, reason: `No ${r.title} on record` };
   }
+}
 
-  const expiresAt = best.expiresAt ?? null;
-  const days = expiresAt ? Math.floor((expiresAt.getTime() - args.now.getTime()) / 86_400_000) : null;
-
-  if (expiresAt && expiresAt <= args.now) {
-    return { ...base, status: "expired", effect: "blocked", expiresAt, daysToExpiry: days, reason: `${r.title} expired ${Math.abs(days!)} day(s) ago` };
+/**
+ * The candidates, judged by the canonical evaluator: each subject's rows of each type as one
+ * version history, then the most favourable verdict across them. Returns the credential the
+ * verdict names, so its `privateDetail` can be honoured.
+ */
+export function candidateVerdict(candidates: readonly Credential[], now: Date, noticeDays: number): { verdict: ComplianceVerdict; named: Credential | undefined } {
+  const keyed = candidates.map((c, i) => ({ c, id: c.id ?? -(i + 1), capturedAt: c.capturedAt ?? new Date(i) }));
+  const groups = new Map<string, typeof keyed>();
+  for (const k of keyed) {
+    const g = `${k.c.ownerKey ?? ""}\u0000${k.c.docType}`;
+    groups.set(g, [...(groups.get(g) ?? []), k]);
   }
-  if (best.verificationStatus === "needs_review") {
-    if (best.privateDetail) return withheld("review", expiresAt);
-    return { ...base, status: "evidence_unverified", effect: "review", expiresAt, daysToExpiry: days, reason: `${r.title} is on record but has not been verified` };
-  }
-  // A warn window of zero means "never warn": a 24-hour inspection is valid
-  // or it is not, and twelve hours left is not an exception to raise. Without
-  // this, floor(0.5 days) = 0 <= 0 would flag every daily item as expiring.
-  if (r.warnDaysBeforeExpiry > 0 && days !== null && days <= r.warnDaysBeforeExpiry) {
-    return { ...base, status: "expiring", effect: "review", expiresAt, daysToExpiry: days, reason: `${r.title} expires in ${days} day(s)` };
-  }
-  return { ...base, status: "satisfied", effect: "none", expiresAt, daysToExpiry: days, reason: `${r.title} current${days !== null ? ` (${days} days)` : ""}` };
+  const verdicts = Array.from(groups.values()).map(group => complianceRequirementValidity(
+    group.map((k): ComplianceDocumentRow => ({
+      id: k.id, docType: k.c.docType, title: k.c.docType, issuedAt: k.c.issuedAt ?? null, expiresAt: k.c.expiresAt ?? null,
+      verificationStatus: k.c.verificationStatus, capturedAt: k.capturedAt,
+    })),
+    [group[0]!.c.docType], now, noticeDays,
+  ));
+  const verdict = mostFavourableVerdict(verdicts);
+  return { verdict, named: keyed.find(k => k.id === verdict.documentId)?.c };
 }
 
 /* ------------------------------------------------------------------ */

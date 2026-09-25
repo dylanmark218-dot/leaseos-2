@@ -20,7 +20,8 @@ import {
 } from "./_core/complianceDocumentValidity";
 import type { ValidityState } from "./_core/documentValidity";
 import { assessCoverage, INSURANCE_PROOF_DOC_TYPES, proofFromDocuments, type PolicyRecord } from "./_core/insuranceRisk";
-import { MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch } from "./_core/compliancePassport";
+import { candidateVerdict, evaluateRequirement, MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch, type Credential, type Requirement } from "./_core/compliancePassport";
+import { evaluateWorkContext, type WorkContext } from "./_core/requirementEngine";
 import { operatorIdFromRecord } from "./_core/operatorIdentity";
 import { OWNER_DOCUMENT_LIST_CAP } from "./db";
 import { widgetReaderFor } from "./widgetSources";
@@ -347,5 +348,58 @@ describe("the documentExpiry tile presents the verdict and decides nothing", () 
     }));
     const { payload } = await tileFor(many);
     expect(payload.state).toBe("unknown");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The passport and the work combination                                 */
+/* ------------------------------------------------------------------ */
+
+describe("the passport maps the verdict", () => {
+  const requirement = (over: Partial<Requirement> = {}): Requirement => ({
+    requirementKey: "driver.licence", version: 1, family: "driver", title: "Driver licence", subjectType: "operator", jurisdiction: "CA-AB",
+    satisfiedByDocTypes: ["driver_licence"], warnDaysBeforeExpiry: 30, missingSeverity: "blocked", verificationStatus: "verified",
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"), ...over,
+  });
+  const asCredentials = (docRows: readonly ComplianceDocumentRow[], ownerKey = "operator:9"): Credential[] =>
+    docRows.map(r => ({ id: r.id, capturedAt: r.capturedAt, ownerKey, docType: r.docType, issuedAt: r.issuedAt, expiresAt: r.expiresAt, verificationStatus: r.verificationStatus, privateDetail: false }));
+  const PASSPORT: Record<ValidityState, { status: string; effect: string }> = {
+    in_force: { status: "satisfied", effect: "none" }, expiring: { status: "expiring", effect: "review" },
+    expired: { status: "expired", effect: "blocked" }, rejected: { status: "evidence_rejected", effect: "blocked" },
+    unverified: { status: "evidence_unverified", effect: "review" }, not_yet_effective: { status: "not_yet_effective", effect: "blocked" },
+    incomplete: { status: "evidence_incomplete", effect: "unknown" }, none: { status: "missing", effect: "blocked" },
+  };
+
+  it.each(CASES)("$name", ({ specs, expect: state, lapsed }) => {
+    const item = evaluateRequirement({ requirement: requirement(), credentials: asCredentials(rows("driver_licence", specs)), now: NOW });
+    expect(item).toMatchObject(lapsed ? { status: "expired", effect: "blocked" } : PASSPORT[state]);
+  });
+
+  it("a combination judges each subject's rows as its own history, then the most favourable", () => {
+    // The worker's licence expired; the same type on the equipment's record is in force. Neither
+    // subject's rows are read as versions of the other's.
+    const worker = asCredentials(rows("site_orientation", [{ status: "verified", expires: -5, captured: -1, id: 1 }]), "operator:9");
+    const equipment = asCredentials(rows("site_orientation", [{ status: "verified", expires: 200, captured: -30, id: 2 }]), "equipment:42");
+    const v = candidateVerdict([...worker, ...equipment], NOW, 30);
+    expect(v.verdict).toMatchObject({ state: "in_force", documentId: 2 });
+  });
+
+  it("a customer-required document counts only when it is in force, not merely verified", () => {
+    const base: WorkContext = {
+      jurisdiction: "CA-AB", at: NOW, worker: { id: 9, attributes: {}, credentials: [] }, equipment: null, attachments: [],
+      work: { workType: "excavation" }, site: null, cargo: null, customer: { ref: "ACME", requiredDocTypes: ["acme_site_orientation"] },
+    };
+    const withDoc = (specs: Spec[]) => evaluateWorkContext({
+      ctx: { ...base, worker: { id: 9, attributes: {}, credentials: asCredentials(rows("acme_site_orientation", specs)) } },
+      requirements: [], activePacks: new Set(),
+    });
+    expect(withDoc([{ status: "verified", expires: 100, captured: -5 }]).reasons.join(" ")).not.toContain("customer:");
+    for (const lapsedOrUnset of [
+      [{ status: "verified" as const, expires: -1, captured: -300 }],
+      [{ status: "verified" as const, expires: null, captured: -5 }],
+      [{ status: "needs_review" as const, expires: 100, captured: -5 }],
+    ]) {
+      expect(withDoc(lapsedOrUnset).reasons.join(" ")).toContain("customer: requires acme_site_orientation");
+    }
   });
 });
