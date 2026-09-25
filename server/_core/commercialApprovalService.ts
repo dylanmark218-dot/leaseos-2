@@ -6,7 +6,7 @@
  * rows, and reports whether the requirement is now satisfied. The caller flips
  * its subject's status only on `satisfied`. Nothing here edits the subject.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { MySql2Database } from "drizzle-orm/mysql2";
 import { commercialApprovalPolicies, commercialApprovalSignatures, commercialApprovals, userRoleAssignments } from "../../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./actingScope";
@@ -27,10 +27,20 @@ export type DecideResult =
 export async function decide(db: Db, args: { actorUserId: number; category: string; subjectType: string; subjectRef: string; amountCents: number; preparedByUserId: number | null; decision: "approved" | "refused"; note?: string }): Promise<DecideResult> {
   const scope = await resolveActingScope(db as never, args.actorUserId);
   const bookOrgRef = scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId;
-  const roles = (await db.select({ role: userRoleAssignments.role }).from(userRoleAssignments).where(eq(userRoleAssignments.userId, args.actorUserId))).map(r => r.role as string);
+  // F1 — only grants in force. A revoked role never satisfies, refuses or counts toward an approval.
+  const roles = (await db.select({ role: userRoleAssignments.role }).from(userRoleAssignments).where(and(eq(userRoleAssignments.userId, args.actorUserId), isNull(userRoleAssignments.revokedAt)))).map(r => r.role as string);
 
   // The ledger row for this subject, created on first contact with the requirement snapshotted.
+  //
+  // F1 — the approval's identity is book + subject type + subject. The ledger's unique key is
+  // (subjectType, subjectRef), so a row for the same subject identifier in ANOTHER book is found here —
+  // and is never reused: signatures gathered in one company's book cannot satisfy another's. Such a
+  // collision is refused rather than resolved (a new row would violate the key, and silently picking
+  // either book is the bug). Subject refs are system-issued, so this is a guard, not a normal path.
   let row = (await db.select().from(commercialApprovals).where(and(eq(commercialApprovals.subjectType, args.subjectType), eq(commercialApprovals.subjectRef, args.subjectRef))).limit(1))[0];
+  if (row && (row.bookOrgRef ?? null) !== bookOrgRef) {
+    return { outcome: "blocked", approvalRef: null, reason: `The approval ledger for ${args.subjectType} ${args.subjectRef} belongs to another book — an approval recorded there does not count here` };
+  }
   if (!row) {
     const policies = (await db.select().from(commercialApprovalPolicies)) as ApprovalPolicyRow[];
     const scoped = policies.filter(p => p.bookOrgRef === null || p.bookOrgRef === bookOrgRef).map(p => ({ ...p, maxAmountCents: p.maxAmountCents === null ? null : Number(p.maxAmountCents) }));

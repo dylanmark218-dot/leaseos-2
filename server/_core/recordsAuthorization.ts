@@ -182,6 +182,12 @@ export type Permission =
   | "compliance.passport.read" | "compliance.credential.record" | "compliance.credential.verify"
   | "compliance.private.read" | "compliance.consent.record" | "compliance.requirement.manage"
   | "compliance.program.publish" | "compliance.profile.review"
+  // C1b-2b — requirement verification through the ledger. Proposing, verifying, second approval of a
+  // dispatch-blocking rule, withdrawal and verification governance are separate acts, held separately.
+  // Separation of duties is additionally enforced by person (proposer ≠ verifier ≠ second verifier),
+  // so holding several of these does not let one person carry a requirement alone.
+  | "compliance.requirement.propose" | "compliance.requirement.verify" | "compliance.requirement.second_approve"
+  | "compliance.requirement.retire" | "compliance.verification.govern"
   // v20.22 — packs, work authorization, equipment authorization, calibration.
   | "compliance.pack.manage" | "compliance.work.evaluate"
   | "equipment.authorize" | "calibration.record" | "calibration.impact"
@@ -695,6 +701,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -978,6 +987,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.requirement.retire",
+    "compliance.verification.govern",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1266,6 +1280,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "audit.package.read",
   ],
   legal: [
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.verification.govern",
     "evidence.read_legal",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
@@ -1469,6 +1488,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.requirement.retire",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1855,6 +1879,11 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // v20.22
   "compliance.pack.manage",
   "equipment.authorize",
+  // C1b-2b — each makes a regulatory requirement authoritative, retires one, or changes how it may be verified.
+  "compliance.requirement.verify",
+  "compliance.requirement.second_approve",
+  "compliance.requirement.retire",
+  "compliance.verification.govern",
   // v20.21
   "compliance.credential.verify",
   "compliance.private.read",
@@ -2163,6 +2192,7 @@ export const RECORDS_PROCEDURE_PERMISSIONS = {
   "records.incident.review": "incident.review",
   "records.nearMiss.report": "incident.create",
   "records.maintenance.recordRelease": "maintenance.record_release",
+  "records.maintenance.resolveDefect": "maintenance.record_release",
   "records.maintenance.revokeRelease": "maintenance.revoke_release",
   "records.legalHold.place": "legal_hold.place",
   "records.legalHold.release": "legal_hold.release",
@@ -2483,7 +2513,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "compliance.credentialRecord": "compliance.credential.record",
   "compliance.credentialVerify": "compliance.credential.verify",
   "compliance.consentRecord": "compliance.consent.record",
-  "compliance.requirementLoad": "compliance.requirement.manage",
+  // C1b-2b: requirementLoad creates a proposal and nothing more.
+  "compliance.requirementLoad": "compliance.requirement.propose",
+  "compliance.requirementVerify": "compliance.requirement.verify",
+  "compliance.requirementSecondApprove": "compliance.requirement.second_approve",
+  "compliance.requirementWithdraw": "compliance.requirement.retire",
+  "compliance.verificationPolicySet": "compliance.verification.govern",
+  "compliance.requirementProvenance": "compliance.passport.read",
   "compliance.programPublish": "compliance.program.publish",
   "compliance.profileReviewRecord": "compliance.profile.review",
   "compliance.knowledgeCatalog": "compliance.passport.read",
@@ -2554,6 +2590,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "dispatch.overrideGrant": "dispatch.override.grant",
   "dispatch.whatAmIMissing": "dispatch.readiness_own",
   "dispatch.readiness": "dispatch.read",
+  // The canonical slot model's door. Creating a posting or a slot is planning, so it sits under the
+  // permission that already means "decide who works this job" — never under dispatch.award.
+  "dispatch.createPosting": "dispatch.assign",
+  "dispatch.addRole": "dispatch.assign",
+  "dispatch.listRoles": "dispatch.read",
+  // Binding a slot is assignment, never award. dispatch.award stays a separate permission so the
+  // two can be separated by grant later without touching this code.
+  "dispatch.setRoleAssignment": "dispatch.assign",
+  "dispatch.clearRoleAssignment": "dispatch.assign",
   /* ---- v21.2: enforcement ---- */
   "dispatch.enforcementSet": "dispatch.enforcement.manage",
   "dispatch.enforcementGet": "dispatch.read",

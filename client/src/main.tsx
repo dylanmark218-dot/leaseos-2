@@ -3,6 +3,11 @@ import { COOKIE_NAME, UNAUTHED_ERR_MSG } from "@shared/const";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { showcaseGuardLink } from "./lib/showcaseGuard";
+import {
+  createRefreshGate,
+  refreshViaHttp,
+  sessionRefreshLink,
+} from "./lib/sessionRefresh";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
@@ -39,9 +44,43 @@ queryClient.getMutationCache().subscribe(event => {
   }
 });
 
+/**
+ * S1-I — one rotation at a time, shared by every caller in the tab.
+ *
+ * Built once at module scope, not per request: the single-flight guarantee only holds if every
+ * expired request consults the same gate.
+ */
+const refreshGate = createRefreshGate(() => refreshViaHttp());
+
+/**
+ * What a refresh failure clears, and what it deliberately leaves alone.
+ *
+ * The sessionStorage Bearer mirror is dropped, because it now holds a token the server has stopped
+ * honouring and it is the *fallback* credential — leaving it would keep presenting a dead token on
+ * surfaces where cookies are blocked.
+ *
+ * It does NOT call `startLogin()`. The link surfaces the original `UNAUTHED_ERR_MSG` error, which
+ * the query/mutation cache subscribers below already act on. Redirecting here as well would call
+ * `startLogin()` twice, and each call mints a fresh nonce over the `__Host-` state cookie — the
+ * second would desync the first and the callback would reject with "invalid oauth state".
+ */
+const clearStaleBrowserAuth = () => {
+  try {
+    sessionStorage.removeItem("manus-cookie");
+  } catch {
+    // sessionStorage unavailable — nothing mirrored, nothing to clear.
+  }
+};
+
 const trpcClient = trpc.createClient({
   links: [
     showcaseGuardLink(),
+    // Above httpBatchLink so it sees a finished request and can run it again, and below the
+    // showcase guard so a refused showcase write is never retried against the server.
+    sessionRefreshLink({
+      refresh: () => refreshGate.refresh(),
+      onSignedOut: clearStaleBrowserAuth,
+    }),
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,

@@ -1,127 +1,160 @@
 /**
- * A session is bound to the app it was issued for.
+ * A session is bound to the app it was issued for — tested against the real
+ * `sdk`, not against a copy of its logic.
  *
  * `verifySession` compares the token's `appId` against `ENV.appId` and refuses a
  * mismatch. A signing secret shared across deployments — the same value pasted
  * into staging, or a second app on the same platform — otherwise made either
- * one's session valid here, because the signature checks out and the claim that
- * would have distinguished them was decoded and dropped.
+ * one's session valid here: the signature checks out, and the claim that would
+ * have distinguished them was decoded and dropped.
  *
  * This file exists because nothing tested it. A review of the change that added
  * the check found that no test in the repository mints or verifies a session JWT
- * at all — so a new branch that can refuse every request in the application
- * shipped with no coverage, in the same commit that added nine cases for a
+ * at all — so a branch that can refuse every request in the application shipped
+ * with no coverage, in the same commit that added three cases for a
  * bind-parameter invariant which changes no behaviour.
  *
- * The cases go through `jose` directly rather than through `sdk`, because `sdk`
- * reads `ENV` at module load and constructing it needs an OAuth server. What is
- * pinned is the decision `verifySession` makes, in the same shape and with the
- * same algorithm pin, so a change to that logic has to be made deliberately.
+ * The first draft of this file reimplemented `verifySession`'s decision inline
+ * and asserted against that, which would have kept passing no matter what the
+ * production function did. It now calls `sdk.createSessionToken`,
+ * `sdk.signSession` and `sdk.verifySession` themselves. `ENV` is mocked because
+ * the module reads it at load and builds an OAuth client from it; the functions
+ * under test are the real ones.
  */
-import { describe, expect, it } from "vitest";
-import { SignJWT, jwtVerify } from "jose";
+import { describe, expect, it, vi } from "vitest";
 
-const SECRET = new TextEncoder().encode("a-secret-long-enough-to-sign-with-abc");
-const OTHER_SECRET = new TextEncoder().encode("a-different-deployments-secret-xyz123");
+const APP_ID = "leaseos-app";
+const SECRET = "a-signing-secret-long-enough-to-be-realistic";
 
-const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+const BASE_ENV = {
+  appId: APP_ID,
+  cookieSecret: SECRET,
+  databaseUrl: "",
+  oAuthServerUrl: "https://oauth.invalid",
+  ownerOpenId: "",
+  isProduction: false,
+  forgeApiUrl: "",
+  forgeApiKey: "",
+};
 
-async function mint(
-  claims: { openId?: unknown; appId?: unknown; name?: unknown },
-  secret = SECRET
-) {
-  return new SignJWT(claims as Record<string, unknown>)
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .setExpirationTime(Math.floor(Date.now() / 1000) + 3600)
-    .sign(secret);
+/**
+ * Load the real `sdk` against an explicitly stated environment.
+ *
+ * Every test names its own ENV rather than inheriting one. The first version of
+ * this file used a top-level `vi.mock` plus `vi.doMock` inside two tests, and
+ * `doMock` registrations outlive `resetModules` — so once one test remapped
+ * `appId` to "leaseos-renamed", later tests loaded the sdk with THAT identity and
+ * their tokens were refused for the wrong reason. Three assertions passed
+ * vacuously. Found by disabling the required-claims check in `sdk.ts` and
+ * watching the suite stay green when it should have gone red.
+ */
+async function sdkWith(env: Partial<typeof BASE_ENV> = {}) {
+  vi.resetModules();
+  vi.doMock("./env", () => ({ ENV: { ...BASE_ENV, ...env } }));
+  return (await import("./sdk")).sdk;
 }
 
-/** The decision verifySession makes, in the order it makes it. */
-async function verify(token: string, envAppId: string, secret = SECRET) {
-  let payload: Record<string, unknown>;
-  try {
-    ({ payload } = (await jwtVerify(token, secret, { algorithms: ["HS256"] })) as never);
-  } catch {
-    return { ok: false, reason: "signature" as const };
-  }
-  const { openId, appId, name } = payload;
-  if (!isNonEmptyString(openId) || !isNonEmptyString(appId) || !isNonEmptyString(name)) {
-    return { ok: false, reason: "missing-fields" as const };
-  }
-  if (envAppId && appId !== envAppId) return { ok: false, reason: "wrong-app" as const };
-  return { ok: true as const, openId, appId, name };
-}
-
-const GOOD = { openId: "user-1", appId: "leaseos-app", name: "Dana" };
-
-describe("session appId binding", () => {
-  it("accepts a session issued for this app", async () => {
-    const r = await verify(await mint(GOOD), "leaseos-app");
-    expect(r.ok).toBe(true);
-  });
-
-  it("refuses a validly-signed session issued for a different app", async () => {
-    // The whole point: the signature is good. Only the claim distinguishes them.
-    const r = await verify(await mint({ ...GOOD, appId: "leaseos-staging" }), "leaseos-app");
-    expect(r).toMatchObject({ ok: false, reason: "wrong-app" });
-  });
-
-  it("still refuses a session signed with another deployment's secret", async () => {
-    const r = await verify(await mint(GOOD, OTHER_SECRET), "leaseos-app");
-    expect(r).toMatchObject({ ok: false, reason: "signature" });
-  });
-
-  it("does not enforce when this server does not know its own identity", async () => {
-    // ENV.appId is unset in development and in the test suite. Refusing there
-    // would turn a missing variable into an outage rather than a config gap.
-    const r = await verify(await mint({ ...GOOD, appId: "anything" }), "");
-    expect(r.ok).toBe(true);
+describe("a session minted here verifies here", () => {
+  it("round-trips a token created for the configured appId", async () => {
+    const sdk = await sdkWith();
+    const token = await sdk.createSessionToken("user-1", { name: "Dana" });
+    await expect(sdk.verifySession(token)).resolves.toMatchObject({
+      openId: "user-1",
+      appId: APP_ID,
+    });
   });
 });
 
-describe("the pre-existing non-empty check, which bounds the blast radius", () => {
+describe("a session issued for another app is refused", () => {
+  it("refuses a validly-signed token carrying a different appId", async () => {
+    // The whole point: the signature is good and the secret is shared. Only the
+    // claim distinguishes this deployment from the other one.
+    const sdk = await sdkWith();
+    const foreign = await sdk.signSession({
+      openId: "user-1", appId: "leaseos-staging", name: "Dana",
+    });
+    await expect(sdk.verifySession(foreign)).resolves.toBeNull();
+  });
+
+  it("invalidates a token minted for the appId this server used to carry", async () => {
+    // Reconfiguring the app's identity must retire sessions issued under the old
+    // one, rather than leaving them indistinguishable from current sessions.
+    const sdk = await sdkWith();
+    const token = await sdk.createSessionToken("user-1", { name: "Dana" });
+    await expect(sdk.verifySession(token)).resolves.not.toBeNull();
+
+    const renamed = await sdkWith({ appId: "leaseos-renamed" });
+    await expect(renamed.verifySession(token)).resolves.toBeNull();
+  });
+});
+
+describe("the required claims are still enforced", () => {
   /*
-   * This is why enabling the comparison could not invalidate live sessions. An
-   * empty appId was already refused before the comparison existed — so if
-   * VITE_APP_ID had been unset in production, createSessionToken would have
+   * These predate the appId comparison and bound its blast radius. `verifySession`
+   * already refused a token whose `appId` was not a non-empty string — so if
+   * `VITE_APP_ID` had been unset in production, `createSessionToken` would have
    * minted `appId: ""` and the server would have rejected every session it
    * issued. Login working at all proves the variable is set, and that every live
    * cookie carries exactly the value now compared against.
    */
-  it("refuses an empty appId regardless of the comparison", async () => {
-    expect(await verify(await mint({ ...GOOD, appId: "" }), "leaseos-app")).toMatchObject({
-      ok: false, reason: "missing-fields",
-    });
-    expect(await verify(await mint({ ...GOOD, appId: "" }), "")).toMatchObject({
-      ok: false, reason: "missing-fields",
-    });
+  it("refuses an empty appId", async () => {
+    const sdk = await sdkWith();
+    const token = await sdk.signSession({ openId: "user-1", appId: "", name: "Dana" });
+    await expect(sdk.verifySession(token)).resolves.toBeNull();
   });
 
   it("refuses a missing openId or name", async () => {
-    expect(await verify(await mint({ appId: "leaseos-app", name: "Dana" }), "leaseos-app")).toMatchObject({ ok: false });
-    expect(await verify(await mint({ openId: "user-1", appId: "leaseos-app" }), "leaseos-app")).toMatchObject({ ok: false });
+    const sdk = await sdkWith();
+    await expect(
+      sdk.verifySession(await sdk.signSession({ openId: "", appId: APP_ID, name: "Dana" }))
+    ).resolves.toBeNull();
+    await expect(
+      sdk.verifySession(await sdk.signSession({ openId: "user-1", appId: APP_ID, name: "" }))
+    ).resolves.toBeNull();
+  });
+
+  it("refuses a missing or malformed token", async () => {
+    const sdk = await sdkWith();
+    await expect(sdk.verifySession(undefined)).resolves.toBeNull();
+    await expect(sdk.verifySession("")).resolves.toBeNull();
+    await expect(sdk.verifySession("not-a-jwt")).resolves.toBeNull();
+    await expect(sdk.verifySession("a.b.c")).resolves.toBeNull();
+  });
+
+  it("refuses a token signed with another deployment's secret", async () => {
+    const sdk = await sdkWith();
+    const token = await sdk.createSessionToken("user-1", { name: "Dana" });
+
+    const other = await sdkWith({ cookieSecret: "an-entirely-different-deployment-secret" });
+    await expect(other.verifySession(token)).resolves.toBeNull();
   });
 });
 
-describe("a cron session is subject to the same check", () => {
+describe("a cron session goes through the same gate", () => {
   /*
-   * `authenticateRequest` calls verifySession first and only then inspects the
-   * `cron_` prefix, so the appId comparison gates the cron branch completely.
-   * The platform's own project validation happens downstream and cannot rescue a
-   * refusal. Nothing in this repository mints a cron token, so whether the
-   * platform sets this app's appId on one is an external question — recorded in
-   * audit/hardening-2026-09-21/REMEDIATION.md. This case pins the ordering that
-   * makes it matter.
+   * `authenticateRequest` calls `verifySession` first and only then inspects the
+   * `cron_` prefix, so the appId comparison gates the cron branch completely, and
+   * the platform's own project validation happens downstream where it cannot
+   * rescue a refusal. Nothing in this repository mints a cron token, so whether
+   * the platform sets this app's appId on one is an external question — recorded
+   * in audit/hardening-2026-09-21/REMEDIATION.md. These pin the ordering that
+   * makes it matter, so a change to it is deliberate rather than incidental.
    */
-  it("refuses a cron token carrying a foreign appId, before the cron branch", async () => {
-    const token = await mint({ openId: "cron_task_42", appId: "platform-scheduler", name: "Scheduled Task" });
-    const r = await verify(token, "leaseos-app");
-    expect(r).toMatchObject({ ok: false, reason: "wrong-app" });
+  it("refuses a cron token carrying a foreign appId", async () => {
+    const sdk = await sdkWith();
+    const token = await sdk.signSession({
+      openId: "cron_task_42", appId: "platform-scheduler", name: "Scheduled Task",
+    });
+    await expect(sdk.verifySession(token)).resolves.toBeNull();
   });
 
   it("accepts a cron token carrying this app's appId", async () => {
-    const token = await mint({ openId: "cron_task_42", appId: "leaseos-app", name: "Scheduled Task" });
-    const r = await verify(token, "leaseos-app");
-    expect(r).toMatchObject({ ok: true, openId: "cron_task_42" });
+    const sdk = await sdkWith();
+    const token = await sdk.signSession({
+      openId: "cron_task_42", appId: APP_ID, name: "Scheduled Task",
+    });
+    await expect(sdk.verifySession(token)).resolves.toMatchObject({
+      openId: "cron_task_42",
+    });
   });
 });

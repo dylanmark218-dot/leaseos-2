@@ -1,0 +1,20 @@
+{
+  "id": "09-out-of-scope",
+  "note": "A request to write code. Refused before a model runs; no proposal is created.",
+  "transcript": "Can you write me a Python script that reads the ticket numbers out of a spreadsheet?",
+  "context": {
+    "formKey": "unload_stop",
+    "formVersion": 1,
+    "tripRef": "TRIP-2026-004821",
+    "unitNumber": "T-118",
+    "vehicleMoving": false
+  },
+  "modelResponse": null,
+  "expect": {
+    "refused": true,
+    "refusalReason": "out_of_perimeter",
+    "silentGuesses": 0,
+    "outOfScope": true,
+    "injectionSuspected": false
+  }
+}
