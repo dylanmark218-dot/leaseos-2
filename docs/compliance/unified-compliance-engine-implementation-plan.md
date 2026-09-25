@@ -157,7 +157,7 @@ OHS systems. C1b builds the regulatory authority that they will consume later.
 
 **SPINE items this advances**
 
-* **Item 2** (the four duplications): C1b-3 resolves `complianceDocumentValidity` (**done**; removed from `DECLARED_UNWIRED`, 62 remain). Remaining: `dispatchMatching`, `openShifts`, `fieldTicket`; deferred to C2: `medicalFitnessForDispatch` `<=` and composer Academy acceptance. The D-05 adapter moves
+* **Item 2** (the four duplications): C1b-3 resolves `complianceDocumentValidity` (**done**; removed from `DECLARED_UNWIRED`, 83 remain after merging `main`). Remaining: `dispatchMatching`, `openShifts`, `fieldTicket`; deferred to C2: `medicalFitnessForDispatch` `<=` and composer Academy acceptance. The D-05 adapter moves
   `openShiftsRouter`'s qualification reads onto the canonical projection, which is a step towards the
   `openShifts` duplication but **does not resolve it**: the eligibility decision itself stays inline.
   `dispatchMatching` and `fieldTicket` are untouched.

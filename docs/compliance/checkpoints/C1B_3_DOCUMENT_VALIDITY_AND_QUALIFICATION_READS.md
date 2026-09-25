@@ -211,7 +211,7 @@ test enforces this. `_core/qualificationValidity.ts` mentions the table only in 
   now record a verifier on `verified` rows.
 - `documentValidity.test` has the new route scan.
 - `engineReachability.test`: `complianceDocumentValidity` is no longer declared unwired, and the pin
-  moves from 63 to 62.
+  moves down by one: 63 → 62 on the C1b-3 base, 84 → 83 after merging `main` (#7 declared 21 AI Secretary modules).
 
 **Focused run** (fresh database; 74 files covering document validity, passport, requirements, work
 authorization, Academy, crews, readiness, open shifts, calendar, qualification, tenancy/authorization,
@@ -224,7 +224,7 @@ widgets, dispatch readiness and the SPINE census): **1046 passed, 30 skipped, 0 
 ## 6. SPINE impact
 
 - **Item 2.** `complianceDocumentValidity` is **resolved**. It is wired (widget, passport, composer and
-  dispatch all decide through it or its core) and has been removed from `DECLARED_UNWIRED` (62
+  dispatch all decide through it or its core) and has been removed from `DECLARED_UNWIRED` (83
   remain). The three remaining duplications are `dispatchMatching`, `openShifts` and `fieldTicket`.
 
   The adapter moves `openShifts`' qualification *reads* onto the canonical projection, but its
