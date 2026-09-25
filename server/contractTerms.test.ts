@@ -125,9 +125,13 @@ d("the worker sends the event it processed", () => {
     // Revoked whatever happens: a live subscription left behind is encrypted under this file's key and
     // breaks the next suite that dispatches webhooks under its own.
     try {
+    // Deliveries are read for this subscription only: another subscription on the same event type (another
+    // suite's, or one a failed run left) is not this test's to count.
+    const [subRow] = await pool.execute<mysql.RowDataPacket[]>("SELECT id FROM webhookSubscriptions WHERE subscriptionRef = ?", [sub.subscriptionRef]);
+    const subscriptionId = Number(subRow[0]!.id);
     const seen: string[] = [];
     let failing = true;
-    setWebhookPoster(async (_url, body) => { seen.push(body); return failing ? { status: 503 } : { status: 200 }; });
+    setWebhookPoster(async (url, body) => { if (url === "https://erp.example/hook") seen.push(body); return failing ? { status: 503 } : { status: 200 }; });
     const eventId = key("EV").slice(0, 40);
     await pool.execute("INSERT INTO domainEventOutbox (eventId, eventType, eventVersion, aggregateType, aggregateId, tenantId, correlationId, actorSource, payloadJson, occurredAt, attemptCount, createdAt) VALUES (?, 'worker.test', 1, 'ticket', 'FT-9', 'default', ?, 'system', '{}', NOW(), 0, NOW())", [eventId, key("C").slice(0, 40)]);
     const ports = createWorkerPorts(pool as never, () => new Date("2026-09-10T12:00:00Z"));
@@ -149,14 +153,14 @@ d("the worker sends the event it processed", () => {
     }
     expect(mine).toBeTruthy();
     await ports.processEvent(mine!);
-    const [d1] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? ORDER BY attempt", [eventId]);
+    const [d1] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? AND subscriptionId = ? ORDER BY attempt", [eventId, subscriptionId]);
     expect(d1.map(x => [x.attempt, x.status])).toEqual([[1, "failed"]]);                      // sent by the worker, failed, scheduled
     failing = false;
     await ports.heartbeat!("worker-test", new Date("2026-09-10T12:00:30Z"));
-    const [d2] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? ORDER BY attempt", [eventId]);
+    const [d2] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? AND subscriptionId = ? ORDER BY attempt", [eventId, subscriptionId]);
     expect(d2).toHaveLength(1);                                                                // not due yet at +30 s
     await ports.heartbeat!("worker-test", new Date("2026-09-10T12:01:30Z"));
-    const [d3] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? ORDER BY attempt", [eventId]);
+    const [d3] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? AND subscriptionId = ? ORDER BY attempt", [eventId, subscriptionId]);
     expect(d3.map(x => [x.attempt, x.status])).toEqual([[1, "failed"], [2, "delivered"]]);   // due at +1 min, delivered by the sweep
     expect(seen.filter(b => b.includes(eventId))).toHaveLength(2);
     } finally {
