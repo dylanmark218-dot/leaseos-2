@@ -23,7 +23,7 @@
  * answer to who owns an event.
  */
 
-import { createHash } from "node:crypto";
+import { proposalIdForCapture } from "../tools/registry";
 import type { LlmProvider } from "../llm/provider";
 import type { FormDefinition } from "../../aiProposal";
 import type { ContextPack } from "../context/contextPack";
@@ -95,7 +95,7 @@ export async function runSecretaryExtractionJob(args: {
     // The device's own id, so a replayed capture proposes once. Deriving it
     // here from the event id would break on a redelivered event, which is the
     // case the key exists for.
-    proposalId: `PROP-${createHash("sha256").update(event.clientCaptureId).digest("hex").slice(0, 35)}`,
+    proposalId: proposalIdForCapture(event.clientCaptureId),
   });
 
   return {
