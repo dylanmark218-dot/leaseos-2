@@ -26,7 +26,8 @@ import { operatorIdFromRecord } from "./_core/operatorIdentity";
 import { OWNER_DOCUMENT_LIST_CAP } from "./db";
 import { widgetReaderFor } from "./widgetSources";
 
-const NOW = new Date("2026-10-01T12:00:00Z");
+// Clock-relative: the tile cases below read the real clock, so no fixed fixture date is allowed to age.
+const NOW = new Date();
 const days = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
 
 type Spec = { status: ComplianceDocumentRow["verificationStatus"]; expires: number | null; issued?: number | null; captured: number; id?: number };
