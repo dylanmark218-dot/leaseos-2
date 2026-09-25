@@ -93,7 +93,15 @@ const countBuilders = (src: string, builder: string) =>
  * an ungated operational endpoint, and this is the thing that notices.
  */
 const UNREVIEWED_BASELINE = 0;
-const PUBLIC_BASELINE = 2;
+/*
+ * S1: 2 → 4. `auth.refresh` and `auth.revokeAll` are public **necessarily**, not by oversight —
+ * a refresh exists precisely because the access credential has expired, so requiring an
+ * authenticated session to obtain one would be circular. They are not ungated: both demand
+ * possession of a single-use refresh verifier whose hash is stored server-side, and both refuse
+ * identically whatever the reason, so neither reveals which families exist. The other two remain
+ * `auth.me` and `auth.logout`.
+ */
+const PUBLIC_BASELINE = 4;
 
 describe("records surface is fully role-authorized", () => {
   it("uses roleProcedure for every records procedure", () => {
