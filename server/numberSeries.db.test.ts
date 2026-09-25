@@ -16,7 +16,7 @@ import { nextTrackingNumber } from "./_core/trackingNumbers";
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 270_000_000 + Math.floor(Math.random() * 50_000);
+let seq = 287_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 beforeAll(() => { if (DB_URL) pool = mysql.createPool({ uri: DB_URL, connectionLimit: 12 }); });
 afterAll(async () => { await pool?.end(); });

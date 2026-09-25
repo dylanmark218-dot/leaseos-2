@@ -12,7 +12,7 @@ import { SYSTEM_DEFINITIONS } from "./_core/documentDefinitions";
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 260_000_000 + Math.floor(Math.random() * 50_000);
+let seq = 283_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 beforeAll(() => { if (DB_URL) pool = mysql.createPool({ uri: DB_URL, connectionLimit: 4 }); });
 afterAll(async () => { await pool?.end(); });
