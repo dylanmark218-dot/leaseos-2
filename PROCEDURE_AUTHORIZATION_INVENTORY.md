@@ -402,7 +402,7 @@ missed them.
   the closing UCC are UNKNOWN until a person verifies the class rate, and an
   unknown schedule cannot be reviewed as a tax fact or carry balances
   forward. The schedule is prepared by one person and reviewed by another.
-- **A work order is owned by a person, and cancelling it repairs nothing.** (0189, fleet
+- **A work order is owned by a person, and cancelling it repairs nothing.** (0198, fleet
   maintenance checkpoint 1) Assigning, reassigning and unassigning a work order is
   history, not an edit: the assignee is a user holding a shop role in the unit's
   organization, and the assigner is the caller. Assigning is the shop lead's and

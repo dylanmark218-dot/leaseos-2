@@ -16,7 +16,10 @@ import { externalProcedure, router, type ExternalContext } from "./_core/trpc";
 import { getDb } from "./db";
 import { CUSTOMER_ALERT_KINDS, changeOrders, clientAdjustments, customerAccounts, customerCredits, customerPurchaseOrders, disposalTickets, disputeCases, externalAccessLog, externalAlertPreferences, externalIdentities, facilities, fieldTicketDocuments, fieldTicketEvents, fieldTicketRevisions, fieldTickets, invoices, jobs, loads, paymentAllocations, portalSubmissions, quoteLines, quotes, rfis, roadHazardObservations, safetyEvents, trips, vendorBills, vendors, weatherObservations, workflowNotifications, invoiceLines } from "../drizzle/schema";
 import { intakeDisposalTicket, intakeVendorBill, type ExternalIdentity } from "./_core/portalIntake";
-import { ROTATION_GRACE_MS, TOKEN_TTL_MS, decryptSecret, encryptSecret, mfaKey, newToken, newTotpSecret, sha256, totpVerify } from "./_core/externalIdentityPolicy";
+import { ROTATION_GRACE_MS, TOKEN_TTL_MS, newToken, sha256, totpVerify } from "./_core/externalIdentityPolicy";
+import { environmentSecretKeys, legacyMfaKey } from "./_core/secretKeys";
+import { enrollMfaSecret, mfaStorageOf, resolveMfaSeed } from "./mfaSecretService";
+import { ENV } from "./_core/env";
 import { decideAdjustment } from "./_core/clientAdjustments";
 import { noticeFor, operationalState, projectReadiness } from "./_core/customerProjections";
 import { DEFAULT_ON } from "./_core/customerAlerts";
@@ -336,27 +339,34 @@ export const portalRouter = router({
     return { identityRef: e.identityRef, token, tokenExpiresAt: new Date(now.getTime() + TOKEN_TTL_MS), note: "Shown once. Stored only as a hash." };
   }),
 
-  /** Start MFA: the secret is returned once for the authenticator and stored encrypted; nothing is enforced until confirmed. */
+  /**
+   * Start MFA: the secret is returned once for the authenticator and stored in the canonical
+   * secret store; nothing is enforced until confirmed.
+   *
+   * 0193 — the seed now goes to `encryptedSecrets` under purpose `MFA_SECRET` and the identity
+   * keeps only a reference. `mfaSecretEnc` is cleared by the same write, so re-enrolling can never
+   * leave the replaced seed behind as a reactivation path.
+   */
   mfaEnroll: externalProcedure("portal.mfaEnroll").mutation(async ({ ctx }) => {
     const e = ext(ctx);
-    const key = mfaKey();
-    if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "MFA requires LEASEOS_PORTAL_MFA_KEY on the server; it is not configured" });
-    const db = await getDb();
-    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-    const secret = newTotpSecret();
-    await db.update(externalIdentities).set({ mfaSecretEnc: encryptSecret(secret, key), mfaEnabled: false }).where(eq(externalIdentities.id, e.identityId));
+    const keys = environmentSecretKeys();
+    if (!keys.getActiveKey("MFA_SECRET")) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "MFA requires an MFA secret key on the server; it is not configured" });
+    }
+    const { secret } = await enrollMfaSecret(e.identityId, { keys, legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
     await logAccess(e, "mfa_enroll", "externalIdentity", e.identityRef, null, null);
     return { secret, otpauth: `otpauth://totp/LeaseOS:${encodeURIComponent(e.displayName)}?secret=${secret}&issuer=LeaseOS&digits=6&period=30`, note: "Shown once." };
   }),
 
   mfaConfirm: externalProcedure("portal.mfaConfirm").input(z.object({ code: z.string().min(6).max(8) })).mutation(async ({ ctx, input }) => {
     const e = ext(ctx);
-    const key = mfaKey();
     const db = await getDb();
-    if (!db || !key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "MFA is not available on this server" });
-    const row = (await db.select({ enc: externalIdentities.mfaSecretEnc }).from(externalIdentities).where(eq(externalIdentities.id, e.identityId)).limit(1))[0];
-    if (!row?.enc) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Enroll first" });
-    if (!totpVerify(decryptSecret(row.enc, key), input.code, new Date())) throw new TRPCError({ code: "FORBIDDEN", message: "Code rejected" });
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const row = (await db.select({ mfaSecretEnc: externalIdentities.mfaSecretEnc, mfaSecretRef: externalIdentities.mfaSecretRef }).from(externalIdentities).where(eq(externalIdentities.id, e.identityId)).limit(1))[0];
+    if (!row || mfaStorageOf(row) === "none") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Enroll first" });
+    // Resolution may throw — a present-but-broken reference must fail, not fall back to legacy.
+    const seed = await resolveMfaSeed(row, { keys: environmentSecretKeys(), legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
+    if (!totpVerify(seed, input.code, new Date())) throw new TRPCError({ code: "FORBIDDEN", message: "Code rejected" });
     await db.update(externalIdentities).set({ mfaEnabled: true }).where(eq(externalIdentities.id, e.identityId));
     await logAccess(e, "mfa_confirm", "externalIdentity", e.identityRef, null, null);
     return { mfaEnabled: true as const };

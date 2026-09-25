@@ -26,7 +26,7 @@ export type ReleaseAttempt = {
     | "waiting_parts"
     | "ready_for_service"
     | "closed"
-    // 0189 — a cancelled work order produced no repair and cannot produce a release.
+    // 0198 — a cancelled work order produced no repair and cannot produce a release.
     | "cancelled";
   defectSeverity: DefectSeverity;
   releaseType: ReleaseType;

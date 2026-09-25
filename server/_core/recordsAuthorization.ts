@@ -330,7 +330,7 @@ export type Permission =
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
   | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
-  // 0189 — fleet maintenance, checkpoint 1. Assigning a work order names who owns the repair; cancelling
+  // 0198 — fleet maintenance, checkpoint 1. Assigning a work order names who owns the repair; cancelling
   // one can leave a defect unrepaired, so it is sensitive.
   | "maintenance.workorder.assign" | "maintenance.workorder.cancel";
 
@@ -696,7 +696,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.read",
     "spatial.vehicle.manage",
     "spatial.vehicle.verify",
-    // 0189 — fleet maintenance, checkpoint 1.
+    // 0198 — fleet maintenance, checkpoint 1.
     "maintenance.workorder.assign",
     "maintenance.workorder.cancel",
   ],
@@ -1234,7 +1234,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
     "spatial.route.approve",
     "geo.graph.build",
-    // 0189 — fleet maintenance, checkpoint 1.
+    // 0198 — fleet maintenance, checkpoint 1.
     "maintenance.workorder.assign",
     "maintenance.workorder.cancel",
   ],
@@ -1926,7 +1926,7 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // self-service grant into the restricted sector with no row saying the glass was
   // broken is that category, and without this it proceeded when the audit insert failed.
   "restricted.read",
-  // 0189 — a cancelled work order can leave a defect unrepaired. It may not happen unrecorded.
+  // 0198 — a cancelled work order can leave a defect unrepaired. It may not happen unrecorded.
   "maintenance.workorder.cancel",
 ] as const;
 
@@ -2948,7 +2948,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
 
-  /* ---- 0189: fleet maintenance, checkpoint 1 ---- */
+  /* ---- 0198: fleet maintenance, checkpoint 1 ---- */
   "maintenance.workOrderAssignment": "maintenance.read_defect",
   "maintenance.workOrderAssign": "maintenance.workorder.assign",
   "maintenance.workOrderCancel": "maintenance.workorder.cancel",

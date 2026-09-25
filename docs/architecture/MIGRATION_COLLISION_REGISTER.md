@@ -22,37 +22,94 @@ other claimant takes the next number free on `main` *and* on all open branches a
 Reserved slots `0016`/`0017` are never used (CI gate 0). `0094`, `0095` and `0098` are historical gaps,
 and `0157` is historically used twice. None of those is reused.
 
-## State at C1a integration (2026-09-23, `main` = `6b01a0e`, after PR #4 and PR #5)
+## Current state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
 
-`main` migration head: **`0169_defect_resolution.sql`** (PR #4). PR #5 added none.
+`main` migration head: **`0179_trip_stop_provenance.sql`** (#17). `main` holds `0169`, `0170`/`0171`
+(PR #9), `0174` (C1a) and `0179`; `0172`, `0173` and `0175`–`0178` are open on `main` and claimed only by
+branches. Every number from `0175` to `0188` is claimed by at least one open branch.
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| 0170 | `0170_organization_scoped_role_grants.sql` | `claude/leaseos-auth-workspace-system-t008ad` | open branch | **with main** (`0170_dispatch_role_types`, #9) | its author renumbers at rebase |
+| 0170 | `0170_work_calendar_tasks_reminders.sql` | `claude/work-calendar-task-engine-0mtjyk` | open branch | **with main** | its author renumbers at rebase |
+| 0172 | `0172_training_wallet_renewal_handoff.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none | keeps 0172 |
+| 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none | keeps 0173 |
+| 0175 | `0175_client_services_portal.sql` | `claude/client-portal-job-tracking-zqmejc` | open branch | with driver-portfolio ×2, auth-workspace | first to merge keeps it |
+| 0175 | `0175_driver_portfolio.sql` | `claude/driver-portfolio-api-ya8928`, `claude/driver-portfolio-credential-wallet-ya8928` | open branches | as above | first to merge keeps it |
+| 0175 | `0175_organization_invitations.sql` | `claude/leaseos-auth-workspace-system-t008ad` | open branch | as above | first to merge keeps it |
+| 0176 | `0176_driver_portfolio_events_append_only.sql` | both driver-portfolio branches | open branches | same file on both | follows its branch |
+| 0177 | `0177_driver_portfolio_api.sql` | `claude/driver-portfolio-api-ya8928` | open branch | none | — |
+| 0178 | `0178_document_control_definitions.sql` | `claude/document-control-architecture-jlffzk` | open branch | none | — |
+| 0179 | `0179_document_control_register.sql` | `claude/document-control-architecture-jlffzk` | open branch | **with main** (`0179_trip_stop_provenance`) | its author renumbers at rebase |
+| 0179 | `0179_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | open branch | **with main** | its author renumbers at rebase |
+| 0180 | `0180_document_control_numbering.sql` | `claude/document-control-architecture-jlffzk` | open branch | none | — |
+| 0181 | `0181_document_control_templates.sql` | `claude/document-control-architecture-jlffzk` | open branch | none | — |
+| 0182 | `0182_board_membership.sql`, `0182_customer_account_profile.sql`, `0182_document_control_intake.sql`, `0182_integration_hub_connectors.sql`, `0182_safety_program_builder.sql` | communications-marketplace, customer-contract-rates, document-control, integration-hub, safety-program-builder | open branches | five-way | first to merge keeps it |
+| 0183 | `0183_customer_contracts_rate_sheets.sql`, `0183_document_control_disposal.sql`, `0183_integration_hub_delivery_and_sync.sql`, `0183_open_work_offers_availability.sql` | customer-contract-rates, document-control, integration-hub, communications-marketplace | open branches | four-way | first to merge keeps it |
+| 0184 | `0184_integration_hub_dead_letters_conflicts.sql`, `0184_job_commercial_context.sql` | integration-hub, customer-contract-rates | open branches | two-way | first to merge keeps it |
+| 0185 | `0185_assistant_proposal_tenancy.sql`, `0185_webhook_delivery_claim.sql` | `claude/relaxed-carson-qfcopf`, `claude/sec-004-webhook-delivery-integrity` | open branches | two-way | first to merge keeps it |
+| 0186 | `0186_external_source_categories.sql` | `claude/canadian-govt-apis-leaseos-q33l42` | open branch | none | — |
+| 0187 | `0187_training_compliance_operations.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none (was 0174, collided with main) | — |
+| 0188 | `0188_source_review_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none | — |
+| 0189 | `0189_rule_ledger_generalization.sql` | `claude/leaseos-compliance-survey-5faxe8` (C1b-1, PR #15) | open PR | with the two rows below (claimed after 2026-09-24 12:00) | first to merge keeps it |
+| 0189 | `0189_document_control_register.sql` | `claude/document-control-design-imsd3n` | open branch | with C1b-1, mechanic-portal | first to merge keeps it |
+| 0189 | `0189_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | with C1b-1, document-control-design | first to merge keeps it |
+| 0190 | `0190_document_control_numbering.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
+
+**Next free number for new work: `0191`** (re-check with the scan above before committing).
+
+### Change log
+
+* **2026-09-25**: `main` (`242b619`) now carries `0175_session_families.sql` (#30), so the `0175` rows above
+  now collide with `main` and their authors renumber at rebase. Since the C1b-1 scan, `0189` has also been
+  claimed by `claude/document-control-design-imsd3n` and `claude/mechanic-portal-domain-82efa9`. No file was
+  renamed.
+* **2026-09-24 (C1b-1)**: rescanned after #6, #9, #11, #10, #13, #17, #18, #21, #23–#25 merged. C1b-1 takes
+  `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
+  four branches since). No other branch renumbered.
+
+## Earlier state (2026-09-23, `main` = `42c454f`, after PR #4, PR #5 and C1a #12)
+
+`main` migration head: **`0174_dispatch_override_provenance.sql`**. `main` holds `0169` (PR #4) and
+`0174` (C1a); `0170`–`0173` are open on `main` and claimed only by branches.
 
 | Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|---|
-| 0169 | `0169_defect_resolution.sql` | *(main)* | #4 (merged) | — | **on main** | vs `0169_driver_portfolio` | main owns 0169 |
-| 0169 | `0169_driver_portfolio.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | none | `3911f59` | open branch, no PR | **collides with main** | renumber at that branch's rebase onto main (its author) |
+| 0169 | `0169_defect_resolution.sql` | *(main)* | #4 | — | **on main** | vs `0169_driver_portfolio` | main owns 0169 |
+| 0169 | `0169_driver_portfolio.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | none | `3911f59` | open branch, no PR | **collides with main** | its author renumbers at rebase onto main |
 | 0170 | `0170_driver_portfolio_events_append_only.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | none | `3911f59` | open branch, no PR | with #9, #11, auth-workspace | renumber at rebase |
-| 0170 | `0170_dispatch_role_types.sql` | `feature/dispatch-role-assignment-backend` | #9 | `e6b65f2` | PR open, stacked; CI green | with auth-workspace, driver-portfolio | #9 is nearest to merge, so it **proposes to keep 0170/0171**. Owner to confirm |
-| 0170 | `0170_dispatch_role_types.sql` | `feature/dispatch-assignment-ui` | #11 | `e6b65f2` | PR open, stacked on #9 | same file as #9 (inherited), not a separate claim | follows #9 |
+| 0170 | `0170_dispatch_role_types.sql` | `feature/dispatch-role-assignment-backend` | #9 | `42c454f` | PR open against `main`, main merged in | with auth-workspace, driver-portfolio | #9 is nearest to merge and **proposes to keep 0170/0171**; owner to confirm |
+| 0170 | `0170_dispatch_role_types.sql` | `feature/dispatch-assignment-ui` | #11 | `e6b65f2` | PR open, stacked on #9 | inherited from #9 (same file) | follows #9 |
 | 0170 | `0170_organization_scoped_role_grants.sql` | `claude/leaseos-auth-workspace-system-t008ad` | none | `f21cd1b` | open branch, no PR | with #9, driver-portfolio | renumber at rebase |
-| 0171 | `0171_dispatch_role_assignment_events.sql` | `feature/dispatch-role-assignment-backend` | #9 | `e6b65f2` | PR open | none besides #11's inherited copy | follows #9 |
-| 0171 | `0171_dispatch_role_assignment_events.sql` | `feature/dispatch-assignment-ui` | #11 | `e6b65f2` | PR open | inherited from #9 | follows #9 |
-| 0172 | `0172_training_wallet_renewal_handoff.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | **was** with C1a's original `0172` | C1a moved off; this branch keeps 0172 |
+| 0171 | `0171_dispatch_role_assignment_events.sql` | `feature/dispatch-role-assignment-backend` | #9 | `42c454f` | PR open | inherited copy on #11 only | follows #9 |
+| 0171 | `0171_dispatch_role_assignment_events.sql` | `feature/dispatch-assignment-ui` | #11 | `e6b65f2` | PR open, stacked on #9 | inherited from #9 | follows #9 |
+| 0172 | `0172_training_wallet_renewal_handoff.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none (C1a moved off it) | keeps 0172 |
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
-| 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
-| 0189 | `0189_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | none yet | `1680e94` | open branch; full gate green locally | none: `0175`–`0188` are all claimed by open branches (scan below), `0179` is on `main` | keeps 0189 |
+| 0174 | `0174_dispatch_override_provenance.sql` | *(main)* | #12 | — | **on main** | none | — |
+
+Next free number at that time: `0175` (superseded above).
+
+## Claim: 0185 (SEC-004, 2026-09-24)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | SEC-004 PR | `6f52b57` | gated | none | keeps 0185 |
+
+Chosen by scanning `origin/main` and all 57 remote refs immediately before writing: the highest number
+any of them held was `0184` (`integration-hub-subsystem`, `customer-contract-rates`), so `0185` was the
+first number free everywhere. `claude/integration-hub-subsystem-6nzrkw`'s `0183` also adds
+`webhookDeliveries.claimedAt`/`claimedBy`. When that branch rebases onto this one, its `0183` drops those
+two columns rather than this migration being renumbered (see
+`audit/hardening-2026-09-24/SEC-004-WEBHOOK-DELIVERY-INTEGRITY.md`).
 
 ## Change log
 
-* **2026-09-24**: `claude/mechanic-portal-domain-82efa9` claims `0189` (fleet maintenance checkpoint 1,
-  work-order ownership). The register's scan against every `origin` branch found `0175` claimed four
-  times (`claude/client-portal-job-tracking-zqmejc`, both driver-portfolio branches,
-  `claude/leaseos-auth-workspace-system-t008ad`) and every number through `0188` claimed by at least
-  one branch, so 0189 is the first number free on `main` and on every open branch. The branch had
-  drafted `0175`; it moved before any push.
-
+* **2026-09-23**: C1a merged (#12, `42c454f`), so `0174` is on main. PR #9 was brought onto main (merge-base `42c454f`).
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
   No other branch was renumbered.
+* **2026-09-24**: `0185` claimed by SEC-004 (`claude/sec-004-webhook-delivery-integrity`); first number free on
+  `main` and every remote branch. No branch renumbered.
 
 ## State at the 0169 reconciliation (2026-09-23, `main` = `6f52b574`, after PR #10 and PR #13)
 
@@ -70,3 +127,43 @@ by open branches (`0175` by `claude/driver-portfolio-*` and `claude/training-aca
 
 * **2026-09-23 (0169 reconciliation)**: added the cross-repository 0169 row, the academy branch's
   `0174` collision (new since C1a), and 0179. No file renamed.
+
+## State at the S2 integration (2026-09-25, `main` = `e291f28`, after PR #45, #47 and #48)
+
+`main` migration head: **`0193_mfa_secret_ref.sql`**. `main` carries **no `018x` migration at all** —
+the 0181–0190 range is held entirely by open branches.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | #20 | reconciled onto `main`; integrating | **`claude/relaxed-carson-qfcopf` also claims `0185`** (`0185_assistant_proposal_tenancy.sql`) | **SEC-004 keeps `0185`**: it claimed the number at 2026-09-24 07:52 when it was free on `main` and every branch; the other claim followed 77 minutes later and did not meet the "free everywhere" standard. That branch renumbers at its own integration, as the academy branch's `0174` does |
+| 0191 | `0191_encrypted_secrets.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
+| 0192 | `0192_provider_credentials.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
+| 0193 | `0193_mfa_secret_ref.sql` | `feature/mfa-secret-migration` | #47 | **merged** | none | recorded late — see change log |
+
+Next number free on `main` and on every open branch: **`0194`** — to be re-scanned at the moment of
+claiming, not taken from this line.
+
+## Change log
+
+* **2026-09-25 (S2 integration)**: recorded `0191`, `0192` and `0193`, which were **merged without
+  being entered here** — a bookkeeping defect in S2-A/B/C and S2-D, not a numbering one: all three
+  numbers were verified free across every branch before use, and none collided. The register is the
+  repository's record of that verification, and three merges' worth of it was missing. Also recorded
+  the `0185` double-claim, resolved in SEC-004's favour on claim order. No migration file renamed.
+
+## State at the S2-E Phase 1 claim (2026-09-25, `main` = `14b5df2`, after PR #20 and #49)
+
+`main` migration head: **`0193_mfa_secret_ref.sql`**, 175 migrations. Re-scanned across `main`,
+every remote branch and every open-PR head at the moment of claiming: the highest number held
+anywhere is `0193`, so `0194` is the first free everywhere.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0194 | `0194_webhook_secret_ref.sql` | `feature/webhook-secret-migration-phase1` | S2-E Phase 1 | claiming | none | keeps 0194 |
+
+## Change log
+
+* **2026-09-25 (S2-E Phase 1)**: claimed `0194` and recorded it **in the commit that creates the
+  migration**, rather than afterwards. That ordering is the correction for the `0191`–`0193`
+  omission recorded above: those numbers were each verified free before use, but the verification
+  went unrecorded, and this register is the only place that verification survives.

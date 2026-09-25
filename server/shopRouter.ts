@@ -304,7 +304,7 @@ export const shopRouter = router({
       if (wo.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A cancelled work order is not reopened by changing a status — raise a new one" });
       if (to <= from && !sideways) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `A work order does not move from ${wo.status} back to ${input.to}` });
       /*
-       * 0189 — the move leaves a trace. `startedAt` is set the first time work starts and `completedAt`
+       * 0198 — the move leaves a trace. `startedAt` is set the first time work starts and `completedAt`
        * the first time it reaches ready-for-service or closed; neither is ever moved. The note was
        * accepted and thrown away; it is now appended to the findings with who and when, until the
        * defect history table (maintenance checkpoint 2) carries it as its own row.

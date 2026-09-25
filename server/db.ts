@@ -423,7 +423,7 @@ export async function createDutyRecord(input: InsertDutyRecord) {
 export async function listWorkOrders(unitId: number | undefined, scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
-  // 0189 — scoped through the unit, as every other unit-keyed list is.
+  // 0198 — scoped through the unit, as every other unit-keyed list is.
   const inScope = ownershipScopeWhere("unit", workOrders.unitId, scope);
   return db
     .select()

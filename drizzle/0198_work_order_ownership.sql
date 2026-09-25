@@ -1,11 +1,13 @@
--- 0189 — Mechanic Portal + Fleet Maintenance, checkpoint 1: who owns a work order, and cancelling one.
+-- 0198 — Mechanic Portal + Fleet Maintenance, checkpoint 1: who owns a work order, and cancelling one.
 -- Design: docs/register/MECHANIC_PORTAL_FLEET_MAINTENANCE_DESIGN.md.
 --
 -- Holds, meter readings and the unit's operational state are NOT here. They belong to the Fleet &
 -- Equipment Portfolio's first slice (`unitHolds`, `unitMeterReadings`, docs/fleet/…), which the
 -- mechanic portal is built on rather than beside.
 --
--- Numbered 0189: 0175–0188 are claimed by open branches (the collision register's scan, 2026-09-24).
+-- Numbered 0198: drafted as 0175 and then 0189, it moved twice because both numbers were taken
+-- (0189 by C1b-1 on main). 0198 is the first number above every claim on main and on every branch
+-- (the collision register's scan, 2026-09-25); 0190 is unclaimed but sorts before main's 0191-0194.
 
 -- Who owns a work order, as history. `workOrders.technician` was a free-text name nobody could log in
 -- as; an assignment is a user holding a shop role, and the current assignee is the newest row here —
