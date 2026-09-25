@@ -5573,7 +5573,15 @@ export const webhookSubscriptions = mysqlTable("webhookSubscriptions", {
   subscriptionRef: varchar("subscriptionRef", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 160 }).notNull(),
   url: varchar("url", { length: 500 }).notNull(),
-  secretEnc: varchar("secretEnc", { length: 400 }).notNull(),
+  /**
+   * Legacy inline ciphertext under `LEASEOS_PORTAL_MFA_KEY` — the shared key that also protects MFA
+   * seeds. 0194 relaxed it to NULL so a canonical-only row becomes representable, but **Release 1
+   * still writes it on every creation**: the NULL case is Release 2's, and exists here only so the
+   * schema gains the capability one deployment before anything uses it.
+   */
+  secretEnc: varchar("secretEnc", { length: 400 }),
+  /** 0194 — pointer into `encryptedSecrets` under purpose `WEBHOOK_SECRET`. Preferred when present. */
+  secretRef: varchar("secretRef", { length: 64 }),
   eventTypesJson: text("eventTypesJson").notNull(),
   status: mysqlEnum("status", ["active", "paused", "revoked"]).default("active").notNull(),
   createdByUserId: int("createdByUserId").notNull(),
