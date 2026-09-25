@@ -8066,6 +8066,14 @@ export const knowledgeVersions = mysqlTable("knowledgeVersions", {
   verifiedByUserId: int("verifiedByUserId"),
   verifiedAt: timestamp("verifiedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /* ---- 0189 (C1b-1): what a rule revision needs to know about its source. ---- */
+  citation: varchar("citation", { length: 400 }),
+  section: varchar("section", { length: 200 }),
+  publicationDate: date("publicationDate"),
+  retrievedAt: timestamp("retrievedAt"),
+  repealedAt: timestamp("repealedAt"),
+  /** candidate | reviewed | verified | superseded | withdrawn. Only `verified` can back a rule. */
+  status: varchar("status", { length: 16 }).default("candidate").notNull(),
 });
 export type KnowledgeVersionRow = typeof knowledgeVersions.$inferSelect;
 
@@ -8109,9 +8117,10 @@ export const hosRuleLimitHistory = mysqlTable("hosRuleLimitHistory", {
   id: int("id").autoincrement().primaryKey(),
   promotionRef: varchar("promotionRef", { length: 64 }).notNull().unique(),
 
-  profileKey: varchar("profileKey", { length: 60 }).notNull(),
-  limitKey: varchar("limitKey", { length: 60 }).notNull(),
-  value: double("value").notNull(),
+  /** HOS rows only (0189): a rule from another family has no profile, limit or figure. */
+  profileKey: varchar("profileKey", { length: 60 }),
+  limitKey: varchar("limitKey", { length: 60 }),
+  value: double("value"),
   unit: varchar("unit", { length: 32 }).notNull(),
 
   jurisdiction: varchar("jurisdiction", { length: 64 }).notNull(),
@@ -8148,7 +8157,27 @@ export const hosRuleLimitHistory = mysqlTable("hosRuleLimitHistory", {
 
   correctsPromotionRef: varchar("correctsPromotionRef", { length: 64 }),
   previousPromotionRef: varchar("previousPromotionRef", { length: 64 }),
-});
+
+  /* ---- 0189 (C1b-1): the one rule ledger. Existing rows are `hos_limit`. ---- */
+  ruleFamily: varchar("ruleFamily", { length: 40 }).default("hos_limit").notNull(),
+  /** `profileKey.limitKey` for HOS; the requirement key for other families. */
+  ruleRef: varchar("ruleRef", { length: 160 }),
+  domain: varchar("domain", { length: 40 }),
+  /** The §4 ladder (`AuthorityClass`). */
+  authorityTier: varchar("authorityTier", { length: 40 }),
+  dispatchEffect: varchar("dispatchEffect", { length: 16 }),
+  /** → `knowledgeVersions.versionRef`; the verified source revision this rule was read from. */
+  sourceRevisionRef: varchar("sourceRevisionRef", { length: 64 }),
+  /** That revision's `contentHash` when the rule was verified, so a changed source is detectable. */
+  sourceHash: varchar("sourceHash", { length: 64 }),
+  proposedByUserId: int("proposedByUserId"),
+  secondVerifierUserId: int("secondVerifierUserId"),
+  secondVerifiedAt: timestamp("secondVerifiedAt"),
+  /** A non-numeric rule's content. */
+  payloadJson: text("payloadJson"),
+}, (t) => ({
+  familyRuleIdx: index("hosRuleLimitHistory_family_rule_idx").on(t.ruleFamily, t.ruleRef),
+}));
 export type HosRuleLimitHistoryRow = typeof hosRuleLimitHistory.$inferSelect;
 
 

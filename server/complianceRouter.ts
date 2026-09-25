@@ -19,6 +19,7 @@ import {
   type Credential, type Passport, type Requirement, type Subject,
 } from "./_core/compliancePassport";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
+import { loadRequirementRegistry, packExists } from "./requirementRegistry";
 import {
   COMPLIANCE_KNOWLEDGE_CATALOG,
   evaluateDangerousGoodsAssist,
@@ -28,24 +29,15 @@ import { evaluateDriverQualification } from "./_core/driverTraining";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const SUBJECT = z.enum(["operator", "unit", "trailer", "carrier", "job", "user"]);
+/**
+ * Every subject a requirement can be written for — the column's enum. `requirementLoad` used
+ * `SUBJECT` above, so an equipment, attachment or work-context requirement (which work
+ * authorization evaluates) could never be loaded; only its seed could exist (C1b-2).
+ */
+const REQUIREMENT_SUBJECT = z.enum(["operator", "unit", "trailer", "carrier", "job", "user", "equipment", "attachment", "work_context"]);
 
-async function loadRequirements(): Promise<Requirement[]> {
-  const db = await getDb();
-  const seeded = [...COMPLIANCE_REQUIREMENT_SEEDS];
-  if (!db) return seeded;
-  const rows = await db.select().from(complianceRequirements);
-  const loaded: Requirement[] = rows.map(r => ({
-    requirementKey: r.requirementKey, version: r.version, family: r.family, title: r.title,
-    subjectType: r.subjectType, jurisdiction: r.jurisdiction,
-    appliesWhen: r.appliesWhenJson ? JSON.parse(r.appliesWhenJson) : null,
-    satisfiedByDocTypes: JSON.parse(r.satisfiedByDocTypes), renewalIntervalDays: r.renewalIntervalDays,
-    warnDaysBeforeExpiry: r.warnDaysBeforeExpiry, missingSeverity: r.missingSeverity,
-    verificationStatus: r.verificationStatus, effectiveFrom: r.effectiveFrom, effectiveUntil: r.effectiveUntil,
-  }));
-  // A loaded row supersedes the seed with the same key.
-  const keys = new Set(loaded.map(l => l.requirementKey));
-  return [...loaded, ...seeded.filter(s => !keys.has(s.requirementKey))];
-}
+/** The registry at `now`: governing stored revisions, then unreplaced seeds (`requirementRegistry.ts`). */
+const loadRequirements = (): Promise<Requirement[]> => loadRequirementRegistry(COMPLIANCE_REQUIREMENT_SEEDS);
 
 async function loadCredentials(ownerType: string, ownerId: number): Promise<Credential[]> {
   const db = await getDb();
@@ -165,7 +157,9 @@ export const complianceRouter = router({
   requirementLoad: roleProcedure("compliance.requirementLoad")
     .input(z.object({
       requirementKey: z.string().min(3).max(120), family: z.string().min(2).max(60), title: z.string().min(3).max(220),
-      subjectType: SUBJECT, jurisdiction: z.string().min(1).max(80), appliesWhen: z.record(z.string(), z.unknown()).nullable().optional(),
+      /** C1b-2: the pack this requirement belongs to; it applies only where the pack is active. */
+      packKey: z.string().min(2).max(80).nullable().optional(),
+      subjectType: REQUIREMENT_SUBJECT, jurisdiction: z.string().min(1).max(80), appliesWhen: z.record(z.string(), z.unknown()).nullable().optional(),
       satisfiedByDocTypes: z.array(z.string().min(1)).min(1), renewalIntervalDays: z.number().int().positive().nullable().optional(),
       warnDaysBeforeExpiry: z.number().int().nonnegative().default(30), missingSeverity: z.enum(["review", "blocked"]).default("review"),
       sourceAuthority: z.string().max(220).nullable().optional(), sourceUrl: z.string().max(600).nullable().optional(), sourceReference: z.string().max(300).nullable().optional(),
@@ -174,16 +168,16 @@ export const complianceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      if (input.packKey && !(await packExists(input.packKey))) throw new TRPCError({ code: "NOT_FOUND", message: `Unknown pack ${input.packKey}` });
       const stored = input.requestedStatus === "verified" && input.sourceVerified && input.sourceAuthority?.trim() ? "verified" : "unverified";
       const prior = await db.select({ version: complianceRequirements.version }).from(complianceRequirements).where(eq(complianceRequirements.requirementKey, input.requirementKey)).orderBy(desc(complianceRequirements.version)).limit(1);
       const version = (prior[0]?.version ?? 0) + 1;
-      if (prior[0]) {
-        // The previous version is superseded, not overwritten.
-        await db.update(complianceRequirements).set({ verificationStatus: "superseded", effectiveUntil: input.effectiveFrom })
-          .where(and(eq(complianceRequirements.requirementKey, input.requirementKey), eq(complianceRequirements.version, prior[0].version)));
-      }
+      // C1b-2: revisions are immutable. The previous version is not touched — not its status, not
+      // its dates. Which revision governs on a date is read from the versions by
+      // `requirementRegistry.governingRevisions`, so the earlier one keeps applying until this one's
+      // `effectiveFrom`, instead of stopping the moment this one is loaded.
       await db.insert(complianceRequirements).values({
-        requirementKey: input.requirementKey, version, family: input.family, title: input.title, subjectType: input.subjectType, jurisdiction: input.jurisdiction,
+        requirementKey: input.requirementKey, version, family: input.family, packKey: input.packKey ?? null, title: input.title, subjectType: input.subjectType, jurisdiction: input.jurisdiction,
         appliesWhenJson: input.appliesWhen ? JSON.stringify(input.appliesWhen) : null, satisfiedByDocTypes: JSON.stringify(input.satisfiedByDocTypes),
         renewalIntervalDays: input.renewalIntervalDays ?? null, warnDaysBeforeExpiry: input.warnDaysBeforeExpiry, missingSeverity: input.missingSeverity,
         sourceAuthority: input.sourceAuthority ?? null, sourceUrl: input.sourceUrl ?? null, sourceReference: input.sourceReference ?? null,
