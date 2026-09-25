@@ -140,6 +140,9 @@ d("jobUnits.create under off, advisory and enforced", () => {
   it("walks the setting up and the legacy path behaves accordingly, leaving the history behind", async () => {
     const dispatcher = await withRole("dispatcher");
     const manager = await withRole("management");
+    // F1.3 — the global mode is the fallback for every organization: changing it takes platform authority,
+    // proven by the users row (a session's claim is not enough). This manager is also the platform administrator.
+    await pool.execute("INSERT INTO users (id, openId, role) VALUES (?, ?, 'admin')", [manager, key("platform-admin").slice(0, 60)]);
     const driverUser = await withRole("driver");
     const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'vacuum_truck', 'ABC', 'clear')", [key("211").slice(0, 30)]);
     const unitId = Number(u.insertId);

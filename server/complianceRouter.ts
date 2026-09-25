@@ -10,9 +10,11 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { actingScopeFor, getDb } from "./db";
+import { actingScopeFor, evidenceInScope, getDb, jobInScope, operatorInScope, unitInScope, userInScope } from "./db";
+import { assertCallerOwnsEntity } from "./_core/entityScope";
+import { requireProvableOwnership } from "./ownershipDomain";
 import { carrierProfileReviews, complianceConsents, complianceDocuments, complianceRequirements, writtenProgramVersions } from "../drizzle/schema";
 import {
   abstractRequestPermitted, buildPassport, composeJobPassport, medicalFitnessForDispatch, nextRenewalDue,
@@ -73,6 +75,30 @@ async function loadCredentials(ownerType: string, ownerId: number): Promise<Cred
   }));
 }
 
+type OwnerType = "operator" | "unit" | "job" | "trailer" | "carrier" | "user" | "equipment";
+/**
+ * F1.2 — the subject of a credential or passport is one the caller's organization may see, through the
+ * owner it already has: an operator or unit (trailers are units) through coreRecordOwnership, a job
+ * through jobs.orgRef, a person through their membership, a carrier through the company's legal entity
+ * (0146 — the id programPublish and profileReviewRecord record carrier compliance against). Anything
+ * else answers `what`, the same answer a missing subject gets. Equipment has no owner yet: refused while
+ * more than one company exists (UNKNOWN OWNERSHIP != GLOBAL ACCESS).
+ */
+async function requireSubjectInScope(userId: number, ownerType: OwnerType, ownerId: number, what: string): Promise<void> {
+  if (ownerType === "equipment") return requireProvableOwnership("Equipment credentials", "equipment records carry an owner");
+  if (ownerType === "carrier") {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    return assertCallerOwnsEntity(db as never, userId, ownerId, what);
+  }
+  const scope = await actingScopeFor(userId);
+  const visible = ownerType === "operator" ? await operatorInScope(ownerId, scope)
+    : ownerType === "unit" || ownerType === "trailer" ? await unitInScope(ownerId, scope)
+    : ownerType === "job" ? await jobInScope(ownerId, scope)
+    : await userInScope(ownerId, scope);
+  if (!visible) throw new TRPCError({ code: "NOT_FOUND", message: what });
+}
+
 async function passportFor(tenantId: string, subjectType: Subject["subjectType"], subjectId: number, jurisdiction: string, attributes: Record<string, unknown>): Promise<Passport> {
   const [requirements, credentials] = await Promise.all([loadRequirements(tenantId), loadCredentials(subjectType, subjectId)]);
   return buildPassport({ subject: { subjectType, jurisdiction, attributes }, requirements, credentials, now: new Date() });
@@ -82,6 +108,7 @@ export const complianceRouter = router({
   passport: roleProcedure("compliance.passport")
     .input(z.object({ subjectType: SUBJECT, subjectId: z.number().int().positive(), jurisdiction: z.string().min(2).max(80), attributes: z.record(z.string(), z.unknown()).default({}) }))
     .query(async ({ ctx, input }) => {
+      await requireSubjectInScope(ctx.user.id, input.subjectType, input.subjectId, "Subject not found");
       const tenantId = (await actingScopeFor(ctx.user.id)).tenantId;
       const p = await passportFor(tenantId, input.subjectType, input.subjectId, input.jurisdiction, input.attributes);
       // Private detail never rides out on a passport. Items are requirement
@@ -98,6 +125,9 @@ export const complianceRouter = router({
       trailer: z.object({ id: z.number().int().positive(), attributes: z.record(z.string(), z.unknown()).default({}) }).nullable().optional(),
     }))
     .query(async ({ ctx, input }) => {
+      // F1.2 — every named subject is proven before any is read: one foreign subject refuses the whole job.
+      for (const [type, s] of [["carrier", input.carrier], ["operator", input.operator], ["unit", input.unit], ["trailer", input.trailer]] as const)
+        if (s) await requireSubjectInScope(ctx.user.id, type, s.id, "Subject not found");
       const tenantId = (await actingScopeFor(ctx.user.id)).tenantId;
       const parts: Record<string, Passport | null> = {
         carrier: input.carrier ? await passportFor(tenantId, "carrier", input.carrier.id, input.jurisdiction, input.carrier.attributes) : null,
@@ -111,9 +141,10 @@ export const complianceRouter = router({
   /** The only shape medical fitness takes outside HR. */
   medicalEligibility: roleProcedure("compliance.medicalEligibility")
     .input(z.object({ operatorId: z.number().int().positive() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) return { eligible: "unknown" as const, reviewDue: null };
+      await requireSubjectInScope(ctx.user.id, "operator", input.operatorId, "Operator not found");
       const rows = await db.select().from(complianceDocuments)
         .where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, input.operatorId), eq(complianceDocuments.docType, "medical_fitness")))
         .orderBy(desc(complianceDocuments.expiresAt)).limit(1);
@@ -130,9 +161,12 @@ export const complianceRouter = router({
       jurisdiction: z.string().max(80).nullable().optional(), source: z.string().max(220).nullable().optional(),
       privateDetail: z.boolean().default(false), evidenceRecordId: z.number().int().positive().nullable().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.2 — a credential is filed only against the caller's own subject, with the caller's own evidence.
+      await requireSubjectInScope(ctx.user.id, input.ownerType, input.ownerId, "Credential owner not found");
+      if (input.evidenceRecordId != null && !(await evidenceInScope(input.evidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       // Recorded is not verified. Every credential enters as needs_review.
       const ins = await db.insert(complianceDocuments).values({
         ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, requirementKey: input.requirementKey ?? null,
@@ -151,6 +185,8 @@ export const complianceRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const rows = await db.select().from(complianceDocuments).where(eq(complianceDocuments.id, input.credentialId)).limit(1);
       if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Credential not found" });
+      // F1.2 — another company's credential is not found, not verifiable.
+      await requireSubjectInScope(ctx.user.id, rows[0].ownerType, rows[0].ownerId, "Credential not found");
       await db.update(complianceDocuments).set({ verificationStatus: input.outcome, verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(eq(complianceDocuments.id, input.credentialId));
       return { credentialId: input.credentialId, verificationStatus: input.outcome };
     }),
@@ -165,6 +201,9 @@ export const complianceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.2 — consent is recorded for the caller's own people, against the caller's own signature evidence.
+      await requireSubjectInScope(ctx.user.id, "user", input.subjectUserId, "Subject not found");
+      if (input.signatureEvidenceRecordId != null && !(await evidenceInScope(input.signatureEvidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       const consentRef = ref("CONSENT");
       await db.insert(complianceConsents).values({
         consentRef, subjectUserId: input.subjectUserId, consentType: input.consentType, purpose: input.purpose,
@@ -280,8 +319,18 @@ export const complianceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.1 — the program is the caller's own company's; so is the version it supersedes. (A program key is
+      // not unique across companies: publishing "safety-manual" must never supersede another company's.)
+      await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);
+      if (input.documentEvidenceRecordId != null && !(await evidenceInScope(input.documentEvidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       const prior = await db.select({ id: writtenProgramVersions.id, version: writtenProgramVersions.version }).from(writtenProgramVersions)
-        .where(and(eq(writtenProgramVersions.programKey, input.programKey), isNull(writtenProgramVersions.supersededAt))).orderBy(desc(writtenProgramVersions.version)).limit(1);
+        .where(and(eq(writtenProgramVersions.programKey, input.programKey), eq(writtenProgramVersions.financialEntityId, input.financialEntityId), isNull(writtenProgramVersions.supersededAt))).orderBy(desc(writtenProgramVersions.version)).limit(1);
+      // Program keys are unique across LeaseOS (UNIQUE programKey+version) until the schema scopes them per company.
+      // A key another company holds is refused as taken — never superseded, never a database error.
+      if (!prior[0]) {
+        const elsewhere = (await db.select({ id: writtenProgramVersions.id }).from(writtenProgramVersions).where(and(eq(writtenProgramVersions.programKey, input.programKey), ne(writtenProgramVersions.financialEntityId, input.financialEntityId))).limit(1))[0];
+        if (elsewhere) throw new TRPCError({ code: "CONFLICT", message: `Program key ${input.programKey} is already in use — choose another key` });
+      }
       const version = (prior[0]?.version ?? 0) + 1;
       const now = new Date();
       await db.insert(writtenProgramVersions).values({
@@ -306,6 +355,9 @@ export const complianceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.1 — recorded against the caller's own company only.
+      await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);
+      if (input.evidenceRecordId != null && !(await evidenceInScope(input.evidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       // Anything on the regulator's profile that LeaseOS does not know about is
       // an exception to investigate, not a number to file.
       const unmatched = Math.max(0, input.inspectionsOnProfile - input.knownInspections) + Math.max(0, input.convictionsOnProfile - input.knownConvictions) + Math.max(0, input.collisionsOnProfile - input.knownCollisions);
