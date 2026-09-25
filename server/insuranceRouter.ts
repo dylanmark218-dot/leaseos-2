@@ -21,7 +21,7 @@ import {
 } from "../drizzle/schema";
 import {
   assessCoverage, certificatesAffectedByRenewal, claimFinancials, dispatchInsuranceGate, matchCustomerRequirements,
-  renewalCalendar, roadsideInsuranceItems, type PolicyRecord,
+  renewalCalendar, roadsideInsuranceItems, INSURANCE_PROOF_DOC_TYPES, proofFromDocuments, type PolicyRecord,
 } from "./_core/insuranceRisk";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -33,6 +33,12 @@ async function policiesFor(financialEntityId: number, entity: { type: string; id
   if (!db) return [];
   const rows = await db.select().from(insurancePolicies).where(eq(insurancePolicies.financialEntityId, financialEntityId));
   const out: PolicyRecord[] = [];
+  // SPINE item 2: every proof row the entity owns, judged canonically. This used to take the
+  // first `insurance_proof` row the database returned — any row, in any state — and ignored
+  // `insurance_card`, which dispatch accepts. Both paths now read the same types the same way.
+  const proof = entity
+    ? proofFromDocuments(await db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, entity.type as never), eq(complianceDocuments.ownerId, entity.id), inArray(complianceDocuments.docType, [...INSURANCE_PROOF_DOC_TYPES]))), now)
+    : null;
   for (const p of rows) {
     if (entity) {
       const covered = await db.select({ id: insuranceCoveredEntities.id }).from(insuranceCoveredEntities).where(and(
@@ -43,14 +49,11 @@ async function policiesFor(financialEntityId: number, entity: { type: string; id
       if (!covered[0]) continue;
     }
     const coverages = await db.select().from(insurancePolicyCoverages).where(eq(insurancePolicyCoverages.insurancePolicyId, p.id));
-    const doc = entity
-      ? (await db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, entity.type as never), eq(complianceDocuments.ownerId, entity.id), eq(complianceDocuments.docType, "insurance_proof"))).limit(1))[0]
-      : null;
     out.push({
       policyRef: p.policyRef, policyType: p.policyType, effectiveAt: p.effectiveAt, expiresAt: p.expiresAt, status: p.status,
       coverageVerificationStatus: p.coverageVerificationStatus,
       coverages: coverages.map(c => ({ coverageType: c.coverageType, limitAmount: c.limitAmount, additionalInsuredEndorsement: c.additionalInsuredEndorsement })),
-      document: doc ? { expiresAt: doc.expiresAt, verificationStatus: doc.verificationStatus } : null,
+      document: proof,
     });
   }
   return out;
@@ -157,8 +160,9 @@ export const insuranceRouter = router({
       const now = new Date();
       const reqs = await db.select().from(insuranceRequirements).where(eq(insuranceRequirements.customerRef, input.customerRef));
       const policies = await policiesFor(input.financialEntityId, null, now);
-      // Company-level policies have no per-entity document; treat the policy's own evidence as its proof.
-      const withDocs = policies.map(p => ({ ...p, document: p.document ?? { expiresAt: p.expiresAt, verificationStatus: "verified" as const } }));
+      // Company-level policies have no per-entity document; the policy's own record stands as its
+      // proof. Named as that, not dressed up as a verified document: no document is being judged.
+      const withDocs = policies.map(p => ({ ...p, document: p.document ?? { source: "policy_record" as const } }));
       return { customerRef: input.customerRef, ...matchCustomerRequirements({ requirements: reqs.map(r => ({ coverageType: r.coverageType, minimumLimit: r.minimumLimit, additionalInsuredRequired: r.additionalInsuredRequired })), policies: withDocs, now }) };
     }),
 
