@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
 import mysql from "mysql2/promise";
 import {
-  abstractRequestPermitted, buildPassport, composeJobPassport, evaluateRequirement, medicalFitnessForDispatch,
+  abstractRequestPermitted, buildPassport, composeJobPassport, evaluateRequirement, MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch,
   nextRenewalDue, requirementApplies, tripInspectionValidity, PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED,
   type Credential, type Requirement, type Subject,
 } from "./_core/compliancePassport";
@@ -19,6 +20,12 @@ const req = (over: Partial<Requirement> = {}): Requirement => ({
   effectiveFrom: new Date("2026-01-01T00:00:00Z"), ...over,
 });
 const cred = (over: Partial<Credential> = {}): Credential => ({ docType: "test_doc", expiresAt: days(400), verificationStatus: "verified", privateDetail: false, ...over });
+/** Medical rows judged the way production judges them: the canonical verdict, then the projection. */
+const medical = (rows: { expiresAt: Date | null; verificationStatus?: "needs_review" | "verified" | "rejected"; issuedAt?: Date | null; capturedAt?: Date }[]) =>
+  complianceRequirementValidity(rows.map((r, i) => ({
+    id: i + 1, docType: "medical_fitness", title: "Medical", issuedAt: r.issuedAt ?? null, expiresAt: r.expiresAt,
+    verificationStatus: r.verificationStatus ?? "verified", capturedAt: r.capturedAt ?? days(-10 + i),
+  })), MEDICAL_FITNESS_DOC_TYPES, NOW);
 const subject = (over: Partial<Subject> = {}): Subject => ({ subjectType: "operator", jurisdiction: "CA-AB", attributes: {}, ...over });
 
 /* ------------------------------------------------------------------ */
@@ -148,16 +155,16 @@ describe("a requirement applies where, when and to whom it says", () => {
 
 describe("dispatch learns eligible, never why", () => {
   it("projects medical fitness to yes / no / unknown only", () => {
-    expect(medicalFitnessForDispatch(cred({ docType: "medical_fitness", privateDetail: true }), NOW).eligible).toBe("yes");
-    expect(medicalFitnessForDispatch(cred({ docType: "medical_fitness", privateDetail: true, expiresAt: days(-1) }), NOW).eligible).toBe("no");
-    expect(medicalFitnessForDispatch(cred({ docType: "medical_fitness", privateDetail: true, verificationStatus: "needs_review" }), NOW).eligible).toBe("unknown");
-    expect(medicalFitnessForDispatch(null, NOW).eligible).toBe("unknown");
+    expect(medicalFitnessForDispatch(medical([{ expiresAt: days(400) }])).eligible).toBe("yes");
+    expect(medicalFitnessForDispatch(medical([{ expiresAt: days(-1) }])).eligible).toBe("no");
+    expect(medicalFitnessForDispatch(medical([{ expiresAt: days(400), verificationStatus: "needs_review" }])).eligible).toBe("unknown");
+    expect(medicalFitnessForDispatch(medical([])).eligible).toBe("unknown");
   });
 
   it("names the fields that never leave HR", () => {
     expect(PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED).toContain("title");
     expect(PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED).toContain("storageKey");
-    const projection = medicalFitnessForDispatch(cred({ privateDetail: true }), NOW);
+    const projection = medicalFitnessForDispatch(medical([{ expiresAt: days(400) }]));
     for (const f of PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED) expect(projection).not.toHaveProperty(f);
   });
 });
