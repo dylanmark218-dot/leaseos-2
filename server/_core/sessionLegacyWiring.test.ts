@@ -146,13 +146,21 @@ describe("LWI-2b — both request entry points reach that refusal", () => {
     return token;
   };
 
+  /*
+   * Asserted on the *specific* refusal, not merely "it threw". `authenticateRequest` continues
+   * into a user lookup once a session verifies, and with no database configured that path throws
+   * too — so a bare `rejects.toThrow()` passes even when the cutover check has been deleted. It
+   * did exactly that when the mutation was first planted here, which is why the message is pinned.
+   */
+  const REFUSAL = /Invalid session cookie/;
+
   it("refuses a past-window legacy token presented as a session cookie", async () => {
     const token = await legacyPastWindow();
     const sdk = await sdkAt(AFTER_GRACE);
 
     await expect(
       sdk.authenticateRequest({ headers: { cookie: `${COOKIE_NAME}=${token}` } } as never)
-    ).rejects.toThrow();
+    ).rejects.toThrow(REFUSAL);
   });
 
   it("refuses the same token presented as a Bearer credential", async () => {
@@ -161,7 +169,19 @@ describe("LWI-2b — both request entry points reach that refusal", () => {
 
     await expect(
       sdk.authenticateRequest({ headers: { authorization: `Bearer ${token}` } } as never)
-    ).rejects.toThrow();
+    ).rejects.toThrow(REFUSAL);
+  });
+
+  it("the Bearer path is genuinely reached — the same token verifies inside the window", async () => {
+    /*
+     * Guards against the pair above passing for the wrong reason a second way: if the header were
+     * never read at all, the refusal would still fire (no credential at all is also refused). So
+     * the token is shown to be *accepted* by the verifier inside the window, which means the
+     * refusal after it is about the token, not about the header being ignored.
+     */
+    const token = await legacyPastWindow();
+
+    expect(await verifyAt(token, INSIDE_GRACE)).not.toBeNull();
   });
 });
 
