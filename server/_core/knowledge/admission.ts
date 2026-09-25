@@ -22,6 +22,7 @@
  *
  * Nothing here retrieves, embeds or answers. It decides what is allowed to.
  */
+import type { AuthorityClass, DispatchEffect } from "../complianceFinding";
 
 /* ------------------------------------------------------------------ */
 /* Authority                                                           */
@@ -63,6 +64,49 @@ export const BINDING_LEVELS: readonly AuthorityLevel[] = [
 ];
 
 export const isBinding = (l: AuthorityLevel): boolean => BINDING_LEVELS.includes(l);
+
+/* ------------------------------------------------------------------ */
+/* Authority tier (C1b-1)                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Knowledge authority → the compliance authority ladder.
+ *
+ * The design's mapping table (§4), as code. It is a table on purpose: no rule's tier is decided by
+ * judgement at promotion time, and no stored `authorityLevel` or `authorityType` is rewritten.
+ *
+ * `official_guidance` sits at the statute tier because it interprets statute, but it is **guidance**:
+ * it cannot block dispatch on its own. `recognized_standard` and `manufacturer` are best practice
+ * unless a program version adopts them, in which case the adopting carrier policy supplies the tier.
+ *
+ * Only the binding levels have a tier; `company_policy`, `operational` and `unverified` do not map by
+ * table (company policy is split by pack kind, C1b-2).
+ */
+export function tierForAuthority(level: AuthorityLevel, adoptedByProgram = false): AuthorityClass | null {
+  switch (level) {
+    case "law": return "statute_regulation";
+    case "official_guidance": return "statute_regulation";
+    case "recognized_standard":
+    case "manufacturer": return adoptedByProgram ? "carrier_safety_policy" : "best_practice";
+    default: return null;
+  }
+}
+
+/** Guidance interprets; it does not bind. A rule resting on it alone may not block. */
+export const isGuidance = (level: AuthorityLevel): boolean => level === "official_guidance";
+
+/**
+ * Which rule revisions need two distinct verifiers (C1b-Q3, recommended answer): a rule at the statute
+ * or regulator-order tier whose dispatch effect is BLOCK. The HOS model, generalized.
+ */
+export const requiresSecondVerifier = (tier: AuthorityClass, effect: DispatchEffect): boolean =>
+  effect === "BLOCK" && (tier === "statute_regulation" || tier === "regulator_order");
+
+/** `best_practice` is capped at WARN (§4); guidance cannot BLOCK alone. */
+export function maxEffectFor(tier: AuthorityClass, level: AuthorityLevel): DispatchEffect {
+  if (tier === "best_practice" || isGuidance(level)) return "WARN";
+  return "BLOCK";
+}
 
 /* ------------------------------------------------------------------ */
 /* Licence                                                             */

@@ -149,7 +149,10 @@ export function roleProcedure(procedureName: ProcedureName) {
 import { createHash } from "node:crypto";
 import { EXTERNAL_KIND_PERMISSIONS, EXTERNAL_SENSITIVE_PERMISSIONS, externalPermissionForProcedure, type ExternalPermission } from "./recordsAuthorization";
 import { findExternalIdentityByAnyTokenHash, findExternalIdentityByInvitationHash, touchExternalIdentity, updateExternalIdentity } from "../db";
-import { credentialCheck, decryptSecret, failureUpdate, invitationCheck, mfaKey, totpVerify } from "./externalIdentityPolicy";
+import { credentialCheck, failureUpdate, invitationCheck, totpVerify } from "./externalIdentityPolicy";
+import { environmentSecretKeys, legacyMfaKey } from "./secretKeys";
+import { resolveMfaSeed } from "../mfaSecretService";
+import { ENV } from "./env";
 
 export type ExternalContext = { identityId: number; identityRef: string; kind: "customer" | "vendor" | "facility"; accountId: number; displayName: string };
 
@@ -185,9 +188,23 @@ export function externalProcedure(procedureName: string) {
         // MFA, when enabled, guards every sensitive write.
         if (identity.mfaEnabled && EXTERNAL_SENSITIVE_PERMISSIONS.includes(permission)) {
           const codeRaw = headers["x-portal-mfa"]; const code = Array.isArray(codeRaw) ? codeRaw[0] : codeRaw;
-          const key = mfaKey();
-          if (!key || !identity.mfaSecretEnc) return refuse("denied_scope", "MFA is enabled but cannot be verified on this server", "FORBIDDEN");
-          if (!code || !totpVerify(decryptSecret(identity.mfaSecretEnc, key), code, now)) {
+          /*
+           * 0193 — the seed comes from whichever store this identity uses. `resolveMfaSeed` prefers
+           * `mfaSecretRef`, and when one is present but unreadable it throws rather than reading
+           * the legacy column, so a damaged or tampered new record cannot hand verification back to
+           * a seed the user already replaced.
+           *
+           * The throw is answered here as a refusal rather than allowed to become a 500: an
+           * unreadable secret must deny the request, and it must deny it the same way a missing key
+           * always did.
+           */
+          let seed: string;
+          try {
+            seed = await resolveMfaSeed(identity, { keys: environmentSecretKeys(), legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
+          } catch {
+            return refuse("denied_scope", "MFA is enabled but cannot be verified on this server", "FORBIDDEN");
+          }
+          if (!code || !totpVerify(seed, code, now)) {
             const f = failureUpdate(identity.failedAttempts, now);
             await updateExternalIdentity(identity.id, f);
             return refuse("denied_scope", f.lockedUntil ? `MFA code rejected — locked until ${f.lockedUntil.toISOString()}` : "MFA code required or rejected", "FORBIDDEN");

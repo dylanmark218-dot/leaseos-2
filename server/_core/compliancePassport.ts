@@ -42,7 +42,15 @@ export type Requirement = {
   verificationStatus: RequirementStatus;
   effectiveFrom: Date;
   effectiveUntil?: Date | null;
+  /** C1b-2: a stored registry revision, or a seed constant. Absent on a requirement built in code. */
+  origin?: "registry" | "seed";
 };
+
+/**
+ * C1b-2: which exact requirement revision produced a finding. `version` is the revision the
+ * registry chose at evaluation time, so a later reload never changes what an earlier answer used.
+ */
+export type RequirementRef = { key: string; version: number; origin: "registry" | "seed" | "code" };
 
 export type Credential = {
   docType: string;
@@ -79,6 +87,7 @@ export type ItemStatus =
 
 export type PassportItem = {
   requirementKey: string;
+  requirementRef: RequirementRef;
   family: string;
   title: string;
   status: ItemStatus;
@@ -143,7 +152,10 @@ export function evaluateRequirement(args: {
   now: Date;
 }): PassportItem {
   const r = args.requirement;
-  const base = { requirementKey: r.requirementKey, family: r.family, title: r.title };
+  const base = {
+    requirementKey: r.requirementKey, family: r.family, title: r.title,
+    requirementRef: { key: r.requirementKey, version: r.version, origin: r.origin ?? "code" } as RequirementRef,
+  };
 
   if (r.verificationStatus === "unverified") {
     return {
