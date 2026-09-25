@@ -10,7 +10,10 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, inArray, isNull, or, gte } from "drizzle-orm";
-import { roleProcedure, router } from "./_core/trpc";
+import { moneyScoped, roleProcedure, router } from "./_core/trpc";
+import { requireOwnedEntity } from "./_core/entityScope";
+import { claimInScope, policyInScope, requireCoveredEntity, requireEvidence, requireIncidentReport, requireJob, requireRoadsideEventId, requireUnit, vendorBillIdInScope } from "./financeScope";
+import { requireProvableOwnership } from "./ownershipDomain";
 import { getDb } from "./db";
 import {
   complianceDocuments, evidenceRelationships, incidentReports, insuranceCertificates, insuranceClaimCosts, insuranceClaimRecoveries,
@@ -57,7 +60,7 @@ async function policiesFor(financialEntityId: number, entity: { type: string; id
 }
 
 export const insuranceRouter = router({
-  policyRecord: roleProcedure("insurance.policyRecord")
+  policyRecord: moneyScoped(roleProcedure("insurance.policyRecord"))
     .input(z.object({
       financialEntityId: z.number().int().positive(),
       policyType: z.enum(["commercial_auto","physical_damage","cargo","general_liability","property","equipment","pollution_environmental","garage","cyber","professional_liability","umbrella_excess","non_owned_auto","wcb","surety_bond","other"]),
@@ -67,9 +70,12 @@ export const insuranceRouter = router({
       evidenceRecordId: z.number().int().positive().nullable().optional(),
       coverages: z.array(z.object({ coverageType: z.string().min(1).max(80), limitAmount: z.number().nonnegative().nullable().optional(), limitBasis: z.enum(["per_occurrence","aggregate","per_vehicle","per_load","other"]).nullable().optional(), additionalInsuredEndorsement: z.boolean().default(false) })).min(1),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.1 — the policy is recorded into the caller's own book. (Insurers and brokers are a shared directory.)
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      await requireEvidence(ctx.money, input.evidenceRecordId);
       if (input.expiresAt <= input.effectiveAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Policy expires before it takes effect" });
       const provider = async (name: string, role: "insurer" | "broker") => {
         const ex = (await db.select({ id: insuranceProviders.id }).from(insuranceProviders).where(and(eq(insuranceProviders.name, name), eq(insuranceProviders.role, role))).limit(1))[0];
@@ -92,13 +98,14 @@ export const insuranceRouter = router({
       return { policyRef, policyId, coverageVerificationStatus: "coverage_reported" as const };
     }),
 
-  coverageAssign: roleProcedure("insurance.coverageAssign")
+  coverageAssign: moneyScoped(roleProcedure("insurance.coverageAssign"))
     .input(z.object({ policyRef: z.string().min(1).max(64), entities: z.array(z.object({ entityType: ENTITY, entityId: z.number().int().positive(), statedValue: z.number().nonnegative().nullable().optional() })).min(1), coveredFrom: z.coerce.date() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const p = (await db.select().from(insurancePolicies).where(eq(insurancePolicies.policyRef, input.policyRef)).limit(1))[0];
-      if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Policy not found" });
+      const p = await policyInScope(db, ctx.money, input.policyRef);
+      // F1.1 — a policy covers the caller's own units and operators, never another organization's.
+      for (const e of input.entities) await requireCoveredEntity(ctx.money, e.entityType, e.entityId);
       await db.insert(insuranceCoveredEntities).values(input.entities.map(e => ({ insurancePolicyId: p.id, entityType: e.entityType, entityId: e.entityId, coveredFrom: input.coveredFrom, statedValue: e.statedValue ?? null })));
       // One policy document, related to every covered unit. Zero copies.
       if (p.evidenceRecordId) {
@@ -108,42 +115,48 @@ export const insuranceRouter = router({
       return { policyRef: p.policyRef, covered: input.entities.length, documentRelated: !!p.evidenceRecordId };
     }),
 
-  coverageVerify: roleProcedure("insurance.coverageVerify")
+  coverageVerify: moneyScoped(roleProcedure("insurance.coverageVerify"))
     .input(z.object({ policyRef: z.string().min(1).max(64), outcome: z.enum(["coverage_verified", "coverage_unknown"]), note: z.string().max(400).optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const p = (await db.select().from(insurancePolicies).where(eq(insurancePolicies.policyRef, input.policyRef)).limit(1))[0];
-      if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Policy not found" });
+      const p = await policyInScope(db, ctx.money, input.policyRef);
       await db.update(insurancePolicies).set({ coverageVerificationStatus: input.outcome, coverageVerifiedAt: new Date(), coverageVerifiedByUserId: ctx.user.id }).where(eq(insurancePolicies.id, p.id));
       return { policyRef: p.policyRef, coverageVerificationStatus: input.outcome };
     }),
 
   /** Summary readers get status and policy ref. Not premiums. */
-  coverageForEntity: roleProcedure("insurance.coverageForEntity")
+  coverageForEntity: moneyScoped(roleProcedure("insurance.coverageForEntity"))
     .input(z.object({ financialEntityId: z.number().int().positive(), entityType: ENTITY, entityId: z.number().int().positive(), coverageTypes: z.array(z.string()).default(["commercial_auto", "cargo", "general_liability"]) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      await requireCoveredEntity(ctx.money, input.entityType, input.entityId);   // its compliance documents are read below
       const now = new Date();
       const policies = await policiesFor(input.financialEntityId, { type: input.entityType, id: input.entityId }, now);
       const assessments = input.coverageTypes.map(t => assessCoverage({ coverageType: t, policies, now }));
       return { assessments, dispatch: dispatchInsuranceGate(assessments), roadside: roadsideInsuranceItems(assessments) };
     }),
 
-  requirementSet: roleProcedure("insurance.requirementSet")
+  requirementSet: moneyScoped(roleProcedure("insurance.requirementSet"))
     .input(z.object({ customerRef: z.string().min(1).max(220), requirements: z.array(z.object({ coverageType: z.string().min(1).max(80), minimumLimit: z.number().nonnegative().nullable().optional(), additionalInsuredRequired: z.boolean().default(false), contractingEntityRef: z.string().max(220).nullable().optional() })).min(1) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.1 — requirements are keyed by a free-text customer name and carry no owner, and this REPLACES every
+      // row for that name. With organizations present it would delete another company's requirements.
+      await requireProvableOwnership("Setting customer insurance requirements", "insuranceRequirements carries a book (the next finance schema checkpoint, F2)");
       await db.delete(insuranceRequirements).where(eq(insuranceRequirements.customerRef, input.customerRef));
       await db.insert(insuranceRequirements).values(input.requirements.map(r => ({ customerRef: input.customerRef, coverageType: r.coverageType, minimumLimit: r.minimumLimit ?? null, additionalInsuredRequired: r.additionalInsuredRequired, contractingEntityRef: r.contractingEntityRef ?? null })));
       return { customerRef: input.customerRef, requirements: input.requirements.length };
     }),
 
-  requirementMatch: roleProcedure("insurance.requirementMatch")
+  requirementMatch: moneyScoped(roleProcedure("insurance.requirementMatch"))
     .input(z.object({ financialEntityId: z.number().int().positive(), customerRef: z.string().min(1).max(220) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      await requireProvableOwnership("Matching customer insurance requirements", "insuranceRequirements carries a book (the next finance schema checkpoint, F2)");
       const now = new Date();
       const reqs = await db.select().from(insuranceRequirements).where(eq(insuranceRequirements.customerRef, input.customerRef));
       const policies = await policiesFor(input.financialEntityId, null, now);
@@ -153,27 +166,29 @@ export const insuranceRouter = router({
       return { customerRef: input.customerRef, ...matchCustomerRequirements({ requirements: reqs.map(r => ({ coverageType: r.coverageType, minimumLimit: r.minimumLimit, additionalInsuredRequired: r.additionalInsuredRequired })), policies: withDocs, now }) };
     }),
 
-  certificateIssue: roleProcedure("insurance.certificateIssue")
+  certificateIssue: moneyScoped(roleProcedure("insurance.certificateIssue"))
     .input(z.object({ policyRef: z.string().min(1).max(64), recipientCustomerRef: z.string().min(1).max(220), additionalInsuredNamed: z.boolean().default(false), evidenceRecordId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const p = (await db.select().from(insurancePolicies).where(eq(insurancePolicies.policyRef, input.policyRef)).limit(1))[0];
-      if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Policy not found" });
+      const p = await policyInScope(db, ctx.money, input.policyRef);
+      await requireEvidence(ctx.money, input.evidenceRecordId);
       if (p.coverageVerificationStatus !== "coverage_verified") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A certificate attests to coverage; verify the coverage before issuing one" });
       const certificateRef = ref("COI");
       await db.insert(insuranceCertificates).values({ certificateRef, insurancePolicyId: p.id, recipientCustomerRef: input.recipientCustomerRef, issuedAt: new Date(), expiresAt: p.expiresAt, additionalInsuredNamed: input.additionalInsuredNamed, evidenceRecordId: input.evidenceRecordId ?? null, sharedAt: new Date(), sharedByUserId: ctx.user.id });
       return { certificateRef, expiresAt: p.expiresAt };
     }),
 
-  renewalCalendar: roleProcedure("insurance.renewalCalendar")
+  renewalCalendar: moneyScoped(roleProcedure("insurance.renewalCalendar"))
     .input(z.object({ financialEntityId: z.number().int().positive() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
       const now = new Date();
       const policies = await db.select().from(insurancePolicies).where(eq(insurancePolicies.financialEntityId, input.financialEntityId));
-      const certs = await db.select({ certificateRef: insuranceCertificates.certificateRef, insurancePolicyId: insuranceCertificates.insurancePolicyId, recipientCustomerRef: insuranceCertificates.recipientCustomerRef, expiresAt: insuranceCertificates.expiresAt }).from(insuranceCertificates);
+      // F1.1 — this book's certificates only (this read used to take every company's).
+      const certs = policies.length ? await db.select({ certificateRef: insuranceCertificates.certificateRef, insurancePolicyId: insuranceCertificates.insurancePolicyId, recipientCustomerRef: insuranceCertificates.recipientCustomerRef, expiresAt: insuranceCertificates.expiresAt }).from(insuranceCertificates).where(inArray(insuranceCertificates.insurancePolicyId, policies.map(p => p.id))) : [];
       const byId = new Map(policies.map(p => [p.id, p.policyRef]));
       const calendar = renewalCalendar(policies, now).map(entry => ({
         ...entry,
@@ -182,7 +197,7 @@ export const insuranceRouter = router({
       return { calendar };
     }),
 
-  claimOpen: roleProcedure("insurance.claimOpen")
+  claimOpen: moneyScoped(roleProcedure("insurance.claimOpen"))
     .input(z.object({
       policyRef: z.string().min(1).max(64), incidentReportId: z.number().int().positive().nullable().optional(), roadsideEventId: z.number().int().positive().nullable().optional(),
       unitId: z.number().int().positive().nullable().optional(), jobId: z.number().int().positive().nullable().optional(), lossOccurredAt: z.coerce.date(),
@@ -191,8 +206,11 @@ export const insuranceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const p = (await db.select().from(insurancePolicies).where(eq(insurancePolicies.policyRef, input.policyRef)).limit(1))[0];
-      if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Policy not found" });
+      const p = await policyInScope(db, ctx.money, input.policyRef);
+      await requireIncidentReport(db, ctx.money, input.incidentReportId);
+      await requireRoadsideEventId(db, ctx.money, input.roadsideEventId);
+      await requireUnit(ctx.money, input.unitId);
+      await requireJob(ctx.money, input.jobId);
       if (input.lossOccurredAt < p.effectiveAt || input.lossOccurredAt > p.expiresAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Loss date falls outside the policy period" });
       let statementPreserved: boolean | null = null;
       if (input.incidentReportId) {
@@ -205,24 +223,23 @@ export const insuranceRouter = router({
       return { claimRef, status: "potential" as const, deductible: p.deductible, incidentStatementPreserved: statementPreserved };
     }),
 
-  claimCostRecord: roleProcedure("insurance.claimCostRecord")
+  claimCostRecord: moneyScoped(roleProcedure("insurance.claimCostRecord"))
     .input(z.object({ claimRef: z.string().min(1).max(64), costType: z.enum(["tow","repair","rental_replacement","cleanup","cargo_loss","downtime","legal","other"]), amount: z.number().positive(), vendorBillId: z.number().int().positive().nullable().optional(), incurredAt: z.coerce.date(), note: z.string().max(300).optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const c = (await db.select({ id: insuranceClaims.id }).from(insuranceClaims).where(eq(insuranceClaims.claimRef, input.claimRef)).limit(1))[0];
-      if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "Claim not found" });
+      const { claim: c, financialEntityId } = await claimInScope(db, ctx.money, input.claimRef);
+      if (input.vendorBillId != null) await vendorBillIdInScope(db, ctx.money, input.vendorBillId, financialEntityId);
       await db.insert(insuranceClaimCosts).values({ insuranceClaimId: c.id, costType: input.costType, amount: input.amount, vendorBillId: input.vendorBillId ?? null, incurredAt: input.incurredAt, note: input.note ?? null });
       return { claimRef: input.claimRef, recorded: input.amount };
     }),
 
-  claimRecoveryRecord: roleProcedure("insurance.claimRecoveryRecord")
+  claimRecoveryRecord: moneyScoped(roleProcedure("insurance.claimRecoveryRecord"))
     .input(z.object({ claimRef: z.string().min(1).max(64), recoveryType: z.enum(["approved","received","denied","adjustment"]), amount: z.number(), reference: z.string().max(120).optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const c = (await db.select().from(insuranceClaims).where(eq(insuranceClaims.claimRef, input.claimRef)).limit(1))[0];
-      if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "Claim not found" });
+      const { claim: c } = await claimInScope(db, ctx.money, input.claimRef);
       if (input.recoveryType !== "adjustment" && input.amount <= 0) throw new TRPCError({ code: "BAD_REQUEST", message: "Amount must be positive" });
       await db.insert(insuranceClaimRecoveries).values({ insuranceClaimId: c.id, recoveryType: input.recoveryType, amount: input.amount, recordedAt: new Date(), reference: input.reference ?? null, recordedByUserId: ctx.user.id });
       if (input.recoveryType === "approved") await db.update(insuranceClaims).set({ status: "approved", approvedAmount: input.amount }).where(eq(insuranceClaims.id, c.id));
@@ -230,13 +247,12 @@ export const insuranceRouter = router({
       return { claimRef: input.claimRef, recoveryType: input.recoveryType };
     }),
 
-  claimFinancials: roleProcedure("insurance.claimFinancials")
+  claimFinancials: moneyScoped(roleProcedure("insurance.claimFinancials"))
     .input(z.object({ claimRef: z.string().min(1).max(64) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const c = (await db.select().from(insuranceClaims).where(eq(insuranceClaims.claimRef, input.claimRef)).limit(1))[0];
-      if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "Claim not found" });
+      const { claim: c } = await claimInScope(db, ctx.money, input.claimRef);
       const costs = await db.select().from(insuranceClaimCosts).where(eq(insuranceClaimCosts.insuranceClaimId, c.id));
       const recs = await db.select().from(insuranceClaimRecoveries).where(eq(insuranceClaimRecoveries.insuranceClaimId, c.id));
       return { claimRef: c.claimRef, status: c.status, ...claimFinancials({ costs, recoveries: recs, deductible: c.deductible }) };

@@ -146,11 +146,10 @@ centre's per-type cases).
 
 ### Recorded, not changed here
 
-- **Tenant scope on insurance and medical reads.** `insurance.coverageForEntity` scopes policies by
-  a client-supplied `financialEntityId` and reads the entity's proofs by type and id;
-  `compliance.medicalEligibility` reads by `operatorId`. Neither checks the entity against the
-  caller's organization. The proof is correctly the entity's own record set (tested), but whose
-  entity it is was not in this item's scope — an authorization change, not a validity one.
+- **Tenant scope on insurance and medical reads** was a gap when this survey began and was closed
+  on `main` by F1.1 (#56) while it ran: `insurance.coverageForEntity` now requires the financial
+  entity and the covered entity in the caller's scope, and `compliance.medicalEligibility` the
+  operator. Merged in here; the canonical reads sit behind those checks. Not this item's change.
 - **Academy qualifications.** `trainingAcademyRouter` (the qualification check near the end of the
   file) filters `academyQualifications` by `status` and `expiresAt` inline, beside
   `qualificationValidity`. That is the same shape of duplication for a different table and belongs

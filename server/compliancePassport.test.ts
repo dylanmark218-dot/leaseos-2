@@ -255,7 +255,8 @@ d("a driver, a unit and a carrier, through the registry", () => {
     const management = await withRole("management");
     const dispatcher = await withRole("dispatcher");
     const hr = await withRole("hr");
-    const operatorId = 900000 + Math.floor(Math.random() * 90000);
+    // F1.2 — a real operator: a made-up operator id is "not found".
+    const operatorId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES ('Passport Fixture', NOW())"))[0].insertId);
 
     // Office records a licence. It enters needs_review.
     const rec = await callerFor(office).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: "driver_licence", requirementKey: "ab.driver.licence.class1", title: "Class 1 licence", identifier: "•••1234", expiresAt: new Date("2028-04-21T00:00:00Z"), jurisdiction: "CA-AB" });
@@ -314,7 +315,7 @@ d("a driver, a unit and a carrier, through the registry", () => {
 
   it("versions a written program without overwriting, and flags unmatched profile events", async () => {
     const safety = await withRole("safety");
-    const entityId = 700000 + Math.floor(Math.random() * 90000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1.1 — a real book: a made-up entity id is "not found"
     const pk = `safety-${entityId}`;
     const v1 = await callerFor(safety).compliance.programPublish({ programKey: pk, title: "Safety Program", programType: "safety", financialEntityId: entityId, effectiveFrom: new Date("2026-01-01T00:00:00Z") });
     const v2 = await callerFor(safety).compliance.programPublish({ programKey: pk, title: "Safety Program", programType: "safety", financialEntityId: entityId, effectiveFrom: new Date("2026-09-01T00:00:00Z") });

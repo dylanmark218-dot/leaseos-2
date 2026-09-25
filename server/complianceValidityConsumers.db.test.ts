@@ -71,7 +71,9 @@ async function world() {
   for (const role of ["dispatcher", "office"] as const) await grantUserRole({ userId, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() });
   const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, ?)", [userId, `Op ${rnd()}`]);
   const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'vacuum_truck', 'ABC', 'clear')", [`U-${rnd()}`]);
-  const financialEntityId = 700000 + Math.floor(Math.random() * 200000);
+  // A real book in the single tenant: a made-up financial entity id is "not found" since F1.1.
+  const financialEntityId = Number((await pool.execute<mysql.ResultSetHeader>(
+    "INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${rnd()}${rnd()}`]))[0].insertId);
   const pol = await callerFor(userId).insurance.policyRecord({
     financialEntityId, policyType: "commercial_auto", insurerName: "XYZ", policyNumber: `PN-${rnd()}`,
     effectiveAt: at(-100)!, expiresAt: at(265)!, coverages: [{ coverageType: "commercial_auto", limitAmount: 5_000_000, additionalInsuredEndorsement: true }],
