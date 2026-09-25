@@ -1,7 +1,7 @@
 /**
  * 0175 — Driver Portfolio and Credential Wallet: the model.
  *
- * Pure, apart from HMAC for share tokens. No network, no database.
+ * Pure. No network, no database.
  *
  * The portfolio is not a new credential store. A driver's tickets were already
  * entering `complianceDocuments` (recorded by one person, verified by another),
@@ -24,7 +24,7 @@
  *   PROJECTIONS     the wallet (the driver's own, offline, with a time after
  *                   which it stops claiming READY), the dispatch view (ticks and
  *                   crosses, no HR file), the expiry dashboard, the history, and
- *                   a signed share for a single credential.
+ *                   what a one-credential share shows when it is redeemed.
  *
  * Three rules carry over unchanged: unknown is never satisfied; an expired or
  * missing mandatory credential is overridable by no one; and medical fitness is
@@ -32,9 +32,9 @@
  * `medicalFitnessForDispatch`, and nothing here projects it.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { complianceDocumentValidity, type ComplianceDocumentRow } from "./complianceDocumentValidity";
 import type { DispatchBlocker } from "./dispatchReadiness";
+import { walletStatusAt, type WalletHeadline, type WalletStatus } from "../../shared/driverWallet";
 
 /* ------------------------------------------------------------------ */
 /* Catalogue                                                            */
@@ -483,6 +483,8 @@ export function evaluateDriverReadiness(args: {
 /* ------------------------------------------------------------------ */
 
 export type WalletCard = {
+  /** What kind of requirement this card is, and its stable code: the requirement's identity. */
+  kind: RequirementKind;
   code: string;
   label: string;
   category: CredentialCategory | "equipment";
@@ -497,12 +499,14 @@ export type WalletCard = {
   credentialId: number | null;
   /** The certificate number. The driver's own view; never in the dispatch view. */
   identifier: string | null;
+  /** Why it is not satisfied, when it is not. */
+  reason: string | null;
   action: string | null;
 };
 
 export type Wallet = {
   operatorId: number;
-  headline: "READY FOR WORK" | "ACTION REQUIRED" | "NOT READY";
+  headline: WalletHeadline;
   /** Against the company baseline. A particular job may need more; the dispatch check is where that is decided. */
   scope: "company_baseline";
   verdict: DriverReadiness["verdict"];
@@ -515,6 +519,12 @@ export type Wallet = {
    * cannot keep saying READY past the moment a ticket lapses.
    */
   validUntil: Date;
+  /** What set `validUntil`: the offline allowance, or a required credential's expiry (named). */
+  freshness: {
+    offlineAllowanceHours: number;
+    limitedBy: "offline_allowance" | "credential_expiry";
+    limitingCredential: { kind: RequirementKind; code: string; label: string; expiresAt: Date } | null;
+  };
 };
 
 export const WALLET_OFFLINE_HOURS = 24;
@@ -554,25 +564,31 @@ export function walletView(args: {
 
   const identifierOf = (id: number | null) => (id == null ? null : portfolio.credentials.find(c => c.id === id)?.identifier ?? null);
   const card = (i: ReadinessItem, requiredAs: WalletCard["required"]): WalletCard => ({
-    code: i.code, label: i.label,
+    kind: i.kind, code: i.code, label: i.label,
     category: i.kind === "equipment" ? "equipment" : i.kind === "licence_class" ? "licence" : credentialType(i.code)?.category ?? "company_training",
     state: i.state, satisfied: i.satisfied, required: requiredAs,
     expiresAt: i.expiresAt, daysRemaining: i.daysRemaining, warningTier: i.warningTier,
     verification: verificationOf(i),
-    credentialId: i.credentialId, identifier: identifierOf(i.credentialId), action: i.action,
+    credentialId: i.credentialId, identifier: identifierOf(i.credentialId),
+    reason: i.satisfied ? null : i.detail, action: i.action,
   });
+  const REQUIRED_ORDER: Record<WalletCard["required"], number> = { mandatory: 0, informational: 1, optional: 2 };
   const CATEGORY_ORDER: Record<WalletCard["category"], number> = { licence: 0, endorsement: 1, safety_ticket: 2, orientation: 3, company_training: 4, equipment: 5 };
   const cards = [
     ...baseline.items.map(i => card(i, i.enforcement)),
     ...held.items.map(i => card(i, "optional")),
   ].sort((a, b) =>
-    Number(a.satisfied) - Number(b.satisfied) || CATEGORY_ORDER[a.category] - CATEGORY_ORDER[b.category] || a.label.localeCompare(b.label));
+    // What stops work first: unsatisfied before satisfied, and among those, mandatory before informational before optional.
+    Number(a.satisfied) - Number(b.satisfied) || REQUIRED_ORDER[a.required] - REQUIRED_ORDER[b.required]
+    || CATEGORY_ORDER[a.category] - CATEGORY_ORDER[b.category] || a.label.localeCompare(b.label));
 
-  const offline = new Date(at.getTime() + (args.offlineHours ?? WALLET_OFFLINE_HOURS) * 3_600_000);
+  const offlineHours = args.offlineHours ?? WALLET_OFFLINE_HOURS;
+  const offline = new Date(at.getTime() + offlineHours * 3_600_000);
   const firstLapse = baseline.items
     .filter(i => i.enforcement === "mandatory" && i.satisfied && i.expiresAt && i.expiresAt.getTime() > at.getTime())
-    .map(i => i.expiresAt!.getTime());
-  const validUntil = new Date(Math.min(offline.getTime(), ...firstLapse));
+    .sort((a, b) => a.expiresAt!.getTime() - b.expiresAt!.getTime())[0];
+  const limitedByCredential = firstLapse != null && firstLapse.expiresAt!.getTime() < offline.getTime();
+  const validUntil = limitedByCredential ? firstLapse.expiresAt! : offline;
 
   return {
     operatorId: portfolio.operatorId,
@@ -580,17 +596,21 @@ export function walletView(args: {
     scope: "company_baseline",
     verdict: baseline.verdict,
     cards, generatedAt: at, validUntil,
+    freshness: {
+      offlineAllowanceHours: offlineHours,
+      limitedBy: limitedByCredential ? "credential_expiry" : "offline_allowance",
+      limitingCredential: limitedByCredential ? { kind: firstLapse.kind, code: firstLapse.code, label: firstLapse.label, expiresAt: firstLapse.expiresAt! } : null,
+    },
   };
 }
 
 /**
- * What a cached wallet may say now. Runs on the phone as easily as here: past
+ * What a cached wallet may say now: the shared rule the phone runs too. Past
  * `validUntil` a READY becomes STALE, because the answer was only ever good
  * until then and nobody has confirmed it since.
  */
-export function walletHeadlineAt(wallet: Pick<Wallet, "headline" | "validUntil">, at: Date): Wallet["headline"] | "STALE — RECONNECT TO CONFIRM" {
-  if (at.getTime() >= wallet.validUntil.getTime() && wallet.headline !== "NOT READY") return "STALE — RECONNECT TO CONFIRM";
-  return wallet.headline;
+export function walletHeadlineAt(wallet: Pick<Wallet, "headline" | "validUntil">, at: Date): WalletStatus {
+  return walletStatusAt(wallet, at);
 }
 
 /**
@@ -624,6 +644,14 @@ export type ExpiryAlert = {
   daysRemaining: number;
   tier: WarningTier;
   pendingRenewal: boolean;
+  /**
+   * `verified`: the credential in force is lapsing. `unverified`: nothing of this
+   * type is verified, and the upload awaiting review is itself lapsing, so
+   * verifying it will not help for long.
+   */
+  verification: "verified" | "unverified";
+  /** The row the alert is about. */
+  credentialId: number | null;
 };
 
 /**
@@ -648,8 +676,16 @@ export function expiryAlerts(portfolios: readonly DriverPortfolio[], at: Date): 
       ],
     });
     for (const i of r.items) {
+      if (i.state === "unverified" && i.kind === "credential") {
+        const type = credentialType(i.code)!;
+        const newest = rowsFor(p.credentials, type).filter(c => c.verificationStatus === "needs_review" && c.expiresAt)
+          .sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime())[0];
+        const tier = newest ? expiryWarningTier(daysBetween(at, newest.expiresAt!)) : null;
+        if (newest && tier != null) out.push({ operatorId: p.operatorId, name: p.name, code: i.code, label: i.label, expiresAt: newest.expiresAt!, daysRemaining: daysBetween(at, newest.expiresAt!), tier, pendingRenewal: false, verification: "unverified", credentialId: newest.id });
+        continue;
+      }
       if (!i.expiresAt || i.warningTier == null) continue;
-      out.push({ operatorId: p.operatorId, name: p.name, code: i.code, label: i.label, expiresAt: i.expiresAt, daysRemaining: daysBetween(at, i.expiresAt), tier: i.warningTier, pendingRenewal: i.pendingRenewal });
+      out.push({ operatorId: p.operatorId, name: p.name, code: i.code, label: i.label, expiresAt: i.expiresAt, daysRemaining: daysBetween(at, i.expiresAt), tier: i.warningTier, pendingRenewal: i.pendingRenewal, verification: "verified", credentialId: i.credentialId });
     }
   }
   return out.sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime() || a.name.localeCompare(b.name));
@@ -692,87 +728,69 @@ export function credentialHistory(credentials: readonly PortfolioCredential[], c
 /* ------------------------------------------------------------------ */
 
 /**
- * A signed, expiring claim that lets an authorized person at a gate or a site
- * check ONE credential without being given the driver's portfolio. The QR code
- * carries this token; the verifier's lookup returns `sharedCredentialView` and
- * nothing else.
- *
- * HMAC-SHA256 over the claims. The secret is the server's; a token cannot be
- * minted or extended on the phone. A share is short-lived by construction.
+ * A share lets an authorized person at a gate or a site check ONE credential
+ * without being given the driver's portfolio. The token itself is the
+ * repository's invitation token (`newToken()`: 32 random bytes, stored only as
+ * its SHA-256), held server-side with its expiry and revocation, so this module
+ * decides only two things: how long a share may last, and what redeeming one
+ * shows.
  */
-export type CredentialShareClaims = {
-  v: 1;
-  credentialId: number;
-  operatorId: number;
-  code: string;
-  /** Who it was shown to, as the driver named them: "Cenovus Christina Lake gate". Recorded, not trusted. */
-  audience: string;
-  issuedAt: number;
-  expiresAt: number;
+export const SHARE_MAX_HOURS = 7 * 24;
+export const SHARE_DEFAULT_HOURS = 24;
+
+/** The lifetime a share gets: the default when none is asked for, never longer than seven days. */
+export function shareLifetimeHours(requested: number | null | undefined): number {
+  if (requested == null) return SHARE_DEFAULT_HOURS;
+  if (!Number.isFinite(requested) || requested <= 0) throw new RangeError("A share must last a positive number of hours");
+  if (requested > SHARE_MAX_HOURS) throw new RangeError(`A share may last at most ${SHARE_MAX_HOURS} hours (7 days)`);
+  return requested;
+}
+
+export type SharedCredentialView = {
+  holderName: string;
+  label: string;
+  /** `superseded` when a newer verified credential of the same type has replaced the one shared. */
+  state: ItemState | "superseded";
+  valid: boolean;
+  expiresOn: string | null;
+  verifiedOn: string | null;
+  identifier: string | null;
 };
-
-export const SHARE_MAX_SECONDS = 7 * 24 * 3600;
-const MIN_SECRET_LENGTH = 32;
-
-const b64url = (buf: Buffer) => buf.toString("base64url");
-const sign = (payload: string, secret: string) => createHmac("sha256", secret).update(payload).digest();
-
-export class ShareRefused extends Error {}
-
-export function issueCredentialShare(claims: Omit<CredentialShareClaims, "v">, secret: string): string {
-  if (!secret || secret.length < MIN_SECRET_LENGTH) throw new ShareRefused("Credential sharing is not configured — no signing secret");
-  if (!Number.isInteger(claims.issuedAt) || !Number.isInteger(claims.expiresAt)) throw new ShareRefused("Share times must be whole seconds");
-  if (claims.expiresAt <= claims.issuedAt) throw new ShareRefused("A share must expire after it is issued");
-  if (claims.expiresAt - claims.issuedAt > SHARE_MAX_SECONDS) throw new ShareRefused("A share may last at most 7 days");
-  const payload = b64url(Buffer.from(JSON.stringify({ v: 1, ...claims } satisfies CredentialShareClaims)));
-  return `${payload}.${b64url(sign(payload, secret))}`;
-}
-
-export type ShareReading =
-  | { ok: true; claims: CredentialShareClaims }
-  | { ok: false; reason: "not_configured" | "malformed" | "bad_signature" | "expired" };
-
-export function readCredentialShare(token: string, secret: string, at: Date): ShareReading {
-  if (!secret || secret.length < MIN_SECRET_LENGTH) return { ok: false, reason: "not_configured" };
-  const parts = token.split(".");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) return { ok: false, reason: "malformed" };
-  const expected = sign(parts[0], secret);
-  let given: Buffer;
-  try { given = Buffer.from(parts[1], "base64url"); } catch { return { ok: false, reason: "malformed" }; }
-  // Signature first, then parse: nothing in an unsigned payload is read.
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return { ok: false, reason: "bad_signature" };
-  let claims: CredentialShareClaims;
-  try { claims = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")) as CredentialShareClaims; } catch { return { ok: false, reason: "malformed" }; }
-  if (claims?.v !== 1 || !Number.isInteger(claims.credentialId) || !Number.isInteger(claims.expiresAt)) return { ok: false, reason: "malformed" };
-  if (Math.floor(at.getTime() / 1000) >= claims.expiresAt) return { ok: false, reason: "expired" };
-  return { ok: true, claims };
-}
 
 /**
  * What the person scanning the QR is shown. Evaluated now, not when the share
- * was made: a ticket rejected or lapsed since then reads as what it is. No
- * document, no storage reference, no other credential. A private credential is
- * never shareable, whatever the token says.
+ * was made: a ticket rejected, lapsed or replaced since then reads as what it
+ * is. No document, no storage reference, no other credential. A private
+ * credential, and anything outside the catalogue (medical fitness among them),
+ * is never shown, whatever was shared.
  */
 export function sharedCredentialView(args: {
-  claims: CredentialShareClaims;
+  credentialId: number;
+  code: string;
   holderName: string;
+  /** Every credential the operator holds, so a replacement can be recognised. */
   credentials: readonly PortfolioCredential[];
   at: Date;
-}): { holderName: string; label: string; state: ItemState; valid: boolean; expiresOn: string | null; verifiedOn: string | null; identifier: string | null } | null {
-  const row = args.credentials.find(c => c.id === args.claims.credentialId);
+}): SharedCredentialView | null {
+  const row = args.credentials.find(c => c.id === args.credentialId);
   if (!row || row.privateDetail) return null;
-  const type = credentialType(args.claims.code);
+  const type = credentialType(args.code);
   if (!type || !type.docTypes.map(normalizeCode).includes(normalizeCode(row.docType))) return null;
-  const r = evaluateDriverReadiness({
-    portfolio: { operatorId: args.claims.operatorId, name: args.holderName, licenceClass: null, credentials: [row], equipment: [] },
-    requirements: [{ kind: "credential", code: type.code, enforcement: "mandatory", source: "company", sourceRef: null }],
-    at: args.at,
-  }).items[0]!;
-  return {
-    holderName: args.holderName, label: type.label, state: r.state, valid: r.satisfied,
+  const base = {
+    holderName: args.holderName, label: type.label,
     expiresOn: row.expiresAt ? day(row.expiresAt) : null,
     verifiedOn: row.verificationStatus === "verified" && row.verifiedAt ? day(row.verifiedAt) : null,
     identifier: row.identifier ?? null,
   };
+  const all = rowsFor(args.credentials, type);
+  const inForce = rowForVersion(all, complianceDocumentValidity(all, type.code, args.at).version);
+  if (row.verificationStatus === "verified" && inForce && inForce.id !== row.id && inForce.verificationStatus === "verified") {
+    return { ...base, state: "superseded", valid: false };
+  }
+  const r = evaluateDriverReadiness({
+    portfolio: { operatorId: 0, name: args.holderName, licenceClass: null, credentials: [row], equipment: [] },
+    requirements: [{ kind: "credential", code: type.code, enforcement: "mandatory", source: "company", sourceRef: null }],
+    at: args.at,
+  }).items[0]!;
+  return { ...base, state: r.state, valid: r.satisfied };
 }

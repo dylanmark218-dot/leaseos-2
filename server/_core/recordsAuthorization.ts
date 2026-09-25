@@ -329,7 +329,13 @@ export type Permission =
   // v22.21 — Training Academy. Learner permissions are universal but self-scoped in the router.
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
-  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage";
+  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
+  // 0177 — Driver Portfolio. The `_own` three are universal and self-scoped in the router: they read
+  // the operator linked to ctx.user.id and take no operator id. Reading another driver's portfolio is
+  // safety/HR/management's; managing requirements is safety's and management's. Verification reuses
+  // compliance.credential.verify, and dispatch's view reuses dispatch.read.
+  | "portfolio.read_own" | "portfolio.submit_own" | "portfolio.share_own"
+  | "portfolio.read" | "portfolio.requirement.manage";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -695,6 +701,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "portfolio.read",
+    "portfolio.requirement.manage",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -978,6 +986,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "portfolio.read",
+    "portfolio.requirement.manage",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1230,6 +1240,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.graph.build",
   ],
   hr: [
+    "portfolio.read",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1688,6 +1699,10 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // 0177 — the Driver Wallet: the caller's own operator record, never one the request names.
+  "portfolio.read_own",
+  "portfolio.submit_own",
+  "portfolio.share_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -1735,6 +1750,10 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  // 0177 — a submitted credential, a share of one, and the requirements dispatch reads.
+  "portfolio.submit_own",
+  "portfolio.share_own",
+  "portfolio.requirement.manage",
   "academy.source.review",
   "academy.certificate.issue",
   "academy.certificate.sign_own",
@@ -2936,6 +2955,25 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsRecord": "closeout.terms.record",
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
+
+  /* ---- 0177: Driver Portfolio API ---- */
+  "driverPortfolio.myWallet": "portfolio.read_own",
+  "driverPortfolio.myCredentialHistory": "portfolio.read_own",
+  "driverPortfolio.myShares": "portfolio.read_own",
+  "driverPortfolio.submitCredential": "portfolio.submit_own",
+  "driverPortfolio.shareIssue": "portfolio.share_own",
+  "driverPortfolio.shareRevoke": "portfolio.share_own",
+  "driverPortfolio.operatorReadiness": "dispatch.read",
+  "driverPortfolio.portfolio": "portfolio.read",
+  "driverPortfolio.auditHistory": "portfolio.read",
+  "driverPortfolio.expiryDashboard": "portfolio.read",
+  "driverPortfolio.verificationQueue": "portfolio.read",
+  "driverPortfolio.credentialVerify": "compliance.credential.verify",
+  "driverPortfolio.requirementList": "portfolio.read",
+  "driverPortfolio.requirementGet": "portfolio.read",
+  "driverPortfolio.requirementCreate": "portfolio.requirement.manage",
+  "driverPortfolio.requirementUpdate": "portfolio.requirement.manage",
+  "driverPortfolio.requirementRetire": "portfolio.requirement.manage",
 } as const satisfies Record<string, Permission>;
 
 /**
