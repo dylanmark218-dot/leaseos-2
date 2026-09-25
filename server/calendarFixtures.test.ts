@@ -47,6 +47,10 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   "server/ifta.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "quarter-bound arithmetic; no comparison with now" },
   "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "acquiredAt is fixed at 2026-03-01; schedule/schedulePrepare receive an explicit asOf; dispose compares disposedAt only with acquiredAt and the period's close state; 2026-10-31 is the fixed fiscal-year end. The twin reads the real clock, but only on the km-projection path, which needs a recorded distance and this unit has none. The two `acquiredAt: new Date()` registrations are refused before any date is used" },
   "server/qualificationStore.test.ts": { dates: ["2026-10-01", "2026-11-10"], verdict: "clock_independent", reason: "the expired holding is evaluated against the shift's explicit STARTS, not now" },
+  // CI-0.1 (2026-09-24). The first review this list has been given with a proof rather than a reading:
+  // the file's own "CI-0.1" tests run the fixture year under five system clocks (2026-09-24 through
+  // 2030-09-24) and require identical answers, and were checked to fail on a planted clock dependency.
+  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-16", "2026-10-20", "2026-10-21", "2026-10-31", "2026-11-15", "2030-09-24"], verdict: "clock_independent", reason: "one fiscal year ending 2026-10-31: the schedule gets an explicit asOf (10-15), disposal is compared only with acquisition (10-20), periods lock by a recorded close not the calendar, the twin's real-clock asOf matters only with recorded distance (none here), and the CCA seed rates have no end date. 10-16, 10-21, 11-15 and 2030-09-24 are the proof's own system clocks. Real clock reads: keys, role grants, two refusal-path acquiredAt values" },
 };
 
 function testFiles(dir: string, out: string[] = []): string[] {
