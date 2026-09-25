@@ -46,8 +46,10 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   "server/gst.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "period-bound arithmetic (2026-Q3 ends 1 October); no comparison with now" },
   "server/ifta.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "quarter-bound arithmetic; no comparison with now" },
   "server/qualificationStore.test.ts": { dates: ["2026-10-01", "2026-11-10"], verdict: "clock_independent", reason: "the expired holding is evaluated against the shift's explicit STARTS, not now" },
-  // Recorded 2026-09-24, when 2026-10-15 came within three weeks.
-  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "the schedule is built for an explicit asOf (2026-10-15) inside an explicit fiscal year ending 2026-10-31, and the disposal (2026-10-20) is placed against that same window; the real clock reads mint keys, stamp role grants and date the two refused registrations, none of which is compared with these" },
+  // CI-0.1 (2026-09-24). The first review this list has been given with a proof rather than a reading:
+  // the file's own "CI-0.1" tests run the fixture year under five system clocks (2026-09-24 through
+  // 2030-09-24) and require identical answers, and were checked to fail on a planted clock dependency.
+  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-16", "2026-10-20", "2026-10-21", "2026-10-31", "2026-11-15", "2030-09-24"], verdict: "clock_independent", reason: "one fiscal year ending 2026-10-31: the schedule gets an explicit asOf (10-15), disposal is compared only with acquisition (10-20), periods lock by a recorded close not the calendar, the twin's real-clock asOf matters only with recorded distance (none here), and the CCA seed rates have no end date. 10-16, 10-21, 11-15 and 2030-09-24 are the proof's own system clocks. Real clock reads: keys, role grants, two refusal-path acquiredAt values" },
 };
 
 function testFiles(dir: string, out: string[] = []): string[] {

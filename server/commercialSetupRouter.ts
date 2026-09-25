@@ -93,6 +93,8 @@ export const commercialSetupRouter = router({
       effectiveFrom: z.coerce.date(), effectiveTo: z.coerce.date().optional(), sourceKind: z.enum(["human", "ai_extracted", "imported", "negotiated"]), sourceDocumentEvidenceId: z.number().int().optional(), sourceClause: z.string().max(160).optional(), notes: z.string().max(600).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      // F1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
       const d = await db();
       if (input.pricingMethod === "per_unit" && input.rateMillis == null) throw new TRPCError({ code: "BAD_REQUEST", message: "A per-unit definition carries a rate; without one it is a question, not a rate" });
       if (input.pricingMethod === "flat" && input.flatCents == null) throw new TRPCError({ code: "BAD_REQUEST", message: "A flat definition carries an amount" });
@@ -157,7 +159,9 @@ export const commercialSetupRouter = router({
     }),
 
   /** The deterministic answer, with its reasons, and the questions the sheet leaves open. */
-  rateResolve: roleProcedure("commercialSetup.rateResolve").input(contextInput).query(async ({ input }) => {
+  rateResolve: roleProcedure("commercialSetup.rateResolve").input(contextInput).query(async ({ ctx: caller, input }) => {
+    // F1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+    { const m = await moneyScope(caller.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
     const d = await db();
     const ctx = await context(d, input);
     const defs = await definitionsFor(d, input.financialEntityId, input.serviceCode, input.rateKind);
@@ -185,6 +189,8 @@ export const commercialSetupRouter = router({
       conversion: z.object({ fromUnit: UNIT, toUnit: UNIT, factorMillis: z.number().int().positive(), source: z.string().min(3).max(200), material: z.string().max(80).optional() }).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      // F1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
       const d = await db();
       const rc = await context(d, input);
       const defs = await definitionsFor(d, input.financialEntityId, input.serviceCode, input.rateKind);

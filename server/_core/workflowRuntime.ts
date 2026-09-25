@@ -428,9 +428,9 @@ export function createWorkerPorts(
       }
     },
 
-    async heartbeat(_workerId, at) {
-      // v22.1 — retry sweep for failed webhook deliveries that are due.
-      try { await sweepWebhookRetries(at); } catch (e) { console.warn("[worker] webhook retry sweep failed", e instanceof Error ? e.message : e); }
+    async heartbeat(workerId, at) {
+      // v22.1 — retry sweep for failed webhook deliveries that are due, and (SEC-004) expired claims.
+      try { await sweepWebhookRetries(at, { workerId }); } catch (e) { console.warn("[worker] webhook retry sweep failed", e instanceof Error ? e.message : e); }
     },
     async markProcessed(id) {
       await pool.execute(

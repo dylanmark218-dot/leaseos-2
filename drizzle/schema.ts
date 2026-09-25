@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { bigint, boolean, date, decimal, double, index, int, json, mysqlEnum, mysqlTable, text, timestamp, tinyint, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
@@ -628,6 +629,26 @@ export const tripStops = mysqlTable("tripStops", {
   ticketNumber: varchar("ticketNumber", { length: 100 }),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /*
+   * 0179 — row provenance (leaseos's 0169, reconciled forward; see
+   * docs/register/MIGRATION_0169_RECONCILIATION.md). Both write paths hold the
+   * actor; neither recorded it.
+   *
+   * `recordedSource` reuses `proposalFields.source` rather than minting a second
+   * vocabulary. NULL means the row-level source is not authoritative here: the
+   * assistant commit path holds provenance per FIELD in `proposalFields`,
+   * reachable through `assistantCommitReceipts`, and a row-level guess would be
+   * less true than a null.
+   *
+   * This is not the per-boundary confirmation `siteBaseline` reads. That is
+   * derived from committed receipts by `boundaryConfirmation.ts`; `updatedAt` and
+   * `updatedByUserId` are what `boundaryEvidence.ts` compares a receipt against.
+   */
+  recordedByUserId: int("recordedByUserId"),
+  recordedSource: mysqlEnum("recordedSource", ["driver_voice", "driver_typed", "gps", "photo_ocr", "system_inferred", "imported", "human_corrected"]),
+  updatedByUserId: int("updatedByUserId"),
+  updatedSource: mysqlEnum("updatedSource", ["driver_voice", "driver_typed", "gps", "photo_ocr", "system_inferred", "imported", "human_corrected"]),
+  updatedAt: timestamp("updatedAt"),
 });
 
 export const operatingZones = mysqlTable("operatingZones", {
@@ -4136,6 +4157,57 @@ export const complianceRequirements = mysqlTable("complianceRequirements", {
   verifiedAt: timestamp("verifiedAt"),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /* ---- 0198 (C1b-2b): who proposed the revision, and what it cites. Rows are immutable. ---- */
+  /** The proposer's acting organization, from server scope. NULL on rows written before 0198. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  proposedByUserId: int("proposedByUserId"),
+  instrumentTitle: varchar("instrumentTitle", { length: 400 }),
+  /** law | official_guidance | recognized_standard | manufacturer (the knowledge authority level). */
+  authorityType: varchar("authorityType", { length: 40 }),
+  /** The proposer recorded that the effective date is not known; `effectiveFrom` is the proposal time. */
+  effectiveDateUnknown: boolean("effectiveDateUnknown").default(false).notNull(),
+  /** sha256 of the revision's content and citation, as proposed. Every verification event repeats it. */
+  citationHash: varchar("citationHash", { length: 64 }),
+});
+
+/** 0198 (C1b-2b) — every step in a requirement revision's verification. Append-only (triggers). */
+export const requirementVerificationEvents = mysqlTable("requirementVerificationEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  requirementId: int("requirementId").notNull(),
+  requirementKey: varchar("requirementKey", { length: 120 }).notNull(),
+  version: int("version").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  eventType: mysqlEnum("eventType", ["proposed", "approved", "rejected", "promoted", "withdrawn"]).notNull(),
+  targetLevel: varchar("targetLevel", { length: 32 }),
+  step: tinyint("step"),
+  actorUserId: int("actorUserId").notNull(),
+  reason: text("reason"),
+  citationHash: varchar("citationHash", { length: 64 }),
+  sourceRevisionRef: varchar("sourceRevisionRef", { length: 64 }),
+  sourceHash: varchar("sourceHash", { length: 64 }),
+  comparisonJson: text("comparisonJson"),
+  promotionRef: varchar("promotionRef", { length: 64 }),
+  verifierUserIdsJson: text("verifierUserIdsJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  requirementIdx: index("requirementVerificationEvents_requirement_idx").on(t.requirementId),
+  keyIdx: index("requirementVerificationEvents_key_idx").on(t.requirementKey, t.version),
+}));
+export type RequirementVerificationEventRow = typeof requirementVerificationEvents.$inferSelect;
+
+/** 0198 (C1b-2b) — citation allowed, or source document required, by authority / domain / jurisdiction. Append-only. */
+export const sourceVerificationPolicies = mysqlTable("sourceVerificationPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  policyRef: varchar("policyRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  issuingAuthority: varchar("issuingAuthority", { length: 220 }),
+  domain: varchar("domain", { length: 60 }),
+  jurisdiction: varchar("jurisdiction", { length: 80 }),
+  mode: mysqlEnum("mode", ["CITATION_ALLOWED", "SOURCE_DOCUMENT_REQUIRED"]).notNull(),
+  reason: text("reason").notNull(),
+  setByUserId: int("setByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export const complianceConsents = mysqlTable("complianceConsents", {
@@ -4886,7 +4958,13 @@ export const externalIdentities = mysqlTable("externalIdentities", {
   previousTokenHash: varchar("previousTokenHash", { length: 64 }),
   previousTokenExpiresAt: timestamp("previousTokenExpiresAt"),
   mfaEnabled: boolean("mfaEnabled").default(false).notNull(),
+  /**
+   * 0049 — legacy inline ciphertext under `LEASEOS_PORTAL_MFA_KEY`. Read-only from S2-D onward:
+   * new enrollments write `mfaSecretRef` instead, and this is cleared once migration is verified.
+   */
   mfaSecretEnc: varchar("mfaSecretEnc", { length: 400 }),
+  /** 0193 — pointer into `encryptedSecrets` under purpose `MFA_SECRET`. Preferred when present. */
+  mfaSecretRef: varchar("mfaSecretRef", { length: 64 }),
   failedAttempts: int("failedAttempts").default(0).notNull(),
   lockedUntil: timestamp("lockedUntil"),
   revokedAt: timestamp("revokedAt"),
@@ -5546,7 +5624,15 @@ export const webhookSubscriptions = mysqlTable("webhookSubscriptions", {
   subscriptionRef: varchar("subscriptionRef", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 160 }).notNull(),
   url: varchar("url", { length: 500 }).notNull(),
-  secretEnc: varchar("secretEnc", { length: 400 }).notNull(),
+  /**
+   * Legacy inline ciphertext under `LEASEOS_PORTAL_MFA_KEY` — the shared key that also protects MFA
+   * seeds. 0194 relaxed it to NULL so a canonical-only row becomes representable, but **Release 1
+   * still writes it on every creation**: the NULL case is Release 2's, and exists here only so the
+   * schema gains the capability one deployment before anything uses it.
+   */
+  secretEnc: varchar("secretEnc", { length: 400 }),
+  /** 0194 — pointer into `encryptedSecrets` under purpose `WEBHOOK_SECRET`. Preferred when present. */
+  secretRef: varchar("secretRef", { length: 64 }),
   eventTypesJson: text("eventTypesJson").notNull(),
   status: mysqlEnum("status", ["active", "paused", "revoked"]).default("active").notNull(),
   createdByUserId: int("createdByUserId").notNull(),
@@ -5567,6 +5653,9 @@ export const webhookDeliveries = mysqlTable("webhookDeliveries", {
   responseStatus: int("responseStatus"),
   error: varchar("error", { length: 400 }),
   nextAttemptAt: timestamp("nextAttemptAt"),
+  // 0185 (SEC-004): the claim on an in-flight ('queued') attempt. See webhookDispatchService.ts.
+  claimedAt: timestamp("claimedAt"),
+  claimedBy: varchar("claimedBy", { length: 64 }),
   at: timestamp("at").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
@@ -8157,6 +8246,14 @@ export const knowledgeVersions = mysqlTable("knowledgeVersions", {
   verifiedByUserId: int("verifiedByUserId"),
   verifiedAt: timestamp("verifiedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /* ---- 0189 (C1b-1): what a rule revision needs to know about its source. ---- */
+  citation: varchar("citation", { length: 400 }),
+  section: varchar("section", { length: 200 }),
+  publicationDate: date("publicationDate"),
+  retrievedAt: timestamp("retrievedAt"),
+  repealedAt: timestamp("repealedAt"),
+  /** candidate | reviewed | verified | superseded | withdrawn. Only `verified` can back a rule. */
+  status: varchar("status", { length: 16 }).default("candidate").notNull(),
 });
 export type KnowledgeVersionRow = typeof knowledgeVersions.$inferSelect;
 
@@ -8200,9 +8297,10 @@ export const hosRuleLimitHistory = mysqlTable("hosRuleLimitHistory", {
   id: int("id").autoincrement().primaryKey(),
   promotionRef: varchar("promotionRef", { length: 64 }).notNull().unique(),
 
-  profileKey: varchar("profileKey", { length: 60 }).notNull(),
-  limitKey: varchar("limitKey", { length: 60 }).notNull(),
-  value: double("value").notNull(),
+  /** HOS rows only (0189): a rule from another family has no profile, limit or figure. */
+  profileKey: varchar("profileKey", { length: 60 }),
+  limitKey: varchar("limitKey", { length: 60 }),
+  value: double("value"),
   unit: varchar("unit", { length: 32 }).notNull(),
 
   jurisdiction: varchar("jurisdiction", { length: 64 }).notNull(),
@@ -8217,6 +8315,9 @@ export const hosRuleLimitHistory = mysqlTable("hosRuleLimitHistory", {
   consolidationDate: date("consolidationDate"),
   verificationMethod: mysqlEnum("verificationMethod", [
     "OFFICIAL_WEB", "OFFICIAL_PDF", "OFFICIAL_PRINT", "LEGAL_COUNSEL", "REGULATOR_CONFIRMATION",
+    // 0198 (C1b-2b): a requirement verified against a named instrument, citation and official URL,
+    // without an admitted source document.
+    "OFFICIAL_CITATION",
   ]).notNull(),
   establishedByVersionRef: varchar("establishedByVersionRef", { length: 64 }),
 
@@ -8239,7 +8340,29 @@ export const hosRuleLimitHistory = mysqlTable("hosRuleLimitHistory", {
 
   correctsPromotionRef: varchar("correctsPromotionRef", { length: 64 }),
   previousPromotionRef: varchar("previousPromotionRef", { length: 64 }),
-});
+
+  /* ---- 0189 (C1b-1): the one rule ledger. Existing rows are `hos_limit`. ---- */
+  ruleFamily: varchar("ruleFamily", { length: 40 }).default("hos_limit").notNull(),
+  /** `profileKey.limitKey` for HOS; the requirement key for other families. */
+  ruleRef: varchar("ruleRef", { length: 160 }),
+  domain: varchar("domain", { length: 40 }),
+  /** The §4 ladder (`AuthorityClass`). */
+  authorityTier: varchar("authorityTier", { length: 40 }),
+  dispatchEffect: varchar("dispatchEffect", { length: 16 }),
+  /** → `knowledgeVersions.versionRef`; the verified source revision this rule was read from. */
+  sourceRevisionRef: varchar("sourceRevisionRef", { length: 64 }),
+  /** That revision's `contentHash` when the rule was verified, so a changed source is detectable. */
+  sourceHash: varchar("sourceHash", { length: 64 }),
+  proposedByUserId: int("proposedByUserId"),
+  secondVerifierUserId: int("secondVerifierUserId"),
+  secondVerifiedAt: timestamp("secondVerifiedAt"),
+  /** A non-numeric rule's content. */
+  payloadJson: text("payloadJson"),
+  /** 0198: CITATION_VERIFIED or SOURCE_DOCUMENT_VERIFIED for a requirement promotion; NULL for HOS. */
+  verificationLevel: varchar("verificationLevel", { length: 32 }),
+}, (t) => ({
+  familyRuleIdx: index("hosRuleLimitHistory_family_rule_idx").on(t.ruleFamily, t.ruleRef),
+}));
 export type HosRuleLimitHistoryRow = typeof hosRuleLimitHistory.$inferSelect;
 
 
@@ -9001,3 +9124,123 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
+
+/* ---- S1-A (0175): a session is a row, so a session can be revoked ---- */
+
+/**
+ * One login, and every credential it goes on to mint.
+ *
+ * Before this table `verifySession` was a stateless `jwtVerify` against a token minted with
+ * `expiresInMs: ONE_YEAR_MS`. Logout cleared the cookie and nothing else, so a copy taken out of
+ * the browser kept working for the rest of its year — there was no record to revoke.
+ *
+ * `refreshVerifierHash` is a SHA-256; the verifier the client holds is never stored, following the
+ * rule `externalIdentityPolicy` already states for portal bearer tokens. `absoluteExpiresAt` is
+ * written once at login and never moved, because an expiry that advanced on use would mean "thirty
+ * days after you stop". `appId` is kept so a refresh cannot cross the surface the family was minted
+ * for — the same distinction `sdk.verifySession` enforces for access tokens.
+ */
+export const sessionFamilies = mysqlTable("sessionFamilies", {
+  id: int("id").autoincrement().primaryKey(),
+  familyRef: varchar("familyRef", { length: 64 }).notNull().unique(),
+  openId: varchar("openId", { length: 191 }).notNull(),
+  appId: varchar("appId", { length: 128 }),
+  /** Reserved. A session proves identity; acting scope is still resolved per request. */
+  tenantContext: varchar("tenantContext", { length: 64 }),
+  refreshVerifierHash: varchar("refreshVerifierHash", { length: 64 }).notNull(),
+  rotationCounter: int("rotationCounter").default(0).notNull(),
+  /** S1 records what a login reached; S6 enforces step-up against it. No stored credential is implied. */
+  authAssurance: mysqlEnum("authAssurance", ["single_factor", "mfa"]).default("single_factor").notNull(),
+  mfaCompletedAt: timestamp("mfaCompletedAt"),
+  /** Reserved for S4/S6: revoking a lost phone must not mean deleting the account. */
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  lastUsedAt: timestamp("lastUsedAt"),
+  absoluteExpiresAt: timestamp("absoluteExpiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokeReason: mysqlEnum("revokeReason", [
+    "logout", "revoked_all", "device_revoked", "reuse_detected", "credential_change", "admin", "expired",
+  ]),
+  userAgentHash: varchar("userAgentHash", { length: 64 }),
+  ipHash: varchar("ipHash", { length: 64 }),
+}, t => ({
+  ownerIdx: index("sessionFamilies_openId_idx").on(t.openId, t.revokedAt),
+  verifierIdx: index("sessionFamilies_verifier_idx").on(t.refreshVerifierHash),
+}));
+
+/**
+ * S2-B — the one place reversible ciphertext lives.
+ *
+ * Split from the records that use it so a metadata read never touches a secret: callers hold a
+ * `secretRef`, and only `server/secretStore.ts` resolves one. `keyId` names the key that encrypted
+ * this row — never key material — so a row written under a retired key stays readable and a rewrap
+ * can find what still references one.
+ */
+export const encryptedSecrets = mysqlTable("encryptedSecrets", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Opaque, random, stable across rewrap. Never derived from the plaintext. */
+  secretRef: varchar("secretRef", { length: 64 }).notNull().unique(),
+  purpose: mysqlEnum("purpose", ["MFA_SECRET", "WEBHOOK_SECRET", "PROVIDER_CREDENTIAL", "INTEGRATION_SECRET"]).notNull(),
+  keyId: varchar("keyId", { length: 64 }).notNull(),
+  /** `text`, not varchar: a MUTUAL_TLS certificate and key will not fit in 400 characters. */
+  envelope: text("envelope").notNull(),
+  status: mysqlEnum("status", ["active", "disabled"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  rewrappedAt: timestamp("rewrappedAt"),
+  disabledAt: timestamp("disabledAt"),
+  /** Set by S2-D/S2-E when a legacy inline value is moved here; NULL for natively created secrets. */
+  sourceTable: varchar("sourceTable", { length: 64 }),
+  sourceColumn: varchar("sourceColumn", { length: 64 }),
+}, t => ({
+  purposeKeyIdx: index("encryptedSecrets_purpose_key_idx").on(t.purpose, t.keyId),
+  sourceIdx: index("encryptedSecrets_source_idx").on(t.sourceTable, t.sourceColumn),
+}));
+
+/**
+ * S2-C — provider credential metadata. There is no column here capable of holding a secret.
+ *
+ * Joins `externalDataSources.sourceKey` on `providerKey`, which already carries the licensing
+ * dimensions — so "configured" and "permitted" stay separate questions. PLATFORM rows have no
+ * `orgRef`; TENANT rows must have one, enforced by a CHECK in migration 0192 rather than by service
+ * code, because a malformed row is what a resolver would otherwise have to guess about.
+ */
+export const providerCredentials = mysqlTable("providerCredentials", {
+  id: int("id").autoincrement().primaryKey(),
+  credentialRef: varchar("credentialRef", { length: 64 }).notNull().unique(),
+  providerKey: varchar("providerKey", { length: 120 }).notNull(),
+  environment: mysqlEnum("environment", ["production", "staging", "sandbox"]).default("production").notNull(),
+  authScheme: mysqlEnum("authScheme", ["NONE", "API_KEY", "STATIC_BEARER", "OAUTH2_CLIENT_CREDENTIALS", "OAUTH2_REFRESH", "SIGNED_REQUEST", "MUTUAL_TLS"]).notNull(),
+  ownership: mysqlEnum("ownership", ["PLATFORM", "TENANT"]).notNull(),
+  /** NULL exactly when ownership = PLATFORM. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  /**
+   * Generated, never written by application code: `COALESCE(orgRef, '~platform')`. It exists only
+   * so the scope UNIQUE below covers platform rows too — MariaDB allows unlimited NULLs in a
+   * composite UNIQUE, which would let two active platform credentials for one provider coexist and
+   * make resolution depend on row order.
+   */
+  orgScope: varchar("orgScope", { length: 64 }).generatedAlwaysAs(sql`COALESCE(\`orgRef\`, '~platform')`, {
+    mode: "stored",
+  }),
+  /** The provider's own account/client id. Not secret — an OAuth client id is public. */
+  externalAccountId: varchar("externalAccountId", { length: 200 }),
+  /** Pointer into encryptedSecrets; NULL is legitimate for authScheme NONE. */
+  secretRef: varchar("secretRef", { length: 64 }),
+  status: mysqlEnum("status", ["active", "disabled", "rotating", "revoked", "expired"]).default("active").notNull(),
+  /** Tracks the provider's value. A master-key rewrap does NOT touch this. */
+  credentialVersion: int("credentialVersion").default(1).notNull(),
+  /** Truncated hash, so an operator can recognise a key without the system disclosing it. */
+  fingerprint: varchar("fingerprint", { length: 32 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt"),
+  rotatedAt: timestamp("rotatedAt"),
+  expiresAt: timestamp("expiresAt"),
+  lastUsedAt: timestamp("lastUsedAt"),
+  createdByUserId: int("createdByUserId"),
+  disabledByUserId: int("disabledByUserId"),
+  disabledReason: varchar("disabledReason", { length: 300 }),
+}, t => ({
+  scopeUnique: uniqueIndex("providerCredentials_scope_unique").on(t.providerKey, t.environment, t.ownership, t.orgScope),
+  providerStatusIdx: index("providerCredentials_provider_status_idx").on(t.providerKey, t.status),
+  tenantIdx: index("providerCredentials_tenant_idx").on(t.orgRef, t.providerKey),
+}));

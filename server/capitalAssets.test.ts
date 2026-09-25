@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import mysql from "mysql2/promise";
 import { assetTwin, buildSchedule, capitalizationProposal, ccaPool, fiscalYearFor } from "./_core/capitalAssets";
 import { CCA_CLASS_SEEDS } from "./_core/ccaSeeds";
@@ -145,5 +145,101 @@ d("a year in the asset register", () => {
     expect(s2.pools[0]).toMatchObject({ dispositionsCents: 20_000_000, uccBeforeClaimCents: 0, terminalLossCents: 0 });
     expect(s2.pools[0].reasons.some(r => r.includes("capital gain"))).toBe(true);
     expect(accountant).toBeGreaterThan(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* CI-0.1 — the capital-assets year does not move with the real clock  */
+/* ------------------------------------------------------------------ */
+/*
+ * The fixtures above describe one fiscal year: a company whose year ends 31 October 2026, a truck
+ * acquired 1 March 2026, a schedule taken on 15 October and a disposal on 20 October. Those dates
+ * matter to each other, never to the day CI runs. The calendar tripwire flagged this file because it
+ * also reads the real clock (keys, role grants, and two refusal paths), so this proves the claim the
+ * tripwire's REVIEWED entry makes: run under system clocks before, between, and long after those
+ * dates, every business answer is identical.
+ *
+ * The clocks straddle every flagged date: before the schedule (09-24), between the schedule and the
+ * disposal (10-16), after the disposal (10-21), after the fiscal year ends (11-15), and years later.
+ */
+const CLOCKS = ["2026-09-24T12:00:00Z", "2026-10-16T12:00:00Z", "2026-10-21T12:00:00Z", "2026-11-15T12:00:00Z", "2030-09-24T12:00:00Z"] as const;
+afterEach(() => { vi.useRealTimers(); });
+
+async function underClock<T>(at: string, run: () => Promise<T> | T): Promise<T> {
+  // Only Date is faked: timers stay real, so database I/O is unaffected.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(at));
+  try { return await run(); } finally { vi.useRealTimers(); }
+}
+
+describe("CI-0.1: the fiscal-year arithmetic answers the same whatever the real date", () => {
+  it("fiscal year, schedule, rate status and twin are identical under every system clock", async () => {
+    const evaluate = () => {
+      const fy = fiscalYearFor(new Date("2026-10-15T00:00:00Z"), 10, 31);
+      // The router's rate lookup determines against the REAL clock (`asOf: new Date()`); reproduce it.
+      const rateFor = (cls: string) => determine(CCA_CLASS_SEEDS.filter(r => r.parameters.ccaClass === cls), { jurisdiction: "CA", ruleType: "cca_class", asOf: new Date() }) as never;
+      const schedule = buildSchedule({ fiscalYearStart: fy.start, fiscalYearEnd: fy.end, openingByClass: new Map(), rateFor, assets: [
+        { assetRef: "T1", ccaClass: "Class 16", ccaClassVerified: true, acquiredAt: new Date("2026-03-01T00:00:00Z"), acquisitionCostCents: 20_000_000, disposedAt: new Date("2026-10-20T00:00:00Z"), disposalProceedsCents: 21_000_000, status: "disposed" },
+      ] });
+      // The twin router passes the REAL clock as asOf; with no recorded distance it must not matter.
+      const twin = assetTwin({ asset: { acquisitionCostCents: 20_000_000, acquiredAt: new Date("2026-03-01T00:00:00Z"), expectedLifeKm: 800_000, expectedLifeYears: 10, financing: "financed", status: "in_service" }, fuel: { cents: null, litres: null, transactions: 0 }, shop: { partsCents: 0, labourCents: null, reasons: [] }, tires: { costPerKmCentsKnown: [], unknownRuns: 0 }, distanceKm: null, engineHours: null, downtimeHours: 0, trips: 0, asOf: new Date() });
+      return { fy: [fy.start.toISOString(), fy.end.toISOString()], pools: schedule.pools.map(p => ({ ...p, reasons: [...p.reasons].sort() })), determination: schedule.determination, twin: { determination: twin.determination, unknowns: twin.unknowns, projectedAt: twin.replacement.projectedAt?.toISOString() ?? null } };
+    };
+    const results = [];
+    for (const at of CLOCKS) results.push(await underClock(at, evaluate));
+    expect(results[0]!.fy[1]).toBe("2026-10-31T23:59:59.000Z");
+    expect(results[0]!.pools[0]).toMatchObject({ dispositionsCents: 20_000_000, uccBeforeClaimCents: 0, rate: { status: "unverified" } });
+    for (const [i, r] of results.entries()) expect(r, `system clock ${CLOCKS[i]}`).toEqual(results[0]);
+  });
+});
+
+d("CI-0.1: a year in the asset register gives the same answers whatever the real date", () => {
+  /** The same path as "a year in the asset register", reduced to its business answers (no refs or ids). */
+  async function aYear() {
+    const bookkeeper = await withRole("bookkeeper");
+    const controller = await withRole("controller");
+    const accountant = await withRole("external_accountant");
+    const [ent] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay, status, createdAt) VALUES (?, 'LeaseOS Hydrovac Ltd.', 'corporation', 'CA-AB', 10, 31, 'active', NOW())", [key("ENT").slice(0, 40)]);
+    const entityId = Number(ent.insertId);
+    const [un] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, inspectionStatus, maintenanceStatus, createdAt) VALUES (?, 'vac truck', 'current', 'clear', NOW())", [key("U").slice(0, 20)]);
+    const unitId = Number(un.insertId);
+    const reg = await callerFor(bookkeeper).asset.register({ financialEntityId: entityId, kind: "unit", unitId, description: "2026 vac truck, Unit 142", acquiredAt: new Date("2026-03-01T00:00:00Z"), acquisitionCostCents: 20_000_000, financing: "financed", lender: "Truck Finance Co", financedPrincipalCents: 15_000_000, expectedLifeKm: 800_000, expectedLifeYears: 10 });
+    await callerFor(controller).asset.capitalReview({ assetRef: reg.assetRef, decision: "capitalize", reason: "Heavy truck for hauling" });
+    await callerFor(accountant).asset.ccaClassSet({ assetRef: reg.assetRef, ccaClass: "Class 16", source: "accountant" });
+    await callerFor(accountant).asset.ccaClassVerify({ assetRef: reg.assetRef });
+    const asOf = new Date("2026-10-15T00:00:00Z");
+    const s = await callerFor(bookkeeper).asset.schedule({ financialEntityId: entityId, asOf });
+    const prep = await callerFor(bookkeeper).asset.schedulePrepare({ financialEntityId: entityId, asOf });
+    const review = await callerFor(controller).asset.scheduleReview({ scheduleRef: prep.scheduleRef, note: "Looks right" }).then(() => "reviewed", (e: Error) => e.message);
+    const twin = await callerFor(bookkeeper).asset.twin({ unitId });
+    const disp = await callerFor(bookkeeper).asset.dispose({ assetRef: reg.assetRef, disposedAt: new Date("2026-10-20T00:00:00Z"), proceedsCents: 21_000_000 });
+    const s2 = await callerFor(bookkeeper).asset.schedule({ financialEntityId: entityId, asOf });
+    const pool0 = (p: (typeof s.pools)[number]) => ({ ccaClass: p.ccaClass, additionsCents: p.additionsCents, dispositionsCents: p.dispositionsCents, uccBeforeClaimCents: p.uccBeforeClaimCents, ccaClaimCents: p.ccaClaimCents, closingUccCents: p.closingUccCents, terminalLossCents: p.terminalLossCents, determination: p.determination, rate: p.rate.status });
+    return {
+      registered: { status: reg.status, proposal: reg.proposal.proposal },
+      schedule: { fyEnd: s.fiscalYear.end.toISOString(), pool: pool0(s.pools[0]!), determination: s.determination },
+      prepare: { determination: prep.determination, total: prep.totalCcaClaimCents },
+      review,
+      twin: { determination: twin.determination, unknowns: [...twin.unknowns].sort(), projectedAt: twin.replacement.projectedAt?.toISOString() ?? null },
+      dispose: disp.note,
+      afterDisposal: { pool: pool0(s2.pools[0]!), gainNamed: s2.pools[0]!.reasons.some(r => r.includes("capital gain")) },
+    };
+  }
+
+  it("registers, schedules, reviews, twins and disposes identically under five system clocks", async () => {
+    const results = [];
+    for (const at of CLOCKS) results.push(await underClock(at, aYear));
+    // The answers the original test asserts, read off the first run…
+    expect(results[0]).toMatchObject({
+      registered: { status: "pending_capital_review", proposal: "review" },
+      schedule: { fyEnd: "2026-10-31T23:59:59.000Z", pool: { additionsCents: 20_000_000, ccaClaimCents: null, rate: "unverified" }, determination: "unknown" },
+      prepare: { determination: "unknown", total: null },
+      twin: { determination: "unknown" },
+      afterDisposal: { pool: { dispositionsCents: 20_000_000, uccBeforeClaimCents: 0 }, gainNamed: true },
+    });
+    expect(results[0]!.review).toMatch(/cannot be reviewed as a tax fact/);
+    expect(results[0]!.twin.projectedAt?.slice(0, 4)).toBe("2036");
+    // …and every other clock gives exactly the same answers.
+    for (const [i, r] of results.entries()) expect(r, `system clock ${CLOCKS[i]}`).toEqual(results[0]);
   });
 });

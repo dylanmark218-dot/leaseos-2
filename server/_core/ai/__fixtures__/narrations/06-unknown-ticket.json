@@ -1,0 +1,39 @@
+{
+  "id": "06-unknown-ticket",
+  "note": "\"Ticket forty-four seventy-one\" against open tickets that carry a prefix. Never completed for them.",
+  "formKey": "disposal_ticket",
+  "transcript": "Dropped at Clearwater. Ticket forty-four seventy-one. Scale-in 13:20, net eighteen thousand two hundred kilos.",
+  "context": {
+    "formKey": "disposal_ticket",
+    "formVersion": 1,
+    "tripRef": "TRIP-2026-004821",
+    "unitNumber": "T-118",
+    "openTicketNumbers": ["CW-4471", "CW-4480"],
+    "vehicleMoving": false
+  },
+  "modelResponse": {
+    "fields": {
+      "facilityName": { "value": "Clearwater", "status": "stated", "evidenceQuote": "Dropped at Clearwater", "evidenceRef": null },
+      "facilityTicketNumber": { "value": "4471", "status": "stated", "evidenceQuote": "Ticket forty-four seventy-one", "evidenceRef": null },
+      "loadRef": { "value": "TRIP-2026-004821", "status": "inferred", "evidenceQuote": null, "evidenceRef": "trip" },
+      "ticketDate": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "scaleInTime": { "value": "13:20", "status": "stated", "evidenceQuote": "Scale-in 13:20", "evidenceRef": null },
+      "grossWeightKg": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "tareWeightKg": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "netWeightKg": { "value": 18200, "status": "stated", "evidenceQuote": "net eighteen thousand two hundred kilos", "evidenceRef": null },
+      "volumeM3": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "material": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null }
+    },
+    "notes": null,
+    "outOfScope": false,
+    "injectionSuspected": false
+  },
+  "expect": {
+    "verdicts": { "facilityTicketNumber": "REVIEW", "loadRef": "PASS" },
+    "reasonCodes": { "facilityTicketNumber": ["ticket_prefix_missing"] },
+    "question": "Is the ticket number 4-4-7-1, or does it have a prefix?",
+    "silentGuesses": 0,
+    "outOfScope": false,
+    "injectionSuspected": false
+  }
+}

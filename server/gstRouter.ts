@@ -6,10 +6,12 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createHash } from "node:crypto";
-import { and, desc, eq, gte, lt } from "drizzle-orm";
-import { roleProcedure, router } from "./_core/trpc";
+import { and, desc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
+import { moneyScoped, roleProcedure, router } from "./_core/trpc";
+import { requireOwnedEntity } from "./_core/entityScope";
+import { gstReturnInScope, invoiceInScope, requireEvidence, vendorBillInScope } from "./financeScope";
 import { getDb } from "./db";
-import { expenseRecords, fuelTransactions, gstAdjustments, gstReturns, invoices, taxRegistrations, vendorBills } from "../drizzle/schema";
+import { customerAccounts, expenseRecords, fuelTransactions, gstAdjustments, gstReturns, invoices, taxRegistrations, vendorBills } from "../drizzle/schema";
 import { buildGstReturn, finalizeDecision, gstPeriodBounds, type Adjustment, type PurchaseRecord, type SaleRecord } from "./_core/gstReturn";
 import { determine } from "./_core/taxRuleEngine";
 import { loadTaxRules } from "./payrollService";
@@ -22,12 +24,24 @@ const JUR = z.string().regex(/^CA(-[A-Z]{2})?$/);
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const cents = (n: number | null | undefined) => Math.round((n ?? 0) * 100);
 
+/**
+ * The return for one book. The caller has already proved the book is theirs (F1).
+ *
+ * F1 — sales are this book's invoices and nothing else's. An invoice assigned to no book is in nobody's
+ * return: it cannot be claimed by asking (`includeUnassignedInvoices` is refused), and the review item
+ * that names such invoices counts only those whose own customer account is this book's — deterministic
+ * evidence — never every company's unassigned invoices in the database.
+ */
 async function loadReturn(financialEntityId: number, period: string, jurisdiction: string, includeUnassignedInvoices: boolean) {
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  if (includeUnassignedInvoices) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Invoices assigned to no financial entity cannot be claimed into a return — assign them to their book first (legacy ownership audit), then prepare the return" });
   const { start, end } = gstPeriodBounds(period);
-  const [inv, bills, expenses, fuel, adj, regs, rules] = await Promise.all([
-    db.select().from(invoices).where(and(gte(invoices.createdAt, new Date(start.getTime() - 366 * 86_400_000)), lt(invoices.createdAt, new Date(end.getTime() + 366 * 86_400_000)))),
+  const window = and(gte(invoices.createdAt, new Date(start.getTime() - 366 * 86_400_000)), lt(invoices.createdAt, new Date(end.getTime() + 366 * 86_400_000)));
+  const ownAccounts = db.select({ id: customerAccounts.id }).from(customerAccounts).where(eq(customerAccounts.financialEntityId, financialEntityId));
+  const [inv, unassigned, bills, expenses, fuel, adj, regs, rules] = await Promise.all([
+    db.select().from(invoices).where(and(eq(invoices.financialEntityId, financialEntityId), window)),
+    db.select().from(invoices).where(and(isNull(invoices.financialEntityId), inArray(invoices.customerAccountId, ownAccounts), window)),
     db.select().from(vendorBills).where(and(eq(vendorBills.financialEntityId, financialEntityId), gte(vendorBills.invoiceDate, start), lt(vendorBills.invoiceDate, end))),
     db.select().from(expenseRecords).where(and(eq(expenseRecords.financialEntityId, financialEntityId), gte(expenseRecords.transactionDate, start), lt(expenseRecords.transactionDate, end))),
     db.select().from(fuelTransactions).where(and(eq(fuelTransactions.financialEntityId, financialEntityId), gte(fuelTransactions.occurredAt, start), lt(fuelTransactions.occurredAt, end))),
@@ -35,10 +49,10 @@ async function loadReturn(financialEntityId: number, period: string, jurisdictio
     db.select().from(taxRegistrations).where(and(eq(taxRegistrations.financialEntityId, financialEntityId), eq(taxRegistrations.registrationType, "gst_hst"))),
     loadTaxRules(),
   ]);
-  const live = inv.filter(i => i.status !== "void").filter(i => { const d = i.issuedAt ?? i.createdAt; return d >= start && d < end; });
-  const unassignedExcluded = includeUnassignedInvoices ? 0 : live.filter(i => i.financialEntityId == null).length;
+  const inPeriod = (i: { status: string; issuedAt: Date | null; createdAt: Date }) => { const d = i.issuedAt ?? i.createdAt; return i.status !== "void" && d >= start && d < end; };
+  const live = inv.filter(inPeriod);
+  const unassignedExcluded = unassigned.filter(inPeriod).length;
   const sales: SaleRecord[] = live
-    .filter(i => i.financialEntityId === financialEntityId || (includeUnassignedInvoices && i.financialEntityId == null))
     .map(i => ({ ref: i.invoiceNumber, issuedAt: i.issuedAt ?? i.createdAt, subtotalCents: i.subtotalCents, taxCents: i.taxCents, treatment: i.gstTreatment, jurisdiction, entityAssigned: i.financialEntityId != null }));
   const purchases: PurchaseRecord[] = [
     ...bills.filter(b => b.status !== "cancelled" && b.status !== "disputed").map(b => ({ ref: b.billRef, kind: "vendor_bill" as const, date: b.invoiceDate, subtotalCents: b.subtotalCents ?? 0, taxCents: b.taxAmountCents ?? 0, hasEvidence: b.evidenceRecordId != null, treatment: b.gstTreatment })),
@@ -55,45 +69,49 @@ async function loadReturn(financialEntityId: number, period: string, jurisdictio
 
 export const gstRouter = router({
   /** Classify a sale or a purchase. A closed period refuses — it changes a filed figure. */
-  treatmentSet: roleProcedure("gst.treatmentSet")
+  treatmentSet: moneyScoped(roleProcedure("gst.treatmentSet"))
     .input(z.object({ kind: z.enum(["invoice", "vendor_bill"]), ref: z.string().min(1).max(64), treatment: z.enum(["taxable", "zero_rated", "exempt"]), source: z.enum(["invoice_terms", "customer_status", "review"]) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (input.kind === "invoice") {
-        const row = (await db.select().from(invoices).where(eq(invoices.invoiceNumber, input.ref)).limit(1))[0];
-        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Invoice not found" });
-        if (row.financialEntityId != null) await assertPeriodOpen(row.financialEntityId, row.issuedAt ?? row.createdAt, "Invoice tax treatment");
+        const row = await invoiceInScope(db, ctx.money, input.ref);
+        await assertPeriodOpen(row.financialEntityId!, row.issuedAt ?? row.createdAt, "Invoice tax treatment");
         await db.update(invoices).set({ gstTreatment: input.treatment, gstTreatmentSource: input.source }).where(eq(invoices.id, row.id));
       } else {
-        const row = (await db.select().from(vendorBills).where(eq(vendorBills.billRef, input.ref)).limit(1))[0];
-        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Vendor bill not found" });
+        const row = await vendorBillInScope(db, ctx.money, input.ref);
         await assertPeriodOpen(row.financialEntityId, row.invoiceDate, "Bill tax treatment");
         await db.update(vendorBills).set({ gstTreatment: input.treatment }).where(eq(vendorBills.id, row.id));
       }
       return { kind: input.kind, ref: input.ref, treatment: input.treatment };
     }),
 
-  adjustmentRecord: roleProcedure("gst.adjustmentRecord")
+  adjustmentRecord: moneyScoped(roleProcedure("gst.adjustmentRecord"))
     .input(z.object({ financialEntityId: z.number().int().positive(), period: PERIOD, line: z.enum(["104", "107"]), amountCents: z.number().int().positive(), reason: z.string().min(10).max(400), evidenceRecordId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      await requireEvidence(ctx.money, input.evidenceRecordId);
       await assertPeriodOpen(input.financialEntityId, gstPeriodBounds(input.period).start, "GST adjustment");
       const adjustmentRef = ref("GADJ");
       await db.insert(gstAdjustments).values({ adjustmentRef, financialEntityId: input.financialEntityId, period: input.period, line: input.line, amountCents: input.amountCents, reason: input.reason, evidenceRecordId: input.evidenceRecordId ?? null, recordedByUserId: ctx.user.id, recordedAt: new Date() });
       return { adjustmentRef, line: input.line, amountCents: input.amountCents };
     }),
 
-  return: roleProcedure("gst.return")
+  return: moneyScoped(roleProcedure("gst.return"))
     .input(z.object({ financialEntityId: z.number().int().positive(), period: PERIOD, jurisdiction: JUR.default("CA"), includeUnassignedInvoices: z.boolean().default(false) }))
-    .query(async ({ input }) => loadReturn(input.financialEntityId, input.period, input.jurisdiction, input.includeUnassignedInvoices)),
+    .query(async ({ ctx, input }) => {
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      return loadReturn(input.financialEntityId, input.period, input.jurisdiction, input.includeUnassignedInvoices);
+    }),
 
-  returnPrepare: roleProcedure("gst.returnPrepare")
+  returnPrepare: moneyScoped(roleProcedure("gst.returnPrepare"))
     .input(z.object({ financialEntityId: z.number().int().positive(), period: PERIOD, jurisdiction: JUR.default("CA"), includeUnassignedInvoices: z.boolean().default(false) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
       const r = await loadReturn(input.financialEntityId, input.period, input.jurisdiction, input.includeUnassignedInvoices);
       const summaryJson = JSON.stringify(r);
       const prior = (await db.select({ id: gstReturns.id, status: gstReturns.status }).from(gstReturns).where(and(eq(gstReturns.financialEntityId, input.financialEntityId), eq(gstReturns.period, input.period))).orderBy(desc(gstReturns.id)).limit(1))[0];
@@ -104,13 +122,12 @@ export const gstRouter = router({
     }),
 
   /** Another person, the ledger unchanged since preparation, nothing blocking, every review item acknowledged by code. */
-  returnFinalize: roleProcedure("gst.returnFinalize")
+  returnFinalize: moneyScoped(roleProcedure("gst.returnFinalize"))
     .input(z.object({ returnRef: z.string().min(1).max(64), acknowledgeReviewItems: z.array(z.string().min(1).max(60)).default([]) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const row = (await db.select().from(gstReturns).where(eq(gstReturns.returnRef, input.returnRef)).limit(1))[0];
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Return not found" });
+      const row = await gstReturnInScope(db, ctx.money, input.returnRef);
       if (row.status !== "prepared") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Return is ${row.status}` });
       if (row.preparedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The preparer may not finalize their own return" });
       const summary = JSON.parse(row.summaryJson) as { rateCheck: { jurisdiction: string } };

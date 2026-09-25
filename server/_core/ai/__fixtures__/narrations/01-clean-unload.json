@@ -1,0 +1,43 @@
+{
+  "id": "01-clean-unload",
+  "note": "The easy case, which exists so a regression in the happy path is visible.",
+  "transcript": "Arrived at the site at 14:20. Started unloading at 14:35 and finished at 15:10. Twelve thousand litres on the meter. Departed 15:20.",
+  "context": {
+    "formKey": "unload_stop",
+    "formVersion": 1,
+    "tripRef": "TRIP-2026-004821",
+    "unitNumber": "T-118",
+    "unitTankCapacityLitres": 16000,
+    "vehicleMoving": false
+  },
+  "modelResponse": {
+    "fields": {
+      "arrivedAt": { "value": "14:20", "status": "stated", "evidenceQuote": "Arrived at the site at 14:20", "evidenceRef": null },
+      "waitMinutes": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "delayReason": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "operationStartedAt": { "value": "14:35", "status": "stated", "evidenceQuote": "Started unloading at 14:35", "evidenceRef": null },
+      "operationCompletedAt": { "value": "15:10", "status": "stated", "evidenceQuote": "finished at 15:10", "evidenceRef": null },
+      "quantity": { "value": 12000, "status": "stated", "evidenceQuote": "Twelve thousand litres on the meter", "evidenceRef": null },
+      "measurementMethod": { "value": "Meter", "status": "stated", "evidenceQuote": "on the meter", "evidenceRef": null },
+      "departedAt": { "value": "15:20", "status": "stated", "evidenceQuote": "Departed 15:20", "evidenceRef": null }
+    },
+    "notes": null,
+    "outOfScope": false,
+    "injectionSuspected": false
+  },
+  "expect": {
+    "verdicts": {
+      "arrivedAt": "PASS",
+      "operationStartedAt": "PASS",
+      "operationCompletedAt": "PASS",
+      "quantity": "PASS",
+      "measurementMethod": "PASS",
+      "departedAt": "PASS",
+      "waitMinutes": "NOT_EVALUATED",
+      "delayReason": "NOT_EVALUATED"
+    },
+    "silentGuesses": 0,
+    "outOfScope": false,
+    "injectionSuspected": false
+  }
+}
