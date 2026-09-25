@@ -271,6 +271,30 @@ behaviour (`fleetPortfolio.test` listing `incident_unit_held` as not evaluated; 
 moved, two failures were proved to fail identically on untouched `main` `c626146` and fixed on their own
 (`6510d55`, `59642ba`). No failure was labelled pre-existing without that proof.
 
+## After the freeze — `main` moved to `9569195`, which is red on its own
+
+Frozen on `59642ba` (containing `main` `c626146`), gate green. Immediately after, `main` advanced to
+`9569195` (finance F1, PR #56). A merge was prepared and **not pushed**:
+
+- **`main` `9569195` fails 10 tests in 3 files on its own** — verified in a clean worktree of untouched
+  `9569195` against the same database: `requirementVerification.db` (7), `requirementRegistry.db` (2),
+  `financeScopeCoverage` (1). F1.2 ("scope compliance subjects to the caller's organization") and C1b-2b
+  (requirement verification, #54) meet: the five C1b-2b compliance procedures are unclassified in F1.2's
+  coverage list, and the verification suites' subjects now fail `requireSubjectInScope`. Resolving it is
+  a compliance-scoping decision for that work's owner, not a mechanical fix, so it is not made here.
+- **The prepared merge** (kept locally as `local/cp15-merge-main-9569195`, gate otherwise green: 385 of 388
+  files) resolves F1's overlap with this checkpoint: F1 added its own unit check,
+  `financeScope.requireUnit` — the same `unitInScope` rule, different wording — to seven procedures
+  CP1.5 had already scoped. The resolution keeps **one** refusal: `requireUnit` calls
+  `server/unitScope.ts` (with an optional `Trailer` label); CP1.5's check stays first where both existed
+  and F1's duplicate unit line goes (its job, trip and book checks stay); the guard accepts `requireUnit`
+  and verifies it delegates. F1 also scoped `roadside.open`'s job and trip and the book of
+  `definitionPropose`, `expenseCreate`, `distanceRecord`, `purchasing.request` — closing several of the
+  non-unit residuals below.
+
+When `main` is green again, that merge is re-made (or the prepared one replayed) and the gate re-run
+before CP2 builds on it.
+
 ## Unresolved (outside this checkpoint's scope — not unit mutations, not fixed here)
 
 - **Non-unit ids** some of these mutations accept are not scoped, seen during CP1.5 or reported by the
