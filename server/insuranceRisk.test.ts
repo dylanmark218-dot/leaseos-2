@@ -1,4 +1,9 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { vi, beforeAll, describe, expect, it } from "vitest";
+
+// F1.1 — this suite exercises a deployment that is one ownership domain (no organization yet), where the
+// ownerless customer insurance requirements are provably the single tenant's. The predicate itself, and the refusal once organizations
+// exist, are proved against the real database in tenantScopeFinance.db.test.ts.
+vi.mock("./ownershipDomain", async importOriginal => ({ ...(await importOriginal<typeof import("./ownershipDomain")>()), singleOwnershipDomain: async () => true, requireProvableOwnership: async () => undefined }));
 import mysql from "mysql2/promise";
 import {
   assessCoverage, certificatesAffectedByRenewal, claimFinancials, dispatchInsuranceGate, matchCustomerRequirements,
@@ -207,7 +212,7 @@ d("one policy, fifty trucks, one document; a collision; a customer certificate",
     const office = await withRole("office");
     const dispatcher = await withRole("dispatcher");
     const bookkeeper = await withRole("bookkeeper");
-    const entityId = 260000 + Math.floor(Math.random() * 90000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1.1 — a real book: a made-up entity id is "not found"
     const [ev] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, storageKey, capturedAt, capturedBy, status) VALUES ('Fleet policy', 'insurance', ?, NOW(), ?, 'verified')", [key("s3").slice(0, 60), office]);
     const evidenceId = Number(ev.insertId);
 
@@ -220,7 +225,9 @@ d("one policy, fifty trucks, one document; a collision; a customer certificate",
     expect(pol.coverageVerificationStatus).toBe("coverage_reported");
 
     // Cover three units under it. The one document relates to all three.
-    const unitIds = [1001, 1002, 1003].map(n => n + Math.floor(Math.random() * 900000));
+    // F1.1 — real units (the single tenant's, unowned): a policy covers trucks that exist in the caller's scope.
+    const unitIds: number[] = [];
+    for (let i = 0; i < 3; i++) unitIds.push(Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [key("U").slice(0, 40)]))[0].insertId));
     const cov = await callerFor(office).insurance.coverageAssign({ policyRef: pol.policyRef, entities: unitIds.map(id => ({ entityType: "unit" as const, entityId: id })), coveredFrom: days(-100) });
     expect(cov.covered).toBe(3);
     const [rels] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM evidenceRelationships WHERE evidenceRecordId = ? AND role = 'insured_under'", [evidenceId]);
@@ -290,7 +297,7 @@ d("one policy, fifty trucks, one document; a collision; a customer certificate",
 
   it("refuses a certificate on unverified coverage", async () => {
     const office = await withRole("office");
-    const entityId = 270000 + Math.floor(Math.random() * 90000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1.1 — a real book: a made-up entity id is "not found"
     const pol = await callerFor(office).insurance.policyRecord({ financialEntityId: entityId, policyType: "cargo", insurerName: "Q", policyNumber: key("PN"), effectiveAt: days(-10), expiresAt: days(355), coverages: [{ coverageType: "cargo", limitAmount: 100000 }] });
     await expect(callerFor(office).insurance.certificateIssue({ policyRef: pol.policyRef, recipientCustomerRef: "X" })).rejects.toThrow(/verify the coverage before issuing/);
   });
