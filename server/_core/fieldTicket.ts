@@ -92,56 +92,6 @@ export function validateFieldTicketScope(
 
 /* ------------------------------------------------------------------ */
 
-export type SignedScopeInput = {
-  ticketNumber: string;
-  siteName?: string | null;
-  startedAt?: Date | null;
-  completedAt?: Date | null;
-  signerName: string;
-  signerCompany?: string | null;
-  lines: Array<{
-    description: string;
-    quantity?: number | null;
-    quantityUnit?: string | null;
-  }>;
-};
-
-const hhmm = (d: Date) =>
-  `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
-
-/**
- * Build the sentence the signer is actually agreeing to. Storing
- * "John Smith signed" proves very little six weeks later; storing what he
- * accepted, where, over what window, and for what quantities is the thing
- * that settles a dispute.
- */
-export function buildSignedScopeStatement(input: SignedScopeInput): string {
-  const who = input.signerCompany
-    ? `${input.signerName} (${input.signerCompany})`
-    : input.signerName;
-  const where = input.siteName ? ` at ${input.siteName}` : "";
-
-  let when = "";
-  if (input.startedAt && input.completedAt) {
-    when = ` from ${hhmm(input.startedAt)} to ${hhmm(input.completedAt)}`;
-  } else if (input.startedAt) {
-    when = ` from ${hhmm(input.startedAt)}`;
-  }
-
-  const items = input.lines.map(l => {
-    const qty =
-      l.quantity != null
-        ? `${l.quantity}${l.quantityUnit ? ` ${l.quantityUnit}` : ""} `
-        : "";
-    return `${qty}${l.description}`.trim();
-  });
-
-  const covering = items.length ? `, covering ${items.join("; ")}` : "";
-  return `${who} accepted field ticket ${input.ticketNumber} for service${where}${when}${covering}.`;
-}
-
-/* ------------------------------------------------------------------ */
-
 /**
  * Derive the ticket's signature status from the per-line dispositions the
  * representative actually gave. Partial acceptance is the common real-world

@@ -29,6 +29,12 @@ const REMOVED = [
     from: "server/_core/fieldTicket.ts",
     survivor: { file: "server/_core/invoiceDraft.ts", name: "draftFromTicket" },
   },
+  {
+    question: "what sentence does a field-ticket signature record as agreed?",
+    removed: ["buildSignedScopeStatement", "SignedScopeInput"],
+    from: "server/_core/fieldTicket.ts",
+    survivor: { file: "server/closeoutRouter.ts", name: "recordSignature" },
+  },
 ] as const;
 
 const walk = (dir: string): string[] =>

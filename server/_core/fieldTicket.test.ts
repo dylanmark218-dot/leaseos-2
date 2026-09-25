@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildSignedScopeStatement,
   deriveSignatureStatus,
   reconcileJob,
   validateFieldTicketScope,
@@ -73,39 +72,6 @@ describe("validateFieldTicketScope", () => {
     expect(
       validateFieldTicketScope({ scope: "trip", jobId: 1842, tripId: 4821 })
     ).toEqual([]);
-  });
-});
-
-describe("buildSignedScopeStatement", () => {
-  it("states what was accepted, where, when, and for how much", () => {
-    const s = buildSignedScopeStatement({
-      ticketNumber: "FT-2026-000421",
-      siteName: "North Pad",
-      startedAt: new Date(Date.UTC(2026, 7, 29, 7, 18)),
-      completedAt: new Date(Date.UTC(2026, 7, 29, 9, 14)),
-      signerName: "John Smith",
-      signerCompany: "ABC Energy",
-      lines: [
-        { description: "vac truck service", quantity: 2, quantityUnit: "h" },
-        { description: "standby", quantity: 45, quantityUnit: "min" },
-      ],
-    });
-    expect(s).toContain("John Smith (ABC Energy)");
-    expect(s).toContain("FT-2026-000421");
-    expect(s).toContain("North Pad");
-    expect(s).toContain("07:18 to 09:14");
-    expect(s).toContain("45 min standby");
-  });
-
-  it("degrades gracefully when site and times are unknown", () => {
-    const s = buildSignedScopeStatement({
-      ticketNumber: "FT-2026-000422",
-      signerName: "R. Hollis",
-      lines: [],
-    });
-    expect(s).toBe(
-      "R. Hollis accepted field ticket FT-2026-000422 for service."
-    );
   });
 });
 
