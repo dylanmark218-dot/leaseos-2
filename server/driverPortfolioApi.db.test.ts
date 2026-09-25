@@ -14,7 +14,7 @@ import { walletStatusAt } from "../shared/driverWallet";
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 310_000_000 + Math.floor(Math.random() * 50_000_000);
+let seq = 312_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 const DAY = 86_400_000;
 const days = (n: number) => new Date(Date.now() + n * DAY);
