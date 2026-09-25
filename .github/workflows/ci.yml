@@ -9,26 +9,32 @@ jobs:
     # Disposable database. Everything below now runs — including the 15 DB
     # tests and the award concurrency suite, neither of which could execute
     # before this existed.
+    #
+    # MariaDB, not MySQL. This service used to be mysql:8.0, under which the
+    # migration step could never have succeeded: 0021_active_role_uniqueness.sql
+    # declares a generated column with the PERSISTENT keyword, which is
+    # MariaDB's spelling — MySQL 8.0 accepts only VIRTUAL and STORED and
+    # rejects the statement outright. server/reservedWordColumns.test.ts points
+    # the same way: it derives its reserved set from the live server and pins
+    # the answer MariaDB 10.11 gives. So the engine is not a preference here,
+    # it is what the ledger and the suite were written against.
     services:
-      mysql:
-        image: mysql:8.0
+      mariadb:
+        image: mariadb:10.11
         env:
-          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
-          MYSQL_DATABASE: leaseos
-          MYSQL_USER: leaseos
-          MYSQL_PASSWORD: leaseos
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+          MARIADB_DATABASE: leaseos
         ports: ["3306:3306"]
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
           --health-interval=5s --health-timeout=5s --health-retries=20
 
-    # root, not the `leaseos` user the service also creates: three suites
-    # migrate a database OF THEIR OWN rather than sharing the gate's —
-    # migrationLedger, trackingOwnershipMigration (which applies 0171 alone, to
-    # check what it attributes and what it leaves unattributed), and
-    # recordsApiAuthorization (whose bootstrap test needs a globally clean
-    # slate). `leaseos` is granted rights on the `leaseos` schema only, so
-    # CREATE DATABASE is refused for it and those three cannot run at all.
+    # root, not a scoped user: three suites migrate a database OF THEIR OWN
+    # rather than sharing this one — migrationLedger, trackingOwnershipMigration
+    # (which applies 0171 alone, to check what it attributes and what it leaves
+    # unattributed) and recordsApiAuthorization (whose bootstrap test needs a
+    # globally clean slate). A user scoped to one schema cannot CREATE DATABASE,
+    # so all three would fail to start.
     env:
       DATABASE_URL: mysql://root@127.0.0.1:3306/leaseos
 
