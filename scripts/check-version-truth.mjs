@@ -173,7 +173,21 @@ if (nodeMajor !== null) {
          * a stray runtime to appear, which makes it the most important form to read.
          */
         const close = rest.indexOf("]");
-        const inner = close === -1 ? rest.slice(1) : rest.slice(1, close);
+        if (close === -1) {
+          /*
+           * The sequence continues onto later lines. This line-at-a-time reader cannot
+           * follow it, and taking whatever sits on this line and moving on is the wrong
+           * answer: it reports success while an active declaration goes unread, which is
+           * precisely how the webpack matrix got in. Refuse instead.
+           */
+          activeDeclarations += 1;
+          fail(
+            `${where}: node-version opens a multi-line list this check cannot read. ` +
+              `Put the versions on one line so they can be compared with .nvmrc (${nodeMajor}).`
+          );
+          return;
+        }
+        const inner = rest.slice(1, close);
         tokens.push(...inner.split(",").map((t) => t.trim()).filter(Boolean));
       } else if (rest === "") {
         // A block sequence on the following lines:  node-version:\n  - 18\n  - 22
