@@ -376,6 +376,10 @@ function evaluateCredential(
       return { ...common, state: "unverified", satisfied: false, detail: `${label} is on file but not yet verified`, action: "Safety to verify against the certificate" };
     case "expired":
       return { ...common, state: "expired", satisfied: false, warningTier: "expired", detail: `${label} expired ${day(v.expiresAt!)}${renewalNote}`, action: pendingRenewal ? "Safety to verify the renewal" : `Renew ${label}, or assign another qualified operator` };
+    case "not_yet_effective":
+      // Verified, but its effective date has not come: nothing is in force yet, which is the dispatch
+      // gate's reading too (`_missing`). Never the default branch — that one means "in force".
+      return { ...common, state: "missing", satisfied: false, detail: `${label} is verified but ${v.reason.replace(/^Version \d+ is verified but /, "")}`, action: "Wait until it takes effect, or assign another qualified operator" };
     default: {
       // in_force or expiring: verified and in force by the canonical rule.
       if (v.expiresAt == null) {

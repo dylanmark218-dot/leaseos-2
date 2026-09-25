@@ -67,6 +67,16 @@ describe("mandatory and informational", () => {
 });
 
 describe("unknown is never satisfied", () => {
+  it("a verified ticket that is not yet in force is not satisfied", () => {
+    // The canonical verdict gained not_yet_effective (#52): verified, but its effective date has not come.
+    // It is not a credential in force, so it cannot satisfy a mandatory requirement.
+    const r = evaluateDriverReadiness({ portfolio: portfolio([cred("first_aid", { issuedAt: days(10), expiresAt: days(700) })]), requirements: [must("first_aid_cpr")], at: NOW });
+    expect(r.items[0]!.satisfied).toBe(false);
+    expect(r.items[0]!.state).toBe("missing");
+    expect(r.items[0]!.detail).toContain("not in force until");
+    expect(r.verdict).not.toBe("ready");
+  });
+
   it("an unverified upload is unknown, overridable by a manager, not ready", () => {
     const r = evaluateDriverReadiness({ portfolio: portfolio([cred("first_aid", { verificationStatus: "needs_review" })]), requirements: [must("first_aid_cpr")], at: NOW });
     expect(r.verdict).toBe("unknown");
