@@ -122,8 +122,13 @@ function reader(userId: number, tenantId: string) {
 
 type Payload = WidgetPayload<unknown>;
 const docTypes = (p: Payload) => p.state === "ok" ? (p.value as { documents: { docType: string }[] }).documents.map(x => x.docType) : null;
+/*
+ * The bystander's mark is an expired licence (its legacy date passed ten days ago). The caller's
+ * legacy date runs 400 days — which, since SPINE item 2, is an unverified licence and so an
+ * overridable unknown, not a clearance. What tells the two operators apart is the expiry.
+ */
 const licenceBlockers = (p: Payload) => p.state === "ok"
-  ? (p.value as { eligibility: { blockers: { code: string }[] } }).eligibility.blockers.map(b => b.code).filter(c => c.startsWith("operator_licence"))
+  ? (p.value as { eligibility: { blockers: { code: string }[] } }).eligibility.blockers.map(b => b.code).filter(c => c === "operator_licence_expired")
   : null;
 const hosOperator = (p: Payload) => p.state === "ok" ? (p.value as { operatorId: number }).operatorId : null;
 function expectUnknown(p: Payload, reason: RegExp) {

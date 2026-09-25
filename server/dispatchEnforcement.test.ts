@@ -148,6 +148,9 @@ d("jobUnits.create under off, advisory and enforced", () => {
     const unitId = Number(u.insertId);
     const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name, licenseExpiresAt) VALUES (?, 'T. Nguyen', DATE_ADD(NOW(), INTERVAL 400 DAY))", [driverUser]);
     const operatorId = Number(op.insertId);
+    // Established means verified: since SPINE item 2 the legacy licenseExpiresAt date alone is an
+    // unverified licence (operator_licence_unknown), so the licence is on file and checked.
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Class 1', NOW(), DATE_ADD(NOW(), INTERVAL 400 DAY), 'verified')", [operatorId]);
     const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Acme', 'LSD 12-01-050-08W5', 'dispatched', 0)", [key("JOB").slice(0, 40)]);
     const jobId = Number(j.insertId);
     // Insured, inspected, registered — so only the unknowns remain.
