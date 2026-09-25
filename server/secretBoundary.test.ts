@@ -151,16 +151,19 @@ describe("resolution happens in services, never in a router body", () => {
      *   providerCredentialService — outbound provider credentials (S2-C)
      *   mfaSecretService          — portal MFA/TOTP seeds (S2-D)
      *   mfaSecretMigration        — the one-time backfill that moves them (S2-D)
+     *   webhookSecretService      — outbound webhook signing secrets (S2-E)
+     *   webhookSecretMigration    — the one-time backfill that moves them (S2-E)
      *
-     * A fourth appearing means a new secret class arrived, or an existing domain grew a second
-     * entry point into the store — both worth a conversation rather than a silent pass. S2-E adds
-     * webhook secrets and will add its own line here, deliberately.
+     * A sixth appearing means a new secret class arrived, or an existing domain grew a second entry
+     * point into the store — both worth a conversation rather than a silent pass.
      */
     const importers = serverSources().filter(p => /["'](?:\.{1,2}\/)*(?:server\/)?secretStore["']/.test(code(p)));
     expect(importers.sort()).toEqual([
       "server/mfaSecretMigration.ts",
       "server/mfaSecretService.ts",
       "server/providerCredentialService.ts",
+      "server/webhookSecretMigration.ts",
+      "server/webhookSecretService.ts",
     ]);
   });
 
@@ -180,6 +183,101 @@ describe("resolution happens in services, never in a router body", () => {
       "server/_core/externalIdentityPolicy.ts",
       "server/_core/secretKeys.ts",
     ]);
+  });
+});
+
+describe("S2-E Phase 1 — the expand release, and the boundary it must not cross", () => {
+  /*
+   * Release 1 gives every instance the ability to READ a canonical webhook reference. It must not
+   * give any instance the ability to WRITE one during normal creation, because an instance still
+   * running the previous version cannot read such a row. These guards are what make "expand now,
+   * cut over later" a property of the codebase rather than an intention in a document.
+   */
+
+  it("E4/E5/E30. webhook creation still writes legacy ciphertext and no canonical reference", () => {
+    /*
+     * THE RELEASE BOUNDARY, as an executable statement. `webhookSubscribe` must keep writing
+     * `secretEnc` and must not write `secretRef` — so normal creation cannot produce a
+     * canonical-only row while pre-Release-1 instances are still serving.
+     *
+     * Asserted on the creation statement itself rather than on a behavioural outcome, because the
+     * hazard is a *code* change shipped a release early: an implementation that moved to canonical
+     * writes would look perfectly healthy in every functional test, and only a rolling deployment
+     * would discover it.
+     */
+    const router = code("server/integrationRouter.ts");
+    const insert = router.match(/\.insert\(webhookSubscriptions\)\.values\(\{[\s\S]*?\}\)/);
+
+    expect(insert, "the webhook subscription insert was not found — has it moved?").not.toBeNull();
+    expect(insert![0], "Release 1 must keep writing legacy ciphertext").toMatch(/\bsecretEnc\s*:/);
+    expect(
+      insert![0],
+      "Release 1 must NOT write a canonical reference: an instance running the previous version cannot read such a row"
+    ).not.toMatch(/\bsecretRef\s*:/);
+  });
+
+  it("no production module decrypts legacy webhook ciphertext outside the compatibility boundary", () => {
+    /*
+     * `secretEnc` may be opened in exactly one place. A second decrypt site is how "canonical first,
+     * fail closed" becomes true in the dispatcher and false in whatever was added next.
+     *
+     * Matched on the IMPORT rather than the call, because the compatibility boundary itself imports
+     * the legacy primitive under an alias (`decryptSecret as legacyDecrypt`). A call-name check
+     * found zero offenders here — including the one file that legitimately does it — which is the
+     * same blindness a rename would exploit.
+     */
+    const LEGACY_DECRYPT_IMPORT =
+      /import\s*\{[^}]*\bdecryptSecret\b[^}]*\}\s*from\s*["'][^"']*externalIdentityPolicy["']/;
+    /*
+     * Dynamic imports count too. A mutation that reached the legacy primitive through
+     * `(await import("./_core/externalIdentityPolicy")).decryptSecret(...)` slipped past the
+     * static-import form entirely — which is the obvious way round a guard that only reads the top
+     * of a file, and therefore the first thing it has to cover.
+     */
+    const LEGACY_DECRYPT_DYNAMIC = /import\s*\(\s*["'][^"']*externalIdentityPolicy["']\s*\)/;
+    const offenders = serverSources().filter(p => {
+      const body = code(p);
+      return /\bsecretEnc\b/.test(body) && (LEGACY_DECRYPT_IMPORT.test(body) || LEGACY_DECRYPT_DYNAMIC.test(body));
+    });
+    expect(offenders).toEqual(["server/webhookSecretService.ts"]);
+  });
+
+  it("the webhook resolver names only WEBHOOK_SECRET", () => {
+    const service = code("server/webhookSecretService.ts");
+    const migration = code("server/webhookSecretMigration.ts");
+
+    for (const [name, body] of [["service", service], ["migration", migration]] as const) {
+      expect(body, `${name} must not reach for another purpose`).not.toMatch(/MFA_SECRET|PROVIDER_CREDENTIAL|INTEGRATION_SECRET/);
+      expect(body).toMatch(/WEBHOOK_SECRET/);
+    }
+  });
+
+  it("no delivery-level signing reference exists", () => {
+    /*
+     * OD-E2, as schema. A per-delivery signing reference is the shape a frozen-secret implementation
+     * would take, and its absence is easier to keep true than its correct use would be.
+     */
+    const schema = code("drizzle/schema.ts");
+    const deliveries = schema.match(/export const webhookDeliveries = mysqlTable\([\s\S]*?\n\}\);/);
+
+    expect(deliveries).not.toBeNull();
+    expect(deliveries![0], "a delivery must not carry its own signing-secret reference").not.toMatch(/signingSecretRef|secretRef/);
+  });
+
+  it("no router mentions the webhook secret reference", () => {
+    // A `secretRef` is a resolver's input. Nothing a client can reach has any use for one.
+    const offenders = routerSources().filter(p => /\bsecretRef\b/.test(code(p)));
+    expect(offenders).toEqual([]);
+  });
+
+  it("the legacy webhook column is still written, so the rollback path survives Release 1", () => {
+    /*
+     * The backfill must retain `secretEnc`. Clearing it is a separate, separately-approved
+     * checkpoint — and until it happens, that column is the only thing that lets Release 1 be
+     * rolled back without every webhook consumer reconfiguring.
+     */
+    const migration = code("server/webhookSecretMigration.ts");
+    expect(migration, "Phase 1 must never null the legacy column").not.toMatch(/secretEnc\s*:\s*null/);
   });
 });
 
