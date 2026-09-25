@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { bigint, boolean, date, decimal, double, index, int, json, mysqlEnum, mysqlTable, text, timestamp, tinyint, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
@@ -4906,7 +4907,13 @@ export const externalIdentities = mysqlTable("externalIdentities", {
   previousTokenHash: varchar("previousTokenHash", { length: 64 }),
   previousTokenExpiresAt: timestamp("previousTokenExpiresAt"),
   mfaEnabled: boolean("mfaEnabled").default(false).notNull(),
+  /**
+   * 0049 — legacy inline ciphertext under `LEASEOS_PORTAL_MFA_KEY`. Read-only from S2-D onward:
+   * new enrollments write `mfaSecretRef` instead, and this is cleared once migration is verified.
+   */
   mfaSecretEnc: varchar("mfaSecretEnc", { length: 400 }),
+  /** 0193 — pointer into `encryptedSecrets` under purpose `MFA_SECRET`. Preferred when present. */
+  mfaSecretRef: varchar("mfaSecretRef", { length: 64 }),
   failedAttempts: int("failedAttempts").default(0).notNull(),
   lockedUntil: timestamp("lockedUntil"),
   revokedAt: timestamp("revokedAt"),
@@ -5566,7 +5573,15 @@ export const webhookSubscriptions = mysqlTable("webhookSubscriptions", {
   subscriptionRef: varchar("subscriptionRef", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 160 }).notNull(),
   url: varchar("url", { length: 500 }).notNull(),
-  secretEnc: varchar("secretEnc", { length: 400 }).notNull(),
+  /**
+   * Legacy inline ciphertext under `LEASEOS_PORTAL_MFA_KEY` — the shared key that also protects MFA
+   * seeds. 0194 relaxed it to NULL so a canonical-only row becomes representable, but **Release 1
+   * still writes it on every creation**: the NULL case is Release 2's, and exists here only so the
+   * schema gains the capability one deployment before anything uses it.
+   */
+  secretEnc: varchar("secretEnc", { length: 400 }),
+  /** 0194 — pointer into `encryptedSecrets` under purpose `WEBHOOK_SECRET`. Preferred when present. */
+  secretRef: varchar("secretRef", { length: 64 }),
   eventTypesJson: text("eventTypesJson").notNull(),
   status: mysqlEnum("status", ["active", "paused", "revoked"]).default("active").notNull(),
   createdByUserId: int("createdByUserId").notNull(),
@@ -5587,6 +5602,9 @@ export const webhookDeliveries = mysqlTable("webhookDeliveries", {
   responseStatus: int("responseStatus"),
   error: varchar("error", { length: 400 }),
   nextAttemptAt: timestamp("nextAttemptAt"),
+  // 0185 (SEC-004): the claim on an in-flight ('queued') attempt. See webhookDispatchService.ts.
+  claimedAt: timestamp("claimedAt"),
+  claimedBy: varchar("claimedBy", { length: 64 }),
   at: timestamp("at").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
@@ -8963,4 +8981,81 @@ export const sessionFamilies = mysqlTable("sessionFamilies", {
 }, t => ({
   ownerIdx: index("sessionFamilies_openId_idx").on(t.openId, t.revokedAt),
   verifierIdx: index("sessionFamilies_verifier_idx").on(t.refreshVerifierHash),
+}));
+
+/**
+ * S2-B — the one place reversible ciphertext lives.
+ *
+ * Split from the records that use it so a metadata read never touches a secret: callers hold a
+ * `secretRef`, and only `server/secretStore.ts` resolves one. `keyId` names the key that encrypted
+ * this row — never key material — so a row written under a retired key stays readable and a rewrap
+ * can find what still references one.
+ */
+export const encryptedSecrets = mysqlTable("encryptedSecrets", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Opaque, random, stable across rewrap. Never derived from the plaintext. */
+  secretRef: varchar("secretRef", { length: 64 }).notNull().unique(),
+  purpose: mysqlEnum("purpose", ["MFA_SECRET", "WEBHOOK_SECRET", "PROVIDER_CREDENTIAL", "INTEGRATION_SECRET"]).notNull(),
+  keyId: varchar("keyId", { length: 64 }).notNull(),
+  /** `text`, not varchar: a MUTUAL_TLS certificate and key will not fit in 400 characters. */
+  envelope: text("envelope").notNull(),
+  status: mysqlEnum("status", ["active", "disabled"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  rewrappedAt: timestamp("rewrappedAt"),
+  disabledAt: timestamp("disabledAt"),
+  /** Set by S2-D/S2-E when a legacy inline value is moved here; NULL for natively created secrets. */
+  sourceTable: varchar("sourceTable", { length: 64 }),
+  sourceColumn: varchar("sourceColumn", { length: 64 }),
+}, t => ({
+  purposeKeyIdx: index("encryptedSecrets_purpose_key_idx").on(t.purpose, t.keyId),
+  sourceIdx: index("encryptedSecrets_source_idx").on(t.sourceTable, t.sourceColumn),
+}));
+
+/**
+ * S2-C — provider credential metadata. There is no column here capable of holding a secret.
+ *
+ * Joins `externalDataSources.sourceKey` on `providerKey`, which already carries the licensing
+ * dimensions — so "configured" and "permitted" stay separate questions. PLATFORM rows have no
+ * `orgRef`; TENANT rows must have one, enforced by a CHECK in migration 0192 rather than by service
+ * code, because a malformed row is what a resolver would otherwise have to guess about.
+ */
+export const providerCredentials = mysqlTable("providerCredentials", {
+  id: int("id").autoincrement().primaryKey(),
+  credentialRef: varchar("credentialRef", { length: 64 }).notNull().unique(),
+  providerKey: varchar("providerKey", { length: 120 }).notNull(),
+  environment: mysqlEnum("environment", ["production", "staging", "sandbox"]).default("production").notNull(),
+  authScheme: mysqlEnum("authScheme", ["NONE", "API_KEY", "STATIC_BEARER", "OAUTH2_CLIENT_CREDENTIALS", "OAUTH2_REFRESH", "SIGNED_REQUEST", "MUTUAL_TLS"]).notNull(),
+  ownership: mysqlEnum("ownership", ["PLATFORM", "TENANT"]).notNull(),
+  /** NULL exactly when ownership = PLATFORM. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  /**
+   * Generated, never written by application code: `COALESCE(orgRef, '~platform')`. It exists only
+   * so the scope UNIQUE below covers platform rows too — MariaDB allows unlimited NULLs in a
+   * composite UNIQUE, which would let two active platform credentials for one provider coexist and
+   * make resolution depend on row order.
+   */
+  orgScope: varchar("orgScope", { length: 64 }).generatedAlwaysAs(sql`COALESCE(\`orgRef\`, '~platform')`, {
+    mode: "stored",
+  }),
+  /** The provider's own account/client id. Not secret — an OAuth client id is public. */
+  externalAccountId: varchar("externalAccountId", { length: 200 }),
+  /** Pointer into encryptedSecrets; NULL is legitimate for authScheme NONE. */
+  secretRef: varchar("secretRef", { length: 64 }),
+  status: mysqlEnum("status", ["active", "disabled", "rotating", "revoked", "expired"]).default("active").notNull(),
+  /** Tracks the provider's value. A master-key rewrap does NOT touch this. */
+  credentialVersion: int("credentialVersion").default(1).notNull(),
+  /** Truncated hash, so an operator can recognise a key without the system disclosing it. */
+  fingerprint: varchar("fingerprint", { length: 32 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt"),
+  rotatedAt: timestamp("rotatedAt"),
+  expiresAt: timestamp("expiresAt"),
+  lastUsedAt: timestamp("lastUsedAt"),
+  createdByUserId: int("createdByUserId"),
+  disabledByUserId: int("disabledByUserId"),
+  disabledReason: varchar("disabledReason", { length: 300 }),
+}, t => ({
+  scopeUnique: uniqueIndex("providerCredentials_scope_unique").on(t.providerKey, t.environment, t.ownership, t.orgScope),
+  providerStatusIdx: index("providerCredentials_provider_status_idx").on(t.providerKey, t.status),
+  tenantIdx: index("providerCredentials_tenant_idx").on(t.orgRef, t.providerKey),
 }));
