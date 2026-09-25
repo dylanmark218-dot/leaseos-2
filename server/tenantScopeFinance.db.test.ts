@@ -712,7 +712,7 @@ d("F1.3 — the requirement registry is organization-scoped: no organization cha
     const bBefore = await view(orgB);
     const shared = await sharedRows();
     const ev = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt, capturedBy) VALUES ('Licence', 'compliance', NOW(), ?)", [officeA]))[0].insertId);
-    const cred = await callerFor(officeA).compliance.credentialRecord({ ownerType: "operator", ownerId: opA, docType: "driver_licence", requirementKey: key, title: "Class 1 licence", evidenceRecordId: ev });
+    const cred = await callerFor(officeA).compliance.credentialRecord({ ownerType: "operator", ownerId: opA, docType: "driver_licence", requirementKey: key, title: "Class 1 licence", evidenceRecordId: ev, expiresAt: new Date(Date.now() + 400 * 86_400_000) });   // #52 ruling B: a verified licence with no expiry is incomplete, never satisfied
     await callerFor(officeA).compliance.credentialVerify({ credentialId: cred.credentialId, outcome: "verified" });
     await callerFor(officeA).compliance.consentRecord({ subjectUserId: dispA, consentType: "driver_abstract", purpose: "annual abstract", signedAt: new Date("2026-01-01T00:00:00Z") });
     await callerFor(officeA).compliance.programPublish({ programKey: `P-${rnd()}`, title: "Safety manual", programType: "safety", financialEntityId: entA, effectiveFrom: new Date("2026-01-01T00:00:00Z") });
