@@ -22,17 +22,40 @@ jobs:
           --health-cmd="mysqladmin ping -h 127.0.0.1"
           --health-interval=5s --health-timeout=5s --health-retries=20
 
+    # root, not the `leaseos` user the service also creates: three suites
+    # migrate a database OF THEIR OWN rather than sharing the gate's —
+    # migrationLedger, trackingOwnershipMigration (which applies 0171 alone, to
+    # check what it attributes and what it leaves unattributed), and
+    # recordsApiAuthorization (whose bootstrap test needs a globally clean
+    # slate). `leaseos` is granted rights on the `leaseos` schema only, so
+    # CREATE DATABASE is refused for it and those three cannot run at all.
     env:
-      DATABASE_URL: mysql://leaseos:leaseos@127.0.0.1:3306/leaseos
+      DATABASE_URL: mysql://root@127.0.0.1:3306/leaseos
 
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with: { version: 10.4.1 }
+      # No `version` input: package.json pins packageManager (pnpm@10.4.1+sha512)
+      # and pnpm/action-setup@v4 refuses to run when both are given, even when
+      # they agree — which they did, at 10.4.1. Every run on this branch died
+      # here, in 40 seconds, before a single test executed, so the whole branch
+      # read red while the gate was green locally.
+      #
+      # Pinned to the v4 commit rather than the mutable `@v4` tag: a tag can be
+      # moved to point at different code, so a third-party action referenced by
+      # tag is code this workflow has not reviewed. Same implementation,
+      # immutable reference — not an upgrade.
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
 
       - run: pnpm install --frozen-lockfile
+
+      # ubuntu-latest (24.04) ships no `mysql` client, and apply-migrations.sh
+      # drives one directly — it has to, because drizzle separates statements
+      # with `--> statement-breakpoint` and compound trigger bodies need
+      # DELIMITER, neither of which a driver will do for you.
+      - name: Install MariaDB client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mariadb-client
 
       # Applying migrations IS a test. A migration that has never executed is
       # an assumption, not a schema.
