@@ -11,6 +11,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
+import { readFileSync } from "node:fs";
 import {
   createSecret,
   describeSecret,
@@ -139,6 +140,34 @@ d("B5-B9 — every wrong request is refused", () => {
     await expect(resolveSecret({ purpose: "PROVIDER_CREDENTIAL", secretRef, keys })).rejects.toThrow(/disabled/);
     // Disabled, not deleted — the row survives for audit.
     expect(await rawRow(secretRef)).toBeTruthy();
+  });
+
+  it("B7. ownership is not expressible here, so it cannot be half-enforced here", async () => {
+    /*
+     * B7 asks that cross-tenant misuse be refused "where ownership applies". It does not apply at
+     * this layer, deliberately: a store that also judged who may read would be the place every
+     * future caller adds an exception, so tenancy lives one layer up in `providerCredentialService`
+     * and is proved by C5 and C7.
+     *
+     * The risk that creates is a half-migration — someone passes an `orgRef` to a store call, the
+     * store ignores it, and the caller believes the read is scoped when it is not. So this pins the
+     * absence rather than leaving it implied: resolution is a function of (purpose, secretRef)
+     * alone, and the store's surface names no tenant for a caller to misread.
+     */
+    const { secretRef } = await createSecret({ purpose: "PROVIDER_CREDENTIAL", plaintext: "scoped-value", keys });
+
+    const withTenantArg = await resolveSecret({
+      purpose: "PROVIDER_CREDENTIAL", secretRef, keys,
+      ...({ orgRef: "org-a", ownership: "TENANT" } as Record<string, unknown>),
+    } as Parameters<typeof resolveSecret>[0]);
+
+    expect(
+      withTenantArg,
+      "if a tenant argument ever changes this result, the store has grown an authorization model and B7 must become a real isolation test"
+    ).toBe("scoped-value");
+
+    const source = readFileSync("server/secretStore.ts", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(source, "the store must not name a tenant it does not enforce").not.toMatch(/\borgRef\b|\bownership\b/);
   });
 
   it("B8. a malformed envelope in the row fails closed", async () => {
