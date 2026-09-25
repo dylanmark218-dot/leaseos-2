@@ -19,13 +19,15 @@ import {
   calibrationEffectOnUse, calibrationImpact, calibrationStatus, equipmentAuthorization, evaluateWorkContext, packsActivatedBy,
   type CalibrationEvent, type DependentMeasurement, type MeasurementUse, type WorkContext,
 } from "./_core/requirementEngine";
-import { COMPLIANCE_PACK_SEEDS, COMPLIANCE_REQUIREMENT_SEEDS, EQUIPMENT_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
+import { COMPLIANCE_REQUIREMENT_SEEDS, EQUIPMENT_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
+import { knownPacks, loadRequirementRegistry, packExists } from "./requirementRegistry";
 import type { Credential } from "./_core/compliancePassport";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
 async function activePacksFor(entityId: number, profile: { jurisdiction: string; attributes: Record<string, unknown> }): Promise<Set<string>> {
-  const auto = packsActivatedBy(profile, COMPLIANCE_PACK_SEEDS);
+  // C1b-2: stored packs as well as seed packs, as with requirements.
+  const auto = packsActivatedBy(profile, await knownPacks());
   const db = await getDb();
   const explicit = db
     ? (await db.select({ packKey: companyPackActivations.packKey }).from(companyPackActivations)
@@ -119,9 +121,12 @@ export const requirementRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);   // F1.1
-      if (!COMPLIANCE_PACK_SEEDS.some(p => p.packKey === input.packKey)) throw new TRPCError({ code: "NOT_FOUND", message: "Unknown pack" });
+      // C1b-2: a pack defined in `compliancePacks` is a pack, not only a seed.
+      if (!(await packExists(input.packKey))) throw new TRPCError({ code: "NOT_FOUND", message: "Unknown pack" });
       await db.insert(companyPackActivations).values({ financialEntityId: input.financialEntityId, packKey: input.packKey, activatedAt: new Date(), activatedByUserId: ctx.user.id, reason: input.reason ?? null });
-      return { packKey: input.packKey, requirementsInPack: EQUIPMENT_REQUIREMENT_SEEDS.filter(r => r.packKey === input.packKey).length };
+      // Activating a pack makes its requirements applicable to this company; it verifies none of them.
+      const registry = await loadRequirementRegistry([...COMPLIANCE_REQUIREMENT_SEEDS, ...EQUIPMENT_REQUIREMENT_SEEDS], new Date(), (await actingScopeFor(ctx.user.id)).tenantId);
+      return { packKey: input.packKey, requirementsInPack: registry.filter(r => r.packKey === input.packKey).length };
     }),
 
   /** WHO + WHAT + WHERE + WHEN + ... = AUTHORIZED / REVIEW / BLOCKED / UNKNOWN. */
@@ -143,17 +148,22 @@ export const requirementRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       await assertCallerOwnsEntity(db as never, caller.user.id, input.financialEntityId);
-      if (input.worker && !(await operatorInScope(input.worker.id, await actingScopeFor(caller.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Operator not found" });
+      const scope = await actingScopeFor(caller.user.id);
+      if (input.worker && !(await operatorInScope(input.worker.id, scope))) throw new TRPCError({ code: "NOT_FOUND", message: "Operator not found" });
       if (input.equipment || input.attachments.length) await requireProvableOwnership("Evaluating equipment credentials", "equipment records carry an owner");
       const activePacks = await activePacksFor(input.financialEntityId, { jurisdiction: input.jurisdiction, attributes: input.companyAttributes });
-      const ctx: WorkContext = {
+      const workContext: WorkContext = {
         jurisdiction: input.jurisdiction, at: input.at ?? new Date(),
         worker: input.worker ? { ...input.worker, credentials: await credentialsFor("operator", input.worker.id) } : null,
         equipment: input.equipment ? { ...input.equipment, credentials: await credentialsFor("equipment", input.equipment.id) } : null,
         attachments: await Promise.all(input.attachments.map(async a => ({ ...a, credentials: await credentialsFor("equipment", a.id) }))),
         work: input.work, site: input.site ?? null, cargo: input.cargo ?? null, customer: input.customer ?? null,
       };
-      const result = evaluateWorkContext({ ctx, requirements: [...COMPLIANCE_REQUIREMENT_SEEDS, ...EQUIPMENT_REQUIREMENT_SEEDS], activePacks });
+      // C1b-2: the registry, not the seed constants. A requirement loaded or revised through
+      // `compliance.requirementLoad` now reaches work authorization, as it already reached the passport.
+      // C1b-2b: the caller's organization's registry, as it stood at ctx.at.
+      const requirements = await loadRequirementRegistry([...COMPLIANCE_REQUIREMENT_SEEDS, ...EQUIPMENT_REQUIREMENT_SEEDS], workContext.at, scope.tenantId);
+      const result = evaluateWorkContext({ ctx: workContext, requirements, activePacks });
       return { ...result, activePacks: Array.from(activePacks).sort() };
     }),
 

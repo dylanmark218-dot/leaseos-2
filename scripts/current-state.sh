@@ -34,8 +34,15 @@ const sensN=arr("SENSITIVE_PERMISSIONS"), uniN=arr("UNIVERSAL_PERMISSIONS");
 console.log(perms.size+" "+sensN+" "+uniN);')
 # This clobbers $1/$2; OUT and RELEASE are captured at the top for that reason.
 set -- $PERMS; PERM_COUNT=$1; SENS_COUNT=$2; UNI_COUNT=$3
-TEST_FILES=$(ls server/*.test.ts server/_core/*.test.ts 2>/dev/null | wc -l | tr -d ' ')
-TEST_CASES=$(cat server/*.test.ts server/_core/*.test.ts | grep -cE '^\s*it\(' || true)
+# `find`, not a two-level glob. vitest's include is `server/**/*.test.ts`, and
+# the glob here was `server/*.test.ts server/_core/*.test.ts` — one level deep
+# each. The first suite to live in a deeper directory (server/ai) would have run
+# in CI and been absent from the document's count, which is the exact shape of
+# false claim gate 8 exists to catch. The counter now enumerates what the runner
+# enumerates.
+TEST_FILE_LIST=$(find server -name '*.test.ts' -not -path '*/node_modules/*' | sort)
+TEST_FILES=$(printf '%s\n' "$TEST_FILE_LIST" | grep -c . || true)
+TEST_CASES=$(printf '%s\n' "$TEST_FILE_LIST" | xargs cat | grep -cE '^\s*it\(' || true)
 NATIVE=$(grep -o 'NotOnDeviceError(' client/src/runtime/adapters/capacitor.ts | wc -l | tr -d ' ')
 
 # The document body is a quoted heredoc: bash interprets none of it.

@@ -1,0 +1,35 @@
+{
+  "id": "05-fabricated-quote",
+  "note": "The silent guess. A plausible value with a quote nobody said. BLOCKED, never REVIEW.",
+  "transcript": "Arrived 11:00, unloaded 11:15 to 11:50. Meter reading.",
+  "context": {
+    "formKey": "unload_stop",
+    "formVersion": 1,
+    "tripRef": "TRIP-2026-004821",
+    "unitNumber": "T-118",
+    "unitTankCapacityLitres": 16000,
+    "vehicleMoving": false
+  },
+  "modelResponse": {
+    "fields": {
+      "arrivedAt": { "value": "11:00", "status": "stated", "evidenceQuote": "Arrived 11:00", "evidenceRef": null },
+      "waitMinutes": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "delayReason": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "operationStartedAt": { "value": "11:15", "status": "stated", "evidenceQuote": "unloaded 11:15", "evidenceRef": null },
+      "operationCompletedAt": { "value": "11:50", "status": "stated", "evidenceQuote": "to 11:50", "evidenceRef": null },
+      "quantity": { "value": 9000, "status": "stated", "evidenceQuote": "nine thousand litres", "evidenceRef": null },
+      "measurementMethod": { "value": "Meter", "status": "stated", "evidenceQuote": "Meter reading", "evidenceRef": null },
+      "departedAt": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null }
+    },
+    "notes": null,
+    "outOfScope": false,
+    "injectionSuspected": false
+  },
+  "expect": {
+    "verdicts": { "quantity": "BLOCKED" },
+    "reasonCodes": { "quantity": ["quote_not_in_transcript"] },
+    "silentGuesses": 1,
+    "outOfScope": false,
+    "injectionSuspected": false
+  }
+}
