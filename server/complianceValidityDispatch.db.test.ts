@@ -47,7 +47,7 @@ async function subject(opts: { legacyLicenceInDays?: number | null; operatorDocs
   const r = await composeReadiness({ operatorId: op.insertId, unitId: u.insertId, trailerId: null, jobId: null });
   return r.eligibility.blockers;
 }
-const only = (blockers: readonly { code: string }[], prefix: string) => blockers.filter(b => b.code.startsWith(prefix));
+const only = <B extends { code: string }>(blockers: readonly B[], prefix: string) => blockers.filter(b => b.code.startsWith(prefix));
 const VERIFIED_LICENCE: Doc = { docType: "driver_licence", status: "verified", expiresInDays: 400 };
 /**
  * The same finding "expiry unknown" already produced: C1a classifies it UNKNOWN / BLOCK under
@@ -64,7 +64,7 @@ d("dispatch reads a credential through the canonical document verdict", () => {
     const [b, ...rest] = only(await subject({ operatorDocs: [{ docType: "driver_licence", status: "needs_review", expiresInDays: 400 }] }), "operator_licence");
     expect(rest).toEqual([]);
     expect(b).toMatchObject(LICENCE_UNKNOWN);
-    expect((b as { label: string }).label).toContain("not verified");
+    expect(b!.label).toContain("not verified");
   }, 20_000);
 
   it("D2: a newer verified correction that says expired wins over an older verified row with a later date", async () => {
@@ -78,19 +78,19 @@ d("dispatch reads a credential through the canonical document verdict", () => {
   it("D3: a verified licence not yet in force blocks as nothing in force", async () => {
     const [b] = only(await subject({ operatorDocs: [{ docType: "driver_licence", status: "verified", expiresInDays: 400, issuedInDays: 2 }] }), "operator_licence");
     expect(b).toMatchObject({ code: "operator_licence_missing", severity: "blocking", overridable: false });
-    expect((b as { label: string }).label).toContain("not yet in force");
+    expect(b!.label).toContain("not yet in force");
   }, 20_000);
 
   it("D4: a verified licence with no expiry is unknown — no type is never-expiring yet", async () => {
     const [b] = only(await subject({ operatorDocs: [{ docType: "driver_licence", status: "verified", expiresInDays: null }] }), "operator_licence");
     expect(b).toMatchObject(LICENCE_UNKNOWN);
-    expect((b as { label: string }).label).toContain("expiry unknown");
+    expect(b!.label).toContain("expiry unknown");
   }, 20_000);
 
   it("L: the legacy licence date alone is unverified — an overridable unknown, not a clearance", async () => {
     const [b] = only(await subject({ legacyLicenceInDays: 400 }), "operator_licence");
     expect(b).toMatchObject(LICENCE_UNKNOWN);
-    expect((b as { label: string }).label).toContain("legacy");
+    expect(b!.label).toContain("legacy");
   }, 20_000);
 
   it("control: a legacy licence date already past is still a hard block", async () => {
