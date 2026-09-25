@@ -205,7 +205,7 @@ d("P7.4 — receivables through the approval ladder, and by organization", () =>
   it("a $30,000 credit needs two different managers; the controller is stopped at $5,000 by name; the requester never approves; the ledger shows every signature", async () => {
     const book = await org();
     const requester = await member(book, ["controller"]), controller = await member(book, ["controller"]), mgr1 = await member(book, ["management"]), mgr2 = await member(book, ["management"]);
-    const entityId = 1_700_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, book]))[0].insertId);   // F1 — the book is the organization's own
     const invoiceNumber = await invoice(entityId, "Fixture Energy", 3_500_000, null, "2026-09-04 00:00:00");
     const req = await callerFor(requester).ar.creditRequest({ financialEntityId: entityId, invoiceNumber, amountCents: 3_000_000, reason: "standby disputed and conceded after the site log review" });
     await expect(callerFor(requester).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" })).rejects.toThrow(/own credit/);
@@ -229,7 +229,7 @@ d("P7.4 — receivables through the approval ladder, and by organization", () =>
     const book = await org();
     const requester = await member(book, ["bookkeeper"]), mgr = await member(book, ["management"]);
     await callerFor(mgr).commercialOffice.approvals.policySet({ category: "write_off", maxAmountCents: 50_000, approverRole: "management" });   // the business covers write-offs only to $500
-    const entityId = 1_700_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, book]))[0].insertId);   // F1 — the book is the organization's own
     const invoiceNumber = await invoice(entityId, "Fixture Energy", 800_000, null, "2026-05-01 00:00:00");
     const w = await callerFor(requester).ar.writeOffRequest({ invoiceNumber, amountCents: 80_000, reason: "customer insolvent; trustee confirmed no distribution" });
     await expect(callerFor(mgr).ar.writeOffDecide({ requestRef: w.requestRef, decision: "approved", reason: "trustee letter on file" })).rejects.toThrow(/REVIEW — no business tier covers \$800\.00/);
@@ -241,7 +241,7 @@ d("P7.4 — receivables through the approval ladder, and by organization", () =>
     const book = await org(), clientOrg = await org();
     const office = await member(book, ["office"]);
     await callerFor(office).commercialOffice.roles.assign({ orgRef: clientOrg, roleKey: "client" });
-    const entityId = 1_700_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, book]))[0].insertId);   // F1 — the book is the organization's own
     const [acct] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO customerAccounts (accountRef, financialEntityId, name, paymentTermsDays, status) VALUES (?, ?, 'Fixture Energy', 30, 'active')", [`ACC-${rnd()}`, entityId]);
     await callerFor(office).commercialOffice.links.set({ recordType: "customer_account", recordId: acct.insertId, orgRef: clientOrg });
     await invoice(entityId, "Fixture Energy", 100_000, acct.insertId, "2026-05-01 00:00:00");   // long overdue, linked
@@ -261,7 +261,7 @@ d("P7.5 — payables through the same ledger, and by organization", () => {
   it("a $40,000 bill takes two managers; the recorder is refused by name; the approver does not release; an unlinked vendor ages by its captured name", async () => {
     const book = await org(), vendorOrg = await org();
     const bookkeeper = await member(book, ["bookkeeper"]), controller = await member(book, ["controller"]), mgr1 = await member(book, ["management"]), mgr2 = await member(book, ["management"]);
-    const entityId = 1_800_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, book]))[0].insertId);   // F1 — the book is the organization's own
     const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [`VEN-${rnd()}`, `Big Iron ${rnd()}`]);
     await callerFor(bookkeeper).commercialOffice.roles.assign({ orgRef: vendorOrg, roleKey: "vendor" });
     await callerFor(bookkeeper).commercialOffice.links.set({ recordType: "vendor", recordId: v.insertId, orgRef: vendorOrg });
@@ -298,7 +298,7 @@ d("P7.6 — GL mapping is the business's own; profitability comes only from evid
   }
   it("refuses a mapping to an account not in the chart, names every unmapped key for a period, and reports READY once the business has mapped its own keys", async () => {
     const book = await org(); const mgr = await member(book, ["management"]);
-    const entityId = 1_900_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, book]))[0].insertId);   // F1 — the book is the organization's own
     await invoice(entityId, "Fixture Energy", null, 100_000, "HYDROVAC_HR", "taxable");
     await expect(callerFor(mgr).commercialOffice.gl.mappingSet({ mappingKind: "service_code", mappingKey: "HYDROVAC_HR", glAccountCode: "4000" })).rejects.toThrow(/not in this business's chart/);
     const before = await callerFor(mgr).commercialOffice.gl.exportReadiness({ financialEntityId: entityId, from: new Date("2026-08-01"), to: new Date("2026-08-31") });
@@ -320,7 +320,7 @@ d("P7.6 — GL mapping is the business's own; profitability comes only from evid
     const book = await org(), clientOrg = await org();
     const office = await member(book, ["office"]), mgr = await member(book, ["management"]);
     await callerFor(office).commercialOffice.roles.assign({ orgRef: clientOrg, roleKey: "client" });
-    const entityId = 1_900_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, book]))[0].insertId);   // F1 — the book is the organization's own
     const jobCode = `JOB-${rnd()}`;
     await callerFor(office).fieldRoute.jobs.create({ jobCode, type: "Hydrovac", customer: "Fixture Energy", location: "LSD 04-12-045-08W4" } as never);
     const [j] = await pool.query<mysql.RowDataPacket[]>("SELECT id FROM jobs WHERE jobCode = ?", [jobCode]);
@@ -397,9 +397,9 @@ d("P7.8 — the vendor audit package, from the ledger, the statements and the re
   it("bundles the vendor's bills with their approval-ledger signatures by role (user ids withheld), the registry documents linked to it, names a bill approved outside the ladder as a gap, is byte-reproducible, and is released only by a second person after a controller prepared it", async () => {
     const book = await org(), vendorOrg = await org();
     const bookkeeper = await member(book, ["bookkeeper"]), controller = await member(book, ["controller"]), mgr1 = await member(book, ["management"]), mgr2 = await member(book, ["management"]);
-    const entityId = 1_700_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, book]))[0].insertId);   // F1 — the book is the organization's own
     const vendorRef = `VEN-${rnd()}`;
-    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [vendorRef, `Big Iron ${rnd()}`]);
+    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, bookOrgRef, name, category, status) VALUES (?,?,?,'parts','active')", [vendorRef, book, `Big Iron ${rnd()}`]);   // F1 — the vendor is kept in this book
     await callerFor(bookkeeper).commercialOffice.roles.assign({ orgRef: vendorOrg, roleKey: "vendor" });
     await callerFor(bookkeeper).commercialOffice.links.set({ recordType: "vendor", recordId: v.insertId, orgRef: vendorOrg });
     const billRef = `BILL-${rnd()}`;
