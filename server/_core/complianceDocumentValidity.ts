@@ -83,7 +83,7 @@ export function complianceDocumentValidity(
  * list this function was not given.
  */
 const SEVERITY: Readonly<Record<ValidityState, number>> = {
-  expired: 0, rejected: 1, expiring: 2, unverified: 3, in_force: 4, none: 5,
+  expired: 0, rejected: 1, incomplete: 2, not_yet_effective: 3, expiring: 4, unverified: 5, in_force: 6, none: 7,
 };
 
 export function documentExpiry(
