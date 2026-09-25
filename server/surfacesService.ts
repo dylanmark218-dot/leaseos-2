@@ -17,6 +17,7 @@ import {
   syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders, academyInspectorRequests, securityIncidents, privacyBreachAssessments, incidentNotificationObligations, facilities, facilityEvidence, facilitySourceLicences } from "../drizzle/schema";
 import { calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import type { ExceptionSources } from "./_core/exceptionCentre";
+import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
 import { loadUngatedAssignments } from "./dispatchEnforcementService";
 import { loadFuelLineFindings } from "./periodCloseService";
 
@@ -48,7 +49,7 @@ async function loadFacilityDirectoryExceptions(db: Awaited<ReturnType<typeof get
 export async function loadExceptionSources(now = new Date()): Promise<ExceptionSources> {
   const db = await getDb();
   const empty: ExceptionSources = {
-    now, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [],
+    now, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentialsAwaitingVerification: [], credentialVerdicts: [], aiProposals: [], aiQuestions: [],
     syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], openCalibrationSweeps: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], inspectorRequests: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [],
   };
   if (!db) return empty;
@@ -65,7 +66,7 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
       .from(vendorBills).leftJoin(vendors, eq(vendors.id, vendorBills.vendorId))
       .where(inArray(vendorBills.status, ["needs_coding", "needs_approval", "missing_receipt", "mismatch", "duplicate_suspected"])).limit(500),
     db.select().from(purchaseAuthorizations).where(eq(purchaseAuthorizations.status, "requested")).limit(500),
-    db.select({ id: complianceDocuments.id, ownerType: complianceDocuments.ownerType, ownerId: complianceDocuments.ownerId, docType: complianceDocuments.docType, title: complianceDocuments.title, expiresAt: complianceDocuments.expiresAt, verificationStatus: complianceDocuments.verificationStatus })
+    db.select({ id: complianceDocuments.id, ownerType: complianceDocuments.ownerType, ownerId: complianceDocuments.ownerId, docType: complianceDocuments.docType, title: complianceDocuments.title, expiresAt: complianceDocuments.expiresAt, pendingReview: sql<boolean>`${complianceDocuments.verificationStatus} = 'needs_review'`.mapWith(Boolean) })
       .from(complianceDocuments)
       .where(or(eq(complianceDocuments.verificationStatus, "needs_review"), and(lte(complianceDocuments.expiresAt, horizon), eq(complianceDocuments.verificationStatus, "verified")))).limit(2000),
     db.select({ proposalId: assistantProposals.proposalId, formKey: assistantProposals.formKey, title: assistantProposals.title, createdAt: assistantProposals.createdAt, commitState: assistantProposals.commitState })
@@ -91,6 +92,30 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   const unitIds = Array.from(new Set(creds.filter(c => c.ownerType === "unit").map(c => c.ownerId)));
   const unitRows = unitIds.length ? await db.select({ id: units.id, unitNumber: units.unitNumber }).from(units).where(inArray(units.id, unitIds)) : [];
   const unitNo = new Map(unitRows.map(u => [u.id, u.unitNumber]));
+
+  const ownerLabel = (ownerType: string, ownerId: number) =>
+    ownerType === "operator" ? opName.get(ownerId) ?? null : ownerType === "unit" ? (unitNo.get(ownerId) ? `Unit ${unitNo.get(ownerId)}` : null) : null;
+
+  /*
+   * SPINE item 2 — the query above only finds which owners and types are worth a look. Whether one
+   * has expired is the canonical verdict's call, over EVERY row of that type the owner holds: a
+   * licence that expired last year beside the renewal now in force is not an exception.
+   */
+  const awaiting = creds.filter(c => c.pendingReview);
+  const flagged = new Map<string, { ownerType: string; ownerId: number; docType: string }>();
+  for (const c of creds) flagged.set(`${c.ownerType}\u0000${c.ownerId}\u0000${c.docType}`, { ownerType: c.ownerType, ownerId: c.ownerId, docType: c.docType });
+  const owners = Array.from(new Map(Array.from(flagged.values()).map(f => [`${f.ownerType}\u0000${f.ownerId}`, f])).values());
+  const history: (typeof complianceDocuments.$inferSelect)[] = [];
+  for (let i = 0; i < owners.length; i += 200) {
+    const chunk = owners.slice(i, i + 200);
+    history.push(...await db.select().from(complianceDocuments).where(or(...chunk.map(o => and(eq(complianceDocuments.ownerType, o.ownerType as never), eq(complianceDocuments.ownerId, o.ownerId))))));
+  }
+  const credentialVerdicts = Array.from(flagged.values()).map(f => {
+    const rows = history.filter(h => h.ownerType === f.ownerType && h.ownerId === f.ownerId && h.docType === f.docType);
+    const verdict = complianceRequirementValidity(rows, [f.docType], now);
+    const named = rows.find(r => r.id === verdict.documentId) ?? rows[0];
+    return { ownerType: f.ownerType, ownerId: f.ownerId, ownerLabel: ownerLabel(f.ownerType, f.ownerId), docType: f.docType, title: named?.title ?? f.docType, verdict };
+  });
 
   // Calibration state per device from its events.
   const deviceIds = devices.map(d => d.id);
@@ -123,7 +148,8 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
     roadsideOpen: roadside.map(r => ({ id: r.id, eventRef: r.eventRef, unitNumber: r.unitNumber ?? null, eventType: r.eventType, occurredAt: r.occurredAt, vendorAssigned: r.assignedVendorId != null })),
     vendorBills: bills.map(b => ({ id: b.id, billRef: b.billRef, vendorName: b.vendorName ?? null, total: b.totalCents / 100, status: b.status, matchOutcome: b.matchOutcome, receivedAt: b.receivedAt, dueAt: b.dueAt })),
     purchaseRequests: pas.map(p => ({ id: p.id, authorizationRef: p.authorizationRef, estimatedAmount: p.estimatedAmount, emergency: p.emergency, requestedAt: p.requestedAt, expiresAt: p.expiresAt, status: p.status })),
-    credentials: creds.map(c => ({ id: c.id, ownerType: c.ownerType, ownerId: c.ownerId, ownerLabel: c.ownerType === "operator" ? opName.get(c.ownerId) ?? null : c.ownerType === "unit" ? (unitNo.get(c.ownerId) ? `Unit ${unitNo.get(c.ownerId)}` : null) : null, docType: c.docType, title: c.title, expiresAt: c.expiresAt, verificationStatus: c.verificationStatus })),
+    credentialsAwaitingVerification: awaiting.map(c => ({ id: c.id, ownerType: c.ownerType, ownerId: c.ownerId, ownerLabel: ownerLabel(c.ownerType, c.ownerId), docType: c.docType, title: c.title, expiresAt: c.expiresAt })),
+    credentialVerdicts,
     aiProposals: proposals,
     aiQuestions: questions.map(q => ({ count: Number(q.count), oldest: q.oldest ? new Date(q.oldest) : null, askedToUserId: q.askedToUserId })),
     syncConflicts: conflicts,

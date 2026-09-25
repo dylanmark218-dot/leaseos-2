@@ -115,12 +115,14 @@ d("an authorized caller cannot establish a trusted state through a create", () =
   });
   it("scans: the access role is the caller's, not the caller's claim", async () => {
     const driver = await withRole("driver");
-    await expect(callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: 1, scannedAt: new Date(), accessRole: "admin" } as never)).rejects.toThrow(REFUSED);
-    const id = await callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: 1, scannedAt: new Date() });
+    // Its own (unowned, single-tenant) unit: "unit 1" is whichever suite created the first unit, and may be an organization's.
+    const unitId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [`U-${Math.random().toString(36).slice(2, 10)}`]))[0].insertId);
+    await expect(callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: unitId, scannedAt: new Date(), accessRole: "admin" } as never)).rejects.toThrow(REFUSED);
+    const id = await callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: unitId, scannedAt: new Date() });
     const [row] = await pool.execute<mysql.RowDataPacket[]>("SELECT accessRole FROM scanAudits WHERE id = ?", [rowId(id)]);
     expect(row[0].accessRole).toBe("driver");
     const management = await withRole("management");
-    const mid = await callerFor(management).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: 1, scannedAt: new Date() });
+    const mid = await callerFor(management).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: unitId, scannedAt: new Date() });
     const [mrow] = await pool.execute<mysql.RowDataPacket[]>("SELECT accessRole FROM scanAudits WHERE id = ?", [rowId(mid)]);
     expect(mrow[0].accessRole).toBe("admin");
   });

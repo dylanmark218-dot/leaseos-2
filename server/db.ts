@@ -717,15 +717,19 @@ const documentOwnerOrg = sql<string | null>`(
     ELSE NULL
   END)`;
 
-export async function listComplianceDocuments(scope: TenantScope) {
+/** An organization's list is its newest hundred; one owner's is up to this many, and a caller that receives this many must not assume it has them all. */
+export const OWNER_DOCUMENT_LIST_CAP = 500;
+
+export async function listComplianceDocuments(scope: TenantScope, owner?: { ownerType: InsertComplianceDocument["ownerType"]; ownerId: number }) {
   const db = await getDb();
   if (!db) return [];
+  const inScope = scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId);
   return db
     .select()
     .from(complianceDocuments)
-    .where(scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId))
+    .where(owner ? and(inScope, eq(complianceDocuments.ownerType, owner.ownerType), eq(complianceDocuments.ownerId, owner.ownerId)) : inScope)
     .orderBy(desc(complianceDocuments.createdAt))
-    .limit(100);
+    .limit(owner ? OWNER_DOCUMENT_LIST_CAP : 100);
 }
 
 /** The organization that owns a document's subject record, or null when nobody does. */
