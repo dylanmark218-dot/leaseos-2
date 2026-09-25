@@ -8935,3 +8935,31 @@ export const sessionFamilies = mysqlTable("sessionFamilies", {
   ownerIdx: index("sessionFamilies_openId_idx").on(t.openId, t.revokedAt),
   verifierIdx: index("sessionFamilies_verifier_idx").on(t.refreshVerifierHash),
 }));
+
+/**
+ * S2-B — the one place reversible ciphertext lives.
+ *
+ * Split from the records that use it so a metadata read never touches a secret: callers hold a
+ * `secretRef`, and only `server/secretStore.ts` resolves one. `keyId` names the key that encrypted
+ * this row — never key material — so a row written under a retired key stays readable and a rewrap
+ * can find what still references one.
+ */
+export const encryptedSecrets = mysqlTable("encryptedSecrets", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Opaque, random, stable across rewrap. Never derived from the plaintext. */
+  secretRef: varchar("secretRef", { length: 64 }).notNull().unique(),
+  purpose: mysqlEnum("purpose", ["MFA_SECRET", "WEBHOOK_SECRET", "PROVIDER_CREDENTIAL", "INTEGRATION_SECRET"]).notNull(),
+  keyId: varchar("keyId", { length: 64 }).notNull(),
+  /** `text`, not varchar: a MUTUAL_TLS certificate and key will not fit in 400 characters. */
+  envelope: text("envelope").notNull(),
+  status: mysqlEnum("status", ["active", "disabled"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  rewrappedAt: timestamp("rewrappedAt"),
+  disabledAt: timestamp("disabledAt"),
+  /** Set by S2-D/S2-E when a legacy inline value is moved here; NULL for natively created secrets. */
+  sourceTable: varchar("sourceTable", { length: 64 }),
+  sourceColumn: varchar("sourceColumn", { length: 64 }),
+}, t => ({
+  purposeKeyIdx: index("encryptedSecrets_purpose_key_idx").on(t.purpose, t.keyId),
+  sourceIdx: index("encryptedSecrets_source_idx").on(t.sourceTable, t.sourceColumn),
+}));
