@@ -1,129 +1,188 @@
-# S2-E — webhook secret migration: implementation plan
+# S2-E — implementation plan (storage migration only)
 
-Companion to `WEBHOOK_SECRET_MIGRATION_DESIGN.md`. **Nothing here is implemented.** Each checkpoint
-is separately reviewable and separately revertible.
+Companion to `WEBHOOK_SECRET_MIGRATION_DESIGN.md`. **Nothing here is implemented.**
+
+Scope per **OD-E5**: move webhook signing secrets off the shared key into canonical
+`WEBHOOK_SECRET` storage. **No rotation API.** Each checkpoint is separately reviewable and
+separately revertible.
 
 ---
 
-## Preconditions — none of this starts until all four hold
+## 1. Frozen pre-S2-E state
 
-| # | Precondition | Why |
+Frozen at the SEC-004 merge. Implementation starts from **exactly this state**, not from "current
+`main`", so that any later divergence is visible rather than absorbed.
+
+| | |
+|---|---|
+| `main` SHA | `2fbba6cdc2647db44b4667941282c6710047f89b` (PR #20 merge) |
+| Migration head | `0193_mfa_secret_ref.sql` |
+| Migration count | **175** |
+| Table count | **413** |
+| Test files / cases | **345 / 4722** |
+| Next free migration number | **`0194`** — free on `main` and on every remote branch at this scan; **re-scan at claim time** |
+| Known unrelated failure | `widgetPersistence.db.test.ts`, local timeout only — issue #46. Remote CI passes it on `main`. **Not S2-E's, and not to be "fixed" inside S2-E.** |
+
+---
+
+## 2. Preconditions
+
+| # | Precondition | State |
 |---|---|---|
-| P1 | **OD-E2 answered** (retry signing rule) | It decides whether deliveries need a signing-ref column and how long `previous` must live. Getting it wrong means migrating live signing secrets under a contract nobody agreed. |
-| P2 | **OD-E1 answered** (`secretEnc NOT NULL` during rollout) | It decides whether E-A is a nullable-column migration or not. |
-| P3 | **OD-E3 settled** (PR #20 ordering) | E-D/E-E modify the function #20 rewrites. |
-| P4 | `LEASEOS_KEY_WEBHOOK_V1` provisioning agreed | New subscriptions fail closed without it, exactly as S2-D. |
+| P1 | OD-E1 … OD-E5 settled | ✅ settled |
+| P2 | SEC-004 (PR #20) merged | ✅ `2fbba6c` |
+| P3 | `LEASEOS_KEY_WEBHOOK_V1` provisioning agreed | ⚠ **operational — must be provisioned before phase 3, and before phase 1 in any environment where a new subscription might be created** |
+| P4 | Register corrected (`0191`–`0193`, `0185` collision) | ✅ landed with the SEC-004 reconciliation |
 
-P1 is the hard one. P3 can be worked around (design §2 fallback) but should not be by default.
+P3 is the one live prerequisite. It mirrors S2-D's `LEASEOS_KEY_MFA_V1`: creation fails closed
+without it, by design, and that must not be softened.
 
 ---
 
-## Decomposition
+## 3. Checkpoints
 
-The brief proposes E-A … E-G. The survey suggests **one change**: split the rotation state machine
-away from the storage migration entirely, and make it optional.
+Each maps to a rollout phase in design §4. **The phase boundaries are deployment boundaries** — E-A
+and E-C must not ship together, or the expand/cutover guarantee is lost.
 
-**Why.** S2-D proved that a storage migration which changes no secret value is invisible to its
-consumers and therefore safe to ship alone. Rotation is the opposite: it is a coordinated protocol
-change with a third party. Bundling them means the low-risk change waits for the high-risk one, and
-the shared key cannot retire until both are done. If the goal is retiring `LEASEOS_PORTAL_MFA_KEY`
-soonest, E-A…E-C plus guards is a complete, shippable unit (this is **OD-E5**).
+### E-A — expand: schema + compatibility reader *(deployment 1)*
 
-### E-A — schema and compatibility reader
-* Migration: `currentSecretRef varchar(64) NULL` on `webhookSubscriptions`; `pendingSecretRef` and
-  `previousSecretRef` **only if OD-E5 keeps rotation in scope**; `rotationState` likewise.
-* `webhookSecretService.ts`: `resolveSigningSecret(subscription, keys)` — ref present → resolve and
-  fail closed; ref absent → legacy decrypt. The single call site #20's rebase would move.
-* No CHECK constraint (all column combinations legal during a rolling deploy — same reasoning as
-  `0193`).
-* Tests: E1, E6, E7, E8, E25. Mutations: ME1, ME3.
+* Migration: add `webhookSubscriptions.secretRef varchar(64) NULL`; relax `secretEnc` to `NULL`.
+  Record the number in `MIGRATION_COLLISION_REGISTER.md` **in the same commit**.
+* Replace the body of `secretFor()` with the compatibility resolver: `secretRef` first, fail closed
+  on a present-but-broken ref; legacy only when the ref is **absent**.
+* **No write-path change.** Creation still writes legacy `secretEnc` only.
+* New module `server/webhookSecretService.ts` so the resolver has one home, joining the named store
+  importers in `secretBoundary.test.ts` — a deliberate line, as S2-D's was.
+* Tests: E1, E6, E7, E8, E9, E24, E30. Mutations: ME1, ME3, ME12.
 
-### E-B — new writes canonical
-* `webhookSubscribe` stores under `WEBHOOK_SECRET` and links `currentSecretRef`.
-* Legacy `secretEnc` written or not per **OD-E1**.
-* Response shape unchanged — the plaintext is still returned exactly once.
-* Tests: E4, E5, E20. Mutations: ME2, ME9.
+**Why no write change here:** a canonical-only row must be impossible until every instance can read
+one. E30 pins that E-A produces none.
 
-### E-C — backfill and readiness
-* `webhookSecretMigration.ts`, modelled on `mfaSecretMigration.ts`: batched, idempotent, resumable,
-  read-back verified, fail-closed, counts-only reporting.
-* **Per-batch progress break** — see design §8 and ME15.
-* Readiness report spanning *both* classes, so the shared-key retirement question has one answer:
-  legacy MFA remaining, legacy webhook remaining, canonical refs of each, invalid rows.
-* Tests: E2, E3, E9, E10, E11, E12, E13, E23, E24. Mutations: ME4, ME11, ME12, ME15.
+### E-B — backfill + readiness *(operational, after phase 2 convergence)*
+
+* `server/webhookSecretMigration.ts`, modelled on `mfaSecretMigration.ts`: bounded, idempotent,
+  resumable, read-back verified byte-identical, fail-closed, counts-only reporting, legacy retained.
+* **Per-batch** no-progress break (design §6).
+* Readiness report spanning **both** secret classes, so design §9's conjunction has one answer.
+* Tests: E2, E3, E10, E11, E12, E13, E14, E22, E23. Mutations: ME4, ME9, ME10, ME11.
 * **E3 is the keystone**: identical `(timestamp, body)` → byte-identical HMAC across the migration.
 
-### E-D — rotation state machine *(only if OD-E5 keeps it in S2-E)*
-* `prepare` / `activate` / `retire` / `rollback`, atomic guarded transitions, new `integration.*`
-  permissions.
-* Tests: E14, E15, E16, E17, E26, E27. Mutations: ME5, ME6, ME14.
+### E-C — cutover: canonical writes *(deployment 2)*
 
-### E-E — retry and signing-version integration *(depends on OD-E2)*
-* Under **B**: record `signingSecretRef` on the delivery row, audit-only.
-* Under **A**: the signer resolves the recorded ref, and `previous` retention extends past the
-  ≈14.6-hour retry horizon.
-* Tests: E28, E29. Mutations: ME7, ME13.
+* `webhookSubscribe` writes canonical only — `WEBHOOK_SECRET`, `secretRef` set, `secretEnc` left
+  NULL. Response shape unchanged; plaintext still returned exactly once.
+* **Gated on phase 2 being confirmed**, not assumed.
+* Tests: E4, E5, E19. Mutations: ME2, ME7.
+
+### E-D — dispatch and signing verification
+
+* Prove the post-SEC-004 dispatch path resolves through the single compatibility service, for
+  canonical, legacy and transitional rows alike.
+* **The mandatory acceptance test** (design §11) lands here: secret A → failed attempt → secret
+  changed to B → retry and reclaim both verify under B, not A, without consulting the recorded
+  signature.
+* Tests: E15, E16, E17, E18, E21, E26, E27, E28, E29. Mutations: ME5, ME6.
+
+### E-E — legacy cleanup readiness
+
+* Operational report: legacy-only, transitional, canonical-only, invalid, plus S2-D's remaining
+  legacy MFA.
+* **Does not clear anything.** Clearing `secretEnc` is a separate, separately-approved checkpoint.
+* Tests: E22 (extended). Mutations: none.
 
 ### E-F — structural and leakage guards
-* Extend `secretBoundary.test.ts`: `webhookSecretService` joins the named store importers (a
-  deliberate line, as S2-D's did); no router resolves a signing secret inline; no secret in logs,
-  audit or delivery rows.
-* Tests: E18, E19, E21, E22, E30. Mutations: ME8, ME10.
+
+* No raw secret in responses, logs, audit or delivery rows.
+* **No new legacy writer after cutover** — the guard that keeps E-C from being undone.
+* No `MFA_SECRET` purpose from webhook code.
+* No direct legacy decrypt outside the compatibility boundary.
+* Tests: E20, E25. Mutations: ME8.
 
 ### E-G — full verification
-* Focused suites, existing integration/webhook suites, S1, S2-A…S2-D, typecheck, build, full
-  clean-DB gate, remote CI on the pushed SHA.
-* Local MariaDB is unreliable (issue #46) — verify service health first, use a unique disposable
-  database, and compare any failure against unmodified `main` before calling it environmental.
+
+Focused suites, webhook/integration suites, SEC-004's claim suite, S1, S2-A…S2-D, typecheck,
+`git diff --check`, migration parity, build, full clean-DB gate, remote CI on the pushed SHA.
+
+Verify DB health first and use a unique disposable database — issue #46 stands, and any failure is
+compared against unmodified `main` before being called environmental.
 
 ---
 
-## Migration number
+## 4. Deployment sequence — the part that must not be reordered
 
-**Next safe number: `0194`.**
+```
+E-A  ──deploy──►  phase 1: every instance reads both; nothing writes canonical
+                      │
+                      ▼
+                  phase 2: CONFIRM fleet convergence   ← operational gate, not a commit
+                      │
+E-C  ──deploy──►  phase 3: creation writes canonical only
+                      │
+E-B  ──run────►   phase 4: backfill legacy rows (may also run earlier; catches phase-3 stragglers)
+                      │
+E-E  ──report─►   phase 5: prove legacyOnly = 0 → remove legacy write → later, legacy read
+```
 
-Scanned at `main` = `d94da0e`: `main`'s head is `0193`; across **every remote branch** the highest
-claimed anywhere is `0193`; nothing `≥0194` exists on any branch or open-PR head. PR #20's `0185`
-is free on `main` (which carries no `018x` at all) and does not affect this.
-
-**Re-scan immediately before writing the file** — this number is only as current as the scan.
-
-### A gap to correct
-
-`docs/architecture/MIGRATION_COLLISION_REGISTER.md` is the repository's convention for recording
-claimed numbers. **`0191`, `0192` and `0193` were never added to it** — an omission in S2-A/B/C and
-S2-D. E-A should record all four (0191–0194) in the same commit that claims 0194, so the register
-becomes accurate rather than accumulating a longer gap.
+**The invariant:** no deployment ever writes a representation an already-running instance cannot
+read. Shipping E-A and E-C together breaks it — a canonical-only row could reach an instance that
+only understands `secretEnc`. ME12 exists to make that failure visible in CI rather than in
+production.
 
 ---
 
-## Test and mutation counts
+## 5. Counts
 
 | Checkpoint | Tests | Mutations |
 |---|---|---|
-| E-A | 5 | 2 |
-| E-B | 3 | 2 |
-| E-C | 10 | 4 |
-| E-D | 6 | 3 |
-| E-E | 2 | 2 |
-| E-F | 5 | 2 |
-| **Total** | **31** | **15** |
-
-Storage-only scope (E-A/B/C/F, dropping E-D/E-E per OD-E5): **23 tests, 10 mutations.**
+| E-A | 7 | 3 |
+| E-B | 9 | 4 |
+| E-C | 3 | 2 |
+| E-D | 9 | 2 |
+| E-E | 1 | 0 |
+| E-F | 2 | 1 |
+| **Total** | **30** (E1–E30, some spanning checkpoints) | **12** (ME1–ME12) |
 
 ---
 
-## What this plan deliberately does not do
+## 6. Acceptance gate — required before implementation is accepted
 
-* No change to the external signature protocol: same algorithm, same `timestamp.body`
-  canonicalisation, same headers, same 300-second tolerance.
-* **No second signature header.** Storage `keyId` is LeaseOS's internal concern; a receiver has no
-  business knowing it. If an *external* secret-version identifier would genuinely help coordinated
-  rotation, that is a separate versioned-protocol task with its own compatibility analysis.
-* No secret-reveal endpoint. The plaintext is returned once at creation and is unrecoverable — a
-  property the canonical store makes technically reversible, which is exactly why E20 tests its
+0. **The mandatory acceptance test, stated in full**, because it is the one that turns OD-E2 from an
+   observation into a permanent regression barrier:
+
+   > Create a webhook subscription under secret **A**. Let attempt 1 fail. Change the
+   > subscription's stored secret to **B**. Let the delivery retry, and separately let a claim
+   > expire and be reclaimed. Prove the outbound request of each later attempt verifies under **B**
+   > and **not** under A, and that the signature recorded with the earlier attempt was not
+   > consulted.
+
+   Two cases, not one: `reclaimExpiredAttempt` is a distinct code path that also re-signs
+   (design F4), and a freeze could survive in one while the other stayed correct. Both assert by
+   **identity** — verification under A must *fail* — so a silent freeze cannot pass by accident.
+
+1. **The mandatory acceptance test passes** on both paths, asserting by identity that verification
+   under the superseded secret **fails**.
+2. **E3 passes**: byte-identical HMAC across the storage migration — no receiver reconfigures.
+3. **E30 and ME12 pass**: E-A produces no canonical-only row, and a phase-3-without-phase-1
+   deployment is caught.
+4. **All 12 mutations caught**, files restored byte-for-byte and verified by checksum.
+5. Full clean-DB gate green except the known #46 timeout, and **remote CI green on the pushed SHA**.
+6. The migration number is recorded in the register **in the commit that claims it**.
+
+---
+
+## 7. What this plan deliberately does not do
+
+* **No dual-write.** OD-E1. New secret material is never encrypted under the shared key during the
+  migration window.
+* **No `signingSecretRef` as signing authority.** OD-E2. Metadata only, if ever.
+* **No `pendingSecretRef` / `previousSecretRef` / `rotationState`.** OD-E4. Schema for an API that
+  does not exist is schema that will be wrong when the API arrives.
+* **No rotation API.** OD-E5.
+* **No external protocol change.** Same algorithm, canonicalisation, headers, tolerance. No second
+  signature header.
+* **No secret-reveal endpoint.** The plaintext is returned once at creation and is unrecoverable —
+  a property the canonical store makes technically reversible, which is exactly why E20 tests its
   absence rather than relying on nobody having added one.
-* No forced rotation for existing consumers. Storage migration preserves the secret value; §7 of
-  the design is the line this plan holds.
-* No removal of `LEASEOS_PORTAL_MFA_KEY`, and no removal of the legacy readers. Both are later
-  operational checkpoints gated on the readiness report.
+* **No clearing of `secretEnc`**, and **no removal of `LEASEOS_PORTAL_MFA_KEY`**. Both are later
+  operational checkpoints, and the key cannot go while the MFA compatibility reader needs it.
+* **No fix for issue #46** inside this branch.
