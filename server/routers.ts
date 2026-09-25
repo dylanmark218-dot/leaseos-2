@@ -614,8 +614,16 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(async ({ ctx, input }) =>
-          createTrip({
+        .mutation(async ({ ctx, input }) => {
+          const scope = await scopeFor(ctx.user.id);
+          /*
+           * A trip may not name a unit the caller's organization cannot see. This wrote any unitId it
+           * was given, so one organization could put a trip — its distance, its odometer, its IFTA
+           * miles — on another organization's truck. Scoped as every unit-keyed write is, and out of
+           * scope is "not found", worded exactly as for a unit that does not exist.
+           */
+          if (input.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+          return createTrip({
             ...input,
             distanceKm:
               input.distanceKm ??
@@ -623,8 +631,8 @@ export const appRouter = router({
               input.odometerEndKm !== undefined
                 ? Math.max(0, input.odometerEndKm - input.odometerStartKm)
                 : undefined),
-          }, await scopeFor(ctx.user.id))
-        ),
+          }, scope);
+        }),
       update: roleProcedure("trips.update")
         .input(
           z.object({
