@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
 import mysql from "mysql2/promise";
 import {
-  abstractRequestPermitted, buildPassport, composeJobPassport, evaluateRequirement, medicalFitnessForDispatch,
+  abstractRequestPermitted, buildPassport, composeJobPassport, evaluateRequirement, MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch,
   nextRenewalDue, requirementApplies, tripInspectionValidity, PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED,
   type Credential, type Requirement, type Subject,
 } from "./_core/compliancePassport";
@@ -19,6 +20,12 @@ const req = (over: Partial<Requirement> = {}): Requirement => ({
   effectiveFrom: new Date("2026-01-01T00:00:00Z"), ...over,
 });
 const cred = (over: Partial<Credential> = {}): Credential => ({ docType: "test_doc", expiresAt: days(400), verificationStatus: "verified", privateDetail: false, ...over });
+/** Medical rows judged the way production judges them: the canonical verdict, then the projection. */
+const medical = (rows: { expiresAt: Date | null; verificationStatus?: "needs_review" | "verified" | "rejected"; issuedAt?: Date | null; capturedAt?: Date }[]) =>
+  complianceRequirementValidity(rows.map((r, i) => ({
+    id: i + 1, docType: "medical_fitness", title: "Medical", issuedAt: r.issuedAt ?? null, expiresAt: r.expiresAt,
+    verificationStatus: r.verificationStatus ?? "verified", capturedAt: r.capturedAt ?? days(-10 + i),
+  })), MEDICAL_FITNESS_DOC_TYPES, NOW);
 const subject = (over: Partial<Subject> = {}): Subject => ({ subjectType: "operator", jurisdiction: "CA-AB", attributes: {}, ...over });
 
 /* ------------------------------------------------------------------ */
@@ -148,16 +155,16 @@ describe("a requirement applies where, when and to whom it says", () => {
 
 describe("dispatch learns eligible, never why", () => {
   it("projects medical fitness to yes / no / unknown only", () => {
-    expect(medicalFitnessForDispatch(cred({ docType: "medical_fitness", privateDetail: true }), NOW).eligible).toBe("yes");
-    expect(medicalFitnessForDispatch(cred({ docType: "medical_fitness", privateDetail: true, expiresAt: days(-1) }), NOW).eligible).toBe("no");
-    expect(medicalFitnessForDispatch(cred({ docType: "medical_fitness", privateDetail: true, verificationStatus: "needs_review" }), NOW).eligible).toBe("unknown");
-    expect(medicalFitnessForDispatch(null, NOW).eligible).toBe("unknown");
+    expect(medicalFitnessForDispatch(medical([{ expiresAt: days(400) }])).eligible).toBe("yes");
+    expect(medicalFitnessForDispatch(medical([{ expiresAt: days(-1) }])).eligible).toBe("no");
+    expect(medicalFitnessForDispatch(medical([{ expiresAt: days(400), verificationStatus: "needs_review" }])).eligible).toBe("unknown");
+    expect(medicalFitnessForDispatch(medical([])).eligible).toBe("unknown");
   });
 
   it("names the fields that never leave HR", () => {
     expect(PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED).toContain("title");
     expect(PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED).toContain("storageKey");
-    const projection = medicalFitnessForDispatch(cred({ privateDetail: true }), NOW);
+    const projection = medicalFitnessForDispatch(medical([{ expiresAt: days(400) }]));
     for (const f of PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED) expect(projection).not.toHaveProperty(f);
   });
 });
@@ -220,6 +227,9 @@ const ALL_ROLES: DomainRole[] = ["driver","dispatcher","mechanic","shop_lead","s
 describe("who may verify, who may load a requirement, who may read private detail", () => {
   it("reserves requirement loading to the controller and private detail to HR", () => {
     expect(ALL_ROLES.filter(r => authorize({ userId: 1, roles: [r], permission: "compliance.requirement.manage" }).allowed)).toEqual(["controller"]);
+    // C1b-2b: proposing, verifying and second approval are separate permissions.
+    expect(ALL_ROLES.filter(r => authorize({ userId: 1, roles: [r], permission: "compliance.requirement.propose" }).allowed).sort()).toEqual(["controller", "legal", "safety"]);
+    expect(ALL_ROLES.filter(r => authorize({ userId: 1, roles: [r], permission: "compliance.requirement.second_approve" }).allowed).sort()).toEqual(["controller", "legal", "management"]);
     expect(ALL_ROLES.filter(r => authorize({ userId: 1, roles: [r], permission: "compliance.private.read" }).allowed)).toEqual(["hr"]);
   });
   it("lets dispatch read a passport but not verify a credential", () => {
@@ -238,12 +248,15 @@ const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never,
 async function withRole(role: DomainRole) { const id = nextUser(); await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
 
 d("a driver, a unit and a carrier, through the registry", () => {
-  it("stays UNKNOWN on seeds, becomes READY only when a controller loads a verified requirement and evidence is verified", async () => {
+  it("stays UNKNOWN on seeds, becomes READY only when a proposed requirement is verified by two other people and evidence is verified", async () => {
     const office = await withRole("office");
     const controller = await withRole("controller");
+    const legal = await withRole("legal");
+    const management = await withRole("management");
     const dispatcher = await withRole("dispatcher");
     const hr = await withRole("hr");
-    const operatorId = 900000 + Math.floor(Math.random() * 90000);
+    // F1.2 — a real operator: a made-up operator id is "not found".
+    const operatorId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES ('Passport Fixture', NOW())"))[0].insertId);
 
     // Office records a licence. It enters needs_review.
     const rec = await callerFor(office).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: "driver_licence", requirementKey: "ab.driver.licence.class1", title: "Class 1 licence", identifier: "•••1234", expiresAt: new Date("2028-04-21T00:00:00Z"), jurisdiction: "CA-AB" });
@@ -253,13 +266,23 @@ d("a driver, a unit and a carrier, through the registry", () => {
     const p1 = await callerFor(dispatcher).compliance.passport({ subjectType: "operator", subjectId: operatorId, jurisdiction: "CA-AB", attributes: { licenceClassRequired: "1" } });
     expect(p1.verdict).toBe("unknown");
 
-    // Controller loads the requirement as verified from a verified source. It supersedes the seed.
+    // C1b-2b: the controller proposes (asking for "verified" changes nothing); the proposal replaces
+    // the seed and is still unverified, so the passport stays UNKNOWN.
     const load = await callerFor(controller).compliance.requirementLoad({
       requirementKey: "ab.driver.licence.class1", family: "driver_licensing", title: "Class 1 driver licence", subjectType: "operator", jurisdiction: "CA-AB",
       appliesWhen: { licenceClassRequired: "1" }, satisfiedByDocTypes: ["driver_licence"], missingSeverity: "blocked",
-      sourceAuthority: "Alberta Transportation", sourceVerified: true, requestedStatus: "verified", effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+      // FIXTURE citation — not a verified reading of the instrument.
+      instrumentTitle: "FIXTURE INSTRUMENT — not a real regulation", sourceAuthority: "FIXTURE AUTHORITY", sourceReference: "s. 1(1)",
+      sourceUrl: "https://www.alberta.ca/fixture-not-a-real-page", authorityType: "law",
+      sourceVerified: true, requestedStatus: "verified", effectiveFrom: new Date("2026-01-01T00:00:00Z"),
     });
-    expect(load.storedStatus).toBe("verified");
+    expect(load.storedStatus).toBe("unverified");
+    expect((await callerFor(dispatcher).compliance.passport({ subjectType: "operator", subjectId: operatorId, jurisdiction: "CA-AB", attributes: { licenceClassRequired: "1" } })).verdict).toBe("unknown");
+
+    // A blocking requirement: two verifiers, neither the proposer.
+    const verify = { requirementKey: "ab.driver.licence.class1", version: load.version, target: "CITATION_VERIFIED" as const, decision: "approve" as const, reason: "Checked against the cited section" };
+    await callerFor(legal).compliance.requirementVerify(verify);
+    await callerFor(management).compliance.requirementSecondApprove(verify);
 
     // Still not ready: the evidence itself is unverified.
     const p2 = await callerFor(dispatcher).compliance.passport({ subjectType: "operator", subjectId: operatorId, jurisdiction: "CA-AB", attributes: { licenceClassRequired: "1" } });
@@ -273,13 +296,13 @@ d("a driver, a unit and a carrier, through the registry", () => {
     expect(p3.verdict).toBe("ready");
     expect(p3.satisfied).toBe(1);
 
-    // A requirement load that claims verified without a verified source is stored unverified.
+    // A requirement load that asks for verified is stored as a proposal, whatever it claims.
     const weak = await callerFor(controller).compliance.requirementLoad({
       requirementKey: "ab.unit.registration", family: "vehicle_credentials", title: "Registration", subjectType: "unit", jurisdiction: "CA-AB",
       satisfiedByDocTypes: ["vehicle_registration"], sourceAuthority: "someone said", sourceVerified: false, requestedStatus: "verified", effectiveFrom: new Date("2026-01-01T00:00:00Z"),
     });
     expect(weak.storedStatus).toBe("unverified");
-    expect(weak.note).toContain("cannot be verified unless its source is verified");
+    expect(weak.note).toContain("never by the proposer's own flag");
 
     // Medical: HR records it private; dispatch sees only eligibility.
     await callerFor(hr).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: "medical_fitness", title: "Medical report — see HR", expiresAt: new Date("2028-04-21T00:00:00Z"), privateDetail: true });
@@ -292,7 +315,7 @@ d("a driver, a unit and a carrier, through the registry", () => {
 
   it("versions a written program without overwriting, and flags unmatched profile events", async () => {
     const safety = await withRole("safety");
-    const entityId = 700000 + Math.floor(Math.random() * 90000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1.1 — a real book: a made-up entity id is "not found"
     const pk = `safety-${entityId}`;
     const v1 = await callerFor(safety).compliance.programPublish({ programKey: pk, title: "Safety Program", programType: "safety", financialEntityId: entityId, effectiveFrom: new Date("2026-01-01T00:00:00Z") });
     const v2 = await callerFor(safety).compliance.programPublish({ programKey: pk, title: "Safety Program", programType: "safety", financialEntityId: entityId, effectiveFrom: new Date("2026-09-01T00:00:00Z") });

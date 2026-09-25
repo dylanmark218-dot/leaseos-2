@@ -14,6 +14,8 @@ import type { TileReader } from "./_core/widgetService";
 import type { RoleActor } from "./_core/roleActor";
 import type { WidgetPayload } from "./_core/widgetPayload";
 import { operatorIdFromRecord, type OperatorId, type OperatorResolution } from "./_core/operatorIdentity";
+import { documentExpiry, type ExpiringDocument } from "./_core/complianceDocumentValidity";
+import { OWNER_DOCUMENT_LIST_CAP } from "./db";
 
 const NOT_PROMOTED = (widgetKey: string): WidgetPayload<unknown> => ({
   state: "unknown",
@@ -22,7 +24,11 @@ const NOT_PROMOTED = (widgetKey: string): WidgetPayload<unknown> => ({
 
 type JobRow = { id: number; jobCode: string; status?: string | null };
 type TripRow = { id: number; tripNumber: string; jobId: number | null; unitId: number | null; operatorId: number | null; status?: string | null };
-type DocRow = { id: number; ownerType: string; ownerId: number; docType: string; title: string | null; expiresAt: Date | string | null; verificationStatus: string | null };
+type DocRow = {
+  id: number; ownerType: string; ownerId: number; docType: string; title: string | null;
+  issuedAt: Date | null; expiresAt: Date | null; capturedAt: Date;
+  verificationStatus: "needs_review" | "verified" | "rejected";
+};
 type Caller = {
   surfaces: {
     myDay: () => Promise<unknown>;
@@ -34,7 +40,7 @@ type Caller = {
   fieldRoute: {
     jobs: { list: () => Promise<readonly JobRow[]> };
     trips: { list: () => Promise<readonly TripRow[]> };
-    identity: { documents: { list: () => Promise<readonly DocRow[]> } };
+    identity: { documents: { list: (input?: { ownerType: "operator"; ownerId: number }) => Promise<readonly DocRow[]> } };
   };
 };
 type Readiness = (subject: { operatorId: OperatorId; unitId: number | null; trailerId: number | null; jobId: number | null }) => Promise<unknown>;
@@ -44,15 +50,29 @@ const byRef = <T extends { id: number }>(rows: readonly T[], ref: string, code: 
   rows.find(r => code(r) === ref || String(r.id) === ref) ?? null;
 const numericRef = (ref: string | null): number | null => ref && /^\d{1,10}$/.test(ref) ? Number(ref) : null;
 
-/** Document expiry states, as the records vault names them; the tile shows the state, not a number. */
-function expiryState(doc: DocRow, now: Date, warnDays: number): "current" | "expiring" | "expired" | "unverified" | "rejected" | "missing" {
-  if (doc.verificationStatus === "rejected") return "rejected";
-  if (doc.verificationStatus && doc.verificationStatus !== "verified") return "unverified";
-  if (!doc.expiresAt) return "current";
-  const at = new Date(doc.expiresAt).getTime();
-  if (at < now.getTime()) return "expired";
-  if (at - now.getTime() <= warnDays * 86_400_000) return "expiring";
-  return "current";
+/**
+ * SPINE item 2 — the documentExpiry tile PRESENTS the canonical verdict; it does not reach one.
+ *
+ * This used to decide per row: `needs_review` → unverified, no expiry → "current", a date compared
+ * with now → expired/expiring/current. So a verified licence with no expiry showed as current (the
+ * canonical answer is `incomplete` — not established), a document not yet in force showed as
+ * current, and a newer unverified upload sat beside the verified row still in force as though
+ * both were the document. Validity is per document TYPE and is `documentExpiry`'s
+ * (`complianceDocumentValidity`) alone. What stays here is presentation: the words, the group a
+ * row sorts into, and the day count of an expiry the verdict has already established.
+ */
+type TileGroup = "lapsed" | "refused" | "not_in_force_yet" | "not_established" | "expiring" | "in_force";
+function presentVerdict(d: ExpiringDocument): { label: string; group: TileGroup } {
+  switch (d.state) {
+    case "expired": return { label: `Expired${d.daysRemaining !== null ? ` ${Math.abs(d.daysRemaining)} day(s) ago` : ""}`, group: "lapsed" };
+    case "rejected": return { label: "Rejected on review — nothing else on file", group: "refused" };
+    case "not_yet_effective": return { label: "Verified, not yet in force", group: "not_in_force_yet" };
+    case "incomplete": return { label: "Not established — verified, but no expiry recorded", group: "not_established" };
+    case "unverified": return { label: "Not established — on file, not verified", group: "not_established" };
+    case "none": return { label: "Not established — nothing on file", group: "not_established" };
+    case "expiring": return { label: `Expires in ${d.daysRemaining} day(s)`, group: "expiring" };
+    case "in_force": return { label: "In force", group: "in_force" };
+  }
 }
 
 const SYSTEM = () => ({ source: "system_inferred" as const, verification: "unverified" as const, exact: true, observedAt: new Date() });
@@ -156,11 +176,19 @@ export function widgetReaderFor(actor: RoleActor, callerFor: (userId: number) =>
           const now = new Date();
           const warnDays = intOption(task.options, "warnDays", 30, 1, 180);
           const limit = intOption(task.options, "limit", 8, 3, 30);
-          const mine = (await caller.fieldRoute.identity.documents.list()).filter(d => d.ownerType === "operator" && d.ownerId === me.operatorId);
-          const rows = mine.map(d => ({ id: d.id, docType: d.docType, title: d.title, expiresAt: d.expiresAt, state: expiryState(d, now, warnDays) }))
-            .sort((a, b) => (a.expiresAt ? new Date(a.expiresAt).getTime() : Infinity) - (b.expiresAt ? new Date(b.expiresAt).getTime() : Infinity))
-            .slice(0, limit);
-          return { state: "ok", value: { warnDays, documents: rows, total: mine.length }, provenance: SYSTEM(), deepLink: { portal: "driver", route: "/portal/driver" } };
+          // This operator's own documents, whole history: the verdict for a type needs every row of
+          // it, so the org-wide newest-hundred list cannot serve. The owner check stays as well.
+          const mine = (await caller.fieldRoute.identity.documents.list({ ownerType: "operator", ownerId: me.operatorId }))
+            .filter(d => d.ownerType === "operator" && d.ownerId === me.operatorId);
+          if (mine.length >= OWNER_DOCUMENT_LIST_CAP) {
+            return { state: "unknown", reason: `this operator has at least ${OWNER_DOCUMENT_LIST_CAP} documents on file, more than one read returns; validity is not established from a partial history` };
+          }
+          const judged = documentExpiry(mine.map(d => ({
+            id: d.id, docType: d.docType, title: d.title, issuedAt: d.issuedAt, expiresAt: d.expiresAt,
+            verificationStatus: d.verificationStatus, capturedAt: d.capturedAt,
+          })), now, warnDays);
+          const rows = judged.slice(0, limit).map(d => ({ ...d, ...presentVerdict(d) }));
+          return { state: "ok", value: { warnDays, documents: rows, types: judged.length, total: mine.length }, provenance: SYSTEM(), deepLink: { portal: "driver", route: "/portal/driver" } };
         } catch (e) { return failed("Document expiry", e); }
       }
       case "unitReadiness": {
