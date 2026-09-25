@@ -77,6 +77,11 @@ const COMPLIANCE: Record<string, "subject_scoped" | "book_scoped" | "pure_evalua
   driverQualification: "pure_evaluator",
   // Requirements are regulations, one registry for every company (controller-only). See F1 doc §7.3.
   requirementLoad: "shared_registry",
+  // C1b-2b's verification ledger over that registry. Each names a requirement revision (or, for the policy, an
+  // authority/domain/jurisdiction), never a subject or a book; the organization is the caller's acting scope from
+  // the server, and a revision outside it is NOT_FOUND (`revisionInScope`, requirementVerification.db test 17).
+  requirementVerify: "shared_registry", requirementSecondApprove: "shared_registry", requirementWithdraw: "shared_registry",
+  verificationPolicySet: "shared_registry", requirementProvenance: "shared_registry",
 };
 
 /** Top-level input keys, through `.optional()` / `.default()` / `.strict()` wrappers. */
