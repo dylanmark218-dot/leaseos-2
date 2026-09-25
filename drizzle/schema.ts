@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { bigint, boolean, date, decimal, double, index, int, json, mysqlEnum, mysqlTable, text, timestamp, tinyint, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
@@ -8962,4 +8963,53 @@ export const encryptedSecrets = mysqlTable("encryptedSecrets", {
 }, t => ({
   purposeKeyIdx: index("encryptedSecrets_purpose_key_idx").on(t.purpose, t.keyId),
   sourceIdx: index("encryptedSecrets_source_idx").on(t.sourceTable, t.sourceColumn),
+}));
+
+/**
+ * S2-C — provider credential metadata. There is no column here capable of holding a secret.
+ *
+ * Joins `externalDataSources.sourceKey` on `providerKey`, which already carries the licensing
+ * dimensions — so "configured" and "permitted" stay separate questions. PLATFORM rows have no
+ * `orgRef`; TENANT rows must have one, enforced by a CHECK in migration 0192 rather than by service
+ * code, because a malformed row is what a resolver would otherwise have to guess about.
+ */
+export const providerCredentials = mysqlTable("providerCredentials", {
+  id: int("id").autoincrement().primaryKey(),
+  credentialRef: varchar("credentialRef", { length: 64 }).notNull().unique(),
+  providerKey: varchar("providerKey", { length: 120 }).notNull(),
+  environment: mysqlEnum("environment", ["production", "staging", "sandbox"]).default("production").notNull(),
+  authScheme: mysqlEnum("authScheme", ["NONE", "API_KEY", "STATIC_BEARER", "OAUTH2_CLIENT_CREDENTIALS", "OAUTH2_REFRESH", "SIGNED_REQUEST", "MUTUAL_TLS"]).notNull(),
+  ownership: mysqlEnum("ownership", ["PLATFORM", "TENANT"]).notNull(),
+  /** NULL exactly when ownership = PLATFORM. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  /**
+   * Generated, never written by application code: `COALESCE(orgRef, '~platform')`. It exists only
+   * so the scope UNIQUE below covers platform rows too — MariaDB allows unlimited NULLs in a
+   * composite UNIQUE, which would let two active platform credentials for one provider coexist and
+   * make resolution depend on row order.
+   */
+  orgScope: varchar("orgScope", { length: 64 }).generatedAlwaysAs(sql`COALESCE(\`orgRef\`, '~platform')`, {
+    mode: "stored",
+  }),
+  /** The provider's own account/client id. Not secret — an OAuth client id is public. */
+  externalAccountId: varchar("externalAccountId", { length: 200 }),
+  /** Pointer into encryptedSecrets; NULL is legitimate for authScheme NONE. */
+  secretRef: varchar("secretRef", { length: 64 }),
+  status: mysqlEnum("status", ["active", "disabled", "rotating", "revoked", "expired"]).default("active").notNull(),
+  /** Tracks the provider's value. A master-key rewrap does NOT touch this. */
+  credentialVersion: int("credentialVersion").default(1).notNull(),
+  /** Truncated hash, so an operator can recognise a key without the system disclosing it. */
+  fingerprint: varchar("fingerprint", { length: 32 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt"),
+  rotatedAt: timestamp("rotatedAt"),
+  expiresAt: timestamp("expiresAt"),
+  lastUsedAt: timestamp("lastUsedAt"),
+  createdByUserId: int("createdByUserId"),
+  disabledByUserId: int("disabledByUserId"),
+  disabledReason: varchar("disabledReason", { length: 300 }),
+}, t => ({
+  scopeUnique: uniqueIndex("providerCredentials_scope_unique").on(t.providerKey, t.environment, t.ownership, t.orgScope),
+  providerStatusIdx: index("providerCredentials_provider_status_idx").on(t.providerKey, t.status),
+  tenantIdx: index("providerCredentials_tenant_idx").on(t.orgRef, t.providerKey),
 }));
