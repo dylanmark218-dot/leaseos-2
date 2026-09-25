@@ -33,6 +33,9 @@ export async function member(pool: mysql.Pool, orgRef: string | null, roles: str
 export async function operatorFor(pool: mysql.Pool, orgRef: string | null, userId: number, licenceExpires: Date | null = new Date("2028-01-01T00:00:00Z")) {
   const id = nextId();
   await pool.execute("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())", [id, userId, `Op ${rnd()}`, "1", licenceExpires]);
+  // #52 (on main): the legacy operators.licenseExpiresAt date alone is an unverified licence, so a ready
+  // driver also needs a verified driver_licence document. Same expiry, so an expired fixture stays expired.
+  if (licenceExpires) await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Driver licence', NOW(), ?, 'verified')", [id, licenceExpires]);
   if (orgRef) await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [orgRef, id]);
   return id;
 }

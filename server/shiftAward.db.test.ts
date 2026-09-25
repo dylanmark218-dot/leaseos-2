@@ -34,6 +34,9 @@ async function establishedOperator(manager: number) {
   const driverUser = await withRole("driver");
   const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name, licenseExpiresAt) VALUES (?, 'C. One', DATE_ADD(NOW(), INTERVAL 400 DAY))", [driverUser]);
   const operatorId = Number(op.insertId);
+  // #52 (on main): the legacy operators.licenseExpiresAt date alone is an unverified licence, so a ready
+  // driver also needs a verified driver_licence document. Same expiry, so an expired fixture stays expired.
+  await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Driver licence', NOW(), DATE_ADD(NOW(), INTERVAL 400 DAY), 'verified')", [operatorId]);
   await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'medical_fitness', 'Medical', NOW(), DATE_ADD(NOW(), INTERVAL 300 DAY), 'verified')", [operatorId]);
   await pool.execute("INSERT INTO hosAttestations (operatorId, dutyDate, method, statement, hoursAvailableMinutesStated, attestedByUserId) VALUES (?, UTC_DATE(), 'paper_log_reviewed', 'Reviewed the paper log for today', 600, ?)", [operatorId, manager]);
   return { driverUser, operatorId };

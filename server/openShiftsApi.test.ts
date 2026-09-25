@@ -38,6 +38,9 @@ async function operatorWithLicence(userId: number, expires: Date | null) {
   await pool.execute(
     "INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())",
     [userId, userId, `Op ${rnd()}`, "1", expires]);
+  // #52 (on main): the legacy operators.licenseExpiresAt date alone is an unverified licence, so a ready
+  // driver also needs a verified driver_licence document. Same expiry, so an expired fixture stays expired.
+  if (expires) await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Driver licence', NOW(), ?, 'verified')", [userId, expires]);
 }
 const postShift = (dispatcher: number, over: Record<string, unknown> = {}) =>
   caller(dispatcher).shifts.post({ title: "Vac truck operator", startsAt: STARTS, endsAt: ENDS, requiredRole: "driver", ...over });

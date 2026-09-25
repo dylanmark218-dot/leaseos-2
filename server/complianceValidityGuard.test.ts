@@ -193,6 +193,8 @@ const READERS: Record<string, string> = {
   "server/hosRouter.ts": "files a scanned paper log as a needs_review document; decides nothing",
   "server/workforceRouter.ts": "writes a verified credential from verified training; decides nothing",
   "server/trainingAcademyRouter.ts": "foreign TDG recognition requires the named document in force by complianceRequirementValidity",
+  // Open Work (#59), added on merging main: documents read as qualification holdings.
+  "server/openShiftsService.ts": "open-shift eligibility: the operator's documents as qualification holdings, decided by qualificationValidity.missingFrom (validityOf); its own date checks are leave windows",
 };
 
 function readdirTs(dir: string): string[] {
