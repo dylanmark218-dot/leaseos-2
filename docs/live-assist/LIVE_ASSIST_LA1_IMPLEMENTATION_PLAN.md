@@ -3,8 +3,10 @@
 Companion to `docs/live-assist/LIVE_ASSIST_DESIGN.md`. Section references (§) are to that document. D-*
 are its owner decisions (§20); P-* are the preconditions in §2 below.
 
-**Status: plan only.** Nothing in this document is built. It exists so that, once the owner rules, LA-1
-can be built without inventing scope, storage, authority or test obligations during coding.
+**Status: LA-1a built (2026-09-25) under a narrow owner carve-out; LA-1b, LA-1c and LA-1d remain blocked.**
+The ruling, and exactly what it does and does not authorize, is `docs/live-assist/LA1A_OWNER_RULING.md`.
+The rest of this document is still the plan for the blocked sub-checkpoints; §3 records how LA-1a was
+actually built and where it differs from what is written here.
 
 ## Checkpoint 0 result (this document)
 
@@ -36,8 +38,8 @@ into either a typed proposal or saved evidence, with nothing about the image lef
 | — | link levels and degradation (a photo question is already the SNAPSHOT_ONLY behavior): LA-2 |
 | — | screen share: LA-3; video clips: LA-4; proposed actions: LA-6 |
 
-Four permissions are added in LA-1: `liveAssist.use`, `liveAssist.saveEvidence`, `liveAssist.administer`
-and `liveAssist.review`. `liveAssist.screenShare` and `liveAssist.video` are added in the checkpoints that
+Four permissions are added in LA-1: `live_assist.use`, `live_assist.save_evidence`, `live_assist.administer`
+and `live_assist.review`. `liveAssist.screenShare` and `liveAssist.video` are added in the checkpoints that
 use them, so no permission exists before the code it guards.
 
 ---
@@ -69,10 +71,45 @@ reached from a mounted router or declared in `DECLARED_UNWIRED` with a reason. T
 
 ### LA-1a — session foundation, no model
 
+*As built (2026-09-25):* migrations `0202`/`0203` (`0185` and `0199` were claimed by other branches before
+LA-1a opened; see the collision register). Differences from the plan below, each deliberate:
+
+- **Permission names:** `live_assist.use`, `live_assist.administer`, `live_assist.review` — lowercase, as most of the
+  `Permission` union is, so the generated count in `LEASEOS_CURRENT_STATE.md` reads them (it matches lowercase
+  names only). Procedure paths stay `liveAssist.*`. The `liveAssist.*` permission names in §7 below are the
+  plan's; these are the built ones.
+- **Grants:** `live_assist.use` for driver, dispatcher, mechanic, shop_lead, office and management;
+  `live_assist.administer` for management; `live_assist.review` for safety and management. No
+  `live_assist.save_evidence` yet; dispatchers gain no evidence permission.
+- **Session columns:** no `contextRefsJson` (storing client-named job or unit references before LA-1b can
+  admit them would store unverified claims), no `linkLevel` or link/source history (LA-2 work; history is the
+  event log). Added: `startKey` (retry key, unique per organization and user), `openMarker` (one open session
+  per person, enforced by a unique index), `idleDeadlineAt`/`hardDeadlineAt` (server deadlines), and
+  `transientPurgedAt`.
+- **Transient tables:** no per-row `purgeAfter`; retention is the session's `purgeAfter`, one server-controlled
+  value. `liveAssistFrames.originalHash` is included (design §7.3).
+- **Policies:** `thresholdsJson` and `visionRouteKey` are not created (LA-2 and LA-1b). `currentMarker` makes
+  concurrent policy changes collide instead of both becoming current.
+- **Events:** no hash chain; D-09 is not ruled. Append-only by trigger (`0203`).
+- **Organization change:** a session asked about under a different acting organization is `NOT_FOUND` and is
+  **not** ended (the design said `org_changed`); the owner's ruling forbids one organization's request from
+  terminating another's session. It stops by its own deadline. There is no `org_changed` reason.
+- **Purge:** composed at the worker's composition root (`server/_core/productionWorker.ts`) through a
+  throttled, non-throwing ticker, rather than inside `workflowRuntime.ts`'s heartbeat, so the workflow
+  runtime's responsibilities are untouched. Budgets: 100 sessions per phase and 2,000 rows per tick.
+- **Budgets enforced in LA-1a:** one open session per person, a daily session count, idle and hard deadlines.
+  The frame and inference counters exist, and `budgetVerdict` is tested, but nothing increments them yet.
+- **Start under contention:** start takes no locking read; the two unique indexes decide a race. A loser
+  that used the same `startKey` is answered with the winner's session; one with a different key is refused
+  with `CONFLICT`. A deadlock victim among concurrent inserts is retried up to three times after a short
+  pause, then refused with `CONFLICT`, never an internal error.
+- **Deadline invariant:** `idleDeadlineAt <= hardDeadlineAt` always, so the sweep finds every due session
+  through the `(state, idleDeadlineAt)` index instead of scanning a table that keeps every lifecycle row.
+
 - **Migration:** all six tables of §15, created together so that later LA-1 PRs add no migration. The append-only triggers for `liveAssistEvents` go in a second migration, following the `0175`/`0176` driver-portfolio precedent.
 - **Pure modules:** `session.ts` and `policy.ts`.
 - **Service and router:** `liveAssistService.ts` and `liveAssistRouter.ts`, with `start`, `heartbeat`, `pause`, `resume`, `end`, `policyGet`, `policySet` and `lifecycleList`.
-- **Permissions:** `liveAssist.use`, `liveAssist.administer` and `liveAssist.review`.
+- **Permissions:** `live_assist.use`, `live_assist.administer` and `live_assist.review`.
 - **Kill switch:** `LIVE_ASSIST_ENABLED` is read from `server/_core/env.ts` and defaults to false. It is false in every environment until LA-1 exits.
 - **Purge:** a bounded sweep, described in §6.
 
@@ -94,7 +131,7 @@ reached from a mounted router or declared in `DECLARED_UNWIRED` with a reason. T
 ### LA-1d — save a photo as evidence
 
 - **Procedure:** `liveAssist.saveFrame`.
-- **Permission:** `liveAssist.saveEvidence`, **and** the existing `evidence.upload`.
+- **Permission:** `live_assist.save_evidence`, **and** the existing `evidence.upload`.
 - **How it works:**
   - The original bytes go through the existing upload.
   - A link is required.
@@ -139,7 +176,7 @@ Paths are proposals. Every new server file is either imported by `liveAssistRout
 | `server/_core/modelGateway.ts` | `"vision"` added to `ModelTask`; a routing row with its licence |
 | `server/engineReachability.test.ts` | `modelGateway` removed from `DECLARED_UNWIRED` |
 | `server/liveAssistRouter.ts` | `ask` |
-| `server/_core/recordsAuthorization.ts` | the `liveAssist.ask` → `liveAssist.use` map entry; the pins rise by 1 |
+| `server/_core/recordsAuthorization.ts` | the `liveAssist.ask` → `live_assist.use` map entry; the pins rise by 1 |
 | `client/src/liveAssist/LiveAssistPanel.tsx` | a conversation view built by wiring the existing `AIChatBox` props (`onCamera`, `onAttach`); answers render certainty wording (§11.1) and safety notices verbatim |
 | `client/src/liveAssist/PhotoCapture.tsx` | the file input; reads the file once; computes `originalHash` with WebCrypto SHA-256 over the untouched bytes |
 | `client/src/liveAssist/InspectView.tsx` | zoom and crop; decodes with `createImageBitmap(file, { imageOrientation: "from-image" })` so EXIF rotation is honoured; the crop is cut from the full-resolution bitmap |
@@ -155,7 +192,7 @@ Paths are proposals. Every new server file is either imported by `liveAssistRout
 |---|---|
 | `server/liveAssistRouter.ts` | `proposeForm` |
 | `server/liveAssistService.ts` | builds the proposal through `buildProposal` / `createAssistantProposal`, the same path `assistant.draft` uses, with `source = photo_ocr` |
-| `server/_core/recordsAuthorization.ts` | `liveAssist.proposeForm` → `liveAssist.use`. The procedure **also** checks `assistant.use` inside, because a Live Assist user without Secretary rights must not create proposals |
+| `server/_core/recordsAuthorization.ts` | `liveAssist.proposeForm` → `live_assist.use`. The procedure **also** checks `assistant.use` inside, because a Live Assist user without Secretary rights must not create proposals |
 | scanner modules (if merged) | imported, not copied |
 
 ### LA-1d
@@ -164,7 +201,7 @@ Paths are proposals. Every new server file is either imported by `liveAssistRout
 |---|---|
 | `server/liveAssistRouter.ts` | `saveFrame` |
 | `server/liveAssistService.ts` | one transaction: re-check the session; the same size cap and storage call as `fieldRoute.evidence.upload`, reused through a shared function rather than by calling the procedure; recompute SHA-256; compare with `originalHash`; write `evidenceRecords` (domain `recordType`, `status = needs_review`, `sealState = draft`), `evidenceRelationships`, `liveAssistFrames.savedEvidenceRecordId` (clearing its `purgeAfter`) and an `evidence_saved` event |
-| `server/_core/recordsAuthorization.ts` | `liveAssist.saveEvidence` added, granted and sensitive; the map entry |
+| `server/_core/recordsAuthorization.ts` | `live_assist.save_evidence` added, granted and sensitive; the map entry |
 | `client/src/liveAssist/SaveEvidenceSheet.tsx` | the link picker, pre-filled from the session's context; the save is disabled until a link is chosen |
 
 ---
@@ -206,10 +243,10 @@ Deliberately absent:
 
 | Permission | Sensitive | Granted to (LA-1) | Procedures |
 |---|---|---|---|
-| `liveAssist.use` | yes | driver, dispatcher, mechanic, shop_lead, office, management (the roles that hold `assistant.use` today) | `start`, `ask`, `heartbeat`, `pause`, `resume`, `end`, `policyGet`, `proposeForm` |
-| `liveAssist.saveEvidence` | yes | driver, mechanic, shop_lead, office, management (of those, the roles that hold `evidence.upload` today; dispatcher does not) | `saveFrame` |
-| `liveAssist.administer` | yes | management | `policySet` |
-| `liveAssist.review` | yes | safety, management | `lifecycleList` (lifecycle rows only) |
+| `live_assist.use` | yes | driver, dispatcher, mechanic, shop_lead, office, management (the roles that hold `assistant.use` today) | `start`, `ask`, `heartbeat`, `pause`, `resume`, `end`, `policyGet`, `proposeForm` |
+| `live_assist.save_evidence` | yes | driver, mechanic, shop_lead, office, management (of those, the roles that hold `evidence.upload` today; dispatcher does not) | `saveFrame` |
+| `live_assist.administer` | yes | management | `policySet` |
+| `live_assist.review` | yes | safety, management | `lifecycleList` (lifecycle rows only) |
 
 - Grants are explicit per role, as `GRANTS` requires. There is no inheritance and none of these is universal.
 - A role not listed gets nothing. Customer, vendor and facility portals get nothing: no `externalProcedure` is added.

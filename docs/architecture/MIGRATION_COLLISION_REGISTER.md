@@ -22,7 +22,29 @@ other claimant takes the next number free on `main` *and* on all open branches a
 Reserved slots `0016`/`0017` are never used (CI gate 0). `0094`, `0095` and `0098` are historical gaps,
 and `0157` is historically used twice. None of those is reused.
 
-## Current state (2026-09-25, `main` = `88608f3`, scan at C1b-2b)
+## Current state (2026-09-25, `main` = `c626146`, scan at LA-1a)
+
+`main` migration head: **`0198_requirement_verification.sql`** (C1b-2b merged). The scan above, run over
+`origin/main` and all 94 remote refs immediately before writing, found these numbers claimed above the head:
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| 0195 | `0195_document_control_register.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
+| 0196 | `0196_document_control_numbering.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
+| 0197 | `0197_knowledge_provenance.sql` | `claude/leaseos-intelligence-engine-cr2fg1` | open branch | none | — |
+| 0199 | `0199_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none (was 0189, renumbered by its author) | — |
+| 0200 | `0200_fleet_portfolio_foundation.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | — |
+| 0201 | `0201_fleet_portfolio_guards.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | — |
+| 0202 | `0202_live_assist_sessions.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0202 |
+| 0203 | `0203_live_assist_events_append_only.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0203 |
+
+LA-1a took `0202`, the first number no branch held, and `0203` for its append-only guard, rather than `0185`
+(named free in the Live Assist design on 2026-09-24 and taken by SEC-004 since) or `0199` (named next free in
+the C1b-2b state below and claimed by the mechanic portal since). No other branch renumbered.
+
+**Next free number for new work: `0204`** (re-check with the scan before committing).
+
+## Earlier state (2026-09-25, `main` = `88608f3`, scan at C1b-2b)
 
 `main` migration head: **`0194_webhook_secret_ref.sql`**. `main` holds `0189` (C1b-1) and `0191`–`0194`
 (secret management). Numbers claimed by open branches above the head:
@@ -34,7 +56,7 @@ and `0157` is historically used twice. None of those is reused.
 | 0197 | `0197_knowledge_provenance.sql` | `claude/leaseos-intelligence-engine-cr2fg1` | open branch | none (touches `knowledgeSources`/`knowledgeChunks`, new `knowledgeSnapshots`; C1b-2b does not touch those) | — |
 | 0198 | `0198_requirement_verification.sql` | `claude/leaseos-compliance-survey-5faxe8` (C1b-2b) | this branch | none | keeps 0198 |
 
-**Next free number for new work: `0199`** (re-check with the scan before committing). The 2026-09-24 table below
+Next free number at that time: `0199` (superseded above). The 2026-09-24 table below
 is kept for history; several of its claims have since merged or been renumbered by their authors.
 
 ## Earlier state (2026-09-24, `main` = `1680e94`, scan at C1b-1)

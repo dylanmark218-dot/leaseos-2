@@ -4,6 +4,11 @@
 no seeds, no tests are added by this document. Nothing here is built unless a row says **EXISTS**, which
 means verified in the tree at the commit below rather than believed.
 
+**Update 2026-09-25:** the owner ruled on D-01 (for LA-1a only), on cleanup and on roles, and LA-1a is built.
+See `docs/live-assist/LA1A_OWNER_RULING.md`. That ruling is **not** an approval of this design as a whole:
+every other open decision in §20 (including D-03, D-12 and D-13) is still open, and LA-1b onward remain
+blocked by their prerequisites.
+
 | | |
 |---|---|
 | Surveyed at | branch `claude/live-assist-architecture-qg4jgp` = `main` = `6f52b57` (release `v23.25`) |

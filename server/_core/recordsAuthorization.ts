@@ -282,6 +282,10 @@ export type Permission =
   | "board.read" | "board.post" | "board.manage"
   // v22.20 — the agent. Asking it to work, acting, and approving differ.
   | "agent.use" | "agent.act" | "agent.approve" | "agent.read"
+  // LA-1a — Live Assist, the session spine only (docs/live-assist/LA1A_OWNER_RULING.md). Using a
+  // session, setting the organization's policy, and reviewing the lifecycle record are three acts.
+  // None of them grants evidence creation, credential verification or any other domain write.
+  | "live_assist.use" | "live_assist.administer" | "live_assist.review"
   // v22.20 — clearing a government data source for operational use.
   | "geo.source.review"
   // v22.19 — the package a truck carries when nothing can be fetched.
@@ -354,6 +358,7 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    "live_assist.use", // LA-1a: the session spine only
     "automation.override.operational",
     "facility.directory.report",
     "facility.directory.read",
@@ -437,6 +442,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "live_assist.use", // LA-1a: the session spine only
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -548,6 +554,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
+    "live_assist.use", // LA-1a: the session spine only
     "assistant.ask",
     "board.read",
     "board.post",
@@ -614,6 +621,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
+    "live_assist.use", // LA-1a: the session spine only
     "facility.directory.read",
     "academy.evaluate",
     "assistant.ask",
@@ -701,6 +709,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "live_assist.review", // LA-1a: the lifecycle record, never session content
     /* C1b-2b — requirement verification */
     "compliance.requirement.propose",
     "compliance.requirement.verify",
@@ -825,6 +834,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    "live_assist.use", // LA-1a: the session spine only
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -987,6 +997,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "live_assist.use", "live_assist.administer", "live_assist.review", // LA-1a
     /* C1b-2b — requirement verification */
     "compliance.requirement.verify",
     "compliance.requirement.second_approve",
@@ -1759,6 +1770,10 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  // LA-1a — a Live Assist decision that cannot be recorded is refused.
+  "live_assist.use",
+  "live_assist.administer",
+  "live_assist.review",
   "academy.source.review",
   "academy.certificate.issue",
   "academy.certificate.sign_own",
@@ -2778,6 +2793,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "agent.decideApproval": "agent.approve",
   "agent.awaitEvent": "agent.act",
   "agent.get": "agent.read",
+  // LA-1a — Live Assist session spine (docs/live-assist/LA1A_OWNER_RULING.md).
+  "liveAssist.start": "live_assist.use",
+  "liveAssist.heartbeat": "live_assist.use",
+  "liveAssist.pause": "live_assist.use",
+  "liveAssist.resume": "live_assist.use",
+  "liveAssist.end": "live_assist.use",
+  "liveAssist.policyGet": "live_assist.use",
+  "liveAssist.policySet": "live_assist.administer",
+  "liveAssist.lifecycleList": "live_assist.review",
   "board.history": "board.read",
   "board.edit": "board.post",
   "board.withdraw": "board.post",
