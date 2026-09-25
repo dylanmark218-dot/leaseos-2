@@ -136,49 +136,6 @@ export function trustProxySetting(env: Record<string, string | undefined>): bool
   return raw;
 }
 
-// ---------------------------------------------------------------------------
-// Health
-
-export type ReadinessProbe = () => Promise<void>;
-
-async function withTimeout(p: Promise<void>, ms: number): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    await Promise.race([p, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), ms); })]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * `/health/live` — the process is up and serving; a supervisor restarts it if
- * this stops answering. It checks nothing else, on purpose: a database outage
- * is not fixed by restarting the web process.
- *
- * `/health/ready` — send traffic here or not. Each probe must answer within
- * the timeout; the response names which failed but never why, because this
- * endpoint is unauthenticated and an error message is a map of the internals.
- */
-export function registerHealthRoutes(app: Express, probes: Record<string, ReadinessProbe>, opts: { timeoutMs?: number } = {}) {
-  const timeoutMs = opts.timeoutMs ?? 2_000;
-  app.get("/health/live", (_req, res) => {
-    res.setHeader("Cache-Control", "no-store");
-    res.json({ status: "live" });
-  });
-  app.get("/health/ready", async (_req, res) => {
-    const checks: Record<string, "ok" | "failed"> = {};
-    await Promise.all(
-      Object.entries(probes).map(async ([name, probe]) => {
-        try {
-          await withTimeout(probe(), timeoutMs);
-          checks[name] = "ok";
-        } catch {
-          checks[name] = "failed";
-        }
-      })
-    );
-    const ready = Object.values(checks).every(c => c === "ok");
-    res.setHeader("Cache-Control", "no-store");
-    res.status(ready ? 200 : 503).json({ status: ready ? "ready" : "not_ready", checks });
-  });
-}
+// Health routes are main's `server/_core/health.ts` (/healthz, /readyz). This module's own
+// /health/live and /health/ready, with a database ping, were dropped on merging main: main's
+// readiness deliberately consults no dependency (see health.ts).

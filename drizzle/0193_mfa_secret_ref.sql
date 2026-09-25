@@ -1,0 +1,33 @@
+-- S2-D — the pointer that lets an MFA seed move without anyone re-enrolling.
+--
+-- WHY THIS MIGRATION ADDS A COLUMN AND MOVES NO DATA. A SQL migration cannot re-encrypt an
+-- application secret, because doing so would require the master key, and a master key must never
+-- appear in a migration file or a database row. So the schema change is additive and inert, and the
+-- actual movement is done by an application-level backfill that holds both keys — see
+-- `server/mfaSecretMigration.ts`.
+--
+-- `mfaSecretEnc` IS NOT DROPPED HERE, AND NOT NULLED HERE. The old ciphertext is the rollback path.
+-- Until the deployed migration is verified complete, an identity's legacy seed is the only thing
+-- that lets a release be rolled back without every portal user re-enrolling their authenticator.
+-- Clearing it is a separate, later checkpoint, gated on the readiness report reaching legacy-only
+-- zero.
+--
+-- EVERY COMBINATION OF THE TWO COLUMNS IS LEGAL, so there is deliberately no CHECK constraint:
+--
+--   enc set,  ref null  — legacy, not yet migrated
+--   enc set,  ref set   — migrated, inside the rollback window
+--   enc null, ref set   — migrated and cleaned up, or enrolled after S2-D
+--   enc null, ref null  — never enrolled
+--
+-- A constraint excluding any of these would make a rolling deployment impossible: during a rollout
+-- the old and new application versions both write, and a constraint one of them cannot satisfy
+-- takes the site down. The invariants that actually matter here are behavioural — which column is
+-- read first, and that a present-but-broken ref never falls back — and they live in tests, where
+-- they can express "fails closed" rather than merely "is not null".
+-- NO INDEX ON THE NEW COLUMN, deliberately. The two readers are a one-time batched backfill and an
+-- operator readiness count, both over a portal-identity table measured in thousands of rows, and
+-- the column is NULL for most of them — an index would be read a handful of times and paid for on
+-- every write. `externalIdentities` carries no explicit index today; adding the first one on a
+-- speculative benefit is not a trade this migration can justify by measurement.
+ALTER TABLE `externalIdentities`
+  ADD COLUMN `mfaSecretRef` varchar(64) NULL AFTER `mfaSecretEnc`;

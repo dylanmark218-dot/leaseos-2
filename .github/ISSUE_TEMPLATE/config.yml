@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/dylanmark218-dot/leaseos-2/security/advisories/new
+    about: >
+      Never report a vulnerability in a public issue. Use private vulnerability
+      reporting, and read SECURITY.md before you send details.
+  - name: Security policy
+    url: https://github.com/dylanmark218-dot/leaseos-2/blob/main/SECURITY.md
+    about: What to include in a report, and what must never be pasted into one.
+  - name: Contributing guide
+    url: https://github.com/dylanmark218-dot/leaseos-2/blob/main/CONTRIBUTING.md
+    about: Branch strategy, migrations, generated truth and the authoritative gate.

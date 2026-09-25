@@ -1,7 +1,7 @@
 import express from "express";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { allowedOriginsFromEnv, crossSiteGuard, rateLimit, registerHealthRoutes, securityHeaders, trustProxySetting } from "./httpHardening";
+import { allowedOriginsFromEnv, crossSiteGuard, rateLimit, securityHeaders, trustProxySetting } from "./httpHardening";
 
 const servers: { close: () => void }[] = [];
 afterEach(() => { while (servers.length) servers.pop()!.close(); });
@@ -102,38 +102,5 @@ describe("trustProxySetting", () => {
     expect(trustProxySetting({ LEASEOS_TRUST_PROXY: "1" })).toBe(1);
     expect(trustProxySetting({ LEASEOS_TRUST_PROXY: "true" })).toBe(true);
     expect(trustProxySetting({ LEASEOS_TRUST_PROXY: "loopback, 10.0.0.0/8" })).toBe("loopback, 10.0.0.0/8");
-  });
-});
-
-describe("health routes", () => {
-  it("live answers without consulting any dependency", async () => {
-    const a = express();
-    registerHealthRoutes(a, { database: async () => { throw new Error("down"); } });
-    const r = await fetch(`${await serve(a)}/health/live`);
-    expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ status: "live" });
-  });
-
-  it("ready is 200 when every probe passes and 503 naming the failed one — without its error", async () => {
-    const a = express();
-    let dbUp = true;
-    registerHealthRoutes(a, { database: async () => { if (!dbUp) throw new Error("ECONNREFUSED 10.0.0.7:3306"); }, other: async () => {} });
-    const base = await serve(a);
-    let r = await fetch(`${base}/health/ready`);
-    expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ status: "ready", checks: { database: "ok", other: "ok" } });
-    dbUp = false;
-    r = await fetch(`${base}/health/ready`);
-    expect(r.status).toBe(503);
-    const text = await r.text();
-    expect(JSON.parse(text)).toEqual({ status: "not_ready", checks: { database: "failed", other: "ok" } });
-    expect(text).not.toContain("10.0.0.7");
-  });
-
-  it("a hung probe fails readiness rather than hanging the check", async () => {
-    const a = express();
-    registerHealthRoutes(a, { database: () => new Promise(() => {}) }, { timeoutMs: 50 });
-    const r = await fetch(`${await serve(a)}/health/ready`);
-    expect(r.status).toBe(503);
   });
 });
