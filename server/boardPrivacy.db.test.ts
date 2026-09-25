@@ -67,6 +67,16 @@ d("private conversations stay their members'", () => {
     expect(byLead.added).toBe(true);
   });
 
+  it("will not open a direct conversation or a group with a person from another organization", async () => {
+    const a = await org(pool), b = await org(pool);
+    const disp = await member(pool, a, ["dispatcher"]);
+    const drv = await member(pool, a, ["driver"]);
+    const stranger = await member(pool, b, ["driver"]);
+    await expect(callerFor(drv).board.direct({ userId: stranger })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(callerFor(disp).board.createChannel({ type: "group", name: `Mixed ${rnd()}`, members: [{ userId: stranger, memberRole: "member" }] })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await rows(pool, "SELECT COUNT(*) AS n FROM messageChannelMembers WHERE userId = ?", [stranger]))[0]!.n).toBe(0);
+  });
+
   it("keeps the moderation door shut to a dispatcher", async () => {
     const a = await org(pool);
     const x = await member(pool, a, ["driver"]);
