@@ -6,7 +6,11 @@ import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
 
 export const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
-let seq = 270_000_000 + Math.floor(Math.random() * 50_000);
+// Its own range, clear of every suite's band (testIdBands.test.ts lists them; 285_000_000 and 331_000_000 are
+// the neighbours). Nine suites import this module and each draws a contiguous run from a random start, so the
+// window is wide: two runs of a few dozen ids in thirty million do not meet. It was 270_000_000, which is
+// tenantScopeMoney.db.test.ts's band — the guard reads only *.test.ts, so it could not see this file.
+let seq = 300_000_000 + Math.floor(Math.random() * 30_000_000);
 export const nextId = () => seq++;
 
 export const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });

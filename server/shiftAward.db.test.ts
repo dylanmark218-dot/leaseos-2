@@ -18,7 +18,7 @@ import { callerFor as orgCaller, member, org, postWork as postWorkIn, STARTS, EN
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 16_000_000 + Math.floor(Math.random() * 60_000);
+let seq = 29_000_000 + Math.floor(Math.random() * 60_000);
 beforeAll(() => { if (URL) pool = mysql.createPool({ uri: URL, connectionLimit: 6 }); });
 afterAll(async () => { await pool?.end(); });
 const caller = (id: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id, role: "user" } as never });

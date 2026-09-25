@@ -16,7 +16,7 @@ import { STARTS, ENDS } from "./boardFixtures";
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 17_000_000 + Math.floor(Math.random() * 60_000);
+let seq = 30_000_000 + Math.floor(Math.random() * 60_000);
 beforeAll(() => { if (URL) pool = mysql.createPool({ uri: URL, connectionLimit: 8 }); });
 afterAll(async () => { await pool?.end(); });
 const caller = (id: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id, role: "user" } as never });
