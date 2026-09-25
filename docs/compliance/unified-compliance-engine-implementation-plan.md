@@ -151,7 +151,7 @@ OHS systems. C1b builds the regulatory authority that they will consume later.
 | Slice | Content | Migration |
 |---|---|---|
 | C1b-1 | ledger generalization + source fields + lifecycle; HOS equivalence tests; `promote()` generalized. **Implemented** (`0189`; the next free number was re-scanned, see the register) | one |
-| C1b-2 | requirements under the ledger; immutable revisions; two-person for dispatch-blocking statute; loader fixes; `requirementRef` on findings and checks; point-in-time query | one |
+| C1b-2 | requirements under the ledger; immutable revisions; two-person for dispatch-blocking statute; loader fixes; `requirementRef` on findings and checks; point-in-time query. **Split:** C1b-2a (immutable revisions, one registry reader for passport, work authorization and packs, the loader and subject/pack fixes, `requirementRef` on passport items) is **implemented** (`checkpoints/C1B_2A_REQUIREMENT_REGISTRY.md`). C1b-2b (verification through the ledger) needs an owner decision on sources, recorded in that document | 2a none; 2b one |
 | C1b-3 | SPINE item 2 `complianceDocumentValidity` reconciliation (equivalence first); D-05 credential read adapter, non-destructive, with equivalence tests for the four `workerQualifications` readers | none expected |
 
 **SPINE items this advances**
