@@ -1,5 +1,5 @@
 /**
- * 0183 — Checkpoint 3: the marketplace award.
+ * 0206 — Checkpoint 3: the marketplace award.
  *
  * Design §5.5. An award binds the slot a post names, through the canonical binding
  * (`applyBinding`, unchanged), behind a readiness check the dispatcher recorded for exactly this

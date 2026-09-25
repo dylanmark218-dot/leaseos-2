@@ -1,5 +1,5 @@
 /**
- * 0182/0183 — the board's offline queue, on the device half.
+ * 0205/0206 — the board's offline queue, on the device half.
  *
  * Pure: memory adapters and a fake transport. What these prove is the device's side of the
  * promises the server suites prove on theirs: nothing reads as sent before the server answered, a

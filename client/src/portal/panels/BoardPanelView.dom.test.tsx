@@ -1,5 +1,5 @@
 /**
- * 0182/0183 — the Board view, rendered.
+ * 0205/0206 — the Board view, rendered.
  *
  * What these prove on the screen itself: a message still on the device reads as queued and never
  * as delivered, a refused one is kept and says why, an acknowledgement is asked only of somebody

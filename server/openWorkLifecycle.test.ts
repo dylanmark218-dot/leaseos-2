@@ -1,5 +1,5 @@
 /**
- * 0183 — the post's life, the offer's life, and what a declaration is.
+ * 0206 — the post's life, the offer's life, and what a declaration is.
  *
  * Pure. The tables are the rule; these pin the shape of them, the same way
  * `dispatchLifecycle` is pinned: every terminal state has no exit, `filled` is

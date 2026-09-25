@@ -3,14 +3,14 @@
 **Status:** PROPOSED, D-1…D-6 **recorded in Checkpoint 5** (§14), with **Checkpoint 2 built under the recommended options** for D-1…D-6 (§14)
 because the owner asked for the work to continue before recording decisions. Every recommended option
 is the one implemented; a different answer to any of them is a change to the branch, not to this
-document. Checkpoint 2 (§15) is on the branch: migrations `0182`/`0183`, board membership, publish
+document. Checkpoint 2 (§15) is on the branch: migrations `0205`/`0206`, board membership, publish
 and moderation authorities, replay identity, the post's life with responses, offers and availability,
 the `openShifts` engine wired and its inline copy deleted, the outbox helper, and the refusal suites.
 Checkpoint 3 (the award, §5.5) is on the branch too: `shifts.award` on `dispatch.assign`, the canonical
 binding run inside the award's transaction (`setRoleAssignmentIn`), the lock order posting → role →
 post → offers, refusal on a stale or uncovered check, the winner's offer awarded and the others not
 selected, the job room kept in step with every binding, and the race suite. `0184` was not needed
-and is released. Checkpoint 4 (§11, the Field Mobile slice) is on the branch as well: a **Board**
+and is released (it is not this feature's number). Checkpoint 4 (§11, the Field Mobile slice) is on the branch as well: a **Board**
 panel in the portal shell with the six tabs (Inbox · Dispatch · My Jobs · Open Work · Company ·
 Safety), conversations, the open-work list and card, acknowledgement, answering a post and an offer.
 Writes go through `client/src/runtime/boardQueue.ts`, built on the existing `Outbox` with three new
@@ -173,18 +173,18 @@ prerequisite work. Nothing here is a new engine.
 
 ```
 messageChannels                        the container (type, tenantId, jobRef, crewRef, archived)
- ├── membershipMode: open | explicit | crew                                        [0182, column]
- ├── messageChannelMembers            who may open an EXPLICIT channel, with a member role  [0182]
- ├── messageChannelEvents             membership / moderation / emergency audit             [0182]
+ ├── membershipMode: open | explicit | crew                                        [0205, column]
+ ├── messageChannelMembers            who may open an EXPLICIT channel, with a member role  [0205]
+ ├── messageChannelEvents             membership / moderation / emergency audit             [0205]
  └── boardMessages (+ clientMutationId)  message, receipts, revisions, attachments — as today
 
 shiftPosts                             the offer of work (tenantId, as today)
- ├── + dispatchPostingId, dispatchRoleId, unitId, overtime, closesAt, publishedAt, …   [0183]
- ├── shiftInterests (+ response, clientMutationId, deviceCreatedAt)                     [0183]
- ├── shiftOffers                      dispatcher → person, accept/decline, one award link  [0183]
- └── shiftPostEvents                  append-only marketplace audit                        [0183]
+ ├── + dispatchPostingId, dispatchRoleId, unitId, overtime, closesAt, publishedAt, …   [0206]
+ ├── shiftInterests (+ response, clientMutationId, deviceCreatedAt)                     [0206]
+ ├── shiftOffers                      dispatcher → person, accept/decline, one award link  [0206]
+ └── shiftPostEvents                  append-only marketplace audit                        [0206]
 
-workerAvailability                     declared availability windows and preferences       [0183]
+workerAvailability                     declared availability windows and preferences       [0206]
 
 dispatchRoles / dispatchRoleAssignmentEvents      THE slot and its history — unchanged
 dispatchEligibilityChecks                          the readiness evidence — unchanged
@@ -199,7 +199,7 @@ Why this fits LeaseOS specifically: every new row is either membership (a resolv
 
 ### 4.1 Channel kinds
 
-`messageChannels.type` gains `direct`, `group`, `department`, `unit`, `shift` (migration `0182`, enum extension). The request's remaining kinds already exist: company = `general`/`announcement`, dispatch = `dispatch`, safety = `safety`, mechanic = `maintenance`, job = `job`, emergency = `emergency`. `private` keeps its current meaning (management room) and is **not** the DM type; a DM is `direct` with `membershipMode = explicit` and exactly two members.
+`messageChannels.type` gains `direct`, `group`, `department`, `unit`, `shift` (migration `0205`, enum extension). The request's remaining kinds already exist: company = `general`/`announcement`, dispatch = `dispatch`, safety = `safety`, mechanic = `maintenance`, job = `job`, emergency = `emergency`. `private` keeps its current meaning (management room) and is **not** the DM type; a DM is `direct` with `membershipMode = explicit` and exactly two members.
 
 ### 4.2 Membership
 
@@ -253,7 +253,7 @@ A job room is a `job` channel with `membershipMode = explicit` and `jobRef = job
 
 ## 5. Open Work: the job board linked to the slot
 
-### 5.1 The post (`shiftPosts`, extended in `0183`)
+### 5.1 The post (`shiftPosts`, extended in `0206`)
 
 | Added column | Type | Why |
 |---|---|---|
@@ -456,9 +456,11 @@ Scan of every remote branch against `origin/main` (2026-09-24): claims exist for
 
 | Number | File | Contents |
 |---|---|---|
-| **`0182`** | `0182_board_membership.sql` | `messageChannels`: `type` enum + `direct, group, department, unit, shift`; `membershipMode`; backfill `crew` where `crewRef IS NOT NULL`. `messageChannelMembers` (+ generated `memberKey`, unique). `messageChannelEvents`. `boardMessages`: `clientMutationId`, `UNIQUE(deviceId, clientMutationId)`. `messageReceipts.deviceAcknowledgedAt`. |
-| **`0183`** | `0183_open_work_offers_availability.sql` | `shiftPosts`: link, unit, overtime, region, priority, lifecycle timestamps, `status` enum + `draft, closed`. `shiftInterests`: `response`, clocks, replay key, `UNIQUE(deviceId, clientMutationId)`. `shiftOffers` (+ generated `offerKey`). `shiftPostEvents`. `workerAvailability`. |
-| **`0184`** | reserved for Checkpoint 3 | only if the award needs a column the design missed; released if not |
+| **`0205`** | `0205_board_membership.sql` | `messageChannels`: `type` enum + `direct, group, department, unit, shift`; `membershipMode`; backfill `crew` where `crewRef IS NOT NULL`. `messageChannelMembers` (+ generated `memberKey`, unique). `messageChannelEvents`. `boardMessages`: `clientMutationId`, `UNIQUE(deviceId, clientMutationId)`. `messageReceipts.deviceAcknowledgedAt`. |
+| **`0206`** | `0206_open_work_offers_availability.sql` | `shiftPosts`: link, unit, overtime, region, priority, lifecycle timestamps, `status` enum + `draft, closed`. `shiftInterests`: `response`, clocks, replay key, `UNIQUE(deviceId, clientMutationId)`. `shiftOffers` (+ generated `offerKey`). `shiftPostEvents`. `workerAvailability`. |
+| ~~`0184`~~ | released | was reserved for Checkpoint 3 in case the award needed a column; it did not, and `0184` is **not** this feature's (it is claimed by `integration-hub` and `customer-contract-rates`) |
+
+**Renumbered at integration (2026-09-25).** The migrations were written as `0182`/`0183`. The register scan at integration found both numbers claimed by other open branches whose claims were committed *before* this branch's (2026-09-24: `0182` by document-control 01:11, safety-program-builder 01:25, customer-contract-rates 01:47, integration-hub 01:49; `0183` by document-control 01:30, customer-contract-rates 01:47, integration-hub 01:49; this branch 01:52 for both). Under the register's precedent (SEC-004 kept `0185` on claim order, the number having been free everywhere when claimed), this branch's claims were the later ones, so this branch moved — to `0205` and `0206`, the first numbers free on `main` (head `0198`) and on every open branch (highest claim `0204`). Nothing in either file changed but its name; the production ledger (`schemaMigrations`) applies any file it has not seen, so a number below or above `main`'s head is applied either way.
 
 Register: this branch's rows go into `docs/architecture/MIGRATION_COLLISION_REGISTER.md` at implementation, per its rule ("the first branch to merge keeps its number; every other claimant takes the next number free … at its own rebase"). Parity: four new `CREATE TABLE` in `0182`/`0183` ↔ four new `mysqlTable(` in `drizzle/schema.ts`. `tenantIsolation.test.ts` pin unchanged (§7).
 
@@ -518,7 +520,7 @@ Existing suites that must keep passing untouched: `openShifts.test.ts` (16), `op
 | C-14 | Tenant isolation tests "at minimum" | Isolation is a measured surface, not a property (roadmap step 3 open) | Every new procedure gets a cross-org test; the document does not claim org-wide isolation |
 | C-15 | "Overtime board" | No table needed | `shiftPosts.overtime` + filter |
 | C-16 | Award race "only valid award survives" | Already true for the binding (posting lock + head event, D14) | The marketplace award enters the same lock in the same order |
-| C-17 | Migration numbers "based on current main" | `main` head `0174`; open branches to `0181` | `0182`/`0183`, `0184` reserved |
+| C-17 | Migration numbers "based on current main" | `main` head `0174`; open branches to `0181` | `0182`/`0183` then, `0184` reserved and released; renumbered `0205`/`0206` at integration (§10) |
 | C-18 | "One giant PR" warning | Repository workflow: design approved, then checkpoints with the gate green each time | Checkpoints in §15 |
 
 ---
@@ -563,7 +565,7 @@ The offer-answer policy (connected-only) is **not** one of D-1…D-6; it is reco
 | # | Scope | Gate evidence |
 |---|---|---|
 | 1 (this) | Survey + design on `claude/leaseos-communications-marketplace-p8ptqw` | documentation guards green; no code |
-| 2 | `0182`, `0183`; membership + `board.publish`/`board.moderate`; mutation identity; post lifecycle, responses, offers, availability; `openShifts` wired and the inline copy deleted; outbox helper; every refusal test in §12 except award | full `ci-gate.sh`; `engineReachability` updated; inventory counts |
+| 2 | `0205`, `0206`; membership + `board.publish`/`board.moderate`; mutation identity; post lifecycle, responses, offers, availability; `openShifts` wired and the inline copy deleted; outbox helper; every refusal test in §12 except award | full `ci-gate.sh`; `engineReachability` updated; inventory counts |
 | 3 | `shifts.award` on `applyBinding(tx)`; job-room resolver; concurrency suite; `work.awarded` | `shiftAward*.db.test.ts`, `dispatchRoleAssignment.db.test.ts` unchanged |
 | 4 | Field Mobile slice: `BoardPanel`, Open Work list + card, respond, job room, three capture kinds, queue state | dom tests; `commPackage`/runtime suites unchanged |
 

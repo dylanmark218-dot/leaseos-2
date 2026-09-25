@@ -1,5 +1,5 @@
 /**
- * 0182 — a retried post is one post, and both acknowledgement clocks are kept.
+ * 0205 — a retried post is one post, and both acknowledgement clocks are kept.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";

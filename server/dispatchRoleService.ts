@@ -295,7 +295,7 @@ export type AssignmentOutcome = {
   lastEventId: number;
   planningState: string;
   staffing: ReturnType<typeof assessStaffing>;
-  /** 0182 — the job room the binding kept in step: the operator bound joins it, the one displaced leaves it. */
+  /** 0205 — the job room the binding kept in step: the operator bound joins it, the one displaced leaves it. */
   jobRoom: JobRoomResult | null;
 };
 
@@ -339,7 +339,7 @@ async function applyBinding(args: {
   const now = new Date();
 
   /*
-   * 0183 — a caller that already holds the posting lock (the marketplace award, which locks the
+   * 0206 — a caller that already holds the posting lock (the marketplace award, which locks the
    * posting first, then the role, then the post and its offers) runs the binding inside its own
    * transaction. The body is unchanged: the same lock order, the same checks, the same writes.
    */
@@ -494,7 +494,7 @@ async function applyBinding(args: {
 }
 
 /**
- * 0183 — the binding inside a transaction the caller already holds. The marketplace award takes
+ * 0206 — the binding inside a transaction the caller already holds. The marketplace award takes
  * the posting lock first, exactly as this does, so the two never deadlock; then it asks for the
  * binding here rather than restating any of it.
  */

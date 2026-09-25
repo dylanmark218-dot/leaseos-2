@@ -30,7 +30,7 @@ const ENDS = new Date("2026-11-10T18:00:00Z");
 /**
  * An operator row with a licence, since that is the one credential stored.
  *
- * 0183 — `operators.userId` is the mapping the board reads (design C-10). The row used to be
+ * 0206 — `operators.userId` is the mapping the board reads (design C-10). The row used to be
  * seeded with `id = userId` and no `userId`, which only worked because the eligibility read
  * conflated the two; it now names the person it belongs to.
  */

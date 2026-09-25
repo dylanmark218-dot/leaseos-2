@@ -1,5 +1,5 @@
 /**
- * 0182/0183 — the Board: conversations and open work, for a phone in a cab.
+ * 0205/0206 — the Board: conversations and open work, for a phone in a cab.
  *
  * Pure: every word comes from `boardModel`, every value from props. The container reads the server
  * and the device's queue and hands both over; this renders them and reports what was tapped.

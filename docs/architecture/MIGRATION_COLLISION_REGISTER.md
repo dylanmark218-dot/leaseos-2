@@ -22,6 +22,23 @@ other claimant takes the next number free on `main` *and* on all open branches a
 Reserved slots `0016`/`0017` are never used (CI gate 0). `0094`, `0095` and `0098` are historical gaps,
 and `0157` is historically used twice. None of those is reused.
 
+## Claim: 0205 and 0206 (Company Board + Open Work, 2026-09-25, `main` = `9569195`)
+
+`main` migration head: **`0198_requirement_verification.sql`**. The scan above, rerun against `main` and every remote
+branch at this integration, found the highest claim anywhere to be `0204` (`driver-portfolio-credential-wallet`).
+
+| Number | Migration file | Branch | Was | Why it moved | Status |
+|---|---|---|---|---|---|
+| 0205 | `0205_board_membership.sql` | `claude/leaseos-communications-marketplace-p8ptqw` | `0182` | `0182` was claimed earlier by document-control-architecture (2026-09-24 01:11), safety-program-builder (01:25), customer-contract-rates (01:47) and integration-hub (01:49); this branch's claim was 01:52 | renumbered; PR against `main` |
+| 0206 | `0206_open_work_offers_availability.sql` | `claude/leaseos-communications-marketplace-p8ptqw` | `0183` | `0183` was claimed earlier by document-control-architecture (01:30), customer-contract-rates (01:47) and integration-hub (01:49); this branch's claim was 01:52 | renumbered; PR against `main` |
+
+Resolved on claim order, the SEC-004 precedent (`0185`): a number keeps its claimant when it was free everywhere at
+the claim, and this branch's `0182`/`0183` were not. `0184` was only ever *reserved* by this branch and never
+written; it is released and is not this feature's (`integration-hub`, `customer-contract-rates` hold it). The
+remaining `0182`/`0183`/`0184` claimants are unchanged by this entry. File contents unchanged; names only.
+
+**Next free number for new work: `0207`** (re-check with the scan before committing).
+
 ## Current state (2026-09-25, `main` = `88608f3`, scan at C1b-2b)
 
 `main` migration head: **`0194_webhook_secret_ref.sql`**. `main` holds `0189` (C1b-1) and `0191`–`0194`

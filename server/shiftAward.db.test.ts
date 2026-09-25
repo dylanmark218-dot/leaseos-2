@@ -1,5 +1,5 @@
 /**
- * 0183 — Checkpoint 3: the marketplace award, against a real database.
+ * 0206 — Checkpoint 3: the marketplace award, against a real database.
  *
  * The award binds the slot through the canonical binding behind the dispatcher's stored check.
  * These prove: a blocked or unknown readiness refuses; a check the recompute disagrees with

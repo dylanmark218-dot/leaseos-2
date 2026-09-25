@@ -1,5 +1,5 @@
 /**
- * 0182/0183 — what the board says, as a tested artifact rather than a styling choice.
+ * 0205/0206 — what the board says, as a tested artifact rather than a styling choice.
  *
  * Pure. The view renders these words; it decides none of them.
  *

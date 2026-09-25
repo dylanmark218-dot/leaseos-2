@@ -1,5 +1,5 @@
 /**
- * v22.20 (0091) — open shifts, reachable. 0183 — Open Work: the post linked to its slot.
+ * v22.20 (0091) — open shifts, reachable. 0206 — Open Work: the post linked to its slot.
  *
  * `_core/openShifts.ts` decides: who could take a post, what interest is and is not, where a post
  * and an offer may go from where they are. `openShiftsService.ts` reads what those rules need.
@@ -512,7 +512,7 @@ export const openShiftsRouter = router({
     }),
 
   /**
-   * 0183 — Checkpoint 3: fill the post by binding the slot it names, through the canonical
+   * 0206 — Checkpoint 3: fill the post by binding the slot it names, through the canonical
    * binding, behind the readiness check the dispatcher recorded for this subject and slot.
    * `dispatch.assign` — the binding's own permission; no second way to bind a slot.
    */

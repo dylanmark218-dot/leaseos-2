@@ -1,5 +1,5 @@
 /**
- * 0182/0183 — the board's vocabulary, and the lines it must not cross.
+ * 0205/0206 — the board's vocabulary, and the lines it must not cross.
  *
  * A badge is where a false claim comes back: "Delivered" on a message still on a tablet, ✓ on a
  * ticket nobody recorded, "Assigned" on an accepted offer. Each of those would let somebody act on

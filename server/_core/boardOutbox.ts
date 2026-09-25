@@ -1,5 +1,5 @@
 /**
- * 0182/0183 — the board's and the marketplace's outbox rows, and the consumer that turns them into
+ * 0205/0206 — the board's and the marketplace's outbox rows, and the consumer that turns them into
  * in-app notifications.
  *
  * Modelled on `enforcementOutbox.ts`, and for the same reason: the invariant "a person was offered

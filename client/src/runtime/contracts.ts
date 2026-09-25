@@ -29,11 +29,11 @@ export type CaptureKind =
   | "expense_receipt" | "photo" | "signature" | "incident" | "defect_report" | "tailgate" | "tdg_document" | "voice_note"
   // v22.20 — a roadside enforcement document and the order it carries.
   | "roadside_enforcement" | "oos_order"
-  // 0182/0183 — a board message, an acknowledgement of one, a response to open work.
+  // 0205/0206 — a board message, an acknowledgement of one, a response to open work.
   | "board_message" | "board_acknowledgement" | "shift_response";
 
 /**
- * 0182/0183 — captures sent DIRECTLY to their own tRPC procedure with the capture's `localId` as
+ * 0205/0206 — captures sent DIRECTLY to their own tRPC procedure with the capture's `localId` as
  * the client mutation id, never packaged for `sync.receivePackage`. A chat message is not evidence:
  * sealing one would make a conversation an evidence record, and the package protocol would upload
  * it as a file. They share the outbox, the six states and the store; they do not share the channel.

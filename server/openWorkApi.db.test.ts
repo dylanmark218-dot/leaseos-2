@@ -1,5 +1,5 @@
 /**
- * 0183 — Open Work through the API: the post's life, responses, offers, the link to a slot, and
+ * 0206 — Open Work through the API: the post's life, responses, offers, the link to a slot, and
  * the organization boundary. Nothing here awards anything; that is Checkpoint 3.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

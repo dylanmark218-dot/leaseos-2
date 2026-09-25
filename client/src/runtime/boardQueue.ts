@@ -1,5 +1,5 @@
 /**
- * 0182/0183 — the board's offline queue: a message, an acknowledgement, a response to open work.
+ * 0205/0206 — the board's offline queue: a message, an acknowledgement, a response to open work.
  *
  * Built on the outbox that already exists, not beside it: the same `LocalStore`, the same six
  * states, the same rule that nothing unaccepted is deleted. What differs is the channel. A board

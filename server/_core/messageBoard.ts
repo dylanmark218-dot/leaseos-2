@@ -35,7 +35,7 @@ import type { Receipt as LifecycleReceipt } from "./messageLifecycle";
 export type ChannelType =
   | "announcement" | "dispatch" | "safety" | "maintenance" | "field_operations"
   | "road_conditions" | "training" | "general" | "job" | "client" | "private" | "emergency"
-  // 0182 — conversations between named people, a department, a unit, a shift.
+  // 0205 — conversations between named people, a department, a unit, a shift.
   | "direct" | "group" | "department" | "unit" | "shift";
 
 export type Channel = {
@@ -257,7 +257,7 @@ export function broadcastReaches(target: BroadcastTarget, person: { branchRef: s
 }
 
 /* ------------------------------------------------------------------ */
-/* 0182 — membership: who may open an explicit channel                  */
+/* 0205 — membership: who may open an explicit channel                  */
 /* ------------------------------------------------------------------ */
 
 /**

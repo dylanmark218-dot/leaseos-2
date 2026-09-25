@@ -7061,7 +7061,7 @@ export const shiftPosts = mysqlTable("shiftPosts", {
   status: mysqlEnum("status", ["draft", "open", "closed", "filled", "cancelled", "expired"]).default("open").notNull(),
   postedByUserId: int("postedByUserId").notNull(),
   postedAt: timestamp("postedAt").notNull(),
-  /* 0183 — the slot this post fills. NULL = not yet linked to a job; an unlinked post cannot be filled. */
+  /* 0206 — the slot this post fills. NULL = not yet linked to a job; an unlinked post cannot be filled. */
   dispatchPostingId: int("dispatchPostingId"),
   dispatchRoleId: int("dispatchRoleId"),
   unitId: int("unitId"),
@@ -7089,7 +7089,7 @@ export const shiftInterests = mysqlTable("shiftInterests", {
   userId: int("userId").notNull(),
   expressedAt: timestamp("expressedAt").notNull(),
   withdrawnAt: timestamp("withdrawnAt"),
-  /* 0183 — one standing response per person per post; replaced in place, the previous one audited. */
+  /* 0206 — one standing response per person per post; replaced in place, the previous one audited. */
   response: mysqlEnum("response", ["interested", "available", "request_assignment", "declined"]).default("interested").notNull(),
   note: varchar("note", { length: 400 }),
   deviceCreatedAt: timestamp("deviceCreatedAt"),
@@ -7100,7 +7100,7 @@ export const shiftInterests = mysqlTable("shiftInterests", {
 });
 export type ShiftInterestRow = typeof shiftInterests.$inferSelect;
 
-/* ---- 0183: offers, marketplace audit, availability ---- */
+/* ---- 0206: offers, marketplace audit, availability ---- */
 
 export const shiftOffers = mysqlTable("shiftOffers", {
   id: int("id").autoincrement().primaryKey(),
@@ -7244,7 +7244,7 @@ export const messageChannels = mysqlTable("messageChannels", {
   /** What makes a channel external. Access is decided here, not per message. */
   clientRef: varchar("clientRef", { length: 64 }),
   crewRef: varchar("crewRef", { length: 64 }),
-  /** 0182 — how a person is admitted: today's open rule, the crew rule, or an explicit member row. */
+  /** 0205 — how a person is admitted: today's open rule, the crew rule, or an explicit member row. */
   membershipMode: mysqlEnum("membershipMode", ["open", "explicit", "crew"]).default("open").notNull(),
   archived: boolean("archived").default(false).notNull(),
   createdByUserId: int("createdByUserId").notNull(),
@@ -7252,7 +7252,7 @@ export const messageChannels = mysqlTable("messageChannels", {
 });
 export type MessageChannelRow = typeof messageChannels.$inferSelect;
 
-/* ---- 0182: board membership ---- */
+/* ---- 0205: board membership ---- */
 
 export const messageChannelMembers = mysqlTable("messageChannelMembers", {
   id: int("id").autoincrement().primaryKey(),
@@ -7301,7 +7301,7 @@ export const boardMessages = mysqlTable("boardMessages", {
   deviceCreatedAt: timestamp("deviceCreatedAt").notNull(),
   serverReceivedAt: timestamp("serverReceivedAt"),
   deviceId: varchar("deviceId", { length: 64 }),
-  /** 0182 — with `deviceId`, the replay identity: a retried post returns the message it already wrote. */
+  /** 0205 — with `deviceId`, the replay identity: a retried post returns the message it already wrote. */
   clientMutationId: varchar("clientMutationId", { length: 64 }),
   requiresAcknowledgement: boolean("requiresAcknowledgement").default(false).notNull(),
   withdrawnAt: timestamp("withdrawnAt"),
@@ -7318,7 +7318,7 @@ export const messageReceipts = mysqlTable("messageReceipts", {
   deliveredAt: timestamp("deliveredAt"),
   openedAt: timestamp("openedAt"),
   acknowledgedAt: timestamp("acknowledgedAt"),
-  /** 0182 — the device's clock at acknowledgement. `acknowledgedAt` stays the server's. */
+  /** 0205 — the device's clock at acknowledgement. `acknowledgedAt` stays the server's. */
   deviceAcknowledgedAt: timestamp("deviceAcknowledgedAt"),
   /** The server witnesses acceptance, so it may record it. */
   acceptedAt: timestamp("acceptedAt"),

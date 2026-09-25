@@ -1,5 +1,5 @@
 /**
- * 0182 — the job room: a `job` channel, explicit by construction, created on demand.
+ * 0205 — the job room: a `job` channel, explicit by construction, created on demand.
  *
  * Design §4.5. A room is one per job in the acting organization, keyed by the job's own code. Its
  * members are whoever the canonical binding puts on the work: the dispatcher who bound the slot and

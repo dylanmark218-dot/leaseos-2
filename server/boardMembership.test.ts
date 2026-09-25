@@ -1,5 +1,5 @@
 /**
- * 0182 — the board with membership: who opens an explicit channel, who publishes, what an audience is.
+ * 0205 — the board with membership: who opens an explicit channel, who publishes, what an audience is.
  *
  * Pure. The router's `openChannel` asks these and decides nothing itself.
  */

@@ -25,7 +25,7 @@ export async function startProductionWorker(): Promise<ProductionWorker | null> 
       return { tasksCreated: 0 };
     },
   }, {
-    // 0182/0183 — board and open-work events become in-app notifications, one per recipient.
+    // 0205/0206 — board and open-work events become in-app notifications, one per recipient.
     name: "board",
     matches: event => BOARD_AGGREGATE_TYPES.includes(event.aggregateType),
     handle: async event => {

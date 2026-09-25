@@ -531,7 +531,7 @@ code**, not merely self-scoped by intention. The list is deliberately one entry
 long and a test holds it there. Denials still override universals, and a user
 holding no recognized role still gets nothing.
 
-## 0182/0183 — Company Board + Open Work (design: `docs/product/COMPANY_BOARD_OPEN_WORK_DESIGN.md`)
+## 0205/0206 — Company Board + Open Work (design: `docs/product/COMPANY_BOARD_OPEN_WORK_DESIGN.md`)
 
 Twenty-one procedures added, all `ROLE_AUTHORIZED`; the live counts are generated into
 `LEASEOS_CURRENT_STATE.md` and pinned in `procedureAuthorization.test.ts`.

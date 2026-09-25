@@ -151,7 +151,7 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
         {panel === "myday" && view && (OFFICE_PORTALS.has(portal) ? <MyDayPanel view={view} office={officeView} onGo={go} /> : <MyDayPanel view={view} onGo={go} />)}
         {panel === "exceptions" && <ExceptionsPanel items={(exceptions.data?.items ?? []) as never} summary={myDay.data?.attention as never} onGo={go} />}
         {panel === "inbox" && <InboxPanel items={(inbox.data?.items ?? []) as never} counts={inbox.data?.counts ?? {}} onGo={go} />}
-        {/* 0182/0183 — conversations and open work; writes go through the device's board queue. */}
+        {/* 0205/0206 — conversations and open work; writes go through the device's board queue. */}
         {panel === "board" && <BoardPanel online={online} orgKey={boardOrgKey} />}
         {panel === "timeline" && <TimelinePanel />}
         {panel === "setup" && OFFICE_PORTALS.has(portal) && <SetupPanel />}

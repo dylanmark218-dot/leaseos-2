@@ -1,5 +1,5 @@
 /**
- * 0182 — publishing is not posting.
+ * 0205 — publishing is not posting.
  *
  * An emergency, or anything in an announcement channel, needs `board.publish`; `board.post` alone
  * is refused. An emergency writes a channel event and an outbox row in the same transaction as the

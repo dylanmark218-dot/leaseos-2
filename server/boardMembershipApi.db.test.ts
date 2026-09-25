@@ -1,5 +1,5 @@
 /**
- * 0182 — the board with membership, against a real database.
+ * 0205 — the board with membership, against a real database.
  *
  * What these prove: an explicit channel admits its members and nobody else; management is nobody
  * else; moderation is the one way in and it is recorded; another organization's channel and people

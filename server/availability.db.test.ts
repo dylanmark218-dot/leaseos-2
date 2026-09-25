@@ -1,5 +1,5 @@
 /**
- * 0183 — "Offer Me Work": a declaration is appended and superseded, never edited; it is one
+ * 0206 — "Offer Me Work": a declaration is appended and superseded, never edited; it is one
  * organization's; it feeds the candidate pool and changes no readiness verdict.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

@@ -1,5 +1,5 @@
 /**
- * 0183 — Checkpoint 3: two awards, one slot, one survivor — against a real database.
+ * 0206 — Checkpoint 3: two awards, one slot, one survivor — against a real database.
  *
  * `decideAward` being right is necessary and not sufficient; the guarantee lives in the
  * transaction. The marketplace award enters the binding's own lock (posting first, then role) and

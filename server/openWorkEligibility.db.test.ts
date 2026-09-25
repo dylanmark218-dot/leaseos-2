@@ -1,5 +1,5 @@
 /**
- * 0183 — the preview: eligible, ineligible or unknown, with codes, from the canonical stores and the
+ * 0206 — the preview: eligible, ineligible or unknown, with codes, from the canonical stores and the
  * readiness composer. Unknown never reads as eligible, and readiness is its own axis.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

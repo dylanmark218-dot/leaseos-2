@@ -3,7 +3,7 @@
  *
  * Written against `workerQualifications`, the store 0092 added and nothing in production ever
  * wrote. D-05 (2026-09-23) named the canonical pair — `academyQualifications` (a grant) and
- * `complianceDocuments` (a verified document) — and 0183 made open work read them through the
+ * `complianceDocuments` (a verified document) — and 0206 made open work read them through the
  * same shared rule (`qualificationValidity`). The cases are unchanged; the fixtures now seed the
  * stores the answer actually comes from. `workerQualifications` itself is untouched: the crew
  * forecast, the calendar and shift readiness still read it, and D-05 forbids destructive

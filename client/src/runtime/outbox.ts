@@ -41,7 +41,7 @@ export class Outbox {
     // worker hears it now — "which job or unit is this for?" — than the sync
     // engine hears it hours later.
     //
-    // 0182/0183 — a direct capture is never sealed; it relates to a channel, a
+    // 0205/0206 — a direct capture is never sealed; it relates to a channel, a
     // message or a post instead, and must name one. Relating to nothing is
     // refused the same way.
     if (isDirectCapture(c.kind)) {
@@ -54,7 +54,7 @@ export class Outbox {
   }
 
   /**
-   * 0182/0183 — the send did not reach a server that answered: back to queued, attempt counted,
+   * 0205/0206 — the send did not reach a server that answered: back to queued, attempt counted,
    * reason kept. Not `failed`: failed means the server refused it, and a dropped connection is
    * not a refusal. The retry carries the same mutation id, so it cannot become a second record.
    */
@@ -64,7 +64,7 @@ export class Outbox {
     return this.transition(c, "queued", { lastError: reason });
   }
 
-  /** 0182/0183 — the server's reference for a direct capture, kept once it answered. */
+  /** 0205/0206 — the server's reference for a direct capture, kept once it answered. */
   async setServerRef(localId: string, serverRef: string) {
     const c = await this.must(localId);
     c.fields = { ...c.fields, serverRef };

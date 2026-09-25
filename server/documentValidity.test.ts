@@ -159,7 +159,7 @@ describe("one rule, shared", () => {
     const adapter = readFileSync("server/_core/qualificationValidity.ts", "utf8");
     expect(adapter).toContain('from "./documentValidity"');
     expect(readFileSync("server/readinessRouter.ts", "utf8")).toContain("_core/qualificationValidity");
-    // 0183 — open work no longer reads `workerQualifications` at all (D-05: the canonical pair is
+    // 0206 — open work no longer reads `workerQualifications` at all (D-05: the canonical pair is
     // academyQualifications and complianceDocuments). Its reader is the service, and it reaches
     // the same rule directly: the engine decides, the service presents rows as versions.
     expect(readFileSync("server/openShiftsService.ts", "utf8")).toContain("_core/qualificationValidity");

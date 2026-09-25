@@ -1,11 +1,11 @@
 /**
- * v22.20 (0096) — the board, reachable. 0182 — the board with membership.
+ * v22.20 (0096) — the board, reachable. 0205 — the board with membership.
  *
  * `_core/messageBoard.ts` and `_core/messageLifecycle.ts` hold the rules; this
  * stores and serves. Five things it is responsible for.
  *
  * **Access is decided on the channel.** An outside viewer is refused before any
- * message is read, not filtered out of a list afterwards. Since 0182 a channel
+ * message is read, not filtered out of a list afterwards. Since 0205 a channel
  * is `open` (every internal viewer), `crew` (through crew membership) or
  * `explicit` (through a member row) — one door, `openChannel`, decides which.
  *
@@ -80,7 +80,7 @@ const rowToReceipt = (row: any): Receipt => ({
  * acknowledgement time* — not at some plausible earlier point, which would be
  * inventing a delivery that nothing witnessed.
  *
- * 0182 — `deviceAt` is the device's clock for the state being reached. It is
+ * 0205 — `deviceAt` is the device's clock for the state being reached. It is
  * stored beside the server's stamp for an acknowledgement and overwrites nothing.
  */
 async function advanceReceipt(d: DbOrTx, args: { messageRef: string; userId: number; evidence: Evidence; at: Date; deviceAt?: Date | null }) {
@@ -200,7 +200,7 @@ async function crewRelationship(d: DbOrTx, args: { crewRef: string; tenantId: st
 }
 
 /**
- * 0182 — admission to an explicit channel, by the same four standings.
+ * 0205 — admission to an explicit channel, by the same four standings.
  *
  * `moderating` is the one bypass, and it is not silent: the caller holds
  * `board.moderate`, and the resolver that asked for it writes the event.
@@ -326,7 +326,7 @@ function originalRevision(message: any): Revision {
   return { revision: 1, body: message.body, editedByUserId: message.authorUserId, at: message.deviceCreatedAt, reason: null };
 }
 
-/** 0182 — the append-only channel record. Nothing in production updates or deletes one of these. */
+/** 0205 — the append-only channel record. Nothing in production updates or deletes one of these. */
 async function channelEvent(d: DbOrTx, args: {
   channelRef: string; tenantId: string; eventType: typeof messageChannelEvents.$inferInsert["eventType"];
   actorUserId: number; actorRole: string; subjectUserId?: number | null; messageRef?: string | null; detail?: string | null; at: Date;
@@ -383,7 +383,7 @@ export const messageBoardRouter = router({
       jobRef: z.string().max(64).optional(),
       clientRef: z.string().max(64).optional(),
       crewRef: z.string().max(64).optional(),
-      /** 0182 — omitted: direct/group are explicit, a crew channel is crew, everything else is open. */
+      /** 0205 — omitted: direct/group are explicit, a crew channel is crew, everything else is open. */
       membershipMode: z.enum(["open", "explicit", "crew"]).optional(),
       /** Initial members of an explicit channel. The creator is always one, as a moderator. */
       members: z.array(z.object({ userId: z.number().int().positive(), memberRole: MEMBER_ROLE.default("member") })).max(MAX_EXPLICIT_MEMBERS).default([]),
@@ -443,7 +443,7 @@ export const messageBoardRouter = router({
     }),
 
   /**
-   * 0182 — the one direct channel between two people. Created on first use, returned afterwards;
+   * 0205 — the one direct channel between two people. Created on first use, returned afterwards;
    * A→B and B→A are the same room. Both must belong to the organization.
    */
   direct: roleProcedure("board.direct")
@@ -485,7 +485,7 @@ export const messageBoardRouter = router({
       return { channelRef, created: true, note: "Direct channel. Nobody outside it — management included — opens it without a recorded moderation act." };
     }),
 
-  /** 0182 — who is in an explicit channel. Members and `board.manage` may ask; a direct channel is its two members' to see. */
+  /** 0205 — who is in an explicit channel. Members and `board.manage` may ask; a direct channel is its two members' to see. */
   members: roleProcedure("board.members")
     .input(z.object({ channelRef: z.string().min(1).max(64) }))
     .query(async ({ ctx, input }) => {
@@ -504,7 +504,7 @@ export const messageBoardRouter = router({
       };
     }),
 
-  /** 0182 — add a person to an explicit channel. `board.manage`, or a moderator or manager of the channel. */
+  /** 0205 — add a person to an explicit channel. `board.manage`, or a moderator or manager of the channel. */
   memberAdd: roleProcedure("board.memberAdd")
     .input(z.object({ channelRef: z.string().min(1).max(64), userId: z.number().int().positive(), memberRole: MEMBER_ROLE.default("member") }))
     .mutation(async ({ ctx, input }) => {
@@ -542,7 +542,7 @@ export const messageBoardRouter = router({
       return { channelRef: input.channelRef, userId: input.userId, added: true, note: "Added. A new member does not inherit the conversation before they joined." };
     }),
 
-  /** 0182 — end a membership. The row stays; what they were sent stays theirs. A person may leave on their own. */
+  /** 0205 — end a membership. The row stays; what they were sent stays theirs. A person may leave on their own. */
   memberRemove: roleProcedure("board.memberRemove")
     .input(z.object({ channelRef: z.string().min(1).max(64), userId: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
@@ -566,7 +566,7 @@ export const messageBoardRouter = router({
     }),
 
   /**
-   * 0182 — the caller's inbox: every channel they may open, with what is waiting on them.
+   * 0205 — the caller's inbox: every channel they may open, with what is waiting on them.
    * Open channels by the channel rule, crew channels by membership, explicit channels by a row.
    */
   mine: roleProcedure("board.mine")
@@ -607,7 +607,7 @@ export const messageBoardRouter = router({
    * it happened; `serverReceivedAt` is stamped here. A queued message posted
    * three hours later keeps both.
    *
-   * 0182 — `clientMutationId` with `deviceId` is the replay identity: the same
+   * 0205 — `clientMutationId` with `deviceId` is the replay identity: the same
    * pair twice returns the message written the first time.
    */
   post: roleProcedure("board.post")
@@ -676,13 +676,13 @@ export const messageBoardRouter = router({
         }
         recipients = current.map(m => m.userId);
       } else if (opened.member) {
-        // 0182 — an explicit channel's audience is its current members, exactly as a crew's is.
+        // 0205 — an explicit channel's audience is its current members, exactly as a crew's is.
         if (input.recipients.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Recipients of an explicit channel are derived from current membership" });
         if (opened.member.standing !== "current" || !opened.member.current) throw new TRPCError({ code: "FORBIDDEN", message: "Not a current member of this channel" });
         if (!memberMayPost(opened.member.current.memberRole)) throw new TRPCError({ code: "FORBIDDEN", message: "This channel role may read and not post" });
         recipients = (await currentExplicitMembers(d, channelRow.channelRef, acceptedAt)).map(m => m.userId);
       } else if (channelType === "announcement" && !input.recipients.length) {
-        // 0182 — an announcement with nobody to acknowledge it has no roll-call. The organization's
+        // 0205 — an announcement with nobody to acknowledge it has no roll-call. The organization's
         // membership is the audience when the caller named none; the single tenant has no
         // membership table to resolve from and is refused rather than guessed.
         recipients = await organizationAudience(d, acting, acceptedAt);
@@ -833,7 +833,7 @@ export const messageBoardRouter = router({
         const view = await viewFor(d, { kind: row.kind, objectRef: row.objectRef, heldPermissions: permissionsFor(readerRoles) });
         byMessage.set(row.messageRef, [...(byMessage.get(row.messageRef) ?? []), view]);
       }
-      // 0182 — the reader's own receipt, so a screen asks for an acknowledgement only from somebody
+      // 0205 — the reader's own receipt, so a screen asks for an acknowledgement only from somebody
       // who owes one. No receipt is `null`: not in the audience, which is not "acknowledged".
       const myReceipts = visible.length && viewer.internal
         ? await d.select({ messageRef: messageReceipts.messageRef, acknowledgedAt: messageReceipts.acknowledgedAt }).from(messageReceipts)
@@ -876,7 +876,7 @@ export const messageBoardRouter = router({
   /**
    * Say you have it. Only the recipient can, for their own receipt.
    *
-   * 0182 — `deviceAcknowledgedAt` is the device's clock; the server's own stamp is the audit time.
+   * 0205 — `deviceAcknowledgedAt` is the device's clock; the server's own stamp is the audit time.
    * Naturally idempotent: a second acknowledgement moves nothing and says so.
    */
   acknowledge: roleProcedure("board.acknowledge")
@@ -997,7 +997,7 @@ export const messageBoardRouter = router({
     }),
 
   /**
-   * 0182 — moderation, the one way into a conversation the caller is not in.
+   * 0205 — moderation, the one way into a conversation the caller is not in.
    *
    * Sensitive, and never silent: the read is a `moderator_read` event on the
    * channel, naming who, when and why, before a single message is returned.
@@ -1020,7 +1020,7 @@ export const messageBoardRouter = router({
       };
     }),
 
-  /** 0182 — withdraw somebody else's message as a moderator. Recorded on the channel; nothing is deleted. */
+  /** 0205 — withdraw somebody else's message as a moderator. Recorded on the channel; nothing is deleted. */
   moderateWithdraw: roleProcedure("board.moderateWithdraw")
     .input(z.object({ messageRef: z.string().min(1).max(64), reason: z.string().min(10).max(600), at: z.coerce.date().default(() => new Date()) }))
     .mutation(async ({ ctx, input }) => {

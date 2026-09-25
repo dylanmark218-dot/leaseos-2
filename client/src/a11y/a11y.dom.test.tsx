@@ -23,7 +23,7 @@ import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser } from 
 import { BoardPanelView, type BoardPanelViewProps } from "../portal/panels/BoardPanelView";
 import { presentOpenWork } from "../portal/boardModel";
 
-/** 0182/0183 — the Board, read in a cab: conversations with a queued message, and an open-work card. */
+/** 0205/0206 — the Board, read in a cab: conversations with a queued message, and an open-work card. */
 function board(o: Partial<BoardPanelViewProps> = {}): BoardPanelViewProps {
   const at = new Date("2026-10-20T14:00:00Z");
   const channels = [{ channelRef: "CH-D", type: "dispatch", name: "Dispatch — North", unacknowledged: 0 }, { channelRef: "CH-S", type: "safety", name: "Safety", unacknowledged: 1 }];

@@ -202,7 +202,7 @@ export function intendToAssign(args: { post: ShiftPost; candidate: Candidate; in
 }
 
 /* ------------------------------------------------------------------ */
-/* 0183 — the post's life, and the offer's                              */
+/* 0206 — the post's life, and the offer's                              */
 /* ------------------------------------------------------------------ */
 
 export type PostStatus = "draft" | "open" | "closed" | "filled" | "cancelled" | "expired";
@@ -280,7 +280,7 @@ export function effectiveOfferStatus(offer: { status: OfferStatus; expiresAt: Da
 }
 
 /* ------------------------------------------------------------------ */
-/* 0183 — availability is a declaration                                 */
+/* 0206 — availability is a declaration                                 */
 /* ------------------------------------------------------------------ */
 
 export type AvailabilityState = "available" | "unavailable" | "on_call" | "available_for_overtime";

@@ -48,7 +48,7 @@ export function captureSyncPriority(kind: CaptureKind): number {
       return 20;
     case "photo":
       return 40;
-    // 0182/0183 — never packaged (see DIRECT_CAPTURE_KINDS); ranked only so the switch is total.
+    // 0205/0206 — never packaged (see DIRECT_CAPTURE_KINDS); ranked only so the switch is total.
     // Their own sender orders them: acknowledgements first.
     case "board_acknowledgement":
     case "board_message":
@@ -114,7 +114,7 @@ export class SyncEngine {
     if (!deviceRef) return none("Device not enrolled");
     if ((await this.deps.store.getMeta("deviceStatus")) === "revoked") return none("This device was revoked — recapture on an enrolled device", "revoked");
 
-    // 0182/0183 — direct captures (a message, an acknowledgement, a response to open work) go to
+    // 0205/0206 — direct captures (a message, an acknowledgement, a response to open work) go to
     // their own procedure through BoardQueue. Packaging one would upload a conversation as evidence.
     const queued = prioritizeQueuedCaptures((await this.deps.store.listCaptures({ syncState: "queued" })).filter(c => !isDirectCapture(c.kind))).slice(0, MAX_ITEMS_PER_PACKAGE);
     if (queued.length === 0) return none("Nothing to sync", "active");

@@ -270,7 +270,7 @@ export type Permission =
   | "timeOff.request" | "timeOff.decide" | "timeOff.schedulingRead"
   // v22.20 — open shifts. Posting work and wanting it are different acts.
   | "shifts.post" | "shifts.read" | "shifts.interest"
-  // 0183 — declaring your own availability is a statement about yourself and nobody else.
+  // 0206 — declaring your own availability is a statement about yourself and nobody else.
   | "shifts.availability_own"
   // v22.20 — crews. Reading a forecast and changing who is on a crew differ.
   | "crews.read" | "crews.manage"
@@ -282,7 +282,7 @@ export type Permission =
   | "assistant.ask" | "assistant.curate"
   // v22.20 — the board. Creating a channel is not the same as posting in one.
   | "board.read" | "board.post" | "board.manage"
-  // 0182 — publishing company-wide or emergency is not posting; reading a private conversation as
+  // 0205 — publishing company-wide or emergency is not posting; reading a private conversation as
   // a moderator is neither reading nor managing, and every use of it is an event.
   | "board.publish" | "board.moderate"
   // v22.20 — the agent. Asking it to work, acting, and approving differ.
@@ -1722,7 +1722,7 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
-  // 0183 — a person's own availability reads and writes `ctx.user.id` and nothing the request could name.
+  // 0206 — a person's own availability reads and writes `ctx.user.id` and nothing the request could name.
   "shifts.availability_own",
 ] as const;
 
@@ -2770,7 +2770,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "shifts.respond": "shifts.interest",
   "shifts.offerRespond": "shifts.interest",
   "shifts.interests": "shifts.read",
-  // 0183 — the post's lifecycle and its offers are the poster's acts; linking a post to a slot is
+  // 0206 — the post's lifecycle and its offers are the poster's acts; linking a post to a slot is
   // an assignment act and carries the binding's own permission.
   "shifts.publish": "shifts.post",
   "shifts.close": "shifts.post",

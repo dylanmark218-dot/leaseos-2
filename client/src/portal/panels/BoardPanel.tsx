@@ -1,5 +1,5 @@
 /**
- * 0182/0183 — the Board, the container.
+ * 0205/0206 — the Board, the container.
  *
  * Reads come from the server: `board.mine` (the conversations this person may open),
  * `board.read` (one of them), `shifts.list` and `shifts.get` (open work, with the person's own
