@@ -44,8 +44,8 @@
  * binding and target revisions.
  */
 
-import { NEVER_AUTONOMOUS } from "../../actionGateway";
-import type { ProcedureName } from "../../recordsAuthorization";
+import { HUMAN_AUTHORIZATION_PERMISSIONS, NEVER_AUTONOMOUS } from "../../actionGateway";
+import { permissionForProcedure, type ProcedureName } from "../../recordsAuthorization";
 import { FORMS } from "../../aiProposal";
 
 export type ToolCategory = "read" | "propose" | "human_step";
@@ -246,12 +246,31 @@ export function resolveTool(allowlist: TaskAllowlist, toolKey: string): ToolDefi
   if (!tool) {
     throw new ToolNotAllowed(`${toolKey} is not available to task ${allowlist.taskKey}`);
   }
-  if ((NEVER_AUTONOMOUS as readonly string[]).includes(tool.procedure)) {
+  const refused = agentMayNotCall(tool.procedure);
+  if (refused) {
     // Belt and braces: the registry should never have contained one, and if a
     // future edit adds one, being on a list must not make it reachable.
-    throw new ToolNotAllowed(`${tool.procedure} is never performed by an agent`);
+    throw new ToolNotAllowed(refused);
   }
   return tool;
+}
+
+/**
+ * Why an agent tool may not call this procedure, or null when it may.
+ *
+ * By name (`NEVER_AUTONOMOUS`) and — CP1.5 — by permission: a procedure authorized by one of the
+ * `HUMAN_AUTHORIZATION_PERMISSIONS` returns a unit, a driver or a load to service (a hold release, a
+ * mechanic release, an out-of-service clearance), and a tool calls procedures as the driver, so a
+ * tool naming one would be a person's signature performed by the agent. Whatever the procedure is
+ * called, and whether or not it exists yet.
+ */
+export function agentMayNotCall(procedure: string): string | null {
+  if ((NEVER_AUTONOMOUS as readonly string[]).includes(procedure)) return `${procedure} is never performed by an agent`;
+  const permission = permissionForProcedure(procedure);
+  if (permission && HUMAN_AUTHORIZATION_PERMISSIONS.includes(permission)) {
+    return `${procedure} requires ${permission}: returning something to service is a person's act, never an agent tool`;
+  }
+  return null;
 }
 
 /** A run that has spent its budget stops. It does not ask for more. */
