@@ -23,6 +23,12 @@ const REMOVED = [
     from: "server/_core/dispatchMatching.ts",
     survivor: { file: "server/_core/dispatchAward.ts", name: "decideAward" },
   },
+  {
+    question: "which ticket lines may be billed, and which wait or block?",
+    removed: ["splitByDisposition"],
+    from: "server/_core/fieldTicket.ts",
+    survivor: { file: "server/_core/invoiceDraft.ts", name: "draftFromTicket" },
+  },
 ] as const;
 
 const walk = (dir: string): string[] =>

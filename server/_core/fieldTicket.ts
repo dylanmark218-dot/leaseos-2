@@ -164,21 +164,6 @@ export function deriveSignatureStatus(
   return "unsigned";
 }
 
-/**
- * Split lines into what may proceed to billing and what needs a human.
- * A disputed line is never dropped — an unrecorded dispute is a charge
- * quietly written off.
- */
-export function splitByDisposition<T extends { disposition: LineDisposition }>(
-  lines: T[]
-) {
-  return {
-    billable: lines.filter(l => l.disposition === "accepted"),
-    review: lines.filter(l => l.disposition === "disputed"),
-    unpresented: lines.filter(l => l.disposition === "not_presented"),
-  };
-}
-
 /* ------------------------------------------------------------------ */
 
 export type ReconciliationInput = {

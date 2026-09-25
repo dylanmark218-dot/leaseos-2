@@ -3,7 +3,6 @@ import {
   buildSignedScopeStatement,
   deriveSignatureStatus,
   reconcileJob,
-  splitByDisposition,
   validateFieldTicketScope,
   type LineDisposition,
   type SignatureStatus,
@@ -140,33 +139,6 @@ describe("deriveSignatureStatus", () => {
     expect(deriveSignatureStatus(d("not_presented", "not_presented"))).toBe(
       "unsigned"
     );
-  });
-});
-
-describe("splitByDisposition", () => {
-  it("keeps a disputed line rather than dropping it", () => {
-    const lines = [
-      { disposition: "accepted" as LineDisposition, description: "service" },
-      { disposition: "disputed" as LineDisposition, description: "standby" },
-      {
-        disposition: "not_presented" as LineDisposition,
-        description: "washout",
-      },
-    ];
-    const r = splitByDisposition(lines);
-    expect(r.billable).toHaveLength(1);
-    expect(r.review).toHaveLength(1);
-    expect(r.review[0].description).toBe("standby");
-    expect(r.unpresented).toHaveLength(1);
-  });
-
-  it("lets an accepted service bill while a disputed standby waits", () => {
-    const lines = [
-      { disposition: "accepted" as LineDisposition, kind: "service" },
-      { disposition: "accepted" as LineDisposition, kind: "disposal" },
-      { disposition: "disputed" as LineDisposition, kind: "standby" },
-    ];
-    expect(splitByDisposition(lines).billable).toHaveLength(2);
   });
 });
 
