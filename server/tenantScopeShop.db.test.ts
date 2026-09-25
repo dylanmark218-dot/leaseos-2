@@ -45,7 +45,9 @@ d("the shop belongs to the organization that owns the unit", () => {
     await expect(callerFor(mechB).shop.unitCost({ unitId: a.unitId })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(callerFor(mechB).shop.workOrderCost({ workOrderNumber: a.workOrderNumber })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(callerFor(mechB).shop.workOrderAdvance({ workOrderId: a.workOrderId, to: "waiting_parts" })).rejects.toMatchObject({ code: "NOT_FOUND" });
-    await expect(callerFor(mechB).shop.warrantyPolicyRecord({ subjectType: "unit_component", subjectId: 1, unitId: a.unitId, coverageUntil: new Date("2027-01-01") } as never)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // F1.1 — warranty records carry no organization, so with organizations present they are refused outright
+    // (OWNERSHIP_UNRESOLVED) before any unit is looked up. Still a refusal; it confirms nothing about A's unit.
+    await expect(callerFor(mechB).shop.warrantyPolicyRecord({ subjectType: "unit_component", subjectId: 1, unitId: a.unitId, coverageUntil: new Date("2027-01-01") } as never)).rejects.toThrow(/OWNERSHIP_UNRESOLVED/);
     await expect(callerFor(mechB).shop.recallRecord({ source: "OEM", sourceRef: `RC-${rnd()}`, summary: "brake line fitting may crack under load", unitIds: [a.unitId] })).rejects.toMatchObject({ code: "NOT_FOUND" });
     // A member of an organization does not see the historical single tenant's unowned unit either; the legacy caller does.
     await expect(callerFor(mechA).shop.unitCost({ unitId: unowned.unitId })).rejects.toMatchObject({ code: "NOT_FOUND" });
