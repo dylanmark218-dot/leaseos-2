@@ -65,10 +65,97 @@ licence document is filed and verified. Three test fixtures that built an "estab
 the legacy date alone needed a verified `driver_licence`; a fleet that has not migrated its licences
 will see the same.
 
-## Still open in this duplication
+## The rest of the duplication — reconciled (2026-09-25)
 
-- The `documentExpiry` board tile (`server/widgetSources.ts`) still decides expiry inline in the
-  vault's vocabulary. Routing it through the adapter is the next step.
-- Insurance-proof selection in `policiesCovering` still picks the latest-expiring proof itself.
+A survey of every reader of `complianceDocuments` found the two sites named above and five more.
+All seven now map the canonical verdict; none decides validity itself.
+
+### The one answer
+
+`server/_core/complianceDocumentValidity.ts`:
+
+- `complianceRequirementValidity(rows, docTypes, at, noticeDays)` — the entry point. Each accepted
+  type is judged by `documentValidity.validityOf` on its own rows; `mostFavourableVerdict` picks
+  the one that stands (moved here from the composer). The verdict names its row (`documentId`) and,
+  when it is `unverified`, the date the newest row claims (`claimedExpiresAt`) and whether that
+  claim has already lapsed (`claimLapsed`). A lapsed claim may block; it never clears.
+- Rows captured in the same instant order by id, so the same records always give the same verdict.
+- `documentExpiry` (the tile's list) and `candidateVerdict` (the passport's grouping per subject,
+  in `compliancePassport.ts`) are built on it.
+
+### Every site, what it did, what it does
+
+| Site | Before | Semantic differences from canonical | Now |
+|---|---|---|---|
+| Dispatch credentials (`readinessComposer.credentialState`) | converted earlier in this item | — | `complianceRequirementValidity` |
+| documentExpiry tile (`widgetSources`) | per row: `needs_review`→unverified, no expiry→**current**, date vs now | no expiry read as current (canonical `incomplete`); not-yet-effective read as current; an upload beside the verified row showed as a second document; judged from the org's newest 100 rows | one row per type, the canonical state; presentation only (label, group, days to an established expiry); unknown shows **Not established**; reads the operator's own history via `documents.list`'s owner filter; a history at the cap reads `unknown` |
+| Insurance proof, dispatch (`readinessComposer.policiesCovering`) | latest-expiring `insurance_proof`/`insurance_card` row, any state | an unverified or rejected upload with a later date displaced a verified proof | `proofFromDocuments` |
+| Insurance proof, office (`insuranceRouter.policiesFor`) | the **first** `insurance_proof` row the database returned; ignored `insurance_card` | arbitrary row; a card dispatch accepted was invisible here | `proofFromDocuments`, same types as dispatch |
+| Proof assessment (`insuranceRisk.assessCoverage`) | read the proof's date and status | verified proof with no expiry, or not yet effective, stood as proof | maps the verdict (table below); the company-level substitution is named `policy_record`, not a fabricated verified document |
+| Medical fitness (`medicalFitnessForDispatch`, composer and `compliance.medicalEligibility`) | one row by latest expiry, read inline | verified no expiry → **yes**; not yet effective → **yes**; an older verified row passed over for a newer unchecked one | projection of the verdict |
+| Exception centre (`surfacesService` → `exceptionCentre`) | per row: date vs now | a superseded licence raised **expired** beside its renewal in force; no-expiry and not-yet-effective raised nothing | verdict per owner and type over the owner's whole history; the review queue is a separate list of rows the SQL selected |
+| Passport (`evaluateRequirement`, `compliance.passport`, requirement engine) | ranked candidates itself, read the winner's date | no expiry → **satisfied**; not yet effective → **satisfied**; older verified row outranked a newer expired correction; a combination read one subject's rows as another's versions | `candidateVerdict` per subject and type; two statuses added rather than rounding |
+| Customer-required documents (`evaluateWorkContext`) | any verified row of the type | an **expired** verified document counted | in force by the verdict |
+| Foreign TDG recognition (`academy.foreignTdgRoadRecognize`) | verified and has a date | an **expired** or not-yet-effective certificate was recognized | must be in force by the verdict |
+
+### Final handling of the states that are not "in force"
+
+| Canonical state | Dispatch gate | Tile | Insurance | Medical | Exception centre | Passport |
+|---|---|---|---|---|---|---|
+| `unverified` | `_unknown` (overridable) | Not established | `coverage_reported` (review) | unknown | review queue only | `evidence_unverified` (review) |
+| `unverified`, claim lapsed | `_expired` | Not established | `document_expired` | no | expired | expired |
+| `incomplete` (no expiry, type must have one) | `_unknown` | Not established | `coverage_reported` | unknown | "no expiry recorded" | `evidence_incomplete` (unknown) |
+| `not_yet_effective` | `_missing` | Verified, not yet in force | `coverage_reported` | no | "not yet in force" | `not_yet_effective` (blocked) |
+| `rejected` | `_missing` | Rejected on review | `document_missing` | no | — | `evidence_rejected` / withheld |
+| `expired` | `_expired` | Expired | `document_expired` | no | expired | expired |
+| `none` | `_missing` | (no row) | `document_missing` | unknown | — | missing |
+
+Unknown is never shown or treated as expired or valid. `EXPIRY_OPTIONAL_TYPES` is still empty, so
+every verified document without an expiry is `incomplete`.
+
+### Guard
+
+`server/complianceValidityGuard.test.ts` reads the source as a TypeScript AST:
+
+- only `complianceDocumentValidity.ts` and `qualificationValidity.ts` import `validityOf`;
+- each consumer above calls a canonical entry point and contains neither a document's
+  `verificationStatus` compared with a verification literal nor a document's
+  `expiresAt`/`issuedAt`/`effectiveFrom` compared with a time (receivers are narrowed per function,
+  so the policy's own expiry or a bill's due date is not caught);
+- the files importing `complianceDocuments` are a pinned census, each with a sentence on how it
+  stands; a new reader fails until someone says whether it decides validity.
+
+Each consumer, restored to its old code, fails the guard; each mapping, mutated, fails the tests.
+
+### Tests
+
+`complianceValidityConsumers.test.ts` (the verdict on the separating record shapes, each consumer's
+mapping, insurance selection including multiple and no valid candidates, cross-consumer equivalence,
+the tile through the real reader, the passport, the combination and customer-required documents);
+`complianceValidityConsumers.db.test.ts` (the same records through `composeReadiness`,
+`compliance.medicalEligibility`, `insurance.coverageForEntity` and the tile against the database;
+entity scope for the proof; the exception centre; the TDG refusal); `surfaces.test.ts` (the exception
+centre's per-type cases).
+
+### Consequences to expect
+
+- A verified document with no expiry now reads unknown/not established everywhere, not current.
+- A proof, medical or licence verified but not yet effective no longer counts until it takes effect.
+- The insurance office now accepts an `insurance_card` wherever dispatch did.
+- `documents.list` takes an optional `{ ownerType, ownerId }`; without it the answer is unchanged.
+
+### Recorded, not changed here
+
+- **Tenant scope on insurance and medical reads.** `insurance.coverageForEntity` scopes policies by
+  a client-supplied `financialEntityId` and reads the entity's proofs by type and id;
+  `compliance.medicalEligibility` reads by `operatorId`. Neither checks the entity against the
+  caller's organization. The proof is correctly the entity's own record set (tested), but whose
+  entity it is was not in this item's scope — an authorization change, not a validity one.
+- **Academy qualifications.** `trainingAcademyRouter` (the qualification check near the end of the
+  file) filters `academyQualifications` by `status` and `expiresAt` inline, beside
+  `qualificationValidity`. That is the same shape of duplication for a different table and belongs
+  with the qualification engine, not here.
 - `EXPIRY_OPTIONAL_TYPES` is a list, not document-type metadata. Moving it to canonical type
-  metadata is a later hardening checkpoint, not a blocker for this one.
+  metadata is a later hardening checkpoint.
+- `compliancePassport.test.ts` › "through the registry" passes on a fresh database and fails on a
+  second run against the same one; it is not re-run safe. The gate always uses a fresh database.
