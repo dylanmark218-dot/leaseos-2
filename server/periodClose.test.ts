@@ -79,7 +79,7 @@ describe("the close decision", () => {
 });
 
 describe("the fuel line reaches the exception centre", () => {
-  const empty = (): ExceptionSources => ({ openCalibrationSweeps: [], inspectorRequests: [], now: NOW, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [], syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [] });
+  const empty = (): ExceptionSources => ({ openCalibrationSweeps: [], inspectorRequests: [], now: NOW, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentialsAwaitingVerification: [], credentialVerdicts: [], aiProposals: [], aiQuestions: [], syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [] });
   it("raises receiptless purchases, unexplained tank variance and a soft-closed period, each gated on the role that acts", () => {
     const xs = deriveExceptions({ ...empty(),
       statementsWithFindings: [{ statementRef: "STMT-1", provider: "Cardlock Co", unmatched: 2, ambiguous: 1, importedAt: NOW }, { statementRef: "STMT-2", provider: "X", unmatched: 0, ambiguous: 0, importedAt: NOW }],

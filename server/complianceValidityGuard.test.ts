@@ -119,6 +119,10 @@ const CONSUMERS: { file: string; name: string; kind: "fn" | "case"; mustCall: bo
   { file: "server/insuranceRouter.ts", name: "policiesFor", kind: "fn", mustCall: true },
   { file: "server/_core/compliancePassport.ts", name: "medicalFitnessForDispatch", kind: "fn", mustCall: false },
   { file: "server/complianceRouter.ts", name: "medicalEligibility", kind: "fn", mustCall: true },
+  { file: "server/surfacesService.ts", name: "loadExceptionSources", kind: "fn", mustCall: true },
+  { file: "server/_core/exceptionCentre.ts", name: "deriveExceptions", kind: "fn", mustCall: false,
+    // The centre dates bills, purchase requests and policies too; a credential reaches it as `c` / `v`.
+    receiver: r => /^(c|v|c\.verdict)$/.test(r.getText()) },
 ];
 
 describe("one place decides whether a compliance document is in force", () => {
@@ -173,7 +177,7 @@ const READERS: Record<string, string> = {
   "server/insuranceRouter.ts": "insurance office: the entity's proof through proofFromDocuments",
   "server/complianceRouter.ts": "medicalEligibility through complianceRequirementValidity; writes (record, verify) decide nothing; the passport is read by evaluateRequirement — see SPINE_ITEM2_COMPLIANCE_VALIDITY.md, still open",
   "server/db.ts": "listComplianceDocuments (the documentExpiry tile's source) and writes; decides nothing",
-  "server/surfacesService.ts": "the exception centre's credential feed; its classification in exceptionCentre.ts is still open — see SPINE_ITEM2_COMPLIANCE_VALIDITY.md",
+  "server/surfacesService.ts": "the exception centre: flagged owners' whole history per type through complianceRequirementValidity; exceptionCentre.ts maps the verdicts",
   "server/requirementRouter.ts": "requirement-engine credentials for evaluateRequirement — still open, as above",
   "server/auditRouter.ts": "copies rows into an audit package verbatim; decides nothing",
   "server/hosRouter.ts": "files a scanned paper log as a needs_review document; decides nothing",

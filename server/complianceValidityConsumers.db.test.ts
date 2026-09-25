@@ -16,6 +16,8 @@ import { appRouter } from "./routers";
 import { grantUserRole, operatorForUserInScope } from "./db";
 import { composeReadiness } from "./readinessComposer";
 import { widgetReaderFor } from "./widgetSources";
+import { loadExceptionSources } from "./surfacesService";
+import { deriveExceptions } from "./_core/exceptionCentre";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { complianceRequirementValidity, type ComplianceDocumentRow } from "./_core/complianceDocumentValidity";
 import type { ValidityState } from "./_core/documentValidity";
@@ -161,5 +163,22 @@ d("insurance proof selection is scoped to the entity's own records", () => {
     const [someoneElse] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name) VALUES (?)", [`Op ${rnd()}`]);
     await file("operator", someoneElse.insertId, "medical_fitness", [{ status: "verified", expires: 300, captured: -5 }]);
     expect((await callerFor(w.userId).compliance.medicalEligibility({ operatorId: w.operatorId })).eligible).toBe("unknown");
+  }, 30_000);
+});
+
+d("the exception centre raises expiry from the verdict, over the owner's whole history", () => {
+  it("a superseded licence beside its renewal in force raises no expiry; a lone lapsed one does", async () => {
+    const w = await world();
+    await file("operator", w.operatorId, "driver_licence", [
+      { status: "verified", expires: -20, captured: -400 },
+      { status: "verified", expires: 300, captured: -25 },
+    ]);
+    const [lapsed] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name) VALUES (?)", [`Op ${rnd()}`]);
+    await file("operator", lapsed.insertId, "driver_licence", [{ status: "verified", expires: -20, captured: -400 }]);
+
+    const xs = deriveExceptions(await loadExceptionSources(new Date()));
+    const about = (id: number) => xs.filter(x => x.subjectType === "operator" && x.subjectId === id && x.key.startsWith("cred:")).map(x => x.key.split(":").pop());
+    expect(about(w.operatorId)).toEqual([]);
+    expect(about(lapsed.insertId)).toEqual(["expired"]);
   }, 30_000);
 });
