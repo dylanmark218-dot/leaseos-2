@@ -45,7 +45,6 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   "server/fieldroute.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "the document is created with expiresAt; only its creation is asserted" },
   "server/gst.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "period-bound arithmetic (2026-Q3 ends 1 October); no comparison with now" },
   "server/ifta.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "quarter-bound arithmetic; no comparison with now" },
-  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "acquiredAt is fixed at 2026-03-01; schedule/schedulePrepare receive an explicit asOf; dispose compares disposedAt only with acquiredAt and the period's close state; 2026-10-31 is the fixed fiscal-year end. The twin reads the real clock, but only on the km-projection path, which needs a recorded distance and this unit has none. The two `acquiredAt: new Date()` registrations are refused before any date is used" },
   "server/qualificationStore.test.ts": { dates: ["2026-10-01", "2026-11-10"], verdict: "clock_independent", reason: "the expired holding is evaluated against the shift's explicit STARTS, not now" },
   // CI-0.1 (2026-09-24). The first review this list has been given with a proof rather than a reading:
   // the file's own "CI-0.1" tests run the fixture year under five system clocks (2026-09-24 through
