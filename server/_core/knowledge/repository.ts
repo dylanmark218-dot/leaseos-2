@@ -31,12 +31,19 @@
  * neither reached nor declared. Delete this note when a router calls in.
  */
 
-import { and, eq } from "drizzle-orm";
-import { knowledgeChunks, knowledgeDocuments, knowledgeSources } from "../../../drizzle/schema";
+import { randomUUID } from "node:crypto";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
+import {
+  knowledgeChunks, knowledgeDocuments, knowledgeSnapshots, knowledgeSources, knowledgeVersions,
+} from "../../../drizzle/schema";
 import { getDb } from "../../db";
 import {
   checkSourceGate, licenceFor, type IngestionPurpose, type SourceLicenceRecord,
 } from "./sourceGate";
+import { validateCatalogueEntry, type CatalogueEntry } from "./sourceCatalogue";
+import { classifyRetrieval, sha256Hex, validateSourceUrl, type RetrievalOutcome, type UrlRefusal } from "./provenance";
+import { validateTopics } from "./industryTaxonomy";
+import type { CollectResult } from "./collectors";
 
 type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
@@ -195,6 +202,9 @@ export type ChunkResult =
   | { written: true; count: number; authorizedBy: string }
   | { written: false; reason: string; code: string };
 
+/** Where the text came from (0197). Given whenever the chunks are the product of a recorded retrieval. */
+export type ChunkProvenance = { snapshotRef: string; topics: readonly string[] };
+
 /**
  * Write chunks.
  *
@@ -202,9 +212,37 @@ export type ChunkResult =
  * quarantine. Both, because either alone lets something through: a licensed
  * source whose document was rejected for another reason, or a released document
  * whose source only ever allowed linking.
+ *
+ * With provenance (0197), also refused unless the snapshot belongs to this
+ * document, produced a version, and was not a failed extraction — so a chunk can
+ * always be traced to the exact bytes it was cut from, and text from a parse
+ * that failed never reaches the corpus. Every chunk records its own hash.
  */
-export async function writeChunks(documentRef: string, chunks: readonly ChunkWrite[]): Promise<ChunkResult> {
+export async function writeChunks(
+  documentRef: string, chunks: readonly ChunkWrite[], provenance?: ChunkProvenance,
+): Promise<ChunkResult> {
   const db = await dbOrThrow();
+
+  let versionRef: string | null = null;
+  let topicsJson: string[] | null = null;
+  if (provenance) {
+    const topics = validateTopics(provenance.topics);
+    if (!topics.ok) return { written: false, code: "BAD_TOPICS", reason: topics.reason };
+    topicsJson = [...topics.topics];
+    const [snap] = await db.select().from(knowledgeSnapshots)
+      .where(eq(knowledgeSnapshots.snapshotRef, provenance.snapshotRef)).limit(1);
+    if (!snap) return { written: false, code: "SNAPSHOT_NOT_FOUND", reason: `no snapshot "${provenance.snapshotRef}"` };
+    if (snap.documentRef !== documentRef) {
+      return { written: false, code: "SNAPSHOT_DOCUMENT_MISMATCH", reason: `snapshot "${snap.snapshotRef}" is a retrieval of "${snap.documentRef}", not "${documentRef}"` };
+    }
+    if (!snap.versionRef || !snap.contentSha256) {
+      return { written: false, code: "SNAPSHOT_NOT_USABLE", reason: `snapshot "${snap.snapshotRef}" was ${snap.outcome} and produced no trustworthy content` };
+    }
+    if (snap.extractionStatus === "failed") {
+      return { written: false, code: "EXTRACTION_FAILED", reason: `extraction of "${snap.snapshotRef}" failed: ${snap.extractionError ?? "no reason recorded"}` };
+    }
+    versionRef = snap.versionRef;
+  }
 
   const rows = await db.select().from(knowledgeDocuments)
     .where(eq(knowledgeDocuments.documentRef, documentRef)).limit(1);
@@ -238,6 +276,10 @@ export async function writeChunks(documentRef: string, chunks: readonly ChunkWri
     page: c.page ?? null,
     // So a revocation can find its own rows.
     authorizedByAssessmentId: source.assessment_id,
+    versionRef,
+    snapshotRef: provenance?.snapshotRef ?? null,
+    contentHash: sha256Hex(c.text),
+    topicsJson,
   })));
 
   return { written: true, count: chunks.length, authorizedBy: source.assessment_id };
@@ -268,4 +310,255 @@ export async function quarantined(sourceId?: string): Promise<{ documentRef: str
     title: knowledgeDocuments.title,
     purpose: knowledgeDocuments.purpose,
   }).from(knowledgeDocuments).where(where);
+}
+
+/* ------------------------------------------------------------------ */
+/* The catalogue (0197)                                                */
+/* ------------------------------------------------------------------ */
+
+export type CatalogueWrite = { written: true; sourceId: string } | { written: false; code: string; reason: string };
+
+/**
+ * Describe a source: publisher, format, authority, topics, crawl cadence.
+ *
+ * Idempotent, and blind to the licence. The upsert names only catalogue
+ * columns, so re-running the seed never changes what a source is permitted —
+ * a source somebody has assessed stays assessed, and one nobody has stays
+ * `unassessed`, which the column default makes the starting point.
+ *
+ * A source that has been deactivated is not reactivated by re-seeding:
+ * `active` is not in the update set. Retiring a source is a decision, and a
+ * seed script is not the place to reverse one.
+ */
+export async function registerCatalogueEntry(entry: CatalogueEntry): Promise<CatalogueWrite> {
+  const verdict = validateCatalogueEntry(entry);
+  if (!verdict.ok) return { written: false, code: verdict.code, reason: verdict.reason };
+  const db = await dbOrThrow();
+
+  const catalogue = {
+    sourceName: entry.sourceName,
+    owner: entry.owner,
+    jurisdiction: entry.jurisdiction,
+    homeUrl: entry.homeUrl,
+    sourceKind: entry.sourceKind,
+    authorityLevel: entry.authorityLevel,
+    domainsJson: [...entry.domains],
+    topicsJson: [...entry.topics],
+    refreshIntervalHours: entry.refreshIntervalHours,
+    crawlPolicyJson: { ...entry.crawlPolicy },
+    termsUrl: entry.termsUrl,
+    accessControlled: entry.accessControlled,
+    licenceNotes: entry.licenceNotes,
+  };
+  await db.insert(knowledgeSources)
+    .values({ sourceId: entry.sourceId, ...catalogue })
+    .onDuplicateKeyUpdate({ set: catalogue });
+  return { written: true, sourceId: entry.sourceId };
+}
+
+/** Retire a source. Its rows and history stay; nothing is fetched from it again. */
+export async function deactivateSource(sourceId: string, reason: string): Promise<boolean> {
+  if (!reason.trim()) throw new Error("deactivating a source needs a stated reason");
+  const db = await dbOrThrow();
+  const [res] = await db.update(knowledgeSources)
+    .set({ active: false, deactivatedReason: reason.slice(0, 300) })
+    .where(eq(knowledgeSources.sourceId, sourceId));
+  return (res as { affectedRows?: number }).affectedRows === 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Retrievals (0197)                                                   */
+/* ------------------------------------------------------------------ */
+
+export type SnapshotRequest = {
+  sourceId: string;
+  documentRef: string;
+  result: CollectResult;
+  retrievedAt: Date;
+  /** Where the original bytes were retained. Refused unless the licence permits keeping text. */
+  rawObjectKey?: string | null;
+  /** As stated by this version of the document. Leave null when it states none — never guess. */
+  publishedAt?: Date | null;
+  effectiveFrom?: Date | null;
+  effectiveUntil?: Date | null;
+  recordedByUserId?: number | null;
+  provenance?: Record<string, unknown>;
+};
+
+export type SnapshotRefusal =
+  | UrlRefusal
+  | "SOURCE_NOT_CATALOGUED" | "SOURCE_INACTIVE" | "NO_LICENCE_ASSESSMENT" | "PROHIBITED_SOURCE"
+  | "DOCUMENT_NOT_FOUND" | "DOCUMENT_SOURCE_MISMATCH" | "RAW_RETENTION_NOT_AUTHORIZED" | "BAD_EFFECTIVE_RANGE";
+
+/** Emitted when an official document changed. Checkpoint 1 returns it; a later checkpoint routes it to impact review. */
+export type ChangeSignal = {
+  kind: "REGULATORY_CHANGE_DETECTED";
+  sourceId: string; documentRef: string; snapshotRef: string;
+  fromVersionRef: string; toVersionRef: string; authorityLevel: string;
+};
+
+export type SnapshotResult =
+  | { recorded: true; snapshotRef: string; outcome: RetrievalOutcome; versionRef: string | null; change: ChangeSignal | null }
+  | { recorded: false; code: SnapshotRefusal; reason: string };
+
+const newRef = (prefix: string) => `${prefix}-${randomUUID()}`;
+
+/**
+ * Record one retrieval of a document, whatever happened.
+ *
+ * Refusals (nothing written) are for requests that should never have been
+ * made: an uncatalogued, retired, unassessed or prohibited source, a document
+ * that is not this source's, a URL outside the source's domains, or bytes
+ * retained from a source whose licence does not allow keeping text.
+ *
+ * Everything else is recorded — including a page that was down and bytes whose
+ * hash did not match — because "we checked and could not read it" is part of
+ * the audit trail. What differs is whether a version results:
+ *
+ *   first_seen / changed   a new `knowledgeVersions` row, pointing back at the
+ *                          one it supersedes; the old one is marked, not edited
+ *   unchanged              the existing version is confirmed; nothing new
+ *   unavailable            no version; the previous one is untouched — a page
+ *                          being down is not a rule being repealed
+ *   hash_mismatch          no version, and no raw object reference either
+ *
+ * The document row is locked for the duration, so two collectors finishing at
+ * once cannot both decide they saw the first version.
+ */
+export async function recordSnapshot(req: SnapshotRequest): Promise<SnapshotResult> {
+  const db = await dbOrThrow();
+  const refuse = (code: SnapshotRefusal, reason: string): SnapshotResult => ({ recorded: false, code, reason });
+
+  const [source] = await db.select().from(knowledgeSources).where(eq(knowledgeSources.sourceId, req.sourceId)).limit(1);
+  if (!source) return refuse("SOURCE_NOT_CATALOGUED", `"${req.sourceId}" is not in the source catalogue`);
+  if (!source.active) return refuse("SOURCE_INACTIVE", `"${req.sourceId}" is retired: ${source.deactivatedReason ?? "no reason recorded"}`);
+
+  const licence = licenceFor(req.sourceId);
+  if (!licence) return refuse("NO_LICENCE_ASSESSMENT", `"${req.sourceId}" has no stored licence assessment; nothing may be retrieved from it`);
+  if (licence.status === "prohibited") return refuse("PROHIBITED_SOURCE", `"${source.sourceName}" is prohibited`);
+
+  const domains = Array.isArray(source.domainsJson) ? (source.domainsJson as string[]) : [];
+  const url = validateSourceUrl(req.result.url, domains);
+  if (!url.ok) return refuse(url.code, url.reason);
+
+  if (req.rawObjectKey && !checkSourceGate(req.sourceId, "rag_ingestion").allowed) {
+    return refuse("RAW_RETENTION_NOT_AUTHORIZED",
+      `keeping the original bytes of "${source.sourceName}" is reproduction, and its licence does not permit rag_ingestion; record the hash only`);
+  }
+  if (req.effectiveFrom && req.effectiveUntil && req.effectiveUntil <= req.effectiveFrom) {
+    return refuse("BAD_EFFECTIVE_RANGE", "effectiveUntil must be after effectiveFrom");
+  }
+
+  return db.transaction(async (tx) => {
+    const [doc] = await tx.select().from(knowledgeDocuments)
+      .where(eq(knowledgeDocuments.documentRef, req.documentRef)).for("update").limit(1);
+    if (!doc) return refuse("DOCUMENT_NOT_FOUND", `no document "${req.documentRef}"; quarantine it first`);
+    if (doc.sourceId !== req.sourceId) {
+      return refuse("DOCUMENT_SOURCE_MISMATCH", `"${req.documentRef}" belongs to "${doc.sourceId}", not "${req.sourceId}"`);
+    }
+
+    const [latest] = await tx.select().from(knowledgeSnapshots)
+      .where(eq(knowledgeSnapshots.documentRef, req.documentRef))
+      .orderBy(desc(knowledgeSnapshots.retrievedAt), desc(knowledgeSnapshots.id)).limit(1);
+    const [lastGood] = await tx.select().from(knowledgeSnapshots)
+      .where(and(eq(knowledgeSnapshots.documentRef, req.documentRef), isNotNull(knowledgeSnapshots.versionRef)))
+      .orderBy(desc(knowledgeSnapshots.retrievedAt), desc(knowledgeSnapshots.id)).limit(1);
+
+    const cls = classifyRetrieval(lastGood?.contentSha256 ?? null, {
+      httpStatus: req.result.httpStatus, body: req.result.body, declaredSha256: req.result.declaredSha256,
+    });
+
+    let versionRef: string | null = null;
+    let change: ChangeSignal | null = null;
+    const snapshotRef = newRef("KS");
+
+    if (cls.newVersion && cls.sha256) {
+      versionRef = newRef("KV");
+      const supersedes = lastGood?.versionRef ?? null;
+      await tx.insert(knowledgeVersions).values({
+        versionRef, documentRef: req.documentRef, contentHash: cls.sha256,
+        effectiveFrom: req.effectiveFrom ?? null, effectiveUntil: req.effectiveUntil ?? null,
+        publishedAt: req.publishedAt ?? null, supersedesVersionRef: supersedes,
+      });
+      if (supersedes) {
+        await tx.update(knowledgeVersions).set({ supersededByVersionRef: versionRef })
+          .where(eq(knowledgeVersions.versionRef, supersedes));
+        change = {
+          kind: "REGULATORY_CHANGE_DETECTED", sourceId: req.sourceId, documentRef: req.documentRef, snapshotRef,
+          fromVersionRef: supersedes, toVersionRef: versionRef, authorityLevel: source.authorityLevel,
+        };
+      }
+    } else if (cls.outcome === "unchanged") {
+      versionRef = lastGood?.versionRef ?? null;
+    }
+
+    const trustworthy = cls.sha256 !== null;
+    await tx.insert(knowledgeSnapshots).values({
+      snapshotRef, sourceId: req.sourceId, documentRef: req.documentRef, url: url.url,
+      retrievedAt: req.retrievedAt,
+      collectorKind: req.result.collectorKind, collectorVersion: req.result.collectorVersion.slice(0, 40),
+      outcome: cls.outcome, outcomeReason: cls.reason.slice(0, 500),
+      httpStatus: req.result.httpStatus,
+      contentType: req.result.contentType?.slice(0, 120) ?? null,
+      etag: req.result.etag?.slice(0, 200) ?? null,
+      lastModified: req.result.lastModified?.slice(0, 64) ?? null,
+      byteLength: req.result.body ? req.result.body.byteLength : null,
+      contentSha256: cls.sha256,
+      declaredSha256: req.result.declaredSha256?.slice(0, 128) ?? null,
+      // Bytes that failed their hash are not evidence; do not point at them.
+      rawObjectKey: trustworthy ? (req.rawObjectKey ?? null) : null,
+      previousSnapshotRef: latest?.snapshotRef ?? null,
+      versionRef,
+      publishedAt: cls.newVersion ? (req.publishedAt ?? null) : null,
+      effectiveFrom: cls.newVersion ? (req.effectiveFrom ?? null) : null,
+      effectiveUntil: cls.newVersion ? (req.effectiveUntil ?? null) : null,
+      // Only a new version has anything to extract.
+      extractionStatus: cls.newVersion ? "pending" : "not_applicable",
+      provenanceJson: {
+        ...(req.provenance ?? {}),
+        licenceAssessmentId: licence.assessment_id,
+        ...(req.rawObjectKey && !trustworthy ? { rawObjectKeyDiscarded: true } : {}),
+      },
+      recordedByUserId: req.recordedByUserId ?? null,
+    });
+
+    return { recorded: true as const, snapshotRef, outcome: cls.outcome, versionRef, change };
+  });
+}
+
+export type ExtractionOutcome =
+  | { status: "extracted"; parserVersion: string }
+  | { status: "failed"; parserVersion: string; error: string };
+
+/**
+ * Record how parsing a snapshot went. Once.
+ *
+ * A failure is recorded, not retried in place: the snapshot keeps saying what
+ * happened, the previous version's chunks stay exactly as they were, and
+ * `writeChunks` refuses text from the failed snapshot. The database trigger
+ * refuses a second outcome even if this function were bypassed.
+ */
+export async function recordExtraction(snapshotRef: string, outcome: ExtractionOutcome): Promise<boolean> {
+  const db = await dbOrThrow();
+  const [res] = await db.update(knowledgeSnapshots)
+    .set({
+      extractionStatus: outcome.status,
+      parserVersion: outcome.parserVersion.slice(0, 40),
+      extractionError: outcome.status === "failed" ? outcome.error.slice(0, 500) : null,
+    })
+    .where(and(eq(knowledgeSnapshots.snapshotRef, snapshotRef), eq(knowledgeSnapshots.extractionStatus, "pending")));
+  return (res as { affectedRows?: number }).affectedRows === 1;
+}
+
+/** Every version of a document, oldest first — the input `provenance.versionInForce` reads. */
+export async function versionHistory(documentRef: string) {
+  const db = await dbOrThrow();
+  return db.select({
+    versionRef: knowledgeVersions.versionRef,
+    contentHash: knowledgeVersions.contentHash,
+    effectiveFrom: knowledgeVersions.effectiveFrom,
+    effectiveUntil: knowledgeVersions.effectiveUntil,
+    supersedesVersionRef: knowledgeVersions.supersedesVersionRef,
+    supersededByVersionRef: knowledgeVersions.supersededByVersionRef,
+  }).from(knowledgeVersions).where(eq(knowledgeVersions.documentRef, documentRef)).orderBy(knowledgeVersions.id);
 }

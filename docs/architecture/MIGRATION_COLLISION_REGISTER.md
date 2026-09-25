@@ -117,3 +117,19 @@ anywhere is `0193`, so `0194` is the first free everywhere.
   migration**, rather than afterwards. That ordering is the correction for the `0191`–`0193`
   omission recorded above: those numbers were each verified free before use, but the verification
   went unrecorded, and this register is the only place that verification survives.
+
+## State at the Intelligence Engine Checkpoint 1 claim (2026-09-25, `main` = `a9a7246`, after PR #50)
+
+`main` migration head: **`0194_webhook_secret_ref.sql`**. Re-scanned across `main` and all 88 remote
+branches at the moment of claiming, with the scan above: the highest number held anywhere is `0196`
+(`0195_document_control_register.sql` and `0196_document_control_numbering.sql`, PR #29), so `0197` is
+the first free everywhere.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0197 | `0197_knowledge_provenance.sql` | `claude/leaseos-intelligence-engine-cr2fg1` | none yet | claiming | none | keeps 0197 |
+
+## Change log
+
+* **2026-09-25 (Intelligence Engine Checkpoint 1)**: claimed `0197` and recorded it in the commit that
+  creates the migration, per the S2-E correction above. `0195`/`0196` are PR #29's and are left alone.
