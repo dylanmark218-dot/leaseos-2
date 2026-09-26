@@ -198,6 +198,8 @@ const READERS: Record<string, string> = {
   // and requirement-binding windows, not documents.
   "server/driverPortfolioRouter.ts": "wallet, dispatch view and credential history through driverPortfolio (complianceDocumentValidity); writes a driver-uploaded credential as needs_review",
   "server/driverPortfolioService.ts": "loads the operator's complianceDocuments rows for driverPortfolio; decides nothing itself",
+  // C1b-3's D-05 read adapter (#57), added on merging main.
+  "server/qualificationReads.ts": "an Academy grant's evidence document through complianceDocumentValidity; the grant itself through academyVerdict (qualificationValidity)",
 };
 
 function readdirTs(dir: string): string[] {

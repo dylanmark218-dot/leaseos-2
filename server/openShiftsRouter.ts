@@ -16,15 +16,16 @@
  * check could not run is the failure this whole system is built against, and it
  * would be very easy to write here.
  */
+import { readExpiry } from "./_core/documentValidity";
+import { effectiveQualifications } from "./qualificationReads";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { leaveRequests, operators, shiftInterests, shiftPosts, workerQualifications } from "../drizzle/schema";
+import { leaveRequests, operators, shiftInterests, shiftPosts } from "../drizzle/schema";
 import { resolveActingScope } from "./_core/actingScope";
 import { isAbsent, type LeaveRequest } from "./_core/timeOff";
-import { missingFrom } from "./_core/qualificationValidity";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
@@ -123,17 +124,17 @@ export const openShiftsRouter = router({
       const operator = (await d.select().from(operators).where(eq(operators.id, userId)).limit(1))[0];
       if (!operator?.licenseExpiresAt) {
         reasons.push({ code: "no_licence_recorded", detail: "No licence expiry on record — this cannot be established as current" });
-      } else if (operator.licenseExpiresAt.getTime() < post.startsAt.getTime()) {
+      } else if (readExpiry(operator.licenseExpiresAt, post.startsAt, 0).expiry === "expired") {
         reasons.push({ code: "licence_expired", detail: `Licence expires ${operator.licenseExpiresAt.toISOString().slice(0, 10)}, before this shift` });
       }
 
       /* Everything else the post asks for, now read from the qualification store. */
       const required = JSON.parse(post.requiredQualificationsJson) as string[];
       if (required.length) {
-        const held = await d.select().from(workerQualifications).where(eq(workerQualifications.userId, userId)).limit(200);
-        // One rule, in one place. This was decided inline here and in three
-        // other routers, which is four chances for them to stop agreeing.
-        for (const gap of missingFrom(held, required, post.startsAt)) {
+        // C1b-3: the qualification read adapter (Academy first; legacy only as a marked fallback; the
+        // caller's organization). Matching logic below is unchanged.
+        const effective = await effectiveQualifications(d, { tenantId: acting.tenantId, userId, at: post.startsAt, codes: required });
+        for (const gap of effective.filter(e => !e.held).map(e => ({ code: e.code, reason: e.reason, why: e.notHeld! }))) {
           reasons.push({
             // From the structured verdict, not by reading its prose — the
             // previous version matched on wording and silently reclassified
