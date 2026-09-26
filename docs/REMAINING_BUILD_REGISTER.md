@@ -117,7 +117,8 @@ no restricted-records vault, no break-glass path.
 
 Recorded so they do not disappear. None is started; none is SPINE work, and none may be built ahead
 of the spine. Source: `docs/register/AI_RUNTIME_TERMINOLOGY.md`. No status word on any row, on
-purpose: nothing here is claimed.
+purpose: nothing here is claimed. How these rows combine into the first production agent loop, and
+the one new module that loop needs, is in `docs/register/AI_AGENT_LOOP_INVENTORY.md` (2026-09-24).
 
 | # | Item | What is wrong | Definition of done |
 |---|---|---|---|

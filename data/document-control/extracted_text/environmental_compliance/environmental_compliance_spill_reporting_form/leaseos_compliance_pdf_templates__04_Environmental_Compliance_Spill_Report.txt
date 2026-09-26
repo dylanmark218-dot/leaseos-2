@@ -1,0 +1,85 @@
+Environmental Compliance / Spill Reporting Form
+LeaseOS incident template for oilfield trucking, construction near wells, releases, spills, environmental observations, and corrective actions.
+Incident
+Incident ID
+________________________________________________________________
+Date / time discovered
+________________________________________________________________
+Date / time occurred, if known
+________________________________________________________________
+Location / lease / well
+________________________________________________________________
+GPS / site reference
+________________________________________________________________
+Person discovering incident
+________________________________________________________________
+Release / Environmental Condition
+Material / substance
+________________________________________________________________
+Estimated quantity / units
+________________________________________________________________
+Release medium (soil, water, air,
+equipment, etc.)
+________________________________________________________________
+Source / cause, if known
+________________________________________________________________
+Affected area
+________________________________________________________________
+Weather / site conditions
+________________________________________________________________
+Immediate Response
+Personnel notified
+________________________________________________________________
+Emergency services / agency contacted
+________________________________________________________________
+Area secured / traffic control
+________________________________________________________________
+Source stopped / isolated
+________________________________________________________________
+Spill containment used
+________________________________________________________________
+Recovered material / quantity
+________________________________________________________________
+Initial photos / evidence
+________________________________________________________________
+Reporting / Regulatory Review
+Potential reportable release?
+________________________________________________________________
+Agency / authority contacted
+________________________________________________________________
+
+Notification date / time
+________________________________________________________________
+Agency contact / reference number
+________________________________________________________________
+Regulation / permit / plan referenced
+________________________________________________________________
+State / local notification requirements
+checked
+________________________________________________________________
+Remediation / Corrective Action
+Cleanup contractor / personnel
+________________________________________________________________
+Waste characterization
+________________________________________________________________
+Waste container / tracking number
+________________________________________________________________
+Sampling / laboratory results
+________________________________________________________________
+Site restoration
+________________________________________________________________
+Root cause / corrective action
+________________________________________________________________
+Completion date
+________________________________________________________________
+Approval / Closeout
+Prepared by / date
+________________________________________________________________
+Environmental reviewer / date
+________________________________________________________________
+Responsible manager / date
+________________________________________________________________
+Open items / follow-up date
+________________________________________________________________
+Template note: reporting thresholds, agencies, deadlines, and required forms vary by substance, quantity, location, permit, and jurisdiction. Confirm the applicable
+federal, state, tribal, and local requirements before closing an incident.
