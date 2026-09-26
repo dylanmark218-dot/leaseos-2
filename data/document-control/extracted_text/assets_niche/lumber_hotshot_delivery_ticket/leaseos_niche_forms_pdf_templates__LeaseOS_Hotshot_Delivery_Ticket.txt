@@ -1,0 +1,56 @@
+LEASEOS 2
+FIELDROUTE / OPERATIONAL RECORD TEMPLATE
+LUMBER / HOTSHOT DELIVERY TICKET
+Fast equipment, pipe, lumber and field pickup / delivery record
+DOC REF: FRM-DSP-HTS-001
+Revision 1.0  |  Template  |  Enter / verify against the active customer and job record
+PAGE 1 OF 1
+TICKET / POD NO.
+JOB / WORK ORDER
+DISPATCH POSTING
+CUSTOMER ID
+1. PICKUP / DELIVERY DETAILS
+PICKUP / ORIGIN LOCATION
+DELIVERY / FIELD LOCATION
+PICKUP DATE / TIME
+DELIVERY DATE / TIME
+REQUESTED BY
+FIELD CONTACT
+Tractor / day cab
+Hotshot / pickup
+Flat deck / gooseneck
+Lumber / pipe / material
+TRUCK / UNIT ID
+OPERATOR / DRIVER
+TRAILER ID
+PLATE
+2. LOAD / MATERIAL DETAIL
+QTY
+UOM
+ITEM / MATERIAL
+DESCRIPTION / GRADE
+LENGTH / SIZE
+WEIGHT
+TAG / SERIAL
+TOTAL LOAD WEIGHT
+TOTAL PIECES
+SECUREMENT / SPECIAL HANDLING NOTES
+3. FIELD HANDOFF / EXCEPTIONS
+Received in apparent good order
+Exception / damage / shortage noted
+Photo evidence attached
+EXCEPTIONS, DAMAGE, SHORTAGES, OVERAGES, SITE RESTRICTIONS OR NOTES
+DRIVER / CARRIER
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+RECEIVER / FIELD CONTACT
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+DISPATCHER / OFFICE
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+Delivery / receipt record. Not a proof of regulatory compliance, cargo classification or title transfer unless the applicable contract says so.
+LEASEOS 2

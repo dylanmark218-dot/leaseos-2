@@ -58,6 +58,7 @@ async function scopeFor(userId: number) {
 }
 import { securityIncidentsRouter } from "./securityIncidentsRouter";
 import { commercialOfficeRouter } from "./commercialOfficeRouter";
+import { documentControlRouter } from "./documentControlRouter";
 import { facilityDirectoryRouter } from "./facilityDirectoryRouter";
 import type { WidgetLayoutStore } from "./_core/widgetService";
 import { drizzleWidgetLayoutStore } from "./widgetLayouts";
@@ -346,6 +347,7 @@ export const appRouter = router({
   manifestCustody: manifestCustodyRouter,
   securityIncidents: securityIncidentsRouter,
   commercialOffice: commercialOfficeRouter,
+  documentControl: documentControlRouter,
   facilityDirectory: facilityDirectoryRouter,
   system: systemRouter,
   comms: commsRouter,
