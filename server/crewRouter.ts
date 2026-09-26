@@ -6,7 +6,7 @@
  *
  *   ROTATION        from the member's own pattern
  *   APPROVED LEAVE  from `leaveRequests`
- *   QUALIFICATIONS  from `workerQualifications`, and only the verified,
+ *   QUALIFICATIONS  from the qualification read adapter (C1b-3), and only the verified,
  *                   unexpired ones count
  *
  * That last is the point of doing this at all. A forecast built from a list of
@@ -14,12 +14,13 @@
  * verified holdings answers "can this crew do the work", and those come apart
  * exactly when it matters.
  */
+import { effectiveQualifications } from "./qualificationReads";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { crewMembers, crews, leaveRequests, operators, workerQualifications } from "../drizzle/schema";
+import { crewMembers, crews, leaveRequests, operators } from "../drizzle/schema";
 import { resolveActingScope } from "./_core/actingScope";
 import { coverageWarnings, qualifiedForecast, type CrewMember } from "./_core/crewCoverage";
 import { isAbsent, type LeaveRequest } from "./_core/timeOff";
@@ -137,12 +138,10 @@ export const crewRouter = router({
 
         /* Only verified, unexpired holdings count as held. An uploaded
            certificate is a photo, and the engine must not see it as a ticket. */
-        const held = await d.select().from(workerQualifications).where(and(
-          eq(workerQualifications.userId, m.userId), eq(workerQualifications.verificationState, "verified"),
-        )).limit(200);
-        const currentQualifications = held
-          .filter(h => h.expiresAt && h.expiresAt.getTime() > input.from.getTime())
-          .map(h => h.code);
+        // C1b-3: held qualifications from the read adapter (Academy first; legacy only as a marked
+        // fallback; this organization) — held means verified, in date and with an establishable end.
+        const currentQualifications = (await effectiveQualifications(d, { tenantId: acting.tenantId, userId: m.userId, at: input.from }))
+          .filter(e => e.held).map(e => e.code);
 
         crewOut.push({
           userId: m.userId, name: person?.name ?? `user ${m.userId}`,
