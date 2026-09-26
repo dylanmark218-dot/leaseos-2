@@ -68,7 +68,9 @@ export function qualificationValidity(holdings: readonly QualificationHolding[],
 }
 
 /**
- * The stricter reading the operational paths want.
+ * The stricter reading the operational paths want. (C1b-3: the per-router helpers `countsAsHeld` and
+ * `missingFrom` are gone; every reader goes through `server/qualificationReads.ts`, which applies
+ * `heldFromValidity` to Academy and legacy records alike.)
  *
  * A ticket the work requires counts only while it is in force *and* has an
  * establishable end — currency that cannot be established is not currency.
@@ -79,18 +81,18 @@ export function qualificationValidity(holdings: readonly QualificationHolding[],
  */
 export type NotHeldCode = "unknown" | "unverified" | "expired" | "rejected";
 
-export function countsAsHeld(
-  holdings: readonly QualificationHolding[], code: string, at: Date,
-): { held: boolean; reason: string; code: NotHeldCode | null } {
-  const v = qualificationValidity(holdings, code, at);
+export type HeldVerdict = { held: boolean; reason: string; code: NotHeldCode | null };
+
+/**
+ * The operational reading of any qualification verdict (C1b-3: shared by the legacy holdings below and
+ * the Academy-first read adapter, so both sources are held to one rule). `unverifiedWord` names which
+ * not-yet-checked state it is.
+ */
+export function heldFromValidity(v: Validity, code: string, unverifiedWord = "unverified"): HeldVerdict {
   if (v.state === "none") return { held: false, code: "unknown", reason: `No ${code} on record — unknown is not satisfied` };
   if (v.state === "rejected") return { held: false, code: "rejected", reason: `${code} was reviewed and rejected` };
   if (v.state === "unverified") {
-    // Naming which non-verified state it is: "extracted" and "uploaded" are
-    // both short of an assertion, and a reader chasing it needs to know which.
-    const actual = holdings.filter(h => h.code === code).sort((x, y) => y.recordedAt.getTime() - x.recordedAt.getTime())[0];
-    const word = actual?.verificationState === "extracted" ? "extracted" : "unverified";
-    return { held: false, code: "unverified", reason: `${code} is on file but ${word}; nobody has checked it against the certificate` };
+    return { held: false, code: "unverified", reason: `${code} is on file but ${unverifiedWord}; nobody has checked it against the certificate` };
   }
   // Checked, but its effective date has not come: not held yet. The code stays "unverified", which
   // is what this case reported before the engine named it separately.
@@ -100,14 +102,39 @@ export function countsAsHeld(
   return { held: true, code: null, reason: v.reason };
 }
 
-/** Which of a required set a person is missing, with the reason for each. */
-export function missingFrom(
-  holdings: readonly QualificationHolding[],
-  required: readonly string[],
-  at: Date,
-): { code: string; reason: string; why: NotHeldCode }[] {
-  return required
-    .map(qualification => ({ qualification, ...countsAsHeld(holdings, qualification, at) }))
-    .filter(r => !r.held)
-    .map(r => ({ code: r.qualification, reason: r.reason, why: r.code! }));
+/* ------------------------------------------------------------------ */
+/* The Academy adapter (C1b-3 / D-05)                                   */
+/* ------------------------------------------------------------------ */
+
+/** The Academy grant fields the verdict reads. Structural, so this module stays free of the schema. */
+export type AcademyGrantRow = {
+  id: number; qualificationRef: string; qualificationCode: string;
+  status: "current" | "expired" | "pending" | "rejected" | "revoked";
+  validFrom: Date | null; expiresAt: Date | null; verifiedByUserId: number | null; verifiedAt: Date | null; createdAt: Date;
+};
+
+const ACADEMY_STATE: Readonly<Record<AcademyGrantRow["status"], DocumentVersion["state"]>> = {
+  current: "verified", expired: "verified", pending: "uploaded", rejected: "rejected", revoked: "rejected",
+};
+
+/**
+ * The Academy's verdict for one code, through the engine. Pure. Moved here from
+ * `server/qualificationReads.ts` on merging main, so the canonical modules stay the only callers of
+ * `validityOf`. The one thing it adds is stricter, never looser: an Academy status of `expired` is not
+ * overruled into "in force" by its dates.
+ */
+export function academyVerdict<R extends AcademyGrantRow>(rows: readonly R[], at: Date): { validity: Validity; chosen: R | null } {
+  const ordered = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id);
+  const versions: DocumentVersion[] = ordered.map((r, i) => ({
+    documentRef: r.qualificationRef, version: i + 1, type: r.qualificationCode as DocumentType, subjectRef: r.qualificationCode,
+    state: ACADEMY_STATE[r.status], effectiveFrom: r.validFrom, expiresAt: r.expiresAt,
+    verifiedByUserId: r.verifiedByUserId, verifiedAt: r.verifiedAt, supersededByVersion: null, uploadedAt: r.createdAt,
+  }));
+  let validity = validityOf(versions, at);
+  const chosen = validity.version ? ordered[validity.version - 1] ?? null : null;
+  // The Academy said expired. Its dates cannot overrule that into "in force".
+  if (chosen?.status === "expired" && (validity.state === "in_force" || validity.state === "expiring")) {
+    validity = { ...validity, state: "expired", reason: `The Academy records ${chosen.qualificationCode} as expired` };
+  }
+  return { validity, chosen };
 }

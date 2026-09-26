@@ -42,7 +42,7 @@ d("the owner's decisions are the seeded defaults", () => {
     expect(ladder.every(p => p.source.startsWith("owner_decision_2026-09-17"))).toBe(true);
     expect((await c.commercialOffice.categories.list({ kind: "profitability_dimension" })).length).toBe(7);
     expect((await c.commercialOffice.categories.list({ kind: "load_category" })).length).toBe(0);
-    expect((await c.commercialOffice.categories.list({ kind: "document_type" })).filter(t => t.builtIn).length).toBe(10);   // 0144: the canonical document kinds LeaseOS itself produces are built in; a business adds its own
+    expect((await c.commercialOffice.categories.list({ kind: "document_type" })).filter(t => t.builtIn).length).toBeGreaterThanOrEqual(15);   // 0144: the ten canonical kinds LeaseOS itself produces; 0178 (Document Control) adds the five received kinds; the catalog seed adds a built-in row per definition
   }, 20_000);
 });
 
