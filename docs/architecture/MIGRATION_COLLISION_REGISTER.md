@@ -116,8 +116,21 @@ first number free everywhere. `claude/integration-hub-subsystem-6nzrkw`'s `0183`
 `webhookDeliveries.claimedAt`/`claimedBy`. When that branch rebases onto this one, its `0183` drops those
 two columns rather than this migration being renumbered (see
 `audit/hardening-2026-09-24/SEC-004-WEBHOOK-DELIVERY-INTEGRITY.md`).
+## State at Document Control Checkpoint A (2026-09-23, `main` = `0cd4817`)
+
+Scan run with the command above against every remote branch. Claims found: `0170` (eld-compliance,
+auth-workspace, work-calendar), `0172`–`0175` (training-academy-workforce), `0175`–`0177`
+(driver-portfolio ×2). `0178` was the first number free on `main` and on every open branch.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0178 | `0178_document_control_definitions.sql` | `claude/document-control-architecture-jlffzk` | none yet | open branch | none at claim time | keeps 0178 unless a branch merges ahead with it; re-check at PR time |
+| 0179+ | Document Control checkpoints B–F (register extension, numbering ledger, templates, mappings, intake) | same branch | none yet | planned | — | consecutive from 0178; re-check at PR time |
 
 ## Change log
+
+* **2026-09-23 (later)**: Document Control claims `0178` after a fresh scan; driver-portfolio had moved to
+  `0175`–`0177` and training-academy to `0172`–`0175` since the C1a scan.
 
 * **2026-09-23**: C1a merged (#12, `42c454f`), so `0174` is on main. PR #9 was brought onto main (merge-base `42c454f`).
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
@@ -165,6 +178,29 @@ claiming, not taken from this line.
   numbers were verified free across every branch before use, and none collided. The register is the
   repository's record of that verification, and three merges' worth of it was missing. Also recorded
   the `0185` double-claim, resolved in SEC-004's favour on claim order. No migration file renamed.
+## State at Document Control adoption (2026-09-24, `main` = `1680e94`)
+
+The owner adopted `claude/document-control-architecture-jlffzk` as the Document Control implementation
+(`docs/document-control/DC_RECONCILIATION_BRIEF_2026-09-24.md`) and ruled that its checkpoints A–C land
+first. They land from `claude/document-control-design-imsd3n`. Scan run with the command above against
+every remote branch: claims now reach `0188` (`0187` eld-compliance and training-academy, `0188`
+training-academy). `main` holds `0179_trip_stop_provenance.sql`, so the branch's `0179` could not keep
+its number.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0178 | `0178_document_control_definitions.sql` | `claude/document-control-design-imsd3n` (from `…-jlffzk`) | #29 | only claimant | none | keeps 0178 |
+| 0195 | `0195_document_control_register.sql` | same | #29 | first number free after every claim at the 2026-09-25 rebase | none | **built as 0179**, adopted as 0189, **renamed 0195** (see change log); content unchanged, header says so |
+| 0196 | `0196_document_control_numbering.sql` | same | #29 | next free | none | **built as 0180**, adopted as 0190, **renamed 0196** to stay after 0195; content unchanged |
+| 0181–0183 | Document Control D–H (templates, intake, disposal) | `claude/document-control-architecture-jlffzk` | none | held under the D-00 carve-out | 0182/0183 also claimed by four and three other branches | renumber past every claim when that work is ruled in |
+
+* **2026-09-24 (Document Control adoption)**: `0179 → 0189` and `0180 → 0190` for Document Control;
+  `0178` kept. No other branch's file renamed.
+* **2026-09-25 (Document Control rebase onto `main` `14b5df2`)**: `0189` turned out to be claimed three
+  times — C1b-1 (`claude/leaseos-compliance-survey-5faxe8`, PR #15) first, then this PR and
+  `claude/mechanic-portal-domain-82efa9`. Following the rule of thumb and the SEC-004 claim-order
+  precedent, this PR moved off it at its own rebase: `0189 → 0195` and `0190 → 0196` (`0191`–`0193` are
+  on `main`; `0194` is held by PR #50). `0178` unchanged. No other branch's file renamed.
 
 ## State at the S2-E Phase 1 claim (2026-09-25, `main` = `14b5df2`, after PR #20 and #49)
 

@@ -23,6 +23,7 @@
  * not a place where a driver learns what the controller is worried about.
  */
 
+import type { ComplianceVerdict } from "./complianceDocumentValidity";
 import { authorize, type Permission, type RoleGrant } from "./recordsAuthorization";
 
 export type ExceptionCategory =
@@ -62,7 +63,19 @@ export type ExceptionSources = {
   roadsideOpen: { id: number; eventRef: string; unitNumber: string | null; eventType: string; occurredAt: Date; vendorAssigned: boolean }[];
   vendorBills: { id: number; billRef: string; vendorName: string | null; total: number; status: string; matchOutcome: string; receivedAt: Date; dueAt: Date | null }[];
   purchaseRequests: { id: number; authorizationRef: string; estimatedAmount: number; emergency: boolean; requestedAt: Date; expiresAt: Date | null; status: string }[];
-  credentials: { id: number; ownerType: string; ownerId: number; ownerLabel: string | null; docType: string; title: string; expiresAt: Date | null; verificationStatus: string }[];
+  /**
+   * SPINE item 2 — two different facts, kept apart.
+   *
+   * `credentialsAwaitingVerification`: rows nobody has checked yet, as the query selected them. A
+   * work queue about ROWS — each needs a person — and not a verdict on anything.
+   *
+   * `credentialVerdicts`: one per owner and document type, the canonical verdict
+   * (`complianceRequirementValidity`) over every row of that type the owner holds. Expiry
+   * exceptions are raised from these alone. Raising them per row, as this used to, flagged a
+   * superseded licence as expired while its renewal was in force.
+   */
+  credentialsAwaitingVerification: { id: number; ownerType: string; ownerId: number; ownerLabel: string | null; docType: string; title: string; expiresAt: Date | null }[];
+  credentialVerdicts: { ownerType: string; ownerId: number; ownerLabel: string | null; docType: string; title: string; verdict: ComplianceVerdict }[];
   aiProposals: { proposalId: string; formKey: string; title: string; createdAt: Date; commitState: string }[];
   aiQuestions: { count: number; oldest: Date | null; askedToUserId: number | null }[];
   syncConflicts: { id: number; conflictRef: string; recordType: string; recordRef: string; material: boolean; detectedAt: Date }[];
@@ -167,35 +180,62 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
   // passport, which every driver holds. A driver's own expiring documents reach
   // them through their passport and My Day, not through a company-wide list of
   // everyone else's.
-  for (const c of s.credentials) {
-    const days = daysUntil(c.expiresAt, now);
+  for (const c of s.credentialsAwaitingVerification) {
     const isWorker = c.ownerType === "operator" || c.ownerType === "user";
     const label = c.ownerLabel ?? `${c.ownerType} #${c.ownerId}`;
-    if (c.verificationStatus === "needs_review") {
+    out.push({
+      key: `cred:${c.id}:review`, category: isWorker ? "workforce" : "fleet", severity: "low",
+      title: `${label}: ${c.title} awaiting verification`, reason: "Recorded, not yet verified",
+      subjectType: c.ownerType, subjectId: c.ownerId, action: "Verify or reject the document",
+      deepLink: { portal: isWorker ? "hr_workforce" : "fleet_maintenance", route: `/credentials/${c.id}` }, requiredPermission: "compliance.credential.verify",
+      since: null, dueAt: c.expiresAt,
+    });
+  }
+
+  /*
+   * The verdict, mapped. Nothing here reads a row's date or status:
+   *
+   *   expired, or unverified whose own claimed date passed → expired (high)
+   *   expiring                                             → expiring (high inside a week, else medium)
+   *   incomplete                                           → no expiry recorded (medium)
+   *   not_yet_effective                                    → not yet in force (medium)
+   *   in_force, rejected, none, unverified                 → nothing here (unverified is the queue above)
+   */
+  for (const c of s.credentialVerdicts) {
+    const v = c.verdict;
+    const isWorker = c.ownerType === "operator" || c.ownerType === "user";
+    const label = c.ownerLabel ?? `${c.ownerType} #${c.ownerId}`;
+    const ref = v.documentId ?? `${c.ownerType}-${c.ownerId}-${c.docType}`;
+    const common: Pick<Exception, "category" | "subjectType" | "subjectId" | "deepLink" | "requiredPermission"> = {
+      category: isWorker ? "workforce" : "fleet", subjectType: c.ownerType, subjectId: c.ownerId,
+      deepLink: { portal: isWorker ? "hr_workforce" : "fleet_maintenance", route: `/credentials/${v.documentId ?? ""}` },
+      requiredPermission: "compliance.credential.verify",
+    };
+    if (v.state === "expired" || (v.state === "unverified" && v.claimLapsed)) {
+      const lapsedAt = v.state === "expired" ? v.expiresAt : v.claimedExpiresAt;
       out.push({
-        key: `cred:${c.id}:review`, category: isWorker ? "workforce" : "fleet", severity: "low",
-        title: `${label}: ${c.title} awaiting verification`, reason: "Recorded, not yet verified",
-        subjectType: c.ownerType, subjectId: c.ownerId, action: "Verify or reject the document",
-        deepLink: { portal: isWorker ? "hr_workforce" : "fleet_maintenance", route: `/credentials/${c.id}` }, requiredPermission: "compliance.credential.verify",
-        since: null, dueAt: c.expiresAt,
+        ...common, key: `cred:${ref}:expired`, severity: "high",
+        title: `${label}: ${c.title} expired`,
+        reason: v.state === "expired" ? v.reason : `Its own date has passed, and it was never verified — ${v.reason}`,
+        action: "Renew and record the new document", since: lapsedAt, dueAt: lapsedAt,
       });
-    }
-    if (days === null) continue;
-    if (days < 0) {
+    } else if (v.state === "expiring") {
       out.push({
-        key: `cred:${c.id}:expired`, category: isWorker ? "workforce" : "fleet", severity: "high",
-        title: `${label}: ${c.title} expired`, reason: `Expired ${-days} day(s) ago`,
-        subjectType: c.ownerType, subjectId: c.ownerId, action: "Renew and record the new document",
-        deepLink: { portal: isWorker ? "hr_workforce" : "fleet_maintenance", route: `/credentials/${c.id}` }, requiredPermission: "compliance.credential.verify",
-        since: c.expiresAt, dueAt: c.expiresAt,
+        ...common, key: `cred:${ref}:expiring`, severity: v.daysRemaining !== null && v.daysRemaining <= 7 ? "high" : "medium",
+        title: `${label}: ${c.title} expires in ${v.daysRemaining} day(s)`, reason: "Renewal window",
+        action: "Schedule renewal", since: null, dueAt: v.expiresAt,
       });
-    } else if (days <= 30) {
+    } else if (v.state === "incomplete") {
       out.push({
-        key: `cred:${c.id}:expiring`, category: isWorker ? "workforce" : "fleet", severity: days <= 7 ? "high" : "medium",
-        title: `${label}: ${c.title} expires in ${days} day(s)`, reason: "Renewal window",
-        subjectType: c.ownerType, subjectId: c.ownerId, action: "Schedule renewal",
-        deepLink: { portal: isWorker ? "hr_workforce" : "fleet_maintenance", route: `/credentials/${c.id}` }, requiredPermission: "compliance.credential.verify",
-        since: null, dueAt: c.expiresAt,
+        ...common, key: `cred:${ref}:incomplete`, severity: "medium",
+        title: `${label}: ${c.title} has no expiry recorded`, reason: v.reason,
+        action: "Record the expiry from the document", since: null, dueAt: null,
+      });
+    } else if (v.state === "not_yet_effective") {
+      out.push({
+        ...common, key: `cred:${ref}:not_yet_effective`, severity: "medium",
+        title: `${label}: ${c.title} is not yet in force`, reason: v.reason,
+        action: "Confirm what is in force until it takes effect", since: null, dueAt: null,
       });
     }
   }

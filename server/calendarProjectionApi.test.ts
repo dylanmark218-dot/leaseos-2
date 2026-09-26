@@ -22,9 +22,10 @@ const day = (n: number) => new Date(FROM.getTime() + n * 86_400_000);
 
 async function ticket(userId: number, code: string, expiresAt: Date | null, state = "verified") {
   await pool.execute(
-    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt)
-     VALUES (?,?,?,?,?,?,?,NOW())`,
-    [`WQ-${rnd()}${rnd()}`, "default", userId, code, state, expiresAt, 1]);
+    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt, verifiedByUserId, verifiedAt)
+     VALUES (?,?,?,?,?,?,?,NOW(),?,?)`,
+    // C1b-3: a legacy holding counts as verified only with a recorded verifier.
+    [`WQ-${rnd()}${rnd()}`, "default", userId, code, state, expiresAt, 1, state === "verified" ? 1 : null, state === "verified" ? new Date() : null]);
 }
 
 d("every event names the record it came from", () => {

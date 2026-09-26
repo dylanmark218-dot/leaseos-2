@@ -58,6 +58,7 @@ async function scopeFor(userId: number) {
 }
 import { securityIncidentsRouter } from "./securityIncidentsRouter";
 import { commercialOfficeRouter } from "./commercialOfficeRouter";
+import { documentControlRouter } from "./documentControlRouter";
 import { facilityDirectoryRouter } from "./facilityDirectoryRouter";
 import type { WidgetLayoutStore } from "./_core/widgetService";
 import { drizzleWidgetLayoutStore } from "./widgetLayouts";
@@ -346,6 +347,7 @@ export const appRouter = router({
   manifestCustody: manifestCustodyRouter,
   securityIncidents: securityIncidentsRouter,
   commercialOffice: commercialOfficeRouter,
+  documentControl: documentControlRouter,
   facilityDirectory: facilityDirectoryRouter,
   system: systemRouter,
   comms: commsRouter,
@@ -1643,7 +1645,13 @@ export const appRouter = router({
       }),
       }),
       documents: router({
-        list: roleProcedure("documents.list").query(async ({ ctx }) => listComplianceDocuments(await scopeFor(ctx.user.id))),
+        list: roleProcedure("documents.list")
+          // Optional: one owner's documents. Narrows the organization's list; it never widens it —
+          // the scope predicate still applies. The documentExpiry tile reads this, because the
+          // canonical verdict needs an owner's whole history, not whatever of it made the org's
+          // newest hundred.
+          .input(z.object({ ownerType: z.enum(["operator", "unit", "trailer", "equipment", "job"]), ownerId: z.number().int().positive() }).optional())
+          .query(async ({ ctx, input }) => listComplianceDocuments(await scopeFor(ctx.user.id), input)),
         create: roleProcedure("documents.create")
           .input(
             z.object({

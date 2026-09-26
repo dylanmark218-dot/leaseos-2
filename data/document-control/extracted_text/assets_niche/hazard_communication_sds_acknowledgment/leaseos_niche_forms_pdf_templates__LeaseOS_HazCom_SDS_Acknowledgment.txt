@@ -1,0 +1,76 @@
+LEASEOS 2
+FIELDROUTE / OPERATIONAL RECORD TEMPLATE
+HAZARD COMMUNICATION / SDS ACKNOWLEDGMENT
+Chemical, oil, solvent and hazardous-product information / training record
+DOC REF: FRM-SFT-HC-001
+Revision 1.0  |  Template  |  Enter / verify against the active customer and job record
+PAGE 1 OF 2
+1. PERSON / WORKSITE
+WORKER / EMPLOYEE NAME
+WORKER ID
+EMPLOYER / CONTRACTOR
+JOB / SITE REF
+WORK AREA / SITE
+SUPERVISOR / TRAINER
+TRAINING DATE / TIME
+2. CHEMICAL / PRODUCT AND SDS RECORD
+PRODUCT IDENTIFIER
+MANUFACTURER / SUPPLIER
+SDS REV / DATE
+HAZARD CLASS / SIGNAL
+SDS LOCATION / LINK ID
+3. HAZARD / CONTROLS SNAPSHOT
+KNOWN HAZARDS / EXPOSURE ROUTES / INCOMPATIBLE MATERIALS
+CONTROLS / PPE / SAFE HANDLING / STORAGE / SPILL OR EMERGENCY ACTIONS
+WHERE THE CURRENT SDS AND WRITTEN HAZARD COMMUNICATION PROGRAM ARE ACCESSIBLE
+Template intent: record that the worker was shown where the applicable SDS / workplace hazard information is kept and received the site-specific training required by the employer
+program. This form does not replace the current SDS, labels, written hazard communication program, or jurisdiction-specific training requirements.
+Safety record template - adapt to the governing workplace program and jurisdiction before operational use.
+LEASEOS 2
+
+LEASEOS 2
+FIELDROUTE / OPERATIONAL RECORD TEMPLATE
+HAZCOM / SDS TRAINING & ACKNOWLEDGMENT
+Training topics, comprehension check and worker / trainer signoff
+DOC REF: FRM-SFT-HC-001
+Revision 1.0  |  Template  |  Enter / verify against the active customer and job record
+PAGE 2 OF 2
+1. TRAINING TOPICS COVERED
+Written hazard communication program
+Labels / workplace labels
+SDS format / access
+Hazard recognition / symptoms
+Controls / PPE / safe work
+Emergency / spill response
+When new chemical hazards are introduced
+Non-routine tasks / unlabeled lines / containers
+2. WORKER CONFIRMATION
+I acknowledge that I received information and training applicable to my work area and the hazardous products identified on the associated record. I know where to
+obtain the current SDS and applicable workplace hazard communication information, understand the site rules for labels, handling, storage, PPE and emergency
+actions, and will ask for clarification before performing work I do not understand.
+Worker had an opportunity to ask questions
+Trainer verified required topics were addressed
+RESTRICTIONS / FOLLOW-UP TRAINING / SITE-SPECIFIC NOTES
+3. SIGNATURES
+WORKER
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+TRAINER / SUPERVISOR
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+SAFETY / OFFICE REVIEWER
+PRINTED NAME
+SIGNATURE / E-SIGN
+DATE / TIME
+4. JURISDICTION / PROGRAM REFERENCE
+US OSHA HazCom
+Canada WHMIS
+Site-specific / other
+GOVERNING PROGRAM / POLICY REF
+SDS REPOSITORY / DOCUMENT ID
+Regulatory note: OSHA HazCom requires labels, SDSs and employee information/training for covered workplace chemicals; WHMIS likewise includes hazard classification, labelling, SDSs and
+worker education. Use the governing rule and employer program for the actual workplace. See OSHA 29 CFR 1910.1200 and Government of Canada WHMIS guidance.
+Source references: OSHA 29 CFR 1910.1200; Government of Canada WHMIS roles / responsibilities. Verify the current governing program before release.
+LEASEOS 2
