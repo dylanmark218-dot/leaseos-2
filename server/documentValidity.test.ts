@@ -202,9 +202,14 @@ describe("one rule, shared", () => {
   it("is reached through the adapter by the routers that need it", () => {
     const adapter = readFileSync("server/_core/qualificationValidity.ts", "utf8");
     expect(adapter).toContain('from "./documentValidity"');
-    for (const f of ["openShiftsRouter", "readinessRouter"]) {
+    // C1b-3: the four qualification readers go through the D-05 read adapter, which decides through
+    // qualificationValidity / documentValidity — not through their own reading of a store.
+    const reads = readFileSync("server/qualificationReads.ts", "utf8");
+    expect(reads).toContain('from "./_core/qualificationValidity"');
+    expect(reads).toContain('from "./_core/documentValidity"');
+    for (const f of ["openShiftsRouter", "readinessRouter", "crewRouter", "calendarRouter"]) {
       const src = readFileSync(`server/${f}.ts`, "utf8");
-      expect(src).toContain("_core/qualificationValidity");
+      expect(src, f).toContain('from "./qualificationReads"');
     }
   });
 
