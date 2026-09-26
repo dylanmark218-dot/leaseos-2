@@ -1,0 +1,51 @@
+Bill of Lading
+Record the shipment, handling instructions and transfer of custody. Complete all applicable fields before release.
+Company / issuer: __________________________  Home base: _____________________
+Record no. __________________  Revision: ______  Issue date / time: _______________
+Job / load no. __________________  Customer PO / AFE: _________________________
+Parties and route
+Shipper / consignor: __________________________  Contact / phone: _________________
+Pickup address / lease / LSD: __________________________________________________
+Consignee: _________________________________  Contact / phone: _________________
+Delivery address / lease / LSD: __________________________________________________
+Carrier / carrier ID: __________________________  Driver: __________________________
+Unit / trailer: __________________  Pickup date / time: __________  Delivery due: _________
+Shipment details
+Total pieces: __________  Total mass / unit: __________  Volume / unit: _______________
+Quantity basis: [ ] Scale  [ ] Meter  [ ] Count  [ ] Estimate   Ticket / reading ref.: ___________
+Seal / compartment IDs: ____________________  Temperature / unit if relevant: _________
+Handling and instructions
+[ ] General freight  [ ] Water  [ ] Sand  [ ] Crude / fluid  [ ] Equipment  [ ] Other: __________
+Special handling / securement / segregation / delivery instructions:
+_________________________________________________________________________________________
+_________________________________________________________________________________________
+Bill of Lading acknowledgments
+Record no. __________________  Job / load no. ______________  Date: ______________
+Charges and governing documents
+Freight charges: [ ] Prepaid  [ ] Collect  [ ] Third party   Bill to: _______________________
+Rate agreement ref.: _____________________  Declared value / currency if agreed: ______
+Applicable carriage terms / contract title, version and date: __________________________
+Terms attached / supplied by: __________________________  Attachment count: ________
+This form records shipment and custody details. Identify the applicable carriage terms separately; no liability limit or insurance value is established by this blank template.
+Related documents
+POD / scale / manifest / external facility ticket refs.: __________________________________
+Dangerous goods status verified by: ________________  Shipping document ref.: __________
+For regulated loads, attach the applicable shipping or waste documents. This general BOL is not a dedicated dangerous goods or hazardous waste form.
+Pickup acknowledgment
+Received for transport in apparent condition stated below; contents of sealed packages not verified unless recorded.
+Pickup exceptions / quantity discrepancies / seal condition:
+_________________________________________________________________________________________
+_________________________________________________________________________________________
+Shipper printed name / role: __________________  Signature: __________  Time: __________
+Driver printed name: ________________________  Signature: __________  Time: __________
+Delivery acknowledgment
+Received quantity / unit: ________________  Condition / shortages / damage / refusal:
+_________________________________________________________________________________________
+_________________________________________________________________________________________
+Receiver printed name / role: __________________  Signature: __________  Time: _________
+Driver signature: ____________________  Delivery date: __________  POD ref.: __________
+Marks / package IDs | Freight description / product | Pieces / package type | Quantity / unit | Mass / unit
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 

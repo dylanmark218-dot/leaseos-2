@@ -954,6 +954,9 @@ export type InsertZoneEvent = typeof zoneEvents.$inferInsert;
 
 export const trackingSequences = mysqlTable("trackingSequences", {
   id: int("id").autoincrement().primaryKey(),
+  /** DC-C (0196) — the business the counter belongs to; NULL and scopeKey 'default' for the historical single tenant and every legacy series. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  scopeKey: varchar("scopeKey", { length: 64 }).default("default").notNull(),
   sequenceType: varchar("sequenceType", { length: 24 }).notNull(),
   branch: varchar("branch", { length: 12 }),
   periodKey: varchar("periodKey", { length: 16 }).notNull(),
@@ -8778,7 +8781,33 @@ export const commercialDocuments = mysqlTable("commercialDocuments", {
   statusReason: varchar("statusReason", { length: 500 }),
   registeredByUserId: int("registeredByUserId").notNull(),
   registeredAt: timestamp("registeredAt").defaultNow().notNull(),
-});
+  // DC-B (0195) — provenance and lifecycle. NULL originKind = registered before Document Control
+  // kept provenance ("unrecorded"), never a guess. `bookScopeKey` = COALESCE(bookOrgRef,'default')
+  // so the control-number unique index can see the single tenant.
+  bookScopeKey: varchar("bookScopeKey", { length: 64 }).default("default").notNull(),
+  definitionRef: varchar("definitionRef", { length: 64 }),
+  definitionKey: varchar("definitionKey", { length: 40 }),
+  originKind: mysqlEnum("originKind", ["leaseos_generated", "organization_template", "customer_template", "external_form_rendered", "system_rendered", "external_scanned", "external_digital_import", "reference_document"]),
+  issuerKind: mysqlEnum("issuerKind", ["tenant", "customer", "facility", "vendor", "regulator", "government_authority", "manufacturer", "other_third_party", "unknown"]),
+  issuerOrgRef: varchar("issuerOrgRef", { length: 64 }),
+  issuerFacilityId: int("issuerFacilityId"),
+  issuerName: varchar("issuerName", { length: 220 }),
+  /** The LeaseOS business number, when the definition's policy mints one or the owning domain did. NULL for every externally issued document. */
+  controlNumber: varchar("controlNumber", { length: 64 }),
+  controlNumberIssuedAt: timestamp("controlNumberIssuedAt"),
+  controlState: mysqlEnum("controlState", ["captured", "needs_classification", "proposed", "confirmed", "issued", "void", "withdrawn"]).default("confirmed").notNull(),
+  templateRevisionRef: varchar("templateRevisionRef", { length: 64 }),
+  renderManifestHash: varchar("renderManifestHash", { length: 64 }),
+  capturedByUserId: int("capturedByUserId"),
+  capturedByDeviceRef: varchar("capturedByDeviceRef", { length: 64 }),
+  importChannel: mysqlEnum("importChannel", ["device_sync", "office_upload", "portal", "api", "email", "system"]),
+  confirmedByUserId: int("confirmedByUserId"),
+  confirmedAt: timestamp("confirmedAt"),
+  issuedByUserId: int("issuedByUserId"),
+  voidedByUserId: int("voidedByUserId"),
+  voidedAt: timestamp("voidedAt"),
+  voidReason: varchar("voidReason", { length: 500 }),
+}, (t) => ({ controlNumber: uniqueIndex("commercialDocuments_control_number").on(t.bookScopeKey, t.controlNumber), state: index("commercialDocuments_state").on(t.bookScopeKey, t.controlState, t.originKind) }));
 export const commercialDocumentLinks = mysqlTable("commercialDocumentLinks", {
   id: int("id").autoincrement().primaryKey(),
   documentId: int("documentId").notNull(),
@@ -8786,7 +8815,13 @@ export const commercialDocumentLinks = mysqlTable("commercialDocumentLinks", {
   recordRef: varchar("recordRef", { length: 80 }).notNull(),
   linkedByUserId: int("linkedByUserId").notNull(),
   linkedAt: timestamp("linkedAt").defaultNow().notNull(),
-});
+  // DC-B (0195) — the id beside the ref, the role the record plays, and whether a person or a domain said so.
+  recordId: int("recordId"),
+  role: varchar("role", { length: 40 }),
+  source: mysqlEnum("source", ["human", "domain", "ocr_proposed"]).default("human").notNull(),
+  confirmationStatus: mysqlEnum("confirmationStatus", ["proposed", "confirmed"]).default("confirmed").notNull(),
+  linkedByDeviceRef: varchar("linkedByDeviceRef", { length: 64 }),
+}, (t) => ({ recordId: index("commercialDocumentLinks_record_id").on(t.recordType, t.recordId) }));
 export const commercialDocumentDeliveries = mysqlTable("commercialDocumentDeliveries", {
   id: int("id").autoincrement().primaryKey(),
   deliveryRef: varchar("deliveryRef", { length: 40 }).notNull().unique(),
@@ -8996,6 +9031,210 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
 
+/* ==================================================================
+ * DC-A (0178) — Document Control: the definition registry and the
+ * catalog's provenance. A definition says how a class of controlled record
+ * behaves; it is not the document and not the template. Vocabularies are
+ * mirrored in server/_core/documentDefinitions.ts and held in step by test.
+ * ================================================================== */
+
+export const documentDefinitions = mysqlTable("documentDefinitions", {
+  id: int("id").autoincrement().primaryKey(),
+  definitionRef: varchar("definitionRef", { length: 64 }).notNull().unique(),
+  /** NULL = platform-provided; a tenant row with the same key is an overlay of the columns it may change. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  /** COALESCE(orgRef, 'platform'), maintained by the write path so the unique index can see NULL tenancy. */
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  definitionKey: varchar("definitionKey", { length: 40 }).notNull(),
+  definitionVersion: int("definitionVersion").default(1).notNull(),
+  status: mysqlEnum("status", ["draft", "active", "retired"]).default("active").notNull(),
+  supersedesDefinitionId: int("supersedesDefinitionId"),
+  documentClass: mysqlEnum("documentClass", ["operational_form", "controlled_credential", "financial_commercial", "regulated_record", "reference_document", "incident_evidence", "unclassified"]).notNull(),
+  displayName: varchar("displayName", { length: 200 }).notNull(),
+  description: text("description"),
+  primaryDomainOwner: varchar("primaryDomainOwner", { length: 40 }).notNull(),
+  allowedOriginsJson: text("allowedOriginsJson").notNull(),
+  numberingPolicy: mysqlEnum("numberingPolicy", ["leaseos_series", "leaseos_series_optional", "domain_managed", "external_only", "archival_only"]).notNull(),
+  numberSeriesType: varchar("numberSeriesType", { length: 24 }),
+  externalReferencePolicy: mysqlEnum("externalReferencePolicy", ["forbidden", "optional", "required"]).default("optional").notNull(),
+  allowedExternalReferenceTypesJson: text("allowedExternalReferenceTypesJson").notNull(),
+  leaseosTemplateAvailable: boolean("leaseosTemplateAvailable").default(false).notNull(),
+  customTemplateAllowed: boolean("customTemplateAllowed").default(true).notNull(),
+  importAllowed: boolean("importAllowed").default(true).notNull(),
+  requiredFieldsJson: text("requiredFieldsJson").notNull(),
+  optionalFieldsJson: text("optionalFieldsJson").notNull(),
+  allowedLinkKindsJson: text("allowedLinkKindsJson").notNull(),
+  signaturePolicy: mysqlEnum("signaturePolicy", ["none", "optional", "required_single", "required_multi", "domain_managed"]).default("optional").notNull(),
+  revisionPolicy: mysqlEnum("revisionPolicy", ["immutable_supersede", "amend_with_reason", "domain_managed", "reference_versioned"]).default("immutable_supersede").notNull(),
+  printPolicy: mysqlEnum("printPolicy", ["not_printable", "printable", "controlled_copy"]).default("printable").notNull(),
+  extractionProfileKey: varchar("extractionProfileKey", { length: 40 }),
+  /** NULL = UNCONFIGURED: retained indefinitely, never disposition-eligible, surfaced as a finding. No default period is ever applied. */
+  retentionPolicyId: int("retentionPolicyId"),
+  workflowKey: varchar("workflowKey", { length: 40 }),
+  readCategory: varchar("readCategory", { length: 40 }).notNull(),
+  sensitivityTier: mysqlEnum("sensitivityTier", ["INTERNAL", "CONFIDENTIAL", "RESTRICTED", "HIGHLY_RESTRICTED"]).default("INTERNAL").notNull(),
+  jurisdictionsJson: text("jurisdictionsJson").notNull(),
+  jurisdictionPolicy: mysqlEnum("jurisdictionPolicy", ["universal", "configurable_verify_by_jurisdiction"]).default("universal").notNull(),
+  regulatoryBasis: mysqlEnum("regulatoryBasis", ["not_inferred_from_template", "verified_source_cited"]).default("not_inferred_from_template").notNull(),
+  representationPolicy: mysqlEnum("representationPolicy", ["internal_record", "official_external_record", "attach_official_record_required"]).default("internal_record").notNull(),
+  representationNotice: varchar("representationNotice", { length: 300 }),
+  industriesJson: text("industriesJson").notNull(),
+  packKey: varchar("packKey", { length: 24 }),
+  /** The supplied catalog's own key when it differs from ours (an aliased kind), or equals it. */
+  sourcePackageKey: varchar("sourcePackageKey", { length: 80 }),
+  source: varchar("source", { length: 160 }).notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  activatedAt: timestamp("activatedAt"),
+  retiredAt: timestamp("retiredAt"),
+  retiredByUserId: int("retiredByUserId"),
+}, (t) => ({ scopeKeyVersion: uniqueIndex("documentDefinitions_scope_key_version").on(t.scopeKey, t.definitionKey, t.definitionVersion), keyStatus: index("documentDefinitions_key_status").on(t.definitionKey, t.status) }));
+
+/** Every artifact the supplied catalog carried, by SHA-256, with where it came from and which family it belongs to. */
+export const documentSourceArtifacts = mysqlTable("documentSourceArtifacts", {
+  id: int("id").autoincrement().primaryKey(),
+  artifactRef: varchar("artifactRef", { length: 40 }).notNull().unique(),
+  sha256: varchar("sha256", { length: 64 }).notNull().unique(),
+  sourceCollection: varchar("sourceCollection", { length: 120 }).notNull(),
+  sourcePath: varchar("sourcePath", { length: 512 }).notNull(),
+  fileName: varchar("fileName", { length: 220 }).notNull(),
+  extension: varchar("extension", { length: 10 }).notNull(),
+  byteLength: int("byteLength").notNull(),
+  role: mysqlEnum("role", ["printable_template", "editable_template_source", "render_template_source", "engine_definition_or_reference", "reference"]).notNull(),
+  titleCandidate: varchar("titleCandidate", { length: 220 }),
+  templateCodeDetected: varchar("templateCodeDetected", { length: 40 }),
+  revisionDetected: varchar("revisionDetected", { length: 20 }),
+  pages: int("pages"),
+  /** The definition the artifact's family resolves to (after aliasing), when it belongs to one. */
+  definitionKey: varchar("definitionKey", { length: 40 }),
+  sourcePackageKey: varchar("sourcePackageKey", { length: 80 }),
+  variantNo: int("variantNo"),
+  /** Where the bytes live in the repository's seed data, when they do; the seeder recomputes the hash from here. */
+  repositoryPath: varchar("repositoryPath", { length: 512 }),
+  storageKey: varchar("storageKey", { length: 512 }),
+  hashVerifiedAt: timestamp("hashVerifiedAt"),
+  importBatchRef: varchar("importBatchRef", { length: 40 }).notNull(),
+  importedByUserId: int("importedByUserId"),
+  importedAt: timestamp("importedAt").defaultNow().notNull(),
+}, (t) => ({ family: index("documentSourceArtifacts_family").on(t.definitionKey, t.variantNo) }));
+
+export type InsertDocumentDefinition = typeof documentDefinitions.$inferInsert;
+export type InsertDocumentSourceArtifact = typeof documentSourceArtifacts.$inferInsert;
+
+/* ==================================================================
+ * DC-B (0195) — Document Control: the 0144 register becomes origin-aware. The
+ * columns below are added to commercialDocuments and commercialDocumentLinks
+ * by 0195 (see the ALTER statements there); the two new tables carry external
+ * identifiers and the append-only timeline.
+ * ================================================================== */
+
+/** Identifiers another issuer assigned to a document, scoped by that issuer. Facility A's #12345 and Facility B's #12345 both exist. */
+export const documentExternalReferences = mysqlTable("documentExternalReferences", {
+  id: int("id").autoincrement().primaryKey(),
+  referenceRef: varchar("referenceRef", { length: 40 }).notNull().unique(),
+  bookOrgRef: varchar("bookOrgRef", { length: 64 }),
+  /** COALESCE(bookOrgRef, 'default'), maintained by the write path so an index can see the single tenant. */
+  bookScopeKey: varchar("bookScopeKey", { length: 64 }).notNull(),
+  documentId: int("documentId").notNull(),
+  referenceType: varchar("referenceType", { length: 40 }).notNull(),
+  referenceValue: varchar("referenceValue", { length: 120 }).notNull(),
+  referenceValueRaw: varchar("referenceValueRaw", { length: 120 }).notNull(),
+  issuerKind: mysqlEnum("issuerKind", ["tenant", "customer", "facility", "vendor", "regulator", "government_authority", "manufacturer", "other_third_party", "unknown"]).notNull(),
+  issuerOrgRef: varchar("issuerOrgRef", { length: 64 }),
+  issuerFacilityId: int("issuerFacilityId"),
+  issuerName: varchar("issuerName", { length: 220 }),
+  issuerScopeKey: varchar("issuerScopeKey", { length: 160 }).notNull(),
+  source: mysqlEnum("source", ["ocr_proposed", "human_entered", "portal_submitted", "api_imported", "domain_mirrored"]).notNull(),
+  confirmationStatus: mysqlEnum("confirmationStatus", ["proposed", "confirmed", "rejected"]).default("proposed").notNull(),
+  confirmedByUserId: int("confirmedByUserId"),
+  confirmedAt: timestamp("confirmedAt"),
+  /** Set when the value is a mirror of a column another domain owns; the row is then read-only here. */
+  mirrorOfTable: varchar("mirrorOfTable", { length: 40 }),
+  mirrorOfId: int("mirrorOfId"),
+  mirrorOfColumn: varchar("mirrorOfColumn", { length: 40 }),
+  duplicateOfDocumentId: int("duplicateOfDocumentId"),
+  duplicateOverrideReason: varchar("duplicateOverrideReason", { length: 300 }),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  perDocument: uniqueIndex("documentExternalReferences_document_issuer_value").on(t.documentId, t.referenceType, t.issuerScopeKey, t.referenceValue),
+  lookup: index("documentExternalReferences_lookup").on(t.bookScopeKey, t.referenceType, t.referenceValue),
+}));
+
+/** Append-only. The timeline of a controlled document is read from here, never inferred from the row's final state. */
+export const documentControlEvents = mysqlTable("documentControlEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  documentId: int("documentId").notNull(),
+  sequence: int("sequence").notNull(),
+  eventType: varchar("eventType", { length: 60 }).notNull(),
+  actorUserId: int("actorUserId"),
+  actorSource: mysqlEnum("actorSource", ["human", "system", "ai", "integration", "external"]).notNull(),
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  previousState: varchar("previousState", { length: 40 }),
+  newState: varchar("newState", { length: 40 }),
+  detailJson: text("detailJson"),
+  occurredAt: timestamp("occurredAt").notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+}, (t) => ({ seq: uniqueIndex("documentControlEvents_seq_unique").on(t.documentId, t.sequence) }));
+
+export type InsertDocumentExternalReference = typeof documentExternalReferences.$inferInsert;
+export type InsertDocumentControlEvent = typeof documentControlEvents.$inferInsert;
+
+/* ==================================================================
+ * DC-C (0196) — controlled numbering: the ledger around the one counter.
+ * trackingSequences gains orgRef/scopeKey (declared on that table); these two
+ * tables hold device blocks and one row per minted number.
+ * ================================================================== */
+
+/** A contiguous range cut from the row-locked counter for one enrolled device to issue offline. Never recycled. */
+export const numberBlocks = mysqlTable("numberBlocks", {
+  id: int("id").autoincrement().primaryKey(),
+  allocationRef: varchar("allocationRef", { length: 40 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  sequenceType: varchar("sequenceType", { length: 24 }).notNull(),
+  branch: varchar("branch", { length: 12 }).default("").notNull(),
+  periodKey: varchar("periodKey", { length: 16 }).notNull(),
+  firstSequence: bigint("firstSequence", { mode: "number" }).notNull(),
+  lastSequence: bigint("lastSequence", { mode: "number" }).notNull(),
+  count: int("count").notNull(),
+  deviceRef: varchar("deviceRef", { length: 64 }).notNull(),
+  allocatedByUserId: int("allocatedByUserId").notNull(),
+  state: mysqlEnum("state", ["active", "exhausted", "retired", "device_lost"]).default("active").notNull(),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+  retireReason: varchar("retireReason", { length: 300 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ range: uniqueIndex("numberBlocks_range_unique").on(t.scopeKey, t.sequenceType, t.branch, t.periodKey, t.firstSequence), device: index("numberBlocks_device").on(t.deviceRef, t.state) }));
+
+/** One row per minted number, written in the same transaction as the counter bump and the record. Every gap is a row with a reason. */
+export const numberAllocations = mysqlTable("numberAllocations", {
+  id: int("id").autoincrement().primaryKey(),
+  allocationRef: varchar("allocationRef", { length: 40 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  sequenceType: varchar("sequenceType", { length: 24 }).notNull(),
+  branch: varchar("branch", { length: 12 }).default("").notNull(),
+  periodKey: varchar("periodKey", { length: 16 }).notNull(),
+  sequence: bigint("sequence", { mode: "number" }).notNull(),
+  formattedNumber: varchar("formattedNumber", { length: 64 }).notNull(),
+  blockId: int("blockId"),
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  state: mysqlEnum("state", ["reserved", "issued", "voided", "damaged", "lost", "unused_retired"]).notNull(),
+  recordType: varchar("recordType", { length: 40 }),
+  recordId: int("recordId"),
+  idempotencyKey: varchar("idempotencyKey", { length: 120 }),
+  reservedByUserId: int("reservedByUserId"),
+  reservedAt: timestamp("reservedAt").defaultNow().notNull(),
+  issuedAt: timestamp("issuedAt"),
+  closedByUserId: int("closedByUserId"),
+  closedAt: timestamp("closedAt"),
+  reasonCode: mysqlEnum("reasonCode", ["record_insert_failed", "cancelled_before_issue", "duplicate_issue", "printed_and_spoiled", "device_lost", "device_retired", "damaged_in_field", "migration_gap", "other"]),
+  reasonText: varchar("reasonText", { length: 300 }),
+}, (t) => ({ sequence: uniqueIndex("numberAllocations_sequence_unique").on(t.scopeKey, t.sequenceType, t.branch, t.periodKey, t.sequence), idempotency: uniqueIndex("numberAllocations_idempotency_unique").on(t.scopeKey, t.sequenceType, t.idempotencyKey), record: index("numberAllocations_record").on(t.recordType, t.recordId), state: index("numberAllocations_state").on(t.scopeKey, t.sequenceType, t.periodKey, t.state) }));
+
+export type InsertNumberBlock = typeof numberBlocks.$inferInsert;
+export type InsertNumberAllocation = typeof numberAllocations.$inferInsert;
 /* ---- S1-A (0175): a session is a row, so a session can be revoked ---- */
 
 /**
