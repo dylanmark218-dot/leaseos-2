@@ -114,7 +114,9 @@ pnpm build
 gate "Summary"
 echo "tables: $(mysqlc -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$db';")"
 echo "migrations: $(ls drizzle/*.sql | wc -l)"
-echo "role-authorized procedures: $(cat $ROUTERS | grep -c 'roleProcedure(' || true)"
+# From the census, not a token grep: the grep counted `roleProcedure(` wherever the text
+# occurred, comments included (753); the census counts sites in the tree (680).
+echo "role-authorized procedures: $(pnpm exec tsx scripts/procedure-census.ts --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).byKind.roleProcedure ?? 0))')"
 
 echo "== 7b. External gate: portal mounts only externalProcedure, and the count is pinned =="
 EXT=$(grep -c 'externalProcedure(' server/portalRouter.ts || true); ROLE_IN_PORTAL=$(grep -c 'roleProcedure(' server/portalRouter.ts || true)
