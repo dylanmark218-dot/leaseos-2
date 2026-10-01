@@ -1,6 +1,6 @@
 # Operator identity and scope hardening — checkpoint
 
-> **Status: OPID-1 to OPID-6 closed on `claude/operator-identity-scope-hardening`.** The finding
+> **Status: OPID-1 to OPID-7 closed on `claude/operator-identity-scope-hardening`.** The finding
 > below was committed first, before any test or code (`7702582`, from `main` @ `b35bac4`). Then
 > came the RED suite (`20ef18c`) and the fix. What the fix did, and what is still open, is in
 > [Result](#result) at the end. The analysis is kept as the record of what was found.
@@ -94,10 +94,15 @@ Every site now resolves through `operatorForUserInScope` with the scope its rout
 | OPID-4 | hire checks for a record in the hiring scope and creates one through `createOperator`, which records ownership (none for the single tenant) | a record elsewhere no longer stops one being created here |
 | OPID-5 | `resolveOwnPayrollProfile` takes the money scope, resolved before the lookup | no profile: `NOT_FOUND`, as before |
 | OPID-6 | `callerAssignedToJob` takes the commercial scope; the name match is against the resolved record only | not assigned: `NOT_FOUND` |
+| OPID-7 | `shifts.award` (`server/shiftAwardService.ts`, which came from `main` in the 2026-10-01 merge) resolves the person in the post's scope. It had read the first row and then checked that row was in scope | none: `no_operator_record`; two: `no_operator_record` with its own reason, and nothing is bound |
 
 **Tests.** `server/operatorIdentityScope.db.test.ts`: 12 cases, all RED on `b35bac4` and GREEN
-here. `server/operatorIdentityGuard.test.ts` is the source guard: outside `operatorForUserInScope`,
-no production file reads `operators.userId`. One fixture was corrected:
+here. OPID-7 has two cases in `server/shiftAward.db.test.ts`, next to the award's own fixtures.
+Both are RED with `main`'s award code and GREEN here. `server/operatorIdentityGuard.test.ts` is
+the source guard: no production file filters `operators` by `userId` except
+`operatorForUserInScope` and `boardIdentity.displayIdentities`, a batched, organization-scoped read
+of display names. Reading the column after a lookup by operator id is allowed (`jobRoomService`).
+The guard caught OPID-7 the first time `main` was merged in. One fixture was corrected:
 `customerCommercial.db.test.ts` created its drivers' operator records with no owner, which only
 the unscoped lookup let through. They are now owned by the test's organization, and no assertion
 changed.
