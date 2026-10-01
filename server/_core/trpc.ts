@@ -343,7 +343,7 @@ import { createHash } from "node:crypto";
 import { EXTERNAL_KIND_PERMISSIONS, EXTERNAL_SENSITIVE_PERMISSIONS, externalPermissionForProcedure, type ExternalPermission } from "./recordsAuthorization";
 import { findExternalIdentityByAnyTokenHash, findExternalIdentityByInvitationHash, touchExternalIdentity, updateExternalIdentity } from "../db";
 import { credentialCheck, failureUpdate, invitationCheck, totpVerify } from "./externalIdentityPolicy";
-import { environmentSecretKeys, legacyMfaKey } from "./secretKeys";
+import { legacyMfaKey, secretKeyProvider } from "./secretKeys";
 import { resolveMfaSeed } from "../mfaSecretService";
 import { ENV } from "./env";
 
@@ -393,7 +393,7 @@ export function externalProcedure(procedureName: string) {
            */
           let seed: string;
           try {
-            seed = await resolveMfaSeed(identity, { keys: environmentSecretKeys(), legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
+            seed = await resolveMfaSeed(identity, { keys: secretKeyProvider(), legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
           } catch {
             return refuse("denied_scope", "MFA is enabled but cannot be verified on this server", "FORBIDDEN");
           }

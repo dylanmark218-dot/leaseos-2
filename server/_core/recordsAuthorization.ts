@@ -282,6 +282,8 @@ export type Permission =
   | "board.read" | "board.post" | "board.manage"
   // v22.20 — the agent. Asking it to work, acting, and approving differ.
   | "agent.use" | "agent.act" | "agent.approve" | "agent.read"
+  // LA-1a — Live Assist, the session spine only.
+  | "live_assist.use" | "live_assist.administer" | "live_assist.review"
   // v22.20 — clearing a government data source for operational use.
   | "geo.source.review"
   // v22.19 — the package a truck carries when nothing can be fetched.
@@ -360,6 +362,7 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    "live_assist.use",
     "document.read",
     "document.intake",
     "automation.override.operational",
@@ -445,6 +448,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "live_assist.use",
     "document.read",
     "document.intake",
     "document.confirm",
@@ -559,6 +563,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
+    "live_assist.use",
     "document.read",
     "document.intake",
     "assistant.ask",
@@ -627,6 +632,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
+    "live_assist.use",
     "document.read",
     "document.intake",
     "document.confirm",
@@ -717,6 +723,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "live_assist.review",
     "document.read",
     "document.intake",
     "document.confirm",
@@ -845,6 +852,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    "live_assist.use",
     "document.read",
     "document.intake",
     "document.confirm",
@@ -1013,6 +1021,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "live_assist.use",
+    "live_assist.administer",
+    "live_assist.review",
     "document.read",
     "document.intake",
     "document.confirm",
@@ -1801,6 +1812,9 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  "live_assist.use",
+  "live_assist.administer",
+  "live_assist.review",
   // DC-A (0178) — Document Control. Each of these creates operational truth (a controlled record, a
   // confirmed extraction, a consumed number) or changes what every later record is judged by.
   "document.intake",
@@ -2998,6 +3012,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "agent.decideApproval": "agent.approve",
   "agent.awaitEvent": "agent.act",
   "agent.get": "agent.read",
+  // LA-1a — Live Assist session spine.
+  "liveAssist.start": "live_assist.use",
+  "liveAssist.heartbeat": "live_assist.use",
+  "liveAssist.pause": "live_assist.use",
+  "liveAssist.resume": "live_assist.use",
+  "liveAssist.end": "live_assist.use",
+  "liveAssist.policyGet": "live_assist.use",
+  "liveAssist.policySet": "live_assist.administer",
+  "liveAssist.lifecycleList": "live_assist.review",
   "board.history": "board.read",
   "board.edit": "board.post",
   "board.withdraw": "board.post",
@@ -3214,6 +3237,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsRecord": "closeout.terms.record",
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
+
+  /* ---- the page scanner: guidance and review, both read-only ----
+   * Both answer "what does this paperwork need"; neither writes, links or
+   * confirms anything, so both sit on the ordinary compliance read rather
+   * than on a permission of their own. A worker who may not read the
+   * company's compliance material may not read its paperwork guidance
+   * either — that is the same question, and it already has an answer. */
+  "paperwork.guidance": "compliance.read",
+  "paperwork.reviewScan": "compliance.read",
 } as const satisfies Record<string, Permission>;
 
 /**

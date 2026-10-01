@@ -108,6 +108,7 @@ import { createJobUnitGated } from "./dispatchEnforcementService";
 import { iftaRouter } from "./iftaRouter";
 import { fuelOpsRouter } from "./fuelOpsRouter";
 import { periodRouter } from "./periodRouter";
+import { paperworkRouter } from "./paperworkRouter";
 import { gstRouter } from "./gstRouter";
 import { arRouter, bankRouter } from "./cashRouter";
 import { commercialRouter, portalAdminRouter } from "./commercialRouter";
@@ -124,6 +125,7 @@ import { readinessRouter } from "./readinessRouter";
 import { messageBoardRouter } from "./messageBoardRouter";
 import { assistantAskRouter } from "./assistantAskRouter";
 import { agentRouter } from "./agentRouter";
+import { liveAssistRouter } from "./liveAssistRouter";
 import { hosRouter } from "./hosRouter";
 import { portalRouter } from "./portalRouter";
 import { shopRouter } from "./shopRouter";
@@ -353,6 +355,7 @@ export const appRouter = router({
   facilityDirectory: facilityDirectoryRouter,
   system: systemRouter,
   comms: commsRouter,
+  paperwork: paperworkRouter,
   enforcement: enforcementRouter,
   timeOff: timeOffRouter,
   shifts: openShiftsRouter,
@@ -362,6 +365,7 @@ export const appRouter = router({
   board: messageBoardRouter,
   assistantAsk: assistantAskRouter,
   agent: agentRouter,
+  liveAssist: liveAssistRouter,
   hos: hosRouter,
   // B23.2 — who belongs to this organization and what they may do here.
   people: peopleRouter,

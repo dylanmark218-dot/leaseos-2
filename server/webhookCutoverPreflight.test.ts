@@ -138,15 +138,24 @@ describe("S2E2-T17 and the key-material boundary — structural", () => {
         if (statSync(p).isDirectory()) return entry === "node_modules" ? [] : walk(p);
         return /\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p) ? [p] : [];
       });
-    const offenders = [...walk("server"), ...walk("scripts")].filter(p => /kind:\s*["']managed["']/.test(code(p)));
+    // S2-KMS-A: the managed bootstrap is the one module that may say "managed", and only after
+    // every unwrap has succeeded (`managedSecretKeys.test.ts` KMS-T3/T8).
+    const offenders = [...walk("server"), ...walk("scripts")].filter(p => p !== "server/_core/managedSecretKeys.ts" && /kind:\s*["']managed["']/.test(code(p)));
     expect(offenders, "a production source constructs a provider that claims to be managed").toEqual([]);
   });
 
-  it("the production provider wiring is the environment provider, with no managed implementation present", () => {
+  it("the production provider wiring is the one accessor, and no vendor implementation is present", () => {
+    /*
+     * S2-KMS-A: call sites ask `secretKeyProvider()`, which serves the bootstrapped provider — the
+     * environment one unless `LEASEOS_SECRET_KEYS_SOURCE=managed`, in which case a managed backend
+     * must have unwrapped the keys at startup. No vendor adapter exists; the production backend
+     * registry is empty (`secretKeyWiring.test.ts`).
+     */
     const keysModule = code("server/_core/secretKeys.ts");
     expect(keysModule).toMatch(/return createEnvironmentKeyProvider\(config\);/);
     const wiring = ["server/webhookDispatchService.ts", "server/portalRouter.ts", "server/_core/trpc.ts"].map(code);
-    for (const body of wiring) expect(body).toMatch(/environmentSecretKeys\(\)/);
+    for (const body of wiring) expect(body).toMatch(/secretKeyProvider\(\)/);
+    for (const body of wiring) expect(body).not.toMatch(/environmentSecretKeys\(/);
     for (const body of wiring) expect(body).not.toMatch(/kms|keyVault|vault/i);
   });
 
