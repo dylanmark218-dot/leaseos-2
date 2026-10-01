@@ -37,7 +37,10 @@ async function onRoster(userId: number) {
   await pool.execute("INSERT INTO crewMembers (crewRef, userId, crewRole, joinedAt) VALUES (?, ?, 'driver', NOW())", [crewRef, userId]);
 }
 async function operatorRow(id: number) {
+  // Open Work (#59) reaches a person's operator record through `operators.userId`, and #52 reads the
+  // legacy licence date alone as unverified, so a ready driver also carries a verified licence document.
   await pool.execute("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())", [id, id, `Op ${rnd()}`, "1", new Date("2028-01-01T00:00:00Z")]);
+  await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Driver licence', NOW(), ?, 'verified')", [id, new Date("2028-01-01T00:00:00Z")]);
   await onRoster(id);
 }
 async function academy(userId: number, code: string, o: { status?: string; expiresAt?: Date | null; sourceKind?: string; complianceDocumentId?: number | null; createdAt?: Date } = {}) {
@@ -211,6 +214,57 @@ d("the four readers read through the adapter", () => {
     const e = await caller(dispatcher).shifts.eligibility({ postRef: p.postRef, userId: bad });
     expect(e.eligible).toBe(false);
     expect(e.reasons.some((r: { code: string }) => r.code === "qualification_expired")).toBe(true);
+  });
+
+  /*
+   * Open work through the same adapter (#59 reconciled with main). The board decides nothing about a
+   * ticket itself: each of these is the adapter's verdict arriving through `shifts.eligibility`.
+   */
+  const tdgPost = async (dispatcher: number) =>
+    caller(dispatcher).shifts.post({ title: "DG haul", startsAt: AT, endsAt: new Date(AT.getTime() + 12 * 3600_000), requiredRole: "driver", requiredQualifications: ["TDG"] });
+  const tdgGap = (e: { reasons: { code: string }[] }) => e.reasons.filter((r) => r.code.startsWith("qualification_")).map((r) => r.code);
+
+  it("20a. open shifts: a revoked Academy grant fails closed, and a legacy row does not rescue it", async () => {
+    const dispatcher = await withRole("dispatcher");
+    const p = await tdgPost(dispatcher);
+    const u = await withRole("driver"); await operatorRow(u);
+    await academy(u, "TDG", { status: "revoked" }); await legacy(u, "TDG");
+    const e = await caller(dispatcher).shifts.eligibility({ postRef: p.postRef, userId: u });
+    expect(e.eligible).toBe(false);
+    expect(tdgGap(e)).toHaveLength(1);
+  });
+
+  it("20b. open shifts: a holding stamped for another organization cannot satisfy this organization's post", async () => {
+    const a = await org(); const b = await org();
+    const dispatcherB = await member("dispatcher", b);
+    const p = await tdgPost(dispatcherB);
+    const u = await member("driver", b); await operatorRow(u);
+    await legacy(u, "TDG", { tenantId: a });
+    const e = await caller(dispatcherB).shifts.eligibility({ postRef: p.postRef, userId: u });
+    expect(e.eligible).toBe(false);
+    expect(tdgGap(e)).toEqual(["qualification_unknown"]);
+  });
+
+  it("20c. open shifts: precedence decides between grants, not insertion order", async () => {
+    const dispatcher = await withRole("dispatcher");
+    const p = await tdgPost(dispatcher);
+    const u = await withRole("driver"); await operatorRow(u);
+    // The newer, unasserted grant is written first; the older current one second.
+    await academy(u, "TDG", { status: "pending", createdAt: new Date("2026-06-01T00:00:00Z") });
+    await academy(u, "TDG", { createdAt: new Date("2026-01-01T00:00:00Z") });
+    const e = await caller(dispatcher).shifts.eligibility({ postRef: p.postRef, userId: u });
+    expect(tdgGap(e)).toEqual([]);
+    expect(e.eligible).toBe(true);
+  });
+
+  it("20d. open shifts: a grant with no expiry is not dispatch-valid (no qualification type is expiry-optional)", async () => {
+    const dispatcher = await withRole("dispatcher");
+    const p = await tdgPost(dispatcher);
+    const u = await withRole("driver"); await operatorRow(u);
+    await academy(u, "TDG", { expiresAt: null });
+    const e = await caller(dispatcher).shifts.eligibility({ postRef: p.postRef, userId: u });
+    expect(e.eligible).toBe(false);
+    expect(tdgGap(e)).toHaveLength(1);
   });
 
   it("19. crews count an Academy ticket holder", async () => {

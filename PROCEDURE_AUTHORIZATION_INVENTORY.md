@@ -52,11 +52,12 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **11** |
 | `server/liveAssistRouter.ts` | `ROLE_AUTHORIZED` — LA-1a session spine only; every permission sensitive; no universal grant (`docs/live-assist/LA1A_OWNER_RULING.md`) | **8** |
 | `server/documentControlRouter.ts` | `ROLE_AUTHORIZED` | **23** (DC-A: definitions list/get, catalog seed, overlay/create/retire, source artifacts; DC-B: intake, register rendered, confirm, issue, void, supersede, withdraw, amend, get, list; DC-C: series list, gap report, blocks, allocate/retire device block, void number) |
+| `server/attestRouter.ts` | `ROLE_AUTHORIZED` — SA1 Sign & Attest (`docs/sign-attest/SA1_OWNER_RULING.md`); `attest.sign` and `attest.decline` are universal and self-scoped (the signer row must name `ctx.user.id`); every other write is sensitive | **14** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**387 role-authorized procedures. Zero on bare `protectedProcedure`.**
+**401 role-authorized procedures. Zero on bare `protectedProcedure`.**
 
 Baseline in `procedureAuthorization.test.ts` is 0 and must never rise.
 
@@ -533,3 +534,26 @@ A permission belongs in `UNIVERSAL_PERMISSIONS` only when it is self-scoped **in
 code**, not merely self-scoped by intention. The list is deliberately one entry
 long and a test holds it there. Denials still override universals, and a user
 holding no recognized role still gets nothing.
+
+## 0205/0206 — Company Board + Open Work (design: `docs/product/COMPANY_BOARD_OPEN_WORK_DESIGN.md`)
+
+Twenty-one procedures added, all `ROLE_AUTHORIZED`; the live counts are generated into
+`LEASEOS_CURRENT_STATE.md` and pinned in `procedureAuthorization.test.ts`.
+
+| Procedure | Permission | Note |
+|---|---|---|
+| `board.direct` | `board.post` | the one direct channel two people share |
+| `board.members` | `board.read` | members of an explicit channel |
+| `board.memberAdd`, `board.memberRemove` | `board.post` | refused inside unless the caller holds `board.manage` or is a moderator/manager of that channel; a person may remove themselves |
+| `board.mine` | `board.read` | the caller's inbox |
+| `board.moderateRead`, `board.moderateWithdraw` | `board.moderate` (**sensitive**, new) | the one way into a conversation the caller is not in; every use writes a `messageChannelEvents` row |
+| `board.post` (existing) | `board.post`, and **`board.publish`** (sensitive, new) for an `emergency` priority or an `announcement`/`emergency` channel | decided inside from the derived rule `requiresPublishAuthority` |
+| `shifts.get`, `shifts.candidates` | `shifts.read` | |
+| `shifts.respond`, `shifts.offerRespond` | `shifts.interest` | a person's own answer |
+| `shifts.publish`, `shifts.close`, `shifts.cancel`, `shifts.offer`, `shifts.offerWithdraw` | `shifts.post` (sensitive) | the poster's acts |
+| `shifts.link` | `dispatch.assign` | naming the slot a post fills is an assignment act |
+| `shifts.award` (Checkpoint 3) | `dispatch.assign` | binds the slot through the canonical binding behind the dispatcher's stored check; not `dispatch.award` |
+| `shifts.availabilitySet`, `shifts.availabilityMine` | `shifts.availability_own` (universal, new) | reads and writes `ctx.user.id` only |
+| `shifts.availabilityFor` | `shifts.read` | another person's declarations, in the caller's organization only |
+
+Grants: `board.publish` to dispatcher, safety, management; `board.moderate` to safety, management.

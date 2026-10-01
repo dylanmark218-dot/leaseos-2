@@ -191,6 +191,12 @@ d("a day on the lease, signed before the truck leaves", () => {
     // actually proved who they were.
     expect(sig[0]).toMatchObject({ signatureMethod: "portal_link", payloadHash: prep.snapshotHash, capturedLatitude: 53.5 });
     expect(sig[0].externalIdentityId).not.toBeNull();
+    // SA1 — the signature row points at the Sign & Attest session that holds its binding and chain: the
+    // closeout became the first producer. The method stays portal_link on both rows; the mark is an
+    // acknowledgement (no drawing exists in SA1), bound to the R1 snapshot hash.
+    const [sa] = await pool.execute<mysql.RowDataPacket[]>("SELECT s.attestSessionRef, a.authMethod, a.state, r.revisionHash, r.state AS revisionState, r.subjectRef FROM fieldTicketSignatures s JOIN attestSigningSessions a ON a.sessionRef = s.attestSessionRef JOIN attestDocumentRevisions r ON r.id = a.revisionId WHERE s.fieldTicketId = (SELECT id FROM fieldTickets WHERE ticketNumber = ?)", [t.ticketNumber]);
+    expect(sa[0]).toMatchObject({ authMethod: "portal_link", state: "completed", revisionHash: prep.snapshotHash, revisionState: "completed", subjectRef: `${t.ticketNumber}-R1` });
+    expect(signed.attest).toMatchObject({ sessionRef: sa[0].attestSessionRef });
     // SPINE item 2 — this is the one signed-scope statement (fieldTicket.buildSignedScopeStatement was an
     // unwired second one and is gone). It records the authority actually exercised and what was refused.
     const [stmt] = await pool.execute<mysql.RowDataPacket[]>("SELECT signedScopeStatement FROM fieldTicketSignatures WHERE fieldTicketId = (SELECT id FROM fieldTickets WHERE ticketNumber = ?)", [t.ticketNumber]);

@@ -33,6 +33,11 @@ export type EvidenceRecordType =
   | "inspection"
   | "permit"
   | "photo"
+  // SA1 — Sign & Attest: the canonical stroke document, its rendered mark, a finalized artifact, an audit receipt.
+  | "signature_strokes"
+  | "signature_render"
+  | "signed_artifact"
+  | "attest_receipt"
   | "other";
 
 export type EvidenceEntityType =
@@ -54,7 +59,10 @@ export type EvidenceEntityType =
   | "customer"
   | "facility"
   | "dailyLog"
-  | "inspection";
+  | "inspection"
+  // SA1 (0214)
+  | "attestRevision"
+  | "attestMark";
 
 export type EvidenceRelationshipInput = {
   entityType: EvidenceEntityType;
