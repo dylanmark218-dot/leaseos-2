@@ -2810,6 +2810,9 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   /* ---- 0220: the ELD event ledger ---- */
   "eld.eventsAppend": "eld.event.record_own",
   "eld.deviceIntegrity": "eld.read",
+  // ELD checkpoint 2b: the gate is hos.read (a driver reads their own hours); the procedure also
+  // requires eld.read in code before it names another operator.
+  "eld.hosStatus": "hos.read",
 
   /* ---- v20.21: compliance master registry ---- */
   "compliance.passport": "compliance.passport.read",

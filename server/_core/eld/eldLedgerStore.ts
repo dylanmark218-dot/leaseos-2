@@ -19,11 +19,12 @@
  * The store never chooses the most recent copy. First accepted is canonical; every later
  * disagreement is evidence.
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, lt, lte } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { eldEventIngestConflicts, eldEvents, operators, units, type EldEventRow } from "../../../drizzle/schema";
 import type { Db, Tx } from "../dbTypes";
 import { recordBelongsToOrganization } from "../coreRecordOwnership";
+import type { LedgerEventLike } from "./hosProjection";
 import { assessDeviceChain, prepareEldBatch, type BatchProblem, type ChainAssessment, type EldAppendReasonCode, type HashedEldEvent } from "./ledger";
 import { ELD_SCALE } from "../../../shared/eld/eldEvent";
 
@@ -230,4 +231,62 @@ export async function deviceLedgerIntegrity(db: Db, fieldDeviceId: number): Prom
   const rows = await db.select({ eventRef: eldEvents.eventRef, deviceSequence: eldEvents.deviceSequence, eventAt: eldEvents.eventAt, previousEventHash: eldEvents.previousEventHash, eventHash: eldEvents.eventHash })
     .from(eldEvents).where(eq(eldEvents.fieldDeviceId, fieldDeviceId));
   return assessDeviceChain(rows.map(r => ({ ...r, deviceSequence: Number(r.deviceSequence) })));
+}
+
+/**
+ * The rows the HOS engine reads for one operator, inside one organization. Read-only.
+ *
+ * Three sets, because a window cut at `since` would otherwise lie about its own first hours:
+ *   every row in [since, at];
+ *   the last duty-status row before `since`, so a status already running when the window opens is
+ *     counted from the window's start rather than dropped (the engine counts only the overlap);
+ *   every row, at any time, that names one of the rows above in `supersedesEventRef`, so a
+ *     correction recorded after the window still retracts what it names.
+ * Scoped by `orgRef` on every query: an operator id from another organization reads as nothing.
+ *
+ * Also returns each device's sequence gaps as time spans, for the engine's HOS_DATA_GAP check: a gap
+ * from sequence a to b runs from the event before a to the event after b, the narrowest span the
+ * record can vouch for.
+ */
+export async function loadHosLedgerWindow(db: Db, args: { orgRef: string; operatorId: number; since: Date; at: Date }): Promise<{
+  rows: LedgerEventLike[];
+  chainGaps: { fieldDeviceId: number; fromSequence: number; toSequence: number; fromAt: Date | null; toAt: Date | null }[];
+}> {
+  const cols = {
+    eventRef: eldEvents.eventRef, deviceSequence: eldEvents.deviceSequence, operatorId: eldEvents.operatorId, eventType: eldEvents.eventType,
+    eventCode: eldEvents.eventCode, dutyStatus: eldEvents.dutyStatus, eventAt: eldEvents.eventAt, supersedesEventRef: eldEvents.supersedesEventRef,
+    fieldDeviceId: eldEvents.fieldDeviceId,
+  };
+  const own = and(eq(eldEvents.orgRef, args.orgRef), eq(eldEvents.operatorId, args.operatorId));
+  const inWindow = await db.select(cols).from(eldEvents).where(and(own, gte(eldEvents.eventAt, args.since), lte(eldEvents.eventAt, args.at)));
+  const before = await db.select(cols).from(eldEvents)
+    .where(and(own, lt(eldEvents.eventAt, args.since), isNotNull(eldEvents.dutyStatus)))
+    .orderBy(desc(eldEvents.eventAt), desc(eldEvents.deviceSequence)).limit(1);
+  const byRef = new Map<string, (typeof inWindow)[number]>();
+  for (const r of [...before, ...inWindow]) byRef.set(r.eventRef, r);
+  // Follow supersession forward: a correction recorded later can itself be retracted by a later one,
+  // and leaving that second one out would make a retracted correction look active. Bounded, because a
+  // chain longer than this is a device fault, not a correction history.
+  let frontier = Array.from(byRef.keys());
+  for (let depth = 0; frontier.length && depth < 16; depth++) {
+    const naming = await db.select(cols).from(eldEvents).where(and(own, inArray(eldEvents.supersedesEventRef, frontier)));
+    frontier = naming.filter(r => !byRef.has(r.eventRef)).map(r => r.eventRef);
+    for (const r of naming) byRef.set(r.eventRef, r);
+  }
+  const all = Array.from(byRef.values());
+
+  const devices = Array.from(new Set(all.map(r => r.fieldDeviceId).filter((d): d is number => d != null)));
+  const chainGaps: { fieldDeviceId: number; fromSequence: number; toSequence: number; fromAt: Date | null; toAt: Date | null }[] = [];
+  for (const fieldDeviceId of devices) {
+    const chain = await db.select({ eventRef: eldEvents.eventRef, deviceSequence: eldEvents.deviceSequence, eventAt: eldEvents.eventAt, previousEventHash: eldEvents.previousEventHash, eventHash: eldEvents.eventHash })
+      .from(eldEvents).where(and(eq(eldEvents.orgRef, args.orgRef), eq(eldEvents.fieldDeviceId, fieldDeviceId)));
+    const atBySeq = new Map(chain.map(c => [Number(c.deviceSequence), c.eventAt] as const));
+    for (const g of assessDeviceChain(chain.map(c => ({ ...c, deviceSequence: Number(c.deviceSequence) }))).gaps) {
+      chainGaps.push({ fieldDeviceId, fromSequence: g.from, toSequence: g.to, fromAt: atBySeq.get(g.from - 1) ?? null, toAt: atBySeq.get(g.to + 1) ?? null });
+    }
+  }
+  return {
+    rows: all.map(r => ({ eventRef: r.eventRef, deviceSequence: r.deviceSequence == null ? null : Number(r.deviceSequence), operatorId: r.operatorId, eventType: r.eventType, eventCode: r.eventCode, dutyStatus: r.dutyStatus, eventAt: r.eventAt, supersedesEventRef: r.supersedesEventRef })),
+    chainGaps,
+  };
 }

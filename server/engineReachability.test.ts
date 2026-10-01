@@ -134,10 +134,6 @@ const DECLARED_UNWIRED: Record<string, string> = {
   siteBaseline: "per-site median/MAD stop-duration baselines and the stop assessment; needs siteStopBaselines/siteStopAlerts and siteBaselineRouter before anything reaches it",
   tripBillingProjection: "turns a completed trip into ChargeLineSource[] for calculateChargeLines; belongs inside the existing billing path where evaluateBillingReadiness already runs, which is the wiring decision still open",
   tripPassportPackage: "assembles and staleness-checks the trip passport package; needs tripPassportPackages/tripPassportPackageItems and a decision on whether assembly runs on completion, on demand or in the worker",
-  // ELD checkpoint 2a: the HOS engine over the ledger, pure and proven by eldHos.test.ts before anything consumes it.
-  "eld/hosEngine": "ELD checkpoint 2a - the one HOS calculation over the ledger (projection, profile, clocks, determination, and the rule that a verified figure gives no verdict while its day or cycle boundary is a default). Not mounted on purpose: the next ELD checkpoint wires it into a read-only eld.hosStatus; dispatch keeps hos_unknown until a regime mechanics module and verified figures exist. See docs/eld/ELD_CHECKPOINT_2A_HOS_ENGINE.md",
-  "eld/hosProjection": "ELD checkpoint 2a - ledger rows to duty entries (corrections retract, cycles are reported, special categories are not counted); reached only through eld/hosEngine, which is declared above",
-  "eld/reasonCodes": "ELD checkpoint 2a - the HOS_* reason-code registry; reached only through eld/hosEngine and eld/hosProjection, both declared above",
 };
 
 /**
@@ -316,13 +312,6 @@ describe("every engine is reached, or says why not", () => {
       // away from. Both leave the list when SPINE item 4 wires the stop-timing router.
       "boundaryConfirmation",
       "siteBaseline",
-      // ELD checkpoint 2a, landing as one chain before its procedure: hosEngine imports the
-      // projection and the reason codes. Not the `billing` shape — the engine calls hos.ts's
-      // computeClocks and determine rather than copying them, and it reads the ELD ledger,
-      // not dutyRecords, so there is no live second copy to drift from. Both leave the list
-      // when the next ELD checkpoint mounts eld.hosStatus.
-      "eld/hosProjection",
-      "eld/reasonCodes",
       // The one that prompted this check. `billing` leaves the list when the trip
       // projection is adapted onto rateResolution/linePricing, or when either is
       // wired for real — see docs/b23/HOOKS_AND_PERSISTENCE.md.
@@ -346,7 +335,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(76);   // ELD checkpoint 2a: +3 eld/{hosEngine,hosProjection,reasonCodes}, declared above; pure, proven by eldHos.test.ts, wired by the next ELD checkpoint;   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
+    expect(unwired).toHaveLength(73);   // ELD checkpoint 2b: eld.hosStatus reaches eld/{hosEngine,hosProjection,reasonCodes}, so the three 2a declarations are gone (76 -> 73);   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });

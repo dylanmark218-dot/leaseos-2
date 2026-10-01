@@ -481,3 +481,102 @@ d("a batch is one transaction", () => {
     expect(await countByRef(existing.eventRef)).toBe(1);     // the earlier record is unaffected
   });
 });
+
+/* ================================================================== */
+/* ELD checkpoint 2b — hours of service read from the ledger           */
+/* ================================================================== */
+
+d("eld.hosStatus reads hours from the ledger, and only the caller's own unless the office asks", () => {
+  const MIN = 60_000;
+  const AT = new Date(T0 + 150 * MIN);
+
+  it("counts a driver's own clocks from the events the device pushed, and answers UNKNOWN with the reason", async () => {
+    const s = await driverScenario();
+    const e0 = ev(0, { eventAtMs: T0, dutyStatus: "on_duty" });
+    const e1 = ev(1, { eventAtMs: T0 + 30 * MIN, dutyStatus: "driving" });
+    accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [e0, e1])));
+    const before = Number((await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM eldEvents"))[0][0].n);
+
+    const r = await callerFor(s.userId).eld.hosStatus({ at: AT });
+    expect(r.operatorId).toBe(s.operatorId);
+    expect(r.engineVersion).toBe("hos-engine/2a");
+    expect(r.projection.entryEventRefs).toEqual([e0.eventRef, e1.eventRef]);
+    // Hand-computed: on duty 14:00, driving 14:30, read at 16:30.
+    expect(r.clocks).toMatchObject({ shiftOnDutyMinutes: 150, shiftDriveMinutes: 120, continuousDriveMinutes: 120, currentStatus: "driving", currentStatusMinutes: 120 });
+    // No operating context was stated, so no schedule is selected and nothing is determined.
+    expect(r.verdict).toBe("unknown");
+    expect(r.reasonCodes).toEqual(expect.arrayContaining(["HOS_PROFILE_UNKNOWN", "HOS_MECHANICS_DEFAULTED", "HOS_TIMEZONE_UNKNOWN", "HOS_OPEN_STATUS"]));
+    expect(r.remaining).toEqual({ drivingMinutes: null, onDutyMinutes: null, shiftWindowMinutes: null, cycleMinutes: null, basisRuleIds: [] });
+    expect(r.window.rowsRead).toBe(2);
+    // A read writes nothing.
+    expect(Number((await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM eldEvents"))[0][0].n)).toBe(before);
+  });
+
+  it("applies a correction pushed by the device as a retraction, with the replacement status the device recorded", async () => {
+    const s = await driverScenario();
+    const e0 = ev(0, { eventAtMs: T0, dutyStatus: "on_duty" });
+    const e1 = ev(1, { eventAtMs: T0 + 30 * MIN, dutyStatus: "driving" });
+    const c = ev(2, { eventAtMs: T0 + 40 * MIN, eventType: "correction", dutyStatus: null, supersedesEventRef: e1.eventRef, annotation: "was on duty, not driving" });
+    const replacement = ev(3, { eventAtMs: T0 + 30 * MIN, dutyStatus: "on_duty" });
+    accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [e0, e1, c, replacement])));
+
+    const r = await callerFor(s.userId).eld.hosStatus({ at: AT });
+    expect(r.projection.supersededEventRefs).toEqual([e1.eventRef]);
+    expect(r.projection.correctionsApplied).toEqual([{ correctionEventRef: c.eventRef, supersedesEventRef: e1.eventRef }]);
+    expect(r.projection.entryEventRefs).toEqual([e0.eventRef, replacement.eventRef]);
+    expect(r.clocks).toMatchObject({ continuousDriveMinutes: 0, shiftDriveMinutes: 0, currentStatus: "on_duty" });
+    expect(r.reasonCodes).toContain("HOS_CORRECTION_APPLIED");
+    // The original is still on the ledger, unchanged.
+    expect((await rowByRef(e1.eventRef)).dutyStatus).toBe("driving");
+  });
+
+  it("counts a status that was already running when the window opened, from the window's start", async () => {
+    const s = await driverScenario();
+    const longOff = ev(0, { eventAtMs: T0 - 20 * 86_400_000, dutyStatus: "off_duty" });
+    const onDuty = ev(1, { eventAtMs: T0, dutyStatus: "on_duty" });
+    accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [longOff, onDuty])));
+    const r = await callerFor(s.userId).eld.hosStatus({ at: new Date(T0 + 60 * MIN), lookbackDays: 1 });
+    expect(r.projection.entryEventRefs).toEqual([longOff.eventRef, onDuty.eventRef]);
+    // Trailing 24 hours from 15:00: off duty 15:00 the day before until 14:00 = 23 hours.
+    expect(r.clocks.dailyOffDutyMinutes).toBe(23 * 60);
+    expect(r.clocks.dailyOnDutyMinutes).toBe(60);
+  });
+
+  it("flags a sequence gap in the device's chain that falls inside the window", async () => {
+    const s = await driverScenario();
+    accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [
+      ev(0, { eventAtMs: T0, dutyStatus: "on_duty" }), ev(1, { eventAtMs: T0 + 10 * MIN, dutyStatus: "driving" }), ev(3, { eventAtMs: T0 + 60 * MIN, dutyStatus: "on_duty" }),
+    ])));
+    const r = await callerFor(s.userId).eld.hosStatus({ at: AT });
+    expect(r.window.chainGaps).toEqual([expect.objectContaining({ fromSequence: 2, toSequence: 2, fromAt: new Date(T0 + 10 * MIN), toAt: new Date(T0 + 60 * MIN) })]);
+    expect(r.reasonCodes).toContain("HOS_DATA_GAP");
+  });
+
+  it("lets the office read any operator in its organization, refuses a colleague without eld.read, and hides other organizations", async () => {
+    const s = await driverScenario();
+    accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [ev(0, { eventAtMs: T0, dutyStatus: "on_duty" })])));
+
+    const safety = await userIn(s.orgRef, "safety");
+    const read = await callerFor(safety).eld.hosStatus({ operatorId: s.operatorId, at: AT });
+    expect(read.operatorId).toBe(s.operatorId);
+    expect(read.window.rowsRead).toBe(1);
+
+    const colleague = await userIn(s.orgRef, "driver");
+    await operatorFor(colleague, s.orgRef);
+    await expect(callerFor(colleague).eld.hosStatus({ operatorId: s.operatorId, at: AT })).rejects.toThrow(/needs eld\.read/);
+
+    const elsewhere = await userIn(await org(), "safety");
+    await expect(callerFor(elsewhere).eld.hosStatus({ operatorId: s.operatorId, at: AT })).rejects.toThrow(/not found/);
+  });
+
+  it("refuses rather than guesses when the caller has no operator record and names none", async () => {
+    const orgRef = await org();
+    const office = await userIn(orgRef, "office");
+    await expect(callerFor(office).eld.hosStatus({ at: AT })).rejects.toThrow(/No operator record/);
+  });
+
+  it("takes no organization or device from the caller", async () => {
+    const s = await driverScenario();
+    await expect(callerFor(s.userId).eld.hosStatus({ at: AT, orgRef: "elsewhere" } as never)).rejects.toThrow();
+  });
+});

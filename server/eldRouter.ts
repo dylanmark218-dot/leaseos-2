@@ -1,25 +1,31 @@
 /**
  * 0220 — the ELD ledger's API.
  *
- * Two procedures and nothing that decides. `eventsAppend` is the device's push: the same transport
+ * Three procedures and nothing that decides. `eventsAppend` is the device's push: the same transport
  * discipline as `sync.receivePackage` (enrolled device, P-256 signature over the canonical batch,
  * single-use nonce, freshness by the device's clock), then everything about identity, tenancy and
  * idempotency is `appendEldEvents`'s. `deviceIntegrity` reads what one device's chain proves.
+ * `hosStatus` reads one operator's hours from the ledger through `evaluateHos`.
  *
- * No procedure here accepts an organization, an operator or a driver's name. The device is the
- * identity, and the device is looked up.
+ * No procedure here accepts an organization or a driver's name. The device is the identity on the
+ * write path, and it is looked up. The only operator id any procedure takes is `hosStatus`'s, a READ
+ * that is checked against the caller's organization and, for anyone but the caller, `eld.read`.
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { deviceKeyEvents, deviceSyncNonces, fieldDevices } from "../drizzle/schema";
+import { deviceKeyEvents, deviceSyncNonces, fieldDevices, operators } from "../drizzle/schema";
 import { resolveActingScope } from "./_core/actingScope";
 import { DEVICE_SIGNATURE_MAX_SKEW_MS, handleSyncRefusal, signatureFreshness, verifyP256PackageSignature, type SyncRefusalCode } from "./_core/deviceSignature";
 import { admitPackage, type FieldDeviceRecord, type KeyEvent } from "./_core/fieldDevice";
 import { canonicalEldBatch, type BatchProblem } from "./_core/eld/ledger";
-import { appendEldEvents, deviceLedgerIntegrity } from "./_core/eld/eldLedgerStore";
+import { appendEldEvents, deviceLedgerIntegrity, loadHosLedgerWindow } from "./_core/eld/eldLedgerStore";
+import { evaluateHos } from "./_core/eld/hosEngine";
+import { authorize } from "./_core/recordsAuthorization";
+import { recordBelongsToOrganization } from "./_core/coreRecordOwnership";
+import { loadProfiles } from "./hosRouter";
 
 /** Why the transport refused, before any event was looked at. Content refusals use the store's codes. */
 export type EldTransportRefusalCode = "device_unknown" | "device_no_organization" | "device_legacy_key" | "signature_stale" | "signature_invalid" | "device_not_admitted";
@@ -110,5 +116,72 @@ export const eldRouter = router({
       // Out of scope reads as absent, as everywhere else in LeaseOS.
       if (!d || d.orgRef !== acting) throw new TRPCError({ code: "NOT_FOUND", message: `Device ${input.deviceRef} not found` });
       return { deviceRef: input.deviceRef, ...(await deviceLedgerIntegrity(db, d.id)) };
+    }),
+
+  /**
+   * ELD checkpoint 2b — hours of service computed from the ledger, read-only.
+   *
+   * Runs `evaluateHos` over one operator's ledger rows and returns its whole answer: the clocks,
+   * the determination after the mechanics discipline, the reason codes, and the window it read.
+   * It writes nothing and changes no other answer — dispatch still reads `hos_unknown`.
+   *
+   * Who may read whom: `hos.read` (the gate) lets a driver read their OWN operator, resolved from
+   * the session, never from the input. Naming any other operator additionally needs `eld.read`, the
+   * office's permission. Either way the operator must belong to the caller's organization, and one
+   * that does not reads as not found.
+   *
+   * The operating context (authority, jurisdiction, weight, latitude) is the caller's statement,
+   * exactly as `hos.status` takes it: the selector answers UNKNOWN for every rung it leaves out, so an
+   * incomplete context makes the answer less certain, never more permissive.
+   */
+  hosStatus: roleProcedure("eld.hosStatus")
+    .input(z.object({
+      operatorId: z.number().int().positive().optional(),
+      carrierAuthority: z.enum(["federal", "provincial", "territorial"]).nullish(),
+      jurisdiction: z.string().max(8).nullish(),
+      crossedBoundary: z.boolean().nullish(),
+      registeredWeightKg: z.number().int().positive().max(200_000).nullish(),
+      operationClass: z.string().max(40).nullish(),
+      latitude: z.number().min(-90).max(90).nullish(),
+      at: z.coerce.date().optional(),
+      lookbackDays: z.number().int().min(1).max(30).default(16),
+    }).strict())
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const acting = (await resolveActingScope(db, ctx.user.id)).tenantId;
+
+      const own = await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, ctx.user.id));
+      const ownId = own.length === 1 ? own[0]!.id : null;
+      const operatorId = input.operatorId ?? ownId;
+      if (operatorId == null) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: own.length > 1 ? `User ${ctx.user.id} has ${own.length} operator records; which one is meant has to be established, not guessed` : "No operator record for the signed-in user; name an operator to read someone else's hours" });
+      }
+      if (operatorId !== ownId) {
+        const roles = (ctx as unknown as { roles?: readonly string[] }).roles ?? [];
+        // The organization the gate decided in: a role another employer granted never counts here.
+        const organization = (ctx as { organization?: string | null }).organization ?? null;
+        if (!authorize({ userId: ctx.user.id, roles, permission: "eld.read", organization }).allowed) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Reading another operator's hours needs eld.read" });
+        }
+      }
+      // Out of scope reads as absent.
+      const exists = (await db.select({ id: operators.id }).from(operators).where(eq(operators.id, operatorId)).limit(1))[0];
+      if (!exists || !(await recordBelongsToOrganization(db, acting, "operator", operatorId))) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `Operator ${operatorId} not found` });
+      }
+
+      const at = input.at ?? new Date();
+      const since = new Date(at.getTime() - input.lookbackDays * 86_400_000);
+      const window = await loadHosLedgerWindow(db, { orgRef: acting, operatorId, since, at });
+      const result = evaluateHos({
+        operatorId, events: window.rows,
+        homeTerminalTimezone: null,              // no column yet; the engine reports HOS_TIMEZONE_UNKNOWN
+        context: { carrierAuthority: input.carrierAuthority, jurisdiction: input.jurisdiction, crossedBoundary: input.crossedBoundary, registeredWeightKg: input.registeredWeightKg, operationClass: input.operationClass, latitude: input.latitude, at },
+        profiles: await loadProfiles(db),
+        chainGaps: window.chainGaps.map(g => ({ fromAt: g.fromAt, toAt: g.toAt })),
+        at,
+      });
+      return { ...result, window: { from: since, to: at, rowsRead: window.rows.length, chainGaps: window.chainGaps } };
     }),
 });

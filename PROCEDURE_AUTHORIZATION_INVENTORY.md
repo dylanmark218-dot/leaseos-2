@@ -52,7 +52,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **11** |
 | `server/liveAssistRouter.ts` | `ROLE_AUTHORIZED` — LA-1a session spine only; every permission sensitive; no universal grant (`docs/live-assist/LA1A_OWNER_RULING.md`) | **8** |
 | `server/documentControlRouter.ts` | `ROLE_AUTHORIZED` | **23** (DC-A: definitions list/get, catalog seed, overlay/create/retire, source artifacts; DC-B: intake, register rendered, confirm, issue, void, supersede, withdraw, amend, get, list; DC-C: series list, gap report, blocks, allocate/retire device block, void number) |
-| `server/eldRouter.ts` | `ROLE_AUTHORIZED` (0220: `eld.eventsAppend` self-scoped to the enrolled device; `eld.deviceIntegrity` an office read) | **2** |
+| `server/eldRouter.ts` | `ROLE_AUTHORIZED` (0220: `eld.eventsAppend` self-scoped to the enrolled device; `eld.deviceIntegrity` an office read; `eld.hosStatus` gated on `hos.read`, own operator only unless the caller also holds `eld.read`) | **3** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
