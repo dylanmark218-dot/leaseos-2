@@ -191,7 +191,10 @@ d("assistant proposals are their organization's alone (invariants 1, 2, 13)", ()
     const p = await proposalOf(A, a1);
     expect((await loadExceptionSources(new Date(), { tenantId: A })).aiProposals.some(x => x.proposalId === p)).toBe(true);
     expect((await loadExceptionSources(new Date(), { tenantId: B })).aiProposals.some(x => x.proposalId === p)).toBe(false);
-    expect((await loadExceptionSources(new Date())).aiProposals).toEqual([]);
+    // TEN-EXC-1: there is no unscoped call any more — the scope is a required argument, and a call
+    // that smuggles in none fails rather than reading every organization's proposals.
+    // @ts-expect-error scope is required
+    await expect(loadExceptionSources(new Date())).rejects.toThrow();
   });
 
   it("leaves a legacy row whose owner was never proved visible to nobody and committable by nobody (invariant 11)", async () => {

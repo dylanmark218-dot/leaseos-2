@@ -10,6 +10,7 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
 import { resolveActingScope } from "./_core/actingScope";
 import { anchoredScope, getDb, orgScopeWhere, ownershipScopeWhere, type TenantScope } from "./db";
+import { credentialOwner, ownedBy, ownerOf } from "./exceptionScope";
 import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
   billingBooks, calibrationSweeps, complianceDocuments, disposalTickets, fieldTickets, manifests, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
@@ -26,7 +27,51 @@ const DAY = 86_400_000;
 /* Exception sources                                                    */
 /* ------------------------------------------------------------------ */
 
-/** The disposal-facility directory's open items, for the Exception Centre. Derived, never stored. */
+/*
+ * TEN-EXC-1 ownership rules, one per source that is not a single column (see exceptionScope.ts).
+ * Every link a row carries must agree; an unresolved link hides the row from everyone.
+ */
+/** A defect is its unit's. A defect naming a unit that does not exist is nobody's. */
+const defectInScope = (scope: TenantScope) => ownedBy(scope, [ownerOf.unit(maintenanceDefects.unitId)]);
+/** A roadside event is its unit's, and the job, trip and operator it names must be the same organization's. */
+const roadsideInScope = (scope: TenantScope) => ownedBy(scope, [ownerOf.unit(roadsideServiceEvents.unitId)], [
+  [roadsideServiceEvents.jobId, ownerOf.job(roadsideServiceEvents.jobId)],
+  [roadsideServiceEvents.tripId, ownerOf.trip(roadsideServiceEvents.tripId)],
+  [roadsideServiceEvents.operatorId, ownerOf.operator(roadsideServiceEvents.operatorId)],
+]);
+/** A vendor bill is its financial entity's; its vendor (whose name is shown), unit and job must agree. */
+const vendorBillInScope = (scope: TenantScope) => ownedBy(scope, [ownerOf.entity(vendorBills.financialEntityId), ownerOf.vendor(vendorBills.vendorId)], [
+  [vendorBills.unitId, ownerOf.unit(vendorBills.unitId)],
+  [vendorBills.jobId, ownerOf.job(vendorBills.jobId)],
+]);
+/** A purchase request is its financial entity's; vendor, unit and job must agree. */
+export const purchaseRequestInScope = (scope: TenantScope) => ownedBy(scope, [ownerOf.entity(purchaseAuthorizations.financialEntityId)], [
+  [purchaseAuthorizations.vendorId, ownerOf.vendor(purchaseAuthorizations.vendorId)],
+  [purchaseAuthorizations.unitId, ownerOf.unit(purchaseAuthorizations.unitId)],
+  [purchaseAuthorizations.jobId, ownerOf.job(purchaseAuthorizations.jobId)],
+]);
+/** A pending question is its proposal's (0185 proved owner). A question on an unresolved proposal is nobody's. */
+export const questionInScope = (scope: TenantScope) => ownedBy(scope, [ownerOf.proposal(assistantQuestions.proposalId)]);
+/**
+ * A sync conflict is the device's that uploaded it (stamped at enrolment); the package it came in, if
+ * recorded, must be from a device of the same organization. The record it names has no resolvable
+ * owner (server versions are a registry, not a table), so provenance is the device's — and a device
+ * with no stamp proves nothing.
+ */
+export const syncConflictInScope = (scope: TenantScope) => ownedBy(scope, [ownerOf.device(syncConflicts.fieldDeviceId)], [
+  [syncConflicts.syncPackageId, ownerOf.syncPackage(syncConflicts.syncPackageId)],
+]);
+/** An inspector request is its subject person's organization, and the certificate's holder must agree. */
+const inspectorRequestInScope = (scope: TenantScope, now: Date) => ownedBy(scope, [
+  ownerOf.user(academyInspectorRequests.subjectUserId, now),
+  ownerOf.certificate(academyInspectorRequests.certificateId, now),
+]);
+
+/**
+ * The disposal-facility directory's open items, for the Exception Centre. Derived, never stored.
+ * TEN-EXC-1: intentionally GLOBAL — only public directory rows (a `facilityKey`) and confirmed public
+ * licences are read, never the operator's own submissions, so no organization's record is in it.
+ */
 async function loadFacilityDirectoryExceptions(db: Awaited<ReturnType<typeof getDb>>) {
   if (!db) return undefined;
   const conflicting = await db.select({ facilityKey: facilities.facilityKey, name: facilities.name }).from(facilities).where(and(isNotNull(facilities.facilityKey), eq(facilities.lifecycle, "conflicting")));
@@ -46,13 +91,15 @@ async function loadFacilityDirectoryExceptions(db: Awaited<ReturnType<typeof get
 }
 
 /**
- * AIL-1A: AI proposals are read for the caller's organization only. `scope` is optional so the
- * other sources' callers are unchanged, and a caller that passes none gets no proposals at all —
- * the proposal slice fails closed rather than falling back to every organization's. The other
- * exception sources are not tenant-scoped yet; that is recorded in AIL_1A_LEARNING_SCOPE.md and not
- * widened here.
+ * TEN-EXC-1 — every source is read inside the caller's organization, in the query itself.
+ *
+ * `scope` is required: there is no unscoped Exception Centre. Each source's owner comes from its own
+ * links (`exceptionScope.ts`); a row whose owner cannot be resolved, or whose links name two
+ * organizations, is shown to nobody. The ownership rule per source is recorded in
+ * docs/register/TEN_EXC_1_EXCEPTION_CENTRE_TENANCY.md. Which of these a person may act on is still
+ * decided afterwards by `visibleTo` — scope says whose record it is, authorization says who may see it.
  */
-export async function loadExceptionSources(now = new Date(), scope: { tenantId: string } | null = null): Promise<ExceptionSources> {
+export async function loadExceptionSources(now: Date, scope: TenantScope): Promise<ExceptionSources> {
   const db = await getDb();
   const empty: ExceptionSources = {
     now, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [],
@@ -64,31 +111,34 @@ export async function loadExceptionSources(now = new Date(), scope: { tenantId: 
   const [defects, roadside, bills, pas, creds, proposals, questions, conflicts, revoked, devices, policies, reviews] = await Promise.all([
     db.select({ id: maintenanceDefects.id, unitId: maintenanceDefects.unitId, title: maintenanceDefects.title, reportedAt: maintenanceDefects.reportedAt, status: maintenanceDefects.status, unitNumber: units.unitNumber })
       .from(maintenanceDefects).leftJoin(units, eq(units.id, maintenanceDefects.unitId))
-      .where(and(eq(maintenanceDefects.severity, "critical"), inArray(maintenanceDefects.status, ["open", "in_progress"]))).limit(500),
+      .where(and(eq(maintenanceDefects.severity, "critical"), inArray(maintenanceDefects.status, ["open", "in_progress"]), defectInScope(scope))).limit(500),
     db.select({ id: roadsideServiceEvents.id, eventRef: roadsideServiceEvents.eventRef, eventType: roadsideServiceEvents.eventType, occurredAt: roadsideServiceEvents.occurredAt, assignedVendorId: roadsideServiceEvents.assignedVendorId, unitNumber: units.unitNumber })
       .from(roadsideServiceEvents).leftJoin(units, eq(units.id, roadsideServiceEvents.unitId))
-      .where(inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"])).limit(500),
+      .where(and(inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"]), roadsideInScope(scope))).limit(500),
     db.select({ id: vendorBills.id, billRef: vendorBills.billRef, totalCents: vendorBills.totalCents, status: vendorBills.status, matchOutcome: vendorBills.matchOutcome, receivedAt: vendorBills.receivedAt, dueAt: vendorBills.dueAt, vendorName: vendors.name })
       .from(vendorBills).leftJoin(vendors, eq(vendors.id, vendorBills.vendorId))
-      .where(inArray(vendorBills.status, ["needs_coding", "needs_approval", "missing_receipt", "mismatch", "duplicate_suspected"])).limit(500),
-    db.select().from(purchaseAuthorizations).where(eq(purchaseAuthorizations.status, "requested")).limit(500),
+      .where(and(inArray(vendorBills.status, ["needs_coding", "needs_approval", "missing_receipt", "mismatch", "duplicate_suspected"]), vendorBillInScope(scope))).limit(500),
+    db.select().from(purchaseAuthorizations).where(and(eq(purchaseAuthorizations.status, "requested"), purchaseRequestInScope(scope))).limit(500),
     db.select({ id: complianceDocuments.id, ownerType: complianceDocuments.ownerType, ownerId: complianceDocuments.ownerId, docType: complianceDocuments.docType, title: complianceDocuments.title, expiresAt: complianceDocuments.expiresAt, verificationStatus: complianceDocuments.verificationStatus })
       .from(complianceDocuments)
-      .where(or(eq(complianceDocuments.verificationStatus, "needs_review"), and(lte(complianceDocuments.expiresAt, horizon), eq(complianceDocuments.verificationStatus, "verified")))).limit(2000),
+      .where(and(
+        or(eq(complianceDocuments.verificationStatus, "needs_review"), and(lte(complianceDocuments.expiresAt, horizon), eq(complianceDocuments.verificationStatus, "verified"))),
+        ownedBy(scope, [credentialOwner(complianceDocuments.ownerType, complianceDocuments.ownerId, now)]),
+      )).limit(2000),
     db.select({ proposalId: assistantProposals.proposalId, formKey: assistantProposals.formKey, title: assistantProposals.title, createdAt: assistantProposals.createdAt, commitState: assistantProposals.commitState })
-      .from(assistantProposals).where(and(eq(assistantProposals.commitState, "awaiting_readback"), scope ? eq(assistantProposals.tenantId, scope.tenantId) : sql`false`)).limit(500),
+      .from(assistantProposals).where(and(eq(assistantProposals.commitState, "awaiting_readback"), eq(assistantProposals.tenantId, scope.tenantId))).limit(500),
     db.select({ askedToUserId: assistantQuestions.askedToUserId, count: sql<number>`count(*)`, oldest: sql<Date | null>`min(${assistantQuestions.createdAt})` })
-      .from(assistantQuestions).where(eq(assistantQuestions.status, "pending")).groupBy(assistantQuestions.askedToUserId),
+      .from(assistantQuestions).where(and(eq(assistantQuestions.status, "pending"), questionInScope(scope))).groupBy(assistantQuestions.askedToUserId),
     db.select({ id: syncConflicts.id, conflictRef: syncConflicts.conflictRef, recordType: syncConflicts.recordType, recordRef: syncConflicts.recordRef, material: syncConflicts.material, detectedAt: syncConflicts.detectedAt })
-      .from(syncConflicts).where(eq(syncConflicts.status, "unresolved")).limit(500),
+      .from(syncConflicts).where(and(eq(syncConflicts.status, "unresolved"), syncConflictInScope(scope))).limit(500),
     db.select({ deviceRef: fieldDevices.deviceRef, userId: fieldDevices.userId, revokedAt: fieldDevices.revokedAt, queued: sql<number>`count(${syncPackages.id})` })
       .from(fieldDevices).innerJoin(syncPackages, and(eq(syncPackages.fieldDeviceId, fieldDevices.id), eq(syncPackages.state, "queued")))
-      .where(eq(fieldDevices.status, "revoked")).groupBy(fieldDevices.id),
-    db.select().from(measurementDevices).where(inArray(measurementDevices.status, ["active", "out_of_service"])).limit(500),
+      .where(and(eq(fieldDevices.status, "revoked"), eq(fieldDevices.orgRef, scope.tenantId))).groupBy(fieldDevices.id),
+    db.select().from(measurementDevices).where(and(inArray(measurementDevices.status, ["active", "out_of_service"]), ownedBy(scope, [ownerOf.entity(measurementDevices.financialEntityId)]))).limit(500),
     db.select({ policyRef: insurancePolicies.policyRef, policyType: insurancePolicies.policyType, expiresAt: insurancePolicies.expiresAt, status: insurancePolicies.status })
-      .from(insurancePolicies).where(lte(insurancePolicies.expiresAt, horizon)).limit(500),
+      .from(insurancePolicies).where(and(lte(insurancePolicies.expiresAt, horizon), ownedBy(scope, [ownerOf.entity(insurancePolicies.financialEntityId)]))).limit(500),
     db.select({ reviewRef: carrierProfileReviews.reviewRef, unmatchedExternalEvents: carrierProfileReviews.unmatchedExternalEvents, reviewedAt: carrierProfileReviews.reviewedAt, nextReviewDueAt: carrierProfileReviews.nextReviewDueAt })
-      .from(carrierProfileReviews).orderBy(desc(carrierProfileReviews.profileObtainedAt)).limit(50),
+      .from(carrierProfileReviews).where(ownedBy(scope, [ownerOf.entity(carrierProfileReviews.financialEntityId)])).orderBy(desc(carrierProfileReviews.profileObtainedAt)).limit(50),
   ]);
 
   // Owner labels for credentials: operator names where the owner is an operator.
@@ -116,15 +166,15 @@ export async function loadExceptionSources(now = new Date(), scope: { tenantId: 
     measurementsInQuestion: calibrationSweeps.measurementsInQuestion,
     suspectFrom: calibrationSweeps.suspectFrom, runAt: calibrationSweeps.runAt,
   }).from(calibrationSweeps)
-    .leftJoin(measurementDevices, eq(measurementDevices.id, calibrationSweeps.measurementDeviceId))
-    .where(eq(calibrationSweeps.state, "open")).limit(200);
+    .innerJoin(measurementDevices, eq(measurementDevices.id, calibrationSweeps.measurementDeviceId))
+    .where(and(eq(calibrationSweeps.state, "open"), ownedBy(scope, [ownerOf.entity(measurementDevices.financialEntityId)]))).limit(200);
   const inspector = await db.select({ requestRef: academyInspectorRequests.requestRef, issuingAuthority: academyInspectorRequests.issuingAuthority, dueAt: academyInspectorRequests.dueAt, state: academyInspectorRequests.state, irrecoverable: academyInspectorRequests.irrecoverable })
-    .from(academyInspectorRequests).where(inArray(academyInspectorRequests.state, ["received", "assembling", "incomplete"])).limit(200);
+    .from(academyInspectorRequests).where(and(inArray(academyInspectorRequests.state, ["received", "assembling", "incomplete"]), inspectorRequestInScope(scope, now))).limit(200);
   return {
     now,
     openCalibrationSweeps: sweeps,
     inspectorRequests: inspector.map(r => ({ requestRef: r.requestRef, issuingAuthority: r.issuingAuthority, dueAt: r.dueAt, state: r.state, irrecoverable: !!r.irrecoverable })),
-    securityIncidents: await loadOpenSecurityIncidents(db),
+    securityIncidents: await loadOpenSecurityIncidents(db, scope),
     facilityDirectory: await loadFacilityDirectoryExceptions(db),
     criticalDefects: defects.map(d => ({ id: d.id, unitId: d.unitId, unitNumber: d.unitNumber ?? null, title: d.title, reportedAt: d.reportedAt, status: d.status })),
     roadsideOpen: roadside.map(r => ({ id: r.id, eventRef: r.eventRef, unitNumber: r.unitNumber ?? null, eventType: r.eventType, occurredAt: r.occurredAt, vendorAssigned: r.assignedVendorId != null })),
@@ -138,8 +188,8 @@ export async function loadExceptionSources(now = new Date(), scope: { tenantId: 
     measurementDevices: devices.map(d => { const st = calibrationStatus({ events: evByDevice.get(d.id) ?? [], intervalDays: d.calibrationIntervalDays, now }); return { deviceRef: d.deviceRef, deviceType: d.deviceType, status: d.status, calibrationState: st.status, daysRemaining: st.daysRemaining }; }),
     insurancePolicies: policies,
     carrierProfileReviews: Array.from(latestReviews.values()),
-    ungatedAssignments: await loadUngatedAssignments(),
-    ...(await loadFuelLineFindings()),
+    ungatedAssignments: await loadUngatedAssignments(scope),
+    ...(await loadFuelLineFindings(scope)),
   };
 }
 
@@ -170,6 +220,7 @@ export async function loadInbox(args: { userId: number; roles: readonly string[]
   if (!db) return [];
   const roles = args.roles.length ? args.roles : ["__none__"];
   const acting = await resolveActingScope(db, args.userId);
+  const scope: TenantScope = { tenantId: acting.tenantId };
   const [tasks, notes, myProposals, myQuestions, myRequests] = await Promise.all([
     db.select().from(operationalTasks).where(and(
       inArray(operationalTasks.status, ["open", "acknowledged", "in_progress"] as never),
@@ -182,8 +233,8 @@ export async function loadInbox(args: { userId: number; roles: readonly string[]
       or(eq(workflowNotifications.tenantId, acting.tenantId), isNull(workflowNotifications.tenantId)),
     )).orderBy(desc(workflowNotifications.queuedAt)).limit(100),
     db.select({ proposalId: assistantProposals.proposalId, title: assistantProposals.title, formKey: assistantProposals.formKey, createdAt: assistantProposals.createdAt }).from(assistantProposals).where(and(eq(assistantProposals.createdByUserId, args.userId), eq(assistantProposals.tenantId, acting.tenantId), eq(assistantProposals.commitState, "awaiting_readback"))).limit(50),
-    db.select({ questionRef: assistantQuestions.questionRef, question: assistantQuestions.question, createdAt: assistantQuestions.createdAt }).from(assistantQuestions).where(and(eq(assistantQuestions.askedToUserId, args.userId), eq(assistantQuestions.status, "pending"))).limit(50),
-    db.select({ authorizationRef: purchaseAuthorizations.authorizationRef, status: purchaseAuthorizations.status, estimatedAmount: purchaseAuthorizations.estimatedAmount, requestedAt: purchaseAuthorizations.requestedAt }).from(purchaseAuthorizations).where(and(eq(purchaseAuthorizations.requestedByUserId, args.userId), eq(purchaseAuthorizations.status, "requested"))).limit(50),
+    db.select({ questionRef: assistantQuestions.questionRef, question: assistantQuestions.question, createdAt: assistantQuestions.createdAt }).from(assistantQuestions).where(and(eq(assistantQuestions.askedToUserId, args.userId), eq(assistantQuestions.status, "pending"), questionInScope(scope))).limit(50),
+    db.select({ authorizationRef: purchaseAuthorizations.authorizationRef, status: purchaseAuthorizations.status, estimatedAmount: purchaseAuthorizations.estimatedAmount, requestedAt: purchaseAuthorizations.requestedAt }).from(purchaseAuthorizations).where(and(eq(purchaseAuthorizations.requestedByUserId, args.userId), eq(purchaseAuthorizations.status, "requested"), purchaseRequestInScope(scope))).limit(50),
   ]);
   const items: InboxItem[] = [];
   for (const t of tasks) items.push({ kind: "task", ref: t.taskNumber, title: t.title, detail: t.description ?? null, dueAt: t.dueAt, since: t.createdAt, deepLink: { portal: "office_administration", route: `/tasks/${t.taskNumber}` } });
@@ -192,12 +243,12 @@ export async function loadInbox(args: { userId: number; roles: readonly string[]
   for (const q of myQuestions) items.push({ kind: "ai_question", ref: q.questionRef, title: q.question, detail: null, dueAt: null, since: q.createdAt, deepLink: { portal: "field_workforce", route: `/assistant/questions/${q.questionRef}` } });
   for (const r of myRequests) items.push({ kind: "my_request", ref: r.authorizationRef, title: `Your purchase request $${r.estimatedAmount.toFixed(2)} is awaiting approval`, detail: null, dueAt: null, since: r.requestedAt, deepLink: { portal: "field_workforce", route: `/purchasing/${r.authorizationRef}` } });
   if (args.canApprovePurchases) {
-    const pending = await db.select({ authorizationRef: purchaseAuthorizations.authorizationRef, estimatedAmount: purchaseAuthorizations.estimatedAmount, emergency: purchaseAuthorizations.emergency, requestedAt: purchaseAuthorizations.requestedAt, requestedByUserId: purchaseAuthorizations.requestedByUserId }).from(purchaseAuthorizations).where(eq(purchaseAuthorizations.status, "requested")).limit(50);
+    const pending = await db.select({ authorizationRef: purchaseAuthorizations.authorizationRef, estimatedAmount: purchaseAuthorizations.estimatedAmount, emergency: purchaseAuthorizations.emergency, requestedAt: purchaseAuthorizations.requestedAt, requestedByUserId: purchaseAuthorizations.requestedByUserId }).from(purchaseAuthorizations).where(and(eq(purchaseAuthorizations.status, "requested"), purchaseRequestInScope(scope))).limit(50);
     // Never one's own request — that is not an approval one may give.
     for (const p of pending.filter(p => p.requestedByUserId !== args.userId)) items.push({ kind: "approval", ref: p.authorizationRef, title: `${p.emergency ? "Emergency " : ""}purchase approval: $${p.estimatedAmount.toFixed(2)}`, detail: null, dueAt: null, since: p.requestedAt, deepLink: { portal: "management", route: `/purchasing/${p.authorizationRef}` } });
   }
   if (args.canResolveConflicts) {
-    const conflicts = await db.select({ conflictRef: syncConflicts.conflictRef, recordType: syncConflicts.recordType, recordRef: syncConflicts.recordRef, detectedAt: syncConflicts.detectedAt }).from(syncConflicts).where(eq(syncConflicts.status, "unresolved")).limit(50);
+    const conflicts = await db.select({ conflictRef: syncConflicts.conflictRef, recordType: syncConflicts.recordType, recordRef: syncConflicts.recordRef, detectedAt: syncConflicts.detectedAt }).from(syncConflicts).where(and(eq(syncConflicts.status, "unresolved"), syncConflictInScope(scope))).limit(50);
     for (const c of conflicts) items.push({ kind: "conflict", ref: c.conflictRef, title: `Resolve sync conflict on ${c.recordType} ${c.recordRef}`, detail: null, dueAt: null, since: c.detectedAt, deepLink: { portal: "office_administration", route: `/sync/conflicts/${c.conflictRef}` } });
   }
   return items.sort((a, b) => (a.dueAt?.getTime() ?? Infinity) - (b.dueAt?.getTime() ?? Infinity) || b.since.getTime() - a.since.getTime());
@@ -340,9 +391,9 @@ export async function loadTimeline(args: { entityType: "unit" | "job" | "trip" |
 
 
 /** 0131 — open security incidents with what the exception centre needs to know about them. */
-async function loadOpenSecurityIncidents(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
+async function loadOpenSecurityIncidents(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: TenantScope) {
   const open = await db.select({ id: securityIncidents.id, incidentRef: securityIncidents.incidentRef, title: securityIncidents.title, severity: securityIncidents.severity, personalInformationSuspected: securityIncidents.personalInformationSuspected })
-    .from(securityIncidents).where(inArray(securityIncidents.status, ["open", "triaging", "contained", "investigating", "recovering", "monitoring"])).limit(200);
+    .from(securityIncidents).where(and(inArray(securityIncidents.status, ["open", "triaging", "contained", "investigating", "recovering", "monitoring"]), eq(securityIncidents.orgRef, scope.tenantId))).limit(200);
   if (!open.length) return [];
   const ids = open.map(o => o.id);
   const [assessed, unsent] = await Promise.all([

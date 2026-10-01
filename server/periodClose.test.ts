@@ -122,6 +122,8 @@ d("August, closed", () => {
     const controller = await withRole("controller");
     const shopLead = await withRole("shop_lead");
     const entityId = 1_100_000 + Math.floor(Math.random() * 90_000);
+    // TEN-EXC-1: the Exception Centre reads a period through its financial entity, so the entity must exist.
+    await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, ?, 'August Books Ltd', 'corporation', 'CA-AB')", [entityId, key("FE").slice(0, 60)]);
     const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'truck', 'ABC', 'clear')", [key("142").slice(0, 30)]);
     const unitId = Number(u.insertId);
     const [acct] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO fuelAccounts (accountRef, financialEntityId, name, fuelType, kind, status) VALUES (?, ?, 'Cardlock', 'diesel', 'fleet', 'active')", [key("ACCT").slice(0, 40), entityId]);

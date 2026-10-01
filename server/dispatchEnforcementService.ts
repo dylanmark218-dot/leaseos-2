@@ -4,6 +4,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
+import { ownedBy, ownerOf } from "./exceptionScope";
 import { actingScopeFor, getDb, jobInScope, ownershipScopeWhere, unitInScope, type TenantScope } from "./db";
 import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, jobUnits, operators, type InsertJobUnit } from "../drizzle/schema";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
@@ -131,13 +132,24 @@ export async function createJobUnitGated(input: GatedJobUnitInput): Promise<Gate
   return { id: Number(ins[0]?.insertId ?? 0), mode, checkId: decision.checkId, exceptions: decision.exceptions };
 }
 
-/** Advisory-mode assignments made without a check, or against a blocked/unknown one — for the exception centre. */
-export async function loadUngatedAssignments(limit = 200): Promise<{ jobUnitId: number; jobId: number; unitId: number; operatorId: number | null; createdAt: Date; finding: string }[]> {
+/**
+ * Advisory-mode assignments made without a check, or against a blocked/unknown one — for the exception centre.
+ * TEN-EXC-1: only the scope's own — the job and unit must both be its organization's, the operator (if
+ * named) too, and so must the check it was made against (`checkInScope`'s rule: NULL = the single tenant). An assignment
+ * linking two organizations' records is shown to neither.
+ */
+export async function loadUngatedAssignments(scope: TenantScope, limit = 200): Promise<{ jobUnitId: number; jobId: number; unitId: number; operatorId: number | null; createdAt: Date; finding: string }[]> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db.select({ id: jobUnits.id, jobId: jobUnits.jobId, unitId: jobUnits.unitId, operatorId: jobUnits.operatorId, createdAt: jobUnits.createdAt, checkId: jobUnits.eligibilityCheckId, verdict: dispatchEligibilityChecks.verdict })
     .from(jobUnits).leftJoin(dispatchEligibilityChecks, eq(dispatchEligibilityChecks.id, jobUnits.eligibilityCheckId))
-    .where(eq(jobUnits.enforcementModeAtCreate, "advisory")).orderBy(desc(jobUnits.createdAt)).limit(limit);
+    .where(and(
+      eq(jobUnits.enforcementModeAtCreate, "advisory"),
+      ownedBy(scope, [ownerOf.job(jobUnits.jobId), ownerOf.unit(jobUnits.unitId)], [
+        [jobUnits.operatorId, ownerOf.operator(jobUnits.operatorId)],
+        [jobUnits.eligibilityCheckId, ownerOf.eligibilityCheck(jobUnits.eligibilityCheckId)],
+      ]),
+    )).orderBy(desc(jobUnits.createdAt)).limit(limit);
   return rows
     .filter(r => r.checkId == null || r.verdict === "blocked" || r.verdict === "unknown")
     .map(r => ({ jobUnitId: r.id, jobId: r.jobId, unitId: r.unitId, operatorId: r.operatorId, createdAt: r.createdAt, finding: r.checkId == null ? "Assignment made without a readiness check" : `Assignment made against a ${r.verdict} check` }));

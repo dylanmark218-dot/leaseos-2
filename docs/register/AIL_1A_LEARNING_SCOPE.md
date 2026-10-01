@@ -151,7 +151,7 @@ from.
 | `get` / `answer` / `setStatus` / `readBack` / `acknowledge` / `commit` / `reject` (through `proposalInScope`) | owner inferred from the first non-null of job, trip or unit, else the single tenant; a missing row returned "in scope" | strict `rowInTenant(proposal, scope)`; a missing or unresolved row is "not found" |
 | `assistant.pending` | no tenant filter without a `tripId` | the query carries `tenantId = acting` on both branches |
 | `executeAssistantCommit` (any caller) | no tenant check of its own | resolves the actor's scope **inside the transaction**; refuses another organization's or an unresolved row as "Proposal not found"; re-checks every anchor with the same rule as draft, **on the transaction's own connection** (`proposalAnchorRefusal(tx, …)`), before any field is read |
-| Exception Centre AI proposals | every organization's `awaiting_readback` proposals | the caller's organization only. With no scope passed, the proposal slice is empty (fail closed). |
+| Exception Centre AI proposals | every organization's `awaiting_readback` proposals | the caller's organization only. With no scope passed, the proposal slice is empty (fail closed). TEN-EXC-1 later made the scope a required argument for every source. |
 | Inbox "my proposals" | by creator only | by creator **and** tenant |
 
 `proposalFields` has no tenant column by design: it is reached only through its proposal, and one
@@ -265,7 +265,7 @@ adds none and fixes none of them, because they are outside its scope:
 - **Owner ruling needed:** is `assistantQueries` history USER- or ORGANIZATION-scoped? Today any
   `assistant.ask` holder in the organization sees everyone's questions, drivers included.
 - **Separate tenancy defects found by the survey** (not AIL-1A):
-  - the Exception Centre's *other* sources are unscoped;
+  - the Exception Centre's *other* sources are unscoped (fixed in TEN-EXC-1);
   - `documentFingerprints` duplicate priors are matched across tenants in the commit service;
   - `merchantMemory` has no organization (it is unwired);
   - `trips.create`, `agent.requestAction` targets and `manifestCustody.bind` take unchecked ids;

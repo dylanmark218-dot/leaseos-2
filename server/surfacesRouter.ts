@@ -31,9 +31,13 @@ const may = (userId: number, grants: RoleGrant[]) => {
 };
 
 export const surfacesRouter = router({
-  /** Needs attention — derived from state, filtered to what the caller may act on. */
+  /**
+   * Needs attention — derived from state, filtered to what the caller may act on.
+   * TEN-EXC-1: the organization comes from the session only; an input that names one (or any other
+   * unknown field) is refused, not silently dropped.
+   */
   exceptions: roleProcedure("surfaces.exceptions")
-    .input(z.object({ category: z.string().max(40).optional(), limit: z.number().int().positive().max(500).default(200) }).optional())
+    .input(z.object({ category: z.string().max(40).optional(), limit: z.number().int().positive().max(500).default(200) }).strict().optional())
     .query(async ({ ctx, input }) => {
       const { grants } = await grantsFor(ctx.user.id);
       const all = deriveExceptions(await loadExceptionSources(new Date(), await actingScopeFor(ctx.user.id)));
