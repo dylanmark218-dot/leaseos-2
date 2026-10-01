@@ -533,3 +533,26 @@ A permission belongs in `UNIVERSAL_PERMISSIONS` only when it is self-scoped **in
 code**, not merely self-scoped by intention. The list is deliberately one entry
 long and a test holds it there. Denials still override universals, and a user
 holding no recognized role still gets nothing.
+
+## 0205/0206 — Company Board + Open Work (design: `docs/product/COMPANY_BOARD_OPEN_WORK_DESIGN.md`)
+
+Twenty-one procedures added, all `ROLE_AUTHORIZED`; the live counts are generated into
+`LEASEOS_CURRENT_STATE.md` and pinned in `procedureAuthorization.test.ts`.
+
+| Procedure | Permission | Note |
+|---|---|---|
+| `board.direct` | `board.post` | the one direct channel two people share |
+| `board.members` | `board.read` | members of an explicit channel |
+| `board.memberAdd`, `board.memberRemove` | `board.post` | refused inside unless the caller holds `board.manage` or is a moderator/manager of that channel; a person may remove themselves |
+| `board.mine` | `board.read` | the caller's inbox |
+| `board.moderateRead`, `board.moderateWithdraw` | `board.moderate` (**sensitive**, new) | the one way into a conversation the caller is not in; every use writes a `messageChannelEvents` row |
+| `board.post` (existing) | `board.post`, and **`board.publish`** (sensitive, new) for an `emergency` priority or an `announcement`/`emergency` channel | decided inside from the derived rule `requiresPublishAuthority` |
+| `shifts.get`, `shifts.candidates` | `shifts.read` | |
+| `shifts.respond`, `shifts.offerRespond` | `shifts.interest` | a person's own answer |
+| `shifts.publish`, `shifts.close`, `shifts.cancel`, `shifts.offer`, `shifts.offerWithdraw` | `shifts.post` (sensitive) | the poster's acts |
+| `shifts.link` | `dispatch.assign` | naming the slot a post fills is an assignment act |
+| `shifts.award` (Checkpoint 3) | `dispatch.assign` | binds the slot through the canonical binding behind the dispatcher's stored check; not `dispatch.award` |
+| `shifts.availabilitySet`, `shifts.availabilityMine` | `shifts.availability_own` (universal, new) | reads and writes `ctx.user.id` only |
+| `shifts.availabilityFor` | `shifts.read` | another person's declarations, in the caller's organization only |
+
+Grants: `board.publish` to dispatcher, safety, management; `board.moderate` to safety, management.
