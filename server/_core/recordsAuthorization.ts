@@ -3048,6 +3048,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsRecord": "closeout.terms.record",
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
+
+  /* ---- the page scanner: guidance and review, both read-only ----
+   * Both answer "what does this paperwork need"; neither writes, links or
+   * confirms anything, so both sit on the ordinary compliance read rather
+   * than on a permission of their own. A worker who may not read the
+   * company's compliance material may not read its paperwork guidance
+   * either — that is the same question, and it already has an answer. */
+  "paperwork.guidance": "compliance.read",
+  "paperwork.reviewScan": "compliance.read",
 } as const satisfies Record<string, Permission>;
 
 /**
