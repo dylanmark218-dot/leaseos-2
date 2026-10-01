@@ -4,6 +4,8 @@ import { createWorkerPorts } from "./workflowRuntime";
 import { startOnce, withHandlers, type Lifecycle } from "./workerLifecycle";
 import { handleClaimedEnforcementEvent } from "./enforcementOutbox";
 import { getDb } from "../db";
+import { sweepLiveAssist } from "../liveAssistService";
+import { createSweepTicker, withSweepOnHeartbeat } from "./liveAssist/sweepTicker";
 
 export type ProductionWorker = { lifecycle: Lifecycle; close: () => Promise<void> };
 
@@ -14,7 +16,15 @@ export async function startProductionWorker(): Promise<ProductionWorker | null> 
   const base = createWorkerPorts(pool);
   const db = await getDb();
   if (!db) { await pool.end(); throw new Error("Workflow worker requires DATABASE_URL"); }
-  const ports = withHandlers(base, [{
+  // LA-1a (owner ruling, docs/live-assist/LA1A_OWNER_RULING.md): bounded purge of expired Live Assist
+  // transient state rides the existing heartbeat, after the webhook retry sweep, at most once a minute.
+  // The ticker never throws — the drain loop awaits `heartbeat` outside its own try/catch, so a throw
+  // here would stop outbox processing — and it logs counts and an error code only.
+  const liveAssistSweep = createSweepTicker({
+    run: at => sweepLiveAssist(db, at),
+    log: (level, line) => (level === "warn" ? console.warn(line) : console.info(line)),
+  });
+  const ports = withHandlers(withSweepOnHeartbeat(base, liveAssistSweep), [{
     name: "enforcement",
     matches: event => event.aggregateType === "enforcementEvent",
     handle: async event => {

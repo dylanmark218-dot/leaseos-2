@@ -121,6 +121,7 @@ import { readinessRouter } from "./readinessRouter";
 import { messageBoardRouter } from "./messageBoardRouter";
 import { assistantAskRouter } from "./assistantAskRouter";
 import { agentRouter } from "./agentRouter";
+import { liveAssistRouter } from "./liveAssistRouter";
 import { hosRouter } from "./hosRouter";
 import { portalRouter } from "./portalRouter";
 import { shopRouter } from "./shopRouter";
@@ -360,6 +361,7 @@ export const appRouter = router({
   board: messageBoardRouter,
   assistantAsk: assistantAskRouter,
   agent: agentRouter,
+  liveAssist: liveAssistRouter,
   hos: hosRouter,
   records: recordsRouter,
   payroll: payrollRouter,

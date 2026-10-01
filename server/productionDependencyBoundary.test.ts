@@ -128,7 +128,7 @@ describe("2./3. every bare import of the production graphs is a builtin or a pro
   });
   it("the worker graph is small and entirely production", () => {
     const names = [...graphs["server/_core/worker.ts"]!.bare.keys()].map(packageName).filter(n => !BUILTINS.has(n));
-    expect(new Set(names)).toEqual(new Set(["dotenv", "mysql2", "drizzle-orm"]));
+    expect(new Set(names)).toEqual(new Set(["dotenv", "mysql2", "drizzle-orm", "zod"]));
   });
 });
 
