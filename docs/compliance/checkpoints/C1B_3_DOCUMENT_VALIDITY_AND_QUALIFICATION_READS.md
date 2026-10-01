@@ -11,7 +11,8 @@
 > and the readiness/crew/open-shift/calendar routers reading through it), adapted to main's
 > `complianceDocumentValidity` row type. The sections below describe the branch as first written.
 
-**Status:** implemented on `claude/leaseos-compliance-survey-5faxe8`; not merged.
+**Status:** **merged** in #57 as `3127f11` (2026-09-26). The post-merge record is at the end of this
+document. It covers what reached `main`, and what is still open.
 **Base:** `main` @ `3d05d32` (merge of #54, C1b-2b). **Migration head:** `0198_requirement_verification` (unchanged).
 **Migration:** none. Nothing needed a schema change: the adapter reads existing columns, and every
 reconciliation is in code.
@@ -255,3 +256,62 @@ widgets, dispatch readiness and the SPINE census): **1046 passed, 30 skipped, 0 
 ## 8. Rollback
 
 Revert the C1b-3 commits. There is no migration, so no data or schema needs reverting.
+
+## 9. Post-merge record (checked on `main` @ `b02e6df`, 2026-10-01)
+
+#57 merged as `3127f11` on 2026-09-26. Before it merged, `main` was merged into the branch, and #52's
+document-validity model was kept in every file both changed (see the note at the top). Since then `main`
+has taken #59, #102, #104 and #108, among others. This section records what of C1b-3 is on `main` today.
+
+**On `main`:**
+- `server/qualificationReads.ts`, the D-05 adapter. It is read-only and organization-scoped. Its
+  precedence is Academy, then `complianceDocuments` evidence, then an explicit legacy fallback. It is
+  still the only production reader of `workerQualifications`; `server/documentValidityCanonical.test.ts`
+  enforces that.
+- Four readers go through the adapter:
+  - shift readiness (`readinessRouter.ts`);
+  - crews (`crewRouter.ts`);
+  - the calendar (`calendarRouter.ts`);
+  - open shifts. These now read through `openShiftsService.ts:156` (`effectiveQualifications`). The
+    router no longer reads qualifications itself.
+- `readExpiry` and `heldFromValidity`, and `academyVerdict` in `_core/qualificationValidity.ts`, where
+  #52's guard requires it to be.
+- `server/qualificationReads.db.test.ts`, covering precedence, fallback, provenance and tenant crossing.
+
+**Not on `main`.** These were dropped when #52's model was chosen:
+- C1b-3's own document-validity routing;
+- `documentValidityCharacterization.test.ts`;
+- the document-validity cases and census 1 and 10 in `documentValidityCanonical.test.ts`.
+
+#52's `complianceValidityGuard.test.ts` now does that census job.
+
+**SPINE item 2.** `docs/register/SPINE_ITEM2_DUPLICATIONS.md` records all four pairs as resolved.
+`complianceDocumentValidity` was resolved by #52. `openShifts`, `dispatchMatching` and `fieldTicket` were
+resolved by the item-2 work recorded there. The register marks item 2 **COMPLETE** only after its last
+branch merges and CI on the resulting `main` is green. That record belongs to that register, not to this
+document. `server/engineReachability.test.ts` pins 73 unwired engines on `main`.
+
+**The two deferrals from §2:**
+- `medicalFitnessForDispatch`: **resolved by #52.** It now takes the canonical verdict
+  (`compliancePassport.ts:388`, called from `readinessComposer.ts:536`).
+- Composer Academy acceptance: **still open.** `readinessComposer.ts:506` still reads
+  `q.status === "current" && (!q.expiresAt || q.expiresAt > now)` inline. It affects dispatch, so moving
+  it onto the adapter or the canonical verdict is C2 work.
+
+**Credential cleanup still open (unchanged):**
+- retire `workerQualifications`. It has no writer, and its historical rows need an owner decision first;
+- an organization column on `academyQualifications`, if people can belong to more than one organization.
+
+**Gate on `main`.** `scripts/ci-gate.sh` was run on a fresh database with Node 22.23.3, the version
+`.nvmrc` pins; gate 0a refuses any other version.
+- At `240b2dd`: 6941 passed, 3 skipped, and **1 failed**. The failure was the census "open work consumes
+  the adapter's verdict and decides no qualification itself" in `documentValidityCanonical.test.ts`.
+- **Cause:** two merges collided.
+  - #59 added that census check. It forbids the open-work files from importing anything from
+    `documentValidity`.
+  - The SPINE item-2 open-shift rule (`c2dc622`) imports `readExpiry` from it, in
+    `_core/openShifts.ts`, to judge the licence date.
+- **Fix:** #117 (`8ccf578`, merged as `b02e6df`). It allows exactly that one name in exactly that file.
+  A licence date is not a qualification, and `readExpiry` is the canonical expiry primitive.
+- That test file is the only difference between `240b2dd` and `b02e6df`. At `b02e6df` it passes, along
+  with `qualificationReads.db`, `complianceValidityGuard` and `engineReachability` (4 files, 53 tests).
