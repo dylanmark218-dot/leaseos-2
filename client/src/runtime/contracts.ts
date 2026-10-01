@@ -28,7 +28,23 @@ export type CaptureKind =
   | "pretrip" | "posttrip" | "hos_event" | "job_accept" | "load_ticket" | "disposal_ticket" | "fuel_receipt"
   | "expense_receipt" | "photo" | "signature" | "incident" | "defect_report" | "tailgate" | "tdg_document" | "voice_note"
   // v22.20 — a roadside enforcement document and the order it carries.
-  | "roadside_enforcement" | "oos_order";
+  | "roadside_enforcement" | "oos_order"
+  // A document put through the page scanner whose type nobody has established.
+  // A scan the classifier DID place is saved under that kind instead, so a
+  // scanned disposal ticket syncs at ticket priority rather than at this one.
+  | "scanned_document"
+  // 0205/0206 — a board message, an acknowledgement of one, a response to open work.
+  | "board_message" | "board_acknowledgement" | "shift_response";
+
+/**
+ * 0205/0206 — captures sent DIRECTLY to their own tRPC procedure with the capture's `localId` as
+ * the client mutation id, never packaged for `sync.receivePackage`. A chat message is not evidence:
+ * sealing one would make a conversation an evidence record, and the package protocol would upload
+ * it as a file. They share the outbox, the six states and the store; they do not share the channel.
+ * Each relates to a channel, a message or a post rather than to a job or a unit.
+ */
+export const DIRECT_CAPTURE_KINDS: readonly CaptureKind[] = ["board_message", "board_acknowledgement", "shift_response"];
+export const isDirectCapture = (kind: CaptureKind): boolean => DIRECT_CAPTURE_KINDS.includes(kind);
 
 export type GpsFix = { latitude: number; longitude: number; accuracyM: number | null; fixedAt: string; source: "device_gps" | "network" | "manual" };
 
@@ -66,7 +82,19 @@ export type LocalCapture = {
   packagedIn: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Checkpoint 5 — whose it is: the organization and the signed-in person it was written under. Set
+   * on direct captures (board messages, acknowledgements, open-work responses), which are sent as
+   * that person into that organization; absent on evidence captures, which the vault and the
+   * device's enrolment already scope. A capture is listed and sent only under the scope that wrote it.
+   */
+  scope?: CaptureScope | null;
 };
+
+/** The organization key (`orgRef`, or `default` for the historical single tenant) and the person. */
+export type CaptureScope = { orgKey: string; userId: number };
+export const sameScope = (a: CaptureScope | null | undefined, b: CaptureScope | null | undefined): boolean =>
+  !!a && !!b && a.orgKey === b.orgKey && a.userId === b.userId;
 
 export type LocalPackage = { packageRef: string; captureIds: string[]; queuedAt: string; state: "queued" | "sent" | "accepted" | "rejected" | "partial"; receipt: unknown; attempts: number };
 
@@ -115,4 +143,105 @@ export interface Clock { now(): Date; }
 
 export class NotOnDeviceError extends Error {
   constructor(what: string) { super(`${what} is only available on a device with the native shell`); this.name = "NotOnDeviceError"; }
+}
+
+/* ------------------------------------------------------------------ */
+/* The page scanner                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Scanning is three separate pieces of hardware-backed machinery, and they are
+ * three interfaces because a device can have one without the others: a rugged
+ * Android tablet shipped without Google Play Services has no ML Kit document
+ * scanner and may still decode a barcode through the plain camera.
+ *
+ * Each is `available()`-first for the same reason the vault is: a capability
+ * the device does not have must be declared unavailable in plain words at the
+ * moment the worker reaches for it, not discovered at the edge of coverage
+ * four hours later. `NotOnDeviceError` is thrown, never returned as a null
+ * result that reads like "the page was blank".
+ *
+ * Expected plugins (not installed in this repository):
+ *   @capacitor-mlkit/document-scanner   ML Kit Document Scanner (Android) / VisionKit (iOS)
+ *   @capacitor-mlkit/barcode-scanning   ML Kit barcode, Android + iOS + Web
+ *   (text recognition)                  ML Kit Text Recognition v2 / Apple Vision, on-device
+ *
+ * What must be true on the device and cannot be proven here:
+ *   - recognition runs ON the device, so a photographed payroll document or a
+ *     customer's rate sheet never leaves it to be read;
+ *   - the bytes handed back are the scanner's own perspective-corrected output
+ *     and nothing re-encodes them between the sensor and the vault;
+ *   - the engine's confidences are the engine's, not a constant a binding
+ *     invented to make the quality gate pass.
+ */
+
+/**
+ * What the platform reports about its own capture.
+ *
+ * Every field is nullable and null means UNRECORDED, never good. The quality
+ * gate treats an unreported signal as a signal it cannot judge and says so —
+ * the alternative is a faded thermal ticket sailing through because the
+ * platform declined to score it.
+ */
+export type CaptureQualitySignals = {
+  widthPx: number | null;
+  heightPx: number | null;
+  /** 0–100, higher is sharper. */
+  focusScore: number | null;
+  /** 0–100, the share of the page the engine believes is blown out. */
+  glarePercent: number | null;
+  /** 0–100 confidence that the four page corners were actually found. */
+  edgeConfidence: number | null;
+  /** 0–100, how much of the frame the detected page fills. */
+  pageCoveragePercent: number | null;
+};
+
+/** One page as the scanner handed it back: already edge-detected, deskewed, shadow-removed. */
+export type ScannedPage = {
+  bytes: Uint8Array;
+  mimeType: string;
+  quality: CaptureQualitySignals;
+};
+
+export interface DocumentScanner {
+  available(): Promise<boolean>;
+  /**
+   * Opens the platform's own scanning UI and resolves with the pages the
+   * worker accepted, or null if they backed out. Cancelling is an ordinary
+   * outcome and not an error: a driver who opens the scanner by mistake has
+   * not failed at anything.
+   */
+  scan(options: { maxPages: number; allowGallery: boolean }): Promise<ScannedPage[] | null>;
+}
+
+export type OcrBlock = {
+  text: string;
+  /** 0–100. null where the platform does not expose a per-block score. */
+  confidence: number | null;
+};
+
+export type DeviceOcrResult = {
+  engine: string;
+  engineVersion: string | null;
+  rawText: string;
+  blocks: OcrBlock[];
+  /** Mean of the block confidences, or null when the platform scored none of them. */
+  meanConfidence: number | null;
+};
+
+export interface OcrEngine {
+  available(): Promise<boolean>;
+  /** On-device text recognition over one page. Nothing is uploaded to read it. */
+  recognize(bytes: Uint8Array, mimeType: string): Promise<DeviceOcrResult>;
+}
+
+export type DecodedBarcode = {
+  /** The symbology as the platform names it: QR_CODE, CODE_128, PDF417, … */
+  format: string;
+  value: string;
+};
+
+export interface BarcodeScanner {
+  available(): Promise<boolean>;
+  scanImage(bytes: Uint8Array, mimeType: string): Promise<DecodedBarcode[]>;
 }

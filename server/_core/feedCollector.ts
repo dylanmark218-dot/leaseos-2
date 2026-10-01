@@ -41,6 +41,13 @@ export type FeedSource = {
   sourceKey: string;
   displayName: string;
   status: "unverified" | "verified" | "superseded" | "withdrawn";
+  /**
+   * The registry's commercial-use answer, carried so CLEARED can read it. `geo.sourceReview` can
+   * mark a row verified while leaving this `unknown`, and `geoRouter`'s import gate already refuses
+   * that combination; the collector refused only on `status`, so the same row was importable
+   * nowhere and pollable here. Required, so a caller cannot forget it and get a pass.
+   */
+  commercialUsePermitted: "yes" | "no" | "unknown";
   rateLimitCalls: number | null;
   rateLimitWindowSeconds: number | null;
   updateIntervalHours: number | null;
@@ -56,9 +63,15 @@ export type FeedState = {
   lastFailureAt: Date | null;
   lastFailureReason: string | null;
   consecutiveFailures: number;
+  /**
+   * When the publisher said to come back, from a `Retry-After` on a refusal. None of the Canadian
+   * publishers sends one today (checked 2026-10-01); a publisher that starts to is obeyed, not
+   * second-guessed by our own backoff arithmetic. Optional so older state shapes still read.
+   */
+  notBefore?: Date | null;
 };
 
-export const emptyFeedState = (): FeedState => ({ recentCallsAt: [], lastSuccessAt: null, lastFailureAt: null, lastFailureReason: null, consecutiveFailures: 0 });
+export const emptyFeedState = (): FeedState => ({ recentCallsAt: [], lastSuccessAt: null, lastFailureAt: null, lastFailureReason: null, consecutiveFailures: 0, notBefore: null });
 
 export type PollDecision =
   | { poll: true; reason: string; quotaRemaining: number | null }
@@ -92,8 +105,20 @@ export function shouldPoll(source: FeedSource, state: FeedState, now: Date, cred
       retryAfterSeconds: null,
     };
   }
+  if (source.commercialUsePermitted !== "yes") {
+    return {
+      poll: false,
+      reason: `${source.displayName} is verified but its commercial use is recorded as ${source.commercialUsePermitted} — a licence review that did not answer that question has not cleared a commercial poll`,
+      blockedBy: "not_cleared",
+      retryAfterSeconds: null,
+    };
+  }
   if (source.credentialEnvVar && !credential?.present) {
     return { poll: false, reason: `No credential in ${source.credentialEnvVar} — the key belongs in the environment, never in the source tree`, blockedBy: "no_credential", retryAfterSeconds: null };
+  }
+  if (state.notBefore && now.getTime() < state.notBefore.getTime()) {
+    const wait = Math.ceil((state.notBefore.getTime() - now.getTime()) / 1000);
+    return { poll: false, reason: `The publisher asked us to wait (Retry-After) — ${wait}s remaining`, blockedBy: "quota_exhausted", retryAfterSeconds: wait };
   }
   if (source.updateIntervalHours != null && state.lastSuccessAt) {
     const dueAt = state.lastSuccessAt.getTime() + source.updateIntervalHours * 3_600_000;
@@ -108,12 +133,15 @@ export function shouldPoll(source: FeedSource, state: FeedState, now: Date, cred
   return { poll: true, reason: `Due, cleared, and ${q.remaining ?? "unmetered"} call(s) left in the window`, quotaRemaining: q.remaining };
 }
 
-export function recordCall(state: FeedState, at: Date, outcome: { ok: true } | { ok: false; reason: string }, source: FeedSource): FeedState {
+export function recordCall(state: FeedState, at: Date, outcome: { ok: true } | { ok: false; reason: string; retryAfterSeconds?: number | null }, source: FeedSource): FeedState {
   const keepFrom = source.rateLimitWindowSeconds ? windowStart(at, source.rateLimitWindowSeconds * 2).getTime() : 0;
   const recentCallsAt = [...state.recentCallsAt.filter(t => t.getTime() > keepFrom), at];
   return outcome.ok
-    ? { recentCallsAt, lastSuccessAt: at, lastFailureAt: state.lastFailureAt, lastFailureReason: state.lastFailureReason, consecutiveFailures: 0 }
-    : { recentCallsAt, lastSuccessAt: state.lastSuccessAt, lastFailureAt: at, lastFailureReason: outcome.reason, consecutiveFailures: state.consecutiveFailures + 1 };
+    ? { recentCallsAt, lastSuccessAt: at, lastFailureAt: state.lastFailureAt, lastFailureReason: state.lastFailureReason, consecutiveFailures: 0, notBefore: null }
+    : {
+        recentCallsAt, lastSuccessAt: state.lastSuccessAt, lastFailureAt: at, lastFailureReason: outcome.reason, consecutiveFailures: state.consecutiveFailures + 1,
+        notBefore: outcome.retryAfterSeconds && outcome.retryAfterSeconds > 0 ? new Date(at.getTime() + outcome.retryAfterSeconds * 1000) : state.notBefore ?? null,
+      };
 }
 
 /* ------------------------------------------------------------------ */

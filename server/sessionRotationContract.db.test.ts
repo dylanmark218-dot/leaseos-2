@@ -7,6 +7,7 @@
  * `Date` alone is faked where a case needs the clock moved.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { ORG_SELECTION_COOKIE } from "./_core/organizationSelection";
 const envSet = vi.hoisted(() => {
   const set: string[] = [];
   if (!process.env.JWT_SECRET) { process.env.JWT_SECRET = "p0b-test-signing-secret-long-enough-to-be-realistic"; set.push("JWT_SECRET"); }
@@ -137,7 +138,8 @@ d("SR-T7/T8/T9 — revocation", () => {
     const c = caller(cred(f));
     await expect(c.api.auth.logout()).resolves.toEqual({ success: true });
     expect((await rowFor(f.familyRef)).revokeReason).toBe("logout");
-    expect(c.cleared.map(x => [x.name, x.options.path])).toEqual([[COOKIE_NAME, "/"], [REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH], ...LEGACY_REFRESH_COOKIE_PATHS.map(p => [REFRESH_COOKIE_NAME, p])]);
+    // #64 (v23.26): the organization selection ends with the session, at the session cookie's path.
+    expect(c.cleared.map(x => [x.name, x.options.path])).toEqual([[COOKIE_NAME, "/"], [REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH], ...LEGACY_REFRESH_COOKIE_PATHS.map(p => [REFRESH_COOKIE_NAME, p]), [ORG_SELECTION_COOKIE, "/"]]);
     await expect(caller(cred(f)).api.auth.refresh()).rejects.toMatchObject(REFUSED);
   });
 

@@ -2,35 +2,73 @@
  * PortalShell — one shell, role-composed.
  *
  * The same backend; a different first screen per portal. The shell reads
- * `portals.mine` for which portals this session holds, then the five surfaces
- * — My Day, Exceptions, Inbox, Search, Timeline — all of which the server
- * already filters to what the caller may see or act on. The shell decides
- * nothing about permission; it renders what it is given.
+ * `session.context` for who this is, which company they are acting for and
+ * which workspaces are open to them, then the five surfaces — My Day,
+ * Exceptions, Inbox, Search, Timeline — all of which the server already
+ * filters to what the caller may see or act on. The shell decides nothing
+ * about permission; it renders what it is given.
+ *
+ * v23.26 — the switcher is server-authoritative. It used to read
+ * `portals.mine` and hold the current portal in `useState`, so switching was a
+ * local variable: correct in practice, because every call behind it was gated
+ * anyway, but it meant the shell's idea of "which workspaces do I hold" and the
+ * server's could differ, and the shell's was the one on screen. Now the list
+ * comes from `session.context`, the switch goes through
+ * `session.selectWorkspace` — which refuses one the caller does not hold and
+ * remembers one they do — and access revoked server-side takes the tab with it
+ * on the next fetch.
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useRoute } from "wouter";
+import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { composeMyDayView, composeOfficeView, contextRibbon, exceptionIndicator, switcherModel, PORTAL_LABELS, type PortalKey } from "./viewModels";
-import { isHeldPortal, resolvePortalEntry } from "./entryModel";
-import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser, type ChooserOption } from "./PortalChooser";
+import { composeMyDayView, composeOfficeView, contextRibbon, exceptionIndicator, switcherModel, type PortalKey } from "./viewModels";
 import { MyDayPanel } from "./panels/MyDayPanel";
 import { ExceptionsPanel } from "./panels/ExceptionsPanel";
 import { InboxPanel } from "./panels/InboxPanel";
 import { TimelinePanel } from "./panels/TimelinePanel";
 import { SetupPanel } from "./panels/SetupPanel";
+import { PeopleAccessPanel } from "./panels/PeopleAccessPanel";
+import { BoardPanel } from "./panels/BoardPanel";
 import { UniversalSearch } from "./UniversalSearch";
 import { SyncIndicator } from "./SyncIndicator";
 import { QuickCapture } from "./QuickCapture";
+import { SessionGate } from "@/session/SessionGate";
 
-export type PanelKey = "myday" | "exceptions" | "inbox" | "timeline" | "setup";
+export type PanelKey = "myday" | "exceptions" | "inbox" | "board" | "timeline" | "setup" | "people";
 
 const OFFICE_PORTALS = new Set<PortalKey>(["office_administration", "finance_billing", "management", "executive", "hr_workforce", "auditor_regulator"]);
 
-export function PortalShell({ initialPanel = "myday", displayName = null }: { initialPanel?: PanelKey; displayName?: string | null }) {
+/**
+ * The shell, behind the gate.
+ *
+ * `SessionGate` resolves identity, organization and workspace and renders the
+ * sign-in screen, the chooser or a refusal when any of those is unsettled. It
+ * hands the shell a workspace only once the server has said this person holds
+ * it — which is presentation, not permission: the gate could be deleted and
+ * not one call behind it would start succeeding.
+ */
+export function PortalShell(props: { initialPanel?: PanelKey; displayName?: string | null }) {
+  return (
+    <SessionGate>
+      {({ context, workspace }) => (
+        <PortalShellBody
+          {...props}
+          workspace={workspace as PortalKey}
+          held={context.availableWorkspaces.map(w => w.key as PortalKey)}
+          // The Board queue's scope: the organization the server says this session acts for (the
+          // historical single tenant reads "default"). None opens no queue — nothing is written for nobody.
+          orgKey={context.activeOrganization?.orgRef ?? null}
+          displayName={props.displayName ?? context.user?.name ?? null}
+        />
+      )}
+    </SessionGate>
+  );
+}
+
+function PortalShellBody({ initialPanel = "myday", displayName = null, workspace, held, orgKey }: { initialPanel?: PanelKey; displayName?: string | null; workspace: PortalKey; held: readonly PortalKey[]; orgKey: string | null }) {
   const [, navigate] = useLocation();
   const [panel, setPanel] = useState<PanelKey>(initialPanel);
-  const [portalOverride, setPortalOverride] = useState<PortalKey | null>(null);
   const [online, setOnline] = useState<boolean>(typeof navigator === "undefined" ? true : navigator.onLine);
   // v21.9.1 — subscribe; a value read once at mount is wrong the moment the truck leaves coverage.
   useEffect(() => {
@@ -40,45 +78,16 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
     return () => { window.removeEventListener("online", up); window.removeEventListener("offline", down); };
   }, []);
 
-  const session = trpc.portals.mine.useQuery();
+  const selectWorkspace = trpc.session.selectWorkspace.useMutation();
   const myDay = trpc.surfaces.myDay.useQuery(undefined, { refetchInterval: 60_000 });
   const exceptions = trpc.surfaces.exceptions.useQuery({ limit: 200 }, { refetchInterval: 60_000 });
   const inbox = trpc.surfaces.inbox.useQuery(undefined, { refetchInterval: 60_000 });
 
-  const held = useMemo(() => (session.data?.portals ?? []).map(p => p.portal as PortalKey), [session.data]);
-
-  // The `:portal` segment of /portal/:portal. It used to be routed and never
-  // read, so a deep link silently landed people wherever defaultPortal chose.
-  // It is an input like any other: checked against the held set, never trusted.
-  const [, routeParams] = useRoute("/portal/:portal/*?");
-  const requested = routeParams?.portal ?? null;
-
-  const organization = session.data?.organization ?? null;
-  const savedDefault =
-    organization && organization.state !== "ambiguous" && organization.state !== "unresolved"
-      ? organization.defaultWorkspace
-      : null;
-
-  const entry = useMemo(
-    () => resolvePortalEntry({ held, savedDefault, requested, notReached: session.data?.notReached ?? [] }),
-    [held, savedDefault, requested, session.data]
-  );
-
-  // An override can only ever name a portal this session holds: it is set from
-  // the switcher, which is built from `held`, and re-checked here so that stays
-  // true however the switcher changes.
-  const overridden = isHeldPortal(portalOverride, held) ? portalOverride : null;
-  const portal = overridden ?? (entry.kind === "enter" ? entry.portal : null);
+  // The server named the workspace and the list it came from. The shell picks
+  // nothing — there is no local default here any more, because a default the
+  // client chooses is a default the client can be wrong about.
+  const portal = workspace;
   const switcher = switcherModel(held, portal);
-
-  const describe = (key: string): ChooserOption => {
-    const surface = (session.data?.portals ?? []).find(p => p.portal === key);
-    return {
-      portal: key,
-      displayName: surface?.displayName ?? PORTAL_LABELS[key as PortalKey] ?? key,
-      purpose: surface?.purpose ?? "",
-    };
-  };
 
   const view = useMemo(() => {
     if (!portal || !myDay.data) return null;
@@ -90,31 +99,23 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
 
   const go = (link: { portal: string; route: string }) => navigate(`/portal/${link.portal}${link.route}`);
 
-  if (session.isLoading) return <div className="p-8 text-sm text-[#5b6b82]">Composing your portal…</div>;
-
-  // Two live memberships and no way to choose. resolveActingScope refuses this
-  // rather than picking one; the screen says so rather than rendering a fault.
-  if (organization?.state === "ambiguous") {
-    return <OrganizationSelectionRequired detail={organization.detail} />;
-  }
-
-  if (entry.kind === "none" && !overridden) {
-    return <NoPortalAvailable notReached={entry.notReached.map(describe)} />;
-  }
-
-  if (!portal && entry.kind === "choose") {
-    return (
-      <PortalChooser
-        options={entry.options.map(describe)}
-        notReached={(session.data?.notReached ?? []).map(describe)}
-        rejectedDefault={entry.rejectedDefault}
-        rejectedRequest={entry.rejectedRequest ?? null}
-        onChoose={key => { setPortalOverride(key as PortalKey); navigate(`/portal/${key}`); }}
-      />
-    );
-  }
-
-  if (!portal) return <NoPortalAvailable notReached={(session.data?.notReached ?? []).map(describe)} />;
+  /**
+   * Switch workspace. The server decides, and it is the server that says where
+   * to land.
+   *
+   * A refusal here is not a bug to swallow: it means the tab on screen names a
+   * workspace this account no longer holds — revoked while they were signed in.
+   * The chooser is the right place to land, because it re-reads what is
+   * actually open rather than leaving a stale tab looking pressable.
+   */
+  const switchTo = async (key: PortalKey) => {
+    try {
+      const chosen = await selectWorkspace.mutateAsync({ workspace: key });
+      navigate(chosen.landing);
+    } catch {
+      navigate("/workspaces");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#f6f8fb] text-[#172033]">
@@ -122,7 +123,7 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-2">
           <nav aria-label="Portals" className="flex flex-wrap gap-1">
             {switcher.map(s => (
-              <button key={s.key} onClick={() => setPortalOverride(s.key)} aria-current={s.current ? "page" : undefined}
+              <button key={s.key} onClick={() => { void switchTo(s.key); }} aria-current={s.current ? "page" : undefined}
                 className={`rounded-full px-3 py-1 text-sm ${s.current ? "bg-[#132a4a] text-white" : "bg-[#eef2f7] text-[#172033] hover:bg-[#dfe5ee]"}`}>{s.label}</button>
             ))}
           </nav>
@@ -140,15 +141,23 @@ export function PortalShell({ initialPanel = "myday", displayName = null }: { in
 
       <main className="mx-auto max-w-6xl px-4 py-6">
         <div className="mb-4 flex gap-2 text-sm">
-          {(["myday", "exceptions", "inbox", "timeline", ...(OFFICE_PORTALS.has(portal) ? ["setup" as PanelKey] : [])] as PanelKey[]).map(p => (
-            <button key={p} onClick={() => setPanel(p)} className={`rounded-lg px-3 py-1 ${panel === p ? "bg-white shadow" : "text-[#5b6b82]"}`}>{p === "myday" ? "My Day" : p[0]!.toUpperCase() + p.slice(1)}</button>
+          {/* B23.2 — "People" only in the management workspace. The procedures
+              behind it refuse anyone without `roles.grant` regardless, so this
+              keeps a door from being drawn rather than being the lock. */}
+          {(["myday", "exceptions", "inbox", "board", "timeline",
+             ...(OFFICE_PORTALS.has(portal) ? ["setup" as PanelKey] : []),
+             ...(portal === "management" ? ["people" as PanelKey] : [])] as PanelKey[]).map(p => (
+            <button key={p} onClick={() => setPanel(p)} className={`rounded-lg px-3 py-1 ${panel === p ? "bg-white shadow" : "text-[#5b6b82]"}`}>{p === "myday" ? "My Day" : p === "people" ? "People" : p[0]!.toUpperCase() + p.slice(1)}</button>
           ))}
         </div>
         {panel === "myday" && view && (OFFICE_PORTALS.has(portal) ? <MyDayPanel view={view} office={officeView} onGo={go} /> : <MyDayPanel view={view} onGo={go} />)}
         {panel === "exceptions" && <ExceptionsPanel items={(exceptions.data?.items ?? []) as never} summary={myDay.data?.attention as never} onGo={go} />}
         {panel === "inbox" && <InboxPanel items={(inbox.data?.items ?? []) as never} counts={inbox.data?.counts ?? {}} onGo={go} />}
+        {/* 0205/0206 — conversations and open work; writes go through the device's board queue. */}
+        {panel === "board" && <BoardPanel online={online} orgKey={orgKey} />}
         {panel === "timeline" && <TimelinePanel />}
         {panel === "setup" && OFFICE_PORTALS.has(portal) && <SetupPanel />}
+        {panel === "people" && portal === "management" && <PeopleAccessPanel />}
         {view && view.quickCapture.length > 0 && <QuickCapture actions={view.quickCapture} />}
       </main>
     </div>

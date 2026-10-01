@@ -58,8 +58,11 @@ describe("the job body", () => {
 
   it("writes nothing — the worker that owns the transaction does that", () => {
     const source = readFileSync("server/_core/ai/worker/secretaryExtractionJob.ts", "utf8");
-    // `createHash(...).update(...)` feeds a hash, not a table; every database write shape is still refused.
-    expect(source).not.toMatch(/getDb|drizzle\/schema|\.insert\(|(?<!createHash\("[a-z0-9]+"\))\.update\(/);
+    // A hash's `.update(` is a digest, not a write: `createHash("sha256").update(id)` derives the
+    // proposal id (60f8d90) and matched the write pattern, failing this on untouched main c626146.
+    // Only that chain is set aside; a database insert or update still fails here.
+    const writes = source.replace(/createHash\([^)]*\)\s*\.update\(/g, "createHash().digest-of(");
+    expect(writes).not.toMatch(/getDb|drizzle\/schema|\.insert\(|\.update\(/);
   });
 
   it("claims exactly one event type, so a filter can be exact", () => {
