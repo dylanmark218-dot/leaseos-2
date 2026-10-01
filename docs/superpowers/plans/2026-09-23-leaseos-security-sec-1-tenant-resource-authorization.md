@@ -298,3 +298,47 @@ tests. No data is transformed, so nothing needs a down step. Reverting Item 6 mu
 
 After the ninth commit is green on the full gate and the PR is opened, stop and request review. Approval of this
 plan is not approval to begin; approval of the PR is not approval of SEC-2.
+
+---
+
+## Status — 2026-10-01 (implementation record)
+
+Implemented on `claude/leaseos-security-architecture-f2j1vn` after `origin/main` (`b35bac4`) was merged in
+at `be00c7b`. Main had moved 333 commits since this plan was written, including a parallel security
+program (S1 sessions, S2 encrypted secrets and KMS, SEC-004 webhook claims, F1 finance scoping, B23.1
+organization-scoped roles). **Every item was re-verified against the merged head before any code was
+written**; four were already fixed there and were not touched.
+
+| Plan item | Outcome | Commit |
+|---|---|---|
+| 1 Assistant draft and commit | fixed; plus a financial-entity target check the plan did not name | `4d4f145` |
+| 2 Compliance router | **already fixed on main** (`344f352`, F1.2) | — |
+| 3 Private credential projection | fixed on `documents.list`, creation, credential recording and the exception centre's history | `a2edd17` |
+| 4 Approver standing | **already fixed on main** (B23.1, `grantsInOrganization` + `revokedAt`) | — |
+| 5 closeout.documentRender, audit packages, surfaces.search, portal admin, invoicing | **already fixed on main** (F1 finance scope, P0-A3) | — |
+| 5 restricted vault incident lookups and break-glass target | fixed | `eb34837` |
+| 5 exception centre loaders | fixed — and wider than planned: **every** source of `loadExceptionSources` read across organizations, and the inbox's approver and resolver queues too | `48db151` |
+| 5 comms packageFetch / packageStatus | fixed — plus two the plan missed: `packageBuild` stored unchecked anchors, and its predecessor lookup by label let one company supersede another's package | `ce6f2ab` |
+| 5 deliveryUpdate | fixed | `ce70ca0` |
+| 5 device.verifySeal, sync.resolveConflict, receivePackage items | fixed; a foreign item is rejected exactly as a nonexistent one, so the verdict is not an existence or content oracle | `d000cee` |
+| 6 Security-incident state | fixed (`statusChange` under `incident.review`; affected organization must exist) | `8ba2652` |
+| 7 Capture reference | fixed | `d000cee` |
+| 8 Storage-key ownership | **deferred to SEC-6**, see below | — |
+| 9 Webhook decrypt-before-filter | **already fixed on main** (SEC-004 / 0194 resolver) | — |
+| — (found during item 5) | `academy.inspectorRequestCreate/Assemble/List` crossed organizations | `6012926` |
+
+**Why item 8 is deferred rather than done.** Verified at the merged head: no client code uploads to
+storage or sends a storage key (the only upload path, `evidence.upload`, mints the key server-side),
+and no procedure returns bytes for a client-cited key — the only reads of those keys hash them. The
+issue is latent. The correct fix is to stop accepting client keys and issue server-minted upload
+intents, which is a file-handling design change (SEC-6, with MIME sniffing and malware scanning),
+not a predicate; an ownership rule now would rewrite fixtures in six suites (`fieldroute`,
+`hosAttestation`, `documentControl.db`, `tenantScopeHos.db`, `numberSeries.db`,
+`commercialOffice.db`) that cite keys no path mints.
+
+**Lessons recorded.** Two first drafts were wrong and caught by tests before commit: the assistant
+check hid a proposal from its own organization over a placeholder stop id, and the package check
+refused whole packages where the router's contract rejects items. One new test passed against the
+unfixed router (an unreadable object made both cases reject alike); it was found by running the
+test with the fix stashed and was rewritten to discriminate. Every RED quoted in a commit was
+observed, not predicted.

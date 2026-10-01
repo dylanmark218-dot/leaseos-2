@@ -529,6 +529,12 @@ MIT licence (`LICENSE`). Deployment architecture: **not represented in the repos
 Severity reflects reachability on main today. "Confirmed" means the code was read at the cited lines; none was
 executed.
 
+> **Status 2026-10-01 (SEC-1).** Measured at `6f52b57`. After merging `origin/main` at `b35bac4`: V3, V6
+> and V15 were already fixed there by parallel work; V2, V4, V8 (all rows), V9 and V11 are closed on this
+> branch, each with a database test that failed first; V10 has its target-validation half closed (step-up
+> and two-person remain SEC-4); V12's ownership half is deferred to SEC-6 as latent. The commit for each is
+> in the SEC-1 plan's status section. Rows not named here are unchanged.
+
 | # | Finding | Severity | Evidence |
 |---|---|---|---|
 | V1 | Staff session is a one-year bearer JWT with no server-side revocation; logout, offboarding and device revocation leave it valid; the token is also accepted as a Bearer header and mirrored into `sessionStorage`, defeating `httpOnly` against any script on the page | **High** | §3 |
