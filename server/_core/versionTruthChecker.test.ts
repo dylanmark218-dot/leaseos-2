@@ -416,25 +416,28 @@ describe("VTP15/VTP16 — the pin is an exact build, and every literal is that b
   });
 });
 
-describe("VTP17 — the running build is compared with the pin", () => {
+describe("VTP17 — the running build is compared with the pin, and a mismatch fails everywhere", () => {
   const foreign = `${MAJOR}.0.1`;
 
-  it("in CI, a running build other than the pin fails: setup-node did not deliver the pinned build", () => {
+  it("in CI, a running build other than the pin fails", () => {
     const run = runVersionTruthFixture({ nvmrc: `${foreign}\n`, mode: "ci" });
     expect(run.status, run.output).not.toBe(0);
     expect(run.output).toContain(`the running Node is ${PIN}, but .nvmrc pins ${foreign}`);
   });
 
-  it("locally, the same mismatch is reported and does not fail", () => {
+  it("locally — CI unset — the same mismatch fails the same way: no warn-only mode exists", () => {
     const run = runVersionTruthFixture({ nvmrc: `${foreign}\n`, mode: "local" });
-    expect(run.status, run.output).toBe(0);
-    expect(run.stderr).toContain(`the running Node is ${PIN}, but .nvmrc pins ${foreign}`);
+    expect(run.status, run.output).not.toBe(0);
+    expect(run.output).toContain(`the running Node is ${PIN}, but .nvmrc pins ${foreign}`);
+    expect(run.output).toContain("The gate runs only on the pinned build");
   });
 
-  it("the pinned build passes in CI with nothing reported", () => {
-    const run = runVersionTruthFixture({ mode: "ci" });
-    expect(run.status, run.output).toBe(0);
-    expect(run.stderr).toBe("");
+  it("the pinned build passes, in CI and locally, with nothing on stderr", () => {
+    for (const mode of ["ci", "local"] as const) {
+      const run = runVersionTruthFixture({ mode });
+      expect(run.status, run.output).toBe(0);
+      expect(run.stderr).toBe("");
+    }
   });
 });
 

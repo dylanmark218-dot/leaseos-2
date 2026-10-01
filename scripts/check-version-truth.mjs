@@ -334,23 +334,24 @@ if (pkg) {
 /* ------------------------------------------------------------- the runtime */
 
 /*
- * The declarations can all agree and the job can still run something else: setup-node
+ * The declarations can all agree and the process can still be something else: setup-node
  * substitutes a cached build, a developer's shell ignores .nvmrc. So the running process is
  * compared with the pin too, and its ICU and tz data are printed on every run, because they
- * are what a patch build actually changes. In CI a mismatch fails — the whole point of the
- * pin is that the gate's answers come from one known build. Locally it is reported, not
- * failed: a developer on a neighbouring patch is told, and the tz-data floor in
- * server/transportDateContract.test.ts still refuses stale civil-time rules.
+ * are what a patch build actually changes.
+ *
+ * A mismatch FAILS, everywhere. Not "warn locally, fail in CI": the gate's civil-time answers
+ * come from the tz data the running build carries, so a gate run on another build is not a
+ * run of this gate, whoever started it. This is gate 0a, before anything expensive — a
+ * developer on the wrong build is told in the first second, not after the suite.
  */
 const running = process.versions.node;
 const runtimeLine = `runtime: Node ${running} · ICU ${process.versions.icu ?? "none"} · tz ${process.versions.tz ?? "none"}`;
 if (nodeExact !== null && running !== nodeExact) {
-  const msg = `the running Node is ${running}, but .nvmrc pins ${nodeExact}.`;
-  if (process.env.GITHUB_ACTIONS === "true" || process.env.CI === "true") {
-    fail(`${msg} In CI the gate must run on the pinned build; setup-node did not deliver it.`);
-  } else {
-    console.error(`note: ${msg} Locally this is reported, not failed — use the pinned build (nvm use) before trusting civil-time results.`);
-  }
+  fail(
+    `the running Node is ${running}, but .nvmrc pins ${nodeExact}. ` +
+      `The gate runs only on the pinned build (nvm use, or setup-node with node-version-file: .nvmrc); ` +
+      `a different patch build carries different ICU and tz data, so its answers are not this gate's.`
+  );
 }
 
 /* ---------------------------------------------------------------- verdict */
