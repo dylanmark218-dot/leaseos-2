@@ -84,7 +84,7 @@ jobs:
       # knows British Columbia no longer falls back) on the next. One file now states the
       # runtime for developers and CI alike, and scripts/check-version-truth.mjs refuses a
       # workflow that names a version any other way, and a CI runtime that is not that build.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version-file: .nvmrc, cache: pnpm }
 
       # ubuntu-latest (24.04) ships no `mysql` client; the gate scripts need one.
