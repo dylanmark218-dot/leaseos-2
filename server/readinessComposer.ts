@@ -46,7 +46,7 @@ import { computeEligibilityFingerprint, type EligibilityFacts } from "./_core/di
 import { assessCoverage, INSURANCE_PROOF_DOC_TYPES, proofFromDocuments, type PolicyRecord, type ProofOfCoverage } from "./_core/insuranceRisk";
 import { calibrationEffectOnUse, calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import { MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch } from "./_core/compliancePassport";
-import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
+import { complianceRequirementValidity, driverLicenceVerdict } from "./_core/complianceDocumentValidity";
 import { trainingDispatchDecision } from "./_core/trainingAcademy";
 import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
@@ -423,16 +423,16 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   const opCreds = await credentialsFor("operator", op.id);
   for (const c of opCreds) governingExpiries.push({ what: `operatorDoc:${c.id}`, at: c.expiresAt });
   governingExpiries.push({ what: "legacyLicence", at: op.licenseExpiresAt });
-  let licence = credentialState(opCreds, ["driver_licence"], "Driver licence", now);
-  if (!licence.present && op.licenseExpiresAt) {
-    // The flat legacy field is a weak signal: present, unverified. It keeps an
-    // unmigrated operator from reading as "no licence" while the structured
-    // record is still to be entered — and, being unverified, it no longer clears
-    // dispatch on its own (owner's ruling, 2026-09-25). A past date still blocks.
-    licence = {
-      label: "Driver licence (legacy record)", present: true, expiresAt: op.licenseExpiresAt,
-      validity: { state: "unverified", reason: "the date is from the legacy operator record, which nobody has checked against a licence" },
-    };
+  // The one licence verdict (complianceDocumentValidity.driverLicenceVerdict): documents first, the
+  // legacy date only as an unverified claim (owner's ruling, 2026-09-25). A past date still blocks.
+  const licenceVerdict = driverLicenceVerdict(opCreds, op.licenseExpiresAt, now);
+  const licence: CredentialState = {
+    label: licenceVerdict.source === "legacy_record" ? "Driver licence (legacy record)" : "Driver licence",
+    present: licenceVerdict.state !== "none" && licenceVerdict.state !== "rejected",
+    expiresAt: licenceVerdict.claimedExpiresAt,
+    validity: { state: licenceVerdict.state, reason: licenceVerdict.reason },
+  };
+  if (licenceVerdict.source === "legacy_record") {
     contributions.push({ engine: "compliance", finding: "Licence read from the legacy operator record — no structured credential yet" });
   }
   const job = subject.jobId ? (await db.select().from(jobs).where(eq(jobs.id, subject.jobId)).limit(1))[0] ?? null : null;

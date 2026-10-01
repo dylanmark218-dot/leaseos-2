@@ -157,7 +157,10 @@ d("the award binds the slot through the canonical binding", () => {
     const s = await establishedScene();
     // A second person the open-shift rule lets take the work: licensed and on the roster.
     const other = await withRole("driver");
-    await pool.execute("INSERT INTO operators (userId, name, licenseExpiresAt) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 400 DAY))", [other, `Op ${rnd()}`]);
+    const [otherOp] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name, licenseExpiresAt) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 400 DAY))", [other, `Op ${rnd()}`]);
+    // SPINE item 2: open-shift eligibility reads the canonical licence verdict, so "licensed" means a
+    // verified driver_licence document — the legacy date alone is an unverified claim.
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Driver licence', NOW(), DATE_ADD(NOW(), INTERVAL 400 DAY), 'verified')", [otherOp.insertId]);
     await onRoster(other);
     const c = await acknowledgedCheck(s);
     await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: s.driverUser });
