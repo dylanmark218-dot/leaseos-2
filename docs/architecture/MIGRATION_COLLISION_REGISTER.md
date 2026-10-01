@@ -286,3 +286,19 @@ took `0215`–`0216` while this merge was being gated, the second of them minute
 pushed `0215`–`0217`. As the later, unmerged claimant this branch moved again, to the first
 three numbers free on `main` and on every open branch. No other branch was renumbered.
 
+
+## Claim: 0221–0222 (Fleet & Equipment Portfolio asset core, 2026-10-01)
+
+Scanned at commit time across `origin/main` and every remote branch: `main` ends at `0219`
+(`0219_job_commercial_context.sql`, #98); the highest number on any branch is `0220`
+(`claude/eld-compliance-intelligence-ramlrd`, which took it while this checkpoint was being gated). `0221` and `0222` are the first
+numbers free everywhere.
+This branch also carries the mechanic-portal branch's `0199`–`0201` unchanged (merged in `82df3d6`);
+no other branch holds those numbers.
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0221 | `0221_fleet_asset_identity.sql` | `claude/fleet-equipment-portfolio-design-3d13d5` | none yet | `b35bac4` | gated | none | keeps 0221 |
+| 0222 | `0222_fleet_component_guards.sql` | `claude/fleet-equipment-portfolio-design-3d13d5` | none yet | `b35bac4` | gated | none | keeps 0222 |
+
+**Next free number for new work: `0223`** (re-check with the scan before committing).

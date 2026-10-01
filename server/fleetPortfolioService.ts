@@ -12,8 +12,9 @@ import { and, desc, eq, inArray, isNotNull, or as sqlOr } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import {
   faultCodes, fleetPortfolioEvents, fuelTransactions, maintenanceDefects, roadsideServiceEvents, telemetrySnapshots,
-  tireInstallations, tireMeasurements, trips, unitHolds, unitMeterReadings, workOrderReleases, workOrders,
+  tireInstallations, tireMeasurements, trips, unitHolds, unitMeterReadings, units, workOrderReleases, workOrders,
 } from "../drizzle/schema";
+import { componentStatesFor } from "./fleetComponents";
 import type { DbOrTx } from "./_core/dbTypes";
 import { meterSequence, METER_TYPES, type MeterObservation, type MeterType, type Standing } from "./_core/fleetMeters";
 import { operationalState, type HoldEffect, type HoldType, type OperationalState, type PortfolioFacts } from "./_core/fleetPortfolio";
@@ -165,7 +166,7 @@ export async function portfolioFacts(db: DbOrTx, unitId: number): Promise<Portfo
   const attempt = async <T>(name: string, read: () => Promise<T>, empty: T): Promise<T> => {
     try { return await read(); } catch { unreadable.push(name); return empty; }
   };
-  const [holds, defects, releases, roadside, faults, enforcement, meters] = await Promise.all([
+  const [holds, defects, releases, roadside, faults, enforcement, meters, unitRow, components] = await Promise.all([
     attempt("unitHolds", () => activeHolds(db, unitId), []),
     attempt("maintenanceDefects", () => db.select().from(maintenanceDefects).where(and(eq(maintenanceDefects.unitId, unitId), sqlOr(inArray(maintenanceDefects.status, ["open", "in_progress"]), eq(maintenanceDefects.severity, "critical")))), []),
     attempt("workOrderReleases", () => db.select().from(workOrderReleases).where(eq(workOrderReleases.unitId, unitId)).orderBy(desc(workOrderReleases.releasedAt)), []),
@@ -174,6 +175,9 @@ export async function portfolioFacts(db: DbOrTx, unitId: number): Promise<Portfo
     // A unit may be a tractor or a trailer; an order may name it either way.
     attempt("outOfServiceOrders", () => loadEnforcementState(db, { unitId, trailerId: unitId, operatorId: null }), null),
     attempt("meters", async () => (await meterSequencesFor(db, unitId)).sequences, []),
+    // 0221 — lifecycle is stored on the unit; components are read with the two facts that hold a parent.
+    attempt("units", async () => (await db.select({ lifecycleStatus: units.lifecycleStatus, lifecycleChangedAt: units.lifecycleChangedAt }).from(units).where(eq(units.id, unitId)).limit(1))[0] ?? null, null),
+    attempt("unitComponents", () => componentStatesFor(db, unitId), []),
   ]);
   const mine = new Set([`unit:${unitId}`, `trailer:${unitId}`]);
   return {
@@ -186,6 +190,8 @@ export async function portfolioFacts(db: DbOrTx, unitId: number): Promise<Portfo
     openRoadside: roadside.map(r => ({ eventRef: r.eventRef, status: r.status, occurredAt: r.occurredAt })),
     faults: faults.map(f => ({ id: f.id, code: f.code, status: f.status, severityDetermination: f.severityDetermination, occurrenceCount: f.occurrenceCount, lastSeenAt: f.lastSeenAt })),
     meters: meters.map(m => ({ meterType: m.meterType, trust: m.trust, regressions: m.regressions })),
+    lifecycle: unitRow ? { status: unitRow.lifecycleStatus, changedAt: unitRow.lifecycleChangedAt } : null,
+    components,
     unreadable,
   };
 }

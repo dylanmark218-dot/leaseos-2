@@ -45,6 +45,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/shopRouter.ts` | `ROLE_AUTHORIZED` | **25** |
 | `server/maintenanceRouter.ts` | `ROLE_AUTHORIZED` | **3** |
 | `server/fleetPortfolioRouter.ts` | `ROLE_AUTHORIZED` | **9** |
+| `server/fleetAssetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/assetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/projectRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/integrationRouter.ts` | `ROLE_AUTHORIZED` (`integrationRouter`) / `INTEGRATION_CLIENT` (`inboundRouter`, `integrationProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md`) | **11** |
@@ -58,7 +59,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**446 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
+**456 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
 The table lists the surfaces reviewed here, not every router; the system-wide count is generated into
 `LEASEOS_CURRENT_STATE.md`. The numbers in this table are written by `node scripts/procedure-inventory.mjs`,
 which reads them from the routers (CP1.5: nine rows had drifted below their routers and the total said 356).

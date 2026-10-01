@@ -90,7 +90,7 @@ export const actingRoleFor = (roles: readonly string[], holdType: HoldType, act:
 /* ------------------------------------------------------------------ */
 
 export type OperationalStatus = "available" | "warning" | "maintenance_hold" | "out_of_service" | "indeterminate";
-export type ReasonCategory = "maintenance" | "inspection" | "compliance" | "safety" | "damage" | "administrative" | "enforcement" | "telematics" | "meter" | "source";
+export type ReasonCategory = "maintenance" | "inspection" | "compliance" | "safety" | "damage" | "administrative" | "enforcement" | "telematics" | "meter" | "source" | "lifecycle" | "component";
 
 export type StateReason = {
   code: string;
@@ -115,6 +115,10 @@ export type PortfolioFacts = {
   openRoadside: readonly { eventRef: string; status: string; occurredAt: Date | null }[];
   faults: readonly { id: number; code: string; status: string; severityDetermination: string; occurrenceCount: number; lastSeenAt: Date | null }[];
   meters: readonly Pick<MeterSequence, "meterType" | "trust" | "regressions">[];
+  /** 0221 — the stored lifecycle; absent (an older caller) reads as active, which is what every existing unit is. */
+  lifecycle?: { status: "active" | "seasonal_storage" | "retired" | "sold" | "transferred"; changedAt: Date | null } | null;
+  /** 0221 — the components attached now, each with the two facts that hold the parent (O-9). */
+  components?: readonly { componentRef: string; childUnitId: number; childUnitNumber: string; relationship: string; criticalDefectOpen: boolean; safetyHold: boolean }[];
   /** Sources the caller tried and failed to read. Each one makes the state indeterminate. */
   unreadable: readonly string[];
 };
@@ -126,7 +130,6 @@ export type PortfolioFacts = {
  */
 export const NOT_EVALUATED = [
   { domain: "documents_and_insurance", reason: "Decided by the dispatch readiness composer, which reads the requirement registry and insurance" },
-  { domain: "lifecycle", reason: "Unit lifecycle (active, storage, retired, sold) is not recorded yet" },
   { domain: "dispatched", reason: "Whether the unit is on a job is a booking, not a condition of the unit" },
 ] as const;
 
@@ -159,6 +162,19 @@ const HOLD_STATUS: Record<HoldEffect, StateReason["status"]> = { warn: "warning"
 export function operationalState(f: PortfolioFacts): OperationalState {
   const reasons: StateReason[] = [];
   const push = (r: StateReason) => reasons.push(r);
+
+  // 0221 — out of the fleet is out of service; storage holds the unit; a component's critical defect or
+  // safety hold holds its parent until it is detached, which is a recorded act.
+  const life = f.lifecycle?.status ?? "active";
+  if (life === "retired" || life === "sold" || life === "transferred") {
+    push({ code: `unit_${life}`, status: "out_of_service", category: "lifecycle", label: `${life === "transferred" ? "Transferred to another organization" : life[0]!.toUpperCase() + life.slice(1)}: not in the fleet`, source: { table: "units", ref: "lifecycleStatus" }, since: f.lifecycle?.changedAt ?? null, liftedBy: "fleet.lifecycleSet (management returns a unit to the fleet)" });
+  } else if (life === "seasonal_storage") {
+    push({ code: "unit_in_storage", status: "maintenance_hold", category: "lifecycle", label: "In seasonal storage", source: { table: "units", ref: "lifecycleStatus" }, since: f.lifecycle?.changedAt ?? null, liftedBy: "fleet.lifecycleSet" });
+  }
+  for (const c of f.components ?? []) {
+    if (c.criticalDefectOpen) push({ code: `component_critical_defect:${c.childUnitId}`, status: "maintenance_hold", category: "component", label: `Component ${c.childUnitNumber} (${c.relationship}) has an unresolved critical defect`, source: { table: "unitComponents", ref: c.componentRef }, since: null, liftedBy: "records.maintenance.resolveDefect on the component, or fleet.componentDetach" });
+    if (c.safetyHold) push({ code: `component_hold_safety:${c.childUnitId}`, status: "out_of_service", category: "component", label: `Component ${c.childUnitNumber} (${c.relationship}) is out of service`, source: { table: "unitComponents", ref: c.componentRef }, since: null, liftedBy: "fleet.holdRelease on the component, or fleet.componentDetach" });
+  }
 
   for (const h of f.holds) {
     push({ code: `hold_${h.holdType}`, status: HOLD_STATUS[h.dispatchEffect], category: h.holdType, label: h.reason, source: { table: "unitHolds", ref: h.holdRef }, since: h.placedAt, liftedBy: liftedByFor(h) });

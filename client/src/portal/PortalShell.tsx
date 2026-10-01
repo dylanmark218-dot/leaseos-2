@@ -29,12 +29,16 @@ import { InboxPanel } from "./panels/InboxPanel";
 import { TimelinePanel } from "./panels/TimelinePanel";
 import { SetupPanel } from "./panels/SetupPanel";
 import { PeopleAccessPanel } from "./panels/PeopleAccessPanel";
+import { FleetPanel } from "./panels/FleetPanel";
 import { UniversalSearch } from "./UniversalSearch";
 import { SyncIndicator } from "./SyncIndicator";
 import { QuickCapture } from "./QuickCapture";
 import { SessionGate } from "@/session/SessionGate";
 
-export type PanelKey = "myday" | "exceptions" | "inbox" | "timeline" | "setup" | "people";
+export type PanelKey = "myday" | "exceptions" | "inbox" | "timeline" | "setup" | "people" | "fleet";
+
+/** 0221 — the portals that work units. Drawing the panel elsewhere would only draw a screen that refuses. */
+const FLEET_PORTALS = new Set<PortalKey>(["fleet_maintenance", "dispatch_operations", "safety_compliance", "office_administration", "management"]);
 
 const OFFICE_PORTALS = new Set<PortalKey>(["office_administration", "finance_billing", "management", "executive", "hr_workforce", "auditor_regulator"]);
 
@@ -141,6 +145,7 @@ function PortalShellBody({ initialPanel = "myday", displayName = null, workspace
               behind it refuse anyone without `roles.grant` regardless, so this
               keeps a door from being drawn rather than being the lock. */}
           {(["myday", "exceptions", "inbox", "timeline",
+             ...(FLEET_PORTALS.has(portal) ? ["fleet" as PanelKey] : []),
              ...(OFFICE_PORTALS.has(portal) ? ["setup" as PanelKey] : []),
              ...(portal === "management" ? ["people" as PanelKey] : [])] as PanelKey[]).map(p => (
             <button key={p} onClick={() => setPanel(p)} className={`rounded-lg px-3 py-1 ${panel === p ? "bg-white shadow" : "text-[#5b6b82]"}`}>{p === "myday" ? "My Day" : p === "people" ? "People" : p[0]!.toUpperCase() + p.slice(1)}</button>
@@ -152,6 +157,7 @@ function PortalShellBody({ initialPanel = "myday", displayName = null, workspace
         {panel === "timeline" && <TimelinePanel />}
         {panel === "setup" && OFFICE_PORTALS.has(portal) && <SetupPanel />}
         {panel === "people" && portal === "management" && <PeopleAccessPanel />}
+        {panel === "fleet" && FLEET_PORTALS.has(portal) && <FleetPanel onOpen={unitId => navigate(`/fleet/${unitId}`)} />}
         {view && view.quickCapture.length > 0 && <QuickCapture actions={view.quickCapture} />}
       </main>
     </div>

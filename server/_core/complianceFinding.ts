@@ -45,7 +45,7 @@ export type FindingDomain =
   | "permit" | "destination" | "route" | "communications" | "capability" | "commercial" | "unclassified";
 
 /** Bumped whenever CLASSIFICATION changes meaning. Part of the rule-set hash, so a change stales every check. */
-export const CLASSIFICATION_VERSION = "c1a.4";   // main's c1a.3 + 0200 fleet portfolio hold rules (both landed as "c1a.3" on their own branches; the merge is a third rule set)
+export const CLASSIFICATION_VERSION = "c1a.5";   // main's c1a.3 + 0200 fleet portfolio hold rules (both landed as "c1a.3" on their own branches; the merge is a third rule set)
 
 /**
  * A readiness finding. It IS a `DispatchBlocker` — every existing consumer (the checklist, the
@@ -143,6 +143,16 @@ export const CLASSIFICATION: readonly Rule[] = [
   r("fleet.hold.warning", /^(unit|trailer)_hold_[a-z_]+_warning$/, "maintenance", "company_policy", ...WARN_ACK),
   r("fleet.hold.out_of_service", /^(unit|trailer)_hold_safety$/, "maintenance", "carrier_safety_policy", ...HARD),
   r("fleet.hold.block", /^(unit|trailer)_hold_(maintenance|inspection|compliance|damage|administrative)$/, "maintenance", "carrier_safety_policy", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
+  /*
+   * 0221 — Fleet & Equipment Portfolio asset core. Out of the fleet (retired, sold, transferred) is
+   * nobody's to override; seasonal storage is releasable only under an approved policy; a unit bound
+   * where its class does not belong, and a mounted component's critical defect or safety hold, are the
+   * truck's own safety state.
+   */
+  r("fleet.lifecycle.out", /^(unit|trailer)_(retired|sold|transferred)$/, "maintenance", "company_policy", ...HARD),
+  r("fleet.lifecycle.storage", /^(unit|trailer)_in_storage$/, "maintenance", "company_policy", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
+  r("fleet.class.mismatch", /^(unit|trailer)_class_mismatch$/, "trailer", "carrier_safety_policy", ...HARD),
+  r("fleet.component.critical", /^component_(critical_defect|hold_safety):\d+$/, "defect", "carrier_safety_policy", ...HARD),
   r("maintenance.overdue", /^(trailer_)?maintenance_overdue$/, "maintenance", "carrier_safety_policy", ...WARN_ACK),
   r("trailer.incompatible", /^trailer_incompatible$/, "trailer", "carrier_safety_policy", ...HARD),
   r("trailer.compatibility.unknown", /^trailer_compatibility_unknown$/, "trailer", "carrier_safety_policy", ...UNKNOWN_BLOCKS),

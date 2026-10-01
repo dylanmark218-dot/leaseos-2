@@ -336,7 +336,7 @@ d("the migrated tranche is coherent", () => {
   it("declares a permission for every migrated procedure", () => {
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
     // Merged census: 662 main procedures, 10 auth-workspace, 8 Live Assist, and 2 paperwork.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(735);   // 0200: +9 fleet.* (portfolio foundation); 0199: +3 maintenance.{workOrderAssignment,workOrderAssign,workOrderCancel} (fleet maintenance CP1)   // v23.31: +40 customerCommercial.*;   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(745);   // 0221: +10 fleet.* (asset core);   // 0200: +9 fleet.* (portfolio foundation); 0199: +3 maintenance.{workOrderAssignment,workOrderAssign,workOrderCancel} (fleet maintenance CP1)   // v23.31: +40 customerCommercial.*;   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
   });
 
   it("has a holder for every permission it uses", () => {

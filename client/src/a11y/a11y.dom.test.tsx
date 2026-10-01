@@ -9,6 +9,8 @@ import { DisposalFinderView, type DisposalFinderViewProps } from "../pages/Dispo
 import { CommercialOfficeView, type CommercialOfficeViewProps } from "../pages/CommercialOfficeView";
 import { DispatchReadinessView, type DispatchReadinessViewProps } from "../dispatch/DispatchReadinessView";
 import { DispatchJobDetailView, type DispatchJobDetailViewProps } from "../dispatch/DispatchJobDetailView";
+import { FleetListView, type FleetListRow } from "../fleet/FleetListView";
+import { FleetAssetDetailView, type Actions as FleetActions, type AssetDetail } from "../fleet/FleetAssetDetailView";
 import { SourcedPanel } from "../showcase/SourcedPanel";
 import { WidgetBoard } from "../widgets/WidgetBoard";
 import { WidgetTileShell } from "../widgets/WidgetTileShell";
@@ -211,6 +213,30 @@ const a11ySheet = (o: Partial<RateSheetDetail> = {}): RateSheetDetail => ({
 const withheld = (): RateSheetDetail => { const s = a11ySheet({ confidential: false }); return { ...s, versions: s.versions.map(v => ({ ...v, lines: v.lines.map(({ rateMillis: _r, flatCents: _f, basisPoints: _b, multiplierMillis: _m, minimumQuantityMillis: _q, minimumChargeCents: _c, billingIncrementMillis: _i, roundingMode: _o, currency: _cu, ...rest }) => rest) })) }; };
 const sheetProps = (o: Partial<RateSheetViewProps> = {}): RateSheetViewProps => ({ offline: false, sheet: { kind: "loaded", data: a11ySheet() }, selectedVersion: null, onSelectVersion: () => {}, canPropose: true, canApprove: true, busy: false, onVersionCreate: () => {}, onLineAdd: () => {}, onLineRemove: () => {}, onSubmit: () => {}, onDecide: () => {}, onOpenCustomer: () => {}, onOpenContract: () => {}, onOpenJob: () => {}, ...o });
 
+/* ---- 0221: the Fleet portfolio's screens ---- */
+const fleetFilters = { status: null, lifecycle: null, assetClass: null, q: "" };
+const fleetRow = (o: Partial<FleetListRow>): FleetListRow => ({
+  unitId: 1, unitNumber: "27", assetClass: "power_unit", assetType: "hydrovac", make: "Kenworth", model: "T880", modelYear: 2021, plate: "ABC 123",
+  lifecycleStatus: "active", status: "available", activeHolds: 0, openCriticalDefects: 0, assignedOperatorName: null, ...o,
+});
+const fleetRows: FleetListRow[] = [fleetRow({ unitId: 1, unitNumber: "A1" }), fleetRow({ unitId: 2, unitNumber: "B2", status: "out_of_service", activeHolds: 1, assignedOperatorName: "D. Reid" }), fleetRow({ unitId: 3, unitNumber: "C3", status: "indeterminate", assetClass: null, assetType: null })];
+const fleetDetail: AssetDetail = {
+  identity: { unitId: 7, unitNumber: "27", assetClass: "power_unit", assetType: "hydrovac", assetSubtype: null, vehicleType: "hydrovac", vin: "1XK", serialNumber: null, plate: "ABC 123", plateJurisdiction: "AB", make: "Kenworth", model: "T880", modelYear: 2021, manufacturer: null, ownershipType: "owned", acquiredAt: null, homeTerminal: "Red Deer", assignedBranchRef: null, assignedDivision: null, regulatoryClass: null, companyAssetNumber: null, notes: null },
+  lifecycle: { status: "active", changedAt: null, reason: null, retiredAt: null },
+  state: { status: "out_of_service", reasons: [{ code: "hold_safety", status: "out_of_service", category: "safety", label: "Steering box leaking", source: { table: "unitHolds", ref: "HOLD-1" }, since: "2026-09-25T00:00:00Z", liftedBy: "fleet.holdRelease" }], restrictions: ["Yard moves only"], since: "2026-09-25T00:00:00Z", notEvaluated: [{ domain: "documents_and_insurance", reason: "decided at dispatch" }] },
+  driverNotice: "Out of service — do not operate: Steering box leaking",
+  readiness: { verdict: "blocked", findings: [{ code: "unit_hold_safety", label: "Unit 27 — safety hold", severity: "blocking", subject: "truck", overrideClass: "NEVER_OVERRIDABLE" }], notEvaluated: [{ axis: "operator", reason: "no driver" }, { axis: "job", reason: "no job" }, { axis: "route", reason: "no route" }] },
+  assignment: { operatorName: "D. Reid", jobCode: "JOB-1" },
+  holds: [{ holdRef: "HOLD-1", holdType: "safety", dispatchEffect: "out_of_service", reason: "Steering box leaking", status: "active", placedAt: "2026-09-25T00:00:00Z", placedByRole: "safety", sourceKind: "manual" }],
+  components: [{ componentRef: "CMP-1", direction: "attached", otherUnitId: 9, otherUnitNumber: "VAC-9", relationship: "mounted", removable: false, installedAt: "2026-09-01T00:00:00Z", removedAt: null, criticalDefectOpen: true }],
+  meters: [{ meterType: "odometer_km", trust: "trusted", current: { value: 100500, recordedAt: "2026-09-04T00:00:00Z", source: "trip" } }],
+  documents: [{ id: 1, docType: "cvip_certificate", title: "CVIP 2026", identifier: "C-1", issuedAt: null, expiresAt: "2027-01-01T00:00:00Z", verificationStatus: "verified", validity: "in_force" }],
+  insurance: { status: "coverage_verified", reason: "Policy P-1 in force" },
+  defects: [{ id: 3, title: "Blower bearing seized", severity: "critical", status: "open", reportedAt: "2026-09-20T00:00:00Z" }], workOrders: [], inspections: [],
+  events: [{ eventRef: "FPE-1", eventType: "hold_placed", subjectType: "hold", subjectRef: "HOLD-1", detail: "safety (manual): Steering box leaking", actorUserId: 5, actorRole: "safety", occurredAt: "2026-09-25T00:00:00Z" }],
+};
+const fleetActions = (o: Partial<FleetActions> = {}): FleetActions => ({ forbidden: {}, placeHold: () => {}, releaseHold: () => {}, setLifecycle: () => {}, detachComponent: () => {}, busy: null, lastError: null, ...o });
+
 const surfaces = [
   { name: "customers — overview", render: () => render(<CustomersView {...customers()} />) },
   { name: "customers — contacts, with the add form", render: () => render(<CustomersView {...customers({ tab: "contacts" })} />) },
@@ -236,6 +262,14 @@ const surfaces = [
   { name: "dispatch readiness — query failed", render: () => render(<DispatchReadinessView {...readinessPanel({ kind: "failed", message: "Database unavailable" })} />) },
   { name: "dispatch readiness — capability picture", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked, readinessCapabilities, { status: "BLOCKED", explanation: "1 capability blocked; 1 was not evaluated.", missingRequired: [] })} />) },
   { name: "dispatch detail — a filled slot and an open one", render: () => render(<DispatchJobDetailView {...jobDetail()} />) },
+  // 0221 — the Fleet portfolio: the list in three states, the detail with a held unit and a refused control.
+  { name: "fleet list — held, unestablished and operational units", render: () => render(<FleetListView state={{ kind: "loaded", rows: fleetRows, total: 3, cap: 100 }} filters={fleetFilters} onFilter={() => {}} onOpen={() => {}} />) },
+  { name: "fleet list — empty answer", render: () => render(<FleetListView state={{ kind: "loaded", rows: [], total: 0, cap: 100 }} filters={fleetFilters} onFilter={() => {}} onOpen={() => {}} />) },
+  { name: "fleet list — read failed", render: () => render(<FleetListView state={{ kind: "failed", message: "Database unavailable" }} filters={fleetFilters} onFilter={() => {}} onOpen={() => {}} />) },
+  { name: "fleet asset — out of service, controls offered", render: () => render(<FleetAssetDetailView state={{ kind: "loaded", detail: fleetDetail }} actions={fleetActions()} />) },
+  { name: "fleet asset — a refused control, with the reason", render: () => render(<FleetAssetDetailView state={{ kind: "loaded", detail: fleetDetail }} actions={fleetActions({ forbidden: { placeHold: "FORBIDDEN: fleet.hold.place", setLifecycle: "FORBIDDEN: fleet.lifecycle.set" }, lastError: "Hold HOLD-1 was released by someone else a moment ago" })} />) },
+  { name: "fleet asset — equipment tab", render: () => render(<FleetAssetDetailView state={{ kind: "loaded", detail: fleetDetail }} actions={fleetActions()} initialTab="Equipment" />) },
+  { name: "fleet asset — read failed", render: () => render(<FleetAssetDetailView state={{ kind: "failed", message: "Unit 99 not found" }} actions={fleetActions()} />) },
   { name: "dispatch detail — job with no posting", render: () => render(<DispatchJobDetailView {...jobDetail({ slots: { kind: "no_posting" } })} />) },
   // A refused write is an alert a screen reader must reach; it is the state most likely to be
   // styled into a corner and never announced.

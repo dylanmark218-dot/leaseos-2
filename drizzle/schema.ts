@@ -157,9 +157,37 @@ export const units = mysqlTable("units", {
     .default("clear")
     .notNull(),
   qrTag: varchar("qrTag", { length: 120 }),
+  /* 0221 — Fleet & Equipment Portfolio, asset core: identity and lifecycle (docs/fleet). `assetClass` is the
+   * structural discriminator the dispatch gate reads; NULL = not classified, never guessed from vehicleType.
+   * Lifecycle is stored; operational state is derived and stored nowhere. */
+  assetClass: mysqlEnum("assetClass", ["power_unit", "trailer", "mounted_system", "portable_equipment", "component"]),
+  assetType: varchar("assetType", { length: 60 }),
+  assetSubtype: varchar("assetSubtype", { length: 60 }),
+  companyAssetNumber: varchar("companyAssetNumber", { length: 60 }),
+  serialNumber: varchar("serialNumber", { length: 120 }),
+  plateJurisdiction: varchar("plateJurisdiction", { length: 8 }),
+  make: varchar("make", { length: 80 }),
+  model: varchar("model", { length: 80 }),
+  modelYear: int("modelYear"),
+  manufacturer: varchar("manufacturer", { length: 120 }),
+  ownershipType: mysqlEnum("ownershipType", ["owned", "leased", "rented", "customer_supplied", "contractor_supplied"]),
+  acquiredAt: timestamp("acquiredAt"),
+  homeTerminal: varchar("homeTerminal", { length: 120 }),
+  assignedBranchRef: varchar("assignedBranchRef", { length: 64 }),
+  assignedDivision: varchar("assignedDivision", { length: 120 }),
+  defaultOperatorId: int("defaultOperatorId"),
+  regulatoryClass: varchar("regulatoryClass", { length: 60 }),
+  lifecycleStatus: mysqlEnum("lifecycleStatus", ["active", "seasonal_storage", "retired", "sold", "transferred"]).default("active").notNull(),
+  lifecycleChangedAt: timestamp("lifecycleChangedAt"),
+  lifecycleChangedByUserId: int("lifecycleChangedByUserId"),
+  lifecycleReason: varchar("lifecycleReason", { length: 400 }),
+  retiredAt: timestamp("retiredAt"),
+  notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => ({
+  lifecycleIdx: index("units_lifecycle_idx").on(t.lifecycleStatus, t.assetClass),
+}));
 
 export const jobUnits = mysqlTable("jobUnits", {
   id: int("id").autoincrement().primaryKey(),
@@ -9962,3 +9990,29 @@ export const fleetPortfolioEvents = mysqlTable("fleetPortfolioEvents", {
   occurredAt: timestamp("occurredAt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+/* ==================================================================
+ * 0221 — Fleet & Equipment Portfolio: components. Both ends are `units`
+ * rows; a detachment sets removedAt and 0222 refuses any rewrite or
+ * delete, so what was attached during a job is a temporal query.
+ * ================================================================== */
+export const unitComponents = mysqlTable("unitComponents", {
+  id: int("id").autoincrement().primaryKey(),
+  componentRef: varchar("componentRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  parentUnitId: int("parentUnitId").notNull(),
+  childUnitId: int("childUnitId").notNull(),
+  relationship: mysqlEnum("relationship", ["mounted", "installed", "attached", "towed"]).notNull(),
+  removable: boolean("removable").default(true).notNull(),
+  installedAt: timestamp("installedAt").notNull(),
+  installedByUserId: int("installedByUserId").notNull(),
+  installWorkOrderId: int("installWorkOrderId"),
+  removedAt: timestamp("removedAt"),
+  removedByUserId: int("removedByUserId"),
+  removeWorkOrderId: int("removeWorkOrderId"),
+  removalReason: varchar("removalReason", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  parentIdx: index("unitComponents_parent_idx").on(t.parentUnitId, t.removedAt),
+  childIdx: index("unitComponents_child_idx").on(t.childUnitId, t.removedAt),
+}));

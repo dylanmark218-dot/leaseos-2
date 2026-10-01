@@ -45,6 +45,7 @@ const portalRouter = readFileSync("server/portalRouter.ts", "utf8");
 const shopRouter = readFileSync("server/shopRouter.ts", "utf8");
 const maintenanceRouter = readFileSync("server/maintenanceRouter.ts", "utf8");
 const fleetPortfolioRouter = readFileSync("server/fleetPortfolioRouter.ts", "utf8");
+const fleetAssetRouter = readFileSync("server/fleetAssetRouter.ts", "utf8");   // 0221, spread into the fleet router
 const assetRouter = readFileSync("server/assetRouter.ts", "utf8");
 const projectRouter = readFileSync("server/projectRouter.ts", "utf8");
 const integrationRouter = readFileSync("server/integrationRouter.ts", "utf8");
@@ -89,7 +90,7 @@ const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
  * payrollRouter.ts both draw from it. Checking only one would let a declared
  * permission go unwired without anyone noticing.
  */
-const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, maintenanceRouter, fleetPortfolioRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter].join("\n");
+const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, maintenanceRouter, fleetPortfolioRouter, fleetAssetRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter].join("\n");
 
 const countBuilders = (src: string, builder: string) =>
   (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
@@ -177,7 +178,7 @@ describe("migrated operational procedures", () => {
     // 40-procedure payroll/finance surface, all gated from the start.
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
     // The merged surface includes 8 Live Assist, 2 paperwork, 23 Document Control, and 10 auth-workspace procedures.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(735);   // 0200: +9 fleet.* (portfolio foundation); 0199: +3 maintenance.* (fleet maintenance CP1)   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(745);   // 0221: +10 fleet.{list,get,unitReadiness,components,assetCreate,assetUpdate,lifecycleSet,componentAttach,componentDetach,myAssignedUnits} (asset core);   // 0200: +9 fleet.* (portfolio foundation); 0199: +3 maintenance.* (fleet maintenance CP1)   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 
@@ -242,6 +243,7 @@ describe("migrated operational procedures", () => {
     expect(countBuilders(shopRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(maintenanceRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(fleetPortfolioRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(fleetAssetRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(assetRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(projectRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(integrationRouter, "protectedProcedure")).toBe(0);

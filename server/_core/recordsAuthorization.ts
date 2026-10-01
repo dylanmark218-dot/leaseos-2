@@ -354,7 +354,12 @@ export type Permission =
   // 0200 — the Fleet & Equipment Portfolio's foundation. Placing and releasing a hold decide whether a
   // unit may move, and verifying a meter reading makes it count; all three are sensitive. Which hold
   // TYPES a role may place or release is decided in `_core/fleetPortfolio.ts`, below the permission.
-  | "fleet.hold.place" | "fleet.hold.release" | "fleet.meter.record" | "fleet.meter.verify";
+  | "fleet.hold.place" | "fleet.hold.release" | "fleet.meter.record" | "fleet.meter.verify"
+  // 0221 — asset core. Identity, lifecycle and components are three recorded acts, each sensitive; a
+  // lifecycle change returns a unit to service or takes it out, so an agent never performs it.
+  // `fleet.read_own` is universal and self-scoped in the router: the driver's own assigned units, from
+  // the slot model, with no unit id taken from the driver.
+  | "fleet.asset.manage" | "fleet.lifecycle.set" | "fleet.component.manage" | "fleet.read_own";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -652,6 +657,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.hold.release",
     "fleet.meter.record",
     "fleet.meter.verify",
+    "fleet.component.manage",
   ],
   shop_lead: [
     "live_assist.use",
@@ -751,6 +757,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.hold.release",
     "fleet.meter.record",
     "fleet.meter.verify",
+    "fleet.asset.manage",
+    "fleet.lifecycle.set",
+    "fleet.component.manage",
   ],
   safety: [
     "live_assist.review",
@@ -1062,6 +1071,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
     // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.meter.record",
+    "fleet.asset.manage",
   ],
   management: [
     "live_assist.use",
@@ -1348,6 +1358,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.hold.place",
     "fleet.hold.release",
     "fleet.meter.verify",
+    "fleet.asset.manage",
+    "fleet.lifecycle.set",
+    "fleet.component.manage",
   ],
   hr: [
     "document.read",
@@ -1850,6 +1863,8 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // 0221 — the driver's own assigned units, resolved from the slot model; the request names no unit.
+  "fleet.read_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -2106,6 +2121,9 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "fleet.hold.place",
   "fleet.hold.release",
   "fleet.meter.verify",
+  "fleet.asset.manage",
+  "fleet.lifecycle.set",
+  "fleet.component.manage",
 ] as const;
 
 export function isSensitivePermission(p: Permission): boolean {
@@ -3398,6 +3416,17 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "fleet.meterRecord": "fleet.meter.record",
   "fleet.meterDecide": "fleet.meter.verify",
   "fleet.history": "fleet.read",
+  /* ---- 0221: Fleet & Equipment Portfolio asset core ---- */
+  "fleet.list": "fleet.read",
+  "fleet.get": "fleet.read",
+  "fleet.unitReadiness": "fleet.read",
+  "fleet.components": "fleet.read",
+  "fleet.assetCreate": "fleet.asset.manage",
+  "fleet.assetUpdate": "fleet.asset.manage",
+  "fleet.lifecycleSet": "fleet.lifecycle.set",
+  "fleet.componentAttach": "fleet.component.manage",
+  "fleet.componentDetach": "fleet.component.manage",
+  "fleet.myAssignedUnits": "fleet.read_own",
 } as const satisfies Record<string, Permission>;
 
 /**

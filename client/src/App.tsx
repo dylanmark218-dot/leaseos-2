@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import NotFound from "@/pages/NotFound";
 import { Redirect, Route, Switch } from "wouter";
 import { PortalShell } from "./portal/PortalShell";
+import FleetAssetDetail from "./fleet/FleetAssetDetail";
 import { SessionGate } from "./session/SessionGate";
 import { CustomerPortal } from "./portal/external/CustomerPortal";
 import HosVerificationConsole from "./pages/HosVerificationConsole";
@@ -85,7 +86,12 @@ function Router() {
       <Route path="/showcase/billing-safety" component={() => <ShowcaseFrame title="Billing and safety"><BillingSafetyWorkspace /></ShowcaseFrame>} />
       <Route path="/showcase/compliance-engine" component={() => <ShowcaseFrame title="Compliance engine"><ComplianceEngine /></ShowcaseFrame>} />
       <Route path="/showcase/offline-vault" component={() => <ShowcaseFrame title="Offline vault"><OfflineVault /></ShowcaseFrame>} />
-      <Route path="/fleet" component={() => <Redirect to="/showcase/fleet" />} />
+      {/* 0221 — the authoritative Fleet surface: the portal's Fleet panel, and one unit by id. The deep
+          link the server already emits (`/portal/fleet_maintenance/units/:id`) lands here too. The
+          former demonstration stays under /showcase/fleet. */}
+      <Route path="/fleet" component={() => <PortalShell initialPanel="fleet" />} />
+      <Route path="/fleet/:unitId">{(p: { unitId: string }) => <FleetAssetDetail unitId={Number(p.unitId)} />}</Route>
+      <Route path="/portal/:portal/units/:unitId">{(p: { unitId: string }) => <FleetAssetDetail unitId={Number(p.unitId)} />}</Route>
       <Route path="/locations" component={() => <Redirect to="/showcase/locations" />} />
       <Route path="/compliance-engine" component={() => <Redirect to="/showcase/compliance-engine" />} />
       <Route path="/offline-vault" component={() => <Redirect to="/showcase/offline-vault" />} />
