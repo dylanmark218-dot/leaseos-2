@@ -2940,6 +2940,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "geo.graphBuild": "geo.graph.build",
   "geo.routeCompute": "geo.read",
   "geo.sourceReview": "geo.source.review",
+  "geo.transportFeeds": "geo.source.review",
 
   /* ---- v22.17: communications on the route ---- */
   "comms.channelSeed": "comms.channel.manage",

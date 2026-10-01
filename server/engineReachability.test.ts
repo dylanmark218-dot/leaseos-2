@@ -95,26 +95,13 @@ const DECLARED_UNWIRED: Record<string, string> = {
   financialCalendar: "AP/AR and company-event projections; no financial surface yet",
   openShifts: "eligibility engine; openShiftsRouter currently decides inline — a live duplication, not a gap",
   billing: "billing engine predates this audit; reachability not yet established",
-  advisoryImpact: "road-advisory placement; feed scheduler is not started",
   eventEmitter: "event vocabulary; emitters write via raw SQL",
-  feedCollector: "feed quota and clearance gates; scheduler not started",
-  feedIngest: "feed ingestion lifecycle; scheduler not started",
   billingAdjustment: "adjustment rules; same unestablished reachability as billing",
   dataApi: "shape declarations only",
   dataIngestion: "import path not wired",
   dispatchMatching: "suitability match and posting visibility; no live counterpart (no posting feed or capability data yet). Booking conflicts were a duplicate of the award's own check and were removed (SPINE item 2)",
   disposalReconciliation: "reconciliation engine; no procedure calls it",
   domainEmitters: "event vocabulary; emitted from raw SQL paths",
-  feedHttp: "HTTP edge; scheduler not started in production",
-  // The Canadian 511 tranche (2026-09-24): per-province endpoints and parsers over the feed layer
-  // above, declared for the same reason it is — nothing starts the scheduler that would call them.
-  "transport/providerRegistry": "per-province endpoint, key location and parser over feedCollector/feedHttp/feedIngest; scheduler not started",
-  "transport/ibi511": "the 511 platform parser shared by AB, ON, MB, NB, YT and NL; reached only through providerRegistry",
-  "transport/drivebcOpen511": "DriveBC Open511 parser; reached only through providerRegistry",
-  "transport/quebecRoadworks": "Québec MTMD roadworks parser; reached only through providerRegistry",
-  "transport/placement": "publisher geometry to the point-and-radius advisoryImpact places; used only by the parsers above",
-  "transport/fields": "date, severity and column-width coercions shared by the parsers above",
-  feedScheduler: "backoff scheduler; nothing starts it from an entry point",
   fieldTicket: "scope validation and job reconciliation have no live counterpart (job close). Its disposition split and statement builder duplicated closeout/invoicing and were removed (SPINE item 2); signature status still differs from closeoutRouter's and waits for a ruling",
   heartbeat: "liveness helper; no monitor calls it",
   "managedKeyBackend.fake": "S2-KMS-A: the managed key backend tests stand in for a vendor adapter — a KEK it never exports, AES-GCM wrapping, the failure modes a real backend has. Imported by tests only, never by production (secretKeyWiring.test.ts pins that); the production backend registry is empty until S2-KMS-B proves the hosting platform",
@@ -318,19 +305,9 @@ describe("every engine is reached, or says why not", () => {
       "osmImport",
       "osmTopology",
       // Declared before their consumers were, each waiting on the same wiring.
-      "advisoryImpact",
       "deviceManifest",
       "eventEmitter",
-      "feedCollector",
-      "feedIngest",
       "monitoringNotice",
-      // The provincial parsers and their helpers, imported only by providerRegistry and each
-      // other. They leave with the feed layer, when the scheduler is started.
-      "transport/drivebcOpen511",
-      "transport/fields",
-      "transport/ibi511",
-      "transport/placement",
-      "transport/quebecRoadworks",
       // SPINE item 1, landing as one chain before its router: boundaryEvidence holds the
       // chain rule and imports boundaryConfirmation, which imports siteBaseline's types.
       // Not the `billing` shape — nothing else in the tree answers "which boundaries does
@@ -361,7 +338,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(86);
+    expect(unwired).toHaveLength(75);   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });
