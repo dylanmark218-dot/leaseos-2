@@ -205,6 +205,18 @@ export const agentRouter = router({
         };
       }
 
+      // A finished run takes no new action. "Finished" is read from TRANSITIONS
+      // rather than listed again: a status with nowhere to go (completed, failed,
+      // cancelled — or one the table does not know) would otherwise be reopened
+      // by the waiting_for_approval / blocked writes below. A replay has already
+      // returned above: it reads back a decision, it does not make one.
+      if ((TRANSITIONS[run.status] ?? []).length === 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `This run is ${run.status} and takes no new action. Start a new run.`,
+        });
+      }
+
       // Asking for the first action is what starts the run. Without this a
       // ready run could never reach any waiting state.
       if (run.status === "ready" || run.status === "created") {

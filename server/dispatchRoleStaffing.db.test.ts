@@ -25,7 +25,7 @@ describe("staffing integration — preconditions", () => {
 
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 880_000_000 + Math.floor(Math.random() * 50_000);
+let seq = 882_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 const caller = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 
@@ -60,7 +60,7 @@ async function job(orgRef: string) {
  * suite's work order invisible to its own mechanic. Explicit ids keep this suite out of the range
  * anyone hardcodes, without changing another suite to accommodate this one.
  */
-let assetId = 1_400_000_000 + Math.floor(Math.random() * 40_000_000);
+let assetId = 1_520_000_000 + Math.floor(Math.random() * 40_000_000);
 const nextAssetId = () => assetId++;
 
 async function unit(orgRef: string) {

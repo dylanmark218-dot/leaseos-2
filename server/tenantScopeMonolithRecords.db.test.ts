@@ -2,8 +2,10 @@
  * P4.1 router 10, second slice — the monolith's records that carry, or now carry, an owner:
  * assistant proposals (through their job, trip or unit), compliance artifacts and tailgates
  * (through the job), manifests (orgRef from 0129, written for the first time), billing rate
- * cards (orgRef from 0148). Route contexts and operating zones are road facts and geofences
- * around shared locations; they stay shared. Across the boundary: "not found", never "forbidden".
+ * cards (orgRef from 0148). Route contexts are road facts and stay shared. Operating zones were
+ * treated the same way here until P0-A2.1 (0209) found they are one organization's geofences that
+ * drive its own trip timeline; they now carry orgRef — see tenantScopeOperatingZones.db.test.ts.
+ * Across the boundary: "not found", never "forbidden".
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
@@ -36,7 +38,7 @@ d("the monolith's owned records", () => {
     const A = await org(), B = await org();
     const mgrA = await member(A, ["management"]), mgrB = await member(B, ["management"]), legacy = await member(null, ["management"]);
     const tripA = await tripOwnedBy(A), unitA = await unitOwnedBy(A);
-    // A proposal of A's (on A's trip): A reads it, B does not find it. Since AIL-1A (0185) the proposal
+    // A proposal of A's (on A's trip): A reads it, B does not find it. Since AIL-1A (0210) the proposal
     // carries its own organization, stamped at draft from the acting scope.
     const proposalId = `PRP-${rnd()}`;
     await pool.execute("INSERT INTO assistantProposals (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, targetRecordId, eventDateLocal, utcOffsetMinutes, tripId, createdByUserId, readBack, readBackAcknowledged, commitState) VALUES (?, 'membership', ?, 'unload_stop', 1, 'Unload stop', ?, 1, '2026-09-09', -360, ?, ?, 'confirmed readback', 1, 'awaiting_readback')", [A, proposalId, `TRIP-${tripA} unload stop`, tripA, mgrA]);

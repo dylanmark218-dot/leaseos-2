@@ -102,7 +102,7 @@ const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
 let seq = 0;
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
-let userSeq = 720000 + Math.floor(Math.random() * 50000);
+let userSeq = 404_000_000 + Math.floor(Math.random() * 50000);
 const nextUser = () => userSeq++;
 
 beforeAll(async () => {

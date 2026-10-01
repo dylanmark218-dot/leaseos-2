@@ -1,0 +1,40 @@
+-- S2-E Phase 1 (expand) — the pointer that lets a webhook signing secret move without any
+-- receiver reconfiguring anything.
+--
+-- THIS MIGRATION IS RELEASE 1 OF TWO, AND IT DELIBERATELY CHANGES NO BEHAVIOUR. It gives the schema
+-- the *capability* to represent a canonical reference one deployment before anything writes one.
+-- That ordering is the entire safety argument: while Release 1 is rolling out, an instance still
+-- running the previous version can read every row in the table, because every row still carries
+-- `secretEnc`.
+--
+-- WHY `secretEnc` BECOMES NULLABLE HERE AND NOT IN RELEASE 2. The column must already accept NULL
+-- before the first canonical-only row can exist. Relaxing it now is safe precisely because nothing
+-- in Release 1 writes NULL: both the old code and the new code still supply legacy ciphertext at
+-- creation. Deferring the relaxation to Release 2 would mean shipping a schema change and a
+-- behaviour change in the same deployment, which is the thing this split exists to avoid.
+--
+-- NO DATA MOVES HERE. Re-encrypting a secret needs a master key, and a master key never belongs in
+-- a migration file or a database row. The conversion is done by `server/webhookSecretMigration.ts`,
+-- which holds both keys for the length of one batch and writes neither anywhere.
+--
+-- EVERY COMBINATION OF THE TWO COLUMNS IS LEGAL AT THE STORAGE LAYER, so there is deliberately no
+-- CHECK constraint:
+--
+--   secretEnc set,  secretRef null  — legacy, not yet backfilled
+--   secretEnc set,  secretRef set   — backfilled, inside the rollback window
+--   secretEnc null, secretRef set   — canonical; RELEASE 2 ONLY, never written in Release 1
+--   secretEnc null, secretRef null  — invalid on an enabled subscription; the resolver fails closed
+--
+-- A constraint excluding the last case would have to be satisfied by both application versions
+-- during a rolling deploy, and would turn a resolvable runtime refusal into a write-time crash. The
+-- invariant that matters is behavioural — which column is read first, and that a present-but-broken
+-- reference never falls back to the legacy one — and it lives in tests, where it can express "fails
+-- closed" rather than merely "is not null".
+--
+-- NO INDEX. The two readers are a one-time batched backfill and an operator count, over a table of
+-- webhook subscriptions measured in hundreds. `webhookSubscriptions` carries no explicit index
+-- today, and adding the first on a speculative benefit is not a trade this migration can justify by
+-- measurement.
+ALTER TABLE `webhookSubscriptions`
+  ADD COLUMN `secretRef` varchar(64) NULL AFTER `secretEnc`,
+  MODIFY COLUMN `secretEnc` varchar(400) NULL;

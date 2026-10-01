@@ -222,15 +222,23 @@ export async function executeAssistantCommit(args: {
           isNull(userRoleAssignments.revokedAt)
         )
       );
+    // B23.1 — the scope travels with the grant, and the decision is made in
+    // the organization this commit is acting for. Flattening `scopeType` to a
+    // nullable branch, as this did, discarded the organization entirely: a
+    // grant from another employer arrived here indistinguishable from one this
+    // company issued.
     const grants: RoleGrant[] = roleRows.map(r => ({
       role: r.role,
-      scopeRef: r.scopeType === "global" ? null : r.scopeRef,
+      scopeType: r.scopeType as RoleGrant["scopeType"],
+      orgRef: r.orgRef ?? null,
+      scopeRef: r.scopeType === "branch" ? r.scopeRef : null,
     }));
     const targetPermission = plan.intent.requiredPermission as Permission;
     const decision = authorize({
       userId: args.actorUserId,
       grants,
       permission: targetPermission,
+      organization: (await resolveActingScope(tx as never, args.actorUserId)).tenantId,
     });
 
     const auditInserted = await tx.insert(authorizationDecisions).values({
@@ -317,7 +325,7 @@ export async function executeAssistantCommit(args: {
     // This call used to launder the handle through an escape cast, which put back
     // exactly the hole the typing removed. applyIntent already declares `tx: Tx`,
     // so the cast bought nothing and cost the checking of everything it calls.
-    const target = await applyIntent(tx, plan.intent, row, committed.fields);
+    const target = await applyIntent(tx, plan.intent, row, committed.fields, args.actorUserId, now);
     if (!target.ok) return { committed: false as const, refusals: target.refusals };
 
     // Auto-file. The bytes already live once in the vault under the extraction's
@@ -390,7 +398,10 @@ async function applyIntent(
   tx: Tx,
   intent: AssistantCommitIntent,
   proposalRow: typeof assistantProposals.$inferSelect,
-  committedFields: readonly { key: string; value: unknown }[]
+  committedFields: readonly { key: string; value: unknown }[],
+  /* 0179: the actor and the commit instant, so a written row can name who wrote it. */
+  actorUserId: number,
+  now: Date
 ): Promise<{ ok: true; targetRecordId: number } | { ok: false; refusals: string[] }> {
   if (intent.kind === "trip_stop_update") {
     const targetRows = await tx
@@ -418,7 +429,26 @@ async function applyIntent(
 
     await tx
       .update(tripStops)
-      .set({ ...intent.values, notes })
+      .set({
+        ...intent.values,
+        notes,
+        /*
+         * 0179: the actor is recorded; the SOURCE deliberately is not.
+         *
+         * This path commits a proposal whose provenance is held per field in
+         * `proposalFields` — driver_voice for what was spoken, driver_typed for
+         * what was corrected, photo_ocr for what was read — and reaching it from
+         * this row is what the `assistantCommitReceipts` row written below is
+         * for. Collapsing that to one row-level value would be less true than
+         * leaving it null, so it is left null.
+         *
+         * `updatedAt` is the same instant the receipt records as `committedAt`,
+         * which is what lets `boundaryEvidence.ts` tell "the newest commit was
+         * the last write" from "somebody edited the row after it".
+         */
+        updatedByUserId: actorUserId,
+        updatedAt: now,
+      })
       .where(eq(tripStops.id, intent.targetRecordId));
     return { ok: true, targetRecordId: intent.targetRecordId };
   }

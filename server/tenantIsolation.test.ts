@@ -36,7 +36,7 @@ describe("the tenant surface is known", () => {
     // The organization is carried only where something consults it. This count
     // moving is a new scoped concept and has to be changed on purpose — which
     // is what happened when leaveRequests arrived and this test failed first,
-    // and again when AIL-1A (0185) gave assistantProposals an owner.
+    // and again when AIL-1A (0210) gave assistantProposals an owner.
     expect(scoped).toHaveLength(20);
     expect(scoped.map(t => t.table).sort()).toEqual([
       "agentRuns", "assistantProposals", "assistantQueries", "billingAuthorityBands", "crews", "domainEventOutbox", "enforcementEvents",
@@ -55,7 +55,7 @@ describe("the tenant surface is known", () => {
     expect(scoped.filter(t => t.notNull).map(t => t.table).sort()).toEqual([
       "domainEventOutbox", "operationalTasks", "workflowInstances", "workflowNotifications",
     ]);
-    // assistantProposals is nullable only together with `legacy_unresolved` (0185's CHECK): a legacy
+    // assistantProposals is nullable only together with `legacy_unresolved` (0210's CHECK): a legacy
     // row whose owner was never proved, which strict equality leaves visible to nobody.
     expect(scoped.filter(t => !t.notNull).map(t => t.table).sort()).toEqual([
       "agentRuns", "assistantProposals", "assistantQueries", "billingAuthorityBands", "crews", "enforcementEvents",
@@ -269,7 +269,10 @@ describe("the workflow runtime exists and is started through one production owne
 
   it("is started by the production entry point through the single-owner lifecycle", () => {
     const production = readFileSync("server/_core/productionWorker.ts", "utf8");
-    const entry = readFileSync("server/_core/index.ts", "utf8");
+    // P0-C: the production entry point composes `startServer` (server/_core/startup.ts), which
+    // is where the embedded worker is started; the entry file itself only chooses the frontend.
+    const entry = readFileSync("server/_core/startup.ts", "utf8");
+    expect(readFileSync("server/_core/index.ts", "utf8")).toContain("startServer(");
     const standalone = readFileSync("server/_core/worker.ts", "utf8");
 
     expect(production).toContain("startProductionWorker");
