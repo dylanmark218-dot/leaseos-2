@@ -28,6 +28,7 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   "server/_core/calibrationEvidence.test.ts": { dates: ["2026-09-20", "2026-10-01"], verdict: "clock_independent", reason: "both are compared only against fixed dates — 2026-10-01 against a reading at a fixed AT, 2026-09-20 against the finding's own performedAt. The two tests in this file that DO read the real clock pass it to deriveExceptions and involve neither date" },
   "server/_core/evidenceVault.test.ts": { dates: ["2026-09-20", "2026-09-21"], verdict: "clock_independent", reason: "every evaluation receives an explicit `now`; the only real read stamps amendedAt" },
   "server/communications.test.ts": { dates: ["2026-09-18", "2026-09-25"], verdict: "clock_independent", reason: "effectiveTo and planForPath `at` are both explicit; Date.now() only mints keys" },
+  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "schedule and disposal fixtures use explicit asOf/acquiredAt/disposedAt dates; real clock reads only supply registration timestamps and unique test keys" },
   // Re-recorded 2026-09-21 with the file unchanged: 2026-11-20 (an invoice dueAt at line 123)
   // came into range as the 60-day window advanced, and a date entering is precisely what this
   // list exists to have somebody look at. It was checked against the same reason, which holds —
