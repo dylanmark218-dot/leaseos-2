@@ -15,6 +15,13 @@
  * as the value `"22, cache: pnpm }"`. VTP1 pins that shape so the next parser change cannot
  * repeat it.
  *
+ * THE CONTRACT TIGHTENED ON 2026-10-01. `.nvmrc` pins an EXACT build, not a major: the same
+ * commit answered a Pacific date two different ways on two runner images because a major
+ * floats across patch builds, and patch builds carry different ICU and tz data. So a
+ * workflow literal now has to be that exact build (or, better, `node-version-file: .nvmrc`),
+ * `.nvmrc` itself may not be a bare major, and in CI the running build must be the pinned
+ * one. VTP15–VTP17 pin those; VTP2's "22.x is fine" became "22.x floats and is refused".
+ *
  * TESTED AT THE CLI BOUNDARY, ON PURPOSE. Each case writes a throwaway repository — an
  * `.nvmrc`, a `package.json`, some workflows — and runs the real script as a child process
  * with `cwd` set to that fixture, exactly as `ci-gate.sh` invokes it. Nothing here
@@ -31,6 +38,14 @@ import { tmpdir } from "node:os";
 /** The real production script. Read from disk at run time, so it can never go stale. */
 const CHECKER = resolve(process.cwd(), "scripts/check-version-truth.mjs");
 
+/**
+ * The build these fixtures pin: whatever is running this test. The checker compares the pin
+ * with the running process, and the child is spawned on `process.execPath`, so a fixture that
+ * pins anything else is testing the runtime check (VTP17), not the declaration checks.
+ */
+const PIN = process.versions.node;
+const MAJOR = PIN.split(".")[0];
+
 const created: string[] = [];
 afterEach(() => {
   for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -40,11 +55,11 @@ afterEach(() => {
 const BASE_PACKAGE = {
   name: "fixture",
   packageManager: "pnpm@10.4.1+sha512.fixture",
-  engines: { node: ">=22 <23", pnpm: "10.4.1" },
+  engines: { node: `>=${MAJOR} <${Number(MAJOR) + 1}`, pnpm: "10.4.1" },
   devDependencies: {} as Record<string, string>,
 };
 
-/** The shape `.github/workflows/ci.yml` actually uses today. */
+/** The shape `.github/workflows/ci.yml` actually uses today: the file, not a literal. */
 const COMPLIANT_CI = `name: CI
 on: [push]
 jobs:
@@ -53,20 +68,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
+        with: { node-version-file: .nvmrc, cache: pnpm }
+`;
+
+/** The older shape, still legal when the literal is the exact pin — and the parser trap VTP1 guards. */
+const LITERAL_CI = `name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: ${PIN}, cache: pnpm }
 `;
 
 type Fixture = {
   nvmrc?: string;
   packageJson?: Record<string, unknown>;
   workflows?: Record<string, string>;
+  /** `ci` runs the child as GitHub Actions would; `local` strips the CI markers. Default: local. */
+  mode?: "ci" | "local";
 };
 
 function runVersionTruthFixture(fixture: Fixture = {}) {
   const root = mkdtempSync(join(tmpdir(), "leaseos-vt-"));
   created.push(root);
 
-  writeFileSync(join(root, ".nvmrc"), fixture.nvmrc ?? "22\n");
+  writeFileSync(join(root, ".nvmrc"), fixture.nvmrc ?? `${PIN}\n`);
   writeFileSync(
     join(root, "package.json"),
     JSON.stringify(fixture.packageJson ?? BASE_PACKAGE, null, 2)
@@ -95,10 +123,12 @@ function runVersionTruthFixture(fixture: Fixture = {}) {
   const checker = join(root, "scripts/check-version-truth.mjs");
   copyFileSync(CHECKER, checker);
 
-  const result = spawnSync(process.execPath, [checker], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  // The environment decides whether a runtime mismatch fails (CI) or is reported (local).
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== "CI" && k !== "GITHUB_ACTIONS") env[k] = v;
+  if (fixture.mode === "ci") { env.CI = "true"; env.GITHUB_ACTIONS = "true"; }
+
+  const result = spawnSync(process.execPath, [checker], { cwd: root, encoding: "utf8", env });
 
   return {
     status: result.status,
@@ -109,19 +139,29 @@ function runVersionTruthFixture(fixture: Fixture = {}) {
 }
 
 describe("VTP1 — the repository's own CI shape keeps passing", () => {
+  it("accepts node-version-file: .nvmrc inside a flow mapping with a trailing key", () => {
+    const run = runVersionTruthFixture();
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toContain(`version truth: Node ${PIN}`);
+  });
+
   /*
    * Not a formality. Teaching the parser to read `[18.x, 20.x]` made it read
    * `{ node-version: 22, cache: pnpm }` as the value `"22, cache: pnpm }"` and the baseline
    * went red. This is the guard against fixing the matrix by breaking ci.yml again.
    */
-  it("accepts a flow mapping with a trailing key after the version", () => {
-    const run = runVersionTruthFixture();
+  it("accepts an exact literal in a flow mapping with a trailing key after the version", () => {
+    const run = runVersionTruthFixture({ workflows: { "ci.yml": LITERAL_CI } });
     expect(run.status, run.output).toBe(0);
-    expect(run.stdout).toContain("version truth: Node 22");
   });
 
   it("names how many workflows it scanned, so a silent zero is visible", () => {
     expect(runVersionTruthFixture().stdout).toMatch(/1 workflow\b/);
+  });
+
+  it("prints the running Node, ICU and tz data, because they are what a patch build changes", () => {
+    const run = runVersionTruthFixture();
+    expect(run.stdout).toMatch(new RegExp(`runtime: Node ${PIN.replace(/\./g, "\\.")} · ICU \\S+ · tz \\S+`));
   });
 });
 
@@ -173,30 +213,41 @@ jobs:
     expect(run.output, "an operator needs the line, not just the file").toContain("webpack.yml:13");
   });
 
-  it("does not complain about the 22.x the matrix also lists", () => {
+  it("refuses the 22.x the matrix also lists: a major floats across patch builds", () => {
     const run = runVersionTruthFixture({
       workflows: { "ci.yml": COMPLIANT_CI, "webpack.yml": WEBPACK },
     });
-    expect(run.output).not.toMatch(/node-version is 22, but/);
+    expect(run.output).toMatch(/node-version "22\.x" is not an exact build/);
   });
 });
 
 describe("VTP3/VTP4 — matrix forms", () => {
-  it("VTP3. a compliant flow sequence passes, quoted or not", () => {
+  it("VTP3. a flow sequence of the exact pin passes, quoted or not", () => {
     const run = runVersionTruthFixture({
       workflows: {
         "ci.yml": COMPLIANT_CI,
-        "m.yml": `name: M\njobs:\n  a:\n    strategy:\n      matrix:\n        node-version: [22.x, "22", '22']\n`,
+        "m.yml": `name: M\njobs:\n  a:\n    strategy:\n      matrix:\n        node-version: [${PIN}, "${PIN}", '${PIN}']\n`,
       },
     });
     expect(run.status, run.output).toBe(0);
+  });
+
+  it("VTP3b. a flow sequence that names the major, or major.x, fails", () => {
+    const run = runVersionTruthFixture({
+      workflows: {
+        "ci.yml": COMPLIANT_CI,
+        "m.yml": `name: M\njobs:\n  a:\n    strategy:\n      matrix:\n        node-version: [${MAJOR}.x, "${MAJOR}"]\n`,
+      },
+    });
+    expect(run.status, run.output).not.toBe(0);
+    expect(run.output).toContain("not an exact build");
   });
 
   it("VTP4. a block sequence naming 18 fails", () => {
     const run = runVersionTruthFixture({
       workflows: {
         "ci.yml": COMPLIANT_CI,
-        "m.yml": `name: M\njobs:\n  a:\n    strategy:\n      matrix:\n        node-version:\n          - 22\n          - 18\n`,
+        "m.yml": `name: M\njobs:\n  a:\n    strategy:\n      matrix:\n        node-version:\n          - ${PIN}\n          - 18\n`,
       },
     });
     expect(run.status, run.output).not.toBe(0);
@@ -242,7 +293,7 @@ describe("VTP6/VTP7 — a workflow may state no Node; the directory may not", ()
   });
 });
 
-describe("VTP8/VTP9 — text that looks like a declaration but is not one", () => {
+describe("VTP8/VTP9 — text that looks like a declaration, and the file that is one", () => {
   it("VTP8. commented-out declarations are ignored, scalar and matrix alike", () => {
     const run = runVersionTruthFixture({
       workflows: {
@@ -253,14 +304,25 @@ describe("VTP8/VTP9 — text that looks like a declaration but is not one", () =
     expect(run.status, run.output).toBe(0);
   });
 
-  it("VTP9. node-version-file is a different key and is not read as a version", () => {
+  it("VTP9. node-version-file: .nvmrc is the declaration — on its own it satisfies non-vacuity", () => {
     const run = runVersionTruthFixture({
       workflows: {
-        "ci.yml": COMPLIANT_CI,
         "f.yml": `name: F\njobs:\n  a:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version-file: .nvmrc\n`,
       },
     });
     expect(run.status, run.output).toBe(0);
+  });
+
+  it("VTP9b. node-version-file pointing anywhere but .nvmrc fails: a second file is a second answer", () => {
+    const run = runVersionTruthFixture({
+      workflows: {
+        "ci.yml": COMPLIANT_CI,
+        "f.yml": `name: F\njobs:\n  a:\n    steps:\n      - with:\n          node-version-file: .node-version\n`,
+      },
+    });
+    expect(run.status, run.output).not.toBe(0);
+    expect(run.output).toContain(".node-version");
+    expect(run.output).toContain("f.yml");
   });
 });
 
@@ -275,13 +337,13 @@ describe("VTP10/VTP11/VTP12 — the pnpm and Node invariants still hold", () => 
 
   it("VTP11. engines.pnpm drifting from packageManager fails", () => {
     const run = runVersionTruthFixture({
-      packageJson: { ...BASE_PACKAGE, engines: { node: ">=22 <23", pnpm: "10.15.1" } },
+      packageJson: { ...BASE_PACKAGE, engines: { node: BASE_PACKAGE.engines.node, pnpm: "10.15.1" } },
     });
     expect(run.status, run.output).not.toBe(0);
     expect(run.output).toContain("10.4.1");
   });
 
-  it("VTP12. engines.node drifting from .nvmrc fails", () => {
+  it("VTP12. engines.node drifting from .nvmrc's major fails", () => {
     const run = runVersionTruthFixture({
       packageJson: { ...BASE_PACKAGE, engines: { node: ">=23 <24", pnpm: "10.4.1" } },
     });
@@ -304,7 +366,7 @@ describe("VTP13/VTP14 — an active declaration it cannot pin must fail, not be 
     const run = runVersionTruthFixture({
       workflows: {
         "ci.yml": COMPLIANT_CI,
-        "multi.yml": `name: M\njobs:\n  a:\n    strategy:\n      matrix:\n        node-version: [\n          22,\n          23\n        ]\n`,
+        "multi.yml": `name: M\njobs:\n  a:\n    strategy:\n      matrix:\n        node-version: [\n          ${PIN},\n          23\n        ]\n`,
       },
     });
 
@@ -325,20 +387,71 @@ describe("VTP13/VTP14 — an active declaration it cannot pin must fail, not be 
   });
 });
 
+describe("VTP15/VTP16 — the pin is an exact build, and every literal is that build", () => {
+  it("VTP15. a major-only .nvmrc fails, naming the drift it allows", () => {
+    const run = runVersionTruthFixture({ nvmrc: `${MAJOR}\n` });
+    expect(run.status, run.output).not.toBe(0);
+    expect(run.output).toContain("expected an exact Node build");
+    expect(run.output).toContain("patch builds");
+  });
+
+  it("VTP16. a literal naming a different build of the same major fails, naming both", () => {
+    const other = `${MAJOR}.0.0`;
+    const run = runVersionTruthFixture({
+      workflows: {
+        "ci.yml": COMPLIANT_CI,
+        "o.yml": `name: O\njobs:\n  a:\n    steps:\n      - with: { node-version: ${other} }\n`,
+      },
+    });
+    expect(run.status, run.output).not.toBe(0);
+    expect(run.output).toContain(other);
+    expect(run.output).toContain(PIN);
+  });
+
+  it("VTP16b. the exact literal passes — the pin is the contract, not the file name", () => {
+    const run = runVersionTruthFixture({
+      workflows: { "o.yml": `name: O\njobs:\n  a:\n    steps:\n      - with: { node-version: ${PIN} }\n` },
+    });
+    expect(run.status, run.output).toBe(0);
+  });
+});
+
+describe("VTP17 — the running build is compared with the pin", () => {
+  const foreign = `${MAJOR}.0.1`;
+
+  it("in CI, a running build other than the pin fails: setup-node did not deliver the pinned build", () => {
+    const run = runVersionTruthFixture({ nvmrc: `${foreign}\n`, mode: "ci" });
+    expect(run.status, run.output).not.toBe(0);
+    expect(run.output).toContain(`the running Node is ${PIN}, but .nvmrc pins ${foreign}`);
+  });
+
+  it("locally, the same mismatch is reported and does not fail", () => {
+    const run = runVersionTruthFixture({ nvmrc: `${foreign}\n`, mode: "local" });
+    expect(run.status, run.output).toBe(0);
+    expect(run.stderr).toContain(`the running Node is ${PIN}, but .nvmrc pins ${foreign}`);
+  });
+
+  it("the pinned build passes in CI with nothing reported", () => {
+    const run = runVersionTruthFixture({ mode: "ci" });
+    expect(run.status, run.output).toBe(0);
+    expect(run.stderr).toBe("");
+  });
+});
+
 describe("an expression never erases the matrix that supplies its values", () => {
   const withMatrix = (list: string) =>
     `name: X\njobs:\n  a:\n    strategy:\n      matrix:\n        node-version: ${list}\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \${{ matrix.node-version }}\n`;
 
-  it("passes when every major in the matrix is supported", () => {
+  it("passes when every entry in the matrix is the exact pin", () => {
     const run = runVersionTruthFixture({
-      workflows: { "ci.yml": COMPLIANT_CI, "x.yml": withMatrix("[22]") },
+      workflows: { "ci.yml": COMPLIANT_CI, "x.yml": withMatrix(`[${PIN}]`) },
     });
     expect(run.status, run.output).toBe(0);
   });
 
   it("fails when the matrix contains an unsupported major", () => {
     const run = runVersionTruthFixture({
-      workflows: { "ci.yml": COMPLIANT_CI, "x.yml": withMatrix("[18, 22]") },
+      workflows: { "ci.yml": COMPLIANT_CI, "x.yml": withMatrix(`[18, ${PIN}]`) },
     });
     expect(run.status, run.output).not.toBe(0);
     expect(run.output).toContain("18");
