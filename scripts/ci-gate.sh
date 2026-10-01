@@ -111,6 +111,12 @@ pnpm exec tsx scripts/skipped-db-suites.ts "$VITEST_JSON"
 gate "7. Production build"
 pnpm build
 
+# P0-C — the artifact just built must boot where only `dependencies` are installed. Reuses this
+# gate's build: the smoke builds nothing, it copies dist/ into a runtime directory outside the
+# checkout, installs production dependencies there, and runs dist/index.js and dist/worker.js.
+gate "7a. Production-only runtime boot: dist/ with production dependencies alone, outside the checkout"
+bash scripts/prod-runtime-smoke.sh
+
 gate "Summary"
 echo "tables: $(mysqlc -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$db';")"
 echo "migrations: $(ls drizzle/*.sql | wc -l)"
