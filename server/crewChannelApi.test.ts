@@ -11,7 +11,7 @@ import type { DomainRole } from "./_core/recordsAuthorization";
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 20_000_000 + Math.floor(Math.random() * 60_000);
+let seq = 24_000_000 + Math.floor(Math.random() * 60_000);
 beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 4 }); });
 const caller = (id: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id, role: "user" } as never });
 async function withRole(role: DomainRole) { const id = seq++; await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }

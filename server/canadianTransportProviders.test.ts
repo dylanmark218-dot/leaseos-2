@@ -18,7 +18,7 @@ import { drivebcNormalizer, parseDriveBcEvents } from "./_core/transport/drivebc
 import { fromDateText, IncompleteSnapshotError } from "./_core/transport/fields";
 import { ibi511Normalizer, ibiSeverity, parseIbi511Events } from "./_core/transport/ibi511";
 import { coveringCircle } from "./_core/transport/placement";
-import { CANADIAN_TRANSPORT_PROVIDERS, ingestProvider, providerFor, providerReadiness } from "./_core/transport/providerRegistry";
+import { CANADIAN_TRANSPORT_PROVIDERS, ingestProvider, providerFor, providerRuntimeReadiness } from "./_core/transport/providerRegistry";
 import { parseQuebecRoadworks, quebecRoadworksNormalizer } from "./_core/transport/quebecRoadworks";
 
 const at = new Date("2026-09-24T18:00:00Z");
@@ -100,16 +100,19 @@ describe("every province is registered once, with its row", () => {
 });
 
 describe("the readiness matrix is the collector's gate, not a second opinion", () => {
-  const allKeys = { AB_511_API_KEY: "k", ON_511_API_KEY: "k", MB_511_API_KEY: "k", NB_511_API_KEY: "k", YT_511_API_KEY: "k", NL_511_API_KEY: "k" };
-  const state = (k: string, env: Record<string, string | undefined>) => providerReadiness(providerFor(k)!, row(k), env, at).state;
+  // Every provider switched on and a database present, so what is left to decide is rights and keys.
+  const ALL_ON = { LEASEOS_TRANSPORT_FEEDS_ENABLED: CANADIAN_TRANSPORT_PROVIDERS.map(p => p.sourceKey).join(",") };
+  const allKeys = { ...ALL_ON, AB_511_API_KEY: "k", ON_511_API_KEY: "k", MB_511_API_KEY: "k", NB_511_API_KEY: "k", YT_511_API_KEY: "k", NL_511_API_KEY: "k" };
+  const state = (k: string, env: Record<string, string | undefined>) =>
+    providerRuntimeReadiness({ provider: providerFor(k)!, row: row(k), env: { ...ALL_ON, ...env }, databaseReady: true, now: at }).status;
 
   it("holds every licence-silent 511 at rights review even with its key present", () => {
     for (const k of ["ab511", "mb511", "nb511", "yt511", "nl511"]) expect(state(k, allKeys), k).toBe("rights_review");
   });
 
   it("asks for Ontario's key when it is missing, and is ready when it is present", () => {
-    expect(state("on511", {})).toBe("credential_required");
-    expect(state("on511", { ON_511_API_KEY: "   " })).toBe("credential_required");
+    expect(state("on511", {})).toBe("credential_missing");
+    expect(state("on511", { ON_511_API_KEY: "   " })).toBe("credential_missing");
     expect(state("on511", allKeys)).toBe("ready");
   });
 
@@ -261,7 +264,11 @@ describe("DriveBC Open511", () => {
     expect(a.sourceUpdatedAt).toEqual(new Date("2026-01-26T18:10:05Z"));
     // Bare dates are Pacific midnight, not UTC midnight and not the server's.
     expect(a.effectiveFrom).toEqual(new Date("2025-09-29T07:00:00Z"));
-    expect(a.effectiveTo).toEqual(new Date("2026-11-08T08:00:00Z"));
+    // 2026-11-08 midnight in British Columbia is 07:00Z, not 08:00Z: BC adopted permanent
+    // UTC−7 in 2026 and does not fall back on 2026-11-01. The tz database carries that from
+    // 2026c, and the pinned Node build (.nvmrc) carries 2026c. The full contract, with the
+    // transitions that still happen elsewhere, is server/transportDateContract.test.ts.
+    expect(a.effectiveTo).toEqual(new Date("2026-11-08T07:00:00Z"));
     expect(a.radiusMetres).toBeGreaterThanOrEqual(DEFAULT_ADVISORY_RADIUS_METRES);
   });
 

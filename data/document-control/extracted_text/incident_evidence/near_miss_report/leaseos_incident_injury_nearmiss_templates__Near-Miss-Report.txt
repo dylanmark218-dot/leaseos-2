@@ -1,0 +1,52 @@
+Near Miss Report
+Record an event with no actual injury or damage that could have caused harm. If harm occurred, link an incident report.
+Company: __________________________________  Home base: _______________________
+Record no. __________________  Record revision: ______  Date: _____________________
+Site / lease / project: __________________________  Job / dispatch: __________________
+Location / LSD / address: ______________________________________________________
+Event date / time / zone: ____________________  Reported date / time: __________________
+Reporter / role / contact or confidential reference: __________________________________
+Task / unit / equipment / people exposed: __________________________________________
+What happened
+Event sequence and how injury, damage or release was narrowly avoided:
+________________________________________________________________________________________
+________________________________________________________________________________________
+________________________________________________________________________________________
+Potential consequences and controls
+Credible potential harm and who or what was exposed:
+________________________________________________________________________________________
+________________________________________________________________________________________
+Potential severity / likelihood / company risk method: ________________________________
+Control that worked or failed; contributing conditions and evidence:
+________________________________________________________________________________________
+________________________________________________________________________________________
+Immediate action
+[ ] Affected work paused  [ ] Area isolated  [ ] Temporary control  [ ] Other: ____________
+Action taken / by whom / time: __________________________________________________
+Near Miss Report Review
+Record no. __________________  Event date: ______________  Site: ____________________
+Witnesses and evidence
+Attach photographs, sketches and statements with this record number. Preserve originals; distinguish firsthand accounts from reported information.
+Contributing factors / preliminary causes and evidence; mark unconfirmed findings:
+________________________________________________________________________________________
+Corrective actions
+Notification and review
+Notified person / agency / date / time / reference: ___________________________________
+Reporting assessment owner: ______________  Due: __________  Status: ________________
+External form / submission reference or reason not applicable: __________________________
+Prepared by / signature / date: ___________________________________________________
+Reviewed by / signature / date: __________________________________________________
+Closure verified by / date / evidence: ______________________________________________
+[ ] Open  [ ] Actions pending  [ ] Closed     Effectiveness review date: ___________________
+Use N/A or unknown as appropriate. Link continuation pages. Preserve signed originals and track corrections. Signatures acknowledge preparation or review, not admission of fault.
+Internal company template. Not an official OSHA, DOT, OHS or workers compensation form; assess applicable reporting and prescribed forms separately.
+Witness name or secure reference | Contact or statement ID | Interview date
+ |  | 
+ |  | 
+Photo or evidence ID | Description and capture date | Original location or custodian
+ |  | 
+ |  | 
+Action and related finding | Owner | Due date | Verification or evidence
+ |  |  | 
+ |  |  | 
+ |  |  | 

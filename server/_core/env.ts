@@ -1,3 +1,88 @@
+/**
+ * The master-key variables — NAMES ONLY, deliberately.
+ *
+ * README calls this module "the authority on configuration … it declares every variable the
+ * server reads", and until 0193 that was quietly untrue: `LEASEOS_PORTAL_MFA_KEY` has been read by
+ * `externalIdentityPolicy.ts` since the portal shipped and appeared nowhere in this file. A
+ * deployment inventory that silently omits the variable protecting every MFA seed is worse than no
+ * inventory, because it is trusted.
+ *
+ * THE VALUES ARE NOT IN `ENV`, AND THAT IS THE POINT. `ENV` is imported almost everywhere; putting
+ * key material on it would put a master key one property access away from every module in the
+ * server, and would break the invariant that only `_core/secretKeys.ts` reads these variables —
+ * an invariant `secretBoundary.test.ts` enforces. Listing a name is not reading a value, so this
+ * inventory can be here while the material stays behind the key provider.
+ *
+ * Each is 64 hex characters (32 bytes). A malformed value is treated as absent, never truncated
+ * or padded, so a typo fails closed rather than silently weakening the key.
+ */
+export const SECRET_KEY_ENV_VARS = {
+  /** Active key for each purpose in the canonical secret store. Read by `_core/secretKeys.ts`. */
+  active: {
+    MFA_SECRET: "LEASEOS_KEY_MFA_V1",
+    WEBHOOK_SECRET: "LEASEOS_KEY_WEBHOOK_V1",
+    PROVIDER_CREDENTIAL: "LEASEOS_KEY_PROVIDER_V1",
+    INTEGRATION_SECRET: "LEASEOS_KEY_INTEGRATION_V1",
+  },
+  /**
+   * The pre-S2 shared key, decrypt-only. Still required until BOTH legacy classes are migrated
+   * and the compatibility readers are gone:
+   *
+   *   `externalIdentities.mfaSecretEnc`       — 0193 migrates it; readers retire after cutover.
+   *   `webhookSubscriptions.secretEnc`        — still live; S2-E has not moved it.
+   *
+   * It cannot be removed while either remains. That it protects two unrelated secret classes at
+   * once is the defect S2 exists to undo.
+   */
+  legacyShared: "LEASEOS_PORTAL_MFA_KEY",
+  /**
+   * S2-KMS-A. `managedSource` selects where keys come from (`environment` — the variables above —
+   * or `managed`); `managedKeys` is JSON of wrapped references for the managed bootstrap. Neither
+   * may carry raw key material: the bootstrap refuses a 64-hex value anywhere in `managedKeys`.
+   * Read by `_core/secretKeys.ts` only.
+   */
+  managedSource: "LEASEOS_SECRET_KEYS_SOURCE",
+  managedKeys: "LEASEOS_MANAGED_KEYS",
+} as const;
+
+/**
+ * Provincial road-information feeds — NAMES ONLY, for the same reason as above.
+ *
+ * The keys are read by exactly one function, `httpFeedFetcher` in `_core/feedHttp.ts`, at the
+ * moment it builds a request, from the environment object the server passes it. They are never on
+ * `ENV`, never in a client bundle, never in a response, and never in a recorded error (the fetcher
+ * redacts the raw and URL-encoded forms). A key held is access to a publisher's API; whether its
+ * answers may be used is the `externalDataSources` row, and a key never overrides that.
+ *
+ * `enabled` is the owner's switch: a comma-separated list of source keys the runtime may schedule.
+ * Unset means none. Turning a feed on is a production decision, not a deploy side effect.
+ */
+export const TRANSPORT_FEED_ENV_VARS = {
+  enabled: "LEASEOS_TRANSPORT_FEEDS_ENABLED",
+  keys: {
+    ab511: "AB_511_API_KEY",
+    on511: "ON_511_API_KEY",
+    mb511: "MB_511_API_KEY",
+    nb511: "NB_511_API_KEY",
+    yt511: "YT_511_API_KEY",
+    nl511: "NL_511_API_KEY",
+  },
+} as const;
+
+/**
+ * DEPLOYMENT PREREQUISITE, from 0193.
+ *
+ * `LEASEOS_KEY_MFA_V1` must be provisioned before this code reaches an environment where portal
+ * MFA enrolment is expected to work. `portal.mfaEnroll` refuses without it, by design: writing new
+ * seeds under the legacy key would make retiring that key impossible, which is the whole point of
+ * the migration. The refusal must not be softened to remove the prerequisite.
+ *
+ * It is not enforced at boot here. The rule that would be correct — refuse to start when a purpose
+ * key is missing *for a purpose that has stored rows* — needs a database read, and absent-but-
+ * unused is legitimately not a failure: an environment with no portal identities needs no MFA key.
+ * Making it a blanket startup requirement would refuse to boot deployments that are entirely fine.
+ * `mfaKeyReadiness()` in `_core/secretKeys.ts` answers the question for an operator today.
+ */
 export const ENV = {
   appId: process.env.VITE_APP_ID ?? "",
   cookieSecret: process.env.JWT_SECRET ?? "",

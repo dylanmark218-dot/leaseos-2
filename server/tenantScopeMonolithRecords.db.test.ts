@@ -2,8 +2,10 @@
  * P4.1 router 10, second slice — the monolith's records that carry, or now carry, an owner:
  * assistant proposals (through their job, trip or unit), compliance artifacts and tailgates
  * (through the job), manifests (orgRef from 0129, written for the first time), billing rate
- * cards (orgRef from 0148). Route contexts and operating zones are road facts and geofences
- * around shared locations; they stay shared. Across the boundary: "not found", never "forbidden".
+ * cards (orgRef from 0148). Route contexts are road facts and stay shared. Operating zones were
+ * treated the same way here until P0-A2.1 (0209) found they are one organization's geofences that
+ * drive its own trip timeline; they now carry orgRef — see tenantScopeOperatingZones.db.test.ts.
+ * Across the boundary: "not found", never "forbidden".
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
