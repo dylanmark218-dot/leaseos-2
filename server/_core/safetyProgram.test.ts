@@ -449,3 +449,37 @@ describe("the NSC trucking content pack", () => {
     expect(body("nsc_trucking.defect_reporting")).toMatch(/The mechanic who performs the repair records it and releases it/);
   });
 });
+
+describe("the oilfield and industrial content pack", () => {
+  const pack = CONTENT_PACKS.find(p => p.moduleKey === "oilfield_industrial")!;
+  const body = (key: string) => contentForTemplate(key)!.template.sections.map(s => s.body).join("\n");
+
+  it("covers all thirty-six oilfield templates, the hydrovac ones included", () => {
+    expect(pack.templates.map(t => t.templateKey).sort()).toEqual(POLICY_TEMPLATE_SEEDS.filter(t => t.moduleKey === "oilfield_industrial").map(t => t.templateKey).sort());
+    expect(pack.templates.length).toBe(36);
+  });
+
+  it("states the H2S controls a reviewer checks first", () => {
+    expect(body("oilfield_industrial.h2s_procedure")).toMatch(/at around 100 ppm it deadens the sense of smell, so smell is never a warning/);
+    expect(body("oilfield_industrial.h2s_procedure")).toMatch(/On a monitor alarm: stop, hold your breath, move upwind or crosswind/);
+    expect(body("oilfield_industrial.h2s_procedure")).toMatch(/do not enter without SCBA and a trained partner/);
+    expect(body("oilfield_industrial.gas_detection")).toMatch(/Bump-test before each day's use/);
+    expect(body("oilfield_industrial.gas_detection")).toMatch(/19\.5 per cent oxygen/);
+    expect(body("oilfield_industrial.h2s_emergency_response")).toMatch(/Rescue only by trained workers wearing SCBA, working in pairs/);
+  });
+
+  it("does not invent a site-specific spacing, pressure or LEL figure: it names who sets it", () => {
+    for (const t of pack.templates) expect(t.sections.map(s => s.body).join("\n"), t.templateKey).not.toMatch(/\b\d+\s*(m|metres|meters|psi|kPa|%\s*LEL)\b/);
+    expect(body("oilfield_industrial.vacuum_truck_procedures")).toMatch(/at the distance from wellheads and tanks the client's site rules set/);
+    expect(body("oilfield_industrial.hydrovac_procedures")).toMatch(/within the limits the facility owner or permit sets/);
+    expect(body("oilfield_industrial.hot_work")).toMatch(/within the limits the permit sets/);
+  });
+
+  it("puts locates before digging, exhaust downwind, and the prime contractor where the Act puts it", () => {
+    const hv = body("oilfield_industrial.hydrovac_procedures");
+    expect(hv.indexOf("Confirm locates")).toBeLessThan(hv.indexOf("Keep water pressure"));
+    expect(body("oilfield_industrial.vacuum_truck_procedures")).toMatch(/Route the exhaust downwind/);
+    expect(body("oilfield_industrial.prime_contractor_responsibilities")).toMatch(/The owner of the work site is the prime contractor unless it designates another party in writing/);
+    expect(body("oilfield_industrial.confined_space")).toMatch(/The safety watch never enters to rescue/);
+  });
+});

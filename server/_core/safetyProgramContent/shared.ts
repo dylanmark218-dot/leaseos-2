@@ -32,3 +32,7 @@ export function swp(key: string, summary: string, b: { purpose: string; scope: s
 
 export const ALL_WORKERS = "Every worker, supervisor, manager and contractor of {{company.name}}, at every work site, yard, shop and vehicle.";
 export const OHS_REFS = "Alberta Occupational Health and Safety Act, Regulation and Code, as cited by the reference keys linked to this document in LeaseOS.";
+
+export function plan(key: string, summary: string, b: { purpose: string; scope: string; roles: string; activation: string; actions: string; communication: string; recovery: string; drills: string; records: string; references: string }) {
+  return T(key, summary, [["Purpose", b.purpose], ["Scope", b.scope], ["Roles and contacts", b.roles], ["Activation", b.activation], ["Response actions", b.actions], ["Communication", b.communication], ["Recovery and review", b.recovery], ["Drills", b.drills], ["Records", records(b.records)], ["References", b.references], ["Revision history", REVISION]]);
+}

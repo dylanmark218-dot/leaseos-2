@@ -2,8 +2,8 @@
 
 Status: **complete on branch `claude/safety-compliance-program-builder-2qnty0`**, not merged. This is the
 data model and template engine, plus the first two categories of the Alberta Commercial/Oilfield content
-pack: company foundation (19 templates), occupational health and safety (39) and commercial trucking / National
-Safety Code (41), loaded as drafts.
+pack: company foundation (19 templates), occupational health and safety (39), commercial trucking / National
+Safety Code (41) and oilfield and industrial operations (36), loaded as drafts.
 Every other template is a skeleton and every regulatory reference seeds unverified. Further categories load
 one at a time into the keys this checkpoint creates.
 
@@ -101,6 +101,19 @@ profile that the duty-status engine enforces, and a test holds them free of hour
 disagree with what is enforced. Figures stated (24-hour trip inspection validity, 12-month abstract review,
 cargo-securement WLL and g-force criteria) are for the reviewer to confirm against the instruments.
 
+Category 4, **oilfield and industrial operations**, is in `server/_core/safetyProgramContent/oilfieldIndustrial.ts`:
+36 templates — 26 in the oilfield pack (orientation, site entry, prime contractor, permit to work, SIMOPS, line
+of fire, pinch points, H2S, gas detection, the H2S emergency response plan, ignition control, flammable
+atmospheres, bonding and grounding, hot work, confined space and tank entry, pressure, stored energy,
+high-pressure lines, rig moves, spotters, heavy equipment, exclusion zones, lifting, rigging, suspended loads)
+and 10 in the hydrovac / vacuum truck pack (hydrovac excavation, vacuum trucks, tank cleaning, pressure
+washing, fluid and chemical transfer, loading, produced water, sewage, waste and disposal sites). Figures
+stated (19.5 per cent oxygen; H2S deadening smell at around 100 ppm; the 10 ppm and 15 ppm H2S limits) are for
+the reviewer to confirm. Figures that vary by site — gas alarm set points, LEL limits for hot work, spacing
+from wellheads, hydrovac pressure and temperature near buried facilities — are not invented: the text names
+who sets each (the safety manager, the permit, the client's site rules, the facility owner), and a test refuses
+any distance, pressure or LEL figure in the pack.
+
 Content in every category is written through per-kind builders (`safetyProgramContent/shared.ts`), and the
 integrity check now also refuses a template whose headings differ from its skeleton's, in order.
 
@@ -156,7 +169,7 @@ The PDF/ZIP archive is not built here — the manifest is.
 
 ## Tests
 
-- `server/_core/safetyProgram.test.ts` — 46 cases (content pack integrity, heading order, merge fields, OHS and trucking content checks included): catalog integrity (unique keys, real modules and packs,
+- `server/_core/safetyProgram.test.ts` — 50 cases (content pack integrity, heading order, merge fields, OHS, trucking and oilfield content checks included): catalog integrity (unique keys, real modules and packs,
   every cited reference exists, seeds cannot carry a verification), obligations by profile, assembly and its
   hash, policy codes, version chain, approval and edit rules, acknowledgement steps, matrix statuses and
   evidence choice, corrective-action rules, COR readiness by evidence, manifest, ledger chain, packs.
@@ -177,7 +190,7 @@ below when the gate completes). Typecheck clean; test-file typecheck adds no err
 
 ## Not in this checkpoint
 
-Policy body content beyond company foundation, OHS and trucking (every other template is a skeleton; the written text is
+Policy body content beyond company foundation, OHS, trucking and oilfield (every other template is a skeleton; the written text is
 a draft a person adapts and reviews before it is marked reviewed); verification of any regulatory reference (all
 unverified — provision numbers are what the template authors worked from and must be checked against the
 instruments as consolidated); a client UI; the PDF/ZIP vendor package; a hazard-assessment record and a drill
