@@ -48,6 +48,15 @@ owner types unchanged.
 | 1.17 migrations | Head `0174` on `main`; highest claim `0180`. | Head **`0219`**; `0210–0216` claimed by open branches; `LEASEOS_MIGRATION_POLICY.md`; `server/migrationSlots.test.ts` fails CI on any duplicate number except 0157. |
 | Moratorium | Fully in force; no carve-outs. | Still in force (`SPINE_WIRING_PLAN.md:3` unchanged, hash-pinned). Item 2 resolved; items 3–4 not started; 11 of 13 spine engines still declared unwired. Owner carve-outs exist for Document Control CP1/CP2/CP6, Live Assist LA-1a and Customer/Contract/Rates; **none covers AI wiring**. |
 
+### 0.1 Revision 3 — re-checked against `main` = `240b2dd`
+
+- `workerAvailability` (0206, `schema.ts:7240`) now records declared worker availability, read by
+  `server/openShiftsService.ts:83` for the Open Work candidate pool and never by readiness;
+  `operatorAvailability` (0013) is still unread. Gap G9 is NARROWED.
+- Sign & Attest SA1 (0214–0216) is the canonical signature-of-a-hash store (`attestDocumentRevisions`).
+- No change to any other §0 fact: no outbound transport, no `sales` role, quotes on legacy cards,
+  `resourceBookings` unchanged, migration head `0219`.
+
 ---
 
 ## 1. Repository survey
@@ -565,7 +574,7 @@ Ordered by how much the rest depends on them.
 | G6 | **No sales capabilities in the gateway and no sales tools.** `CAPABILITIES` has six entries, none sales; PR #7's tool registry is unmerged; no worker handler runs a model. | §1.12, §1.13 | PR #7 or equivalent; moratorium · Revision 2: **NARROWED** — the tool registry is merged; still no sales capabilities, no handler runs a model |
 | G7 | **Quotes do not use the deterministic resolver;** explicit lines bypass every check; `rate_override` approval is unused; no quote expiry; no internal acceptance path; no `quote` document kind. | §1.9 | Roadmap step 5 · Revision 2: **NARROWED** — rate sheets exist as approved charge definitions; quotes still use legacy cards |
 | G8 | **Booking holds.** `tentative` is never written; `resourceBookings` lacks `orgRef`, expiry, actor, source, and any lock finer than the posting (two postings booking the same unit are not serialised). No expiry sweep. | §1.4 | Dispatch award transaction · Revision 2: **OPEN** — unchanged; also holds must avoid operators because open shifts read tentative bookings |
-| G9 | **Availability is not computed.** `operatorAvailability` is schema-only; readiness answers `availability_not_declared` and `hos_unknown` for everyone; HOS clocks are never consulted by the composer. | §1.5 | SPINE dispatch gate; P9 verified HOS · Revision 2: **OPEN** |
+| G9 | **Availability is not computed.** `operatorAvailability` is schema-only; readiness answers `availability_not_declared` and `hos_unknown` for everyone; HOS clocks are never consulted by the composer. | §1.5 | SPINE dispatch gate; P9 verified HOS · Revision 2: **OPEN** · Revision 3: **NARROWED** — `workerAvailability` records declared willingness; HOS and verified availability remain UNKNOWN |
 | G10 | **No job intake state.** `jobs.status` starts at `dispatched`; no requested start, LSD FK, service code FK or customer FK; `jobs.customer` is text. | §1.4 | Additive columns or a separate intake record · Revision 2: **NARROWED** — job commercial context exists; requested start, service code and location remain open |
 | G11 | **No region/yard/base entity, no proximity query over anything but facilities, no travel time.** | §1.7 | Spatial foundation; routing source decision (P2.1) · Revision 2: **OPEN** |
 | G12 | **No regional signal ingestion; activity sources are licence-blocked;** no per-customer history metrics. | §1.8 | `geo.sourceReview`, feed family (off-spine, unwired) · Revision 2: **OPEN** |

@@ -2,7 +2,7 @@
 
 **Design checkpoint, no code.** Companion to `docs/register/AI_BUSINESS_DEVELOPMENT_SURVEY.md`,
 which carries the survey (§1), reuse (§2) and gaps (§3) with citations. This document carries §4–§15.
-**Revision 2**, written against `main` = `b35bac4` (release `v23.31`). Revision 1 was written
+**Revision 2**, written against `main` = `b35bac4` (release `v23.31`), with a revision-3 addendum for `240b2dd` in §0.1. Revision 1 was written
 against `6f52b57`; §0 lists what changed on `main` in between and how the design moved. Every
 "existing" symbol below is cited in the survey; every "new" symbol is a proposal and is marked as such.
 
@@ -42,6 +42,14 @@ one; **proposal** for anything a model produces that is not yet a record.
 | **Migrations:** head `0219`; `0210–0216` claimed by open branches; `LEASEOS_MIGRATION_POLICY.md` ("first slot free in ALL" lineages); `server/migrationSlots.test.ts` fails CI on any duplicate number except the historical 0157. | §13 updated. Still no numbers assigned. |
 | **Routing:** still no travel time; the Canadian provider runtime is road advisories feeding route-approval staleness (`liveAdvisories`), not scheduled in production. | `checkRouteFeasibility` still answers distance plus verdict; duration stays UNKNOWN. |
 | `operatingZones.orgRef` added (0209); still no yard / region / base entity. `complianceDocuments` still has no organization owner type. | `serviceBases` and `salesRegions` remain proposals. |
+
+### 0.1 Revision 3 — `main` = `240b2dd` (revision 2 merged as PR #108)
+
+| What landed alongside | Effect on this design |
+|---|---|
+| **Open Work** (0205–0206, `docs/product/COMPANY_BOARD_OPEN_WORK_DESIGN.md`): `shiftPosts` can link to a `dispatchRoles` slot; `shiftOffers`; `shiftPostEvents`; **`workerAvailability`** (`schema.ts:7240`: `userId`, `state ∈ {available, unavailable, on_call, available_for_overtime}`, window, `source ∈ {self, dispatcher}`, superseded chain), "consumed by the candidate pool and never by readiness". The older `operatorAvailability` (0013) is still unused. | The hold preview (§9.2) may add a **declared-capacity count**: operators whose current `workerAvailability` is `available` or `on_call` over the window, labelled "declared, not verified". It is never an eligibility input, never names a person in a customer message, and never books anyone. After conversion, staffing the new posting may go through an Open Work post linked to its slot, so sales still never touches operators. Sales reads `workerAvailability` only, not `operatorAvailability`. Gap G9 narrows: declared willingness exists; HOS and verified availability are still UNKNOWN. |
+| **Sign & Attest SA1** (0214–0216, `docs/sign-attest/SIGN_ATTEST_DESIGN.md`): "a signature is of a hash"; `attestDocumentRevisions` (`subjectType` free varchar) whose fingerprint the server recomputes; append-only marks and events; two-person rule asserted against the row. | Where a later checkpoint needs a person's signature on a sales artifact (a signed quote acceptance taken outside the portal, a signed vendor-application package), it registers that artifact as an attest subject instead of adding a sales signature scheme. Payload-hash-bound approvals in the agent gateway (§8.4) are unchanged; they are approvals, not signatures. |
+| Migration head still `0219`; `0214–0216` are now on `main`, filling the gap below the head. | §13 unchanged: scan, take the first slot free everywhere, let `migrationSlots.test.ts` confirm. |
 
 ---
 
