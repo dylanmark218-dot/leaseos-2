@@ -266,7 +266,10 @@ describe("the workflow runtime exists and is started through one production owne
 
   it("is started by the production entry point through the single-owner lifecycle", () => {
     const production = readFileSync("server/_core/productionWorker.ts", "utf8");
-    const entry = readFileSync("server/_core/index.ts", "utf8");
+    // P0-C: the production entry point composes `startServer` (server/_core/startup.ts), which
+    // is where the embedded worker is started; the entry file itself only chooses the frontend.
+    const entry = readFileSync("server/_core/startup.ts", "utf8");
+    expect(readFileSync("server/_core/index.ts", "utf8")).toContain("startServer(");
     const standalone = readFileSync("server/_core/worker.ts", "utf8");
 
     expect(production).toContain("startProductionWorker");

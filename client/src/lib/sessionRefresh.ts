@@ -35,7 +35,7 @@ import { TRPCClientError } from "@trpc/client";
 import { observable } from "@trpc/server/observable";
 import type { TRPCLink } from "@trpc/client";
 import type { AnyRouter } from "@trpc/server";
-import { UNAUTHED_ERR_MSG } from "@shared/const";
+import { TRPC_MOUNT_PATH, UNAUTHED_ERR_MSG } from "@shared/const";
 
 /**
  * The procedures that mint or destroy credentials, which must never trigger a refresh.
@@ -128,12 +128,16 @@ export function createRefreshGate(runRefresh: () => Promise<boolean>): RefreshGa
  * through the client would route the refresh through this very link, and structural impossibility
  * beats a guard that a later refactor can drop. `credentials: "include"` is what carries the
  * httpOnly cookies; nothing is read from the response but its status.
+ *
+ * The URL is built from `TRPC_MOUNT_PATH`, the constant the server mounts the router at and
+ * derives the refresh cookie's Path from (P0-B): the request path and the cookie path cannot
+ * disagree when both come from one place.
  */
 export async function refreshViaHttp(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch
 ): Promise<boolean> {
   try {
-    const response = await fetchImpl("/api/trpc/auth.refresh", {
+    const response = await fetchImpl(`${TRPC_MOUNT_PATH}/auth.refresh`, {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },

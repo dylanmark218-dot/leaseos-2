@@ -111,20 +111,28 @@ describe("F — a login produces a session family, not just a token", () => {
     readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ")
       .split("\n").map(l => l.replace(/\/\/.*$/, "")).join("\n");
 
-  it("creates a session family at the OAuth callback", () => {
+  /*
+   * P0-B moved the issuance out of the callback into `_core/browserSession.ts`, the one function
+   * every browser session comes from; the callback calls it. The checks follow the code.
+   */
+  it("the OAuth callback issues the session through the one issuing function", () => {
+    expect(/issueBrowserSession\s*\(/.test(codeOf("server/_core/oauth.ts"))).toBe(true);
+  });
+
+  it("creates a session family at login", () => {
     expect(
-      /createSessionFamily\s*\(/.test(codeOf("server/_core/oauth.ts")),
+      /createSessionFamily\s*\(/.test(codeOf("server/_core/browserSession.ts")),
       "a login that mints no family leaves nothing to revoke or rotate",
     ).toBe(true);
   });
 
-  it("sets the refresh cookie alongside the access cookie", () => {
-    const src = codeOf("server/_core/oauth.ts");
-    expect(src).toContain("REFRESH_COOKIE_NAME");
-    expect(/refresh:\s*true/.test(src), "the refresh cookie uses the narrow-path options").toBe(true);
+  it("sets the refresh cookie alongside the access cookie, through the canonical helpers", () => {
+    const src = codeOf("server/_core/browserSession.ts");
+    expect(/issueAccessCookie\s*\(/.test(src)).toBe(true);
+    expect(/issueRefreshCookie\s*\(/.test(src), "the refresh cookie uses the canonical refresh-path helper").toBe(true);
   });
 
   it("binds the family to the app the session was minted for", () => {
-    expect(/appId/.test(codeOf("server/_core/oauth.ts"))).toBe(true);
+    expect(/appId/.test(codeOf("server/_core/browserSession.ts"))).toBe(true);
   });
 });
