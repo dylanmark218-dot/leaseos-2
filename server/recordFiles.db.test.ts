@@ -46,8 +46,16 @@ async function org() {
 async function member(orgRef: string | null, roles: string[], scopeRef: string | null = null) {
   const userId = seq++;
   if (orgRef) await pool.execute("INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01',1)", [`MEM-${rnd()}`, orgRef, userId]);
+  // B23.1A: grants in the shape 0170 leaves behind — scoped to the organization
+  // that issued them, a branch grant naming both its organization and its branch.
+  // `global` now means platform-wide authority; a tenant-isolation test that gave
+  // every caller that would be testing the wrong thing. A member of nowhere gets
+  // the quarantine shape, which authorizes nothing.
   for (const role of roles) {
-    await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, scopeRef, grantedByUserId, grantedAt) VALUES (?,?,?,?,1,NOW())", [userId, role, scopeRef ? "branch" : "global", scopeRef]);
+    await pool.execute(
+      "INSERT INTO userRoleAssignments (userId, role, scopeType, orgRef, scopeRef, grantedByUserId, grantedAt) VALUES (?,?,?,?,?,1,NOW())",
+      [userId, role, !orgRef ? "unscoped_legacy" : scopeRef ? "branch" : "organization", orgRef, scopeRef]
+    );
   }
   return userId;
 }

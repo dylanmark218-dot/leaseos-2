@@ -128,8 +128,11 @@ const FILE_PERMISSIONS: readonly Permission[] = [
   "evidence.read_safety_summary", "evidence.read_commercial", "evidence.read_personnel",
   "evidence.read_legal", "evidence.verify", "evidence.export",
 ];
-function heldFilePermissions(userId: number, grants: readonly RoleGrant[]): Set<Permission> {
-  return new Set(FILE_PERMISSIONS.filter(p => authorize({ userId, grants, permission: p }).allowed));
+function heldFilePermissions(userId: number, grants: readonly RoleGrant[], organization: string | null): Set<Permission> {
+  // B23.1A — decided IN the organization the gate already resolved, like every
+  // other records decision: an organization-confined grant is judged against it,
+  // and a grant in another company answers nothing here.
+  return new Set(FILE_PERMISSIONS.filter(p => authorize({ userId, grants, permission: p, organization }).allowed));
 }
 
 const FOLDER_KEYS = [
@@ -547,7 +550,7 @@ export const recordsRouter = router({
       .query(async ({ ctx, input }) => {
         const scope = await actingScopeFor(ctx.user.id);
         const me = await svc.resolveOperatorForUser(ctx.user.id);
-        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id));
+        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
         // Read one past the window so "there is more" is a fact, not a guess.
         const candidates = await svc.listFileCandidates(scope, 501);
         const truncated = candidates.length > 500;
@@ -614,7 +617,7 @@ export const recordsRouter = router({
         if (!d) throw notFound();
 
         const me = await svc.resolveOperatorForUser(ctx.user.id);
-        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id));
+        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
         const ownerOperatorId = ownerOperatorOf(d.relationships);
         const isOwner = (ownerOperatorId != null && ownerOperatorId === me.operatorId) || d.rec.capturedBy === ctx.user.id;
         const v = fileVisibility({ held, recordType: d.rec.recordType, isOwner });
@@ -731,7 +734,7 @@ export const recordsRouter = router({
         if (!subject) throw notFound();
 
         const me = await svc.resolveOperatorForUser(ctx.user.id);
-        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id));
+        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
         const isOwner =
           (subject.ownerOperatorId != null && subject.ownerOperatorId === me.operatorId) || subject.capturedBy === ctx.user.id;
         if (!fileVisibility({ held, recordType: subject.recordType, isOwner }).visible) throw notFound();
