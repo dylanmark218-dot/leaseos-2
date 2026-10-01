@@ -1,0 +1,51 @@
+Accident Investigation Report
+Establish the event sequence, evidence-supported causes and actions that prevent recurrence.
+Company: __________________________________  Home base: _______________________
+Record no. __________________  Record revision: ______  Date: _____________________
+Site / lease / project: __________________________  Job / dispatch: __________________
+Location / LSD / address: ______________________________________________________
+Event date / time / zone: ____________________  Reported date / time: __________________
+Linked incident no. ______________  Lead investigator / role: _________________________
+Investigation team / worker representative: _________________________________________
+Scope / units / equipment / involved employers: ____________________________________
+Sequence and evidence
+Conditions and controls
+Work method, weather, equipment, supervision and controls expected versus present:
+________________________________________________________________________________________
+________________________________________________________________________________________
+Cause analysis
+Unconfirmed hypotheses / further evidence required: __________________________________
+Accident Investigation Report Review
+Record no. __________________  Event date: ______________  Site: ____________________
+Witnesses and evidence
+Attach photographs, sketches and statements with this record number. Preserve originals; distinguish firsthand accounts from reported information.
+Corrective actions
+Notification and review
+Notified person / agency / date / time / reference: ___________________________________
+Reporting assessment owner: ______________  Due: __________  Status: ________________
+External form / submission reference or reason not applicable: __________________________
+Prepared by / signature / date: ___________________________________________________
+Reviewed by / signature / date: __________________________________________________
+Closure verified by / date / evidence: ______________________________________________
+[ ] Open  [ ] Actions pending  [ ] Closed     Effectiveness review date: ___________________
+Use N/A or unknown as appropriate. Link continuation pages. Preserve signed originals and track corrections. Signatures acknowledge preparation or review, not admission of fault.
+Internal company template. Not an official OSHA, DOT, OHS or workers compensation form; assess applicable reporting and prescribed forms separately.
+Time | Event or observation | Evidence or source ID
+ |  | 
+ |  | 
+ |  | 
+ |  | 
+Immediate or contributing factor | Underlying system cause | Evidence or pending check
+ |  | 
+ |  | 
+ |  | 
+Witness name or secure reference | Contact or statement ID | Interview date
+ |  | 
+ |  | 
+Photo or evidence ID | Description and capture date | Original location or custodian
+ |  | 
+ |  | 
+Action and related finding | Owner | Due date | Verification or evidence
+ |  |  | 
+ |  |  | 
+ |  |  | 

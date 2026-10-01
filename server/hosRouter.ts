@@ -10,17 +10,21 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
-import { and, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { complianceDocuments, dutyRecords, hosAttestations, hosRuleLimits, hosRuleProfiles } from "../drizzle/schema";
-import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
+import { complianceDocuments, hosAttestations, hosRuleLimits, hosRuleProfiles } from "../drizzle/schema";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
+// P0-A1 — every operator-keyed read or write goes through the HOS boundary. This router does not
+// import the duty-record or operator tables at all (server/hosBoundaryGuard.test.ts pins that), so
+// the unscoped "select by the id the caller sent" is not available here to be written by accident.
+import { dutyEntriesInScope, hosScopeFor, requireHosOperatorInScope } from "./hosScope";
 import { ALL_HOS_PROFILE_SEEDS, HOS_SEED_CAVEAT, HOS_SEED_RETRIEVAL_DATE } from "./_core/hosRuleSeeds";
 import { divergences, promote as promoteLimit } from "./_core/knowledge/promotionLedger";
 import { checkPromotionScope } from "./_core/knowledge/scopeGuard";
 import {
   computeClocks, determine, selectProfile, tripFeasibility,
-  type DutyEntry, type HosRuleProfile, type LimitKey,
+  type HosRuleProfile, type LimitKey,
 } from "./_core/hos";
 
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
@@ -81,12 +85,14 @@ export const hosRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // P0-A1 — the page is filed against an operator the caller's organization owns, or not at all.
+      const op = await requireHosOperatorInScope(await hosScopeFor(ctx.user.id), input.operatorId);
       const dutyDate = new Date(`${input.dutyDate}T00:00:00Z`);
       if (dutyDate.getTime() > Date.now() + 24 * 60 * 60 * 1000) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "A duty date in the future has no log page to scan" });
       }
       const ins = await db.insert(complianceDocuments).values({
-        ownerType: "operator", ownerId: input.operatorId,
+        ownerType: "operator", ownerId: op.id,
         docType: "hos_daily_log", requirementKey: "hos.daily_log",
         title: `Paper log — ${input.dutyDate}`,
         identifier: input.dutyDate,
@@ -133,7 +139,11 @@ export const hosRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const acting = await resolveActingScope(db, ctx.user.id);
+      // P0-A1 — the organization is the server's, and the operator must be that organization's.
+      // Before this, an attestation for another company's driver was accepted, filed under the
+      // caller's orgRef, and superseded that company's own live statement for the day.
+      const scope = await hosScopeFor(ctx.user.id);
+      const op = await requireHosOperatorInScope(scope, input.operatorId);
       const dutyDate = new Date(`${input.dutyDate}T00:00:00Z`);
       if (dutyDate.getTime() > Date.now() + 24 * 60 * 60 * 1000) {
         // Hours are a fact about a day that has begun. Attesting the future is a promise.
@@ -141,13 +151,13 @@ export const hosRouter = router({
       }
       // A correction is a second statement, not an edit: both stay on the record.
       const prior = await db.select({ id: hosAttestations.id }).from(hosAttestations).where(and(
-        eq(hosAttestations.operatorId, input.operatorId),
+        eq(hosAttestations.operatorId, op.id),
         eq(hosAttestations.dutyDate, dutyDate),
         isNull(hosAttestations.supersededAt),
       ));
       const ins = await db.insert(hosAttestations).values({
-        orgRef: acting.tenantId === SINGLE_TENANT_ID ? null : acting.tenantId,
-        operatorId: input.operatorId, dutyDate, method: input.method, statement: input.statement,
+        orgRef: scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId,
+        operatorId: op.id, dutyDate, method: input.method, statement: input.statement,
         hoursAvailableMinutesStated: input.hoursAvailableMinutesStated ?? null,
         attestedByUserId: ctx.user.id, attestedAt: new Date(),
       });
@@ -373,17 +383,18 @@ export const hosRouter = router({
   /** The clocks, and what the applicable schedule makes of them. */
   status: roleProcedure("hos.status")
     .input(CONTEXT.extend({ operatorId: z.number().int().positive(), lookbackDays: z.number().int().min(1).max(30).default(16) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const d = await db();
       const since = new Date(input.at.getTime() - input.lookbackDays * 24 * 60 * 60_000);
-      const rows = await d.select().from(dutyRecords).where(and(eq(dutyRecords.operatorId, input.operatorId), gte(dutyRecords.startedAt, since)));
-      const entries: DutyEntry[] = rows.map(r => ({ dutyStatus: r.dutyStatus, startedAt: r.startedAt, endedAt: r.endedAt }));
+      // P0-A1 — the duty record is read through the boundary: ownership is proved first, and a
+      // foreign operator gets the not-found refusal rather than clocks, a verdict, or even a count.
+      const duty = await dutyEntriesInScope(await hosScopeFor(ctx.user.id), input.operatorId, since);
       const selection = selectProfile({ ...input, at: input.at }, await loadProfiles(d));
       const profile = selection.outcome === "selected" ? selection.profile : null;
       const core = profile?.limits.find(l => l.limitKey === "core_rest_minutes" && l.verificationStatus === "verified")?.value;
-      const clocks = computeClocks(entries, input.at, { shiftResetMinutes: core });
+      const clocks = computeClocks(duty.entries, input.at, { shiftResetMinutes: core });
       return {
-        operatorId: input.operatorId, dutyRecordsRead: rows.length,
+        operatorId: duty.operatorId, dutyRecordsRead: duty.rowsRead,
         selection, clocks, determination: determine(clocks, profile),
         shiftBasis: core ? `work shift taken to begin after a verified ${core} min core rest` : "work shift taken to begin after 8 h of rest — a default, because no verified core-rest figure applies",
       };
@@ -392,14 +403,16 @@ export const hosRouter = router({
   /** Can this trip be finished legally? UNKNOWN whenever the driving limit is unverified. */
   tripFeasibility: roleProcedure("hos.tripFeasibility")
     .input(CONTEXT.extend({ operatorId: z.number().int().positive(), estimatedDriveMinutes: z.number().positive().max(10_000) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const d = await db();
       const since = new Date(input.at.getTime() - 16 * 24 * 60 * 60_000);
-      const rows = await d.select().from(dutyRecords).where(and(eq(dutyRecords.operatorId, input.operatorId), gte(dutyRecords.startedAt, since)));
+      // P0-A1 — same boundary as `status`. A yes/no about another company's driver would still be
+      // that driver's hours, so the operator is proved to be the caller's before anything is read.
+      const duty = await dutyEntriesInScope(await hosScopeFor(ctx.user.id), input.operatorId, since);
       const selection = selectProfile({ ...input, at: input.at }, await loadProfiles(d));
       const profile = selection.outcome === "selected" ? selection.profile : null;
-      const clocks = computeClocks(rows.map(r => ({ dutyStatus: r.dutyStatus, startedAt: r.startedAt, endedAt: r.endedAt })), input.at);
+      const clocks = computeClocks(duty.entries, input.at);
       const determination = determine(clocks, profile);
-      return { operatorId: input.operatorId, selection, determination, feasibility: tripFeasibility(determination, input.estimatedDriveMinutes) };
+      return { operatorId: duty.operatorId, selection, determination, feasibility: tripFeasibility(determination, input.estimatedDriveMinutes) };
     }),
 });

@@ -1,0 +1,56 @@
+Injury Report
+Record one affected person per report. Restrict access to authorized personnel and record only relevant information.
+Company: __________________________________  Home base: _______________________
+Record no. __________________  Record revision: ______  Date: _____________________
+Site / lease / project: __________________________  Job / dispatch: __________________
+Location / LSD / address: ______________________________________________________
+Event date / time / zone: ____________________  Reported date / time: __________________
+Person / worker ID: ________________________  Employer / role: ______________________
+Supervisor / contact: _______________________  Shift start: _________________________
+Linked incident no. ________________________  Injury onset date / time: ______________
+Reported injury and circumstances
+Task, event or exposure; object / substance involved; record the person’s account:
+________________________________________________________________________________________
+________________________________________________________________________________________
+Body part / left or right side: ____________________________________________________
+Reported symptoms or injury; identify source of any clinical diagnosis:
+________________________________________________________________________________________
+Response and care
+First aid provided / by whom / time: _______________________________________________
+Care: [ ] None reported  [ ] First aid  [ ] Medical assessment  [ ] Emergency transport
+Provider / facility / visit date if known: _____________________________________________
+Emergency department: [ ] Yes [ ] No [ ] Unknown   Inpatient: [ ] Yes [ ] No [ ] Unknown
+Immediate controls and follow-up arrangements:
+________________________________________________________________________________________
+Work status and confidential follow-up
+Status source / date: ___________________________________________________________
+[ ] Not assessed  [ ] Usual duties  [ ] Restricted duties  [ ] Away from work  [ ] Unknown
+Restrictions / review date / secure supporting record: _________________________________
+Assigned case contact: _____________________  Next contact / review: _________________
+Injury Report Review
+Record no. __________________  Event date: ______________  Site: ____________________
+Witnesses and evidence
+Attach photographs, sketches and statements with this record number. Preserve originals; distinguish firsthand accounts from reported information.
+Contributing factors / preliminary causes and evidence; mark unconfirmed findings:
+________________________________________________________________________________________
+Corrective actions
+Notification and review
+Notified person / agency / date / time / reference: ___________________________________
+Reporting assessment owner: ______________  Due: __________  Status: ________________
+External form / submission reference or reason not applicable: __________________________
+Prepared by / signature / date: ___________________________________________________
+Reviewed by / signature / date: __________________________________________________
+Closure verified by / date / evidence: ______________________________________________
+[ ] Open  [ ] Actions pending  [ ] Closed     Effectiveness review date: ___________________
+Use N/A or unknown as appropriate. Link continuation pages. Preserve signed originals and track corrections. Signatures acknowledge preparation or review, not admission of fault.
+Internal company template. Not an official OSHA, DOT, OHS or workers compensation form; assess applicable reporting and prescribed forms separately.
+Witness name or secure reference | Contact or statement ID | Interview date
+ |  | 
+ |  | 
+Photo or evidence ID | Description and capture date | Original location or custodian
+ |  | 
+ |  | 
+Action and related finding | Owner | Due date | Verification or evidence
+ |  |  | 
+ |  |  | 
+ |  |  | 

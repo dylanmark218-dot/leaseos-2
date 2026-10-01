@@ -17,7 +17,16 @@ vi.mock("./storage", () => ({
   storageRead: async (relKey: string) => { const b = objects.get(relKey); if (!b) throw new Error(`no object ${relKey}`); return b; },
 }));
 
+/*
+ * Both keys, because from 0193 portal MFA spans both stores. `LEASEOS_KEY_MFA_V1` is what new
+ * enrolments are written under; `LEASEOS_PORTAL_MFA_KEY` remains decrypt-only for identities whose
+ * seed has not been migrated yet, and for webhook secrets, which S2-E has not moved.
+ *
+ * Distinct material on purpose: if they were the same, a regression that wrote new secrets under
+ * the legacy key would still pass here, which is exactly what this separation exists to prevent.
+ */
 process.env.LEASEOS_PORTAL_MFA_KEY = "a".repeat(64);
+process.env.LEASEOS_KEY_MFA_V1 = "d".repeat(64);
 
 const NOW = new Date("2026-09-10T12:00:00Z");
 const idRow = (over = {}) => ({ status: "active" as const, acceptedAt: new Date("2026-09-01T00:00:00Z"), tokenExpiresAt: new Date("2026-12-01T00:00:00Z"), lockedUntil: null, failedAttempts: 0, mfaEnabled: false, ...over });
@@ -101,7 +110,7 @@ const AUTH: PostSiteAuthorization = { disposalRequired: true, travelToDisposal: 
 d("the customer's identity, from invitation to revocation", () => {
   it("accepts an invitation once, refuses the bearer before acceptance, rotates with a grace window, locks after failures, requires MFA on sensitive writes once confirmed, and is refused after revocation", async () => {
     const controller = await withRole("controller");
-    const entityId = 2_200_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'ABC Energy')", [acctRef, entityId]);
     const inv = await callerFor(controller).portalAdmin.identityInvite({ kind: "customer", accountRef: acctRef, email: "mj@abc.example", displayName: "M. Johnson" });
@@ -150,7 +159,7 @@ d("a signed ticket, a bonus, a document, a report", () => {
     const driver = await withRole("driver");
     const office = await withRole("office");
     const payroll = await withRole("payroll_admin");
-    const entityId = 2_300_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'ABC Energy')", [acctRef, entityId]);
     const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress, createdAt) VALUES (?, 'hydrovac', 'hydrovac', 'ABC Energy', '10-22-045-06-W5', 'on_site', 0, NOW())", [key("JOB").slice(0, 40)]);

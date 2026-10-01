@@ -129,7 +129,7 @@ describe("who may change enforcement", () => {
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let userSeq = 760000 + Math.floor(Math.random() * 50000);
+let userSeq = 405_000_000 + Math.floor(Math.random() * 50000);
 const nextUser = () => userSeq++;
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
 beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 6 }); });
@@ -140,11 +140,17 @@ d("jobUnits.create under off, advisory and enforced", () => {
   it("walks the setting up and the legacy path behaves accordingly, leaving the history behind", async () => {
     const dispatcher = await withRole("dispatcher");
     const manager = await withRole("management");
+    // F1.3 — the global mode is the fallback for every organization: changing it takes platform authority,
+    // proven by the users row (a session's claim is not enough). This manager is also the platform administrator.
+    await pool.execute("INSERT INTO users (id, openId, role) VALUES (?, ?, 'admin')", [manager, key("platform-admin").slice(0, 60)]);
     const driverUser = await withRole("driver");
     const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'vacuum_truck', 'ABC', 'clear')", [key("211").slice(0, 30)]);
     const unitId = Number(u.insertId);
     const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name, licenseExpiresAt) VALUES (?, 'T. Nguyen', DATE_ADD(NOW(), INTERVAL 400 DAY))", [driverUser]);
     const operatorId = Number(op.insertId);
+    // Established means verified: since SPINE item 2 the legacy licenseExpiresAt date alone is an
+    // unverified licence (operator_licence_unknown), so the licence is on file and checked.
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Class 1', NOW(), DATE_ADD(NOW(), INTERVAL 400 DAY), 'verified')", [operatorId]);
     const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Acme', 'LSD 12-01-050-08W5', 'dispatched', 0)", [key("JOB").slice(0, 40)]);
     const jobId = Number(j.insertId);
     // Insured, inspected, registered — so only the unknowns remain.
