@@ -40,7 +40,8 @@ import { fromDispatchBooking } from "./_core/workProjections";
 import { assessSchedule, rankAssessments, type ScheduleAssessment } from "./_core/schedulingIntelligence";
 import { CONTEXT as HOS_CONTEXT, determinationFor } from "./hosRouter";
 import { composeReadiness } from "./readinessComposer";
-import { units } from "../drizzle/schema";
+import { dispatchBids, dispatchInvitations, dispatchPostings, operatorCapabilities, units } from "../drizzle/schema";
+import { matchOperatorToJob, type JobRequirements, type MatchResult, type OperatorProfile } from "./_core/dispatchMatching";
 import {
   applyDeviceActions, applyReminderOutcome, audit, auditTrail, completeRemindersFor, emitWorkEvent, insertRule, isParticipant, loadEvent, loadEventsFor,
   loadReminder, loadRule, loadTask, openChecklistCount, openDependencies, orgRefFor, orgWhere, persistedEvent, queueNotification, recordReminderAction,
@@ -653,18 +654,37 @@ export const workRouter = router({
       estimatedDriveMinutes: z.number().int().min(0).max(10_000).optional(),
       unitId: z.number().int().positive().optional(),
       jobId: z.number().int().positive().optional(),
+      /** B23.4 — an open posting: its pool is the default candidate set, its window and duration the default window, and its requirements one more cited line. */
+      postingId: z.number().int().positive().optional(),
       hos: HOS_CONTEXT.omit({ at: true }).optional(),
       now: AT,
     }))
     .query(async ({ ctx, input }) => {
       const d = await db();
       const c = await caller(d, ctx);
+      // The posting, when one is named: its job, its pool, its window and its requirements.
+      const posting = input.postingId ? (await d.select().from(dispatchPostings).where(eq(dispatchPostings.id, input.postingId)).limit(1))[0] ?? null : null;
+      if (input.postingId && !posting) throw new TRPCError({ code: "NOT_FOUND", message: "No such posting" });
+      const jobId = input.jobId ?? posting?.jobId ?? null;
+      let requirements: JobRequirements | null = null;
+      if (posting?.requirementsJson) {
+        try { const parsed = JSON.parse(posting.requirementsJson) as Partial<JobRequirements>; if (parsed && Array.isArray(parsed.requiredCapabilities)) requirements = { jobCode: parsed.jobCode ?? String(posting.jobId), ...parsed, requiredCapabilities: parsed.requiredCapabilities }; } catch { requirements = null; }
+      }
       // Who is being asked about: operator records resolve to their users; a record with no user is skipped and named.
       const userIds = new Set(input.userIds);
       const skipped: string[] = [];
-      if (input.operatorIds.length) {
-        const ops = await d.select({ id: operators.id, userId: operators.userId }).from(operators).where(inArray(operators.id, input.operatorIds));
-        for (const id of input.operatorIds) {
+      const operatorIds = new Set(input.operatorIds);
+      if (posting && !userIds.size && !operatorIds.size) {
+        // The posting's pool: everyone invited, everyone who bid, and everyone in its specialty pool.
+        for (const i of await d.select({ operatorId: dispatchInvitations.operatorId }).from(dispatchInvitations).where(eq(dispatchInvitations.postingId, posting.id)).limit(200)) if (i.operatorId) operatorIds.add(i.operatorId);
+        for (const b of await d.select({ operatorId: dispatchBids.operatorId }).from(dispatchBids).where(eq(dispatchBids.postingId, posting.id)).limit(200)) operatorIds.add(b.operatorId);
+        if (posting.poolCode) for (const m of await d.select({ operatorId: operatorCapabilities.operatorId }).from(operatorCapabilities).where(and(eq(operatorCapabilities.kind, "specialty"), eq(operatorCapabilities.code, posting.poolCode))).limit(200)) operatorIds.add(m.operatorId);
+        if (!operatorIds.size) skipped.push(`posting ${posting.id} has no invitation, bid or pool member yet`);
+      }
+      if (operatorIds.size) {
+        const ids = Array.from(operatorIds);
+        const ops = await d.select({ id: operators.id, userId: operators.userId }).from(operators).where(inArray(operators.id, ids));
+        for (const id of ids) {
           const op = ops.find(o => o.id === id);
           if (op?.userId) userIds.add(op.userId); else skipped.push(`operator ${id} has no user`);
         }
@@ -676,24 +696,30 @@ export const workRouter = router({
       let duration = input.estimatedDurationMinutes ?? null;
       if (from && to) {
         basis = "window as asked";
-      } else if (input.jobId) {
-        const jobBookings = await d.select().from(resourceBookings).where(and(eq(resourceBookings.jobId, input.jobId), inArray(resourceBookings.bookingState, ["tentative", "confirmed"]))).limit(50);
+      } else if (posting?.scheduledStart) {
+        from = posting.scheduledStart;
+        const minutes = posting.estimatedDurationMinutes ?? 8 * 60;
+        to = new Date(from.getTime() + Math.max(minutes, 60) * 60_000);
+        basis = `window from posting ${posting.id}'s scheduled start${posting.estimatedDurationMinutes ? " and estimated duration" : "; an eight-hour job was assumed"}`;
+        duration = duration ?? minutes;
+      } else if (jobId) {
+        const jobBookings = await d.select().from(resourceBookings).where(and(eq(resourceBookings.jobId, jobId), inArray(resourceBookings.bookingState, ["tentative", "confirmed"]))).limit(50);
         if (jobBookings.length) {
           from = new Date(Math.min(...jobBookings.map(b => b.startsAt.getTime())));
           to = new Date(Math.max(...jobBookings.map(b => b.endsAt.getTime())));
-          basis = `window from job ${input.jobId}'s ${jobBookings.length} booking(s)`;
+          basis = `window from job ${jobId}'s ${jobBookings.length} booking(s)`;
           duration = duration ?? Math.max(1, Math.round((to.getTime() - from.getTime()) / 60_000));
         } else {
           from = input.now; to = new Date(input.now.getTime() + 12 * 3_600_000);
-          basis = `job ${input.jobId} has no booking yet, so the next twelve hours were assumed`;
+          basis = `job ${jobId} has no booking yet, so the next twelve hours were assumed`;
         }
       } else {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Give a window, or a job whose bookings give one" });
       }
       if (duration == null) { duration = 8 * 60; basis += "; an eight-hour job was assumed"; }
-      else if (input.estimatedDurationMinutes == null) basis += "; the duration is the booking's length";
+      else if (input.estimatedDurationMinutes == null && !posting?.scheduledStart) basis += "; the duration is the booking's length";
       if (to.getTime() <= from.getTime() || to.getTime() - from.getTime() > 14 * DAY) throw new TRPCError({ code: "BAD_REQUEST", message: "The window must be ahead of its start and at most 14 days" });
-      const unit = input.unitId ? (await d.select({ id: units.id, unitNumber: units.unitNumber }).from(units).where(eq(units.id, input.unitId)).limit(1))[0] ?? null : null;
+      const unit = input.unitId ? (await d.select({ id: units.id, unitNumber: units.unitNumber, vehicleType: units.vehicleType }).from(units).where(eq(units.id, input.unitId)).limit(1))[0] ?? null : null;
       if (input.unitId && !unit) throw new TRPCError({ code: "NOT_FOUND", message: "No such unit" });
       // The unit's own bookings, from dispatch: taken for the unit the way a person's booking is taken for them.
       const unitBookings = unit
@@ -712,10 +738,26 @@ export const workRouter = router({
           hos = { determination: r.determination, asOf: from, ref: `hos.status:${op.id}@${from.toISOString()}` };
         }
         // Readiness: the composer's own verdict for this person on this unit, never re-derived.
+        // Matching: the posting's requirements against the operator's recorded capabilities, in the matching engine's own arithmetic.
+        let match: Parameters<typeof assessSchedule>[0]["match"] = undefined;
+        if (posting) {
+          if (!requirements || !op) match = null;
+          else {
+            const caps = await d.select().from(operatorCapabilities).where(eq(operatorCapabilities.operatorId, op.id)).limit(200);
+            const profile: OperatorProfile = {
+              operatorId: op.id, name: op.name, onCall: false,
+              capabilities: caps.map(x => ({ kind: x.kind, code: x.code, label: x.label, expiresAt: x.expiresAt, isCredential: x.isCredential })),
+              specialtyPools: caps.filter(x => x.kind === "specialty").map(x => x.code),
+              operatingRegions: caps.filter(x => x.kind === "region").map(x => x.code),
+            };
+            const result: MatchResult = matchOperatorToJob(profile, unit ? { unitId: unit.id, unitNumber: unit.unitNumber, equipmentClass: unit.vehicleType } : null, requirements, from);
+            match = { result, ref: `dispatchPosting:${posting.id}:job:${posting.jobId}` };
+          }
+        }
         let readiness: Parameters<typeof assessSchedule>[0]["readiness"] = null;
         if (op && unit) {
           try {
-            const r = await composeReadiness({ operatorId: op.id, unitId: unit.id, trailerId: null, jobId: input.jobId ?? null }, input.now);
+            const r = await composeReadiness({ operatorId: op.id, unitId: unit.id, trailerId: null, jobId: jobId ?? null, postingId: posting?.id ?? null }, input.now);
             readiness = { verdict: r.eligibility.verdict, blockers: r.eligibility.blockers.map(b => ({ code: b.code, label: b.label, severity: b.severity })), ref: `dispatch.readiness:${op.id}/${unit.id}` };
           } catch (e) {
             readiness = { verdict: "unknown", blockers: [{ code: "readiness_unavailable", label: e instanceof Error ? e.message : "readiness could not be composed", severity: "unknown" }], ref: `dispatch.readiness:${op.id}/${unit.id}` };
@@ -726,11 +768,11 @@ export const workRouter = router({
           unit: unit ? { unitId: unit.id, label: `Unit ${unit.unitNumber}` } : null,
           window: { from, to },
           estimatedDurationMinutes: duration, estimatedDriveMinutes: input.estimatedDriveMinutes ?? null,
-          availability, unitBookings, hos: op ? hos : null, readiness, now: input.now,
+          availability, unitBookings, hos: op ? hos : null, readiness, match, now: input.now,
         }));
         if (!op) assessments[assessments.length - 1]!.findings.unshift({ engine: "hos", state: "unknown", line: "No operator record for this person; hours of service and readiness were not read.", ref: null, deepLink: null });
       }
-      return { from, to, basis, skipped, ranked: rankAssessments(assessments), note: "Advice composed from engines that already decided, each line citing its engine. UNKNOWN is not feasible. Dispatch assigns; the readiness gate runs at award." };
+      return { from, to, basis, skipped, postingId: posting?.id ?? null, jobId, ranked: rankAssessments(assessments), note: "Advice composed from engines that already decided, each line citing its engine. UNKNOWN is not feasible. Dispatch assigns; the readiness gate runs at award." };
     }),
 
   /** What the worker runs each heartbeat, on demand. Idempotent: run it twice and the second pass changes nothing. */

@@ -987,7 +987,12 @@ The answer sits on the dispatcher's readiness panel beside the gate's own
 verdict, in its own words — feasible, review, cannot say, not feasible — never
 "ready": the job's bookings give the window and the answer says so, the unit's
 own bookings are taken for the unit, and every finding carries a link derived
-from its reference by one rule.
+from its reference by one rule. Given an open posting, the same procedure
+assesses the posting's own pool — the invited, the bidders, the specialty pool —
+over the posting's scheduled window, with the dispatch matching engine as one
+more cited line: who is missing which ticket, in that engine's words, and a
+match is who may see the posting, not who may be sent. Asking invites, bids and
+awards nothing.
 
 An inspector can now be handed one: a time-limited grant is issued against a
 unit, the code carries its reference rather than any authority, and opening it

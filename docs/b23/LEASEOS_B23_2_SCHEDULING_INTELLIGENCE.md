@@ -80,15 +80,63 @@ Tests: `server/_core/schedulingIntelligence.test.ts` +2 (unit spans, links),
 link), `client/src/dispatch/DispatchReadinessView.dom.test.tsx` +4 (absent unless supplied, the
 sentence and the links, never "Ready", failures on screen), two more axe surfaces.
 
+## B23.4 — the ranked pool on an open posting, with the matching engine's line
+
+`work.scheduleAssess` now takes a `postingId`. Given one and no candidates, the posting's own pool
+is the candidate set: everyone invited (`dispatchInvitations`), everyone who bid
+(`dispatchBids`), and everyone in its specialty pool (`operatorCapabilities` of kind `specialty`
+with the posting's `poolCode`). A posting with nobody in any of the three is refused plainly
+("has no invitation, bid or pool member yet"), never answered with an empty ranking that reads as
+"nobody is free". Candidates named explicitly are still assessed as before; the pool only fills
+in when nothing was named.
+
+The window comes from the posting when it has a `scheduledStart`: its estimated duration gives
+the end, and the `basis` says "window from posting N's scheduled start and estimated duration",
+or that an eight-hour job was assumed when the posting carries no duration. A posting without a
+start falls through to the job's bookings and then to the next twelve hours, as in B23.3.
+
+The matching engine (`server/_core/dispatchMatching.ts`, declared unwired since it landed) is
+now one more cited engine. The posting's `requirementsJson` is parsed into the engine's own
+`JobRequirements`; each candidate's `operatorCapabilities` become its `OperatorProfile`; the unit,
+when one is named, is passed with its `vehicleType` as the equipment class; and the engine's
+`matchOperatorToJob` runs as of the window's start. Its result becomes a `matching` finding with
+the reference `dispatchPosting:<postingId>:job:<jobId>`, which `linkFor` turns into
+`/dispatch/<jobId>`:
+
+- not matched → **block**, "Not a match for the posting — missing H2S Alive. …", naming each
+  missing requirement from the engine's own list;
+- matched with an unknown factor → **unknown**, so the verdict cannot round to feasible;
+- matched with a partial factor → **review**;
+- matched → **ok**, listing the met factors.
+
+Every matching line that is not a block ends with the engine's own rule restated: a match is who
+may see the posting, not who may be sent. A posting whose requirements are absent or unreadable
+gets an **unknown** line ("could not be read"), never a clear one. Asking leaves invitations and
+bids exactly as they were; the readiness composer is handed the `postingId` so its own
+posting-aware axes run, and the verdict, as before, is advice.
+
+Tests: `server/_core/schedulingIntelligence.test.ts` +2 (the four matching states and the
+posting link; absent and unreadable requirements), `server/schedulingIntelligence.db.test.ts` +1
+(pool-derived candidates, the posting's window and basis, the block line naming the missing
+ticket, the ok line for the holder, the holder outranking, invitations untouched, the unknown
+line for a posting with no requirements, the plain refusal for an empty pool).
+`server/engineReachability.test.ts` no longer lists `dispatchMatching` as unwired.
+
 ## Known limitations
 
 - HOS duty status is not yet fed into the availability read; the composite reads it only through
   the determination.
-- The panel assesses the job's assigned pair only; ranking a candidate pool for an unassigned
-  posting is the next use of the same procedure.
+- The pool is read from the posting's invitations, bids and specialty pool only; operators who
+  merely *could* be invited (a region, a vehicle class) are not proposed. Widening the pool is a
+  product decision, not a missing query.
+- The matching line is computed per request from `operatorCapabilities`; a capability that
+  expired between the request and the award is the readiness gate's to catch, as it always was.
+- The dispatcher's posting screen does not yet show the ranked pool; the answer is served by the
+  procedure and rendered only on the readiness panel for an assigned pair.
 
 ## Recommended next checkpoint
 
-Offer the ranked candidate pool on an open posting (`dispatchPostings`) through the same
-procedure, with the pool's eligibility from `dispatchMatching` as one more cited engine, so a
-dispatcher staffing a job sees who could take it and why the rest could not.
+Render the ranked pool on the dispatcher's open-posting screen (`client/src/dispatch/`), one
+row per candidate with the verdict, the matching line and the links, so staffing a job is done
+from the composed answer rather than from memory — with the same safety question the readiness
+panel asks: nothing on the screen says Ready, and asking never invites, bids or awards.

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { assessSchedule, earliestFree, linkFor, rankAssessments, type ScheduleInput } from "./schedulingIntelligence";
 import { determine, type Clocks, type HosRuleProfile } from "./hos";
 import type { AvailabilityResult } from "./calendarEvents";
+import { matchOperatorToJob, type OperatorProfile } from "./dispatchMatching";
 
 const T = (h: number, m = 0) => new Date(Date.UTC(2027, 3, 12, h, m));
 const WINDOW = { from: T(6), to: T(18) };
@@ -151,5 +152,29 @@ describe("the unit, and where a finding goes", () => {
     expect(linkFor(null)).toBeNull();
     const a = assessSchedule(base());
     for (const f of a.findings) expect(f.deepLink, f.line).toBe(linkFor(f.ref));
+  });
+});
+
+describe("the posting's requirements, through the matching engine", () => {
+  const job = { jobCode: "J-1", requiredCapabilities: [{ kind: "certification" as const, code: "H2S", label: "H2S Alive" }], specialtyPool: null };
+  const op = (caps: OperatorProfile["capabilities"]): OperatorProfile => ({ operatorId: 7, name: "Dylan", capabilities: caps, specialtyPools: [], operatingRegions: [], onCall: false });
+  const ref = "dispatchPosting:9:job:41";
+
+  it("writes no line when no posting is in question, and an unknown one when its requirements could not be read", () => {
+    expect(assessSchedule(base()).findings.some(f => f.engine === "matching")).toBe(false);
+    const a = assessSchedule(base({ match: null }));
+    expect(a.verdict).toBe("UNKNOWN");
+    expect(a.findings.find(f => f.engine === "matching")).toMatchObject({ state: "unknown", line: expect.stringMatching(/could not be read/) });
+  });
+
+  it("a missing requirement blocks, naming it and the engine; a held one is ok and still says a match is not an eligibility", () => {
+    const missing = assessSchedule(base({ match: { result: matchOperatorToJob(op([]), null, job, T(5)), ref } }));
+    expect(missing.verdict).toBe("NOT_FEASIBLE");
+    expect(missing.findings.find(f => f.engine === "matching")).toMatchObject({ state: "block", line: expect.stringMatching(/^Not a match for the posting — missing H2S Alive/), deepLink: "/dispatch/41" });
+    const held = assessSchedule(base({ match: { result: matchOperatorToJob(op([{ kind: "certification", code: "H2S", label: "H2S Alive", expiresAt: T(23), isCredential: true }]), null, job, T(5)), ref } }));
+    expect(held.verdict).toBe("FEASIBLE");
+    expect(held.findings.find(f => f.engine === "matching")!.line).toMatch(/Matches the posting's requirements \(H2S Alive\)\. A match is who may see the posting, not who may be sent\./);
+    const expired = assessSchedule(base({ match: { result: matchOperatorToJob(op([{ kind: "certification", code: "H2S", label: "H2S Alive", expiresAt: T(4), isCredential: true }]), null, job, T(5)), ref } }));
+    expect(expired.findings.find(f => f.engine === "matching")!.line).toMatch(/missing H2S Alive \(expired\)/);
   });
 });

@@ -136,4 +136,45 @@ d("one answer for dispatch, composed and cited", () => {
     expect(none.basis).toMatch(/has no booking yet, so the next twelve hours were assumed; an eight-hour job was assumed/);
     await expect(caller(dispatcher).work.scheduleAssess({ operatorIds: [999_999_999], jobId, now: NOW })).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringMatching(/operator 999999999 has no user/) });
   });
+
+  it("B23.4 — an open posting: the pool is the candidate set, the window is the posting's, and the matching engine's line names what each is missing", async () => {
+    const dispatcher = await person("dispatcher");
+    const holder = await person("driver");
+    const lacking = await person("driver");
+    const holderOp = await operatorFor(holder, "Priya");
+    const lackingOp = await operatorFor(lacking, "Sam");
+    const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Acme', 'LSD 04-12-052-09W5', 'dispatched', 0)", [`JOB-${rnd()}`.slice(0, 40)]);
+    const jobId = Number(job.insertId);
+    const requirements = { jobCode: `J-${jobId}`, requiredCapabilities: [{ kind: "certification", code: "H2S", label: "H2S Alive" }] };
+    const [p] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO dispatchPostings (postingNumber, jobId, distribution, planningState, priority, crewSize, requirementsJson, scheduledStart, estimatedDurationMinutes) VALUES (?, ?, 'invite_only', 'invite_only', 'normal', 1, ?, ?, 240)", [`DSP-${rnd()}`.slice(0, 40), jobId, JSON.stringify(requirements), local(2027, 4, 12, 7)]);
+    const postingId = Number(p.insertId);
+    await pool.execute("INSERT INTO dispatchInvitations (postingId, operatorId, status, sentAt) VALUES (?, ?, 'sent', ?), (?, ?, 'sent', ?)", [postingId, holderOp, NOW, postingId, lackingOp, NOW]);
+    await pool.execute("INSERT INTO operatorCapabilities (operatorId, kind, code, label, expiresAt, isCredential) VALUES (?, 'certification', 'H2S', 'H2S Alive', ?, 1)", [holderOp, local(2028, 1, 1, 0)]);
+
+    const r = await caller(dispatcher).work.scheduleAssess({ postingId, now: NOW });
+    expect(r.postingId).toBe(postingId);
+    expect(r.jobId).toBe(jobId);
+    expect(r.basis).toBe(`window from posting ${postingId}'s scheduled start and estimated duration`);
+    expect(r.from.toISOString()).toBe(local(2027, 4, 12, 7).toISOString());
+    expect(r.to.toISOString()).toBe(local(2027, 4, 12, 11).toISOString());
+    expect(r.ranked.map(a => a.candidate.userId).sort()).toEqual([holder, lacking].sort());
+    const byUser = new Map(r.ranked.map(a => [a.candidate.userId, a]));
+    const sam = byUser.get(lacking)!.findings.find(f => f.engine === "matching")!;
+    expect(sam).toMatchObject({ state: "block", line: expect.stringMatching(/^Not a match for the posting — missing H2S Alive/), ref: `dispatchPosting:${postingId}:job:${jobId}`, deepLink: `/dispatch/${jobId}` });
+    expect(byUser.get(lacking)!.verdict).toBe("NOT_FEASIBLE");
+    const priya = byUser.get(holder)!.findings.find(f => f.engine === "matching")!;
+    expect(priya).toMatchObject({ state: "ok", line: expect.stringMatching(/Matches the posting's requirements \(H2S Alive\)\. A match is who may see the posting, not who may be sent\./) });
+    // The holder outranks the one who lacks the ticket; neither was invited, bid for or awarded anything by asking.
+    expect(r.ranked[0]!.candidate.userId).toBe(holder);
+    const [inv] = await pool.execute<mysql.RowDataPacket[]>("SELECT status FROM dispatchInvitations WHERE postingId = ?", [postingId]);
+    expect(inv.map(x => x.status)).toEqual(["sent", "sent"]);
+    // A posting with no requirements recorded: the matching line is unknown, not clear.
+    const [bare] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO dispatchPostings (postingNumber, jobId, distribution, planningState, priority, crewSize, scheduledStart) VALUES (?, ?, 'invite_only', 'invite_only', 'normal', 1, ?)", [`DSP-${rnd()}`.slice(0, 40), jobId, local(2027, 4, 12, 7)]);
+    const none = await caller(dispatcher).work.scheduleAssess({ postingId: Number(bare.insertId), operatorIds: [holderOp], now: NOW });
+    expect(none.basis).toMatch(/an eight-hour job was assumed/);
+    expect(none.ranked[0]!.findings.find(f => f.engine === "matching")).toMatchObject({ state: "unknown", line: expect.stringMatching(/could not be read/) });
+    // A posting nobody was invited to, with no pool and no bids: nobody to assess, said plainly.
+    const [empty] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO dispatchPostings (postingNumber, jobId, distribution, planningState, priority, crewSize) VALUES (?, ?, 'invite_only', 'invite_only', 'normal', 1)", [`DSP-${rnd()}`.slice(0, 40), jobId]);
+    await expect(caller(dispatcher).work.scheduleAssess({ postingId: Number(empty.insertId), now: NOW })).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringMatching(/has no invitation, bid or pool member yet/) });
+  });
 });

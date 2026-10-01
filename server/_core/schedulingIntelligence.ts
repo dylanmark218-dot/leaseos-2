@@ -31,8 +31,9 @@
 import type { AvailabilityResult, AvailabilityStatus } from "./calendarEvents";
 import { tripFeasibility, type HosDetermination } from "./hos";
 import type { EligibilityVerdict } from "./dispatchReadiness";
+import type { MatchResult } from "./dispatchMatching";
 
-export type FindingEngine = "calendar" | "hos" | "dispatch" | "readiness";
+export type FindingEngine = "calendar" | "hos" | "dispatch" | "readiness" | "matching";
 export type FindingState = "ok" | "review" | "block" | "unknown";
 
 export type Finding = {
@@ -56,6 +57,7 @@ export function linkFor(ref: string | null): string | null {
   if (!ref) return null;
   if (ref.startsWith("hos.status:")) return "/hos-verification";
   if (ref.startsWith("dispatch.readiness:")) return null;   // the finding is already on that panel
+  if (ref.startsWith("dispatchPosting:")) { const job = /:job:(\d+)$/.exec(ref); return job ? `/dispatch/${job[1]}` : null; }
   if (ref === "calendarEvent" || ref === "leaveRequest" || ref === "crewMember") return "/work";
   if (ref.startsWith("resourceBooking")) return "/work";
   return null;
@@ -78,6 +80,9 @@ export type ReadinessFacts = {
   ref: string;
 };
 
+/** What the matching engine said about this candidate for the posting, when a posting is in question. */
+export type MatchFacts = { result: MatchResult; ref: string };
+
 export type ScheduleInput = {
   candidate: { userId: number; label: string };
   unit: { unitId: number; label: string } | null;
@@ -91,6 +96,12 @@ export type ScheduleInput = {
   unitBookings?: readonly { from: Date; to: Date; ref: string }[];
   hos: HosFacts | null;
   readiness: ReadinessFacts | null;
+  /**
+   * Absent when no posting is in question (no line is written). Null when a posting is in question
+   * and its requirements could not be read (an unknown line). A match is never an eligibility: the
+   * matching engine's own rule, kept here — it decides who may see a posting, not who may be sent.
+   */
+  match?: MatchFacts | null;
   now: Date;
 };
 
@@ -250,6 +261,22 @@ function readinessFindings(input: ScheduleInput): Finding[] {
 }
 
 /* ------------------------------------------------------------------ */
+/* The posting's requirements, from the matching engine                 */
+/* ------------------------------------------------------------------ */
+
+function matchFindings(input: ScheduleInput): Finding[] {
+  if (input.match === undefined) return [];
+  if (input.match === null) return [finding({ engine: "matching", state: "unknown", line: "The posting's requirements could not be read, so nothing was matched against them.", ref: null })];
+  const { result: m, ref } = input.match;
+  const unknowns = m.reasons.filter(r => r.outcome === "unknown").map(r => `${r.factor}: ${r.detail}`);
+  if (!m.matched) return [finding({ engine: "matching", state: "block", line: `Not a match for the posting — missing ${m.missingRequirements.join(", ") || "a requirement"}. ${m.explanation}`, ref })];
+  if (unknowns.length) return [finding({ engine: "matching", state: "unknown", line: `Matches the posting's stated requirements, but ${unknowns.join("; ")}.`, ref })];
+  const partial = m.reasons.filter(r => r.outcome === "partial").map(r => `${r.factor}: ${r.detail}`);
+  if (partial.length) return [finding({ engine: "matching", state: "review", line: `Matches the posting's requirements with reservations — ${partial.join("; ")}. A match is who may see the posting, not who may be sent.`, ref })];
+  return [finding({ engine: "matching", state: "ok", line: `Matches the posting's requirements (${m.reasons.filter(r => r.outcome === "met").map(r => r.factor).join(", ") || "none stated"}). A match is who may see the posting, not who may be sent.`, ref })];
+}
+
+/* ------------------------------------------------------------------ */
 /* The composite                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -260,7 +287,7 @@ export function assessSchedule(input: ScheduleInput): ScheduleAssessment {
   const cal = calendarFindings(input);
   const hos = hosFindings(input, cal.availableFrom);
   const ready = readinessFindings(input);
-  const findings = [...cal.findings, ...hos.findings, ...ready];
+  const findings = [...cal.findings, ...matchFindings(input), ...hos.findings, ...ready];
   const has = (s: FindingState) => findings.some(f => f.state === s);
   const verdict: ScheduleVerdict = has("block") ? "NOT_FEASIBLE" : has("unknown") ? "UNKNOWN" : has("review") ? "FEASIBLE_WITH_REVIEW" : "FEASIBLE";
   const who = input.unit ? `${input.candidate.label} and ${input.unit.label}` : input.candidate.label;
