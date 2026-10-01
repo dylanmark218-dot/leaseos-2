@@ -28,7 +28,6 @@ import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
 import { adminProcedure, roleProcedure, router } from "./_core/trpc";
 import {
-  authorizeMechanicRelease,
   authorizeRecordScope,
 } from "./_core/recordsAuthorization";
 import {
@@ -53,7 +52,7 @@ import {
   planEscalation,
   ROADSIDE_INSPECTION_SCOPE,
 } from "./_core/incidentReport";
-import { currentReleaseEvidenceFor, evaluateMechanicRelease } from "./_core/mechanicRelease";
+import { currentReleaseEvidenceFor } from "./_core/mechanicRelease";
 import * as svc from "./recordsService";
 import {
   bootstrapManagementRole,
@@ -752,62 +751,14 @@ export const recordsRouter = router({
       .mutation(async ({ ctx, input }) => {
       // P4.1: the work order's unit must be in the caller's scope.
       if (!(await workOrderInScope(input.workOrderId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderId} not found` });
-        const grants = await listActiveUserRoles(ctx.user.id);
-
-        // The signature must be the caller's own.
-        const auth = authorizeMechanicRelease({
-          userId: ctx.user.id,
-          grants,
-          organization: ctx.organization,   // B23.1A — see records.evidence.seal
-          technicianUserId: ctx.user.id,
+        // 0221 — retired (design S-1): there is one door that appends a release, `shop.workOrderRelease`.
+        // This one wrote no `resolvedDefectIds`, so a release made here never counted as evidence for the
+        // defect it repaired, and it could not see the work order's tasks. The scope check above stays, so
+        // another organization's work order is still "not found" rather than learning it exists.
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `records.maintenance.recordRelease is closed. Use shop.workOrderRelease for work order ${input.workOrderId} — it names the defects the release repaired, refuses while tasks are open, and is the one door a release comes through.`,
         });
-        if (!auth.allowed) throw forbidden(auth.detail ?? "Cannot record a release");
-
-        const wo = await svc.loadWorkOrderSubject(input.workOrderId);
-        if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: "No such work order" });
-
-        const decision = evaluateMechanicRelease({
-          workOrderStatus: wo.status,
-          // Read from the defect, never from the request.
-          defectSeverity: wo.defectSeverity,
-          releaseType: input.releaseType,
-          restrictionDetail: input.restrictionDetail,
-          repairSummary: input.repairSummary,
-          testProcedure: input.testProcedure,
-          testResult: input.testResult,
-          roadTestPerformed: input.roadTestPerformed,
-          technicianUserId: ctx.user.id,
-          technicianIdentifier: input.technicianIdentifier,
-        });
-
-        if (!decision.valid) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: decision.blockers.map(b => b.label).join("; "),
-          });
-        }
-
-        await svc.appendWorkOrderRelease({
-          workOrderId: wo.id,
-          unitId: wo.unitId,
-          releaseType: input.releaseType,
-          restrictionDetail: input.restrictionDetail ?? null,
-          repairSummary: input.repairSummary,
-          testProcedure: input.testProcedure ?? null,
-          testResult: input.testResult ?? null,
-          roadTestPerformed: input.roadTestPerformed,
-          roadTestNotes: input.roadTestNotes ?? null,
-          technicianUserId: ctx.user.id,
-          technicianIdentifier: input.technicianIdentifier,
-          releasedAt: new Date(),
-        });
-
-        return {
-          released: true,
-          restricted: decision.restricted,
-          unitId: wo.unitId,
-          dispatchRecalculationRequired: true,
-        };
       }),
 
     /**
@@ -881,6 +832,7 @@ export const recordsRouter = router({
         const changed = await svc.resolveMaintenanceDefect({
           defectId: defect.id, resolvedByUserId: ctx.user.id,
           resolvedByReleaseId: evidenceId, note: input.note, at: new Date(),
+          actorRole: ctx.roles.find(r => r === "mechanic" || r === "shop_lead") ?? ctx.roles[0] ?? "unknown",
         });
         if (!changed) {
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Defect ${defect.id} is already resolved` });

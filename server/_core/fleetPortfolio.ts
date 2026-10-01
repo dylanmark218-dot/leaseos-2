@@ -138,6 +138,8 @@ export const NOT_EVALUATED = [
 export function liftedByFor(h: { sourceKind?: string; sourceRef?: string | null }): string {
   if (!h.sourceKind || h.sourceKind === "manual") return "fleet.holdRelease";
   if (h.sourceKind === "incident") return "records.incident.review";
+  // 0221 — a defect's hold is lifted by the second person's return to service of its repair.
+  if (h.sourceKind === "defect") return "maintenance.returnToService";
   return `the ${h.sourceKind} workflow that placed it${h.sourceRef ? ` (${h.sourceRef})` : ""}`;
 }
 

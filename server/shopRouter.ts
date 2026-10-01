@@ -6,7 +6,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { evaluateMechanicRelease } from "./_core/mechanicRelease";
-import { appendWorkOrderRelease } from "./recordsService";
+import { appendRelease, unfinishedTasks } from "./defectLifecycleService";
 import { actingScopeFor, getDb, unitInScope, workOrderInScope } from "./db";
 import { requireProvableOwnership } from "./ownershipDomain";
 
@@ -391,6 +391,10 @@ export const shopRouter = router({
         : null;
       const defectSeverity = (defect?.severity ?? "advisory") as "advisory" | "inspection_required" | "critical";
 
+      // 0221 — a release is the repair's evidence, and the repair is its tasks: none may still be open.
+      const unfinished = await unfinishedTasks(db, wo.id);
+      if (unfinished.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Unfinished tasks on ${wo.workOrderNumber}: ${unfinished.map(t => `${t.taskRef} (${t.status})`).join(", ")} — finish, mark not required, or defer them with a reason first` });
+
       const decision = evaluateMechanicRelease({
         workOrderStatus: wo.status,
         defectSeverity,
@@ -407,7 +411,9 @@ export const shopRouter = router({
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: decision.blockers.map(b => b.label).join(" · ") });
       }
 
-      const releaseId = await appendWorkOrderRelease({
+      // 0221 — the one door that appends a release (records.maintenance.recordRelease is retired), and the
+      // release and a `released` event on every defect it names are written together.
+      const releaseId = await appendRelease(db, {
         workOrderId: input.workOrderId, unitId: wo.unitId, releaseType: input.releaseType,
         restrictionDetail: input.restrictionDetail ?? null,
         repairSummary: input.repairSummary, testProcedure: input.testProcedure ?? null,
@@ -416,7 +422,7 @@ export const shopRouter = router({
         technicianUserId: ctx.user.id, technicianIdentifier: `TECH-${ctx.user.id}`,
         technicianCertificationRef: input.technicianCertificationRef ?? null,
         releasedAt: input.releasedAt, resolvedDefectIds: JSON.stringify(input.resolvedDefectIds),
-      });
+      }, { namedDefectIds: input.resolvedDefectIds, actor: { userId: ctx.user.id, role: ctx.roles.find(r => r === "mechanic" || r === "shop_lead") ?? ctx.roles[0] ?? "unknown" }, at: new Date() });
 
       return {
         releaseId: releaseId ?? null, workOrderId: input.workOrderId, unitId: wo.unitId,

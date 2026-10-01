@@ -354,7 +354,11 @@ export type Permission =
   // 0200 — the Fleet & Equipment Portfolio's foundation. Placing and releasing a hold decide whether a
   // unit may move, and verifying a meter reading makes it count; all three are sensitive. Which hold
   // TYPES a role may place or release is decided in `_core/fleetPortfolio.ts`, below the permission.
-  | "fleet.hold.place" | "fleet.hold.release" | "fleet.meter.record" | "fleet.meter.verify";
+  | "fleet.hold.place" | "fleet.hold.release" | "fleet.meter.record" | "fleet.meter.verify"
+  // 0221 — fleet maintenance, checkpoint 2. Triage decides a defect's severity (lowering a critical frees
+  // a safety hold); return to service is the second person's verification that lifts a defect's hold.
+  | "maintenance.defect.triage" | "maintenance.defect.send_to_shop" | "maintenance.task.write"
+  | "maintenance.return_to_service.record";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -460,6 +464,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    // 0221 — opening a work order from a defect.
+    "maintenance.defect.send_to_shop",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -651,6 +657,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.hold.place",
     "fleet.hold.release",
     "fleet.meter.record",
+    // 0221 — fleet maintenance, checkpoint 2: triage, send to shop, the repair's tasks, return to service.
+    "maintenance.defect.triage",
+    "maintenance.defect.send_to_shop",
+    "maintenance.task.write",
+    "maintenance.return_to_service.record",
     "fleet.meter.verify",
   ],
   shop_lead: [
@@ -750,6 +761,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.hold.place",
     "fleet.hold.release",
     "fleet.meter.record",
+    // 0221 — fleet maintenance, checkpoint 2.
+    "maintenance.defect.triage",
+    "maintenance.defect.send_to_shop",
+    "maintenance.task.write",
+    "maintenance.return_to_service.record",
     "fleet.meter.verify",
   ],
   safety: [
@@ -883,6 +899,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.hold.place",
     "fleet.hold.release",
+    // 0221 — the second person who returns a unit to service; a critical defect's safety hold is theirs to lift.
+    "maintenance.return_to_service.record",
+    // 0221 — and they decide severity: lowering a critical defect frees its safety hold, which safety may release.
+    "maintenance.defect.triage",
   ],
   office: [
     "live_assist.use",
@@ -1062,6 +1082,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
     // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.meter.record",
+    // 0221 — opening a work order from a defect.
+    "maintenance.defect.send_to_shop",
   ],
   management: [
     "live_assist.use",
@@ -1347,6 +1369,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.hold.place",
     "fleet.hold.release",
+    // 0221 — return to service (a safety hold is management's or safety's to lift).
+    "maintenance.return_to_service.record",
     "fleet.meter.verify",
   ],
   hr: [
@@ -2106,6 +2130,9 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "fleet.hold.place",
   "fleet.hold.release",
   "fleet.meter.verify",
+  // 0221 — triage can lower a critical defect, which frees a safety hold; return to service puts a unit back on the road.
+  "maintenance.defect.triage",
+  "maintenance.return_to_service.record",
 ] as const;
 
 export function isSensitivePermission(p: Permission): boolean {
@@ -3390,6 +3417,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "fleet.meterRecord": "fleet.meter.record",
   "fleet.meterDecide": "fleet.meter.verify",
   "fleet.history": "fleet.read",
+
+  /* ---- 0221: fleet maintenance, checkpoint 2 — defect to return to service ---- */
+  "maintenance.defectReport": "maintenance.write_defect",
+  "maintenance.defectTriage": "maintenance.defect.triage",
+  "maintenance.defectSendToShop": "maintenance.defect.send_to_shop",
+  "maintenance.taskAdd": "maintenance.task.write",
+  "maintenance.taskSetStatus": "maintenance.task.write",
+  "maintenance.returnToService": "maintenance.return_to_service.record",
+  "maintenance.defectHistory": "maintenance.read_defect",
 
   /* ---- the page scanner: guidance and review, both read-only ----
    * Both answer "what does this paperwork need"; neither writes, links or

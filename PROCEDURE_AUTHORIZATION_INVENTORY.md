@@ -43,7 +43,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/commercialRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/closeoutRouter.ts` | `ROLE_AUTHORIZED` | **20** |
 | `server/shopRouter.ts` | `ROLE_AUTHORIZED` | **25** |
-| `server/maintenanceRouter.ts` | `ROLE_AUTHORIZED` | **3** |
+| `server/maintenanceRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/fleetPortfolioRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/assetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/projectRouter.ts` | `ROLE_AUTHORIZED` | **9** |
@@ -58,7 +58,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**469 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
+**476 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
 The table lists the surfaces reviewed here, not every router; the system-wide count is generated into
 `LEASEOS_CURRENT_STATE.md`. The numbers in this table are written by `node scripts/procedure-inventory.mjs`,
 which reads them from the routers (CP1.5: nine rows had drifted below their routers and the total said 356).
@@ -418,6 +418,17 @@ missed them.
   (`fleet.meter.record`, mechanic, shop lead, office — not the driver yet); verifying or rejecting
   one is a second person's and sensitive (`fleet.meter.verify`). Every read is `fleet.read`, and
   another organization's unit, hold or reading answers NOT_FOUND worded as for one that does not exist.
+- **A defect is returned to service by a second person.** (0221, fleet maintenance
+  checkpoint 2) Reporting keeps the reporter's words and proposed severity apart from
+  the decision (`maintenance.write_defect`); triage decides it (`maintenance.defect.triage`:
+  mechanic, shop lead, safety — sensitive), and lowering a critical defect frees its
+  safety hold, which only safety or management may release, never its placer. Sending
+  to the shop (`maintenance.defect.send_to_shop`) opens the work order and its first
+  task together; tasks are `maintenance.task.write`. `shop.workOrderRelease` is the one
+  door a release comes through (`records.maintenance.recordRelease` is closed) and waits
+  for every task. `maintenance.returnToService` (sensitive) is refused to the technician
+  who signed the release and applies the portfolio's hold rule to every hold it lifts;
+  both it and triage are human-authorization permissions an agent never exercises.
 - **A work order is owned by a person, and cancelling it repairs nothing.** (0199, fleet
   maintenance checkpoint 1) Assigning, reassigning and unassigning a work order is
   history, not an edit: the assignee is a user holding a shop role in the unit's

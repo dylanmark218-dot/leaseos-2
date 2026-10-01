@@ -10,6 +10,7 @@
 import { and, desc, eq, ne } from "drizzle-orm";
 import { getDb } from "./db";
 import { placeHold, releaseHold } from "./fleetPortfolioService";
+import { defectEvent } from "./defectLifecycleService";
 import type { DbOrTx } from "./_core/dbTypes";
 import {
   evidenceAccessEvents,
@@ -628,20 +629,33 @@ export async function resolveMaintenanceDefect(args: {
   resolvedByReleaseId: number | null;
   note: string;
   at: Date;
+  /** 0221 — who resolved it, and the role they acted in, for the defect's history. */
+  actorRole?: string;
 }): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  const r = await db
-    .update(maintenanceDefects)
-    .set({
-      status: "resolved",
-      resolvedAt: args.at,
-      resolvedByUserId: args.resolvedByUserId,
-      resolvedByReleaseId: args.resolvedByReleaseId,
-      resolutionNote: args.note.slice(0, 400),
-    })
-    .where(and(eq(maintenanceDefects.id, args.defectId), ne(maintenanceDefects.status, "resolved")));
-  return (r[0]?.affectedRows ?? 0) > 0;
+  // 0221 — the resolution and its `resolved` event, together.
+  return db.transaction(async tx => {
+    const before = (await tx.select({ unitId: maintenanceDefects.unitId, status: maintenanceDefects.status }).from(maintenanceDefects).where(eq(maintenanceDefects.id, args.defectId)).limit(1))[0];
+    const r = await tx
+      .update(maintenanceDefects)
+      .set({
+        status: "resolved",
+        resolvedAt: args.at,
+        resolvedByUserId: args.resolvedByUserId,
+        resolvedByReleaseId: args.resolvedByReleaseId,
+        resolutionNote: args.note.slice(0, 400),
+      })
+      .where(and(eq(maintenanceDefects.id, args.defectId), ne(maintenanceDefects.status, "resolved")));
+    const changed = (r[0]?.affectedRows ?? 0) > 0;
+    if (changed && before) {
+      await defectEvent(tx as unknown as DbOrTx, {
+        defectId: args.defectId, unitId: before.unitId, eventType: "resolved", fromValue: before.status, toValue: "resolved",
+        releaseId: args.resolvedByReleaseId, reason: args.note, actor: { userId: args.resolvedByUserId, role: args.actorRole ?? "unknown" }, at: args.at,
+      });
+    }
+    return changed;
+  });
 }
 
 export async function latestRelease(unitId: number) {

@@ -7,16 +7,16 @@ here can be added rather than read.
 | Measure | Value | Read from |
 |---|---|---|
 | Release | **v23.31** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **443** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **192** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **755** | `roleProcedure(` call sites across all routers |
+| Tables | **445** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **194** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **762** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **388** | the `Permission` union |
-| Sensitive (fail-closed) permissions | **146** | `SENSITIVE_PERMISSIONS` |
+| Permissions | **392** | the `Permission` union |
+| Sensitive (fail-closed) permissions | **148** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **449 / 6187** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **450 / 6198** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -73,7 +73,14 @@ every assignment kept as history; a cancelled work order that repairs
 nothing, releases nothing and leaves its defect open; a legacy update that
 can no longer move a status; a forward-only advance that stamps when work
 started and finished and keeps its note; telematics answering not-found
-across an organization) · Fleet & Equipment Portfolio foundation (typed
+across an organization) · fleet maintenance, checkpoint 2 (a defect from
+the reporter's words to an independent return to service: the proposal
+kept apart from the triage decision, a reported critical holding the unit
+at once, the work order and its first task opened together, tasks that
+only move forward, one release door that waits for every task, and a
+return to service refused to the technician who signed the release that
+resolves the defect, lifts its hold, closes its roadside event and the
+work order in one act, every step an event) · Fleet & Equipment Portfolio foundation (typed
 holds whose effect is a warning, a block releasable only under an approved
 policy, or — for a safety hold — out of service with no override, placed
 and released by different people with the hold's type deciding who, never

@@ -299,7 +299,7 @@ export const facilities = mysqlTable("facilities", {
 export const inspections = mysqlTable("inspections", {
   id: int("id").autoincrement().primaryKey(),
   unitId: int("unitId").notNull(),
-  type: mysqlEnum("type", ["training", "pre_trip", "post_trip"]).notNull(),
+  type: mysqlEnum("type", ["training", "pre_trip", "post_trip", "return_to_service"]).notNull(),
   status: mysqlEnum("status", [
     "pass",
     "fail",
@@ -313,6 +313,12 @@ export const inspections = mysqlTable("inspections", {
   observedAt: timestamp("observedAt").notNull(),
   authenticatedOperatorId: int("authenticatedOperatorId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /* 0221 — a return-to-service inspection: the second person's verification of a released repair. */
+  inspectionRef: varchar("inspectionRef", { length: 64 }).unique(),
+  outcome: mysqlEnum("outcome", ["pass", "fail"]),
+  inspectorUserId: int("inspectorUserId"),
+  workOrderId: int("workOrderId"),
+  releaseId: int("releaseId"),
 });
 
 export const maintenanceDefects = mysqlTable("maintenanceDefects", {
@@ -347,6 +353,15 @@ export const maintenanceDefects = mysqlTable("maintenanceDefects", {
   resolvedByReleaseId: int("resolvedByReleaseId"),
   resolutionNote: varchar("resolutionNote", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /* 0221 — what the reporter said and proposed, kept apart from what was decided. `severity` above is the
+     decision readiness reads; `severityProposed` never is. NULL on rows from before 0221: not recorded. */
+  defectRef: varchar("defectRef", { length: 64 }).unique(),
+  source: mysqlEnum("source", ["driver_report", "mechanic_inspection", "roadside", "enforcement", "telematics", "office"]),
+  driverStatement: text("driverStatement"),
+  severityProposed: mysqlEnum("severityProposed", ["advisory", "inspection_required", "critical"]),
+  severityProposedByUserId: int("severityProposedByUserId"),
+  severityDecidedByUserId: int("severityDecidedByUserId"),
+  severityDecidedAt: timestamp("severityDecidedAt"),
 });
 
 export const deliveries = mysqlTable("deliveries", {
@@ -9961,4 +9976,51 @@ export const jobCommercialSnapshots = mysqlTable("jobCommercialSnapshots", {
   payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
   supersedesSnapshotId: int("supersedesSnapshotId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/* ------------------------------------------------------------------ */
+/* 0221 — Fleet maintenance, checkpoint 2: defect to return to service */
+/* ------------------------------------------------------------------ */
+
+/** Every act on a defect, as history (0222: append-only). Written in the transaction of the act. */
+export const maintenanceDefectEvents = mysqlTable("maintenanceDefectEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  defectId: int("defectId").notNull(),
+  unitId: int("unitId").notNull(),
+  eventType: mysqlEnum("eventType", ["reported", "severity_decided", "sent_to_shop", "task_added", "task_status", "released", "returned_to_service", "return_to_service_failed", "resolved", "hold_placed", "hold_released", "roadside_closed"]).notNull(),
+  fromValue: varchar("fromValue", { length: 120 }),
+  toValue: varchar("toValue", { length: 120 }),
+  reason: varchar("reason", { length: 600 }),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 40 }).notNull(),
+  workOrderId: int("workOrderId"),
+  releaseId: int("releaseId"),
+  taskId: int("taskId"),
+  inspectionId: int("inspectionId"),
+  holdRef: varchar("holdRef", { length: 96 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** The repair as tasks. Forward only; a finished task is history (0222); a release waits for every task. */
+export const workOrderTasks = mysqlTable("workOrderTasks", {
+  id: int("id").autoincrement().primaryKey(),
+  taskRef: varchar("taskRef", { length: 64 }).notNull().unique(),
+  workOrderId: int("workOrderId").notNull(),
+  unitId: int("unitId").notNull(),
+  seq: int("seq").notNull(),
+  kind: mysqlEnum("kind", ["inspect", "diagnose", "repair", "replace", "adjust", "road_test", "other"]).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  instructions: text("instructions"),
+  defectId: int("defectId"),
+  status: mysqlEnum("status", ["open", "in_progress", "done", "not_required", "deferred"]).default("open").notNull(),
+  findings: text("findings"),
+  correctiveAction: text("correctiveAction"),
+  deferredReason: varchar("deferredReason", { length: 400 }),
+  createdByUserId: int("createdByUserId").notNull(),
+  completedByUserId: int("completedByUserId"),
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

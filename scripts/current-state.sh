@@ -149,7 +149,14 @@ every assignment kept as history; a cancelled work order that repairs
 nothing, releases nothing and leaves its defect open; a legacy update that
 can no longer move a status; a forward-only advance that stamps when work
 started and finished and keeps its note; telematics answering not-found
-across an organization) · Fleet & Equipment Portfolio foundation (typed
+across an organization) · fleet maintenance, checkpoint 2 (a defect from
+the reporter's words to an independent return to service: the proposal
+kept apart from the triage decision, a reported critical holding the unit
+at once, the work order and its first task opened together, tasks that
+only move forward, one release door that waits for every task, and a
+return to service refused to the technician who signed the release that
+resolves the defect, lifts its hold, closes its roadside event and the
+work order in one act, every step an event) · Fleet & Equipment Portfolio foundation (typed
 holds whose effect is a warning, a block releasable only under an approved
 policy, or — for a safety hold — out of service with no override, placed
 and released by different people with the hold's type deciding who, never

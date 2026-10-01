@@ -177,7 +177,7 @@ describe("migrated operational procedures", () => {
     // 40-procedure payroll/finance surface, all gated from the start.
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
     // The merged surface includes 8 Live Assist, 2 paperwork, 23 Document Control, and 10 auth-workspace procedures.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(735);   // 0200: +9 fleet.{unitState,holdList,holdPlace,holdRelease,meterReadings,meterProgress,meterRecord,meterDecide,history} (portfolio foundation);   // 0199: +3 maintenance.{workOrderAssignment,workOrderAssign,workOrderCancel} (fleet maintenance CP1);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(742);   // 0221: +7 maintenance.{defectReport,defectTriage,defectSendToShop,taskAdd,taskSetStatus,returnToService,defectHistory} (fleet maintenance CP2);   // 0200: +9 fleet.{unitState,holdList,holdPlace,holdRelease,meterReadings,meterProgress,meterRecord,meterDecide,history} (portfolio foundation);   // 0199: +3 maintenance.{workOrderAssignment,workOrderAssign,workOrderCancel} (fleet maintenance CP1);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 

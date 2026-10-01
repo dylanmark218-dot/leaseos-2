@@ -11,12 +11,20 @@
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, notInArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { actingScopeFor, getDb, listActiveUserRoles, orgScopeWhere, userInScope, workOrderInScope } from "./db";
-import { facilities, workOrderAssignments, workOrderReleases, workOrders } from "../drizzle/schema";
+import { actingScopeFor, getDb, listActiveUserRoles, orgScopeWhere, unitInScope, userInScope, workOrderInScope } from "./db";
+import { facilities, maintenanceDefects, unitHolds, workOrderAssignments, workOrderReleases, workOrderTasks, workOrders } from "../drizzle/schema";
 import { assignmentHistory, newRef, workOrderRow } from "./maintenanceService";
-import { operationalStateFor } from "./fleetPortfolioService";
+import { operationalStateFor, orgRefOf } from "./fleetPortfolioService";
+import { actingRoleFor, driverNotice, mayPlaceHold, mayReleaseHold } from "./_core/fleetPortfolio";
+import { currentReleaseEvidenceFor, defectIdsNamedBy } from "./_core/mechanicRelease";
+import { permissionsFor, type Permission } from "./_core/recordsAuthorization";
+import { requireCallerUnits } from "./unitScope";
+import {
+  activeDefectHolds, addTask, DEFECT_HOLD_ROLE, defectHistory, defectRow, liveWorkOrderFor, lifecycleRef, recordReturnToService,
+  releasesFor, reportDefect, sendToShop, setTaskStatus, taskTransitionRefusal, triageDefect, triagePlan, unfinishedTasks,
+} from "./defectLifecycleService";
 
 async function dbOrThrow() {
   const db = await getDb();
@@ -30,6 +38,20 @@ async function workOrderOrNotFound(userId: number, workOrderId: number) {
   if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${workOrderId} not found` });
   return wo;
 }
+
+/** The role the caller acts in for this permission — the first of theirs that holds it. */
+const roleHolding = (roles: readonly string[], permission: Permission) => roles.find(r => permissionsFor([r]).includes(permission)) ?? roles[0] ?? "unknown";
+
+/** A defect the caller's organization may see — through its unit — or "not found", like one that does not exist. */
+async function defectOrNotFound(userId: number, defectId: number) {
+  const db = await dbOrThrow();
+  const d = await defectRow(db, defectId);
+  if (!d || !(await unitInScope(d.unitId, await actingScopeFor(userId)))) throw new TRPCError({ code: "NOT_FOUND", message: `Defect ${defectId} not found` });
+  return d;
+}
+
+const SEVERITY = z.enum(["advisory", "inspection_required", "critical"]);
+const TASK_KIND = z.enum(["inspect", "diagnose", "repair", "replace", "adjust", "road_test", "other"]);
 
 export const maintenanceRouter = router({
   /* ---------------- work orders ---------------- */
@@ -111,6 +133,199 @@ export const maintenanceRouter = router({
         note: wo.defectId
           ? `Defect ${wo.defectId} stays open, and a unit held for it stays held; cancelling the work does not repair it.`
           : "Nothing was repaired under this work order.",
+      };
+    }),
+
+  /* ---------------- checkpoint 2: defect → work order → repair → return to service ---------------- */
+
+  /**
+   * Report a defect: the reporter's words kept as said, their severity kept as a proposal. Until triage
+   * the proposal stands (design O-3): a reported critical holds the unit at once, with a `unitHolds`
+   * safety hold that only an independent return to service lifts.
+   */
+  defectReport: roleProcedure("maintenance.defectReport")
+    .input(z.object({
+      unitId: z.number().int().positive(),
+      title: z.string().min(3).max(220),
+      driverStatement: z.string().min(1).max(4000),
+      severityProposed: SEVERITY,
+      source: z.enum(["driver_report", "mechanic_inspection", "office"]).default("driver_report"),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = await requireCallerUnits(ctx.user.id, { unitId: input.unitId });
+      const db = await dbOrThrow();
+      const r = await reportDefect(db, {
+        unitId: input.unitId, orgRef: orgRefOf(scope.tenantId), title: input.title, driverStatement: input.driverStatement,
+        severityProposed: input.severityProposed, source: input.source,
+        actor: { userId: ctx.user.id, role: roleHolding(ctx.roles, "maintenance.write_defect") }, at: new Date(),
+      });
+      const state = await operationalStateFor(db, input.unitId);
+      return { ...r, unitStatus: state.status, driverNotice: driverNotice(state) };
+    }),
+
+  /**
+   * Decide a defect's severity. Raising it to critical holds the unit (safety, out of service);
+   * `holdUnit` on an inspection-required defect holds it for maintenance. Lowering it releases the
+   * defect's hold — which the portfolio's hold rule governs: never by whoever placed it, and a safety
+   * hold only by safety or management. So a mechanic may raise a defect to critical, and may not take a
+   * critical back down alone.
+   */
+  defectTriage: roleProcedure("maintenance.defectTriage")
+    .input(z.object({ defectId: z.number().int().positive(), severity: SEVERITY, reason: z.string().min(5).max(600), holdUnit: z.boolean().default(false) }))
+    .mutation(async ({ ctx, input }) => {
+      let d = await defectOrNotFound(ctx.user.id, input.defectId);
+      if (d.status === "resolved") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Defect ${d.id} is resolved — a new finding is a new defect` });
+      const db = await dbOrThrow();
+      if (!d.defectRef) {
+        // A defect from before 0221 gets its reference the first time it is triaged, so its hold can name it.
+        await db.update(maintenanceDefects).set({ defectRef: lifecycleRef("DEF") }).where(and(eq(maintenanceDefects.id, d.id), isNull(maintenanceDefects.defectRef)));
+        d = (await defectRow(db, d.id))!;
+      }
+      const current = await activeDefectHolds(db, [d.defectRef!]);
+      const plan = triagePlan(current, input.severity, input.holdUnit);
+      for (const h of plan.release) {
+        const may = mayReleaseHold({ roles: ctx.roles, holdType: h.holdType, placedByUserId: h.placedByUserId, userId: ctx.user.id, status: h.status });
+        if (!may.allowed) throw new TRPCError({ code: "FORBIDDEN", message: `${may.reason} — this decision would release defect ${d.defectRef}'s ${h.holdType} hold` });
+      }
+      if (plan.place?.holdType === "maintenance" && !mayPlaceHold(ctx.roles, "maintenance").allowed) {
+        throw new TRPCError({ code: "FORBIDDEN", message: mayPlaceHold(ctx.roles, "maintenance").reason });
+      }
+      const scope = await actingScopeFor(ctx.user.id);
+      const at = new Date();
+      const r = await triageDefect(db, {
+        defect: d, orgRef: orgRefOf(scope.tenantId), severity: input.severity, reason: input.reason, plan,
+        placedByRole: plan.place?.holdType === "safety" ? DEFECT_HOLD_ROLE : (actingRoleFor(ctx.roles, "maintenance", "place") ?? DEFECT_HOLD_ROLE),
+        releaseRole: plan.release[0] ? actingRoleFor(ctx.roles, plan.release[0].holdType, "release") : null,
+        actor: { userId: ctx.user.id, role: roleHolding(ctx.roles, "maintenance.defect.triage") }, at,
+      });
+      const state = await operationalStateFor(db, d.unitId);
+      return { defectId: d.id, defectRef: d.defectRef, from: d.severity, severity: input.severity, releasedHoldRefs: r.released, placedHoldRef: r.placed, unitStatus: state.status };
+    }),
+
+  /** Open the work order for a defect and its first task, in one transaction. One live work order per defect. */
+  defectSendToShop: roleProcedure("maintenance.defectSendToShop")
+    .input(z.object({
+      defectId: z.number().int().positive(),
+      task: z.object({ kind: TASK_KIND.default("repair"), title: z.string().min(3).max(220).optional(), instructions: z.string().max(4000).optional() }).default({ kind: "repair" }),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const d = await defectOrNotFound(ctx.user.id, input.defectId);
+      if (d.status === "resolved") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Defect ${d.id} is resolved — there is nothing to repair` });
+      const db = await dbOrThrow();
+      const live = await liveWorkOrderFor(db, d.id);
+      if (live) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Defect ${d.id} is already in the shop on ${live.workOrderNumber} (${live.status})` });
+      const r = await sendToShop(db, {
+        defect: d, firstTask: { kind: input.task.kind, title: input.task.title ?? d.title, instructions: input.task.instructions ?? null },
+        actor: { userId: ctx.user.id, role: roleHolding(ctx.roles, "maintenance.defect.send_to_shop") }, at: new Date(),
+      });
+      return { defectId: d.id, ...r };
+    }),
+
+  /** Add a task to a work order. A task that names a defect names one on the same unit. */
+  taskAdd: roleProcedure("maintenance.taskAdd")
+    .input(z.object({ workOrderId: z.number().int().positive(), kind: TASK_KIND, title: z.string().min(3).max(220), instructions: z.string().max(4000).optional(), defectId: z.number().int().positive().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const wo = await workOrderOrNotFound(ctx.user.id, input.workOrderId);
+      if (wo.status === "closed" || wo.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Work order ${wo.workOrderNumber} is ${wo.status}` });
+      const db = await dbOrThrow();
+      if (input.defectId != null) {
+        const d = await defectRow(db, input.defectId);
+        if (!d || d.unitId !== wo.unitId) throw new TRPCError({ code: "NOT_FOUND", message: `Defect ${input.defectId} not found` });
+      }
+      return addTask(db, {
+        workOrder: { id: wo.id, unitId: wo.unitId, defectId: wo.defectId ?? null }, defectId: input.defectId ?? null,
+        kind: input.kind, title: input.title, instructions: input.instructions ?? null,
+        actor: { userId: ctx.user.id, role: roleHolding(ctx.roles, "maintenance.task.write") }, at: new Date(),
+      });
+    }),
+
+  /** Move a task forward. Done states the corrective action; not required states why; deferred states the reason. */
+  taskSetStatus: roleProcedure("maintenance.taskSetStatus")
+    .input(z.object({
+      taskRef: z.string().min(1).max(64), status: z.enum(["in_progress", "done", "not_required", "deferred"]),
+      findings: z.string().max(4000).optional(), correctiveAction: z.string().max(4000).optional(), deferredReason: z.string().max(400).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const task = (await db.select().from(workOrderTasks).where(eq(workOrderTasks.taskRef, input.taskRef)).limit(1))[0];
+      if (!task || !(await workOrderInScope(task.workOrderId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Task ${input.taskRef} not found` });
+      const wo = (await workOrderRow(db, task.workOrderId))!;
+      if (wo.status === "closed" || wo.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Work order ${wo.workOrderNumber} is ${wo.status}` });
+      const refusal = taskTransitionRefusal(task.status, input.status, input);
+      if (refusal) throw new TRPCError({ code: "PRECONDITION_FAILED", message: refusal });
+      const ok = await setTaskStatus(db, {
+        task, workOrderDefectId: wo.defectId ?? null, to: input.status,
+        findings: input.findings ?? null, correctiveAction: input.correctiveAction ?? null, deferredReason: input.deferredReason ?? null,
+        actor: { userId: ctx.user.id, role: roleHolding(ctx.roles, "maintenance.task.write") }, at: new Date(),
+      });
+      if (!ok) throw new TRPCError({ code: "CONFLICT", message: `Task ${input.taskRef} changed while it was being updated` });
+      return { taskRef: input.taskRef, from: task.status, status: input.status };
+    }),
+
+  /**
+   * Return to service: a second person verifies the released repair. Refused to the technician who
+   * signed the release, and — through the portfolio's hold rule — to whoever placed a hold it would lift
+   * and to a role that may not release that hold's type (a critical defect's safety hold: safety or
+   * management). It needs a standing release that names the work order's defect, and every task
+   * finished. A pass resolves the named defects on that release, lifts their holds, closes the roadside
+   * events they came from and closes the work order — one transaction. A fail is recorded and changes
+   * nothing else. It never lifts a government out-of-service order: that is `enforcement.orderRelease`.
+   */
+  returnToService: roleProcedure("maintenance.returnToService")
+    .input(z.object({ workOrderId: z.number().int().positive(), releaseId: z.number().int().positive(), outcome: z.enum(["pass", "fail"]), summary: z.string().min(5).max(2000) }))
+    .mutation(async ({ ctx, input }) => {
+      const wo = await workOrderOrNotFound(ctx.user.id, input.workOrderId);
+      if (wo.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Work order ${wo.workOrderNumber} was cancelled — nothing was repaired under it` });
+      if (wo.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Work order ${wo.workOrderNumber} is closed` });
+      const db = await dbOrThrow();
+      const releases = await releasesFor(db, wo.id);
+      const release = releases.find(r => r.id === input.releaseId);
+      if (!release) throw new TRPCError({ code: "NOT_FOUND", message: `Release ${input.releaseId} not found on work order ${wo.workOrderNumber}` });
+      if (release.technicianUserId === ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: `You signed release ${release.id}; returning the unit to service is a second person's verification of that repair` });
+      }
+      const named = defectIdsNamedBy(release);
+      if (!named.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Release ${release.id} names no defect — a return to service verifies the repair of named defects` });
+      if (wo.defectId != null && !named.includes(wo.defectId)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Release ${release.id} does not name defect ${wo.defectId}, which this work order was opened for` });
+      }
+      const stored = releases.map(r => ({ id: r.id, workOrderId: r.workOrderId, releaseType: r.releaseType, testResult: r.testResult, resolvedDefectIds: r.resolvedDefectIds, releasedAt: r.releasedAt }));
+      for (const id of named) {
+        if (currentReleaseEvidenceFor(id, stored)?.id !== release.id) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Release ${release.id} does not stand for defect ${id} — it was revoked, its test failed, or a later release superseded it` });
+        }
+      }
+      const unfinished = await unfinishedTasks(db, wo.id);
+      if (unfinished.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Unfinished tasks on ${wo.workOrderNumber}: ${unfinished.map(t => `${t.taskRef} (${t.status})`).join(", ")}` });
+      const defects = (await db.select().from(maintenanceDefects).where(inArray(maintenanceDefects.id, named))).filter(d => d.unitId === wo.unitId);
+      const holds = await activeDefectHolds(db, defects.map(d => d.defectRef).filter((r): r is string => !!r));
+      if (input.outcome === "pass") {
+        for (const h of holds) {
+          const may = mayReleaseHold({ roles: ctx.roles, holdType: h.holdType, placedByUserId: h.placedByUserId, userId: ctx.user.id, status: h.status });
+          if (!may.allowed) throw new TRPCError({ code: "FORBIDDEN", message: `${may.reason} — ${h.holdRef} holds this unit for defect ${h.sourceRef}` });
+        }
+      }
+      const role = (holds[0] && actingRoleFor(ctx.roles, holds[0].holdType, "release")) || roleHolding(ctx.roles, "maintenance.return_to_service.record");
+      const r = await recordReturnToService(db, {
+        workOrder: { id: wo.id, unitId: wo.unitId, status: wo.status }, release, defects, holds: input.outcome === "pass" ? holds : [],
+        outcome: input.outcome, summary: input.summary, actor: { userId: ctx.user.id, role }, at: new Date(),
+      });
+      const state = await operationalStateFor(db, wo.unitId);
+      return { workOrderId: wo.id, releaseId: release.id, ...r, unitStatus: state.status, driverNotice: driverNotice(state) };
+    }),
+
+  /** A defect's whole story: what was said, proposed and decided, every act on it, its work orders' tasks, its holds. */
+  defectHistory: roleProcedure("maintenance.defectHistory")
+    .input(z.object({ defectId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const d = await defectOrNotFound(ctx.user.id, input.defectId);
+      const db = await dbOrThrow();
+      const wos = await db.select({ id: workOrders.id, workOrderNumber: workOrders.workOrderNumber, status: workOrders.status }).from(workOrders).where(eq(workOrders.defectId, d.id));
+      const tasks = wos.length ? await db.select().from(workOrderTasks).where(inArray(workOrderTasks.workOrderId, wos.map(w => w.id))).orderBy(workOrderTasks.workOrderId, workOrderTasks.seq) : [];
+      const holds = d.defectRef ? await db.select().from(unitHolds).where(and(eq(unitHolds.sourceKind, "defect"), eq(unitHolds.sourceRef, d.defectRef))) : [];
+      return {
+        defect: { id: d.id, defectRef: d.defectRef, unitId: d.unitId, title: d.title, severity: d.severity, severityProposed: d.severityProposed, status: d.status, source: d.source, driverStatement: d.driverStatement, reportedAt: d.reportedAt, resolvedAt: d.resolvedAt, resolvedByReleaseId: d.resolvedByReleaseId },
+        events: await defectHistory(db, d.id), workOrders: wos, tasks, holds,
       };
     }),
 });

@@ -39,6 +39,9 @@ not collide with a main migration:
 | 0201 | `0201_fleet_portfolio_guards.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | keeps 0201 |
 | 0202 | `0202_live_assist_sessions.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0202 |
 | 0203 | `0203_live_assist_events_append_only.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0203 |
+| 0220 | `0220_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | open branch | none | — (seen in the CP2 scan, 2026-10-01) |
+| 0221 | `0221_defect_lifecycle.sql` | `claude/mechanic-portal-domain-82efa9` (mechanic CP2) | open branch | none | keeps 0221 |
+| 0222 | `0222_defect_lifecycle_guards.sql` | `claude/mechanic-portal-domain-82efa9` (mechanic CP2) | open branch | none | keeps 0222 (trigger DDL in its own file) |
 
 **2026-09-25 (later), on merging main into `claude/leaseos-auth-workspace-system-t008ad` (#64):** its
 `0170_organization_scoped_role_grants.sql` and `0175_organization_invitations.sql` collided with main's
@@ -97,6 +100,18 @@ Next free number at that time: `0191` (superseded above).
 * **2026-09-24 (C1b-1)**: rescanned after #6, #9, #11, #10, #13, #17, #18, #21, #23–#25 merged. C1b-1 takes
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
+
+## Claim: 0221, 0222 (mechanic portal CP2 — defect to return to service, 2026-10-01)
+
+| Number | Migration file | Branch | PR | Base | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0221 | `0221_defect_lifecycle.sql` | `claude/mechanic-portal-domain-82efa9` | none | `038dffc` (contains `main` `b35bac4`) | gated on the branch | none | keeps 0221 |
+| 0222 | `0222_defect_lifecycle_guards.sql` | `claude/mechanic-portal-domain-82efa9` | none | `038dffc` | gated on the branch | none | keeps 0222 (trigger DDL in its own file) |
+
+Drafted as `0220`/`0221`. The scan of `origin/main` and all 120 remote refs immediately before writing found
+`main` ending at `0219` and `claude/eld-compliance-intelligence-ramlrd` holding `0220_eld_event_ledger.sql`,
+so this checkpoint takes the first two numbers above every claim. No environment had applied either.
+Next free number: `0223`.
 
 ## Claim: 0199, 0200, 0201 (mechanic portal CP1 and the Fleet & Equipment Portfolio foundation, 2026-09-25)
 
