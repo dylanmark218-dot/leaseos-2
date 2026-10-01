@@ -100,9 +100,18 @@ suite("persistence against MariaDB", () => {
 
   describe("migration", () => {
     it("creates the cascade and the per-owner uniqueness", async () => {
+      // Scoped to this connection's schema. Without `CONSTRAINT_SCHEMA = DATABASE()` the server
+      // opens every table in every schema to answer, which is what issue #46's "5000 ms timeout"
+      // was: on a host with 120 leaseos_* schemas (21,583 tables) the unscoped form took 7,558 ms
+      // and returned 120 rows — one per schema — so `fks[0]` was asserting whichever schema the
+      // server listed first, not this one. Scoped, it takes 13 ms and returns exactly one row.
+      // The row count is asserted for that reason: the gate always has at least two schemas
+      // carrying this constraint (the main database and its `_widgets` companion), so a query
+      // that is not scoped answers with more than one and fails here rather than by timing out.
       const [fks] = await pool.query<mysql.RowDataPacket[]>(
         `SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS
-         WHERE CONSTRAINT_NAME = 'widgetLayoutItems_layout_fk'`);
+         WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'widgetLayoutItems_layout_fk'`);
+      expect(fks).toHaveLength(1);
       expect(fks[0]?.DELETE_RULE).toBe("CASCADE");
 
       const [idx] = await pool.query<mysql.RowDataPacket[]>(

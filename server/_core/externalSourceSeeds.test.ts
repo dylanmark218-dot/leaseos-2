@@ -32,7 +32,7 @@ const byKey = (k: string) =>
   ALL_DATA_SOURCES.find(s => s.sourceKey === k)!;
 
 describe("the count is eight, not nine", () => {
-  it("has twenty-nine sources, eight verified and twenty-one not", () => {
+  it("has thirty-five sources, ten verified and twenty-five not", () => {
     // The research summary said "nine of eleven are clean" while separately
     // flagging three as unresolved. Eleven minus three is eight. Seeding nine
     // would have marked a blocked source usable.
@@ -43,13 +43,18 @@ describe("the count is eight, not nine", () => {
     // separate permission nobody has confirmed. They seed unverified, which
     // means inspection only, and the eight stays eight.
     //
-    // 2026-09-24 added eight federal and provincial candidates — Ontario 511,
+    // The Canadian 511 tranche (2026-09-24) added seven. Two clear on a published open licence —
+    // Ontario 511 under OGL – Ontario, Québec's roadworks under CC BY 4.0 — so eight becomes ten.
+    // Manitoba, New Brunswick, Yukon and Newfoundland and Labrador publish no licence beside their
+    // keys, exactly like Alberta, and Saskatchewan publishes no API. Those five seed unverified.
+    //
+    // The federal and provincial candidates of the same date added seven more —
     // Transport Canada recalls, the recalls-and-alerts feed, two StatCan
-    // services, two open-data catalogues and Québec's truck network. Research
-    // named their licences; nobody has reviewed one, so the eight stays eight.
-    expect(ALL_DATA_SOURCES).toHaveLength(29);
-    expect(VERIFIED_DATA_SOURCES).toHaveLength(8);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(21);
+    // services, two open-data catalogues and Québec's heavy-truck network.
+    // Research named their licences; nobody has reviewed one, so ten stays ten.
+    expect(ALL_DATA_SOURCES).toHaveLength(35);
+    expect(VERIFIED_DATA_SOURCES).toHaveLength(10);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(25);
   });
 
   it("names exactly the ones that could not be verified", () => {
@@ -67,14 +72,18 @@ describe("the count is eight, not nine", () => {
       "ised_bc_rr",
       "ised_cb_grs",
       "ised_sms",
+      "mb511",
       "mb_petroleum",
-      "on511",
+      "nb511",
+      "nl511",
       "qc_reseau_camionnage",
+      "sk_highway_hotline",
       "sk_iris",
       "statcan_boundaries",
       "statcan_rdaas",
       "statcan_wds",
       "tc_vehicle_recalls",
+      "yt511",
     ]);
   });
 
@@ -186,16 +195,6 @@ describe("Alberta 511 is throttled centrally", () => {
     expect(SOURCES_REQUIRING_API_KEY).toContain("ab511");
   });
 
-  it("is not the only 511 that does — Ontario's is keyed and throttled the same way", () => {
-    // The planning notes said Ontario 511 needed no key. Its developer page
-    // says "Requires a developer key" and "Ten calls every 60 seconds".
-    const on511 = byKey("on511");
-    expect(SOURCES_REQUIRING_API_KEY).toContain("on511");
-    expect(on511.rateLimitCalls).toBe(10);
-    expect(on511.rateLimitWindowSeconds).toBe(60);
-    expect(SOURCE_CAVEATS.on511).toContain("never proxy the raw API");
-  });
-
   it("refuses an eleventh call inside the window and serves cache instead", () => {
     const recent = Array.from({ length: 10 }, () => new Date(now.getTime() - 20_000));
     const r = planFeedFetch({
@@ -283,14 +282,18 @@ describe("attribution is collected, and gaps are named", () => {
       "ised_bc_rr",
       "ised_cb_grs",
       "ised_sms",
+      "mb511",
       "mb_petroleum",
-      "on511",
+      "nb511",
+      "nl511",
       "qc_reseau_camionnage",
+      "sk_highway_hotline",
       "sk_iris",
       "statcan_boundaries",
       "statcan_rdaas",
       "statcan_wds",
       "tc_vehicle_recalls",
+      "yt511",
     ]);
   });
 });
@@ -390,7 +393,7 @@ describe("the four integration states are a label over the gate", () => {
   });
 
   it("does not let a forged status reach an approved state", () => {
-    const forged = { ...byKey("on511"), status: "verified" as const, verifiedAt: new Date() };
+    const forged = { ...byKey("tc_vehicle_recalls"), status: "verified" as const, verifiedAt: new Date() };
     expect(integrationState(forged).state).toBe("PERMISSION_REQUIRED");
   });
 
@@ -414,7 +417,7 @@ describe("the four integration states are a label over the gate", () => {
 
 describe("the 2026-09-24 candidates", () => {
   const keys = [
-    "on511", "tc_vehicle_recalls", "hc_recalls_safety_alerts", "goc_open_data_api",
+    "tc_vehicle_recalls", "hc_recalls_safety_alerts", "goc_open_data_api",
     "statcan_wds", "statcan_rdaas", "bc_data_catalogue", "qc_reseau_camionnage",
   ];
 
@@ -453,13 +456,13 @@ beforeAll(async () => {
 });
 
 d("seeding into the database", () => {
-  it("inserts all twenty-nine and is idempotent on a second run", async () => {
+  it("inserts all thirty-five and is idempotent on a second run", async () => {
     const first = await seedExternalDataSources();
-    expect(first.inserted.length + first.existing.length).toBe(29);
+    expect(first.inserted.length + first.existing.length).toBe(35);
 
     const second = await seedExternalDataSources();
     expect(second.inserted).toEqual([]);
-    expect(second.existing).toHaveLength(29);
+    expect(second.existing).toHaveLength(35);
   });
 
   it("persists status, rate limit and retrieval date", async () => {

@@ -6,8 +6,10 @@ import {
   createTripBreadcrumb,
   createZoneEvent,
   getRecentZoneStateForTrip,
-  listActiveOperatingZones,
 } from "../db";
+// P0-A2.1 — the zones a position is evaluated against are the TRIP's organization's, read from
+// trips.orgRef by the boundary. No "all active zones" helper exists any more.
+import { activeOperatingZonesForTrip } from "../operatingZoneScope";
 import {
   detectTransitions,
   evaluateZoneMembership,
@@ -36,7 +38,7 @@ export async function ingestBreadcrumb(
 ): Promise<IngestBreadcrumbResult> {
   const breadcrumbId = await createTripBreadcrumb(input);
 
-  const zones = await listActiveOperatingZones();
+  const zones = await activeOperatingZonesForTrip(input.tripId);
   if (zones.length === 0) {
     return { breadcrumbId, proposedEvents: [] };
   }

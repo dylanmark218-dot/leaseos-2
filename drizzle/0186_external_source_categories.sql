@@ -6,6 +6,8 @@
 -- customer-contract-rates, integration-hub and safety-program-builder 0182–0184; relaxed-carson and
 -- sec-004 0185). This takes 0186, the first number no branch holds.
 -- docs/architecture/MIGRATION_COLLISION_REGISTER.md.
+-- Merged after main reached 0219. The ledger applies every file it has not recorded, by name, so a
+-- number below main's head still runs; the register has recorded this claim since 2026-09-24.
 --
 -- The federal and provincial candidates added to the registry on 2026-09-24 include a vehicle recall
 -- database, a recalls-and-safety-alerts feed, two statistics services and two open-data catalogues. None
