@@ -30,8 +30,15 @@ async function member(role: DomainRole, orgRef: string) {
   return id;
 }
 async function org() { const o = `ORG-${rnd()}`; await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [o, o]); return o; }
+/** On the single tenant's roster — an active crew membership — which the open-shift rule requires (SPINE item 2). */
+async function onRoster(userId: number) {
+  const crewRef = `CR-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+  await pool.execute("INSERT INTO crews (crewRef, tenantId, name, createdByUserId) VALUES (?, 'default', ?, 1)", [crewRef, crewRef]);
+  await pool.execute("INSERT INTO crewMembers (crewRef, userId, crewRole, joinedAt) VALUES (?, ?, 'driver', NOW())", [crewRef, userId]);
+}
 async function operatorRow(id: number) {
-  await pool.execute("INSERT INTO operators (id, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,NOW())", [id, `Op ${rnd()}`, "1", new Date("2028-01-01T00:00:00Z")]);
+  await pool.execute("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())", [id, id, `Op ${rnd()}`, "1", new Date("2028-01-01T00:00:00Z")]);
+  await onRoster(id);
 }
 async function academy(userId: number, code: string, o: { status?: string; expiresAt?: Date | null; sourceKind?: string; complianceDocumentId?: number | null; createdAt?: Date } = {}) {
   const ref = `AQ-${rnd()}${rnd()}`;

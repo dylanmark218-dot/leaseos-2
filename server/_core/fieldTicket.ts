@@ -92,27 +92,12 @@ export function validateFieldTicketScope(
 
 /* ------------------------------------------------------------------ */
 
-/**
- * Derive the ticket's signature status from the per-line dispositions the
- * representative actually gave. Partial acceptance is the common real-world
- * case — "I'll sign the three-hour service but not the standby" — and it must
- * not invalidate the accepted lines.
+/*
+ * Signature status is not derived here. It is the historical state `recordSignature`
+ * (closeoutRouter.ts) writes once, at signing; later line decisions never recompute it.
+ * Whether a ticket may be invoiced is `draftFromTicket` (_core/invoiceDraft.ts): a signature
+ * AND resolved lines AND the billing requirements. (SPINE item 2, owner's ruling.)
  */
-export function deriveSignatureStatus(
-  dispositions: LineDisposition[],
-  representativePresent = true
-): SignatureStatus {
-  if (!representativePresent) return "no_representative";
-  if (dispositions.length === 0) return "unsigned";
-
-  const accepted = dispositions.filter(d => d === "accepted").length;
-  const disputed = dispositions.filter(d => d === "disputed").length;
-
-  if (disputed === 0 && accepted === dispositions.length) return "accepted";
-  if (accepted === 0 && disputed > 0) return "refused";
-  if (accepted > 0 && disputed > 0) return "partially_accepted";
-  return "unsigned";
-}
 
 /* ------------------------------------------------------------------ */
 

@@ -93,7 +93,6 @@ const DECLARED_UNWIRED: Record<string, string> = {
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
   dashboardWidget: "widget contract; no dashboard surface consumes it yet",
   financialCalendar: "AP/AR and company-event projections; no financial surface yet",
-  openShifts: "eligibility engine; openShiftsRouter currently decides inline — a live duplication, not a gap",
   billing: "billing engine predates this audit; reachability not yet established",
   eventEmitter: "event vocabulary; emitters write via raw SQL",
   billingAdjustment: "adjustment rules; same unestablished reachability as billing",
@@ -102,7 +101,7 @@ const DECLARED_UNWIRED: Record<string, string> = {
   dispatchMatching: "suitability match and posting visibility; no live counterpart (no posting feed or capability data yet). Booking conflicts were a duplicate of the award's own check and were removed (SPINE item 2)",
   disposalReconciliation: "reconciliation engine; no procedure calls it",
   domainEmitters: "event vocabulary; emitted from raw SQL paths",
-  fieldTicket: "scope validation and job reconciliation have no live counterpart (job close). Its disposition split and statement builder duplicated closeout/invoicing and were removed (SPINE item 2); signature status still differs from closeoutRouter's and waits for a ruling",
+  fieldTicket: "scope validation and job reconciliation have no live counterpart (job close). Its disposition split and statement builder duplicated closeout/invoicing and were removed (SPINE item 2); its signature-status roll-up contradicted the owner's ruling (a signature is the state recorded at signing) and was removed too",
   heartbeat: "liveness helper; no monitor calls it",
   "managedKeyBackend.fake": "S2-KMS-A: the managed key backend tests stand in for a vendor adapter — a KEK it never exports, AES-GCM wrapping, the failure modes a real backend has. Imported by tests only, never by production (secretKeyWiring.test.ts pins that); the production backend registry is empty until S2-KMS-B proves the hosting platform",
   imageGeneration: "unused capability",
@@ -338,7 +337,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(75);   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
+    expect(unwired).toHaveLength(74);   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });
