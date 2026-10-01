@@ -359,25 +359,8 @@ export async function updateZoneEvent(
   await db.update(zoneEvents).set(input).where(eq(zoneEvents.id, id));
   return true;
 }
-export async function listZoneEvents(
-  tripId?: number,
-  status?: "pending" | "confirmed" | "rejected" | "expired"
-) {
-  const db = await getDb();
-  if (!db) return [];
-  const conditions = [
-    tripId ? eq(zoneEvents.tripId, tripId) : undefined,
-    status ? eq(zoneEvents.status, status) : undefined,
-  ].filter(Boolean);
-  const query = db
-    .select()
-    .from(zoneEvents)
-    .orderBy(desc(zoneEvents.detectedAt))
-    .limit(200);
-  return conditions.length
-    ? query.where(and(...(conditions as Parameters<typeof and>)))
-    : query;
-}
+// P0-A2 — `listZoneEvents` (every organization's proposals when no trip was named) is retired;
+// the scoped list is `listZoneEventsInScope` in server/telematicsScope.ts.
 
 /**
  * Derive each zone's current inside/outside state for a trip from its
@@ -1009,14 +992,10 @@ export async function transferTrackingNumber(id: number): Promise<string | null>
   return (await db.select({ trackingNumber: transferAcknowledgements.trackingNumber }).from(transferAcknowledgements).where(eq(transferAcknowledgements.id, id)).limit(1))[0]?.trackingNumber ?? null;
 }
 
-/** Parent lookups for the monolith's by-id updates: the trip behind a stop or a zone event, the unit behind a safety plan. */
+/** Parent lookups for the monolith's by-id updates: the trip behind a stop, the unit behind a safety plan. (P0-A2: the zone-event lookup moved into server/telematicsScope.ts as `requireZoneEventInScope`.) */
 export async function tripStopTripId(id: number): Promise<number | null> {
   const db = await getDb(); if (!db) return null;
   return (await db.select({ tripId: tripStops.tripId }).from(tripStops).where(eq(tripStops.id, id)).limit(1))[0]?.tripId ?? null;
-}
-export async function zoneEventTripId(id: number): Promise<number | null> {
-  const db = await getDb(); if (!db) return null;
-  return (await db.select({ tripId: zoneEvents.tripId }).from(zoneEvents).where(eq(zoneEvents.id, id)).limit(1))[0]?.tripId ?? null;
 }
 export async function unitSafetyPlanUnitId(id: number): Promise<number | null> {
   const db = await getDb(); if (!db) return null;
