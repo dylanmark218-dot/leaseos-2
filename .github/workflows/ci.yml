@@ -67,7 +67,7 @@ jobs:
       # Full history, not the default depth of 1. registerClaims.test.ts checks
       # every commit hash the register claims with `git cat-file -e`, which can
       # only see what was fetched.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
 
       # No `version` input: package.json pins packageManager (pnpm@10.4.1+sha512)
