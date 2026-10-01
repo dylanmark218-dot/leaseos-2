@@ -1,4 +1,4 @@
-/** v23.26 — the rate sheet screen's container: reads one sheet with every version, drives drafting, lines and approval. RateSheetView is the surface. */
+/** v23.31 — the rate sheet screen's container: reads one sheet with every version, drives drafting, lines and approval. RateSheetView is the surface. */
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import { useLocation } from "wouter";

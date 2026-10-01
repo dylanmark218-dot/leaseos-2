@@ -79,7 +79,7 @@ describe("the close decision", () => {
 });
 
 describe("the fuel line reaches the exception centre", () => {
-  const empty = (): ExceptionSources => ({ openCalibrationSweeps: [], inspectorRequests: [], now: NOW, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [], syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [] });
+  const empty = (): ExceptionSources => ({ openCalibrationSweeps: [], inspectorRequests: [], now: NOW, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentialsAwaitingVerification: [], credentialVerdicts: [], aiProposals: [], aiQuestions: [], syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [] });
   it("raises receiptless purchases, unexplained tank variance and a soft-closed period, each gated on the role that acts", () => {
     const xs = deriveExceptions({ ...empty(),
       statementsWithFindings: [{ statementRef: "STMT-1", provider: "Cardlock Co", unmatched: 2, ambiguous: 1, importedAt: NOW }, { statementRef: "STMT-2", provider: "X", unmatched: 0, ambiguous: 0, importedAt: NOW }],
@@ -121,7 +121,7 @@ d("August, closed", () => {
     const bookkeeper = await withRole("bookkeeper");
     const controller = await withRole("controller");
     const shopLead = await withRole("shop_lead");
-    const entityId = 1_100_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'truck', 'ABC', 'clear')", [key("142").slice(0, 30)]);
     const unitId = Number(u.insertId);
     const [acct] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO fuelAccounts (accountRef, financialEntityId, name, fuelType, kind, status) VALUES (?, ?, 'Cardlock', 'diesel', 'fleet', 'active')", [key("ACCT").slice(0, 40), entityId]);

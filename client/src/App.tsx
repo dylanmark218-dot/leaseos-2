@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import NotFound from "@/pages/NotFound";
 import { Redirect, Route, Switch } from "wouter";
 import { PortalShell } from "./portal/PortalShell";
-import Login from "./pages/Login";
+import { SessionGate } from "./session/SessionGate";
 import { CustomerPortal } from "./portal/external/CustomerPortal";
 import HosVerificationConsole from "./pages/HosVerificationConsole";
 import WidgetBoardPage from "./pages/WidgetBoardPage";
@@ -44,9 +44,13 @@ function DashboardRoute({ children }: { children: ReactNode }) {
 function Router() {
   return (
     <Switch>
-      {/* The sign-in landing. It starts the existing OAuth flow and
-          authenticates nobody itself — see client/src/pages/Login.tsx. */}
-      <Route path="/login" component={() => <Login />} />
+      {/* v23.26 — identity first. `/login` is the one screen an anonymous
+          caller may reach; `/workspaces` is the chooser a person with more
+          than one job sees. Neither is a security boundary: every procedure
+          behind them refuses on its own, and `server/sessionWorkspace.db.test.ts`
+          makes the calls with no client at all to prove it. */}
+      <Route path="/login" component={() => <SessionGate alwaysSignIn />} />
+      <Route path="/workspaces" component={() => <SessionGate alwaysChoose />} />
       <Route path="/" component={() => <PortalShell />} />
       {/* v21.7 — the role-composed portal, on the five surfaces. */}
       <Route path="/portal" component={() => <PortalShell />} />

@@ -1,5 +1,5 @@
 /**
- * v23.26 — conditioned rate lines: the conditions engine, and the resolver reading it.
+ * v23.31 — conditioned rate lines: the conditions engine, and the resolver reading it.
  */
 import { describe, expect, it } from "vitest";
 import { conditionHolds, evaluateApplicability, parseConditions } from "./_core/rateApplicability";

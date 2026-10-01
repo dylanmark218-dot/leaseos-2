@@ -1,5 +1,5 @@
 /**
- * v23.26 — Customers: the list and the profile, pure. Facts in through props, actions out through
+ * v23.31 — Customers: the list and the profile, pure. Facts in through props, actions out through
  * callbacks. The profile's eight sections are the ones the checkpoint names; each renders its
  * empty state rather than a blank, and the archived state is a banner, not a hidden record.
  */

@@ -1,0 +1,55 @@
+Pre Job Safety Checklist
+Verify the applicable readiness checks before work. Record unresolved items and who will resolve them.
+Company: __________________________________  Home base: _______________________
+Record no. __________________  Record revision: ______  Date / time: _________________
+Site / lease / project: __________________________  Job / dispatch: __________________
+Location / LSD / address: ______________________________________________________
+Task / scope: ________________________________________________________________
+Supervisor / assessor: __________________________  Crew / contractor: _______________
+Units / equipment: __________________________  Related permits / procedures: __________
+Readiness checks
+Mark Y = verified, N = unresolved, or NA = not applicable. Explain N and NA below or on a linked sheet. A blank answer is not a pass.
+NA explanations / supporting record IDs: ____________________________________________
+Pre Job Safety Checklist Review
+Record no. _____________________  Date: ______________  Site: _____________________
+Outstanding actions and verification
+Emergency contact / number: ___________________  Radio / communication: ______________
+Muster / emergency access location: __________________________________________________
+Work status and review
+[ ] Ready under verified controls   [ ] Hold affected work   [ ] Not yet assessed
+Limits / remaining restrictions: _____________________________________________________
+Supervisor / authorized reviewer: __________________  Signature: _____________________
+Review date / time: __________________  Next review / trigger: _________________________
+Stop affected work and reassess if scope, equipment, crew, conditions or controls change, or a new hazard is identified. Resolve required actions before releasing affected work.
+Crew acknowledgement
+I have reviewed the task, hazards and controls, and had the opportunity to raise concerns. My signature records this review; it does not replace permits or competency verification.
+Late arrivals / changes briefed by and time: ___________________________________________
+Use the company’s approved procedures and risk criteria. Enter N/A where appropriate and identify all continuation pages by record number. Preserve signed originals when revising.
+Check | Y | N | NA
+Task, scope, work boundaries and crew responsibilities understood |  |  | 
+Site orientation, communication and required competency verified |  |  | 
+JSA / hazard assessment reviewed with the crew |  |  | 
+Required permits and client / site authorizations confirmed |  |  | 
+Equipment, guards and required inspections checked |  |  | 
+Isolation, stored energy and pressure controls verified where applicable |  |  | 
+Utilities, overhead lines and ground disturbance controls addressed |  |  | 
+Traffic, reversing, spotters and exclusion zones coordinated |  |  | 
+Lifting, heights, excavation or confined-space plans verified if applicable |  |  | 
+Atmospheric hazards, gas testing and monitoring addressed if applicable |  |  | 
+PPE, chemical information and task-specific controls available |  |  | 
+Weather, ground conditions, visibility and fitness for task reviewed |  |  | 
+Emergency contacts, muster, first aid and rescue arrangements reviewed |  |  | 
+Spill controls, waste handling and nearby work coordinated |  |  | 
+Issue or required action | Owner | Due / hold point | Verified by and time
+ |  |  | 
+ |  |  | 
+ |  |  | 
+Printed name | Company / role | Signature | Date / time
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 

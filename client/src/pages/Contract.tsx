@@ -1,4 +1,4 @@
-/** v23.26 — the contract screen's container: reads one contract, drives its transitions. ContractView is the surface. */
+/** v23.31 — the contract screen's container: reads one contract, drives its transitions. ContractView is the surface. */
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import { useLocation } from "wouter";

@@ -24,9 +24,10 @@
  */
 
 import { and, desc, eq } from "drizzle-orm";
-import { hosRuleLimitHistory, hosRuleLimits } from "../../../drizzle/schema";
+import { hosRuleLimitHistory, hosRuleLimits, knowledgeDocuments, knowledgeVersions } from "../../../drizzle/schema";
 import { getDb } from "../../db";
-import { isBinding, type AuthorityLevel } from "./admission";
+import type { AuthorityClass, DispatchEffect, FindingDomain } from "../complianceFinding";
+import { isBinding, maxEffectFor, requiresSecondVerifier, tierForAuthority, type AuthorityLevel } from "./admission";
 import { checkCitation } from "./citationGuard";
 import { checkPlausible } from "./rulePromotion";
 
@@ -36,12 +37,24 @@ const dbOrThrow = async () => {
   return db;
 };
 
+/**
+ * The ledger holds more than one rule family since 0189 (C1b-1). Every HOS read below is
+ * restricted to this family, so a document requirement or permit condition can never be read
+ * back as an HOS limit.
+ */
+export const HOS_RULE_FAMILY = "hos_limit";
+const isHos = () => eq(hosRuleLimitHistory.ruleFamily, HOS_RULE_FAMILY);
+
 /* ------------------------------------------------------------------ */
 /* Evidence                                                            */
 /* ------------------------------------------------------------------ */
 
 export type VerificationMethod =
-  | "OFFICIAL_WEB" | "OFFICIAL_PDF" | "OFFICIAL_PRINT" | "LEGAL_COUNSEL" | "REGULATOR_CONFIRMATION";
+  | "OFFICIAL_WEB" | "OFFICIAL_PDF" | "OFFICIAL_PRINT" | "LEGAL_COUNSEL" | "REGULATOR_CONFIRMATION"
+  // 0198 (C1b-2b): verified against a named instrument, citation and official URL, with no admitted
+  // source document. Only a CITATION_VERIFIED rule promotion may use it; the citation guard still
+  // requires an official domain.
+  | "OFFICIAL_CITATION";
 
 export type BindingAuthority = Extract<AuthorityLevel, "law" | "official_guidance" | "recognized_standard" | "manufacturer">;
 
@@ -106,7 +119,7 @@ export function statusFor(e: { effectiveFrom?: Date; effectiveUntil?: Date }, no
   return "CURRENT";
 }
 
-const ref = (prefix: string) =>
+export const ref = (prefix: string) =>
   `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
 /* ------------------------------------------------------------------ */
@@ -117,6 +130,25 @@ export function validateEvidence(e: PromotionEvidence, now: Date): { ok: true } 
   if (!Number.isInteger(e.verifiedByUserId) || e.verifiedByUserId < 1) {
     return { ok: false, code: "NO_VERIFIER", reason: "a regulatory figure needs a named verifier; there is no automated path to verified" };
   }
+  const cited = validateCitedEvidence(e, now);
+  if (!cited.ok) return cited;
+
+  const plausible = checkPlausible(e.limitKey, e.value);
+  if (!plausible.ok) return { ok: false, code: "IMPLAUSIBLE_VALUE", reason: plausible.reason };
+
+  return { ok: true };
+}
+
+/** What every promoted rule must show about where it came from, whatever its family (C1b-1). */
+export type CitedEvidence = Pick<PromotionEvidence,
+  "authorityType" | "instrumentTitle" | "jurisdiction" | "sourceSection" | "citationUrl"
+  | "verificationMethod" | "verifiedAt" | "effectiveFrom" | "effectiveUntil">;
+
+/**
+ * The instrument, jurisdiction, citation, dates and freshness checks, in the order HOS has always
+ * applied them. Shared so a non-HOS rule is held to exactly the same evidence bar.
+ */
+export function validateCitedEvidence(e: CitedEvidence, now: Date): { ok: true } | { ok: false; code: PromotionRefusal; reason: string } {
   if (!isBinding(e.authorityType)) {
     return { ok: false, code: "NON_BINDING_AUTHORITY", reason: `${e.authorityType} cannot establish a regulatory limit` };
   }
@@ -146,9 +178,6 @@ export function validateEvidence(e: PromotionEvidence, now: Date): { ok: true } 
   // publication. A guard, never a correctness check.
   const citation = checkCitation(e.citationUrl, e.verificationMethod);
   if (!citation.ok) return { ok: false, code: citation.code, reason: citation.reason };
-
-  const plausible = checkPlausible(e.limitKey, e.value);
-  if (!plausible.ok) return { ok: false, code: "IMPLAUSIBLE_VALUE", reason: plausible.reason };
 
   return { ok: true };
 }
@@ -184,6 +213,7 @@ export async function promote(e: PromotionEvidence, now: Date): Promise<Promotio
   const prior = await db.select()
     .from(hosRuleLimitHistory)
     .where(and(
+      isHos(),
       eq(hosRuleLimitHistory.profileKey, e.profileKey),
       eq(hosRuleLimitHistory.limitKey, e.limitKey),
     ))
@@ -254,6 +284,11 @@ export async function promote(e: PromotionEvidence, now: Date): Promise<Promotio
       changeReason,
       correctsPromotionRef: e.correctsPromotionRef ?? null,
       previousPromotionRef: previous?.promotionRef ?? null,
+      // 0189: the same row, described in the vocabulary every rule family shares.
+      ruleFamily: HOS_RULE_FAMILY,
+      ruleRef: `${e.profileKey}.${e.limitKey}`,
+      domain: "hos",
+      authorityTier: tierForAuthority(e.authorityType),
     });
 
     // A future rule is known and not applied.
@@ -291,7 +326,7 @@ export async function promote(e: PromotionEvidence, now: Date): Promise<Promotio
 export async function ledgerFor(profileKey: string, limitKey: string) {
   const db = await dbOrThrow();
   return db.select().from(hosRuleLimitHistory)
-    .where(and(eq(hosRuleLimitHistory.profileKey, profileKey), eq(hosRuleLimitHistory.limitKey, limitKey)))
+    .where(and(isHos(), eq(hosRuleLimitHistory.profileKey, profileKey), eq(hosRuleLimitHistory.limitKey, limitKey)))
     .orderBy(hosRuleLimitHistory.id);
 }
 
@@ -303,9 +338,11 @@ export async function ledgerFor(profileKey: string, limitKey: string) {
  */
 export async function believedOn(profileKey: string, limitKey: string, at: Date): Promise<{ value: number; promotionRef: string; citationUrl: string } | null> {
   const rows = await ledgerFor(profileKey, limitKey);
-  const held = rows.filter((r) => r.recordedAt <= at && r.status !== "FUTURE");
+  // An HOS row always carries its figure; one without is not an HOS promotion and is not believed.
+  const held = rows.filter((r) => r.recordedAt <= at && r.status !== "FUTURE" && r.value != null);
   const last = held[held.length - 1];
-  return last ? { value: last.value, promotionRef: last.promotionRef, citationUrl: last.citationUrl } : null;
+  return last && last.value != null
+    ? { value: last.value, promotionRef: last.promotionRef, citationUrl: last.citationUrl } : null;
 }
 
 export type Divergence = {
@@ -342,6 +379,415 @@ export async function divergences(): Promise<Divergence[]> {
 /** Promotions known but not yet in force. */
 export async function pendingFutureRules(now: Date) {
   const db = await dbOrThrow();
-  const rows = await db.select().from(hosRuleLimitHistory).where(eq(hosRuleLimitHistory.status, "FUTURE"));
+  const rows = await db.select().from(hosRuleLimitHistory).where(and(isHos(), eq(hosRuleLimitHistory.status, "FUTURE")));
   return rows.filter((r) => !r.effectiveFrom || r.effectiveFrom > now);
+}
+
+/*
+ * ==================================================================
+ * Other rule families (C1b-1, D-03)
+ * ==================================================================
+ *
+ * The rule ledger, for every family.
+ *
+ * `hosRuleLimitHistory` has been the HOS promotion ledger since 0120. From 0189 it holds any rule
+ * family, and this file is how a rule that is not an HOS figure gets into it. HOS keeps its own door,
+ * `promote` above, because it also maintains the live `hosRuleLimits` row; everything else
+ * lives in the ledger alone.
+ *
+ * What a promotion here must show, in addition to everything an HOS figure shows (instrument,
+ * jurisdiction, citation, dates, freshness — `validateCitedEvidence`, shared):
+ *
+ * * **A verified source revision.** The rule names the `knowledgeVersions` row it was read from, and
+ *   that row must itself be `verified` and not repealed. Its content hash is copied onto the rule, so
+ *   a later change of source is detectable against the rule that relied on the old text.
+ * * **A proposer who is not the verifier** (C1b-Q2). Nobody approves their own reading. A scraper or
+ *   an AI can propose; nothing here accepts a verifier that is not a named person.
+ * * **Two verifiers for the rules that stop a truck** (C1b-Q3): a BLOCK rule at the statute or
+ *   regulator-order tier. Both distinct from each other and from the proposer.
+ * * **An effect the authority can carry.** Guidance cannot block on its own and best practice is
+ *   capped at WARN (§4).
+ *
+ * Lifecycle (§ C1b design): `candidate → reviewed → verified → active → superseded | withdrawn`.
+ * `candidate` and `reviewed` are states of a proposal, before the ledger. `verified` and `active` are
+ * the ledger's FUTURE and CURRENT, split by the effective date. Nothing becomes `active` except by
+ * date, after verification.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Lifecycle                                                           */
+/* ------------------------------------------------------------------ */
+
+export type RuleLifecycle = "candidate" | "reviewed" | "verified" | "active" | "superseded" | "withdrawn";
+
+/** The only moves a rule makes. `active` is reached by date, never by a person. */
+export const LIFECYCLE_TRANSITIONS: Readonly<Record<RuleLifecycle, readonly RuleLifecycle[]>> = {
+  candidate: ["reviewed", "withdrawn"],
+  reviewed: ["verified", "candidate", "withdrawn"],
+  verified: ["active", "superseded", "withdrawn"],
+  active: ["superseded", "withdrawn"],
+  superseded: [],
+  withdrawn: [],
+};
+
+export const canTransition = (from: RuleLifecycle, to: RuleLifecycle): boolean =>
+  LIFECYCLE_TRANSITIONS[from].includes(to);
+
+/**
+ * A ledger row's lifecycle, from its stored status and dates. No history is rewritten to say this:
+ * the mapping is read, not written.
+ */
+export function lifecycleOf(row: { status: LedgerStatus; effectiveFrom: Date | null; effectiveUntil: Date | null }, now: Date): RuleLifecycle {
+  if (row.status === "REVOKED") return "withdrawn";
+  if (row.status === "SUPERSEDED" || row.status === "EXPIRED") return "superseded";
+  if (row.effectiveUntil && row.effectiveUntil <= now) return "superseded";
+  if (row.effectiveFrom && row.effectiveFrom > now) return "verified";
+  return "active";
+}
+
+/** Source revisions: only `verified` backs a rule. */
+export type SourceStatus = "candidate" | "reviewed" | "verified" | "superseded" | "withdrawn";
+
+/* ------------------------------------------------------------------ */
+/* Evidence                                                            */
+/* ------------------------------------------------------------------ */
+
+export type RuleEvidence = {
+  /** Any family except `hos_limit`, which is promoted through `promotionLedger.promote`. */
+  ruleFamily: string;
+  ruleRef: string;
+  domain: FindingDomain;
+  dispatchEffect: DispatchEffect;
+  /** The rule's content. Stored as JSON; a figure, a document list, a condition set. */
+  payload: unknown;
+
+  jurisdiction: string;
+  authorityType: BindingAuthority;
+  /** A standard or manufacturer figure adopted by a program version takes the carrier-policy tier. */
+  adoptedByProgram?: boolean;
+  instrumentTitle: string;
+  issuingAuthority: string;
+  sourceSection: string;
+  citationUrl: string;
+  instrumentVersion?: string;
+  verificationMethod: VerificationMethod;
+  /** → `knowledgeVersions.versionRef`. Empty for a CITATION_VERIFIED promotion, which has none. */
+  sourceRevisionRef: string;
+  /**
+   * C1b-2b: how deep the evidence goes. SOURCE_DOCUMENT_VERIFIED (the default, and C1b-1's only
+   * level) binds the rule to an admitted source revision. CITATION_VERIFIED is the transitional level
+   * (owner decision C1b-Q2 = B): a named instrument, citation and official URL, no source document,
+   * and therefore no automated change detection.
+   */
+  verificationLevel?: "CITATION_VERIFIED" | "SOURCE_DOCUMENT_VERIFIED";
+  /** Mark the rule's current promotion superseded even when this one is not yet in force (a level upgrade). */
+  supersedesPrevious?: boolean;
+
+  proposedByUserId: number;
+  verifiedByUserId: number;
+  verifiedAt: Date;
+  secondVerifierUserId?: number;
+  secondVerifiedAt?: Date;
+  effectiveFrom?: Date;
+  effectiveUntil?: Date;
+  correctsPromotionRef?: string;
+};
+
+export type RuleRefusal = PromotionRefusal
+  | "HOS_FAMILY_USES_PROMOTE" | "NO_RULE_REF" | "NO_PROPOSER" | "SELF_VERIFICATION"
+  | "NO_SECOND_VERIFIER" | "SECOND_VERIFIER_NOT_DISTINCT" | "NO_AUTHORITY_TIER"
+  | "EFFECT_EXCEEDS_AUTHORITY" | "NO_SOURCE_REVISION" | "SOURCE_NOT_VERIFIED" | "SOURCE_REPEALED"
+  | "CITATION_METHOD_MISMATCH";
+
+export type SourceRevision = {
+  versionRef: string;
+  contentHash: string;
+  status: string;
+  repealedAt: Date | null;
+  effectiveUntil: Date | null;
+};
+
+const isPerson = (id: number | undefined): id is number => Number.isInteger(id) && (id as number) >= 1;
+
+/** The tier a rule takes. Derived, never supplied: a proposer cannot pick a stronger tier. */
+export const tierOf = (e: Pick<RuleEvidence, "authorityType" | "adoptedByProgram">): AuthorityClass | null =>
+  tierForAuthority(e.authorityType, e.adoptedByProgram ?? false);
+
+export function validateRuleEvidence(
+  e: RuleEvidence, source: SourceRevision | null, now: Date,
+): { ok: true; tier: AuthorityClass } | { ok: false; code: RuleRefusal; reason: string } {
+  if (e.ruleFamily === HOS_RULE_FAMILY) {
+    return { ok: false, code: "HOS_FAMILY_USES_PROMOTE", reason: "an HOS figure is promoted through hos.limitPromote, which also keeps the live limit" };
+  }
+  if (!e.ruleFamily.trim() || !e.ruleRef.trim()) {
+    return { ok: false, code: "NO_RULE_REF", reason: "a rule must say which family and which rule it is" };
+  }
+  if (!isPerson(e.proposedByUserId)) {
+    return { ok: false, code: "NO_PROPOSER", reason: "a rule revision records who proposed it" };
+  }
+  if (!isPerson(e.verifiedByUserId)) {
+    return { ok: false, code: "NO_VERIFIER", reason: "a rule needs a named verifier; there is no automated path to verified" };
+  }
+  if (e.verifiedByUserId === e.proposedByUserId) {
+    return { ok: false, code: "SELF_VERIFICATION", reason: "the person who proposed a rule does not verify it — a second person does" };
+  }
+
+  const cited = validateCitedEvidence(e, now);
+  if (!cited.ok) return cited;
+
+  const tier = tierOf(e);
+  if (!tier) {
+    return { ok: false, code: "NO_AUTHORITY_TIER", reason: `${e.authorityType} has no tier on the authority ladder` };
+  }
+  const ceiling = maxEffectFor(tier, e.authorityType);
+  if (e.dispatchEffect === "BLOCK" && ceiling !== "BLOCK") {
+    return { ok: false, code: "EFFECT_EXCEEDS_AUTHORITY",
+      reason: e.authorityType === "official_guidance"
+        ? "guidance interprets the law but cannot block dispatch on its own"
+        : `${tier} is capped at ${ceiling}` };
+  }
+
+  if (requiresSecondVerifier(tier, e.dispatchEffect)) {
+    if (!isPerson(e.secondVerifierUserId) || !e.secondVerifiedAt) {
+      return { ok: false, code: "NO_SECOND_VERIFIER", reason: `a ${tier} rule that blocks dispatch needs a second, independent verifier` };
+    }
+    if (e.secondVerifierUserId === e.verifiedByUserId || e.secondVerifierUserId === e.proposedByUserId) {
+      return { ok: false, code: "SECOND_VERIFIER_NOT_DISTINCT", reason: "the second verifier is a third person: not the proposer, not the first verifier" };
+    }
+    if (e.secondVerifiedAt > now) {
+      return { ok: false, code: "AMBIGUOUS_EFFECTIVE_DATE", reason: "second verification in the future" };
+    }
+  }
+
+  // C1b-2b: the citation level is its own evidence class, and says so in the method. It cannot borrow
+  // a source revision it does not claim, and a source-level promotion cannot call itself a citation.
+  if ((e.verificationLevel ?? "SOURCE_DOCUMENT_VERIFIED") === "CITATION_VERIFIED") {
+    if (e.verificationMethod !== "OFFICIAL_CITATION" || e.sourceRevisionRef.trim()) {
+      return { ok: false, code: "CITATION_METHOD_MISMATCH", reason: "a citation-verified rule is verified by OFFICIAL_CITATION and names no source revision" };
+    }
+    return { ok: true, tier };
+  }
+  if (e.verificationMethod === "OFFICIAL_CITATION") {
+    return { ok: false, code: "CITATION_METHOD_MISMATCH", reason: "OFFICIAL_CITATION is the citation level's method; a source-document promotion records how the source was read" };
+  }
+
+  if (!e.sourceRevisionRef.trim() || !source) {
+    return { ok: false, code: "NO_SOURCE_REVISION", reason: "a rule is verified against a source revision; name one that exists" };
+  }
+  if (source.status !== "verified") {
+    return { ok: false, code: "SOURCE_NOT_VERIFIED", reason: `source revision ${source.versionRef} is ${source.status}; a rule cannot be more verified than its source` };
+  }
+  if ((source.repealedAt && source.repealedAt <= now) || (source.effectiveUntil && source.effectiveUntil <= now)) {
+    return { ok: false, code: "SOURCE_REPEALED", reason: `source revision ${source.versionRef} is no longer in force` };
+  }
+
+  return { ok: true, tier };
+}
+
+/* ------------------------------------------------------------------ */
+/* Promotion                                                           */
+/* ------------------------------------------------------------------ */
+
+export type RulePromotionOutcome =
+  | { promoted: true; promotionRef: string; status: LedgerStatus; lifecycle: RuleLifecycle; tier: AuthorityClass }
+  | { promoted: false; code: RuleRefusal; reason: string };
+
+const sourceFor = async (versionRef: string): Promise<SourceRevision | null> => {
+  if (!versionRef.trim()) return null;
+  const db = await dbOrThrow();
+  const rows = await db.select({
+    versionRef: knowledgeVersions.versionRef, contentHash: knowledgeVersions.contentHash,
+    status: knowledgeVersions.status, repealedAt: knowledgeVersions.repealedAt,
+    effectiveUntil: knowledgeVersions.effectiveUntil,
+  }).from(knowledgeVersions).where(eq(knowledgeVersions.versionRef, versionRef)).limit(1);
+  return rows[0] ?? null;
+};
+
+/**
+ * Record a verified rule revision. Same guarantees as the HOS ledger: one row per promoted state,
+ * the departing row marked and never rewritten, corrections pointing at what they correct.
+ */
+export async function promoteRule(
+  e: RuleEvidence, now: Date,
+  /** C1b-2b: the caller's own writes (a verification event), committed or rolled back with the promotion. */
+  alsoInTransaction?: (tx: Parameters<Parameters<Awaited<ReturnType<typeof dbOrThrow>>["transaction"]>[0]>[0], promotionRef: string) => Promise<void>,
+): Promise<RulePromotionOutcome> {
+  const source = await sourceFor(e.sourceRevisionRef);
+  const valid = validateRuleEvidence(e, source, now);
+  if (!valid.ok) return { promoted: false, code: valid.code, reason: valid.reason };
+
+  const db = await dbOrThrow();
+  const sameRule = and(eq(hosRuleLimitHistory.ruleFamily, e.ruleFamily), eq(hosRuleLimitHistory.ruleRef, e.ruleRef));
+
+  if (e.correctsPromotionRef) {
+    const target = await db.select({ id: hosRuleLimitHistory.id }).from(hosRuleLimitHistory)
+      .where(and(sameRule, eq(hosRuleLimitHistory.promotionRef, e.correctsPromotionRef))).limit(1);
+    if (!target[0]) {
+      return { promoted: false, code: "CORRECTS_UNKNOWN_PROMOTION", reason: `no promotion ${e.correctsPromotionRef} of ${e.ruleFamily}/${e.ruleRef} to correct` };
+    }
+  }
+
+  const previous = (await db.select().from(hosRuleLimitHistory).where(sameRule)
+    .orderBy(desc(hosRuleLimitHistory.id)).limit(1))[0];
+
+  const payloadJson = JSON.stringify(e.payload ?? null);
+  if (previous && !e.correctsPromotionRef &&
+      previous.payloadJson === payloadJson &&
+      previous.citationUrl === e.citationUrl &&
+      previous.sourceSection === e.sourceSection &&
+      previous.sourceRevisionRef === e.sourceRevisionRef &&
+      previous.dispatchEffect === e.dispatchEffect &&
+      previous.verifiedByUserId === e.verifiedByUserId) {
+    return { promoted: false, code: "DUPLICATE_PROMOTION", reason: "this rule, source and verifier are already the current promotion" };
+  }
+
+  const status = statusFor(e, now);
+  const promotionRef = ref("RULE-PROM");
+  const changeReason = e.correctsPromotionRef ? "CORRECTED_VERIFICATION" : previous ? "VERIFIED_REVISION" : "INITIAL_VERIFICATION";
+
+  await db.transaction(async (tx) => {
+    const supersede = previous && (
+      (previous.status === "CURRENT" && status === "CURRENT") ||
+      (e.supersedesPrevious && (previous.status === "CURRENT" || previous.status === "FUTURE")));
+    if (supersede) {
+      await tx.update(hosRuleLimitHistory).set({ status: "SUPERSEDED" }).where(eq(hosRuleLimitHistory.id, previous.id));
+    }
+    await tx.insert(hosRuleLimitHistory).values({
+      promotionRef,
+      profileKey: null, limitKey: null, value: null, unit: "none",
+      jurisdiction: e.jurisdiction,
+      authorityType: e.authorityType,
+      instrumentTitle: e.instrumentTitle,
+      issuingAuthority: e.issuingAuthority,
+      sourceSection: e.sourceSection,
+      citationUrl: e.citationUrl,
+      instrumentVersion: e.instrumentVersion ?? null,
+      verificationMethod: e.verificationMethod,
+      establishedByVersionRef: e.sourceRevisionRef,
+      verifiedByUserId: e.verifiedByUserId,
+      verifiedAt: e.verifiedAt,
+      effectiveFrom: e.effectiveFrom ?? null,
+      effectiveUntil: e.effectiveUntil ?? null,
+      status,
+      changeReason,
+      correctsPromotionRef: e.correctsPromotionRef ?? null,
+      previousPromotionRef: previous?.promotionRef ?? null,
+      ruleFamily: e.ruleFamily,
+      ruleRef: e.ruleRef,
+      domain: e.domain,
+      authorityTier: valid.tier,
+      dispatchEffect: e.dispatchEffect,
+      sourceRevisionRef: e.sourceRevisionRef.trim() ? e.sourceRevisionRef : null,
+      // Copied, not referenced: the hash the verifier actually read against. A citation-level
+      // promotion has none, which is exactly why it cannot claim source monitoring.
+      sourceHash: source?.contentHash ?? null,
+      proposedByUserId: e.proposedByUserId,
+      secondVerifierUserId: e.secondVerifierUserId ?? null,
+      secondVerifiedAt: e.secondVerifiedAt ?? null,
+      payloadJson,
+      verificationLevel: e.verificationLevel ?? "SOURCE_DOCUMENT_VERIFIED",
+    });
+    if (alsoInTransaction) await alsoInTransaction(tx, promotionRef);
+  });
+
+  return { promoted: true, promotionRef, status, lifecycle: lifecycleOf({ status, effectiveFrom: e.effectiveFrom ?? null, effectiveUntil: e.effectiveUntil ?? null }, now), tier: valid.tier };
+}
+
+/* ------------------------------------------------------------------ */
+/* Reading                                                             */
+/* ------------------------------------------------------------------ */
+
+/** Every promotion of one rule, oldest first. */
+export async function ruleHistory(ruleFamily: string, ruleRef: string) {
+  const db = await dbOrThrow();
+  return db.select().from(hosRuleLimitHistory)
+    .where(and(eq(hosRuleLimitHistory.ruleFamily, ruleFamily), eq(hosRuleLimitHistory.ruleRef, ruleRef)))
+    .orderBy(hosRuleLimitHistory.id);
+}
+
+export type BelievedRule = {
+  promotionRef: string;
+  ruleFamily: string;
+  ruleRef: string;
+  authorityTier: string | null;
+  dispatchEffect: string | null;
+  sourceRevisionRef: string | null;
+  sourceHash: string | null;
+  payload: unknown;
+};
+
+/**
+ * The rule in force at `at`, as LeaseOS knew it at `at`.
+ *
+ * Only rows recorded by then count — today's knowledge is never applied to yesterday's decision —
+ * and of those, the last one whose effective window covers `at`. A future rule recorded early is
+ * picked up on its effective date without anyone flipping a status.
+ */
+export async function believedRuleOn(ruleFamily: string, ruleRef: string, at: Date): Promise<BelievedRule | null> {
+  const rows = await ruleHistory(ruleFamily, ruleRef);
+  const held = rows.filter((r) =>
+    r.recordedAt <= at && r.status !== "REVOKED" &&
+    (!r.effectiveFrom || r.effectiveFrom <= at) &&
+    (!r.effectiveUntil || r.effectiveUntil > at));
+  const last = held[held.length - 1];
+  if (!last) return null;
+  return {
+    promotionRef: last.promotionRef, ruleFamily: last.ruleFamily, ruleRef: last.ruleRef ?? ruleRef,
+    authorityTier: last.authorityTier, dispatchEffect: last.dispatchEffect,
+    sourceRevisionRef: last.sourceRevisionRef, sourceHash: last.sourceHash,
+    payload: last.payloadJson == null ? null : JSON.parse(last.payloadJson),
+  };
+}
+
+/**
+ * Rules whose source revision has changed status since they were verified: the source was
+ * superseded, withdrawn or repealed after the rule was read from it. Nothing is changed; the list is
+ * for a person to re-read.
+ */
+export async function rulesOnStaleSources(now: Date) {
+  const db = await dbOrThrow();
+  const rows = await db.select({
+    promotionRef: hosRuleLimitHistory.promotionRef, ruleFamily: hosRuleLimitHistory.ruleFamily,
+    ruleRef: hosRuleLimitHistory.ruleRef, ruleStatus: hosRuleLimitHistory.status,
+    sourceRevisionRef: hosRuleLimitHistory.sourceRevisionRef, sourceHash: hosRuleLimitHistory.sourceHash,
+    sourceStatus: knowledgeVersions.status, sourceContentHash: knowledgeVersions.contentHash,
+    repealedAt: knowledgeVersions.repealedAt,
+  }).from(hosRuleLimitHistory)
+    .innerJoin(knowledgeVersions, eq(knowledgeVersions.versionRef, hosRuleLimitHistory.sourceRevisionRef));
+  return rows.filter((r) =>
+    (r.ruleStatus === "CURRENT" || r.ruleStatus === "FUTURE") &&
+    (r.sourceStatus !== "verified" || r.sourceContentHash !== r.sourceHash || (r.repealedAt != null && r.repealedAt <= now)));
+}
+
+/* ------------------------------------------------------------------ */
+/* Source verification                                                 */
+/* ------------------------------------------------------------------ */
+
+export type SourceVerifyOutcome =
+  | { verified: true }
+  | { verified: false; code: "NO_VERIFIER" | "UNKNOWN_SOURCE" | "SELF_VERIFICATION" | "NOT_VERIFIABLE"; reason: string };
+
+/**
+ * Mark a source revision verified. A named person, never the one who fetched the document it belongs
+ * to (C1b-Q2), and only from `candidate` or `reviewed`: a superseded or withdrawn revision stays so.
+ */
+export async function verifySourceRevision(versionRef: string, verifierUserId: number, now: Date): Promise<SourceVerifyOutcome> {
+  if (!isPerson(verifierUserId)) return { verified: false, code: "NO_VERIFIER", reason: "a source is verified by a named person" };
+  const db = await dbOrThrow();
+  const row = (await db.select({ id: knowledgeVersions.id, status: knowledgeVersions.status, fetchedByUserId: knowledgeDocuments.fetchedByUserId })
+    .from(knowledgeVersions)
+    .leftJoin(knowledgeDocuments, eq(knowledgeDocuments.documentRef, knowledgeVersions.documentRef))
+    .where(eq(knowledgeVersions.versionRef, versionRef)).limit(1))[0];
+  if (!row) return { verified: false, code: "UNKNOWN_SOURCE", reason: `no source revision ${versionRef}` };
+  // Read from the document, never taken from the caller.
+  if (row.fetchedByUserId != null && row.fetchedByUserId === verifierUserId) {
+    return { verified: false, code: "SELF_VERIFICATION", reason: "the person who fetched a source does not verify it" };
+  }
+  if (row.status !== "candidate" && row.status !== "reviewed") {
+    return { verified: false, code: "NOT_VERIFIABLE", reason: `source revision ${versionRef} is ${row.status}` };
+  }
+  await db.update(knowledgeVersions)
+    .set({ status: "verified", verifiedByUserId: verifierUserId, verifiedAt: now })
+    .where(eq(knowledgeVersions.id, row.id));
+  return { verified: true };
 }

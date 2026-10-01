@@ -1,6 +1,5 @@
 /**
- * The committed evidence about one trip stop's boundaries — the chain rule, without the
- * reader.
+ * The committed evidence about one trip stop's boundaries, read from its receipts.
  *
  * The chain SPINE item 1 names, end to end:
  *
@@ -11,25 +10,30 @@
  *       → boundaryConfirmations     (boundaryConfirmation.ts — pure, and the only resolver)
  *       → siteBaseline.phaseConfirmation
  *
- * In the sibling repository (`leaseos`, branch `claude/spine-boundary-confirmation`) this
- * module has two halves: `evidenceFromReceipts`, which decides whether a stop's receipts
- * still describe the row, and `boundaryEvidenceForStop`, which reads the row and its
- * receipts through `orgScopeWhere(trips, scope)`. **Only the first half is here**, and the
- * code of it is the sibling's, unchanged. It resolves nothing itself — every verdict comes
- * from `boundaryConfirmations`.
+ * This module does the two things the resolver must not: it reads the database, and
+ * it decides whether the receipts it found still describe the row. It resolves
+ * nothing itself — every verdict comes from `boundaryConfirmations`. The code is the
+ * sibling repository's (`leaseos`, `claude/spine-boundary-confirmation`), unchanged;
+ * what changed is that `tripStops` here now carries the last write it compares
+ * against, through `0179_trip_stop_provenance.sql` (leaseos's 0169, reconciled
+ * forward — docs/register/MIGRATION_0169_RECONCILIATION.md).
  *
- * ## Why the reader is not here
+ * ## Association
  *
- * The chain rule needs the row's last write: `tripStops.updatedAt` and `updatedByUserId`,
- * which `0169_trip_stop_provenance.sql` adds in the sibling. This repository never received
- * that migration, and its `0169` slot is taken by `0169_defect_resolution.sql` (PR #4, now
- * on `main`) — the collision recorded in docs/register/SPINE_ITEM1_BOUNDARY_CONFIRMATION.md.
- * With no last write to compare against, the only honest input a reader here could supply
- * is `{ updatedAt: null, updatedByUserId: null }`, and the rule below answers that with
- * `no_write_recorded` for every stop: a receipt whose row may have been edited since is not
- * evidence. A reader that always answers `unknown` is not worth mounting, and one that
- * invents a last write would be the fail-open this file exists to refuse. So the reader
- * waits for the migration, and the rule is kept identical so that it can be dropped in.
+ * A receipt speaks for a stop only when `targetType = 'trip_stop'` AND
+ * `targetRecordId` is that stop's id. Both are required: ids are per table, so a
+ * `maintenance_defect` receipt can carry the same number as a stop and must not be
+ * read as one. There is no other link — the manifest names fields, not rows.
+ *
+ * ## Scope
+ *
+ * Neither `tripStops` nor `assistantCommitReceipts` carries an `orgRef`. A stop
+ * belongs to its trip, and the trip carries the organization, so the stop is read
+ * only through `orgScopeWhere(trips, scope)` — the same predicate every tenant-scoped
+ * reader in `db.ts` uses. A stop outside the caller's scope and a stop that does not
+ * exist return the same answer, so the result cannot be used to probe for another
+ * organization's stops. Knowing a stop's id is not a way past this: the id is only
+ * ever looked up inside the scope.
  *
  * ## Only the newest commit speaks
  *
@@ -42,23 +46,48 @@
  * speak for it. Receipts committed at the newest instant all speak — within one second
  * they cannot be ordered, and none was followed by a foreign write.
  *
+ * The cost is a boundary an older commit confirmed and nothing has touched since reading
+ * `unknown` once a later commit leaves it out. Proving nothing touched it needs per-field
+ * write provenance on the direct edit path — a schema question, deferred.
+ *
  * ## When the receipts stop describing the row at all — the chain rule
  *
- * A stop whose last write is anything other than its newest commit gets NO evidence,
- * every boundary `unknown`, and the reason:
+ * The assistant commit stamps `tripStops.updatedAt` with the same instant it writes into
+ * the receipt's `committedAt`, and `updatedByUserId` with its actor. A stop whose last
+ * write is anything other than its newest commit gets NO evidence, every boundary
+ * `unknown`, and the reason:
  *
- *     edited_after_commit      — `updatedAt` is later than the newest commit.
- *     no_write_recorded        — `updatedAt` is NULL. Here, every stop, until 0169 lands.
+ *     edited_after_commit      — `updatedAt` is later. `tripStops.update` stamps its own
+ *                                `updatedAt` and records which ROW it touched, never which
+ *                                FIELD, so no receipt can be trusted to describe the row.
+ *     no_write_recorded        — `updatedAt` is NULL. Rows older than 0179 recorded no
+ *                                write at all, so an edit after the commit cannot be ruled
+ *                                out.
  *     write_predates_commit    — `updatedAt` is earlier than a commit that wrote the row.
+ *                                No current writer produces that; a row that contradicts
+ *                                its own receipts is not one to read confirmation from.
  *     written_by_another_actor — the stamps agree but the row's last writer is not the
- *                                newest commit's actor. A NULL writer is refused the same way.
+ *                                newest commit's actor. Both columns are second-precision,
+ *                                so a hand edit landing in the commit's second truncates to
+ *                                the same stamp; the writer does not. A NULL writer is
+ *                                refused the same way.
  *     seal_mismatch            — ANY receipt's manifest no longer matches its sha256.
  *     unreadable_manifest      — ANY receipt's manifest is not a readable array of fields.
  *
+ * The last two look at the whole history, not only the newest receipt: a stop whose
+ * record has been altered anywhere is not one to read confirmation from.
+ *
  * Failing to `unknown` is the safe direction. It can only exclude a sample from a
- * baseline; it can never admit one nobody stands behind.
+ * baseline; it can never admit one nobody stands behind. The costs are real and stated:
+ * an edit that only touched `notes` still breaks the chain; and a hand edit by the
+ * committing user themself, in the same second as their own commit, is the one write the
+ * rule cannot see — a person's own value either way, but not the one the receipt names.
  */
 import { createHash } from "node:crypto";
+import { and, eq, inArray } from "drizzle-orm";
+import { assistantCommitReceipts, tripStops, trips } from "../../drizzle/schema";
+import { orgScopeWhere, type TenantScope } from "../db";
+import type { DbOrTx } from "./dbTypes";
 import { readFieldManifest, type BoundaryEvidence } from "./boundaryConfirmation";
 
 /** What a receipt contributes to the chain check. */
@@ -69,7 +98,7 @@ export type StopReceipt = {
   actorUserId: number;
 };
 
-/** What the stop's own row says about its last write. Here: nothing, until 0169. */
+/** What the stop's own row says about its last write. */
 export type StopLastWrite = {
   updatedAt: Date | null;
   updatedByUserId: number | null;
@@ -133,4 +162,48 @@ export function evidenceFromReceipts(
   }
 
   return { evidence: newestReceipts.flatMap(r => read.get(r)!), chain: "intact" };
+}
+
+/**
+ * The committed evidence for one stop, or `null` when the stop does not exist or is
+ * outside `scope`. The two are deliberately indistinguishable.
+ */
+export async function boundaryEvidenceForStop(
+  db: DbOrTx,
+  stopId: number,
+  scope: TenantScope,
+): Promise<StopEvidence | null> {
+  const stop = (
+    await db
+      .select({ id: tripStops.id, updatedAt: tripStops.updatedAt, updatedByUserId: tripStops.updatedByUserId })
+      .from(tripStops)
+      .where(
+        and(
+          eq(tripStops.id, stopId),
+          inArray(
+            tripStops.tripId,
+            db.select({ id: trips.id }).from(trips).where(orgScopeWhere(trips, scope)),
+          ),
+        ),
+      )
+      .limit(1)
+  )[0];
+  if (!stop) return null;
+
+  const receipts = await db
+    .select({
+      fieldManifest: assistantCommitReceipts.fieldManifest,
+      fieldManifestHash: assistantCommitReceipts.fieldManifestHash,
+      committedAt: assistantCommitReceipts.committedAt,
+      actorUserId: assistantCommitReceipts.actorUserId,
+    })
+    .from(assistantCommitReceipts)
+    .where(
+      and(
+        eq(assistantCommitReceipts.targetType, "trip_stop"),
+        eq(assistantCommitReceipts.targetRecordId, stop.id),
+      ),
+    );
+
+  return evidenceFromReceipts({ updatedAt: stop.updatedAt, updatedByUserId: stop.updatedByUserId }, receipts);
 }

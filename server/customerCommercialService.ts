@@ -1,5 +1,5 @@
 /**
- * v23.26 — Customer, Contract and Rate Management: the database half.
+ * v23.31 — Customer, Contract and Rate Management: the database half.
  *
  * Every rule lives in `_core/commercialLifecycle.ts` and `_core/rateApplicability.ts`; this file
  * is where the rows are read under the money scope (P4.1, 0146: the financial entity is the
@@ -19,8 +19,7 @@ import {
   customerPurchaseOrders, dispatchPostings, dispatchRoles, domainEventOutbox, jobCommercialContexts, jobCommercialParties, jobCommercialReferences, jobCommercialSnapshots, jobs, operators, rateSheetVersions, rateSheets,
 } from "../drizzle/schema";
 import { getDb, jobInScope } from "./db";
-import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
-import { entityIdsInScope, notFound, type MoneyScope } from "./_core/entityScope";
+import { financeScopeFor, notFound, type MoneyScope } from "./_core/entityScope";
 import type { Db, DbOrTx, Tx } from "./_core/dbTypes";
 import { buildOutboxRow } from "./_core/eventEmitter";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
@@ -48,13 +47,18 @@ const roleOf = (a: Actor) => (a.roles.length ? a.roles.join(",") : "none").slice
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 const parseJson = <T>(s: string | null | undefined, fallback: T): T => { if (!s) return fallback; try { return JSON.parse(s) as T; } catch { return fallback; } };
 
-/** The caller's money scope. Empty `entityIds` means the caller can see no commercial record at all. */
-export async function commercialScope(userId: number): Promise<CommercialScope> {
+/**
+ * The caller's money scope, through the strict F1 boundary (`financeScopeFor`, P0-A3): the acting
+ * organization from the caller's live membership — an ended, lapsed or suspended membership is refused,
+ * never revived by the single-tenant fallback — and the books that organization owns. The resolver is
+ * passed in by the router so each handler names the boundary it stands on. Empty `entityIds` means the
+ * caller can see no commercial record at all.
+ */
+export async function commercialScope(userId: number, resolve: typeof financeScopeFor = financeScopeFor): Promise<CommercialScope> {
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-  const acting = await resolveActingScope(db, userId);
-  const scope = { tenantId: acting.tenantId };
-  return { db, scope, entityIds: await entityIdsInScope(db, scope), tenantId: acting.tenantId };
+  const fs = await resolve(db, userId);
+  return { db, scope: { tenantId: fs.tenantId }, entityIds: [...fs.entityIds], tenantId: fs.tenantId };
 }
 const inScope = (s: CommercialScope, col: MySqlColumn) => (s.entityIds.length ? inArray(col, s.entityIds) : sql`1 = 0`);
 

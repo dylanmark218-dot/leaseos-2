@@ -1,5 +1,5 @@
 /**
- * v23.26 — one contract, pure: the customer, the status and its transitions, the dates and the
+ * v23.31 — one contract, pure: the customer, the status and its transitions, the dates and the
  * renewal state, the documents linked to it, the rate sheets under it, the jobs that froze it,
  * and the approval history from the ledger.
  */

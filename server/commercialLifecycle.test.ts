@@ -1,5 +1,5 @@
 /**
- * v23.26 — the pure rules of the Customer / Contract / Rate domain, without a row.
+ * v23.31 — the pure rules of the Customer / Contract / Rate domain, without a row.
  */
 import { describe, expect, it } from "vitest";
 import {

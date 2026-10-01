@@ -1,5 +1,5 @@
 /**
- * v23.26 — Customer, Contract and Rate Management, through the database.
+ * v23.31 — Customer, Contract and Rate Management, through the database.
  *
  * The non-negotiable, proven here: a job snapshotted under a $185/h line keeps pricing at $185/h
  * after the customer's sheet moves to $215/h. Around it: tenant refusal on every record kind,
@@ -14,7 +14,9 @@ import { CONFIDENTIAL_COMMERCIAL_FIELDS } from "../shared/commercialVocabulary";
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 276_000_000 + Math.floor(Math.random() * 50_000);
+let seq = 288_000_000 + Math.floor(Math.random() * 50_000);
+/** Explicit financial-entity ids get their own declared band, so the id-band guard sees it (tenantScopeMoney holds 1.9M). */
+let entitySeq = 2_200_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 beforeAll(() => { if (DB_URL) pool = mysql.createPool({ uri: DB_URL, connectionLimit: 4 }); });
 afterAll(async () => { await pool?.end(); });
@@ -27,7 +29,7 @@ async function member(orgRef: string | null, roles: string[]) {
   return userId;
 }
 async function entity(orgRef: string) {
-  const id = 1_910_000 + Math.floor(Math.random() * 80_000);
+  const id = entitySeq++;
   await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay, orgRef) VALUES (?,?,?,'corporation','AB',12,31,?)", [id, `FE-${rnd()}`, `entity ${rnd()}`, orgRef]);
   return id;
 }
@@ -99,6 +101,27 @@ d("customers are records, unique per entity, never deleted", () => {
     await expect(callerFor(b.office).customerCommercial.customers.create({ financialEntityId: a.financialEntityId, name: `Intruder ${rnd()}` })).rejects.toMatchObject({ code: "NOT_FOUND" });
     const legacy = await member(null, ["office"]);
     expect((await callerFor(legacy).customerCommercial.customers.list({})).some(x => x.accountRef === c.accountRef)).toBe(false);
+  }, 60_000);
+});
+
+d("an ended membership is not revived as the single tenant (the strict F1 boundary, P0-A3)", () => {
+  it("refuses a former member everything, and shows them neither their old company's customers nor the unowned books", async () => {
+    const t = await tenant();
+    const mine = await callerFor(t.office).customerCommercial.customers.create({ financialEntityId: t.financialEntityId, name: `Former ${rnd()}` });
+    // The historical single tenant's book: unowned, visible to a caller with no membership at all.
+    const legacy = await member(null, ["office"]);
+    const unownedId = entitySeq++;
+    await pool.execute("INSERT INTO financialEntities (id, entityRef, legalName, taxpayerType, jurisdiction, fiscalYearEndMonth, fiscalYearEndDay, orgRef) VALUES (?,?,?,'corporation','AB',12,31,NULL)", [unownedId, `FE-${rnd()}`, `legacy ${rnd()}`]);
+    const theirs = await callerFor(legacy).customerCommercial.customers.create({ financialEntityId: unownedId, name: `Legacy ${rnd()}` });
+    expect((await callerFor(legacy).customerCommercial.customers.list({})).some(x => x.accountRef === theirs.accountRef)).toBe(true);
+    // The office user leaves the company. They are not a new single-tenant user; they are nobody's.
+    await pool.execute("UPDATE organizationMemberships SET status = 'ended', effectiveTo = NOW() WHERE userId = ?", [t.office]);
+    for (const call of [
+      () => callerFor(t.office).customerCommercial.customers.list({}),
+      () => callerFor(t.office).customerCommercial.customers.get({ accountRef: mine.accountRef }),
+      () => callerFor(t.office).customerCommercial.customers.get({ accountRef: theirs.accountRef }),
+      () => callerFor(t.office).customerCommercial.customers.create({ financialEntityId: unownedId, name: `Revived ${rnd()}` }),
+    ]) await expect(call()).rejects.toMatchObject({ code: expect.stringMatching(/^(FORBIDDEN|NOT_FOUND)$/) });
   }, 60_000);
 });
 

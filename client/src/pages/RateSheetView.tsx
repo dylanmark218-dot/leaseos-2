@@ -1,5 +1,5 @@
 /**
- * v23.26 — one rate sheet, pure: the current version and every other, each version's lines with
+ * v23.31 — one rate sheet, pure: the current version and every other, each version's lines with
  * their conditions, the approvals, the contract it sits under and the jobs that froze it.
  * Prices appear only when the server said the caller may see them (`confidential`).
  */

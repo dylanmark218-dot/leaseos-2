@@ -174,7 +174,7 @@ export const CLASSIFICATION: readonly Rule[] = [
   r("comms.policy_breach", /^(communication_gap_exceeds_policy|lone_worker_no_satellite)$/, "communications", "company_policy", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
   r("comms.satellite_present", /^lone_worker_satellite_present$/, "communications", "company_policy", ...WARN_ACK),
 
-  /* v23.26 — the job's commercial basis. Company policy under a client contract; never a safety stop. */
+  /* v23.31 — the job's commercial basis. Company policy under a client contract; never a safety stop. */
   r("commercial.account_hold", /^commercial_account_(on_hold|inactive)$/, "commercial", "company_policy", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
   r("commercial.contract", /^commercial_contract_not_usable$/, "commercial", "client_contract", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
   // Blocking when required and absent; the producer downgrades it to review under a recorded waiver or an emergency posting, and monotonicity keeps it there.

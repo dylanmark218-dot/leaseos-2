@@ -1,5 +1,5 @@
 /**
- * v23.26 — the pure half of the Customer / Contract / Rate domain.
+ * v23.31 — the pure half of the Customer / Contract / Rate domain.
  *
  * No database, no clock: every rule the service enforces is a function here, so a state
  * transition, the choice of a sheet version at a date, the commercial readiness gate and the

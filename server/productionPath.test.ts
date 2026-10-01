@@ -42,7 +42,16 @@ d("29 — the chain, through the product", () => {
     const proposer = await withRole("management");
     const approver = await withRole("management");
     const branch = `B-${rnd()}`;
-    const unitId = 127;
+    // B23.1B: created, not named. This was `const unitId = 127` — a unit this
+    // test does not own. The enforcement event opens a work order against it,
+    // and `workOrderInScope` resolves that work order through the unit's
+    // ownership row, so once any suite claimed unit 127 the release step failed
+    // with "Work order N not found" and looked like an authorization defect.
+    const [fixtureUnit] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')",
+      [`U-PP-${rnd()}`]
+    );
+    const unitId = fixtureUnit.insertId;
     const vehicleRef = `UNIT-${rnd()}`;
 
     /* A release policy, approved by a second person. */

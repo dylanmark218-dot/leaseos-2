@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
  * The artifacts of project rule §18 — the ones written on paper, read over a radio, or quoted in a
  * dispute. Adding a prefix here is a decision that it has become one of those.
  */
-const CANONICAL_PREFIXES = ["FT", "INV", "DLY", "SIG", "CR", "BB", "DSP", "WO", "ORG", "CN", "CON", "RSHT"] as const;   // v23.26: customer number, contract number, rate sheet number — read aloud, quoted on paper
+const CANONICAL_PREFIXES = ["FT", "INV", "DLY", "SIG", "CR", "BB", "DSP", "WO", "ORG", "CN", "CON", "RSHT"] as const;   // v23.31: customer number, contract number, rate sheet number — read aloud, quoted on paper
 
 const serverFiles = readdirSync("server").filter(f => f.endsWith(".ts") && !f.endsWith(".test.ts")).map(f => `server/${f}`);
 

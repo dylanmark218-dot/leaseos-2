@@ -1,5 +1,12 @@
 # Organization-aware portals — the work this checkpoint did not do
 
+> **Closed by #64 (auth workspace), merged with main 2026-09-25.** The finding below — an ended membership
+> falls through to the single-tenant fallback with its role grants intact — no longer holds on the merged
+> branch: `resolveActingScope` now refuses a caller whose memberships are all excluded (`MembershipRevoked`,
+> "membership is not active"), and refuses two live memberships until one is chosen. A user who never had a
+> membership still gets the fallback. `server/actingScopeMembership.test.ts` and `.db.test.ts` were rewritten
+> to the closed state. The analysis below is kept as the record of what was found.
+
 The login and portal-chooser checkpoint stops at the edge of tenancy on purpose.
 Everything below is known, reachable from the current code, and deliberately unbuilt.
 

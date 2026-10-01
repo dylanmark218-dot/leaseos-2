@@ -1,5 +1,5 @@
 /**
- * v23.26 — the small vocabulary the commercial screens share: page states, money and date text,
+ * v23.31 — the small vocabulary the commercial screens share: page states, money and date text,
  * the status badge, the enum-to-words map. One place, so a status never gets an inline colour.
  */
 import { Badge } from "@/components/ui/badge";

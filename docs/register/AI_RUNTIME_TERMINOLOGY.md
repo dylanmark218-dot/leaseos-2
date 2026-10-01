@@ -694,3 +694,37 @@ is item 9 of §18: the plan document the moratorium cites was absent from this r
 moratorium whose primary text is missing is enforced by quotation. The recovered plan's ordering
 (per-boundary confirmation → the four duplications → `offlineCapability` → the rest of the spine)
 is the order this document assumed.
+
+---
+
+## 22. Agent-runtime terms (added 2026-09-24)
+
+The runtime design these terms belong to is mapped in `docs/register/AI_AGENT_RUNTIME_ARCHITECTURE.md`,
+which uses the six-word status set `IMPLEMENTED / PARTIAL / DECLARED_UNWIRED / MISSING / DEFERRED /
+NOT_NEEDED` (mapping to this document's §0 words is in its §0). Status below is on
+`claude/compassionate-mendel-8sa4vg` at `6f52b57`; `(PR #7)` means the code is in the open Secretary
+PR, not this tree.
+
+| Term | LeaseOS definition | Repository home | Status |
+|---|---|---|---|
+| **Agent** | A controlled runtime that combines inference, state, tools, policy and repeated execution toward a goal. The model is never the authority; the agent is never the authorization boundary. | the agent runtime: `server/agentRouter.ts` + `server/_core/actionGateway.ts` | **PARTIAL** — records runs and decisions; executes nothing |
+| **Agent Loop** | The bounded Decision → Action → Observation → Evaluation cycle; limits are server-enforced. | no executor; `TRANSITIONS`, `detectNoProgress()`, `agentRuns.maxSteps` | **MISSING** (loop); budgets **PARTIAL** |
+| **Orchestrator** | Server-controlled coordinator of one or more tasks/workers. Not a new module. | agent runtime (`TRANSITIONS`) + live workflow runtime (`workflowEngine.ts` → `operationalTasks`) + worker `withHandlers()` | **IMPLEMENTED** for rule-driven human tasks; **NOT_NEEDED** as a separate `orchestrator.ts` |
+| **Worker** | Least-privileged executor responsible for a bounded task. | production-worker handler (`productionWorker.ts`); `runSecretaryExtractionJob()` + `TaskAllowlist` (PR #7) | **DECLARED_UNWIRED (PR #7)** for AI; worker infrastructure **IMPLEMENTED** |
+| **ReAct** | For LeaseOS: Decision → Action → Observation → Evaluation. Hidden chain-of-thought is not requested or persisted; audit uses reason codes and evidence refs. | `agentActions.decision` / `decisionReasons`; `assistantQuestions.reason`; `evidenceRefs` (accepted, not yet persisted) | **PARTIAL** — observation (tool result) not persisted |
+| **Plan-and-Execute** | A structured plan whose execution state is durable and bounded. | `agentSteps` (caller-supplied capability plan, `REGISTRY.has`, ≤ 40); run states in `agentRuns.status` | **PARTIAL** — plan stored, never advanced |
+| **Evaluator** | Deterministic or model-assisted verification against explicit criteria; outcomes map to `Verdict` and `Decision`, not a new enum. | `validateExtraction()` (PR #7); `verifyClaim()`; `checkCommit()`; `detectGaps()`; `resolveAutomation()` | **PARTIAL** |
+| **Human-in-the-Loop** | Policy-required human approval before specified high-impact actions; the AI never promotes itself to automatic. | `automationPolicy.ts` + `SafetyCeiling`; `agentApprovals` (payload-hash bound); read-back → acknowledge → commit; `NEVER_AUTONOMOUS`, `NEVER_AUTOMATIC` | **IMPLEMENTED** (safety-ceiling list empty by owner decision) |
+| **Agentic RAG** | Authorized, agent-directed retrieval through tool-like, audited requests — never unrestricted context dumping. | `assistant.ask` + `admitSource()` (knowledge); scoped read tools in `SECRETARY_TOOLS` (records, PR #7) | **IMPLEMENTED** (knowledge, extractive, no model); records **DECLARED_UNWIRED**; embeddings **DEFERRED** |
+| **Context Engineering** | Controlled construction and maintenance of the model's temporary working context: relevant, authorized, provenance-carrying, within limits. | `AdmittedContextBlock`; `assembleContext()`; `ContextPack` (PR #7); `inputHash` (PR #7) | **PARTIAL** — admission live; pack, pruning and budget-in-context absent |
+| **Agent Handoff** | Structured transfer of a bounded task and evidence between workers; never untyped prose as state. | would be a typed `domainEventOutbox` row (`correlationId` = run, `causationId` = parent step) | **NOT_NEEDED** now (no second worker); pattern documented |
+| **Agent Budget** | Server-controlled limits (steps, inference calls, tool calls, retries, deadline, tokens, cost). Model and caller may narrow, never widen. Exhaustion is deterministic. | `agentRuns.maxSteps`/`stepsUsed` (unread); `stepBudget`/`spendStep()` (PR #7); outbox `maxAttempts` | **PARTIAL** — no enforcement at run level; no inference/token/deadline budget |
+| **Cancellation** | Stops further tool and model work, never rolls back committed transactions, and is audited. | `agentRuns.status = cancelled` in `TRANSITIONS` | **PARTIAL** — state exists; no procedure reaches it; `requestAction` does not refuse terminal runs |
+
+### Correction to §0 and §4
+
+§0 says the production worker "registers exactly one" handler. It registers exactly one *named*
+handler (`enforcement`); every other event falls through `withHandlers()` to the generic
+`workflow_rules` processor, which runs `workflowEngine.ts` rules into `operationalTasks`
+(deduplicated by rule + subject) in production. The §4 verdict stands — no `orchestrator.ts` —
+and is stronger for it: a live, durable, deterministic coordinator already exists.

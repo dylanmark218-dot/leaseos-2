@@ -23,7 +23,7 @@ export const PRECEDENCE: readonly ScopeLevel[] = ["job_override", "change_order"
 
 export type ChargeDefinition = {
   id: number; definitionRef: string; rateKind: RateKind; serviceCode: string; resourceClass: string | null; unitId: number | null;
-  /** v23.26 — a rate line on a sheet version carries its conditions; null on every definition proposed directly. */
+  /** v23.31 — a rate line on a sheet version carries its conditions; null on every definition proposed directly. */
   applicabilityJson?: string | null; rateSheetVersionId?: number | null; lineKind?: string | null;
   pricingMethod: PricingMethod; unit: Unit; rateMillis: number | null; flatCents: number | null; basisPoints: number | null; multiplierMillis: number | null;
   minimumQuantityMillis: number | null; minimumChargeCents: number | null; billingIncrementMillis: number | null; roundingMode: "nearest" | "up" | "down";
@@ -36,9 +36,9 @@ export type ResolutionContext = {
   rateKind: RateKind; serviceCode: string; at: Date;
   customerAccountId?: number | null; vendorId?: number | null; projectRef?: string | null; siteRef?: string | null; contractRef?: string | null; jobId?: number | null; branchCode?: string | null; unitId?: number | null; resourceClass?: string | null;
   conditionKey?: string | null;
-  /** v23.26 — what the job knows about itself (shift, province, equipment class, …) for conditioned rate lines. */
+  /** v23.31 — what the job knows about itself (shift, province, equipment class, …) for conditioned rate lines. */
   attributes?: ContextAttributes | null;
-  /** v23.26 — when set, only definitions on this sheet version (or with no sheet at all) are considered: a snapshotted job prices from its pinned version. */
+  /** v23.31 — when set, only definitions on this sheet version (or with no sheet at all) are considered: a snapshotted job prices from its pinned version. */
   rateSheetVersionId?: number | null;
 };
 
@@ -63,9 +63,9 @@ export function scopeApplies(d: ChargeDefinition, ctx: ResolutionContext): boole
   if (d.resourceClass != null && ctx.resourceClass != null && d.resourceClass !== ctx.resourceClass) return false;
   if (d.conditionKey != null && d.conditionKey !== (ctx.conditionKey ?? null)) return false;
   if (d.rateKind === "vendor_payable" && (ctx.vendorId ?? null) == null) return false;   // a payable is owed to someone
-  // v23.26 — a job pinned to a sheet version prices from that version; a line on another version of the same or another sheet is not in play.
+  // v23.31 — a job pinned to a sheet version prices from that version; a line on another version of the same or another sheet is not in play.
   if (ctx.rateSheetVersionId != null && d.rateSheetVersionId != null && d.rateSheetVersionId !== ctx.rateSheetVersionId) return false;
-  // v23.26 — conditioned rate lines: every condition must hold; an attribute the context lacks never holds.
+  // v23.31 — conditioned rate lines: every condition must hold; an attribute the context lacks never holds.
   if (d.applicabilityJson != null && d.applicabilityJson !== "" && !evaluateApplicability(d.applicabilityJson, ctx.attributes ?? {}).applies) return false;
   return true;
 }
@@ -87,7 +87,7 @@ export function resolveRate(defs: readonly ChargeDefinition[], ctx: ResolutionCo
   const expired = defs.filter(d => wasApproved(d) && !inWindow(d, ctx.at) && scopeApplies(d, ctx));
   if (proposedOnly.length) reasons.push(`${proposedOnly.length} proposed definition(s) apply but are not approved — a proposal prices nothing`);
   if (expired.length) reasons.push(`${expired.length} approved definition(s) match but are outside their effective window at ${ctx.at.toISOString().slice(0, 10)}`);
-  // v23.26 — a conditioned line that was set aside says which condition failed, so "no rate" is never a mystery.
+  // v23.31 — a conditioned line that was set aside says which condition failed, so "no rate" is never a mystery.
   for (const d of defs) {
     if (!d.applicabilityJson || !wasApproved(d) || !inWindow(d, ctx.at) || d.rateKind !== ctx.rateKind || d.serviceCode !== ctx.serviceCode) continue;
     const a = evaluateApplicability(d.applicabilityJson, ctx.attributes ?? {});

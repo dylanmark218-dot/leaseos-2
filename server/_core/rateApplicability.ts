@@ -1,5 +1,5 @@
 /**
- * v23.26 — rate line applicability: conditions beyond the scope columns.
+ * v23.31 — rate line applicability: conditions beyond the scope columns.
  *
  * A charge definition names its scope (customer, contract, site, unit, job, branch) in columns
  * the resolver has always matched exactly. A rate line on a sheet may also be conditioned on

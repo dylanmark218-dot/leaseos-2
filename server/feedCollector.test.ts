@@ -19,7 +19,7 @@ const ago = (min: number) => new Date(now.getTime() - min * 60_000);
 const ab511 = (over: Partial<FeedSource> = {}): FeedSource => ({
   sourceKey: "ab511", displayName: "511 Alberta Developer API", status: "unverified",
   rateLimitCalls: 10, rateLimitWindowSeconds: 60, updateIntervalHours: 1,
-  advisoryOnly: true, credentialEnvVar: "ALBERTA_511_API_KEY", ...over,
+  commercialUsePermitted: "yes", advisoryOnly: true, credentialEnvVar: "ALBERTA_511_API_KEY", ...over,
 });
 const present = { present: true, envVar: "ALBERTA_511_API_KEY" };
 

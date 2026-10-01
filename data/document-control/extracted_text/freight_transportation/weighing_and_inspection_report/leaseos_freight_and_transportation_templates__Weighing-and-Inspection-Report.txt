@@ -1,0 +1,51 @@
+Weighing and Inspection Report
+Record scale readings, the weighing configuration, visible condition and follow-up actions.
+Company / issuer: __________________________  Home base: _____________________
+Record no. __________________  Revision: ______  Issue date / time: _______________
+Job / load no. __________________  Customer PO / AFE: _________________________
+Vehicle and weighing details
+Carrier / driver: _______________________________  Unit / trailer: ___________________
+Product / load description: ______________________  BOL / manifest ref.: _______________
+Scale facility / address: _________________________________________________________
+Scale ID / operator: ___________________________  External scale ticket no.: ___________
+Weigh date / time / zone: ______________________  Measurement unit: [ ] kg  [ ] lb
+Configuration / axles / trailers / compartments: ______________________________________
+Gross and tare readings
+Enter gross, tare and net above. Net = gross minus tare, using the same unit and comparable configuration.
+Gross / tare configuration differences or estimate basis: ______________________________
+Axle or axle group readings
+Total measured mass: _________________  Measurement limitations: __________________
+This report records measurements; it does not establish allowable weights or certify roadworthiness.
+Weighing and Inspection findings
+Record no. __________________  Job / load no. ______________  Date: ______________
+Visible inspection
+Result key: OK = no visible issue noted; A = action needed; NA = not applicable; NC = not checked.
+Discrepancies and action
+Reweigh required: [ ] Yes  [ ] No  [ ] Undetermined   Reweigh ticket ref.: _________________
+Disposition: [ ] Hold  [ ] Adjust / reweigh  [ ] Refer for review  [ ] Released by authorized party
+Release authority / basis / outstanding restrictions: __________________________________
+Acknowledgments
+Scale operator / inspector printed name: ____________________________________________
+Signature: _________________________________  Date / time: _______________________
+Driver printed name: _________________________  Signature: _______________________
+Reviewer / release authority: __________________  Date / time: _______________________
+Reading | Mass | Date / time | Source ticket / conditions
+ |  |  | 
+ |  |  | 
+ |  |  | 
+Axle / group | Measured mass | Reviewed limit | Authority / permit / source
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+Inspection point | Result | Finding / evidence reference
+Packaging / container condition |  | 
+Securement / restraint condition |  | 
+Seals / valve closure / leakage |  | 
+Load distribution / stability |  | 
+Visible damage / contamination |  | 
+Markings / labels / document match |  | 
+Issue / affected item | Required action | Owner / due | Closure evidence
+ |  |  | 
+ |  |  | 
+ |  |  | 

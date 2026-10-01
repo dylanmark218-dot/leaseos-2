@@ -1,5 +1,5 @@
 /**
- * v23.26 — the commercial vocabulary shared by server and client.
+ * v23.31 — the commercial vocabulary shared by server and client.
  *
  * Extensible by code, validated by code. A rate line's kind is one of these or a custom key
  * (`custom:<slug>`); nothing here is a column, so adding a kind is a line in a list, not a
