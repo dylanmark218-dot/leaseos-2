@@ -26,7 +26,7 @@ not duplicated, and item 2 does not delete it.
 | `openShifts` | shift eligibility, interest | `openShiftsRouter.ts` inline | **router copy deleted**; the engine's `shiftEligibility` is the one rule (owner's ruling: the union of both), and the router enforces it |
 | `complianceDocumentValidity` | document validity | `readinessComposer` / `dispatchReadiness` / tile and other readers | **resolved by #52** (rulings B and C); every reader now takes the canonical verdict |
 
-**Item 2 is complete** (2026-10-01). All four pairs have one implementation; the last two were settled by the owner's rulings and applied on `claude/spine-item2-openshifts-fieldticket` (§2, §3 and "Item 2 — completion" below).
+**All four pairs are resolved** (2026-10-01). Each has one implementation; the last two were settled by the owner's rulings and applied on `claude/spine-item2-openshifts-fieldticket` (§2, §3 and "Item 2 — completion" below). Item 2 is recorded **COMPLETE** only once that branch is merged and CI on the resulting `main` commit is green; that record follows the merge.
 
 ---
 
@@ -125,7 +125,7 @@ The engine is `server/_core/fieldTicket.ts`. It has no production importer; only
 
 - **A:** `server/_core/openShifts.ts`, pure, imported only by its test. It refused `wrong_role`, `missing_qualification` (from a pre-filtered list), `on_approved_leave`, `not_rostered` (off-hitch), `overlaps_existing`, and an interest from an ineligible person.
 - **B:** `server/openShiftsRouter.ts`, mounted as `shifts`. `shifts.eligibility` refused approved leave, a missing/expired licence and unknown/unverified/expired qualifications (through the C1b-3 read adapter). `shifts.expressInterest` checked **no** eligibility despite its comment, and the licence was read where `operators.id == userId` instead of the person link `operators.userId`.
-- RED on `main` (`server/openShiftsEligibility.db.test.ts`): 12 of 12 fail.
+- RED on `main` (`server/openShiftsEligibility.db.test.ts`): the original 12 cases all fail. A 13th, added later, pins the licence linkage: a stranger's operator row whose id equals the user's id must not be read as theirs, and reading `operators.id == userId` fails it.
 
 **Ruling.** One canonical implementation preserving every restriction from both. The router calls it and enforces its result. Viewing (`shifts.read`), expressing interest (`shifts.interest`) and posting (`shifts.post`) stay distinct. The work-taking action fails closed.
 
@@ -170,7 +170,7 @@ The engine is `server/_core/fieldTicket.ts`. It has no production importer; only
 - both procedures must call `shiftEligibility`;
 - the router may not import the judging helpers or name any refusal code.
 
-A mutation that bypasses `shiftEligibility` in `expressInterest` fails the guard and 10 of the 12 DB tests.
+A mutation that bypasses `shiftEligibility` in `expressInterest` fails the guard and 10 of the original 12 DB tests.
 
 **Fixtures** in four older suites now give workers a roster and a linked operator record, which the stricter rule requires. `engineReachability`: `openShifts` is wired, and the unwired pin goes 86 → 85.
 
@@ -250,6 +250,6 @@ duplications are the ones that change refusals or billing, and those wait for a 
   - six exports in total were removed by the first checkpoint, and two more by these rulings.
 - **Tests:**
   - removed: 35 lines (the deleted roll-up's unit tests);
-  - added: two DB suites (5 + 12 tests);
+  - added: two DB suites (5 + 13 tests);
   - extended: the structural guard;
   - migrated: the engine unit tests (20).
