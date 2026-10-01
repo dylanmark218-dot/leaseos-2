@@ -2,6 +2,8 @@
 
 **Status:** survey and design only. No production code, migration, schema or test was changed to write it.
 **Measured at:** `main` = `6f52b57` (2026-09-23), plus every remote branch fetched the same day.
+**Re-measured:** 2026-10-01 against `main` = `b35bac4` (333 commits later). The addendum below records what moved;
+section text that it supersedes is marked *(superseded, see addendum)*.
 **Branch:** `claude/payroll-architecture-survey-g90up6` (this document only).
 **Stops here by design:** nothing in §12 onward is built. §21 lists the owner decisions that gate coding.
 
@@ -31,8 +33,64 @@ Two external constraints shape everything:
    permitted work is "a deletion, a resolver, or a router over something already written". The finance survey on
    `claude/finance-accounting-survey-2mp4h6` records an owner decision that the new-engine freeze stands for
    financial-event, journal and export work. Most of §12 is new tables and needs an owner ruling (D1).
-2. **Migration numbering is contested.** `main` ends at 0174; open branches claim 0170 and 0172–0181. The first
-   slot free everywhere is **0182** (§17), allocated only at PR time.
+2. **Migration numbering is contested.** At the survey, `main` ended at 0174 and the first slot free everywhere was
+   0182. At re-measurement (addendum) `main` ends at 0219, 0182 is claimed by PR #99, and the first slot free
+   everywhere is **0220** (§17), allocated only at PR time.
+
+## Addendum — re-measured 2026-10-01 (`main` = `b35bac4`)
+
+Between the survey and this re-measurement, `main` took 333 commits and the migration head moved from 0174 to
+**`0219_job_commercial_context.sql`**. What changed for this design:
+
+**Merged, and now the convention payroll must follow**
+
+| Change | Where | Effect on this design |
+|---|---|---|
+| Finance F1 tenant isolation merged (PR #56) | `moneyScoped(roleProcedure())` in `server/_core/trpc.ts:322`; `financeScopeFor`, `ownsEntity`, `requireOwnedEntity`, `ownedEntityWhere`, `bookOrgWhere`, `assertCallerOwnsEntity` in `server/_core/entityScope.ts`; `server/financeScope.ts`; `server/financeScopeCoverage.test.ts`; `server/tenantScopeFinance.db.test.ts` | New payroll routers use `moneyScoped(...)` and read `ctx.money` (a `FinanceScope` with `entityIds`). The coverage test reads the live router: any procedure whose input carries `financialEntityId`, `expenseRef`, `adjustmentRef` or another money key must be money-scoped or call one of the `SELF_SCOPED` helpers, or the suite fails. D2 is therefore settled by the repository (see §21). |
+| Strict acting-scope resolver | `resolveActingScopeStrict`, `RevivedFallbackRefused`, `MembershipRevoked` (`server/_core/actingScope.ts:191-242`) | Money scope now refuses a caller whose membership ended rather than falling back to the single tenant. Payroll inherits this through `financeScopeFor`. |
+| Organization-scoped role grants merged (PR #64, renumbered to `0207`/`0208`) | `RoleScopeType = global / organization / branch / unscoped_legacy`, `grantsInOrganization()` in `recordsAuthorization.ts`; `roleProcedure` resolves the organization and passes it to `authorize()` (`trpc.ts:95-139`) | Risk 3 in §19 is reduced: a `payroll_admin` grant is now issued by one organization and reaches only it. Legacy grants are `unscoped_legacy` and fail closed where an organization is required. |
+| `periodRouter` scoped | `moneyScoped` + `requireOwnedEntity` (`server/periodRouter.ts:13-21`) | **G3 is fixed on main.** |
+| Expense procedures scoped | `finance.expenseCreate/expenseSetTreatment/expenseDuplicates` prove the book (`payrollRouter.ts`, F1 and F1.1 comments) | **G2 is fixed on main.** |
+| Approval ladder reads only live roles | `isNull(userRoleAssignments.revokedAt)` (`commercialApprovalService.ts:40`) | **G6 is fixed on main.** D4 (reuse the ladder) is stronger for it. |
+| Document Control A–C merged | `0178_document_control_definitions.sql`, `0195_document_control_register.sql`, `0196_document_control_numbering.sql` (`numberAllocations`, `numberBlocks` on `trackingSequences`) | A pay-statement number uses the per-business, ledgered counter that now exists on main rather than the bare allocator described in §6. |
+| Customer contracts and rate sheets (PR #98, `0217`–`0219`) | `customerContracts`, `rateSheets`, `rateSheetVersions` | Customer charge rates are now versioned per contract. They carry no pay rate. The "no shared rate" rule in §11 stands and gains a precedent for effective-dated versions. |
+| Pinned counts | `OPERATIONAL_PROCEDURE_PERMISSIONS` length is now **723** (`procedureAuthorization.test.ts:178`); `serverPaths.size` is now **793** (`crossLayerIntegrity.test.ts:39`) | §15 and T18 cite the new numbers. |
+| Release | `LEASEOS_RELEASE` = `v23.31` | — |
+
+**Still true on `main`**
+
+- `payroll.myStatements` is still unfiltered (G1), `payroll.rateCreate` is still unscoped by design (G4), run approval
+  still has no creator ≠ approver check (G5), a run still cannot leave `draft` and `export` is still a stub (G7). The
+  only change to `payrollRouter.ts` since the survey is the F1 expense scoping.
+- `dutyRecords` still has no tenant column; HOS isolation (PR #71) was done in code, through the operator's owner.
+- The SPINE moratorium stands unchanged (`docs/register/SPINE_WIRING_PLAN.md:3`; restated in
+  `docs/register/SECRETARY_SPINE_MORATORIUM.md`). The finance F0 owner decisions on `main` are unchanged: the
+  new-engine freeze stands for financial-event, journal and export work. **D1 remains the gating decision.**
+- `LEASEOS_CURRENT_STATE.md:1027` still records that organization-wide isolation is not yet a property of the system.
+- No payroll design, table or router other than this document exists on `main` or on any open branch
+  (`git grep -il payroll` over `docs/` finds only finance, document-control, live-assist and knowledge documents that
+  mention it in passing).
+
+**Open branches that matter to payroll (2026-10-01)**
+
+| Branch / PR | State | Relevance |
+|---|---|---|
+| `claude/driver-portfolio-credential-wallet-ya8928` (PR #16) | open; now holds `0210`–`0212` | the credential wallet; still not a money wallet |
+| `claude/training-academy-workforce-q3mdse` (no PR) | open; now `0187`–`0188` | the second (training) wallet, unreconciled |
+| `claude/finance-accounting-survey-2mp4h6` (PR #61) | open; F1 already merged via #56, PR #61 carries follow-up hardening (`platformBootstrap`, census, coverage test) | may change `financeScopeCoverage.test.ts` again before payroll lands |
+| `claude/safety-compliance-program-builder-2qnty0` (PR #99) | open; **claims `0182`** | the number this report provisionally named is taken |
+| `claude/leaseos-sign-attest-design-5993ar` (no PR) | open; `0214`–`0216` "sign and attest" foundation | a generic signature/attestation model; the worker-signs-hours question (G12) should be checked against it before P3 |
+| `claude/leaseos-communications-marketplace-p8ptqw` (PR #59) | open; `0205`–`0206` | board membership and open work offers; adjacent to shift/open-work, not to pay |
+
+**Migration numbering, re-run (register scan over every remote branch, 2026-10-01)**
+
+`main` holds every number up to `0219` except the historical gaps and the slots still held only by branches
+(`0172`, `0173`, `0176`, `0177`, `0180`–`0184`, `0186`–`0188`, `0190`, `0197`, `0199`–`0201`, `0204`–`0206`,
+`0210`–`0216`). Open branches claim `0170`, `0172`, `0173`, `0175`–`0188`, `0197`, `0199`–`0201`, `0205`, `0206`
+and `0210`–`0216`; `0182` is claimed three times (document-control intake, integration hub, PR #99) and `0214` twice.
+Nothing claims `0220` or above. **The first slot free on `main` and on every open branch is now `0220`.** The
+register on `main` says "next free `0210`" and is itself stale; the collision register must be refreshed in the same
+PR that takes a payroll number. §17's provisional table is re-based to `0220`–`0229` below.
 
 ---
 
@@ -298,11 +356,11 @@ Severity: **S** = security or integrity defect on `main` today; **D** = design g
 | # | Sev | Finding | Evidence |
 |---|---|---|---|
 | G1 | **S** | `payroll.myStatements` lists **every entity's** paid/closed runs (up to 24) and stamps the caller's employee number on them; `listPayRuns()` is called with no entity filter. | `payrollRouter.ts:112-120`, `payrollService.ts:269-274` |
-| G2 | **S** | `finance.expenseCreate`, `expenseSetTreatment`, `expenseDuplicates` take a `financialEntityId`/`expenseRef` and never prove it against the caller's organization. | `payrollRouter.ts:645-760`; fixed on `claude/finance-accounting-survey-2mp4h6` (unmerged) |
-| G3 | **S** | `period.readiness/close/reopen` take `financialEntityId` from input with no scope check. | `periodRouter.ts:13-30` |
+| G2 | ~~S~~ fixed | `finance.expenseCreate`, `expenseSetTreatment`, `expenseDuplicates` took a `financialEntityId`/`expenseRef` without proving it. **Fixed on `main` by PR #56 (F1/F1.1).** | `payrollRouter.ts:645-760` |
+| G3 | ~~S~~ fixed | `period.readiness/close/reopen` took `financialEntityId` from input with no scope check. **Fixed on `main`: `moneyScoped` + `requireOwnedEntity`.** | `periodRouter.ts:13-21` |
 | G4 | **S** | `payroll.rateCreate` mints an unscoped, company-wide rate version by `rateKey` ("left unscoped on purpose" per its comment); any `controller` anywhere can supersede any `rateKey`. | `payrollRouter.ts:233-256` |
 | G5 | **S** | Run vs approve separation is role-level only; nothing compares the approver with the run's creator, and a user holding both roles (or the solo admin) self-approves silently. | `payrollRouter.ts:427-458`, `recordsAuthorization.ts:2419-2420` |
-| G6 | **S** | The commercial approval ladder's `decide()` counts revoked roles. | `commercialApprovalService.ts:30`; F0 G2 |
+| G6 | ~~S~~ fixed | The commercial approval ladder's `decide()` counted revoked roles. **Fixed on `main`: `isNull(revokedAt)`.** | `commercialApprovalService.ts:40` |
 | G7 | D | A pay run can never leave `draft` through the API: `runApprove.toState` excludes `collecting`, the engine allows only `draft→collecting`. Nothing writes `payRunLines`. `payPeriods.lockedAt` is never written. `payroll.export` is a stub (`exported: true`). | `payrollRouter.ts:431-498`, `payrollEngine.ts:286-297` |
 | G8 | D | No earning-code catalogue (`earningType` is free text on `payRates`, `payrollEarningEvents`, `payRunLines`); no compensation agreement; no pay schedule; no statement table; no YTD; no deductions/benefits model. | 0022 |
 | G9 | D | `payrollTimeEntries` has no approver, no `sourceRecordRef`, no offline capture ref; `payrollEarningEvents` has no approver and no run link; `payrollAdjustments` has no kind, evidence or affected period; `expenseRecords` has no submitter/approver/reimbursement state. | schema.ts 3315-3427, 3200 |
@@ -316,11 +374,11 @@ Severity: **S** = security or integrity defect on `main` today; **D** = design g
 | G17 | D | The workforce offboarding "final pay proposed" is a timestamp with no payroll write; `leaveRequests` have no payroll link (paid/unpaid). | `_core/workforce.ts:77`, 0090 |
 | G18 | D | `LEASEOS_B20_7` and the code agree on 40 procedures, but B20.5/B20.7 describe a working run lifecycle that the router cannot execute (G7); the docs also predate 0146 scoping. | B20.5 §4, B20.7 |
 | G19 | **O** | SPINE moratorium and the finance new-engine freeze vs the new tables this design needs. | `SPINE_WIRING_PLAN.md:3`, F0 owner decision 2 |
-| G20 | **O** | Migration numbering: the register is stale (stops at 0174); open branches hold 0170, 0172–0181; two 0157 files on main. | §17 |
-| G21 | **O** | Role grants have no organization until the auth-workspace branch merges; the finance F1 wrapper is unmerged; both change how payroll scopes. | §7, D2 |
+| G20 | **O** | Migration numbering: the register is stale (its "next free" lags the scan); at re-measurement `main` ends at 0219, open branches hold up to 0216, 0182 is claimed three times; two 0157 files on main. | §17, addendum |
+| G21 | resolved | Role grants had no organization and the F1 wrapper was unmerged. **Both merged (PR #64 as 0207/0208; PR #56).** Payroll builds on `moneyScoped` and organization-scoped grants. | §7, addendum |
 | G22 | note | `MoneyScope.tenantId` holds an `orgRef`; `tenantId` and `orgRef` are two names for one idea (`PORTAL_ORG_SCOPE_DEFERRED.md:74`). Payroll adds neither column; it keys to `financialEntityId`. | — |
 
-G1–G6 are defects in code that exists today and are permitted repairs under the moratorium.
+G1, G4 and G5 are defects in code that exists on `main` today and are permitted repairs under the moratorium; G2, G3 and G6 were repaired on `main` after the survey.
 
 ---
 
@@ -685,13 +743,15 @@ Service layer: `server/payrollService.ts` stays the data-access module; new pure
 (exception derivation), `payrollExport/` (adapters + a `csvGeneric` reference implementation). Engines take plain
 arguments (no db, no ctx), the repository's convention.
 
-Scope: every procedure begins with `moneyScope(ctx.user.id)` and the matching `assert*InScope` (or the
-finance branch's `moneyScoped(roleProcedure(...))` wrapper once F1 merges, owner decision D2). Any operational id
+Scope: every new procedure is `moneyScoped(roleProcedure("…"))` and reads `ctx.money` (merged F1 convention;
+see addendum). Existing payroll procedures keep `moneyScope()` + `assert*InScope`, which the coverage test accepts as
+`SELF_SCOPED`; migrating them to the wrapper is a P0 cleanup, not a prerequisite. Any operational id
 passed as evidence (`jobId`, `tripId`, `loadId`, `dispatchRoleId`, `unitId`, `evidenceRecordId`) is proved with the
 existing `jobInScope`/`tripInScope`/`unitInScope`/`evidenceInScope` point lookups and refused as NOT_FOUND.
 
 Pinned counts that change with any new procedure: `OPERATIONAL_PROCEDURE_PERMISSIONS` length
-(`procedureAuthorization.test.ts:161`, currently 634), `serverPaths.size` (`crossLayerIntegrity.test.ts:39`, 696),
+(`procedureAuthorization.test.ts:178`, 723 at re-measurement), `serverPaths.size` (`crossLayerIntegrity.test.ts:39`, 793),
+`financeScopeCoverage.test.ts` (every money-keyed procedure must be scoped),
 the `roleProcedure(` count in `scripts/current-state.sh`, and `PROCEDURE_AUTHORIZATION_INVENTORY.md`.
 
 ## 16. Proposed UI surfaces
@@ -716,7 +776,9 @@ B28 widget-source matrix (`docs/b28/WIDGET_SOURCE_MATRIX.md`) gains rows.
 
 ## 17. Migration strategy
 
-**Numbering (measured, not assumed).** `main` (`6f52b57`) ends at `0174_dispatch_override_provenance.sql`.
+**Numbering (measured, not assumed).** *(The paragraph and table below are the 2026-09-23 measurement; the
+addendum re-measures on 2026-10-01: `main` ends at `0219`, nothing claims `0220` or above, so the provisional
+numbers are re-based to `0220`–`0229`.)* `main` (`6f52b57`) ended at `0174_dispatch_override_provenance.sql`.
 The collision register's own scan (`docs/architecture/MIGRATION_COLLISION_REGISTER.md:11-18`), re-run on
 2026-09-23 against every remote branch, shows these claims on open branches:
 
@@ -729,28 +791,29 @@ The collision register's own scan (`docs/architecture/MIGRATION_COLLISION_REGIST
 | 0179 | `claude/eld-compliance-intelligence-ramlrd`, `claude/migration-0169-reconciliation` (PR #17) |
 
 The register itself is stale (it stops at 0174 and predates the 0175–0181 claims), so the two documents that
-name 0175 as "the next compliance slot" are also stale. **The first slot free on `main` and on every open branch
-is `0182`.** Under the register's rule of thumb the number is taken at PR time and re-checked; this document
-claims nothing until then. Slots 0016, 0017, 0094, 0095, 0098 and 0157 are never reused.
+name 0175 as "the next compliance slot" are also stale. At the survey the first slot free on `main` and on every
+open branch was `0182`; **at re-measurement it is `0220`** (0182 is now claimed by PR #99 and two other branches).
+Under the register's rule of thumb the number is taken at PR time and re-checked; this document claims nothing
+until then. Slots 0016, 0017, 0094, 0095, 0098 and 0157 are never reused.
 
 The runner is `scripts/apply-migrations.sh` (`ls drizzle/*.sql | sort`) in CI and `scripts/migrate.ts` with the
 `schemaMigrations` ledger in production; `drizzle/meta/_journal.json` is dead since 0018. Filenames are the
 registry; a compound trigger body must be the only content of its file and use a bare `BEGIN` line.
 
-**Proposed files (provisional numbers, allocated at PR time starting from 0182):**
+**Proposed files (provisional numbers, allocated at PR time starting from 0220 as of 2026-10-01):**
 
 | Provisional | File | Contents | Slice |
 |---|---|---|---|
-| 0182 | `0182_payroll_compensation_agreements.sql` | `compensationAgreements`, `compensationAgreementVersions`, `compensationEarningRules`, `earningCodes` (+ generated `codeKey`); `employeePayrollProfiles` + `workerClassification`, `organizationWorkerRef`; `payGroups` + `payScheduleId` | P1 |
-| 0183 | `0183_payroll_schedules_periods.sql` | `paySchedules`; `payPeriods` + `payScheduleId`, `paymentDate`, new state values; `payRuns` + `payScheduleId`, finalize/void/snapshot/supersede columns | P2 |
-| 0184 | `0184_payroll_time_and_earning_approval.sql` | `payrollTimeEntries` + source/approval/offline columns; `payrollEarningEvents` + `earningCodeId`, `compensationAgreementVersionId`, approval, `payRunId`; `payrollExceptions` | P3 |
-| 0185 | `0185_payroll_expense_reimbursement.sql` | `expenseRecords` + reimbursement state and claimant columns, UNIQUE on `reimbursementLineId` | P4 |
-| 0186 | `0186_payroll_statements.sql` | `payStatements`; `payRunLines` + `payStatementId`, adjustment/expense links, frozen `agreementVersionRef`; `payrollAdjustments` + kind/evidence/affected period; `trackingSequences` kind `PAY` | P5 |
-| 0187 | `0187_payroll_audit_events.sql` | `payrollAuditEvents` table + indexes (DDL only) | P5 |
-| 0188 | `0188_payroll_audit_append_only.sql` | `BEGIN…END` SIGNAL triggers only (the 0176 pattern; compound bodies must be alone in a file) | P5 |
-| 0189 | `0189_payroll_export_batches.sql` | `payrollExportBatches`, `payrollExportItems`; `bankStatementLines.matchedType` + `payroll_run`; `commercialGlMappings.mappingKind` + `payroll_earning_code` | P6 |
-| 0190 | `0190_payroll_approval_policy.sql` | `payrollApprovalPolicies` (or, if D4 chooses the commercial ladder, only the payroll flags) | P7 |
-| 0191 | `0191_payroll_finalized_run_guard.sql` | `SIGNAL` triggers refusing UPDATE/DELETE on `payRunLines`/`payStatements` when the run is FINALIZED (the `manifests_seal_guard` pattern) | P8 |
+| 0220 | `0220_payroll_compensation_agreements.sql` | `compensationAgreements`, `compensationAgreementVersions`, `compensationEarningRules`, `earningCodes` (+ generated `codeKey`); `employeePayrollProfiles` + `workerClassification`, `organizationWorkerRef`; `payGroups` + `payScheduleId` | P1 |
+| 0221 | `0221_payroll_schedules_periods.sql` | `paySchedules`; `payPeriods` + `payScheduleId`, `paymentDate`, new state values; `payRuns` + `payScheduleId`, finalize/void/snapshot/supersede columns | P2 |
+| 0222 | `0222_payroll_time_and_earning_approval.sql` | `payrollTimeEntries` + source/approval/offline columns; `payrollEarningEvents` + `earningCodeId`, `compensationAgreementVersionId`, approval, `payRunId`; `payrollExceptions` | P3 |
+| 0223 | `0223_payroll_expense_reimbursement.sql` | `expenseRecords` + reimbursement state and claimant columns, UNIQUE on `reimbursementLineId` | P4 |
+| 0224 | `0224_payroll_statements.sql` | `payStatements`; `payRunLines` + `payStatementId`, adjustment/expense links, frozen `agreementVersionRef`; `payrollAdjustments` + kind/evidence/affected period; `trackingSequences` kind `PAY` | P5 |
+| 0225 | `0225_payroll_audit_events.sql` | `payrollAuditEvents` table + indexes (DDL only) | P5 |
+| 0226 | `0226_payroll_audit_append_only.sql` | `BEGIN…END` SIGNAL triggers only (the 0176 pattern; compound bodies must be alone in a file) | P5 |
+| 0227 | `0227_payroll_export_batches.sql` | `payrollExportBatches`, `payrollExportItems`; `bankStatementLines.matchedType` + `payroll_run`; `commercialGlMappings.mappingKind` + `payroll_earning_code` | P6 |
+| 0228 | `0228_payroll_approval_policy.sql` | `payrollApprovalPolicies` (or, if D4 chooses the commercial ladder, only the payroll flags) | P7 |
+| 0229 | `0229_payroll_finalized_run_guard.sql` | `SIGNAL` triggers refusing UPDATE/DELETE on `payRunLines`/`payStatements` when the run is FINALIZED (the `manifests_seal_guard` pattern) | P8 |
 
 Each migration: header comment naming the slice and rule, `--> statement-breakpoint` separators, mirrored in
 `drizzle/schema.ts` in the same commit (column parity), Cents/Millis only (money gate), no reserved-word columns,
@@ -795,16 +858,18 @@ Test style follows the repository: `*.test.ts` for pure engines, `*.db.test.ts` 
    new engines under that definition. This report proposes them but takes nothing until the owner rules (D1).
 2. **Existing defects on `main` that payroll inherits.** `payroll.myStatements` lists every entity's runs
    (`payrollRouter.ts:112-120`, unfiltered `listPayRuns`); `payroll.export` is a stub; `finance.expenseCreate`,
-   `expenseSetTreatment` and `expenseDuplicates` are unscoped on `main` (fixed on the unmerged finance branch);
-   `periodRouter` takes `financialEntityId` from input without a scope check; `payroll.rateCreate` mints an
+   `expenseSetTreatment` and `expenseDuplicates` were unscoped (fixed on `main` since, PR #56);
+   `periodRouter` took `financialEntityId` from input without a scope check (fixed on `main` since); `payroll.rateCreate` mints an
    unscoped company-wide rate version by `rateKey`; run vs approve separation is role-level only (no creator ≠
    approver check); `payPeriods.lockedAt` is never written; nothing writes `payRunLines`; a run cannot leave
    `draft` through the API (`runApprove` cannot target `collecting`). These are security or integrity repairs
    and are permitted under the moratorium ("a resolver, or a router over something already written").
-3. **Tenancy is not finished.** `userRoleAssignments` carries no organization; a role held anywhere is a role
-   held everywhere until `claude/leaseos-auth-workspace-system-t008ad` (0170 organization-scoped grants) lands.
-   Payroll's money fence (`financialEntities.orgRef`) holds today, but a `payroll_admin` grant is global.
-   Two live memberships are refused rather than resolved. `MoneyScope.tenantId` holds an `orgRef`.
+3. **Tenancy is not finished, but closer.** Organization-scoped role grants merged after the survey (PR #64,
+   `0207`/`0208`): a `payroll_admin` grant is now issued by one organization and `roleProcedure` decides inside it.
+   Legacy grants are `unscoped_legacy` and fail closed where an organization is required. Money scope uses the
+   strict resolver (no revived single-tenant fallback). Two live memberships are still refused rather than
+   resolved. `MoneyScope.tenantId` holds an `orgRef`. `LEASEOS_CURRENT_STATE.md` still says organization-wide
+   isolation is not yet a property of the whole system.
 4. **Four tenancy columns for money** (`financialEntityId`, `bookOrgRef`, `orgRef`, `tenantId`). Payroll uses
    only `financialEntityId` and never adds `tenantId`.
 5. **Money doubles.** 0022's money columns are grandfathered doubles with Cents/Millis shadows filled by
@@ -839,14 +904,14 @@ decisions in §21.
 | Slice | Scope | Moratorium class | Depends on |
 |---|---|---|---|
 | **P0 — repairs** (no migration) | scope `payroll.myStatements`; scope `periodRouter`; creator ≠ approver on `runApprove`; add `collecting` to `runApprove`/a `runCollect` procedure over existing tables; write `payRunLines` from approved earnings; port the finance branch's F1 expense scoping if it has not merged | repair / resolver | D2 |
-| **P1 — compensation** | 0182: agreements, versions, rules, earning codes; `payrollCompensationRouter`; rule-in-force engine; T4, T5 (pure) | new tables (needs D1) | P0 |
-| **P2 — schedules and periods** | 0183; `payrollScheduleRouter`; period generation resolver | new table | P1 |
-| **P3 — time and earning approval** | 0184; `payrollTimeRouter`; candidate projection from HOS/dispatch/field tickets/work orders; exceptions resolver; T6, T7, T13, T15 | new columns + one table | P2 |
-| **P4 — expenses and reimbursement** | 0185; `payrollExpenseRouter`; QuickCapture receipt wiring; T8, T9 | new columns | P3 |
-| **P5 — runs, statements, audit** | 0186, 0187, 0188; `payrollRunRouter` (collect → finalize → correction); statement engine; `PAY` tracking sequence; document rendering via the invoice-document path; T10, T11, T12, T17, T19 | new tables | P4 |
-| **P6 — export boundary** | 0189; `csvGeneric` adapter + adapter interface; GL mapping kind; bank match type; T14 | new tables (Layer 4 of F0; needs D1/D5) | P5 |
-| **P7 — approval policy** | 0190 or ladder reuse; T16 | table or config | P5, D4 |
-| **P8 — DB guards** | 0191 finalized-run triggers | trigger | P5 |
+| **P1 — compensation** | 0220: agreements, versions, rules, earning codes; `payrollCompensationRouter`; rule-in-force engine; T4, T5 (pure) | new tables (needs D1) | P0 |
+| **P2 — schedules and periods** | 0221; `payrollScheduleRouter`; period generation resolver | new table | P1 |
+| **P3 — time and earning approval** | 0222; `payrollTimeRouter`; candidate projection from HOS/dispatch/field tickets/work orders; exceptions resolver; T6, T7, T13, T15 | new columns + one table | P2 |
+| **P4 — expenses and reimbursement** | 0223; `payrollExpenseRouter`; QuickCapture receipt wiring; T8, T9 | new columns | P3 |
+| **P5 — runs, statements, audit** | 0224, 0225, 0226; `payrollRunRouter` (collect → finalize → correction); statement engine; `PAY` tracking sequence; document rendering via the invoice-document path; T10, T11, T12, T17, T19 | new tables | P4 |
+| **P6 — export boundary** | 0227; `csvGeneric` adapter + adapter interface; GL mapping kind; bank match type; T14 | new tables (Layer 4 of F0; needs D1/D5) | P5 |
+| **P7 — approval policy** | 0228 or ladder reuse; T16 | table or config | P5, D4 |
+| **P8 — DB guards** | 0229 finalized-run triggers | trigger | P5 |
 | **P9 — UI** | employee, supervisor, payroll admin, controller, management panels; widgets; panel contract entries | client | P3+ |
 
 Contractor settlement, tax engines, legal pay stubs, and direct-deposit data are explicitly out of every slice.
@@ -856,7 +921,7 @@ Contractor settlement, tax engines, legal pay stubs, and direct-deposit data are
 | # | Decision | Why it blocks | Default this report assumes |
 |---|---|---|---|
 | D1 | Does the SPINE moratorium / new-engine freeze (F0 owner decision 2) apply to payroll tables (statements, exceptions, audit events, export batches)? | Every slice from P1 on adds tables | Yes; only P0 proceeds until ruled |
-| D2 | Merge order and dependency on `claude/finance-accounting-survey-2mp4h6` (F1 `moneyScoped` wrapper, expense scoping) and on `claude/leaseos-auth-workspace-system-t008ad` (org-scoped role grants) | Determines whether payroll uses `moneyScope()` + `assert*` (today's convention) or `moneyScoped(roleProcedure())` | Build on today's convention; adopt the wrapper when it merges |
+| D2 | ~~Merge order of F1 and org-scoped grants~~ **Settled by the repository on 2026-10-01**: both merged (PR #56, PR #64). Remaining question: migrate the 22 existing `payroll.*` procedures to `moneyScoped()` in P0, or leave them on `moneyScope()` + `assert*` (the coverage test accepts either) | Consistency of the payroll router | Migrate in P0 |
 | D3 | Keep `payRates` as the rate store (extend with agreement links) or migrate rates fully into agreement versions | Data model of P1 and the earning engine | Agreements are authoritative for new profiles; `payRates` read-only legacy |
 | D4 | Reuse the commercial approval ladder (`commercialApprovals`, 0136) for run and agreement approval, or a payroll-specific policy table | P7 and the separation-of-duties tests | Reuse the ladder; payroll-only flags in a small policy table |
 | D5 | First export adapter and format (generic CSV vs QuickBooks Online journal vs a payroll-provider file such as Wagepoint/ADP) | P6 scope; `commercialSettings.accountingTarget` already exists | Generic CSV first; provider adapters behind the same interface |
@@ -881,6 +946,9 @@ Contractor settlement, tax engines, legal pay stubs, and direct-deposit data are
   operational records; expenses, documents, numbering, audit, offline, approvals, client), each citing file and line.
 - `git fetch origin --prune` followed by the collision register's own scan over every remote branch (§17), and the
   open pull-request list (#7, #15, #16, #17 open on 2026-09-23).
+- Re-measured on 2026-10-01 against `main` = `b35bac4`: merged-PR log since `6f52b57`, diffs of the payroll, entity-scope,
+  tRPC, authorization, period and approval modules, the register scan re-run, and the open pull-request list
+  (16 open, including #16, #61, #99). Findings are in the addendum.
 - No tests were run and no dependencies were installed; the report cites the tests that would run.
 
 ## Appendix B. Glossary of LeaseOS terms used here
