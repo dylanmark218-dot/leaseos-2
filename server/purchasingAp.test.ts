@@ -229,6 +229,8 @@ describe("three grants because they are three people", () => {
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
+/** F1.2 — the suite's own (unowned, single-tenant) evidence: "evidence 1" is whichever suite made the first, and may belong to an organization. */
+async function ownEvidence() { return Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt) VALUES ('Tire receipt', 'receipt', NOW())"))[0].insertId); }
 let userSeq = 560000 + Math.floor(Math.random() * 50000);
 const nextUser = () => userSeq++;
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
@@ -292,7 +294,7 @@ d("the flat tire, end to end", () => {
       financialEntityId: entityId, vendorId, vendorInvoiceNumber: key("48291"),
       invoiceDate: new Date("2026-10-08T00:00:00Z"), serviceDate: new Date("2026-09-30T10:00:00Z"),
       subtotal: 2050, taxAmount: 102.5, total: 2152.5, lines: tireBill(),
-      purchaseAuthorizationRef: pa.authorizationRef, roadsideEventRef: rs.eventRef, unitId, evidenceRecordId: 1,
+      purchaseAuthorizationRef: pa.authorizationRef, roadsideEventRef: rs.eventRef, unitId, evidenceRecordId: await ownEvidence(),
     });
     expect(bill.accrual.accrualCandidate).toBe(true);
     expect(bill.accrual.servicePeriod).toBe("2026-09");
@@ -321,9 +323,12 @@ d("the flat tire, end to end", () => {
     expect(after[0].status).toBe("open");
 
     // Recovery: the customer's site condition caused the delay. Review, not an invoice.
-    const rec = await callerFor(bookkeeper).recovery.propose({ billRef: bill.billRef, jobId: 24198, contract: { passThroughAllowed: false }, category: "labour", causedByCustomer: true });
+    // F1 — the job is a real one in the caller's scope; a made-up job id is "not found".
+    const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, createdAt) VALUES (?, 'hydrovac', 'Recovery fixture', 'LSD 04-12-055-20W4', 'on_site', NOW())", [key("JOB").slice(0, 40)]);
+    const jobId = Number(job.insertId);
+    const rec = await callerFor(bookkeeper).recovery.propose({ billRef: bill.billRef, jobId, contract: { passThroughAllowed: false }, category: "labour", causedByCustomer: true });
     expect(rec.status).toBe("review_required");
-    const [invoices] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM invoices WHERE jobId = 24198");
+    const [invoices] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM invoices WHERE jobId = ?", [jobId]);
     expect(Number(invoices[0].n)).toBe(0);
   });
 
@@ -351,7 +356,7 @@ d("the flat tire, end to end", () => {
     const pa = await callerFor(driver).purchasing.request({ financialEntityId: entityId, vendorId, category: "tires", reason: "Two drive tires", estimatedAmount: 2000, emergency: true });
     await callerFor(shopLead).purchasing.approve({ authorizationRef: pa.authorizationRef, authorizedMaximum: 2000 });
     // Billed above the authorized maximum.
-    const bill = await callerFor(bookkeeper).vendor.billRecord({ financialEntityId: entityId, vendorId, vendorInvoiceNumber: key("OVER"), invoiceDate: new Date(), subtotal: 2050, taxAmount: 102.5, total: 2152.5, lines: tireBill(), purchaseAuthorizationRef: pa.authorizationRef, evidenceRecordId: 1 });
+    const bill = await callerFor(bookkeeper).vendor.billRecord({ financialEntityId: entityId, vendorId, vendorInvoiceNumber: key("OVER"), invoiceDate: new Date(), subtotal: 2050, taxAmount: 102.5, total: 2152.5, lines: tireBill(), purchaseAuthorizationRef: pa.authorizationRef, evidenceRecordId: await ownEvidence() });
     const m = await callerFor(bookkeeper).vendor.billMatch({ billRef: bill.billRef });
     expect(m.outcome).toBe("mismatch");
     expect(m.variances.join(" ")).toContain("exceeds authorized maximum");

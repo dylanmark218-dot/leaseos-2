@@ -35,8 +35,8 @@ export type BillingReadinessInput = {
   unconfirmedValues: number;
   dailyLogsComplete: boolean;
   /**
-   * Ticket-level outcome, derived from per-line dispositions by
-   * deriveSignatureStatus() in fieldTicket.ts.
+   * Ticket-level outcome: the signature status `recordSignature` recorded at signing,
+   * never recomputed from per-line dispositions (those are `disputedLineCount`).
    */
   fieldTicketStatus:
     | "accepted"

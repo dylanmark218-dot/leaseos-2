@@ -17,7 +17,7 @@ const now = new Date("2026-09-11T12:00:00Z");
 const source = (over: Partial<FeedSource> = {}): FeedSource => ({
   sourceKey: "ab511", displayName: "511 Alberta Developer API", status: "verified",
   rateLimitCalls: 10, rateLimitWindowSeconds: 60, updateIntervalHours: 1,
-  advisoryOnly: true, credentialEnvVar: "ALBERTA_511_API_KEY", ...over,
+  commercialUsePermitted: "yes", advisoryOnly: true, credentialEnvVar: "ALBERTA_511_API_KEY", ...over,
 });
 const endpoint: FeedEndpoint = { sourceKey: "ab511", url: "https://example.invalid/events", credentialStyle: { kind: "query", parameter: "apikey" }, timeoutMs: 8000 };
 const client = (r: { status: number; body?: string; headers?: Record<string, string> } | Error): HttpClient => ({

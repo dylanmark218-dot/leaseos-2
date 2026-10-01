@@ -273,7 +273,7 @@ describe("verifying an HOS figure is a sensitive act", () => {
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let userSeq = 7_300_000 + Math.floor(Math.random() * 50_000);
+let userSeq = 413_000_000 + Math.floor(Math.random() * 50_000);
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
 beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 4 }); });
 const callerFor = (id: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id, role: "user" } as never });
