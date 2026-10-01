@@ -277,3 +277,101 @@ async function albertaRoad() {
   await pool.execute("INSERT INTO roadGraphEdges (buildRef, segmentId, accessRoadObjectId, label, fromNodeKey, toNodeKey, lengthMetres, surfaceKind, featureTypeLabel, componentId) VALUES (?, ?, ?, 'Fixture Rd', ?, ?, 4000, 'gravel', 'Road', 1)", [buildRef, segmentId, objectId, a, b]);
   return { buildRef, segmentId };
 }
+
+/* ------------------------------------------------------------------ */
+/* P4 — the approval fingerprint moves on material legality changes only */
+/* ------------------------------------------------------------------ */
+
+const approveRoute = (c: Cast, unitId: number, segmentIds: string[]) =>
+  callerFor(c.dispatcher).spatial.routeApprove({ unitId, originRef: "YARD", destinationRef: "LEASE", segmentIds, dispatchStatus: "review", explanation: "fixture approval", requiredChecks: ["road_weight_restriction"], load: { grossWeightKg: 20_000, dangerousGoods: false } });
+const recheck = (c: Cast, approvalRef: string, at?: Date) => callerFor(c.dispatcher).spatial.routeApprovalCheck({ approvalRef, ...(at ? { at } : {}) });
+
+d("P4 — stale on material change, and only on material change", () => {
+  it("records the weight and legal-rule dependencies on every new approval", async () => {
+    const c = await cast();
+    const unitId = await newUnit();
+    await profile(c, unitId);
+    const a = await approveRoute(c, unitId, [key("SEG").slice(0, 60)]);
+    expect(a.dependencies).toEqual(expect.arrayContaining(["measuredWeight", "legalRules", "liveAdvisories"]));
+  }, 60_000);
+
+  it("goes stale when a legally determined reading shows a materially different weight", async () => {
+    const c = await cast();
+    const unitId = await newUnit();
+    await profile(c, unitId);
+    const a = await approveRoute(c, unitId, [key("SEG").slice(0, 60)]);
+    await reading(unitId, { source: "certified_scale", grossKg: 41_000, legal: true, groups: [{ key: "steer", kg: 7_000 }, { key: "drive", kg: 34_000 }] });
+    const r = await recheck(c, a.approvalRef);
+    expect(r.stale).toBe(true);
+    expect(r.changed).toContain("measuredWeight");
+    expect(r.reasons).toContain("the authoritative vehicle weight changed since this route was approved");
+  }, 60_000);
+
+  it("does not go stale when a fresh reading of the same load differs by sensor noise", async () => {
+    const c = await cast();
+    const unitId = await newUnit();
+    await profile(c, unitId);
+    await reading(unitId, { source: "loadsense_calibrated", grossKg: 30_000, legal: true, groups: [{ key: "steer", kg: 7_000 }, { key: "drive", kg: 23_000 }], at: new Date(Date.now() - 120_000) });
+    const a = await approveRoute(c, unitId, [key("SEG").slice(0, 60)]);
+    await reading(unitId, { source: "loadsense_calibrated", grossKg: 30_020, legal: true, groups: [{ key: "steer", kg: 7_010 }, { key: "drive", kg: 23_010 }] });
+    expect((await recheck(c, a.approvalRef)).stale).toBe(false);
+  }, 60_000);
+
+  it("goes stale when the load shifts between axle groups even though gross is unchanged", async () => {
+    const c = await cast();
+    const unitId = await newUnit();
+    await profile(c, unitId);
+    await reading(unitId, { source: "certified_scale", grossKg: 30_000, legal: true, groups: [{ key: "steer", kg: 7_000 }, { key: "drive", kg: 23_000 }], at: new Date(Date.now() - 120_000) });
+    const a = await approveRoute(c, unitId, [key("SEG").slice(0, 60)]);
+    await reading(unitId, { source: "certified_scale", grossKg: 30_000, legal: true, groups: [{ key: "steer", kg: 5_000 }, { key: "drive", kg: 25_000 }] });
+    const r = await recheck(c, a.approvalRef);
+    expect(r.stale).toBe(true);
+    expect(r.changed).toEqual(["measuredWeight"]);
+  }, 60_000);
+
+  it("goes stale when a road ban on the route comes into force", async () => {
+    const c = await cast();
+    const unitId = await newUnit();
+    await profile(c, unitId);
+    const j = freshJurisdiction();
+    await axleRule(j, { single: 9_100, tandem: 17_000 });
+    const seg = key("SEG").slice(0, 60);
+    const starts = new Date(Date.now() + 2 * 86_400_000);
+    await banAt(c, seg, 75, j, { from: starts, to: new Date("2037-12-31T00:00:00Z") });
+    const a = await approveRoute(c, unitId, [seg]);
+    expect((await recheck(c, a.approvalRef)).stale).toBe(false);
+    const r = await recheck(c, a.approvalRef, new Date(starts.getTime() + 3_600_000));
+    expect(r.stale).toBe(true);
+    expect(r.changed).toEqual(expect.arrayContaining(["restrictionSet", "legalRules"]));
+  }, 60_000);
+
+  it("goes stale when the verified base rule a ban resolves against is revised", async () => {
+    const c = await cast();
+    const unitId = await newUnit();
+    await profile(c, unitId);
+    const j = freshJurisdiction();
+    await axleRule(j, { single: 9_100, tandem: 17_000 });
+    const seg = key("SEG").slice(0, 60);
+    await banAt(c, seg, 75, j);
+    const a = await approveRoute(c, unitId, [seg]);
+    await axleRule(j, { single: 9_100, tandem: 16_000 });     // a verified revision of the same rule
+    const r = await recheck(c, a.approvalRef);
+    expect(r.stale).toBe(true);
+    expect(r.changed).toEqual(["legalRules"]);
+  }, 60_000);
+
+  it("does not go stale for evidence elsewhere: a restriction on another road, a reading for another unit, another jurisdiction's rule", async () => {
+    const c = await cast();
+    const unitId = await newUnit(), otherUnit = await newUnit();
+    await profile(c, unitId);
+    const j = freshJurisdiction();
+    await axleRule(j, { single: 9_100, tandem: 17_000 });
+    const seg = key("SEG").slice(0, 60);
+    await banAt(c, seg, 75, j);
+    const a = await approveRoute(c, unitId, [seg]);
+    await restriction(c, key("ELSEWHERE").slice(0, 60), "road_weight_restriction", 9_000, "kg");
+    await reading(otherUnit, { source: "certified_scale", grossKg: 60_000, legal: true, groups: [{ key: "drive", kg: 60_000 }] });
+    await axleRule(freshJurisdiction(), { single: 5_000, tandem: 9_000 });
+    expect((await recheck(c, a.approvalRef)).stale).toBe(false);
+  }, 60_000);
+});

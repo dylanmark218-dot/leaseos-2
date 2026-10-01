@@ -21,9 +21,12 @@ import { resolveAssignment } from "./_core/commRoute";
 import { pathLengthMetres } from "./_core/geoImport";
 import { applicableRestrictions, hashPart, inForce, loadFingerprint, stalenessAgainst, type RouteDependencies } from "./_core/structures";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
+import { resolveRoadBan } from "./routeLegality";
+import { routingWeightFor } from "./routingWeight";
 
 type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 type RouteApprovalRow = typeof routeApprovals.$inferSelect;
+type RestrictionRow = typeof roadRestrictions.$inferSelect;
 
 /* ------------------------------------------------------------------ */
 /* Which advisories a route depends on                                  */
@@ -110,7 +113,7 @@ export async function liveAdvisoryDependency(db: Db, buildRef: string | null, se
 /* ------------------------------------------------------------------ */
 
 /** Everything a route decision stood on, each as a hash: change one and the approval is stale. */
-export async function routeDependencies(db: Db, args: { unitId: number; segmentIds: string[]; load: { grossWeightKg: number; dangerousGoods: boolean; unNumber?: string | null; heightM?: number | null; widthM?: number | null; lengthM?: number | null } | string; permitRefs: string[]; requiredChecks: string[]; at: Date; buildRef?: string | null; carryOver?: RouteDependencies }): Promise<RouteDependencies> {
+export async function routeDependencies(db: Db, args: { unitId: number; segmentIds: string[]; load: { grossWeightKg: number; dangerousGoods: boolean; unNumber?: string | null; heightM?: number | null; widthM?: number | null; lengthM?: number | null } | string; permitRefs: string[]; requiredChecks: string[]; at: Date; buildRef?: string | null; tripId?: number | null; jobId?: number | null; carryOver?: RouteDependencies }): Promise<RouteDependencies> {
   const profile = (await db.select().from(vehicleProfiles).where(eq(vehicleProfiles.unitId, args.unitId)).orderBy(desc(vehicleProfiles.id)).limit(1))[0] ?? null;
   const rs = args.segmentIds.length ? await db.select().from(roadRestrictions).where(inArray(roadRestrictions.segmentId, args.segmentIds)) : [];
   const live = applicableRestrictions(rs, args.at);
@@ -139,7 +142,59 @@ export async function routeDependencies(db: Db, args: { unitId: number; segmentI
     requiredChecks: args.carryOver ? args.carryOver.requiredChecks : hashPart([...args.requiredChecks].sort()),
     communicationsPlan: hashPart(governing),
     liveAdvisories: await liveAdvisoryDependency(db, args.buildRef ?? null, args.segmentIds, args.at),
+    measuredWeight: await measuredWeightDependency(db, profile, args),
+    legalRules: await legalRuleDependency(db, live.applied, args),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* T2 (P4) — the legality inputs an approval stands on                   */
+/* ------------------------------------------------------------------ */
+
+/** Rounding that keeps a re-reading of the same load from looking like a different load. */
+const WEIGHT_GRANULARITY_KG = 100;
+const roundKg = (kg: number) => Math.round(kg / WEIGHT_GRANULARITY_KG) * WEIGHT_GRANULARITY_KG;
+
+/**
+ * The weight the route is evaluated against, as `routingWeightFor` resolves it now: its basis, and
+ * gross and per-group weights to the nearest 100 kg. A heavier load, a lighter one, one axle group
+ * shifting, or a reading losing (or gaining) its legal determination moves this hash. The snapshot
+ * reference and reading time do not: a fresh reading of the same load is not a different load.
+ */
+async function measuredWeightDependency(db: Db, profile: typeof vehicleProfiles.$inferSelect | null, args: { unitId: number; tripId?: number | null; jobId?: number | null; at: Date }): Promise<string> {
+  if (!profile) return hashPart({ measuredWeight: "no_profile" });
+  const groups = JSON.parse(profile.axleGroupsJson) as { name: string; axles?: number; loadedKg: number }[];
+  const w = await routingWeightFor(db, {
+    unitId: args.unitId, tripId: args.tripId ?? null, jobId: args.jobId ?? null, at: args.at,
+    declared: { grossWeightKg: groups.reduce((a, g) => a + g.loadedKg, 0), axleGroups: groups.map(g => ({ key: g.name, label: g.name, weightKg: g.loadedKg, axles: g.axles ?? null })) },
+  });
+  return hashPart({
+    basis: w.basis,
+    grossKg: roundKg(w.grossWeightKg),
+    groups: w.axleGroups.map(g => ({ key: g.key, kg: roundKg(g.weightKg), axles: g.axles ?? null })).sort((a, b) => a.key.localeCompare(b.key)),
+  });
+}
+
+/**
+ * Which legal rule each road ban on the route resolves against: the ban, its percentage, its
+ * jurisdiction, and the promotion of the verified base rule (or the reason none applies). A rule
+ * revision is a new promotion, so it moves this hash; so does a jurisdiction conflict appearing.
+ * Bans themselves (begin, end, percentage) are already in `restrictionSet`.
+ */
+async function legalRuleDependency(db: Db, applied: RestrictionRow[], args: { segmentIds: string[]; at: Date; buildRef?: string | null }): Promise<string> {
+  const bans = applied.filter(r => r.checkKey === "road_ban_level" && ["%", "percent", "pct"].includes((r.unit ?? "").trim().toLowerCase()));
+  if (!bans.length) return hashPart({ legalRules: [] });
+  const provinces: Record<string, string | null> = {};
+  if (args.buildRef) {
+    const geo = await resolveRouteCommunicationGeography(db, { buildRef: args.buildRef, segmentIds: args.segmentIds });
+    for (const id of args.segmentIds) provinces[id] = geo.geographyBySegment[id]?.province ?? null;
+  }
+  const resolved = [];
+  for (const b of bans) {
+    const { resolution } = await resolveRoadBan(b, provinces[b.segmentId] ?? null, args.at);
+    resolved.push({ seg: resolution.segmentId, ref: resolution.restrictionRef, pct: resolution.percent, j: resolution.jurisdiction, rule: resolution.rulePromotionRef, outcome: resolution.outcome });
+  }
+  return hashPart(resolved.sort((a, b) => `${a.seg}/${a.ref}`.localeCompare(`${b.seg}/${b.ref}`)));
 }
 
 export type ApprovalRecheck = {
@@ -177,7 +232,7 @@ export async function recheckRouteApproval(db: Db, a: RouteApprovalRow, at: Date
   if (a.status === "revoked" || a.status === "superseded") {
     return { approvalRef: a.approvalRef, status: a.status, stale: true, changed: [], reasons: [`This approval is ${a.status}`], becameStale: false, notRechecked };
   }
-  const current = await routeDependencies(db, { unitId: a.unitId, segmentIds: JSON.parse(a.segmentIdsJson) as string[], load: approved.loadProfile, permitRefs: [], requiredChecks: [], at, buildRef: a.buildRef, carryOver: approved });
+  const current = await routeDependencies(db, { unitId: a.unitId, segmentIds: JSON.parse(a.segmentIdsJson) as string[], load: approved.loadProfile, permitRefs: [], requiredChecks: [], at, buildRef: a.buildRef, tripId: a.tripId, jobId: a.jobId, carryOver: approved });
   const s = stalenessAgainst(approved, current);
   const becameStale = s.stale && a.status === "approved";
   if (becameStale) await db.update(routeApprovals).set({ status: "stale", staleReasonsJson: JSON.stringify(s.reasons), stalenessDetectedAt: new Date() }).where(eq(routeApprovals.id, a.id));
