@@ -1043,4 +1043,3 @@ Claimed on open branches at the time of reading: `0168`–`0173` (tenant scope, 
 planned), `0178`–`0183` (document control, with SQL for `0182`/`0183`), `0179` (ELD and PR #17),
 `0182`–`0184` (sign-and-attest and governance, planned). The first number no branch claimed was `0185`.
 The rule stays: take the number when the PR opens, check every remote branch, and record the check.
-

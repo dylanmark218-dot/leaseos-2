@@ -35,6 +35,14 @@ export const SECRET_KEY_ENV_VARS = {
    * once is the defect S2 exists to undo.
    */
   legacyShared: "LEASEOS_PORTAL_MFA_KEY",
+  /**
+   * S2-KMS-A. `managedSource` selects where keys come from (`environment` — the variables above —
+   * or `managed`); `managedKeys` is JSON of wrapped references for the managed bootstrap. Neither
+   * may carry raw key material: the bootstrap refuses a 64-hex value anywhere in `managedKeys`.
+   * Read by `_core/secretKeys.ts` only.
+   */
+  managedSource: "LEASEOS_SECRET_KEYS_SOURCE",
+  managedKeys: "LEASEOS_MANAGED_KEYS",
 } as const;
 
 /**
