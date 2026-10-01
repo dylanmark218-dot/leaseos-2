@@ -51,17 +51,6 @@ const OGL_ONTARIO_ATTRIBUTION =
 export const TRANSPORT_RETRIEVAL_DATE = new Date("2026-09-24T00:00:00Z");
 
 /**
- * The federal and provincial candidates added 2026-09-24, beside the 511
- * tranche of the same date and recorded separately from it. What is recorded for
- * them is what the publisher's own page or catalogue entry stated on this date
- * — licence named, rate limit, key requirement, update frequency. That is
- * research, not a licence review, so every one seeds `unverified` and is cleared
- * (or refused) by a person through `geo.sourceReview`, which records who and
- * what they read.
- */
-export const CANDIDATE_RETRIEVAL_DATE = new Date("2026-09-24T00:00:00Z");
-
-/**
  * Sources whose licence, attribution, commercial-use and redistribution terms
  * were confirmed against the publisher.
  */
