@@ -113,3 +113,19 @@ suite run per clock, so a nightly schedule is the likely shape.
 - `server/compliancePassport.test.ts`: `CREDENTIAL_EXPIRES` is clock-relative.
 - `scripts/clock-sweep.sh`, `scripts/clock-sweep/{fakeclock.setup.ts,vitest.config.ts}`: the
   harness. It is not wired into the gate.
+
+## Gate
+
+`scripts/ci-gate.sh`, pinned Node 22.23.3, fresh database:
+
+- **Gates 0–4 pass.** Test-file typecheck: 0 errors.
+- **Gate 5:** 6915 passed, 3 skipped, **1 failed**. The failure is **pre-existing on `main`
+  `ce27fec`, not introduced here.** It is
+  `documentValidityCanonical.test.ts › census › open work consumes the adapter's verdict and decides
+  no qualification itself`: `_core/openShifts.ts imports the validity engine ./documentValidity`.
+  It fails identically on an unmodified checkout of `origin/main`.
+- **Cause.** Two merged lines disagree. `c2dc622` (SPINE item 2, "one open-shift eligibility
+  rule, enforced by the router (owner ruling)", via #102/#59) added the import, and C1b-3's census
+  forbids it. Which side gives way is an owner decision, so it is untouched here.
+- Because gate 5 fails, gates 6–8 did not run. `scripts/current-state.sh` reports the document
+  current. Nothing here touches the build (tests and scripts only).
