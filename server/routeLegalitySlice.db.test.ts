@@ -94,7 +94,7 @@ d("P1 — authoritative measured weight controls routing", () => {
     expect(gross.result).toBe("pass");
     expect(axle.result).toBe("fail");
     expect(axle.reason).toContain("drive axle group 19000 kg exceeds 17000 kg");
-    expect(v.vehicle.axleGroups.map((g: { key: string }) => g.key)).toEqual(["steer", "drive"]);   // every group, not just the heaviest
+    expect(v.vehicle.axleGroups!.map((g: { key: string }) => g.key)).toEqual(["steer", "drive"]);   // every group, not just the heaviest
   }, 60_000);
 
   it("does not let a reading without a legal determination establish compliance — a check it passes is REVIEW", async () => {
