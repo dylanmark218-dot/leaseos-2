@@ -1,4 +1,4 @@
--- 0203: a driver's credential history is appended to, never edited.
+-- 0211: a driver's credential history is appended to, never edited.
 -- Compound bodies: this file contains trigger DDL and nothing else.
 --
 -- "Verified by Safety Admin at 18:49" is only evidence if nobody can change it

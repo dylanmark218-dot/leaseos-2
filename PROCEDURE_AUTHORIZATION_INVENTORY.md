@@ -49,6 +49,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/workforceRouter.ts` | `ROLE_AUTHORIZED` | **16** |
 | `server/auditRouter.ts` | `ROLE_AUTHORIZED` | **6** |
 | `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **11** |
+| `server/liveAssistRouter.ts` | `ROLE_AUTHORIZED` — LA-1a session spine only; every permission sensitive; no universal grant (`docs/live-assist/LA1A_OWNER_RULING.md`) | **8** |
 | `server/documentControlRouter.ts` | `ROLE_AUTHORIZED` | **23** (DC-A: definitions list/get, catalog seed, overlay/create/retire, source artifacts; DC-B: intake, register rendered, confirm, issue, void, supersede, withdraw, amend, get, list; DC-C: series list, gap report, blocks, allocate/retire device block, void number) |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
 | `server/driverPortfolioRouter.ts` | `ROLE_AUTHORIZED` (0204; the three `portfolio.*_own` permissions are universal and self-scoped to the operator linked to the session) | **17** |
@@ -56,7 +57,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/driverPortfolioRouter.ts` | `PUBLIC` | 1 (`shareRedeem`: one credential behind a 256-bit token, only its hash stored; re-read on every redemption; revocable; at most 7 days) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**356 role-authorized procedures. Zero on bare `protectedProcedure`.**
+**387 role-authorized procedures. Zero on bare `protectedProcedure`.**
 
 Baseline in `procedureAuthorization.test.ts` is 0 and must never rise.
 

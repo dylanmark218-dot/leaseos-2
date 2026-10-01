@@ -9033,7 +9033,7 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
 
-/* ---- 0202/0203: Driver Portfolio and Credential Wallet ---- */
+/* ---- 0210/0211: Driver Portfolio and Credential Wallet ---- */
 
 /**
  * What a customer, a site, a job type, a piece of equipment or the company
@@ -9044,7 +9044,7 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
 export const driverRequirementBindings = mysqlTable("driverRequirementBindings", {
   id: int("id").autoincrement().primaryKey(),
   bindingRef: varchar("bindingRef", { length: 96 }).notNull().unique(),
-  /** 0204 — an update retires a binding and creates this successor, which names what it replaced. */
+  /** 0212 — an update retires a binding and creates this successor, which names what it replaced. */
   supersedesBindingRef: varchar("supersedesBindingRef", { length: 96 }),
   /** NULL = the historical single tenant. Applies only to work of the same organization. */
   orgRef: varchar("orgRef", { length: 64 }),
@@ -9063,11 +9063,11 @@ export const driverRequirementBindings = mysqlTable("driverRequirementBindings",
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-/** Append-only (0203): what happened to a driver's credentials, and who did it. */
+/** Append-only (0211): what happened to a driver's credentials, and who did it. */
 export const driverPortfolioEvents = mysqlTable("driverPortfolioEvents", {
   id: int("id").autoincrement().primaryKey(),
   eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
-  /** 0204 — the organization the event belongs to. NULL = the historical single tenant. */
+  /** 0212 — the organization the event belongs to. NULL = the historical single tenant. */
   orgRef: varchar("orgRef", { length: 64 }),
   /** NULL for an organization-level event (a requirement bound, changed or retired). */
   operatorId: int("operatorId"),
@@ -9084,7 +9084,7 @@ export const driverPortfolioEvents = mysqlTable("driverPortfolioEvents", {
 });
 
 /**
- * 0204 — a one-credential share. The token is `newToken()` and only its SHA-256
+ * 0212 — a one-credential share. The token is `newToken()` and only its SHA-256
  * is stored; redeeming re-reads the credential, so a share never outlives the
  * credential being valid. Revocation is `revokedAt`; the audit is in
  * `driverPortfolioEvents`.
@@ -9428,3 +9428,169 @@ export const providerCredentials = mysqlTable("providerCredentials", {
   providerStatusIdx: index("providerCredentials_provider_status_idx").on(t.providerKey, t.status),
   tenantIdx: index("providerCredentials_tenant_idx").on(t.orgRef, t.providerKey),
 }));
+
+/* ---- LA-1a (0202/0203): the Live Assist session spine ---- */
+
+/**
+ * One Live Assist session: a unit of work a person opened on purpose, owned by one user and one
+ * organization. Not a login session — identity is `sessionFamilies`; acting organization is resolved
+ * per request. `orgRef` is written from `resolveActingScope` and never from input.
+ *
+ * `openMarker` is 1 while the session is active or paused and NULL once it stops; the unique index on
+ * (orgRef, userId, openMarker) makes "one open session per person" a database fact rather than a race.
+ * `startKey` is the client's retry key for `start`, unique per (orgRef, userId), never globally.
+ *
+ * Deadlines are the server's: `idleDeadlineAt` moves on heartbeat, `hardDeadlineAt` never moves, and
+ * `purgeAfter` is derived when the session stops. The work counters exist for the checkpoint that first
+ * submits a frame; LA-1a writes none of them.
+ *
+ * LA-1a carve-out only (docs/live-assist/LA1A_OWNER_RULING.md): no column here holds an image, a frame,
+ * a storage key or model output.
+ */
+export const liveAssistSessions = mysqlTable("liveAssistSessions", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionRef: varchar("sessionRef", { length: 40 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  startKey: varchar("startKey", { length: 64 }).notNull(),
+  source: mysqlEnum("source", ["photo", "camera", "screen", "video"]).notNull(),
+  state: mysqlEnum("state", ["active", "paused", "ended", "expired"]).notNull(),
+  openMarker: tinyint("openMarker"),
+  policySnapshotJson: text("policySnapshotJson").notNull(),
+  startedAt: timestamp("startedAt").notNull(),
+  lastHeartbeatAt: timestamp("lastHeartbeatAt").notNull(),
+  idleDeadlineAt: timestamp("idleDeadlineAt").notNull(),
+  hardDeadlineAt: timestamp("hardDeadlineAt").notNull(),
+  pausedAt: timestamp("pausedAt"),
+  endedAt: timestamp("endedAt"),
+  endReason: mysqlEnum("endReason", ["user_end", "idle_timeout", "budget_spent", "policy_disabled"]),
+  purgeAfter: timestamp("purgeAfter"),
+  transientPurgedAt: timestamp("transientPurgedAt"),
+  previousSessionRef: varchar("previousSessionRef", { length: 40 }),
+  framesSubmitted: int("framesSubmitted").default(0).notNull(),
+  bytesSubmitted: bigint("bytesSubmitted", { mode: "number" }).default(0).notNull(),
+  inferenceCalls: int("inferenceCalls").default(0).notNull(),
+  inputTokens: int("inputTokens").default(0).notNull(),
+  outputTokens: int("outputTokens").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  startKeyUnique: uniqueIndex("liveAssistSessions_startKey_unique").on(t.orgRef, t.userId, t.startKey),
+  openUnique: uniqueIndex("liveAssistSessions_open_unique").on(t.orgRef, t.userId, t.openMarker),
+  ownerIdx: index("liveAssistSessions_owner_idx").on(t.orgRef, t.userId, t.startedAt),
+  deadlineIdx: index("liveAssistSessions_deadline_idx").on(t.state, t.idleDeadlineAt),
+  purgeIdx: index("liveAssistSessions_purge_idx").on(t.transientPurgedAt, t.purgeAfter),
+}));
+export type LiveAssistSessionRow = typeof liveAssistSessions.$inferSelect;
+
+/**
+ * Transient conversation state for one session (design §6.3, D-05). Nothing writes it before LA-1b; the
+ * purge that removes it exists first, so no row can ever be written that nothing will remove.
+ */
+export const liveAssistTurns = mysqlTable("liveAssistTurns", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  seq: int("seq").notNull(),
+  role: mysqlEnum("role", ["user", "assistant"]).notNull(),
+  channel: mysqlEnum("channel", ["text", "voice"]).notNull(),
+  text: text("text").notNull(),
+  frameHashesJson: text("frameHashesJson"),
+  redactionFlagsJson: text("redactionFlagsJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  seqUnique: uniqueIndex("liveAssistTurns_seq_unique").on(t.sessionId, t.seq),
+  sessionIdx: index("liveAssistTurns_session_idx").on(t.orgRef, t.sessionId),
+}));
+
+/**
+ * Identity of an image a session looked at — hashes and dimensions, never bytes (design §7.1).
+ * `savedEvidenceRecordId` is set only when a person deliberately saves the original as evidence; the
+ * purge never removes a row that carries one.
+ */
+export const liveAssistFrames = mysqlTable("liveAssistFrames", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  frameSeq: int("frameSeq").notNull(),
+  kind: mysqlEnum("kind", ["context", "inspect", "crop"]).notNull(),
+  frameHash: varchar("frameHash", { length: 64 }).notNull(),
+  originalHash: varchar("originalHash", { length: 64 }),
+  perceptualHash: varchar("perceptualHash", { length: 16 }),
+  width: int("width").notNull(),
+  height: int("height").notNull(),
+  byteSize: int("byteSize").notNull(),
+  regionJson: text("regionJson"),
+  markedByUser: boolean("markedByUser").default(false).notNull(),
+  savedEvidenceRecordId: int("savedEvidenceRecordId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  seqUnique: uniqueIndex("liveAssistFrames_seq_unique").on(t.sessionId, t.frameSeq),
+  sessionIdx: index("liveAssistFrames_session_idx").on(t.orgRef, t.sessionId),
+}));
+
+/** What an answer said it saw, and how sure (design §11). Transient; nothing writes it before LA-1b. */
+export const liveAssistObservations = mysqlTable("liveAssistObservations", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  turnId: int("turnId"),
+  frameHash: varchar("frameHash", { length: 64 }),
+  kind: mysqlEnum("kind", ["identified", "read_text", "condition", "guidance_step"]).notNull(),
+  statement: varchar("statement", { length: 600 }).notNull(),
+  certainty: mysqlEnum("certainty", ["visible_clearly", "visible_partially", "not_visible", "inferred"]).notNull(),
+  requestedView: mysqlEnum("requestedView", ["closer", "wider", "other_side", "more_light", "hold_steady", "freeze", "region", "context_question"]),
+  requestedRegionJson: text("requestedRegionJson"),
+  safetyClass: mysqlEnum("safetyClass", ["none", "advise_qualified_inspection", "stop_work_escalate"]).default("none").notNull(),
+  overreachFlagsJson: text("overreachFlagsJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  sessionIdx: index("liveAssistObservations_session_idx").on(t.orgRef, t.sessionId),
+}));
+
+/**
+ * The lifecycle record: metadata only, append-only (0203 triggers). `actorUserId` NULL means the server
+ * itself acted — a deadline passed, or the purge ran. Never a frame, a turn, an observation or text a
+ * person typed.
+ */
+export const liveAssistEvents = mysqlTable("liveAssistEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  actorUserId: int("actorUserId"),
+  eventType: mysqlEnum("eventType", [
+    "session_started", "session_paused", "session_resumed", "session_ended", "session_expired", "session_transient_purged",
+  ]).notNull(),
+  endReason: mysqlEnum("endReason", ["user_end", "idle_timeout", "budget_spent", "policy_disabled"]),
+  detail: varchar("detail", { length: 200 }),
+  occurredAt: timestamp("occurredAt").defaultNow().notNull(),
+}, (t) => ({
+  orgIdx: index("liveAssistEvents_org_idx").on(t.orgRef, t.occurredAt),
+  sessionIdx: index("liveAssistEvents_session_idx").on(t.sessionId),
+}));
+export type LiveAssistEventRow = typeof liveAssistEvents.$inferSelect;
+
+/**
+ * An organization's Live Assist policy. A change is a new row; the old one is superseded, never edited
+ * in place, so which policy governed a past session stays answerable. `currentMarker` (1 on the current
+ * row, NULL on superseded ones) with its unique index makes two concurrent changes collide instead of
+ * both becoming current.
+ */
+export const liveAssistPolicies = mysqlTable("liveAssistPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  policyRef: varchar("policyRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  enabled: boolean("enabled").notNull(),
+  sourcesAllowedJson: text("sourcesAllowedJson").notNull(),
+  idleSeconds: int("idleSeconds").notNull(),
+  maxSessionMinutes: int("maxSessionMinutes").notNull(),
+  retentionHours: int("retentionHours").notNull(),
+  maxSessionsPerUserPerDay: int("maxSessionsPerUserPerDay").notNull(),
+  dailySpendCeilingCents: int("dailySpendCeilingCents"),
+  setByUserId: int("setByUserId").notNull(),
+  currentMarker: tinyint("currentMarker"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  supersededAt: timestamp("supersededAt"),
+}, (t) => ({
+  currentUnique: uniqueIndex("liveAssistPolicies_current_unique").on(t.orgRef, t.currentMarker),
+}));
+export type LiveAssistPolicyRow = typeof liveAssistPolicies.$inferSelect;

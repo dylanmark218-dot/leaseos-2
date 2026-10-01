@@ -282,6 +282,8 @@ export type Permission =
   | "board.read" | "board.post" | "board.manage"
   // v22.20 — the agent. Asking it to work, acting, and approving differ.
   | "agent.use" | "agent.act" | "agent.approve" | "agent.read"
+  // LA-1a — Live Assist, the session spine only.
+  | "live_assist.use" | "live_assist.administer" | "live_assist.review"
   // v22.20 — clearing a government data source for operational use.
   | "geo.source.review"
   // v22.19 — the package a truck carries when nothing can be fetched.
@@ -342,7 +344,7 @@ export type Permission =
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
   | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
-  // 0204 — Driver Portfolio. The `_own` three are universal and self-scoped in the router: they read
+  // 0212 — Driver Portfolio. The `_own` three are universal and self-scoped in the router: they read
   // the operator linked to ctx.user.id and take no operator id. Reading another driver's portfolio is
   // safety/HR/management's; managing requirements is safety's and management's. Verification reuses
   // compliance.credential.verify, and dispatch's view reuses dispatch.read.
@@ -366,6 +368,7 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    "live_assist.use",
     "document.read",
     "document.intake",
     "automation.override.operational",
@@ -451,6 +454,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "live_assist.use",
     "document.read",
     "document.intake",
     "document.confirm",
@@ -565,6 +569,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
+    "live_assist.use",
     "document.read",
     "document.intake",
     "assistant.ask",
@@ -633,6 +638,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
+    "live_assist.use",
     "document.read",
     "document.intake",
     "document.confirm",
@@ -725,6 +731,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   safety: [
     "portfolio.read",
     "portfolio.requirement.manage",
+    "live_assist.review",
     "document.read",
     "document.intake",
     "document.confirm",
@@ -853,6 +860,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    "live_assist.use",
     "document.read",
     "document.intake",
     "document.confirm",
@@ -1023,6 +1031,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   management: [
     "portfolio.read",
     "portfolio.requirement.manage",
+    "live_assist.use",
+    "live_assist.administer",
+    "live_assist.review",
     "document.read",
     "document.intake",
     "document.confirm",
@@ -1765,7 +1776,7 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
-  // 0204 — the Driver Wallet: the caller's own operator record, never one the request names.
+  // 0212 — the Driver Wallet: the caller's own operator record, never one the request names.
   "portfolio.read_own",
   "portfolio.submit_own",
   "portfolio.share_own",
@@ -1816,10 +1827,13 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
-  // 0204 — a submitted credential, a share of one, and the requirements dispatch reads.
+  // 0212 — a submitted credential, a share of one, and the requirements dispatch reads.
   "portfolio.submit_own",
   "portfolio.share_own",
   "portfolio.requirement.manage",
+  "live_assist.use",
+  "live_assist.administer",
+  "live_assist.review",
   // DC-A (0178) — Document Control. Each of these creates operational truth (a controlled record, a
   // confirmed extraction, a consumed number) or changes what every later record is judged by.
   "document.intake",
@@ -2874,6 +2888,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "agent.decideApproval": "agent.approve",
   "agent.awaitEvent": "agent.act",
   "agent.get": "agent.read",
+  // LA-1a — Live Assist session spine.
+  "liveAssist.start": "live_assist.use",
+  "liveAssist.heartbeat": "live_assist.use",
+  "liveAssist.pause": "live_assist.use",
+  "liveAssist.resume": "live_assist.use",
+  "liveAssist.end": "live_assist.use",
+  "liveAssist.policyGet": "live_assist.use",
+  "liveAssist.policySet": "live_assist.administer",
+  "liveAssist.lifecycleList": "live_assist.review",
   "board.history": "board.read",
   "board.edit": "board.post",
   "board.withdraw": "board.post",
@@ -3068,7 +3091,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
 
-  /* ---- 0204: Driver Portfolio API ---- */
+  /* ---- 0212: Driver Portfolio API ---- */
   "driverPortfolio.myWallet": "portfolio.read_own",
   "driverPortfolio.myCredentialHistory": "portfolio.read_own",
   "driverPortfolio.myShares": "portfolio.read_own",
@@ -3086,6 +3109,14 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "driverPortfolio.requirementCreate": "portfolio.requirement.manage",
   "driverPortfolio.requirementUpdate": "portfolio.requirement.manage",
   "driverPortfolio.requirementRetire": "portfolio.requirement.manage",
+  /* ---- the page scanner: guidance and review, both read-only ----
+   * Both answer "what does this paperwork need"; neither writes, links or
+   * confirms anything, so both sit on the ordinary compliance read rather
+   * than on a permission of their own. A worker who may not read the
+   * company's compliance material may not read its paperwork guidance
+   * either — that is the same question, and it already has an answer. */
+  "paperwork.guidance": "compliance.read",
+  "paperwork.reviewScan": "compliance.read",
 } as const satisfies Record<string, Permission>;
 
 /**

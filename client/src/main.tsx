@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { COOKIE_NAME, UNAUTHED_ERR_MSG } from "@shared/const";
+import { COOKIE_NAME, TRPC_MOUNT_PATH, UNAUTHED_ERR_MSG } from "@shared/const";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { showcaseGuardLink } from "./lib/showcaseGuard";
@@ -82,7 +82,7 @@ const trpcClient = trpc.createClient({
       onSignedOut: clearStaleBrowserAuth,
     }),
     httpBatchLink({
-      url: "/api/trpc",
+      url: TRPC_MOUNT_PATH,
       transformer: superjson,
       headers() {
         // Preview auto-login fallback: when the browser blocks iframe cookies

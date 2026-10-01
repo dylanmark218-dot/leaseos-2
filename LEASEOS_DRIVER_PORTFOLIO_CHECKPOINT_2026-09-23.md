@@ -1,10 +1,10 @@
-# LeaseOS — Driver Portfolio and Credential Wallet: the model (0202/0203)
+# LeaseOS — Driver Portfolio and Credential Wallet: the model (0210/0211)
 
 
-> **Migration numbers (2026-09-25):** `main` merged its own `0175_session_families.sql` first, so this
-> work's migrations are now **`0202_driver_portfolio`**, **`0203_driver_portfolio_events_append_only`** and
-> **`0204_driver_portfolio_api`** (formerly 0175, 0176 and 0177; before that 0169 and 0170). Numbers below
-> that name 0175/0176/0177 refer to the same files under their earlier numbers.
+> **Migration numbers (2026-10-01):** `main` merged Live Assist's `0202`/`0203` first, so this work's
+> migrations are now **`0210_driver_portfolio`**, **`0211_driver_portfolio_events_append_only`** and
+> **`0212_driver_portfolio_api`** (formerly 0202–0204, before that 0175–0177, before that 0169 and 0170).
+> Numbers below that name 0175/0176/0177 or 0202/0203/0204 refer to the same files under their earlier numbers.
 **Release label:** unreleased, on `v23.25`. `LEASEOS_RELEASE` is unchanged; promotion is the owner's call.
 
 This checkpoint builds the **credential and qualification model** and connects

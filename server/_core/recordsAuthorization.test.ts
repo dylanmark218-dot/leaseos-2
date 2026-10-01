@@ -533,7 +533,7 @@ describe("payroll and tax authorization boundaries", () => {
       "dispatch.readiness_own",
       "academy.read_own", "academy.progress_own", "academy.assessment_own",
       "academy.certificate.sign_own", "academy.direct_supervision_attest_own",
-      // 0204 — the Driver Wallet: the caller's own operator record.
+      // 0212 — the Driver Wallet: the caller's own operator record.
       "portfolio.read_own", "portfolio.submit_own", "portfolio.share_own",
     ]);
   });

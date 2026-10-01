@@ -1,9 +1,9 @@
--- 0204 — Driver Portfolio API: what the service layer needs to write.
+-- 0212 — Driver Portfolio API: what the service layer needs to write.
 --
 -- 1. The portfolio's audit rows say which organization they belong to, so
 --    "who did what, to whose portfolio, in which organization, and when" is a
 --    row and not a join. NULL is the historical single tenant, the 0132 rule.
---    The rows stay append-only (0203): ALTER is DDL and fires no row trigger.
+--    The rows stay append-only (0211): ALTER is DDL and fires no row trigger.
 -- 2. The event vocabulary gains the mutations the API performs, and a
 --    requirement event, which is about the organization rather than one
 --    driver, carries no operator.
