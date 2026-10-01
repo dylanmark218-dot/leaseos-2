@@ -14,7 +14,7 @@ import {
   TYPE_FOLDER_KEYS,
   type FolderKey,
   type LifecycleStage,
-} from "../../../server/_core/recordFiles";
+} from "../../../server/recordFiles";
 
 export { FOLDER_LABELS, LIFECYCLE_LABELS, QUEUE_FOLDER_KEYS, TYPE_FOLDER_KEYS };
 export type { FolderKey, LifecycleStage };

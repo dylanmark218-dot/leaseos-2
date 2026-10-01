@@ -40,7 +40,7 @@ import {
   readCategoryFor,
   typeFolderFor,
   type FolderKey,
-} from "./_core/recordFiles";
+} from "./recordFiles";
 import { storageGetSignedUrl } from "./storage";
 import {
   amendSealedEvidence,

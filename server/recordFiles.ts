@@ -1,12 +1,16 @@
 /**
  * Records & File Manager — the projection a person browses.
  *
- * Pure. No network, no database. Not a new engine: every fact it reads is
- * already held by the evidence vault (`evidenceRecords`, `evidenceRelationships`,
- * `evidenceSeals`, `syncPackageItems`, `recordRetentionState`, `legalHoldRecords`)
- * and every decision about who may read what is `authorize()`'s. This module
- * only says which of those decisions applies to a given record, and how the
- * record is presented once it is visible.
+ * Pure. No network, no database. It lives beside `recordsService.ts` rather
+ * than under `server/_core/` on purpose: `engineReachability.test.ts` counts
+ * every module in `_core` as an engine, and this is not one. It decides no
+ * business rule of its own — every fact it reads is already held by the
+ * evidence vault (`evidenceRecords`, `evidenceRelationships`, `evidenceSeals`,
+ * `syncPackageItems`, `recordRetentionState`, `legalHoldRecords`) and every
+ * decision about who may read what is `authorize()`'s. It only says which of
+ * those decisions applies to a given record, and how the record is presented
+ * once it is visible — the same position `readinessComposer.ts` holds over the
+ * readiness engines.
  *
  * Three rules:
  *
@@ -24,7 +28,8 @@
  *   stage is a named stage, not a missing one.
  */
 
-import type { Permission } from "./recordsAuthorization";
+import type { EvidenceRecordType } from "./_core/evidenceSeal";
+import type { Permission } from "./_core/recordsAuthorization";
 
 /** The category reads, as `EVIDENCE_READ_CATEGORIES` names them. */
 export type ReadCategory =
@@ -36,14 +41,35 @@ export type ReadCategory =
   | "evidence.read_legal";
 
 /**
- * Which category read reaches each record type.
+ * The policy: which category read reaches each sealed record type.
  *
- * Written out rather than derived. `other` is job-operational because that is
- * what the upload path has always produced and what `evidence.list` has always
- * shown under `evidence.read_job_operational`; changing that here would take
- * records away from the people who file them.
+ * Typed against the seal's own `EvidenceRecordType`, so this is exhaustive by
+ * construction — a type added to the seal and not classified here fails the
+ * typecheck rather than quietly reaching only its owner (or, worse, being
+ * defaulted into a broad category by whoever notices).
+ *
+ * Grouped by what the record is evidence OF, which is what decides who needs it:
+ *
+ *   The work and its paperwork — job-operational. Tickets, manifests, the
+ *   disposal and scale chain, permits, site photos, the daily log.
+ *
+ *   The vehicle and its fitness — maintenance. Pre/post-trip inspections,
+ *   defects, work orders. A mechanic needs these; billing does not.
+ *
+ *   What went wrong — safety. Incidents, near misses, tailgate meetings.
+ *
+ *   Money — commercial. A receipt is a cost record, not a field record.
+ *
+ * `other` is job-operational, and that is the consequential line in this
+ * table. It is the column's default and, today, the type of EVERY row: no
+ * production path writes `evidenceRecords.recordType` (upload omits it, and
+ * `records.evidence.seal` puts its `recordType` in the sealed manifest without
+ * persisting it to the column). `evidence.list` already shows all of those rows
+ * under `evidence.read_job_operational`; mapping `other` anywhere narrower would
+ * take records away from people who can read them today, and anywhere broader
+ * would widen them. So it matches the existing contract exactly.
  */
-export const READ_CATEGORY_BY_RECORD_TYPE: Readonly<Record<string, ReadCategory>> = {
+export const SEALED_TYPE_READ_CATEGORY = {
   daily_log: "evidence.read_job_operational",
   manifest: "evidence.read_job_operational",
   load_ticket: "evidence.read_job_operational",
@@ -62,13 +88,33 @@ export const READ_CATEGORY_BY_RECORD_TYPE: Readonly<Record<string, ReadCategory>
   incident: "evidence.read_safety_summary",
   near_miss: "evidence.read_safety_summary",
   bill_receipt: "evidence.read_commercial",
+} as const satisfies Record<EvidenceRecordType, ReadCategory>;
+
+/**
+ * Types the seal does not know yet, classified in advance — every one into a
+ * NARROW category, never job-operational. Nothing writes them today. They are
+ * here so that when personnel, legal or invoice documents arrive as evidence
+ * they land with HR, legal or the office, not with everybody who reads tickets.
+ * Removing one does not open it: it falls back to owner-only.
+ */
+export const FORWARD_TYPE_READ_CATEGORY = {
   invoice: "evidence.read_commercial",
   credential: "evidence.read_personnel",
   training_record: "evidence.read_personnel",
   employment_record: "evidence.read_personnel",
   legal_correspondence: "evidence.read_legal",
+} as const satisfies Record<string, Exclude<ReadCategory, "evidence.read_job_operational">>;
+
+export const READ_CATEGORY_BY_RECORD_TYPE: Readonly<Record<string, ReadCategory>> = {
+  ...SEALED_TYPE_READ_CATEGORY,
+  ...FORWARD_TYPE_READ_CATEGORY,
 };
 
+/**
+ * Exact match, own keys only. "Photo", " photo", "load-ticket" and
+ * "__proto__" are not record types and reach no category; normalising them
+ * here would be a second, looser classifier.
+ */
 export function readCategoryFor(recordType: string): ReadCategory | null {
   return Object.prototype.hasOwnProperty.call(READ_CATEGORY_BY_RECORD_TYPE, recordType)
     ? READ_CATEGORY_BY_RECORD_TYPE[recordType]!

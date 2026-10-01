@@ -8,7 +8,9 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  FORWARD_TYPE_READ_CATEGORY,
   READ_CATEGORY_BY_RECORD_TYPE,
+  SEALED_TYPE_READ_CATEGORY,
   fileVisibility,
   folderCounts,
   inFolder,
@@ -25,7 +27,7 @@ import {
   permissionsForDomainRole,
   type DomainRole,
   type Permission,
-} from "./recordsAuthorization";
+} from "./_core/recordsAuthorization";
 
 const ROLES: DomainRole[] = [
   "driver", "dispatcher", "mechanic", "shop_lead", "safety", "office", "management", "hr", "legal",
@@ -33,24 +35,129 @@ const ROLES: DomainRole[] = [
 ];
 const heldBy = (role: DomainRole) => new Set(permissionsForDomainRole(role));
 
-describe("classification", () => {
-  it("maps every evidence record type the seal knows to a category", () => {
-    const sealTypes = [
-      "daily_log", "pre_trip", "post_trip_dvir", "manifest", "load_ticket", "disposal_ticket", "scale_ticket",
-      "field_ticket", "bill_receipt", "safety_meeting", "incident", "near_miss", "defect_report", "work_order",
-      "inspection", "permit", "photo", "other",
-    ];
-    for (const t of sealTypes) expect(readCategoryFor(t), t).not.toBeNull();
+/**
+ * The policy, written out a second time on purpose. The map in recordFiles.ts
+ * is the implementation; this table is the decision. They are compared both
+ * ways, so a type cannot move category, appear or disappear in one place only.
+ */
+const POLICY: Record<string, string> = {
+  // The work and its paperwork — job-operational
+  field_ticket: "evidence.read_job_operational",
+  daily_log: "evidence.read_job_operational",
+  permit: "evidence.read_job_operational",
+  photo: "evidence.read_job_operational",
+  // disposal chain and manifests — job-operational
+  manifest: "evidence.read_job_operational",
+  load_ticket: "evidence.read_job_operational",
+  disposal_ticket: "evidence.read_job_operational",
+  scale_ticket: "evidence.read_job_operational",
+  // legacy default — exactly what evidence.list already shows
+  other: "evidence.read_job_operational",
+  // vehicle / equipment and inspections — maintenance
+  pre_trip: "evidence.read_maintenance",
+  post_trip_dvir: "evidence.read_maintenance",
+  inspection: "evidence.read_maintenance",
+  defect_report: "evidence.read_maintenance",
+  work_order: "evidence.read_maintenance",
+  // safety
+  safety_meeting: "evidence.read_safety_summary",
+  incident: "evidence.read_safety_summary",
+  near_miss: "evidence.read_safety_summary",
+  // receipts and billing — commercial
+  bill_receipt: "evidence.read_commercial",
+  invoice: "evidence.read_commercial",
+  // credentials and people — personnel
+  credential: "evidence.read_personnel",
+  training_record: "evidence.read_personnel",
+  employment_record: "evidence.read_personnel",
+  // legal
+  legal_correspondence: "evidence.read_legal",
+};
+
+/** The seal's own vocabulary, as `EvidenceRecordType` declares it. */
+const SEAL_TYPES = [
+  "daily_log", "pre_trip", "post_trip_dvir", "manifest", "load_ticket", "disposal_ticket", "scale_ticket",
+  "field_ticket", "bill_receipt", "safety_meeting", "incident", "near_miss", "defect_report", "work_order",
+  "inspection", "permit", "photo", "other",
+];
+
+describe("classification policy", () => {
+  for (const [type, category] of Object.entries(POLICY)) {
+    it(`${type} → ${category}`, () => expect(readCategoryFor(type)).toBe(category));
+  }
+
+  it("the implementation classifies exactly the types the policy names, no more", () => {
+    expect(Object.keys(READ_CATEGORY_BY_RECORD_TYPE).sort()).toEqual(Object.keys(POLICY).sort());
+  });
+
+  it("covers every type the seal can produce", () => {
+    expect(Object.keys(SEALED_TYPE_READ_CATEGORY).sort()).toEqual([...SEAL_TYPES].sort());
   });
 
   it("only ever names a real read category", () => {
     for (const c of Object.values(READ_CATEGORY_BY_RECORD_TYPE)) expect(EVIDENCE_READ_CATEGORIES).toContain(c);
   });
 
-  it("leaves an unknown type in no category", () => {
-    expect(readCategoryFor("brand_new_type")).toBeNull();
-    // A prototype key is not a record type.
-    expect(readCategoryFor("constructor")).toBeNull();
+  it("classifies every type the seal does not know yet into a narrow category, never job-operational", () => {
+    for (const [type, c] of Object.entries(FORWARD_TYPE_READ_CATEGORY)) {
+      expect(SEAL_TYPES, type).not.toContain(type);
+      expect(c, type).not.toBe("evidence.read_job_operational");
+    }
+  });
+});
+
+describe("unknown and malformed types inherit nothing", () => {
+  const unknown = [
+    "brand_new_type", "", " ", "Photo", "PHOTO", " photo", "photo ", "load-ticket", "loadTicket", "Other", "OTHER",
+    "__proto__", "constructor", "toString", "hasOwnProperty", "valueOf", "credential\u0000", "evidence.read_legal",
+  ];
+  for (const t of unknown) {
+    it(`${JSON.stringify(t)} has no category`, () => expect(readCategoryFor(t)).toBeNull());
+  }
+
+  it("is invisible to every role by category, including the broadest readers", () => {
+    for (const role of ROLES) {
+      expect(fileVisibility({ held: heldBy(role), recordType: "brand_new_type", isOwner: false }).visible, role).toBe(false);
+    }
+  });
+
+  it("reaches its owner only through evidence.read_own — the existing listForOperator contract", () => {
+    // records.evidence.listForOperator returns every record related to the caller's operator, of any type,
+    // under evidence.read_own. The file manager keeps that, and adds nothing to it.
+    expect(fileVisibility({ held: heldBy("driver"), recordType: "brand_new_type", isOwner: true })).toMatchObject({ visible: true, basis: "own", category: null });
+    for (const role of ROLES.filter(r => !heldBy(r).has("evidence.read_own"))) {
+      expect(fileVisibility({ held: heldBy(role), recordType: "brand_new_type", isOwner: true }).visible, role).toBe(false);
+    }
+  });
+});
+
+describe("who each policy group reaches", () => {
+  const reaches = (type: string) =>
+    ROLES.filter(role => fileVisibility({ held: heldBy(role), recordType: type, isOwner: false }).visible).sort();
+  const holders = (perm: Permission) => ROLES.filter(r => heldBy(r).has(perm)).sort();
+
+  it("reaches exactly the holders of the mapped category — the file manager widens no grant", () => {
+    for (const [type, category] of Object.entries(POLICY)) {
+      expect(reaches(type), type).toEqual(holders(category as Permission));
+    }
+  });
+
+  it("keeps credentials with HR and payroll only", () => {
+    expect(reaches("credential")).toEqual(["hr", "payroll_admin"]);
+  });
+
+  it("keeps receipts away from the field and the shop", () => {
+    for (const r of ["driver", "dispatcher", "mechanic", "shop_lead", "safety"] as DomainRole[]) {
+      expect(reaches("bill_receipt"), r).not.toContain(r);
+    }
+  });
+
+  it("keeps legal correspondence with legal", () => {
+    expect(reaches("legal_correspondence")).toEqual(["legal"]);
+  });
+
+  it("gives a driver no category at all", () => {
+    for (const type of Object.keys(POLICY)) expect(reaches(type), type).not.toContain("driver");
   });
 });
 
