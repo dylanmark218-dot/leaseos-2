@@ -49,6 +49,7 @@ import { surfacesRouter } from "./surfacesRouter";
 import { widgetsRouter, type WidgetDeps } from "./widgetsRouter";
 import { manifestCustodyRouter } from "./manifestCustodyRouter";
 import { resolveActingScope } from "./_core/actingScope";
+import { hosScopeFor, listDutyRecordsInScope, requireHosOperatorInScope, selfOperatorInScope } from "./hosScope";
 
 /** 0132 — the acting tenant for the legacy readers; a user with no membership acts as the historical single tenant. */
 async function scopeFor(userId: number) {
@@ -189,7 +190,6 @@ import {
   updateTripStop,
   listOperatingZones,
   createOperatingZone,
-  listDutyRecords,
   createDutyRecord,
   listWorkOrders,
   createWorkOrder,
@@ -1071,10 +1071,12 @@ export const appRouter = router({
       list: roleProcedure("dutyRecords.list")
         .input(z.object({ operatorId: z.number().int().optional() }).optional())
         .query(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input?.operatorId != null && !(await operatorInScope(input.operatorId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Operator ${input.operatorId} not found` });
-        return listDutyRecords(input?.operatorId);
-      }),
+          // P0-A1 — filtered in the query to the operators the caller's organization owns. The P4.1
+          // guard above this only ever checked a NAMED operator; the unfiltered list was every
+          // company's duty records, newest 500. A foreign operator id is refused by the boundary
+          // exactly as a nonexistent one is.
+          return listDutyRecordsInScope(await hosScopeFor(ctx.user.id), input?.operatorId);
+        }),
       create: roleProcedure("dutyRecords.create")
         .input(
           z.object({
@@ -1098,10 +1100,13 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input?.operatorId != null && !(await operatorInScope(input.operatorId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Operator ${input.operatorId} not found` });
-        
-          const own = await operatorForUser(ctx.user.id);
+          // P0-A1 — whichever operator this names, the caller's organization must own it: a named
+          // operator (an amendment) through the boundary, the signed-in driver's own through the
+          // scoped self-resolution. An operator record another company owns is not the driver's
+          // here, so a driver who left company B does not keep writing B's duty records.
+          const scope = await hosScopeFor(ctx.user.id);
+          if (input.operatorId != null) await requireHosOperatorInScope(scope, input.operatorId);
+          const own = await selfOperatorInScope(scope, ctx.user.id);
           const roles = (ctx as unknown as { roles?: readonly string[] }).roles ?? [];
           const amending = input.operatorId != null && input.operatorId !== own?.id;
           if (amending && !roles.some(r => r === "dispatcher" || r === "hr" || r === "management")) throw new TRPCError({ code: "FORBIDDEN", message: "A duty record names the operator of the signed-in driver; recording for another operator is an amendment for dispatch, HR or management" });

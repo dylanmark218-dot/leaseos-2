@@ -38,7 +38,12 @@ async function driver() {
   await pool.execute(
     "INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())",
     [userId, "driver"]);
-  return { orgRef, userId };
+  // P0-A1 — the operator record this comment always promised. `hos.status` resolves the operator
+  // through the tenant boundary now, so the organization has to own one; a bare user id is
+  // "Operator N not found".
+  const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, userId) VALUES (?, ?)", [`Driver ${rnd()}`, userId]);
+  await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,'operator',?,1)", [orgRef, op.insertId]);
+  return { orgRef, userId, operatorId: op.insertId };
 }
 
 /**
@@ -77,13 +82,13 @@ const evidence = (profileKey: string, limitKey: string, value: number): Promotio
 
 d("a promotion moves exactly one determination", () => {
   it("leaves every limit unknown before anything is verified", async () => {
-    const { userId } = await driver();
+    const { userId, operatorId } = await driver();
     const jurisdiction = `Z${rnd().slice(0, 2)}`;
     const profileKey = `FIX-${rnd()}`;
     await profile(profileKey, jurisdiction);
 
     const status = await callerFor(userId).hos.status({
-      operatorId: userId, carrierAuthority: "federal", jurisdiction, latitude: 53.5, at: NOW,
+      operatorId, carrierAuthority: "federal", jurisdiction, latitude: 53.5, at: NOW,
     }) as { determination: { verdict: string; determinations: { limitKey: string; result: string }[] } };
 
     // P9: nothing verified, so nothing determined.
@@ -91,13 +96,13 @@ d("a promotion moves exactly one determination", () => {
   });
 
   it("lifts only the promoted limit out of unknown", async () => {
-    const { userId } = await driver();
+    const { userId, operatorId } = await driver();
     const jurisdiction = `Z${rnd().slice(0, 2)}`;
     const profileKey = `FIX-${rnd()}`;
     await profile(profileKey, jurisdiction);
 
     const before = await callerFor(userId).hos.status({
-      operatorId: userId, carrierAuthority: "federal", jurisdiction, latitude: 53.5, at: NOW,
+      operatorId, carrierAuthority: "federal", jurisdiction, latitude: 53.5, at: NOW,
     }) as { determination: { determinations: { limitKey: string; result: string }[] } };
     const unknownBefore = before.determination.determinations.filter((x) => x.result === "unknown").length;
 
@@ -105,7 +110,7 @@ d("a promotion moves exactly one determination", () => {
     expect(r.promoted).toBe(true);
 
     const after = await callerFor(userId).hos.status({
-      operatorId: userId, carrierAuthority: "federal", jurisdiction, latitude: 53.5, at: NOW,
+      operatorId, carrierAuthority: "federal", jurisdiction, latitude: 53.5, at: NOW,
     }) as { determination: { determinations: { limitKey: string; result: string }[] } };
     const unknownAfter = after.determination.determinations.filter((x) => x.result === "unknown").length;
 
@@ -116,7 +121,7 @@ d("a promotion moves exactly one determination", () => {
   });
 
   it("determines the promoted limit and leaves its neighbour unknown", async () => {
-    const { userId } = await driver();
+    const { userId, operatorId } = await driver();
     const jurisdiction = `Z${rnd().slice(0, 2)}`;
     const profileKey = `FIX-${rnd()}`;
     await profile(profileKey, jurisdiction);
@@ -132,7 +137,7 @@ d("a promotion moves exactly one determination", () => {
       [profileKey, "daily_on_duty_minutes", 840, "fixture s. 2"]);
 
     const status = await callerFor(userId).hos.status({
-      operatorId: userId, carrierAuthority: "federal", jurisdiction, latitude: 53.5, at: NOW,
+      operatorId, carrierAuthority: "federal", jurisdiction, latitude: 53.5, at: NOW,
     }) as { determination: { verdict: string; unknownCount: number; determinations: { limitKey: string; result: string }[] } };
 
     const byKey = new Map(status.determination.determinations.map((x) => [x.limitKey, x.result]));
@@ -148,7 +153,7 @@ d("a promotion moves exactly one determination", () => {
   });
 
   it("does not apply a future amendment to today's determination", async () => {
-    const { userId } = await driver();
+    const { userId, operatorId } = await driver();
     const jurisdiction = `Z${rnd().slice(0, 2)}`;
     const profileKey = `FIX-${rnd()}`;
     await profile(profileKey, jurisdiction);
