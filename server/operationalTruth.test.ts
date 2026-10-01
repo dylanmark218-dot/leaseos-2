@@ -50,7 +50,9 @@ describe("the monolith's create paths refuse trust-bearing input at the schema",
   it("names every refused field, and none of them has a default that would let a value through", () => {
     const src = readFileSync("server/routers.ts", "utf8");
     const refused = (src.match(/^\s+([a-zA-Z]+): REFUSED,/gm) ?? []).map(l => l.trim().split(":")[0]!);
-    expect(refused.sort()).toEqual(["accessRole", "authMethod", "classificationStatus", "confidence", "confidence", "documentHash", "inspectionStatus", "maintenanceStatus", "source", "status", "status", "status", "status", "status", "unitId", "verificationStatus", "verifiedAt", "verifiedAt"]);
+    // P0-A2.1 — `orgRef` on operatingZones.create: the organization a zone belongs to is the caller's
+    // live membership, never a value in the request.
+    expect(refused.sort()).toEqual(["accessRole", "authMethod", "classificationStatus", "confidence", "confidence", "documentHash", "inspectionStatus", "maintenanceStatus", "orgRef", "source", "status", "status", "status", "status", "status", "unitId", "verificationStatus", "verifiedAt", "verifiedAt"]);
     expect(src).toContain('const REFUSED = z.undefined(');
   });
 });

@@ -1,26 +1,31 @@
-import type { Express } from "express";
+/**
+ * Development serving only: Vite in middleware mode with HMR over the application's HTTP server.
+ *
+ * P0-C — this module is reached from `./dev.ts` and from nothing the production build bundles.
+ * It imports `vite` and `vite.config.ts` (and through it every Vite plugin), all of them
+ * devDependencies; an import of it from the production entrypoint put those packages into
+ * `dist/index.js` and the artifact could not boot where only `dependencies` were installed.
+ * `serveStatic` moved to `./staticAssets.ts` for that reason.
+ */
+import { type Express } from "express";
 import fs from "fs";
 import { type Server } from "http";
 import { nanoid } from "nanoid";
 import path from "path";
+import { createServer as createViteServer } from "vite";
+import viteConfig from "../../vite.config";
 
-/**
- * Development only. `index.ts` reaches this through a dynamic import, and this
- * module reaches Vite the same way: `vite` is imported at call time, and the
- * config is handed to Vite as a file path for it to load, rather than imported
- * here. A static import of `vite.config.ts` — even inside a lazily imported
- * module — is hoisted by the esbuild bundle into `dist/index.js`, which then
- * cannot start without devDependencies installed.
- */
 export async function setupVite(app: Express, server: Server) {
-  const { createServer: createViteServer } = await import("vite");
+  const serverOptions = {
+    middlewareMode: true,
+    hmr: { server },
+    allowedHosts: true as const,
+  };
+
   const vite = await createViteServer({
-    configFile: path.resolve(import.meta.dirname, "../..", "vite.config.ts"),
-    server: {
-      middlewareMode: true,
-      hmr: { server },
-      allowedHosts: true,
-    },
+    ...viteConfig,
+    configFile: false,
+    server: serverOptions,
     appType: "custom",
   });
 
