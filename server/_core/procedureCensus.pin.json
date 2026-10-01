@@ -1,0 +1,62 @@
+[
+ {
+  "file": "server/_core/systemRouter.ts",
+  "procedure": "health",
+  "kind": "publicProcedure"
+ },
+ {
+  "file": "server/_core/systemRouter.ts",
+  "procedure": "notifyOwner",
+  "kind": "adminProcedure"
+ },
+ {
+  "file": "server/recordsRouter.ts",
+  "procedure": "bootstrapManagement",
+  "kind": "adminProcedure"
+ },
+ {
+  "file": "server/recordsRouter.ts",
+  "procedure": "bootstrapStatus",
+  "kind": "adminProcedure"
+ },
+ {
+  "file": "server/routers.ts",
+  "procedure": "me",
+  "kind": "publicProcedure"
+ },
+ {
+  "file": "server/routers.ts",
+  "procedure": "logout",
+  "kind": "publicProcedure"
+ },
+ {
+  "file": "server/routers.ts",
+  "procedure": "refresh",
+  "kind": "publicProcedure"
+ },
+ {
+  "file": "server/routers.ts",
+  "procedure": "revokeAll",
+  "kind": "publicProcedure"
+ },
+ {
+  "file": "server/sessionRouter.ts",
+  "procedure": "context",
+  "kind": "sessionProcedure"
+ },
+ {
+  "file": "server/sessionRouter.ts",
+  "procedure": "selectOrganization",
+  "kind": "sessionProcedure"
+ },
+ {
+  "file": "server/sessionRouter.ts",
+  "procedure": "selectWorkspace",
+  "kind": "sessionProcedure"
+ },
+ {
+  "file": "server/sessionRouter.ts",
+  "procedure": "acceptInvitation",
+  "kind": "sessionProcedure"
+ }
+]

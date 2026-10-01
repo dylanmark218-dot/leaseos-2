@@ -1,0 +1,54 @@
+Hazard Assessment
+Assess the actual work area and changing conditions. Record hazards, controls and outstanding actions.
+Company: __________________________________  Home base: _______________________
+Record no. __________________  Record revision: ______  Date / time: _________________
+Site / lease / project: __________________________  Job / dispatch: __________________
+Location / LSD / address: ______________________________________________________
+Task / scope: ________________________________________________________________
+Supervisor / assessor: __________________________  Crew / contractor: _______________
+Units / equipment: __________________________  Related permits / procedures: __________
+Conditions and hazard prompts
+Weather / visibility: ____________________  Ground / access: _________________________
+Check hazards present; describe each in the register below. These prompts are not exhaustive.
+[ ] Moving equipment / reversing  [ ] Line of fire / pinch points  [ ] Lifting / suspended loads
+[ ] Pressure / stored energy  [ ] Electricity / utilities  [ ] Excavations / unstable ground
+[ ] Falls / heights  [ ] Confined space  [ ] Fire / ignition  [ ] H2S / hazardous atmosphere
+[ ] Chemicals / dust / SDS  [ ] Noise  [ ] Weather / heat / cold  [ ] Fatigue / manual handling
+[ ] Public / other crews  [ ] Spills / environmental receptors  [ ] Other: _________________
+Hazard and control register
+Risk method / matrix and revision: __________________  Use company rating definitions.
+Monitoring / measurements and reference: ___________________________________________
+Additional hazards / attached assessment IDs: _______________________________________
+Hazard Assessment Review
+Record no. _____________________  Date: ______________  Site: _____________________
+Outstanding actions and verification
+Emergency contact / number: ___________________  Radio / communication: ______________
+Muster / emergency access location: __________________________________________________
+Work status and review
+[ ] Ready under verified controls   [ ] Hold affected work   [ ] Not yet assessed
+Limits / remaining restrictions: _____________________________________________________
+Supervisor / authorized reviewer: __________________  Signature: _____________________
+Review date / time: __________________  Next review / trigger: _________________________
+Stop affected work and reassess if scope, equipment, crew, conditions or controls change, or a new hazard is identified. Resolve required actions before releasing affected work.
+Crew acknowledgement
+I have reviewed the task, hazards and controls, and had the opportunity to raise concerns. My signature records this review; it does not replace permits or competency verification.
+Late arrivals / changes briefed by and time: ___________________________________________
+Use the company’s approved procedures and risk criteria. Enter N/A where appropriate and identify all continuation pages by record number. Preserve signed originals when revising.
+Hazard and who may be harmed | Initial risk | Controls and responsible person | Residual risk
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+Issue or required action | Owner | Due / hold point | Verified by and time
+ |  |  | 
+ |  |  | 
+ |  |  | 
+Printed name | Company / role | Signature | Date / time
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
