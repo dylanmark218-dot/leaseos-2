@@ -14,7 +14,7 @@ verdict.
 | SPINE 1: BoundaryConfirmation resolver + chain rule | **merged** (#10, `6f52b57`) |
 | SPINE 1: receipt reader + 0179 trip-stop provenance (clears the 0169 release blocker) | **merged** ([dylanmark218-dot/leaseos-2#17](https://github.com/dylanmark218-dot/leaseos-2/pull/17), `d307ba4`) |
 | SPINE 2: resolve the four duplications (`dispatchMatching`, `openShifts`, `complianceDocumentValidity`, `fieldTicket`) | **COMPLETE**: #52, #60, #89; `main` CI green on `b35bac4` (run 663); record: `docs/register/SPINE_ITEM2_DUPLICATIONS.md` |
-| SPINE 3: `offlineCapability` → HS1 | **next** |
+| SPINE 3: `offlineCapability` → HS1 | **done on `claude/serene-rubin-js8fta`**, pending merge and green `main` CI; record: `docs/register/SPINE_ITEM3_OFFLINE_CAPABILITY.md` |
 | SPINE 4: the rest of the spine, in path order | not started |
 | Secretary model layer ("door 2") | **on `main`, declared unwired**: [dylanmark218-dot/leaseos-2#7](https://github.com/dylanmark218-dot/leaseos-2/pull/7) merged (`c626146`); `server/_core/ai/` exists, `productionWorker.ts` still registers only the enforcement handler, and `assistant.draft` still calls `invokeLLM` inline |
 

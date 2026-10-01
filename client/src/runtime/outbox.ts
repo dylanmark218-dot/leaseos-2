@@ -9,14 +9,17 @@
  */
 
 import type { CaptureAuthorizationClaim, CaptureKind, GpsFix, LocalCapture, LocalStore, FileVault, Clock } from "./contracts";
+import { assertQueueable, CAPTURE_CAPABILITIES, captureCapability, type CapturePolicy } from "./offlinePolicy";
 
 const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 export class Outbox {
-  constructor(private store: LocalStore, private vault: FileVault, private clock: Clock) {}
+  constructor(private store: LocalStore, private vault: FileVault, private clock: Clock, private policy: CapturePolicy = CAPTURE_CAPABILITIES) {}
 
   /** Save a draft locally. It is on the device and nowhere else. */
   async saveDraft(args: { kind: CaptureKind; formKey: string | null; title: string; category: string; fields: Record<string, unknown>; files?: { bytes: Uint8Array; fileName: string; mimeType: string }[]; gps?: GpsFix | null; jobId?: number | null; unitId?: number | null; capturedAt?: Date; captureAuthorizationClaim?: CaptureAuthorizationClaim; captureAuthorizationReason?: string | null }): Promise<LocalCapture> {
+    // Refused before anything touches the vault: a kind nobody declared is not saved under a guess.
+    captureCapability(args.kind, this.policy);
     const now = this.clock.now().toISOString();
     const files: LocalCapture["files"] = [];
     for (const f of args.files ?? []) {
@@ -40,6 +43,8 @@ export class Outbox {
     // The vault refuses to seal a record that relates to nothing. Better the
     // worker hears it now — "which job or unit is this for?" — than the sync
     // engine hears it hours later.
+    // A server decision never enters the evidence queue, signal or not (offlineCapability).
+    assertQueueable(c.kind, this.policy);
     if (c.jobId == null && c.unitId == null) throw new Error(`Capture ${localId} relates to no job or unit — it cannot be sealed on the server; attach it to one before queuing`);
     return this.transition(c, "queued", { lastError: null });
   }

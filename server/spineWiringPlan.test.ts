@@ -103,8 +103,11 @@ describe("the reachability census is consistent with it", () => {
 
   it("names only engines the census accounts for, declared or reached", () => {
     const census = readFileSync(CENSUS, "utf8");
-    const production = walk("server", n => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n))
-      .filter(p => !p.includes("/_core/"))
+    // The device runtime is an application root too (SPINE item 3), as the census counts it.
+    const production = [
+      ...walk("server", n => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n)).filter(p => !p.includes("/_core/")),
+      ...walk("client/src/runtime", n => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n)),
+    ]
       .map(p => readFileSync(p, "utf8"))
       .join("\n");
     for (const name of spineEngines()) {

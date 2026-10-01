@@ -89,7 +89,6 @@ const DECLARED_UNWIRED: Record<string, string> = {
   migrationLedger: "the production migration ledger; reached from scripts/migrate.ts (the deploy path), not from a router — declared by the session that reconciled 5f3bef4",
   requiredSuites: "B23.1B — which test suites the gate refuses to pass without, and the pure check that reads vitest's JSON report. Unwired on purpose and permanently: its caller is scripts/verify-gate-run.ts, run by ci-gate.sh after the suite. A request has no opinion about whether the authorization suites ran.",
   migrationSlots: "B23.1A — the migration filename guard. Unwired on purpose and permanently: it inspects the repository's own `drizzle/` filenames, which is a fact about the tree rather than about any request, so the only caller is `migrationSlots.test.ts` and gate 0 of ci-gate.sh. A router that could answer 'is our migration numbering sound' would be answering it about the server's deployed copy, too late to matter.",
-  offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
   dashboardWidget: "widget contract; no dashboard surface consumes it yet",
   financialCalendar: "AP/AR and company-event projections; no financial surface yet",
@@ -214,9 +213,37 @@ function importsOfBody(body: string, fromDir = ""): string[] {
   return out;
 }
 
+/**
+ * The device runtime is the field app's application root, as the routers are the
+ * server's. `client/src/runtime/` runs on the truck and calls engines that decide
+ * what a device may do offline (SPINE item 3: `offlineCapability`). Only its
+ * value imports of `server/_core` count: an `import type` erases at compile time
+ * and reaches nothing. Its sibling imports (`./outbox`, `./contracts`) are client
+ * modules and are deliberately not read as engine names.
+ *
+ * Reached is not running, here as for the feed adapters below: in this repository
+ * nothing mounts the runtime in the browser (`mountBrowserFallbackRuntime` has no
+ * caller) and the native shell that mounts it on a device is not in the tree. What
+ * this root proves is that the code which runs on the truck calls the engine.
+ */
+function deviceRuntimeSeeds(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const p = join(dir, entry);
+      if (statSync(p).isDirectory()) { walk(p); continue; }
+      if (!/\.tsx?$/.test(p) || /\.test\.tsx?$/.test(p)) continue;
+      const text = stripComments(readFileSync(p, "utf8"));
+      for (const m of text.matchAll(/import\s+(?!type\b)[^;]*?from\s*"(?:\.\.\/)+server\/_core\/([A-Za-z0-9_/]+)"/g)) out.push(m[1]);
+    }
+  };
+  walk("client/src/runtime");
+  return out;
+}
+
 function reachableSet(srcs: Record<string, string>): Set<string> {
   const reached = new Set<string>();
-  const queue: string[] = [];
+  const queue: string[] = [...deviceRuntimeSeeds()];
   // P0-C: three entrypoints — the production server, the standalone worker, and the development
   // server, which is the only place the Vite module is reached from.
   const coreEntrypoints = new Set(["server/_core/index.ts", "server/_core/worker.ts", "server/_core/dev.ts"]);
@@ -335,7 +362,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(73);   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
+    expect(unwired).toHaveLength(72);   // SPINE item 3: -1 offlineCapability — the device runtime (client/src/runtime: outbox, sync engine) now asks it what each capture is, and the census counts that runtime as an application root. Reached is not running: no browser path mounts the runtime and the native shell is not in this repository;   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });

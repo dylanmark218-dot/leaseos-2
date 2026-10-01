@@ -8,6 +8,8 @@
  * their day, what needs attention, what to do next, and a way to capture.
  */
 
+import type { CaptureKind } from "../runtime/contracts";
+
 export type PortalKey =
   | "field_workforce" | "field_leadership" | "safety_compliance" | "dispatch_operations" | "office_administration"
   | "finance_billing" | "fleet_maintenance" | "sales_customer" | "management" | "executive" | "hr_workforce"
@@ -131,7 +133,7 @@ export function exceptionIndicator(summary: MyDay["attention"]): { badge: string
 /* Quick Capture                                                        */
 /* ------------------------------------------------------------------ */
 
-export type QuickCaptureAction = { key: string; label: string; kind: string; formKey: string | null; category: string; needsPhoto: boolean; needsVoice: boolean };
+export type QuickCaptureAction = { key: string; label: string; kind: CaptureKind; formKey: string | null; category: string; needsPhoto: boolean; needsVoice: boolean };
 
 const FIELD_CAPTURE: QuickCaptureAction[] = [
   { key: "receipt", label: "Receipt", kind: "fuel_receipt", formKey: "fuel_receipt", category: "receipt", needsPhoto: true, needsVoice: false },

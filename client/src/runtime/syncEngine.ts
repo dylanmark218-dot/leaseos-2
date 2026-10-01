@@ -15,6 +15,7 @@
 import type { CaptureKind, Clock, Connectivity, FileVault, Keystore, LocalCapture, LocalStore, Transport } from "./contracts";
 import { canonicalJson, sha256Hex, sha256HexOfString, toBase64 } from "./crypto";
 import { Outbox } from "./outbox";
+import { captureEnvelope, type CapturePolicy } from "./offlinePolicy";
 
 export const KEY_ROTATION_DAYS = 30;
 export const MAX_ITEMS_PER_PACKAGE = 500;
@@ -77,8 +78,8 @@ export type SyncOutcome = {
 
 export class SyncEngine {
   private outbox: Outbox;
-  constructor(private deps: { store: LocalStore; vault: FileVault; keystore: Keystore; transport: Transport; connectivity: Connectivity; clock: Clock; platform: "android" | "ios" | "web" }) {
-    this.outbox = new Outbox(deps.store, deps.vault, deps.clock);
+  constructor(private deps: { store: LocalStore; vault: FileVault; keystore: Keystore; transport: Transport; connectivity: Connectivity; clock: Clock; platform: "android" | "ios" | "web"; policy?: CapturePolicy }) {
+    this.outbox = new Outbox(deps.store, deps.vault, deps.clock, deps.policy);
   }
 
   /** Enroll once; the server assigns the device reference and the office activates it. */
@@ -137,6 +138,9 @@ export class SyncEngine {
     for (const c of queued) {
       await this.outbox.markSyncing(c.localId, packageRef);
       try {
+        // 0. The engine's envelope: evidence, never a verdict. A server-authoritative kind
+        //    is refused here and retained as failed — nothing is uploaded for it.
+        captureEnvelope(c, deviceRef, this.deps.policy);
         // 1. Upload — idempotent by the device's reference.
         let evidenceId = c.serverEvidenceId;
         if (evidenceId == null) {

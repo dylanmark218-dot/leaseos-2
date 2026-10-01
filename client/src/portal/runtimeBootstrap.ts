@@ -36,7 +36,7 @@ export function mountBrowserFallbackRuntime(transport: Transport): MountedRuntim
     kind: "browser_fallback",
     outboxStatus: () => outbox.status(),
     capture: async (a, args) => {
-      const c = await outbox.saveDraft({ kind: a.kind as never, formKey: a.formKey, title: a.label, category: a.category, fields: args?.fields ?? {}, files: args?.files, jobId: args?.jobId ?? null, unitId: args?.unitId ?? null });
+      const c = await outbox.saveDraft({ kind: a.kind, formKey: a.formKey, title: a.label, category: a.category, fields: args?.fields ?? {}, files: args?.files, jobId: args?.jobId ?? null, unitId: args?.unitId ?? null });
       if (c.jobId != null || c.unitId != null) { await outbox.queue(c.localId); void engine.syncOnce(); }
       return { localId: c.localId };
     },

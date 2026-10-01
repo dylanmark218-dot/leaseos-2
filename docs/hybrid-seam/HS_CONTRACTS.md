@@ -16,6 +16,11 @@ than approximating. HS1 must not introduce a second name.
 
 Added by HS1 — the only new surface:
 
+> **As built (SPINE item 3, 2026-10-01):** `client/src/runtime/capabilities.ts`. The matrix is as
+> below. The function takes its probes, `capabilities(probes)` with `nativeProbes(connectivity)`, so
+> `network` is the runtime's own `Connectivity` and not a browser global. See
+> `docs/register/SPINE_ITEM3_OFFLINE_CAPABILITY.md`.
+
 ```ts
 /** What this runtime can actually do, probed rather than assumed. */
 export type CapabilityMatrix = {

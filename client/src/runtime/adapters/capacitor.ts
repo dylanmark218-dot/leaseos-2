@@ -97,4 +97,17 @@ export function capacitorBarcodeScanner(): { available: () => Promise<boolean>; 
   };
 }
 
+/**
+ * Camera and GPS have no LeaseOS interface yet — nothing captures through them
+ * outside the browser file picker — so these are probes only. They answer the
+ * one question `capabilities()` asks, "is the plugin there", and open nothing.
+ */
+export function capacitorCamera(): { available: () => Promise<boolean> } {
+  return { available: async () => (await load("@capacitor/camera")) != null };
+}
+
+export function capacitorGeolocation(): { available: () => Promise<boolean> } {
+  return { available: async () => (await load("@capacitor/geolocation")) != null };
+}
+
 export const NATIVE_ONLY_CAPABILITIES = ["encrypted_sqlite", "encrypted_file_vault", "hardware_keystore", "camera", "gps", "biometric_signing", "local_notifications", "document_scanner", "on_device_ocr", "barcode_scanner"] as const;
