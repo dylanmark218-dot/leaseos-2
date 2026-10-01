@@ -12,7 +12,7 @@ import { and, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { MySqlColumn } from "drizzle-orm/mysql-core";
 import type { MySql2Database } from "drizzle-orm/mysql2";
 import { contractorSettlements, employeePayrollProfiles, financialEntities, payPeriods, payRuns, payrollAdjustments, payrollDisputes } from "../../drizzle/schema";
-import { AmbiguousOrganization, SINGLE_TENANT_ID, resolveActingScope } from "./actingScope";
+import { AmbiguousOrganization, RevivedFallbackRefused, SINGLE_TENANT_ID, resolveActingScopeStrict } from "./actingScope";
 
 type Db = MySql2Database<Record<string, unknown>>;
 export type MoneyScope = { tenantId: string };
@@ -83,10 +83,14 @@ export type FinanceScope = MoneyScope & { entityIds: readonly number[] };
 
 export async function financeScopeFor(db: Db, userId: number): Promise<FinanceScope> {
   let tenantId: string;
-  try { tenantId = (await resolveActingScope(db as never, userId)).tenantId; }
+  // P0-A3 — the strict resolver (P0-A1): a membership that ended, lapsed or was suspended is not
+  // replaced by the single-tenant fallback, and no role grant revives it. Money follows the same
+  // rule as hours of service, telematics and operating zones.
+  try { tenantId = (await resolveActingScopeStrict(db as never, userId)).tenantId; }
   catch (e) {
     // Two live memberships: which company's books this request touches has to be established, not guessed.
     if (e instanceof AmbiguousOrganization) throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
+    if (e instanceof RevivedFallbackRefused) throw new TRPCError({ code: "FORBIDDEN", message: "No active organization membership" });
     throw e;
   }
   const scope = { tenantId };
