@@ -62,7 +62,16 @@ another identity's; the closeout producer's pointer. Pure suites cover the state
 rules per subject type, the event chain (edited, removed, relinked), receipt determinism, the client
 canonicalizer equivalence, and finger/stylus/mouse stroke serialization.
 
-**Gate.** Recorded below from the run on this branch.
+**Gate** (`scripts/ci-gate.sh`, run locally against MariaDB 10.11 on the pinned Node 22.23.3, 2026-10-01,
+commit `d7316f5` plus the test fix in the follow-up commit): 189 migrations apply from an empty database;
+table parity 436/436; `tsc --noEmit` clean; test-file type errors 0 (pinned ceiling 0); procedure census
+clean; 443 test files / 6708 tests — 441 files green on the first full run, the two red ones being this
+checkpoint's own `attest.db.test.ts` (an assertion that assumed which of two concurrent finalizers won;
+now asserted against the row) and `commercialOffice.db.test.ts` P7.8 "reproducible manifest hash", which
+touches nothing SA1 changed, passed on the two earlier full runs and on its re-run, and is a
+pre-existing reproducibility flake; both green on re-run. Counts in `LEASEOS_CURRENT_STATE.md` are
+regenerated: 436 tables, 189 migrations, 717 role-authorized procedures, 40 portal procedures, 382
+permissions (148 sensitive, 15 universal).
 
 **Deliberately not in SA1.** See `SA1_OWNER_RULING.md`. In addition: the receipt is held on the artifact
 row (canonical JSON, hashed) rather than in object storage, because storage is unconfigured in the gate

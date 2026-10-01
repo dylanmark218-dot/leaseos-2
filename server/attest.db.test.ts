@@ -175,13 +175,16 @@ d("seven initials, three roles, one document — and what the database refuses a
     await expect(callerFor(office).attest.void({ revisionRef: opened.revisionRef, reason: "trying to void a finalized document" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     await expect(callerFor(office).attest.open({ subjectType: "evidence_record", subjectRef: ev.subjectRef })).rejects.toMatchObject({ code: "CONFLICT", message: expect.stringContaining("superseding") });
     // Supersede: the finalizer may not; a second person may, but only with a changed document; the old row is untouched byte for byte.
-    const before = (await rows("SELECT revisionHash, receiptHash, eventChainHead, finalizedAt FROM attestDocumentRevisions WHERE revisionRef = ?", [opened.revisionRef]))[0]!;
-    await expect(callerFor(office).attest.supersede({ revisionRef: opened.revisionRef, reason: "corrected the facility ticket number" })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(callerFor(office2).attest.supersede({ revisionRef: opened.revisionRef, reason: "corrected the facility ticket number" })).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("Nothing changed") });
+    // Which of the two concurrent finalizers won is the database's choice, so the rule is asserted against the row.
+    const before = (await rows("SELECT revisionHash, receiptHash, eventChainHead, finalizedAt, finalizedByUserId FROM attestDocumentRevisions WHERE revisionRef = ?", [opened.revisionRef]))[0]!;
+    const finalizer = Number(before.finalizedByUserId) === office ? office : office2;
+    const other = finalizer === office ? office2 : office;
+    await expect(callerFor(finalizer).attest.supersede({ revisionRef: opened.revisionRef, reason: "corrected the facility ticket number" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(callerFor(other).attest.supersede({ revisionRef: opened.revisionRef, reason: "corrected the facility ticket number" })).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("Nothing changed") });
     const v2Hash = sha(`rescan-${rnd()}`);
     await pool.execute("UPDATE evidenceRecords SET currentVersion = 2, sealState = 'amended' WHERE id = ?", [ev.evidenceId]);
     await pool.execute("INSERT INTO evidenceSeals (evidenceRecordId, version, canonicalManifest, contentHash, manifestHash, sealedAt, sealedByUserId, verificationResult) VALUES (?,2,'{}',?,?,NOW(),1,'verified')", [ev.evidenceId, v2Hash, sha(`m-${v2Hash}`)]);
-    const next = await callerFor(office2).attest.supersede({ revisionRef: opened.revisionRef, reason: "corrected the facility ticket number" });
+    const next = await callerFor(other).attest.supersede({ revisionRef: opened.revisionRef, reason: "corrected the facility ticket number" });
     expect(next).toMatchObject({ revision: 2, revisionHash: v2Hash, state: "open", supersedes: opened.revisionRef });
     expect(next.fields.map(f => f.fieldKey).sort()).toEqual(view.fields.map(f => f.fieldKey).sort());
     expect(next.signers).toHaveLength(3);
@@ -191,7 +194,7 @@ d("seven initials, three roles, one document — and what the database refuses a
     expect(after.supersededByRevisionId).not.toBeNull();
     expect(Number((await rows("SELECT COUNT(*) AS n FROM attestMarks m JOIN attestSigningSessions s ON s.id = m.sessionId JOIN attestDocumentRevisions r ON r.id = s.revisionId WHERE r.revisionRef = ?", [next.revisionRef]))[0]!.n)).toBe(0);
     // Voiding an open revision; then nothing may be signed on it.
-    const voided = await callerFor(office2).attest.void({ revisionRef: next.revisionRef, reason: "rescanned a third time" });
+    const voided = await callerFor(other).attest.void({ revisionRef: next.revisionRef, reason: "rescanned a third time" });
     expect(voided.state).toBe("voided");
     await expect(callerFor(driver).attest.sign({ revisionRef: next.revisionRef, signerRef: next.signers.find(s => s.displayName === "Driver")!.signerRef, revisionHashAtStart: v2Hash, marks: [ack("driver_sig")] })).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: expect.stringContaining("DOCUMENT_VOIDED") });
   }, 120_000);
