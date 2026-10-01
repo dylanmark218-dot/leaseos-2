@@ -1,0 +1,50 @@
+Incident Report
+Record the initial facts, actual consequences and immediate response. Separate observations from assumptions.
+Company: __________________________________  Home base: _______________________
+Record no. __________________  Record revision: ______  Date: _____________________
+Site / lease / project: __________________________  Job / dispatch: __________________
+Location / LSD / address: ______________________________________________________
+Event date / time / zone: ____________________  Reported date / time: __________________
+Reported by / role / contact: ____________________________________________________
+Type: [ ] Vehicle  [ ] Injury  [ ] Property  [ ] Spill  [ ] Equipment  [ ] Other: ______________
+People / employer / unit / trailer / equipment involved: _______________________________
+Event facts
+Task underway and what happened before, during and after the event:
+________________________________________________________________________________________
+________________________________________________________________________________________
+________________________________________________________________________________________
+Actual injury, damage or environmental impact; mark unknowns:
+________________________________________________________________________________________
+________________________________________________________________________________________
+Immediate response
+Emergency response, first aid, area isolation and temporary controls; include times:
+________________________________________________________________________________________
+________________________________________________________________________________________
+Work stopped / equipment isolated by: _____________________  Time: _________________
+Incident Report Review
+Record no. __________________  Event date: ______________  Site: ____________________
+Witnesses and evidence
+Attach photographs, sketches and statements with this record number. Preserve originals; distinguish firsthand accounts from reported information.
+Contributing factors / preliminary causes and evidence; mark unconfirmed findings:
+________________________________________________________________________________________
+Corrective actions
+Notification and review
+Notified person / agency / date / time / reference: ___________________________________
+Reporting assessment owner: ______________  Due: __________  Status: ________________
+External form / submission reference or reason not applicable: __________________________
+Prepared by / signature / date: ___________________________________________________
+Reviewed by / signature / date: __________________________________________________
+Closure verified by / date / evidence: ______________________________________________
+[ ] Open  [ ] Actions pending  [ ] Closed     Effectiveness review date: ___________________
+Use N/A or unknown as appropriate. Link continuation pages. Preserve signed originals and track corrections. Signatures acknowledge preparation or review, not admission of fault.
+Internal company template. Not an official OSHA, DOT, OHS or workers compensation form; assess applicable reporting and prescribed forms separately.
+Witness name or secure reference | Contact or statement ID | Interview date
+ |  | 
+ |  | 
+Photo or evidence ID | Description and capture date | Original location or custodian
+ |  | 
+ |  | 
+Action and related finding | Owner | Due date | Verification or evidence
+ |  |  | 
+ |  |  | 
+ |  |  | 

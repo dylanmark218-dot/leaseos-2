@@ -25,9 +25,10 @@ async function operatorRow(userId: number, licenceExpires: Date | null) {
 }
 async function ticket(userId: number, code: string, expiresAt: Date | null, state = "verified") {
   await pool.execute(
-    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt)
-     VALUES (?,?,?,?,?,?,?,NOW())`,
-    [`WQ-${rnd()}${rnd()}`, "default", userId, code, state, expiresAt, 1]);
+    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt, verifiedByUserId, verifiedAt)
+     VALUES (?,?,?,?,?,?,?,NOW(),?,?)`,
+    // C1b-3: a legacy holding counts as verified only with a recorded verifier.
+    [`WQ-${rnd()}${rnd()}`, "default", userId, code, state, expiresAt, 1, state === "verified" ? 1 : null, state === "verified" ? new Date() : null]);
 }
 const postShift = (dispatcher: number, quals: string[] = []) =>
   caller(dispatcher).shifts.post({ title: "Shift", startsAt: STARTS, endsAt: ENDS, requiredRole: "driver", requiredQualifications: quals });

@@ -18,12 +18,13 @@
  * The same rule the eligibility read follows. A compliance tile that goes quiet
  * because a date is missing is the failure this system is built against.
  */
+import { effectiveQualifications } from "./qualificationReads";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, gte, isNull, lte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { crewMembers, crews, leaveRequests, shiftInterests, shiftPosts, workerQualifications } from "../drizzle/schema";
+import { crewMembers, crews, leaveRequests, shiftInterests, shiftPosts } from "../drizzle/schema";
 import { resolveActingScope } from "./_core/actingScope";
 import type { DbOrTx } from "./_core/dbTypes";
 import {
@@ -69,23 +70,26 @@ async function buildEvents(d: DbOrTx, args: { tenantId: string; forUserId: numbe
   }
 
   /* Qualification expiries. A verified holding with no expiry is unknown. */
-  const held = await d.select().from(workerQualifications).where(and(
-    eq(workerQualifications.userId, args.forUserId),
-    eq(workerQualifications.verificationState, "verified"),
-  )).limit(200);
-  for (const h of held) {
-    if (h.supersededByHoldingRef) continue;
-    if (h.expiresAt && (h.expiresAt < args.from || h.expiresAt > args.to)) continue;
+  // C1b-3: from the qualification read adapter (Academy first; legacy only as a marked fallback; this
+  // organization). One event per qualification code, for the record that governs it; only verified
+  // records appear, as before.
+  const quals = await effectiveQualifications(d, { tenantId: args.tenantId, userId: args.forUserId, at: args.from });
+  for (const q of quals) {
+    if (!q.source || q.state === "none" || q.state === "unverified" || q.state === "rejected") continue;
+    if (q.expiresAt && (q.expiresAt < args.from || q.expiresAt > args.to)) continue;
     events.push(project({
       layer: "compliance",
-      title: h.expiresAt ? `${h.code} expires` : `${h.code} — no expiry recorded`,
-      detail: h.certificateNumber,
-      at: h.expiresAt ?? args.from, endsAt: null, allDay: true,
+      title: q.expiresAt ? `${q.code} expires` : `${q.code} — no expiry recorded`,
+      detail: q.certificateNumber ?? q.academyQualificationRef,
+      at: q.expiresAt ?? args.from, endsAt: null, allDay: true,
       // blocksWork is true: a ticket the work requires is a blocking expiry.
-      severity: severityOf({ dueAt: h.expiresAt, now: args.from, blocksWork: true }),
+      severity: severityOf({ dueAt: q.expiresAt, now: args.from, blocksWork: true }),
       visibility: "operational",
-      ownerUserId: h.userId,
-      source: { sourceType: "workerQualification", sourceRef: h.holdingRef, generatedBy: "qualification_projection" },
+      ownerUserId: q.userId,
+      source: {
+        sourceType: q.source === "ACADEMY_QUALIFICATION" ? "academyQualification" : "workerQualification",
+        sourceRef: q.sourceRef!, generatedBy: "qualification_projection",
+      },
     }));
   }
 

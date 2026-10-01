@@ -5,11 +5,8 @@
  * did not say", which is different from "it has ended" and different again from "it never ends".
  */
 
-/**
- * Thrown by a parser when a response is only part of a listing the ingester will treat as whole.
- * Failing the run withdraws nothing; ingesting a part as the whole withdraws everything not in it.
- */
-export class IncompleteSnapshotError extends Error {}
+/** Defined beside the withdrawal it protects; re-exported so the parsers keep one import. */
+export { IncompleteSnapshotError } from "../feedIngest";
 
 /** Column widths in `roadAdvisories`. A record that would overflow one is clipped, not rejected. */
 export const HEADLINE_MAX = 400;

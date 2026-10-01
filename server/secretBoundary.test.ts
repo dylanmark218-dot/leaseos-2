@@ -137,11 +137,18 @@ describe("resolution happens in services, never in a router body", () => {
         .filter(m => CRYPTO_CORE.test(m[0]))
         .some(m => !/^import\s+type\b/.test(m[0]));
 
+    /*
+     * S2-KMS-A added the third, with its name on it: `_core/managedSecretKeys` is the managed
+     * bootstrap. It imports the purpose list and the key-id validator to check configuration —
+     * never `encryptSecret` or `decryptSecret`, which the assertion after this list pins.
+     */
     const importers = serverSources().filter(p => valueImport(code(p)));
     expect(importers.sort()).toEqual([
+      "server/_core/managedSecretKeys.ts",
       "server/_core/secretKeys.ts",
       "server/secretStore.ts",
     ]);
+    expect(code("server/_core/managedSecretKeys.ts")).not.toMatch(/\b(?:encryptSecret|decryptSecret)\b/);
   });
 
   it("only named domain services import the store", () => {
@@ -176,8 +183,10 @@ describe("resolution happens in services, never in a router body", () => {
      * pattern-matched away so that removing it is a visible edit to this line — which is exactly
      * what the final step of the MFA cutover will be.
      */
+    // S2-KMS-A: the managed-source and wrapped-reference variables are master-key configuration
+    // too, and are read in the same one place.
     const readers = serverSources().filter(p =>
-      /process\.env\.LEASEOS_(?:KEY_|PORTAL_MFA_KEY)/.test(code(p)) || /env\.LEASEOS_(?:KEY_|PORTAL_MFA_KEY)/.test(code(p))
+      /process\.env\.LEASEOS_(?:KEY_|PORTAL_MFA_KEY|SECRET_KEYS_SOURCE|MANAGED_KEYS)/.test(code(p)) || /env\.LEASEOS_(?:KEY_|PORTAL_MFA_KEY|SECRET_KEYS_SOURCE|MANAGED_KEYS)/.test(code(p))
     );
     expect(readers.sort()).toEqual([
       "server/_core/externalIdentityPolicy.ts",

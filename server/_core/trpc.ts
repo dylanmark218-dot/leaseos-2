@@ -3,7 +3,14 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 
-const t = initTRPC.context<TrpcContext>().create({
+/**
+ * Procedure metadata. `moneyScoped` marks a procedure whose handler receives the caller's money
+ * boundary (`ctx.money`); `financeScopeCoverage.test.ts` reads the mark from the live router, so a
+ * finance procedure added without it fails CI rather than a code review.
+ */
+export type ProcedureMeta = { moneyScoped?: true };
+
+const t = initTRPC.context<TrpcContext>().meta<ProcedureMeta>().create({
   transformer: superjson,
 });
 
@@ -52,9 +59,11 @@ import {
   authorize,
   isSensitivePermission,
   permissionForProcedure,
+  SESSION_PROCEDURE_PERMISSIONS,
   type Permission,
-  type RoleGrant, type ProcedureName } from "./recordsAuthorization";
-import { listActiveUserRoles, recordAuthorizationDecision } from "../db";
+  type RoleGrant, type ProcedureName, type SessionProcedureName } from "./recordsAuthorization";
+import { listActiveUserRoles, listRoleGrantsInActingOrganization, recordAuthorizationDecision } from "../db";
+import { AmbiguousOrganization, MembershipRevoked } from "./actingScope";
 
 /**
  * Enforces a domain permission server-side.
@@ -82,18 +91,55 @@ export function roleProcedure(procedureName: ProcedureName) {
   return t.procedure.use(
     t.middleware(async ({ ctx, next }) => {
       const userId = ctx.user?.id ?? null;
-      const grants: RoleGrant[] = userId
-        ? await listActiveUserRoles(userId)
-        : [];
-      const decision = authorize({ userId, grants, permission });
+
+      // B23.1 — the decision is made IN an organization, or it is not made.
+      //
+      // The gate resolves which company this request is acting for and loads
+      // only the grants that company issued. A role granted by another
+      // employer is not "outvoted" here, it is absent: it never enters the set
+      // the decision is computed from. That is what makes the boundary hold
+      // for all ~650 gated procedures without any of them being edited.
+      //
+      // The two refusals `resolveActingScope` raises are authority answers,
+      // not faults, and are translated below rather than escaping as a 500.
+      let grants: RoleGrant[] = [];
+      let organization: string | null = null;
+      try {
+        if (userId) {
+          const scoped = await listRoleGrantsInActingOrganization(userId);
+          grants = scoped.grants;
+          organization = scoped.organization;
+        }
+      } catch (error) {
+        const refusal = organizationRefusal(error);
+        if (!refusal) throw error;
+        await recordAuthorizationDecision({
+          actorUserId: userId,
+          procedureName,
+          permission,
+          rolesHeld: null,
+          outcome: "denied_scope",
+          detail: refusal.message.slice(0, 400),
+          occurredAt: new Date(),
+        });
+        throw refusal;
+      }
+
+      const decision = authorize({ userId, grants, permission, organization });
 
       const auditId = await recordAuthorizationDecision({
         actorUserId: userId,
         procedureName,
         permission,
+        // The organization is part of the decision now, so it is part of the
+        // record of it. An access review that cannot tell which company a
+        // refusal happened in cannot review anything.
         rolesHeld:
-          grants
-            .map(g => (g.scopeRef ? `${g.role}@${g.scopeRef}` : g.role))
+          [
+            organization ? `@${organization}` : null,
+            ...grants.map(g => (g.scopeRef ? `${g.role}/${g.scopeRef}` : g.role)),
+          ]
+            .filter(Boolean)
             .join(",")
             .slice(0, 300) || null,
         outcome: decision.outcome,
@@ -128,11 +174,158 @@ export function roleProcedure(procedureName: ProcedureName) {
         });
       }
 
-      return next({
-        ctx: { ...ctx, user: ctx.user!, roles: decision.effectiveRoles },
-      });
+      // v23.26 — an unresolved organization is a question, not a crash.
+      //
+      // `resolveActingScope` refuses rather than guesses when a person is a
+      // live member of two companies and has selected neither. That refusal is
+      // correct and stays; what was wrong is that it surfaced as an
+      // INTERNAL_SERVER_ERROR, which tells the shell nothing it can act on and
+      // tells an operator the system is broken when it is in fact protecting
+      // them. Translated once, here, so every one of the ~100 tenant-scoped
+      // procedures behind this gate gets the actionable answer — and again for
+      // the handlers that resolve their own scope after the gate has passed.
+      try {
+        return await next({
+          ctx: {
+            ...ctx,
+            user: ctx.user!,
+            roles: decision.effectiveRoles,
+            // B23.1 — the organization the gate decided in, for handlers that
+            // would otherwise resolve it a second time and could resolve it
+            // differently.
+            organization,
+          },
+        });
+      } catch (error) {
+        const refusal = organizationRefusal(error);
+        if (refusal) throw refusal;
+        throw error;
+      }
     })
   );
+}
+
+/**
+ * The two organization refusals, as named tRPC errors.
+ *
+ * One function because the gate raises them in two places — resolving the
+ * acting organization before the decision, and again from a handler that
+ * resolves its own scope afterwards — and two copies of a refusal is two
+ * chances for one of them to say something different.
+ *
+ * Returns null for anything else, so a real fault is never swallowed into a
+ * FORBIDDEN that hides it.
+ */
+function organizationRefusal(error: unknown): TRPCError | null {
+  if (error instanceof AmbiguousOrganization) {
+    return new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Choose which organization you are working in before continuing.",
+    });
+  }
+  // A membership that ended is a refusal, and it is the caller's own status
+  // rather than a fault — FORBIDDEN, named, not a 500. The same words the
+  // HOS, telematics, zone and finance boundaries use for the same refusal
+  // (`RevivedFallbackRefused`), so one condition reads one way wherever it is met.
+  if (error instanceof MembershipRevoked) {
+    return new TRPCError({
+      code: "FORBIDDEN",
+      message: "No active organization membership",
+    });
+  }
+  return null;
+}
+
+/* ==================================================================
+ * v23.26 — sessionProcedure: the "authenticated, not yet authorized" gate.
+ *
+ * There is exactly one question a signed-in person may ask before holding any
+ * domain role: *what am I allowed to open?* `roleProcedure` cannot answer it —
+ * it refuses a caller with no role, which is precisely the caller who needs to
+ * be told "no LeaseOS workspace is assigned to you yet" rather than shown a
+ * blank screen. `publicProcedure` cannot answer it either: the answer names a
+ * person's organizations and roles and must never be served to an anonymous
+ * request.
+ *
+ * So: authentication required, no role required, every decision audited
+ * through the same table as every other gate, and the set of procedure names
+ * that may use it pinned in `SESSION_PROCEDURE_PERMISSIONS`. That last part is
+ * what stops this becoming the hole the census exists to catch — a new
+ * procedure cannot hide behind a builder the drift guard does not count.
+ * ================================================================== */
+
+export function sessionProcedure(procedureName: SessionProcedureName) {
+  const permission = SESSION_PROCEDURE_PERMISSIONS[procedureName];
+  if (!permission) {
+    throw new Error(
+      `No session permission mapped for procedure "${procedureName}" — add it to SESSION_PROCEDURE_PERMISSIONS`
+    );
+  }
+
+  return t.procedure.use(
+    t.middleware(async ({ ctx, next }) => {
+      const userId = ctx.user?.id ?? null;
+      const now = new Date();
+
+      if (!userId) {
+        await recordAuthorizationDecision({
+          actorUserId: null,
+          procedureName,
+          permission,
+          rolesHeld: null,
+          outcome: "denied_unauthenticated",
+          detail: "No authenticated session",
+          occurredAt: now,
+        });
+        throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+      }
+
+      // Recorded as allowed because it IS allowed: being signed in is the whole
+      // requirement. What the caller may then DO is decided by every other gate,
+      // each of which writes its own row.
+      const grants: RoleGrant[] = await listActiveUserRoles(userId);
+      await recordAuthorizationDecision({
+        actorUserId: userId,
+        procedureName,
+        permission,
+        rolesHeld:
+          grants
+            .map(g => (g.scopeRef ? `${g.role}@${g.scopeRef}` : g.role))
+            .join(",")
+            .slice(0, 300) || null,
+        outcome: "allowed",
+        detail: null,
+        occurredAt: now,
+      });
+
+      return next({ ctx: { ...ctx, user: ctx.user!, grants } });
+    })
+  );
+}
+
+/* ==================================================================
+ * F1 — the money boundary on a role-authorized procedure
+ * ================================================================== */
+
+import { financeScopeFor, type FinanceScope } from "./entityScope";
+import { getDb } from "../db";
+
+/**
+ * `roleProcedure` answers "may this person do this kind of thing"; this answers "in which books".
+ * The caller's organization, and the financial entities (books) it owns, are resolved from the
+ * membership — never from input — and handed to the handler as `ctx.money`. Every record the handler
+ * reads or writes is proved against it (`server/financeScope.ts`); one that fails is "not found".
+ *
+ * Wraps rather than replaces `roleProcedure(...)` so the permission map, the authorization trail and
+ * the pinned procedure counts are untouched.
+ */
+export function moneyScoped(procedure: ReturnType<typeof roleProcedure>) {
+  return procedure.meta({ moneyScoped: true }).use(async ({ ctx, next }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const money: FinanceScope = await financeScopeFor(db, ctx.user.id);
+    return next({ ctx: { ...ctx, money } });
+  });
 }
 
 /* ==================================================================
@@ -150,7 +343,7 @@ import { createHash } from "node:crypto";
 import { EXTERNAL_KIND_PERMISSIONS, EXTERNAL_SENSITIVE_PERMISSIONS, externalPermissionForProcedure, type ExternalPermission } from "./recordsAuthorization";
 import { findExternalIdentityByAnyTokenHash, findExternalIdentityByInvitationHash, touchExternalIdentity, updateExternalIdentity } from "../db";
 import { credentialCheck, failureUpdate, invitationCheck, totpVerify } from "./externalIdentityPolicy";
-import { environmentSecretKeys, legacyMfaKey } from "./secretKeys";
+import { legacyMfaKey, secretKeyProvider } from "./secretKeys";
 import { resolveMfaSeed } from "../mfaSecretService";
 import { ENV } from "./env";
 
@@ -200,7 +393,7 @@ export function externalProcedure(procedureName: string) {
            */
           let seed: string;
           try {
-            seed = await resolveMfaSeed(identity, { keys: environmentSecretKeys(), legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
+            seed = await resolveMfaSeed(identity, { keys: secretKeyProvider(), legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
           } catch {
             return refuse("denied_scope", "MFA is enabled but cannot be verified on this server", "FORBIDDEN");
           }
