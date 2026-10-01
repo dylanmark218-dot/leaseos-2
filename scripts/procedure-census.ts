@@ -63,6 +63,9 @@ function* walk(dir: string): Generator<string> {
  */
 export const KIND_CLASS = {
   roleProcedure: "gated", externalProcedure: "gated", integrationProcedure: "gated",
+  // #61: a domain permission for an own-organization target, platform (or single-owner bootstrap)
+  // authority for a global one, and a refusal otherwise — never ungated.
+  platformOrOrganizationProcedure: "gated",
   publicProcedure: "ungated", adminProcedure: "ungated",
   protectedProcedure: "forbidden",
   permissionForProcedure: "helper", externalPermissionForProcedure: "helper", integrationPermissionForProcedure: "helper",
