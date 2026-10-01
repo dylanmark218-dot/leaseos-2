@@ -283,6 +283,11 @@ notices, daily report. Vendor and facility portal at `/vendor` and
 `/facility`: statements and submissions. First-run setup wizard in the
 office portals: company, services, guardrails, rates with approval,
 readiness — every step the server's answer.
+Analytics dashboard at `/analytics` (Checkpoint C): the organization's metrics grouped by area,
+or a driver's own numbers; each tile shows its value or the words "No value", whether it is
+complete, the records it could not place, the interval it covers and when it was computed, marked
+stale past its budget or after a failed refresh; "Show records" lists exactly the rows behind the
+value, fetched with the question the tile's answer echoed.
 
 ## Not implemented — and not claimed
 

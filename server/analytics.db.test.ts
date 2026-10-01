@@ -183,6 +183,9 @@ d("values, counted by hand", () => {
   it("answers operations as the fixtures say, naming what it could not place", async () => {
     const inProgress = await metric(w.mgrA, "ops.trips.in_progress");
     expect(inProgress).toMatchObject({ value: 3, determination: "computed", breakdown: { in_transit: 2, loading: 1 }, scope: { tenantId: w.A, derivedFrom: "membership" } });
+    // The definition travels with the answer, so a screen or an assistant can say how it was counted.
+    expect(inProgress.formula).toBe(METRICS.find(m => m.id === "ops.trips.in_progress")!.formula);
+    expect(inProgress.description.length).toBeGreaterThan(0);
     const completed = await metric(w.mgrA, "ops.trips.completed");
     expect(completed).toMatchObject({ value: 1, determination: "partial" });
     expect(completed.unknowns).toEqual([{ reason: expect.stringContaining("no completedAt"), count: 1 }]);

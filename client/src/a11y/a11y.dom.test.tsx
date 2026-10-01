@@ -25,8 +25,28 @@ import { PeopleAccessView, type PeopleAccessViewProps } from "../people/PeopleAc
 import { CustomersView, type CustomerProfile, type CustomersViewProps } from "../pages/CustomersView";
 import { ContractView, type ContractDetail, type ContractViewProps } from "../pages/ContractView";
 import { RateSheetView, type RateSheetDetail, type RateSheetViewProps } from "../pages/RateSheetView";
+import { AnalyticsDashboardView, type AnalyticsDashboardViewProps, type MetricAnswer } from "../analytics/AnalyticsDashboardView";
 
 afterEach(cleanup);
+
+/** Analytics Checkpoint C — one tile per state a reader can meet, and the drill-down open. */
+const ANALYTICS_NOW = new Date("2026-09-24T15:00:00Z");
+const metricAnswer = (o: Partial<MetricAnswer> = {}): MetricAnswer => ({
+  metricId: "maintenance.defects.open", value: 2, determination: "computed", unknowns: [], basis: 2,
+  breakdown: { critical: 1, advisory: 1 }, range: null, computedAt: new Date(ANALYTICS_NOW.getTime() - 30_000), freshnessSeconds: 120, ...o,
+});
+const analyticsProps = (o: Partial<AnalyticsDashboardViewProps> = {}): AnalyticsDashboardViewProps => ({
+  mode: "organization", onMode: () => {}, failure: null, loading: false, hiddenCount: 2, emptyReason: null,
+  scope: { derivedFrom: "membership" }, range: "today", onRange: () => {}, zone: "America/Edmonton", now: ANALYTICS_NOW,
+  onRefresh: () => {}, refreshing: false, drill: null, onDrill: () => {},
+  cards: [
+    { id: "maintenance.defects.open", name: "Open defects", family: "maintenance", description: "Defects not yet resolved.", formula: "Count of open defects.", unit: "count", unavailable: null, state: { kind: "loaded", answer: metricAnswer() } },
+    { id: "ops.trips.completed", name: "Trips completed", family: "operations", description: "Trips completed in the range.", formula: "Count of completed trips.", unit: "count", unavailable: null,
+      state: { kind: "failed", message: "network unreachable", last: metricAnswer({ metricId: "ops.trips.completed", value: 4, determination: "partial", breakdown: null, unknowns: [{ reason: "Trips marked complete with no completedAt", count: 1 }], range: { from: new Date("2026-09-24T06:00:00Z"), to: new Date("2026-09-25T06:00:00Z") } }) } },
+    { id: "maintenance.work_orders.overdue", name: "Overdue work orders", family: "maintenance", description: "Work orders past due.", formula: "Not computed.", unit: "count", unavailable: { determination: "not_derivable", reason: "Work orders carry no due date" }, state: { kind: "loading" } },
+  ],
+  ...o,
+});
 
 const finder = (): DisposalFinderViewProps => ({
   lsd: "07-18-053-18 W5M", onLsdChange: () => {}, wasteCode: "", onWasteCodeChange: () => {}, wasteCodes: ["produced_water"], onFind: () => {}, finding: false,
@@ -272,6 +292,11 @@ const surfaces = [
   { name: "people & access — former", render: () => render(<PeopleAccessView {...peopleProps({ section: "former" })} />) },
   { name: "people & access — person detail", render: () => render(<PeopleAccessView {...peopleProps({ selected: { person: PERSON, workspaceOptions: [{ key: "field_workforce", label: "Field Workforce" }] } })} />) },
   { name: "people & access — refusal", render: () => render(<PeopleAccessView {...peopleProps({ error: "This is the last management access in ABC Transport." })} />) },
+  // Analytics Checkpoint C — a manager reads this on a phone in a yard as often as at a desk.
+  { name: "analytics — organization tiles", render: () => render(<AnalyticsDashboardView {...analyticsProps()} />) },
+  { name: "analytics — drill-down open", render: () => render(<AnalyticsDashboardView {...analyticsProps({ drill: { metricId: "maintenance.defects.open", name: "Open defects", unit: "count", state: { kind: "loaded", answer: metricAnswer(), truncated: false, rows: [{ key: "defect:1", record: { table: "maintenanceDefects", id: 1, ref: null }, label: "Brake chamber leak", at: new Date("2026-09-20T14:00:00Z"), fields: { unitId: 7, severity: "critical", status: "open" } }] } } })} />) },
+  { name: "analytics — a driver's own numbers, none linked", render: () => render(<AnalyticsDashboardView {...analyticsProps({ mode: "mine", onMode: null, cards: [], hiddenCount: 0, emptyReason: "No operator record is linked to your login" })} />) },
+  { name: "analytics — could not be read", render: () => render(<AnalyticsDashboardView {...analyticsProps({ failure: "Database unavailable" })} />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {

@@ -16,7 +16,7 @@ here can be added rather than read.
 | Permissions | **384** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **142** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **14** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **445 / 6174** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **446 / 6199** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -207,6 +207,11 @@ notices, daily report. Vendor and facility portal at `/vendor` and
 `/facility`: statements and submissions. First-run setup wizard in the
 office portals: company, services, guardrails, rates with approval,
 readiness — every step the server's answer.
+Analytics dashboard at `/analytics` (Checkpoint C): the organization's metrics grouped by area,
+or a driver's own numbers; each tile shows its value or the words "No value", whether it is
+complete, the records it could not place, the interval it covers and when it was computed, marked
+stale past its budget or after a failed refresh; "Show records" lists exactly the rows behind the
+value, fetched with the question the tile's answer echoed.
 
 ## Not implemented — and not claimed
 

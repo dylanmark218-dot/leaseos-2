@@ -123,6 +123,9 @@ type Evaluation = {
   metricId: string;
   name: string;
   family: MetricDefinition["family"];
+  /** The definition travels with the answer, so a screen or an assistant can say how it was counted without a second call. */
+  description: string;
+  formula: string;
   unit: MetricDefinition["unit"];
   temporal: MetricDefinition["temporal"];
   registryVersion: string;
@@ -137,7 +140,10 @@ type Evaluation = {
   breakdown: Record<string, number> | null;
   computedAt: Date;
   freshnessSeconds: number;
-  drilldown: { procedure: "analytics.drilldown" | "analytics.mineDrilldown"; input: Record<string, unknown> };
+  /** The call that returns this answer's rows: the same metric, the resolved instants (not the label), and the same filters. */
+  drilldown:
+    | { procedure: "analytics.drilldown"; input: { metricId: string; range: { label: "custom"; from: Date; to: Date; zone: string }; filters: Filters } }
+    | { procedure: "analytics.mineDrilldown"; input: { metricId: string; range: { label: "custom"; from: Date; to: Date; zone: string } } };
 };
 
 /** Resolve once, aggregate once. The value and the rows come out of the same call. */
@@ -150,7 +156,7 @@ async function evaluate(db: Db, def: MetricDefinition, scope: ActingScope, range
   const rangeEcho = { label: range.label, from: range.from, to: range.to, zone: range.zone };
   return {
     evaluation: {
-      metricId: def.id, name: def.name, family: def.family, unit: def.unit, temporal: def.temporal,
+      metricId: def.id, name: def.name, family: def.family, description: def.description, formula: def.formula, unit: def.unit, temporal: def.temporal,
       registryVersion: METRIC_REGISTRY_VERSION,
       scope: { tenantId: scope.tenantId, derivedFrom: scope.derivedFrom },
       range: def.temporal === "range" ? range : null,
