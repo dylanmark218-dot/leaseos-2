@@ -16,8 +16,12 @@
  * **A post is not a job.** It may exist before a job does. Until it is linked to a dispatch slot it
  * collects responses and offers and cannot be filled.
  *
- * **Unknown is not eligible.** A preview says `eligible`, `ineligible` or `unknown`, with codes. A
- * ticket nobody has recorded and a person with no operator record are unknown, never eligible.
+ * **One rule decides who may take work** (SPINE item 2, owner's ruling). `_core/openShifts.ts`
+ * `shiftEligibility`, over the records `openShiftsService.personFacts` reads, is the one answer to
+ * "may this person take this shift?". This router enforces it and judges nothing itself:
+ * `shifts.eligibility` and `shifts.expressInterest` ask it directly, and `respond`, `offer` and the
+ * candidate pool ask it through the service. Unknown refuses exactly as a failed check does; the
+ * preview only says which of the two it was. `spineItem2Duplicates.test.ts` keeps it that way.
  *
  * **Availability is a declaration.** It is read by the candidate pool and by nothing that decides
  * whether a truck leaves the yard.
@@ -31,19 +35,16 @@ import { dispatchPostings, dispatchRoles, shiftInterests, shiftOffers, shiftPost
 import { resolveActingScope, SINGLE_TENANT_ID, type ActingScope } from "./_core/actingScope";
 import type { DbOrTx, Tx } from "./_core/dbTypes";
 import {
-  canTransitionOffer, canTransitionPost, effectiveOfferStatus, expressInterest, intendToAssign, isLiveOffer, isTerminalPost, NotEligible, RESPONSE_KINDS, responseVolunteers, summarize,
+  canTransitionOffer, canTransitionPost, effectiveOfferStatus, expressInterest, intendToAssign, isLiveOffer, isTerminalPost, NotEligible, RESPONSE_KINDS, responseVolunteers, shiftEligibility, summarize,
   type AvailabilityPreferences, type Candidate, type OfferStatus, type PostStatus,
 } from "./_core/openShifts";
 import {
-  crewsOf, declarationsFor, declarersCovering, hardReasons, liveOffersFor, postEvent, previewFor, ref, statusNow, toShiftPost, type Preview, type ShiftPostRow,
+  crewsOf, declarationsFor, declarersCovering, eligibilityOf, liveOffersFor, personFacts, postEvent, previewFor, ref, statusNow, toShiftPost, type Preview, type ShiftPostRow,
 } from "./openShiftsService";
 import { enqueueBoardEvent } from "./_core/boardOutbox";
 import { awardPost } from "./shiftAwardService";
 
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
-
-/** Kept for readers of the v22.20 shape; the preview's reasons are a superset. */
-export type EligibilityReason = { code: string; detail: string };
 
 const RESPONSE = z.enum(["interested", "available", "request_assignment", "declined"]);
 const PREFERENCES = z.object({
@@ -289,7 +290,11 @@ export const openShiftsRouter = router({
       const myOffer = (await d.select().from(shiftOffers).where(and(eq(shiftOffers.postRef, post.postRef), eq(shiftOffers.userId, ctx.user.id))).orderBy(desc(shiftOffers.id)).limit(1))[0];
       return {
         post: postView(post, now),
-        me: preview ? { verdict: preview.verdict, reasons: preview.reasons, availability: preview.availability, interestExpressed: preview.interestExpressed, readinessNotEvaluated: preview.readiness?.notEvaluated ?? [] } : null,
+        me: preview ? {
+          eligible: preview.eligible, verdict: preview.verdict, reasons: preview.reasons,
+          availability: preview.availability, availabilityNotes: preview.availabilityNotes, interestExpressed: preview.interestExpressed,
+          readinessNotEvaluated: preview.readiness?.notEvaluated ?? [], readinessBlockers: preview.readiness?.operatorBlockers ?? [],
+        } : null,
         myOffer: myOffer ? { offerRef: myOffer.offerRef, status: effectiveOfferStatus({ status: myOffer.status, expiresAt: myOffer.expiresAt }, now), expiresAt: myOffer.expiresAt } : null,
         history: events.map(e => ({ eventType: e.eventType, actorUserId: e.actorUserId, subjectUserId: e.subjectUserId, detail: e.detail, occurredAt: e.occurredAt })),
       };
@@ -309,19 +314,22 @@ export const openShiftsRouter = router({
       const acting = await resolveActingScope(d, ctx.user.id);
       const userId = input.userId ?? ctx.user.id;
       const post = await postInScope(d, input.postRef, acting);
+      // The one rule (SPINE item 2): the person's own records, never anything the caller sent.
+      const shape = toShiftPost(post);
+      const verdict = shiftEligibility(shape, await personFacts(d, acting.tenantId, shape, userId));
+      // Beside it, not in it: what they declared and what readiness would say.
       const preview = await previewFor(d, { post, userId, scope: acting, now: new Date() });
       return {
         postRef: post.postRef, userId,
-        eligible: preview.verdict === "eligible",
+        eligible: verdict.eligible,
+        reasons: verdict.reasons,
         verdict: preview.verdict,
-        reasons: preview.reasons,
         availability: preview.availability,
+        availabilityNotes: preview.availabilityNotes,
         readiness: preview.readiness,
-        note: preview.verdict === "eligible"
+        note: verdict.eligible
           ? "Eligible from what is on record. The readiness check still runs at assignment."
-          : preview.verdict === "unknown"
-            ? "Not established from what is on record. An unknown check blocks exactly as a failed one does."
-            : "Not eligible from what is on record. An unknown check blocks exactly as a failed one does.",
+          : "Not eligible from what is on record. An unknown check blocks exactly as a failed one does.",
       };
     }),
 
@@ -352,11 +360,11 @@ export const openShiftsRouter = router({
       const avail = { available_for_overtime: 0, available: 0, on_call: 1, undeclared: 2, unavailable: 3 } as const;
       rows.sort((a, b) => rank[a.verdict] - rank[b.verdict] || avail[a.availability] - avail[b.availability]
         || (a.respondedAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.respondedAt?.getTime() ?? Number.MAX_SAFE_INTEGER) || a.userId - b.userId);
-      const candidates: Candidate[] = rows.map(r => ({ userId: r.userId, name: `user ${r.userId}`, eligible: r.verdict === "eligible", reasons: r.reasons.map(x => ({ code: x.code as never, detail: x.detail })) }));
+      const candidates: Candidate[] = rows.map(r => ({ userId: r.userId, name: `user ${r.userId}`, eligible: r.eligible, reasons: r.reasons.map(x => ({ code: x.code as never, detail: x.detail })) }));
       const summary = summarize(toShiftPost(post), candidates);
       return {
         postRef: post.postRef, seats: post.seats, status: statusNow(post, now),
-        candidates: rows.map(r => ({ userId: r.userId, verdict: r.verdict, reasons: r.reasons, availability: r.availability, response: r.response, respondedAt: r.respondedAt, offer: r.offer, crews: r.crews, readinessNotEvaluated: r.readiness?.notEvaluated ?? [] })),
+        candidates: rows.map(r => ({ userId: r.userId, eligible: r.eligible, verdict: r.verdict, reasons: r.reasons, availability: r.availability, availabilityNotes: r.availabilityNotes, response: r.response, respondedAt: r.respondedAt, offer: r.offer, crews: r.crews, readinessNotEvaluated: r.readiness?.notEvaluated ?? [] })),
         barriers: summary.barriers, line: summary.line,
         note: "Ordered by verdict, then declared availability, then who answered first. Nothing here assigns; a dispatcher offers, a person accepts, and the award still runs the readiness check.",
       };
@@ -365,10 +373,10 @@ export const openShiftsRouter = router({
   /**
    * Say you would take it — or that you would not.
    *
-   * One standing response per person per post, replaced in place. Refused from somebody a recorded
-   * fact excludes (leave, rotation, a declared unavailability): an interest list that includes people
-   * who cannot do the work is a list dispatch re-filters by hand. An unknown — a ticket nobody has
-   * recorded — is not a refusal; the readiness check decides that at assignment. Assigns nothing.
+   * One standing response per person per post, replaced in place. Saying you would take it is refused
+   * unless the one rule says you may (SPINE item 2) — an unknown refuses exactly as a failed check
+   * does. Declining is never refused. A declared availability is not a refusal: it is what you said,
+   * and this is what you are saying now. Assigns nothing.
    * Idempotent: the same device mutation twice is one response, and tapping twice is not two claims.
    */
   respond: roleProcedure("shifts.respond")
@@ -378,10 +386,25 @@ export const openShiftsRouter = router({
     }))
     .mutation(async ({ ctx, input }) => respond(ctx.user.id, input)),
 
-  /** The v22.20 door, kept for one release: interest, and nothing else. */
+  /**
+   * The v22.20 door, kept for one release (D-6): interest, and nothing else. The one rule, enforced
+   * here as main's ruling has it — the caller's own records, fails closed, writes nothing on refusal.
+   */
   expressInterest: roleProcedure("shifts.expressInterest")
     .input(z.object({ postRef: z.string().min(1).max(64), at: z.coerce.date().default(() => new Date()) }))
-    .mutation(async ({ ctx, input }) => respond(ctx.user.id, { postRef: input.postRef, response: "interested", at: input.at })),
+    .mutation(async ({ ctx, input }) => {
+      const d = await db();
+      const acting = await resolveActingScope(d, ctx.user.id);
+      const post = toShiftPost(await postInScope(d, input.postRef, acting));
+      const candidate = shiftEligibility(post, await personFacts(d, acting.tenantId, post, ctx.user.id));
+      try {
+        expressInterest({ post, candidate, at: input.at });
+      } catch (e) {
+        if (e instanceof NotEligible) throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
+        throw e;
+      }
+      return respond(ctx.user.id, { postRef: input.postRef, response: "interested", at: input.at }, candidate);
+    }),
 
   /** Who has said they would take it. Context for dispatch, not a queue. */
   interests: roleProcedure("shifts.interests")
@@ -401,8 +424,8 @@ export const openShiftsRouter = router({
 
   /**
    * Offer the work to one person. Dispatch's decision, pending the readiness check — the engine's
-   * `intendToAssign` says so structurally. Refused for somebody a recorded fact excludes; an unknown
-   * is offered and named. One live offer per person per post.
+   * `intendToAssign` says so structurally. Refused unless the one rule says the person may take it
+   * (SPINE item 2); an unknown refuses as a failed check does. One live offer per person per post.
    */
   offer: roleProcedure("shifts.offer")
     .input(z.object({ postRef: z.string().min(1).max(64), userId: z.number().int().positive(), expiresAt: z.coerce.date().optional(), note: z.string().max(400).optional() }))
@@ -413,8 +436,7 @@ export const openShiftsRouter = router({
       const now = new Date();
       if (!(await userInScope(input.userId, { tenantId: acting.tenantId }))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.userId} not found` });
       const postRow = await postInScope(d, input.postRef, acting);
-      const preview = await previewFor(d, { post: postRow, userId: input.userId, scope: acting, now });
-      const candidate: Candidate = { userId: input.userId, name: `user ${input.userId}`, eligible: hardReasons(preview).length === 0, reasons: hardReasons(preview) };
+      const candidate = await eligibilityOf(d, { post: postRow, userId: input.userId, scope: acting });
       const responses = await d.select().from(shiftInterests).where(and(eq(shiftInterests.postRef, postRow.postRef), eq(shiftInterests.userId, input.userId), isNull(shiftInterests.withdrawnAt))).limit(1);
       let intent;
       try {
@@ -438,7 +460,7 @@ export const openShiftsRouter = router({
           offerRef, postRef: post.postRef, userId: input.userId, offeredByUserId: ctx.user.id, offeredAt: now,
           expiresAt: input.expiresAt ?? post.closesAt ?? post.startsAt, status: "offered", responseNote: null,
         });
-        await postEvent(tx, { postRef: post.postRef, eventType: "offer_issued", actorUserId: ctx.user.id, actorRole: actorRoleOf(roles), subjectUserId: input.userId, detail: `${offerRef}${intent.interestExpressed ? " (interest expressed)" : " (no interest expressed)"}${preview.verdict === "unknown" ? " — readiness unknown: " + preview.reasons.map(r => r.code).join(",") : ""}`, at: now });
+        await postEvent(tx, { postRef: post.postRef, eventType: "offer_issued", actorUserId: ctx.user.id, actorRole: actorRoleOf(roles), subjectUserId: input.userId, detail: `${offerRef}${intent.interestExpressed ? " (interest expressed)" : " (no interest expressed)"}`, at: now });
         await enqueueBoardEvent(tx, {
           eventType: "work.offered", aggregateType: "shiftPost", aggregateId: post.postRef, transition: `offered:${offerRef}`,
           tenantId: acting.tenantId, actorUserId: ctx.user.id, occurredAt: now,
@@ -447,7 +469,7 @@ export const openShiftsRouter = router({
       });
       return {
         offerRef, postRef: input.postRef, userId: input.userId, requiresReadinessCheck: true as const, interestExpressed: intent.interestExpressed,
-        previewVerdict: preview.verdict,
+        eligible: candidate.eligible,
         note: "Offered. An acceptance is the person's statement; the award binds the slot, and the readiness check runs then.",
       };
     }),
@@ -602,7 +624,7 @@ export const openShiftsRouter = router({
 });
 
 /** One response per person per post, replaced in place; the previous answer is history. */
-async function respond(userId: number, input: { postRef: string; response: (typeof RESPONSE_KINDS)[number]; note?: string; at: Date; deviceCreatedAt?: Date; deviceId?: string; clientMutationId?: string }) {
+async function respond(userId: number, input: { postRef: string; response: (typeof RESPONSE_KINDS)[number]; note?: string; at: Date; deviceCreatedAt?: Date; deviceId?: string; clientMutationId?: string }, alreadyChecked?: Candidate) {
   const d = await db();
   const acting = await resolveActingScope(d, userId);
   const roles = await listActiveUserRoleNames(userId);
@@ -617,12 +639,12 @@ async function respond(userId: number, input: { postRef: string; response: (type
     if (prior) return { postRef: postRow.postRef, response: prior.response, recorded: false, replayed: true as const, assigns: false as const, note: "Already recorded; a retried response is one response." };
   }
 
-  // The engine's refusal: a recorded fact that excludes them. An unknown is not one.
+  // The one rule (SPINE item 2), from the person's own records: saying you would take it is refused
+  // unless you may. Declining is never refused.
   if (responseVolunteers(input.response)) {
-    const preview = await previewFor(d, { post: postRow, userId, scope: acting, now });
-    const hard = hardReasons(preview);
+    const candidate = alreadyChecked ?? await eligibilityOf(d, { post: postRow, userId, scope: acting });
     try {
-      expressInterest({ post: toShiftPost(postRow), candidate: { userId, name: `user ${userId}`, eligible: hard.length === 0, reasons: hard }, at: input.at });
+      expressInterest({ post: toShiftPost(postRow), candidate, at: input.at });
     } catch (e) {
       if (e instanceof NotEligible) throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
       throw e;

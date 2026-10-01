@@ -1,10 +1,14 @@
 /**
  * 0206 — the preview: eligible, ineligible or unknown, with codes, from the canonical stores and the
  * readiness composer. Unknown never reads as eligible, and readiness is its own axis.
+ *
+ * Since the merge of main's SPINE item 2 ruling the verdict IS `shiftEligibility`'s: everyone here is
+ * on the organization's roster except where a test is about something else, and a missing operator
+ * record is the rule's `no_licence_recorded`.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
-import { callerFor, member, operatorFor, org, postWork, rnd, STARTS } from "./boardFixtures";
+import { callerFor, member, onRoster, operatorFor, org, postWork, rnd, STARTS, worker } from "./boardFixtures";
 
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
@@ -17,22 +21,26 @@ d("what the preview says", () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
     const drv = await member(pool, a, ["driver"]);
+    await onRoster(pool, a, drv);
     const p = await postWork(disp);
     const e = await callerFor(disp).shifts.eligibility({ postRef: p.postRef, userId: drv });
     expect(e.verdict).toBe("unknown");
     expect(e.eligible).toBe(false);
-    expect(e.reasons.map(r => r.code)).toContain("no_operator_record");
+    expect(e.reasons.map(r => r.code)).toEqual(["no_licence_recorded"]);
+    // Unknown refuses: they cannot say they would take it, and may still decline.
+    await expect(callerFor(drv).shifts.respond({ postRef: p.postRef })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    expect((await callerFor(drv).shifts.respond({ postRef: p.postRef, response: "declined" })).recorded).toBe(true);
     expect(e.readiness).toBeNull();
   });
 
   it("carries the readiness composer's own answer beside the verdict, names what was not evaluated, and does not fold a truck's findings into a person's", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
-    await operatorFor(pool, a, drv);
+    const drv = await worker(pool, a);
     const p = await postWork(disp);
     const e = await callerFor(disp).shifts.eligibility({ postRef: p.postRef, userId: drv });
     expect(e.verdict).toBe("eligible");
+    expect(e.eligible).toBe(true);
     expect(e.readiness).not.toBeNull();
     expect(e.readiness!.verdict).toBe("blocked");            // a post with no truck and no job: the composer says so
     expect(e.readiness!.blockerCodes).toContain("truck_inspection_missing");
@@ -45,6 +53,7 @@ d("what the preview says", () => {
     const disp = await member(pool, a, ["dispatcher"]);
     const drv = await member(pool, a, ["driver"]);
     const opId = await operatorFor(pool, a, drv);
+    await onRoster(pool, a, drv);
     await pool.execute("INSERT INTO academyQualifications (qualificationRef, userId, qualificationCode, sourceKind, status, validFrom, expiresAt) VALUES (?,?,?,?,?,?,?)",
       [`AQ-${rnd()}`, drv, "H2S", "academy_certificate", "current", new Date(Date.now() - 200 * 86_400_000), new Date(STARTS.getTime() + 400 * 86_400_000)]);
     // TDG through the adapter's evidence path (C1b-3, which governs since the reconciliation with main):
@@ -66,8 +75,7 @@ d("what the preview says", () => {
   it("calls an expired qualification expired, which excludes", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
-    await operatorFor(pool, a, drv);
+    const drv = await worker(pool, a);
     await pool.execute("INSERT INTO academyQualifications (qualificationRef, userId, qualificationCode, sourceKind, status, validFrom, expiresAt) VALUES (?,?,?,?,?,?,?)",
       [`AQ-${rnd()}`, drv, "H2S", "academy_certificate", "current", new Date(Date.now() - 400 * 86_400_000), new Date(STARTS.getTime() - 86_400_000)]);   // expired the day before the work
     const p = await postWork(disp, { requiredQualifications: ["H2S"] });
@@ -79,19 +87,20 @@ d("what the preview says", () => {
   it("orders the candidate pool by verdict, then declared availability, then who answered first, and names every exclusion", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const ready = await member(pool, a, ["driver"]);
-    const unknown = await member(pool, a, ["driver"]);
-    const declarer = await member(pool, a, ["driver"]);
-    await operatorFor(pool, a, ready);
-    await operatorFor(pool, a, declarer);
+    const ready = await worker(pool, a);
+    const unknown = await member(pool, a, ["driver"]);   // rostered, no operator record: not established
+    await onRoster(pool, a, unknown);
+    const declarer = await worker(pool, a);
     await callerFor(declarer).shifts.availabilitySet({ state: "available_for_overtime" });
+    // The unknown person cannot volunteer (the rule refuses), so they reach the pool by declaring.
+    await callerFor(unknown).shifts.availabilitySet({ state: "available" });
     const p = await postWork(disp, { overtime: true });
-    await callerFor(unknown).shifts.respond({ postRef: p.postRef });
     await callerFor(ready).shifts.respond({ postRef: p.postRef });
     const c = await callerFor(disp).shifts.candidates({ postRef: p.postRef });
     expect(c.candidates.map(x => x.userId)).toEqual([declarer, ready, unknown]);
     expect(c.candidates[0]!.availability).toBe("available_for_overtime");
-    expect(c.candidates[2]!.reasons.map(r => r.code)).toContain("no_operator_record");
+    expect(c.candidates[2]!.reasons.map(r => r.code)).toContain("no_licence_recorded");
+    expect(c.candidates[2]!.eligible).toBe(false);
     expect(c.line).toContain(p.postRef);
     for (const x of c.candidates.filter(x => x.verdict !== "eligible")) expect(x.reasons.length).toBeGreaterThan(0);
   });

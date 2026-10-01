@@ -6,6 +6,21 @@
 #
 # The database named in DATABASE_URL is DROPPED and recreated. Point this at a
 # disposable database. It fails at the first gate that fails, and prints which.
+#
+# RUN THE GATE, NOT `vitest run` AGAINST A DATABASE YOU KEEP.
+#
+# B23.1A — the first full run with a real database produced 26 failures that
+# were not real. `enforcementApi.test.ts` and its neighbours name fixed record
+# ids (`unitId: 127`); the tenant-scope suites create units from the
+# auto-increment and claim them for an organization in `coreRecordOwnership`.
+# On a fresh database the ids never meet. On a database kept across runs they
+# eventually do, and every suite that reaches a hardcoded id then reports
+# "Work order N not found" — a tenant-scope refusal that is completely correct
+# about a row another suite took ownership of two runs ago.
+#
+# Gate 1 is what makes the suite honest, so it is not optional and not slow.
+# If you are debugging one suite, re-run gate 1 first or expect to chase a
+# refusal that belongs to the database rather than to the code.
 set -euo pipefail
 
 : "${DATABASE_URL:?DATABASE_URL is required}"
@@ -63,6 +78,14 @@ bash scripts/apply-migrations.sh
 gate "3. Table parity"
 bash scripts/verify-parity.sh
 
+# B23.1A — 0170 decides, per existing grant, which company that grant speaks
+# for from now on. Reading the SQL proves its syntax; only this proves the
+# classification. It builds the pre-0170 world in a scratch database, seeds a
+# row of every legacy shape, applies 0170 alone, and asserts what each became —
+# including that NO category gained cross-company authority.
+gate "3b. Migration 0207 (formerly 0170) backfill, verified against this database"
+bash scripts/verify-migration-0207.sh
+
 gate "4. Typecheck"
 pnpm exec tsc --noEmit
 
@@ -90,12 +113,23 @@ gate "5. Procedure census: no bare protectedProcedure, every ungated procedure p
 pnpm exec tsx scripts/procedure-census.ts --enforce
 
 gate "6. Test suite (includes column-level parity and reserved-word audit)"
+# Two reporters: `basic` for a human reading the job log, `json` for the gate.
+#
+# B23.1B — the gate used to grep the human output, and that is why this block
+# was rewritten. Locally vitest writes ` ✓ server/x.db.test.ts`; in CI it
+# detects the runner and colours the line, so the tick and the path end up
+# separated by an escape sequence and `(✓|❯) *server/<name>` stops matching.
+# The gate failed on a run where all 312 files passed and every pinned suite
+# had executed. Red that means nothing is worse than no check at all.
+# Removed first: if vitest dies before writing the report, a file left by an
+# earlier run would be read as this run's result — a green gate describing a
+# suite that never executed, which is the whole failure mode being closed here.
+rm -f "$VITEST_JSON"
 LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run --reporter=basic --reporter=json --outputFile.json="$VITEST_JSON" 2>&1 | tee "$VITEST_GATE_OUT"
 # pipefail is on, so a failing vitest still fails the gate through the pipe.
 
 # A suite that needs a database and skips anyway is a suite that is not running and looks
 # like it chose not to. Here a database is configured, so a skipped .db.test.ts is a defect.
-#
 # This is why the check exists: widgetPersistence.db.test.ts (24 cases) and
 # widgetConflict.db.test.ts (10 cases) gate on WIDGET_DB_URL, nothing set it,
 # and they had never run — in CI or anywhere. The first of them exists to guard
@@ -107,6 +141,29 @@ LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run --repo
 # and no terminal mode, and scripts/skipped-db-suites.ts refuses to pass on an empty or
 # unreadable report rather than reading it as "nothing skipped".
 pnpm exec tsx scripts/skipped-db-suites.ts "$VITEST_JSON"
+
+# The verdict, read from the report written for machines. It checks three
+# things the human output cannot be trusted to show:
+#
+#   - every pinned authorization suite is in the run (not deleted, not renamed,
+#     not filtered out) AND executed at least one case;
+#   - no .db.test.ts stood down while a database is configured — the original
+#     false green, in which widgetPersistence.db.test.ts (24 cases guarding a
+#     cross-tenant board overwrite) had never run anywhere;
+#   - at least one database-backed case actually executed, because "nothing
+#     failed" is also true of a run where nothing ran.
+#
+# The list and the logic live in server/_core/requiredSuites.ts, and
+# server/requiredSuites.test.ts exercises them against synthetic reports
+# containing each failure — so the guard is tested without breaking the repo.
+pnpm exec tsx scripts/verify-gate-run.ts "$VITEST_JSON"
+
+# B23.1B — gate 1's clean database is what makes the suite above honest, and it
+# also hides a defect: a test that names a record id it did not create passes
+# on a database nobody else has touched. This causes the collision on purpose
+# in a scratch database, so the class cannot come back silently.
+gate "6b. Fixture isolation: no suite depends on a record id it did not create"
+bash scripts/verify-fixture-isolation.sh
 
 gate "7. Production build"
 pnpm build

@@ -99,7 +99,7 @@ d("the organization comes from membership", () => {
     const userId = seq++;
     const o = await org();
     await member(userId, o, { branchId: "B-FROM-MEMBERSHIP" });
-    await grantUserRole({ userId, role: "safety", scopeType: "branch", scopeRef: "B-FROM-GRANT", grantedByUserId: 1, grantedAt: new Date() });
+    await grantUserRole({ userId, role: "safety", scopeType: "branch", orgRef: SINGLE_TENANT_ID, scopeRef: "B-FROM-GRANT", grantedByUserId: 1, grantedAt: new Date() });
     const scope = await resolveActingScope(db, userId);
     expect(scope.branchRefs).toEqual(expect.arrayContaining(["B-FROM-GRANT", "B-FROM-MEMBERSHIP"]));
   });

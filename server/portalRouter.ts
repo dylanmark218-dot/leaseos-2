@@ -17,7 +17,7 @@ import { getDb } from "./db";
 import { CUSTOMER_ALERT_KINDS, changeOrders, clientAdjustments, customerAccounts, customerCredits, customerPurchaseOrders, disposalTickets, disputeCases, externalAccessLog, externalAlertPreferences, externalIdentities, facilities, fieldTicketDocuments, fieldTicketEvents, fieldTicketRevisions, fieldTickets, invoices, jobs, loads, paymentAllocations, portalSubmissions, quoteLines, quotes, rfis, roadHazardObservations, safetyEvents, trips, vendorBills, vendors, weatherObservations, workflowNotifications, invoiceLines } from "../drizzle/schema";
 import { intakeDisposalTicket, intakeVendorBill, type ExternalIdentity } from "./_core/portalIntake";
 import { ROTATION_GRACE_MS, TOKEN_TTL_MS, newToken, sha256, totpVerify } from "./_core/externalIdentityPolicy";
-import { environmentSecretKeys, legacyMfaKey } from "./_core/secretKeys";
+import { legacyMfaKey, secretKeyProvider } from "./_core/secretKeys";
 import { enrollMfaSecret, mfaStorageOf, resolveMfaSeed } from "./mfaSecretService";
 import { ENV } from "./_core/env";
 import { decideAdjustment } from "./_core/clientAdjustments";
@@ -349,7 +349,7 @@ export const portalRouter = router({
    */
   mfaEnroll: externalProcedure("portal.mfaEnroll").mutation(async ({ ctx }) => {
     const e = ext(ctx);
-    const keys = environmentSecretKeys();
+    const keys = secretKeyProvider();
     if (!keys.getActiveKey("MFA_SECRET")) {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: "MFA requires an MFA secret key on the server; it is not configured" });
     }
@@ -365,7 +365,7 @@ export const portalRouter = router({
     const row = (await db.select({ mfaSecretEnc: externalIdentities.mfaSecretEnc, mfaSecretRef: externalIdentities.mfaSecretRef }).from(externalIdentities).where(eq(externalIdentities.id, e.identityId)).limit(1))[0];
     if (!row || mfaStorageOf(row) === "none") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Enroll first" });
     // Resolution may throw — a present-but-broken reference must fail, not fall back to legacy.
-    const seed = await resolveMfaSeed(row, { keys: environmentSecretKeys(), legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
+    const seed = await resolveMfaSeed(row, { keys: secretKeyProvider(), legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
     if (!totpVerify(seed, input.code, new Date())) throw new TRPCError({ code: "FORBIDDEN", message: "Code rejected" });
     await db.update(externalIdentities).set({ mfaEnabled: true }).where(eq(externalIdentities.id, e.identityId));
     await logAccess(e, "mfa_confirm", "externalIdentity", e.identityRef, null, null);

@@ -3104,7 +3104,15 @@ export const userRoleAssignments = mysqlTable("userRoleAssignments", {
     "bookkeeper", "payroll_admin", "tax_preparer", "controller",
     "external_accountant",
   ]).notNull(),
-  scopeType: mysqlEnum("scopeType", ["global", "branch"]).default("global").notNull(),
+  // B23.1 (0170) — how far the grant reaches. `global` is deliberate
+  // platform-wide authority and is held by nobody after the backfill;
+  // `organization` is the ordinary case; `branch` names its organization too,
+  // because branch identifiers are bare strings with no owner;
+  // `unscoped_legacy` is a pre-B23.1 grant whose organization could not be
+  // inferred without guessing, and authorizes nothing until re-granted.
+  scopeType: mysqlEnum("scopeType", ["global", "organization", "branch", "unscoped_legacy"]).default("global").notNull(),
+  /** The organization that issued this grant. NULL only for platform-global and quarantined rows. */
+  orgRef: varchar("orgRef", { length: 40 }),
   scopeRef: varchar("scopeRef", { length: 64 }),
   grantedByUserId: int("grantedByUserId").notNull(),
   grantedAt: timestamp("grantedAt").notNull(),
@@ -3113,7 +3121,9 @@ export const userRoleAssignments = mysqlTable("userRoleAssignments", {
   revokeReason: text("revokeReason"),
   // Persistent generated column: NULL for revoked rows, collision key for
   // active ones. Never written by the application — the database derives it.
-  activeGrantKey: varchar("activeGrantKey", { length: 180 }),
+  // B23.1 (0170) widened it to include orgRef: without that, `driver @ ABC`
+  // and `driver @ XYZ` collide and the second grant cannot be written at all.
+  activeGrantKey: varchar("activeGrantKey", { length: 220 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -4897,6 +4907,27 @@ export const customerAccounts = mysqlTable("customerAccounts", {
   postSiteBillingRuleJson: text("postSiteBillingRuleJson"),
   status: mysqlEnum("status", ["active", "on_hold", "inactive"]).default("active").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  // 0217 — the account profile: the canonical commercial party. Additive; NULL/defaulted for every prior row.
+  customerNumber: varchar("customerNumber", { length: 40 }),
+  legalName: varchar("legalName", { length: 220 }),
+  tradeName: varchar("tradeName", { length: 220 }),
+  customerType: mysqlEnum("customerType", ["producer_operator", "oilfield_service", "prime_contractor", "consultant", "disposal_company", "municipality", "construction", "trucking", "other"]).default("other").notNull(),
+  billingAddressJson: text("billingAddressJson"),
+  physicalAddressJson: text("physicalAddressJson"),
+  province: varchar("province", { length: 8 }),
+  country: varchar("country", { length: 2 }).default("CA").notNull(),
+  gstNumber: varchar("gstNumber", { length: 20 }),
+  taxStatus: mysqlEnum("taxStatus", ["taxable", "zero_rated", "exempt", "unknown"]).default("unknown").notNull(),
+  defaultCurrency: varchar("defaultCurrency", { length: 3 }).default("CAD").notNull(),
+  requiredReferenceKindsJson: text("requiredReferenceKindsJson"),
+  notes: text("notes"),
+  createdByUserId: int("createdByUserId"),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  archivedAt: timestamp("archivedAt"),
+  archivedByUserId: int("archivedByUserId"),
+  archiveReason: varchar("archiveReason", { length: 400 }),
+  rowVersion: int("rowVersion").default(1).notNull(),
 });
 export type InsertCustomerAccount = typeof customerAccounts.$inferInsert;
 
@@ -6097,6 +6128,12 @@ export const chargeDefinitions = mysqlTable("chargeDefinitions", {
   rejectionReason: varchar("rejectionReason", { length: 400 }),
   notes: varchar("notes", { length: 600 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  // 0218 — a rate line is a charge definition on a rate sheet version; the kind and the conditions the resolver reads.
+  rateSheetVersionId: int("rateSheetVersionId"),
+  lineNo: int("lineNo"),
+  lineKind: varchar("lineKind", { length: 40 }),
+  label: varchar("label", { length: 220 }),
+  applicabilityJson: text("applicabilityJson"),
 });
 export type ChargeDefinitionRow = typeof chargeDefinitions.$inferSelect;
 export type InsertChargeDefinition = typeof chargeDefinitions.$inferInsert;
@@ -6980,6 +7017,56 @@ export const organizationMemberships = mysqlTable("organizationMemberships", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
+
+/* ---- B23.2 (0175): how a person becomes a member of an organization ---- */
+
+/**
+ * An invitation is claimed by the TOKEN plus an authenticated openId, never by
+ * matching an email address: the OAuth provider returns `email` with no
+ * verification flag, so LeaseOS cannot tell a proved address from a typed one.
+ * `emailHint` exists so an administrator can see who they meant and send the
+ * link somewhere. It decides nothing.
+ *
+ * Only the SHA-256 of the token is stored. The raw value is returned once, to
+ * the administrator who created it.
+ */
+export const organizationInvitations = mysqlTable("organizationInvitations", {
+  id: int("id").autoincrement().primaryKey(),
+  invitationRef: varchar("invitationRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull(),
+  emailHint: varchar("emailHint", { length: 320 }),
+  displayNameHint: varchar("displayNameHint", { length: 180 }),
+  tokenDigest: varchar("tokenDigest", { length: 64 }).notNull().unique(),
+  /** `expired` is derived from `expiresAt`, never stored — see 0175. */
+  status: mysqlEnum("status", ["pending", "accepted", "cancelled"]).default("pending").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  invitedByUserId: int("invitedByUserId").notNull(),
+  invitedAt: timestamp("invitedAt").notNull(),
+  acceptedAt: timestamp("acceptedAt"),
+  acceptedByUserId: int("acceptedByUserId"),
+  cancelledAt: timestamp("cancelledAt"),
+  cancelledByUserId: int("cancelledByUserId"),
+  cancelReason: varchar("cancelReason", { length: 300 }),
+  defaultWorkspace: varchar("defaultWorkspace", { length: 60 }),
+  /**
+   * Persistent generated column: NULL unless the row is pending, so accepted
+   * and cancelled rows drop out of the unique index and remain as history.
+   * MariaDB has no partial index; this is the same trick as `activeGrantKey`.
+   * Never written by the application.
+   */
+  pendingKey: varchar("pendingKey", { length: 380 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type OrganizationInvitationRow = typeof organizationInvitations.$inferSelect;
+
+/** The roles an invitation confers on acceptance. A child table, not a blob. */
+export const organizationInvitationRoles = mysqlTable("organizationInvitationRoles", {
+  id: int("id").autoincrement().primaryKey(),
+  invitationId: int("invitationId").notNull(),
+  role: varchar("role", { length: 40 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
 
 /* ---- v22.20 (0087): what a device reports it is holding ---- */
 
@@ -9485,3 +9572,419 @@ export const providerCredentials = mysqlTable("providerCredentials", {
   providerStatusIdx: index("providerCredentials_provider_status_idx").on(t.providerKey, t.status),
   tenantIdx: index("providerCredentials_tenant_idx").on(t.orgRef, t.providerKey),
 }));
+
+/* ---- LA-1a (0202/0203): the Live Assist session spine ---- */
+
+/**
+ * One Live Assist session: a unit of work a person opened on purpose, owned by one user and one
+ * organization. Not a login session — identity is `sessionFamilies`; acting organization is resolved
+ * per request. `orgRef` is written from `resolveActingScope` and never from input.
+ *
+ * `openMarker` is 1 while the session is active or paused and NULL once it stops; the unique index on
+ * (orgRef, userId, openMarker) makes "one open session per person" a database fact rather than a race.
+ * `startKey` is the client's retry key for `start`, unique per (orgRef, userId), never globally.
+ *
+ * Deadlines are the server's: `idleDeadlineAt` moves on heartbeat, `hardDeadlineAt` never moves, and
+ * `purgeAfter` is derived when the session stops. The work counters exist for the checkpoint that first
+ * submits a frame; LA-1a writes none of them.
+ *
+ * LA-1a carve-out only (docs/live-assist/LA1A_OWNER_RULING.md): no column here holds an image, a frame,
+ * a storage key or model output.
+ */
+export const liveAssistSessions = mysqlTable("liveAssistSessions", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionRef: varchar("sessionRef", { length: 40 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  startKey: varchar("startKey", { length: 64 }).notNull(),
+  source: mysqlEnum("source", ["photo", "camera", "screen", "video"]).notNull(),
+  state: mysqlEnum("state", ["active", "paused", "ended", "expired"]).notNull(),
+  openMarker: tinyint("openMarker"),
+  policySnapshotJson: text("policySnapshotJson").notNull(),
+  startedAt: timestamp("startedAt").notNull(),
+  lastHeartbeatAt: timestamp("lastHeartbeatAt").notNull(),
+  idleDeadlineAt: timestamp("idleDeadlineAt").notNull(),
+  hardDeadlineAt: timestamp("hardDeadlineAt").notNull(),
+  pausedAt: timestamp("pausedAt"),
+  endedAt: timestamp("endedAt"),
+  endReason: mysqlEnum("endReason", ["user_end", "idle_timeout", "budget_spent", "policy_disabled"]),
+  purgeAfter: timestamp("purgeAfter"),
+  transientPurgedAt: timestamp("transientPurgedAt"),
+  previousSessionRef: varchar("previousSessionRef", { length: 40 }),
+  framesSubmitted: int("framesSubmitted").default(0).notNull(),
+  bytesSubmitted: bigint("bytesSubmitted", { mode: "number" }).default(0).notNull(),
+  inferenceCalls: int("inferenceCalls").default(0).notNull(),
+  inputTokens: int("inputTokens").default(0).notNull(),
+  outputTokens: int("outputTokens").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  startKeyUnique: uniqueIndex("liveAssistSessions_startKey_unique").on(t.orgRef, t.userId, t.startKey),
+  openUnique: uniqueIndex("liveAssistSessions_open_unique").on(t.orgRef, t.userId, t.openMarker),
+  ownerIdx: index("liveAssistSessions_owner_idx").on(t.orgRef, t.userId, t.startedAt),
+  deadlineIdx: index("liveAssistSessions_deadline_idx").on(t.state, t.idleDeadlineAt),
+  purgeIdx: index("liveAssistSessions_purge_idx").on(t.transientPurgedAt, t.purgeAfter),
+}));
+export type LiveAssistSessionRow = typeof liveAssistSessions.$inferSelect;
+
+/**
+ * Transient conversation state for one session (design §6.3, D-05). Nothing writes it before LA-1b; the
+ * purge that removes it exists first, so no row can ever be written that nothing will remove.
+ */
+export const liveAssistTurns = mysqlTable("liveAssistTurns", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  seq: int("seq").notNull(),
+  role: mysqlEnum("role", ["user", "assistant"]).notNull(),
+  channel: mysqlEnum("channel", ["text", "voice"]).notNull(),
+  text: text("text").notNull(),
+  frameHashesJson: text("frameHashesJson"),
+  redactionFlagsJson: text("redactionFlagsJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  seqUnique: uniqueIndex("liveAssistTurns_seq_unique").on(t.sessionId, t.seq),
+  sessionIdx: index("liveAssistTurns_session_idx").on(t.orgRef, t.sessionId),
+}));
+
+/**
+ * Identity of an image a session looked at — hashes and dimensions, never bytes (design §7.1).
+ * `savedEvidenceRecordId` is set only when a person deliberately saves the original as evidence; the
+ * purge never removes a row that carries one.
+ */
+export const liveAssistFrames = mysqlTable("liveAssistFrames", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  frameSeq: int("frameSeq").notNull(),
+  kind: mysqlEnum("kind", ["context", "inspect", "crop"]).notNull(),
+  frameHash: varchar("frameHash", { length: 64 }).notNull(),
+  originalHash: varchar("originalHash", { length: 64 }),
+  perceptualHash: varchar("perceptualHash", { length: 16 }),
+  width: int("width").notNull(),
+  height: int("height").notNull(),
+  byteSize: int("byteSize").notNull(),
+  regionJson: text("regionJson"),
+  markedByUser: boolean("markedByUser").default(false).notNull(),
+  savedEvidenceRecordId: int("savedEvidenceRecordId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  seqUnique: uniqueIndex("liveAssistFrames_seq_unique").on(t.sessionId, t.frameSeq),
+  sessionIdx: index("liveAssistFrames_session_idx").on(t.orgRef, t.sessionId),
+}));
+
+/** What an answer said it saw, and how sure (design §11). Transient; nothing writes it before LA-1b. */
+export const liveAssistObservations = mysqlTable("liveAssistObservations", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  turnId: int("turnId"),
+  frameHash: varchar("frameHash", { length: 64 }),
+  kind: mysqlEnum("kind", ["identified", "read_text", "condition", "guidance_step"]).notNull(),
+  statement: varchar("statement", { length: 600 }).notNull(),
+  certainty: mysqlEnum("certainty", ["visible_clearly", "visible_partially", "not_visible", "inferred"]).notNull(),
+  requestedView: mysqlEnum("requestedView", ["closer", "wider", "other_side", "more_light", "hold_steady", "freeze", "region", "context_question"]),
+  requestedRegionJson: text("requestedRegionJson"),
+  safetyClass: mysqlEnum("safetyClass", ["none", "advise_qualified_inspection", "stop_work_escalate"]).default("none").notNull(),
+  overreachFlagsJson: text("overreachFlagsJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  sessionIdx: index("liveAssistObservations_session_idx").on(t.orgRef, t.sessionId),
+}));
+
+/**
+ * The lifecycle record: metadata only, append-only (0203 triggers). `actorUserId` NULL means the server
+ * itself acted — a deadline passed, or the purge ran. Never a frame, a turn, an observation or text a
+ * person typed.
+ */
+export const liveAssistEvents = mysqlTable("liveAssistEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  actorUserId: int("actorUserId"),
+  eventType: mysqlEnum("eventType", [
+    "session_started", "session_paused", "session_resumed", "session_ended", "session_expired", "session_transient_purged",
+  ]).notNull(),
+  endReason: mysqlEnum("endReason", ["user_end", "idle_timeout", "budget_spent", "policy_disabled"]),
+  detail: varchar("detail", { length: 200 }),
+  occurredAt: timestamp("occurredAt").defaultNow().notNull(),
+}, (t) => ({
+  orgIdx: index("liveAssistEvents_org_idx").on(t.orgRef, t.occurredAt),
+  sessionIdx: index("liveAssistEvents_session_idx").on(t.sessionId),
+}));
+export type LiveAssistEventRow = typeof liveAssistEvents.$inferSelect;
+
+/**
+ * An organization's Live Assist policy. A change is a new row; the old one is superseded, never edited
+ * in place, so which policy governed a past session stays answerable. `currentMarker` (1 on the current
+ * row, NULL on superseded ones) with its unique index makes two concurrent changes collide instead of
+ * both becoming current.
+ */
+export const liveAssistPolicies = mysqlTable("liveAssistPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  policyRef: varchar("policyRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  enabled: boolean("enabled").notNull(),
+  sourcesAllowedJson: text("sourcesAllowedJson").notNull(),
+  idleSeconds: int("idleSeconds").notNull(),
+  maxSessionMinutes: int("maxSessionMinutes").notNull(),
+  retentionHours: int("retentionHours").notNull(),
+  maxSessionsPerUserPerDay: int("maxSessionsPerUserPerDay").notNull(),
+  dailySpendCeilingCents: int("dailySpendCeilingCents"),
+  setByUserId: int("setByUserId").notNull(),
+  currentMarker: tinyint("currentMarker"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  supersededAt: timestamp("supersededAt"),
+}, (t) => ({
+  currentUnique: uniqueIndex("liveAssistPolicies_current_unique").on(t.orgRef, t.currentMarker),
+}));
+export type LiveAssistPolicyRow = typeof liveAssistPolicies.$inferSelect;
+/** 0217 — a person at the customer, keyed to the account; roles are rows (customerContactRoles). */
+export const customerContacts = mysqlTable("customerContacts", {
+  id: int("id").autoincrement().primaryKey(),
+  contactRef: varchar("contactRef", { length: 40 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  displayName: varchar("displayName", { length: 180 }).notNull(),
+  title: varchar("title", { length: 120 }),
+  company: varchar("company", { length: 220 }),
+  phone: varchar("phone", { length: 60 }),
+  mobile: varchar("mobile", { length: 60 }),
+  email: varchar("email", { length: 220 }),
+  preferredChannel: mysqlEnum("preferredChannel", ["phone", "sms", "email", "portal"]),
+  externalIdentityId: int("externalIdentityId"),
+  signatoryAuthorityId: int("signatoryAuthorityId"),
+  status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  notes: varchar("notes", { length: 600 }),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+});
+
+/** 0217 — one role a contact holds for the account, effective-dated; ended, never deleted. */
+export const customerContactRoles = mysqlTable("customerContactRoles", {
+  id: int("id").autoincrement().primaryKey(),
+  contactId: int("contactId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  roleKey: varchar("roleKey", { length: 40 }).notNull(),
+  isPrimary: boolean("isPrimary").default(false).notNull(),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  status: mysqlEnum("status", ["active", "ended"]).default("active").notNull(),
+  assignedByUserId: int("assignedByUserId").notNull(),
+  assignedAt: timestamp("assignedAt").defaultNow().notNull(),
+  endedByUserId: int("endedByUserId"),
+  endedAt: timestamp("endedAt"),
+});
+
+/** 0217 — the commercial change ledger: append-only, written in the change's own transaction. */
+export const commercialAuditEvents = mysqlTable("commercialAuditEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  subjectType: mysqlEnum("subjectType", ["customer_account", "customer_contact", "customer_contract", "rate_sheet", "rate_sheet_version", "rate_line", "job_commercial_context", "job_commercial_snapshot", "customer_purchase_order"]).notNull(),
+  subjectRef: varchar("subjectRef", { length: 80 }).notNull(),
+  subjectId: int("subjectId"),
+  eventType: varchar("eventType", { length: 60 }).notNull(),
+  fromStatus: varchar("fromStatus", { length: 40 }),
+  toStatus: varchar("toStatus", { length: 40 }),
+  changesJson: text("changesJson"),
+  relatedRef: varchar("relatedRef", { length: 80 }),
+  jobId: int("jobId"),
+  reason: varchar("reason", { length: 500 }),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 60 }).notNull(),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** 0218 — a contract with a lifecycle; its billability rules live in customerContractTerms (termsId). */
+export const customerContracts = mysqlTable("customerContracts", {
+  id: int("id").autoincrement().primaryKey(),
+  contractRef: varchar("contractRef", { length: 40 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  contractNumber: varchar("contractNumber", { length: 80 }).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  contractType: mysqlEnum("contractType", ["msa", "rate_agreement", "service_agreement", "work_order", "purchase_order", "framework", "other"]).default("msa").notNull(),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  status: mysqlEnum("status", ["draft", "pending_approval", "active", "suspended", "expired", "terminated", "superseded"]).default("draft").notNull(),
+  poRequirement: mysqlEnum("poRequirement", ["inherit", "required", "not_required"]).default("inherit").notNull(),
+  requiredReferenceKindsJson: text("requiredReferenceKindsJson"),
+  customerReferencesJson: text("customerReferencesJson"),
+  paymentTermsDays: int("paymentTermsDays"),
+  billingInstructions: text("billingInstructions"),
+  notes: text("notes"),
+  termsId: int("termsId"),
+  renewalKind: mysqlEnum("renewalKind", ["none", "manual", "auto"]).default("manual").notNull(),
+  renewalNoticeDays: int("renewalNoticeDays"),
+  version: int("version").default(1).notNull(),
+  supersedesContractId: int("supersedesContractId"),
+  supersededByContractId: int("supersededByContractId"),
+  submittedByUserId: int("submittedByUserId"),
+  submittedAt: timestamp("submittedAt"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  approvalNote: varchar("approvalNote", { length: 400 }),
+  activatedAt: timestamp("activatedAt"),
+  suspendedAt: timestamp("suspendedAt"),
+  suspendedByUserId: int("suspendedByUserId"),
+  suspensionReason: varchar("suspensionReason", { length: 400 }),
+  terminatedAt: timestamp("terminatedAt"),
+  terminatedByUserId: int("terminatedByUserId"),
+  terminationReason: varchar("terminationReason", { length: 400 }),
+  expiredAt: timestamp("expiredAt"),
+  usedOperationallyAt: timestamp("usedOperationallyAt"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+});
+
+/** 0218 — a customer's rate sheet: the document whose versions group charge definitions. */
+export const rateSheets = mysqlTable("rateSheets", {
+  id: int("id").autoincrement().primaryKey(),
+  rateSheetRef: varchar("rateSheetRef", { length: 40 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  contractId: int("contractId"),
+  name: varchar("name", { length: 220 }).notNull(),
+  sheetNumber: varchar("sheetNumber", { length: 80 }),
+  currency: varchar("currency", { length: 3 }).default("CAD").notNull(),
+  status: mysqlEnum("status", ["active", "retired"]).default("active").notNull(),
+  notes: text("notes"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+});
+
+/** 0218 — one approved-as-a-unit revision of a sheet; its lines are chargeDefinitions rows. */
+export const rateSheetVersions = mysqlTable("rateSheetVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  versionRef: varchar("versionRef", { length: 40 }).notNull().unique(),
+  rateSheetId: int("rateSheetId").notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  version: int("version").notNull(),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  status: mysqlEnum("status", ["draft", "pending_approval", "approved", "rejected", "superseded", "retired"]).default("draft").notNull(),
+  contentHash: varchar("contentHash", { length: 64 }),
+  notes: text("notes"),
+  supersedesVersionId: int("supersedesVersionId"),
+  supersededByVersionId: int("supersededByVersionId"),
+  submittedByUserId: int("submittedByUserId"),
+  submittedAt: timestamp("submittedAt"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  rejectedByUserId: int("rejectedByUserId"),
+  rejectedAt: timestamp("rejectedAt"),
+  rejectionReason: varchar("rejectionReason", { length: 400 }),
+  usedOperationallyAt: timestamp("usedOperationallyAt"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+});
+
+/** 0219 — the job's live commercial assignment: customer, bill-to, contract, sheet, PO. */
+export const jobCommercialContexts = mysqlTable("jobCommercialContexts", {
+  id: int("id").autoincrement().primaryKey(),
+  jobId: int("jobId").notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  billToCustomerAccountId: int("billToCustomerAccountId"),
+  contractId: int("contractId"),
+  rateSheetId: int("rateSheetId"),
+  pinnedRateSheetVersionId: int("pinnedRateSheetVersionId"),
+  purchaseOrderId: int("purchaseOrderId"),
+  referenceWaiverReason: varchar("referenceWaiverReason", { length: 400 }),
+  referenceWaivedByUserId: int("referenceWaivedByUserId"),
+  referenceWaivedAt: timestamp("referenceWaivedAt"),
+  notes: varchar("notes", { length: 600 }),
+  currentSnapshotId: int("currentSnapshotId"),
+  setByUserId: int("setByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+});
+
+/** 0219 — the other companies and people on a job, as references. */
+export const jobCommercialParties = mysqlTable("jobCommercialParties", {
+  id: int("id").autoincrement().primaryKey(),
+  jobId: int("jobId").notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  partyRole: varchar("partyRole", { length: 40 }).notNull(),
+  customerAccountId: int("customerAccountId"),
+  contactId: int("contactId"),
+  orgRef: varchar("orgRef", { length: 64 }),
+  freeText: varchar("freeText", { length: 220 }),
+  status: mysqlEnum("status", ["active", "ended"]).default("active").notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+  endedByUserId: int("endedByUserId"),
+  endedAt: timestamp("endedAt"),
+});
+
+/** 0219 — PO, work order, AFE, cost centre and the customer's other references, one row per kind. */
+export const jobCommercialReferences = mysqlTable("jobCommercialReferences", {
+  id: int("id").autoincrement().primaryKey(),
+  jobId: int("jobId").notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  referenceKind: varchar("referenceKind", { length: 40 }).notNull(),
+  referenceValue: varchar("referenceValue", { length: 120 }).notNull(),
+  customerPurchaseOrderId: int("customerPurchaseOrderId"),
+  source: mysqlEnum("source", ["office", "dispatch", "customer_portal", "field", "import"]).default("office").notNull(),
+  status: mysqlEnum("status", ["active", "ended"]).default("active").notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+  endedByUserId: int("endedByUserId"),
+  endedAt: timestamp("endedAt"),
+});
+
+/** 0219 — the immutable commercial basis of a job; billing reads this and never the live sheet. */
+export const jobCommercialSnapshots = mysqlTable("jobCommercialSnapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  snapshotRef: varchar("snapshotRef", { length: 40 }).notNull().unique(),
+  jobId: int("jobId").notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  sequenceNo: int("sequenceNo").notNull(),
+  reason: mysqlEnum("reason", ["activation", "correction", "manual"]).notNull(),
+  status: mysqlEnum("status", ["current", "superseded"]).default("current").notNull(),
+  capturedByUserId: int("capturedByUserId").notNull(),
+  capturedAt: timestamp("capturedAt").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  customerAccountRef: varchar("customerAccountRef", { length: 64 }).notNull(),
+  customerNumber: varchar("customerNumber", { length: 40 }),
+  customerName: varchar("customerName", { length: 220 }).notNull(),
+  billToCustomerAccountId: int("billToCustomerAccountId").notNull(),
+  contractId: int("contractId"),
+  contractRef: varchar("contractRef", { length: 40 }),
+  contractNumber: varchar("contractNumber", { length: 80 }),
+  contractVersion: int("contractVersion"),
+  termsId: int("termsId"),
+  termsRef: varchar("termsRef", { length: 64 }),
+  termsVersion: int("termsVersion"),
+  rateSheetId: int("rateSheetId"),
+  rateSheetVersionId: int("rateSheetVersionId"),
+  rateSheetVersionRef: varchar("rateSheetVersionRef", { length: 40 }),
+  rateSheetVersion: int("rateSheetVersion"),
+  rateSheetContentHash: varchar("rateSheetContentHash", { length: 64 }),
+  purchaseOrderId: int("purchaseOrderId"),
+  poRef: varchar("poRef", { length: 64 }),
+  poNumber: varchar("poNumber", { length: 80 }),
+  paymentTermsDays: int("paymentTermsDays").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  poRequired: boolean("poRequired").notNull(),
+  billingInstructions: text("billingInstructions"),
+  payloadJson: text("payloadJson").notNull(),
+  payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
+  supersedesSnapshotId: int("supersedesSnapshotId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});

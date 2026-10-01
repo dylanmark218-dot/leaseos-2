@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
-import { callerFor, count, DAY_AFTER, DAY_BEFORE, DAY_OF, member, operatorFor, org, postWork, rnd, TWO_DAYS_AFTER } from "./boardFixtures";
+import { callerFor, count, DAY_AFTER, DAY_BEFORE, DAY_OF, member, org, postWork, rnd, TWO_DAYS_AFTER, worker } from "./boardFixtures";
 
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
@@ -42,30 +42,36 @@ d("declaring", () => {
 });
 
 d("what a declaration changes", () => {
-  it("excludes a declared unavailability from the pool with its code, and changes no readiness verdict", async () => {
+  it("shows a declared unavailability beside the verdict, changes neither the verdict nor readiness, and ranks the declarer last", async () => {
+    // SPINE item 2: whether a person may take work is one rule. A declaration is what they said about
+    // their willingness — shown, and used to order the pool — never a second list of refusals.
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
-    await operatorFor(pool, a, drv);
+    const drv = await worker(pool, a);
+    const keen = await worker(pool, a);
     const p = await postWork(disp);
     const before = await callerFor(disp).shifts.eligibility({ postRef: p.postRef, userId: drv });
     expect(before.verdict).toBe("eligible");
     expect(before.availability).toBe("undeclared");
     await callerFor(drv).shifts.availabilitySet({ state: "unavailable", windowStartsAt: DAY_BEFORE, windowEndsAt: TWO_DAYS_AFTER });
     const after = await callerFor(disp).shifts.eligibility({ postRef: p.postRef, userId: drv });
-    expect(after.verdict).toBe("ineligible");
-    expect(after.reasons.map(r => r.code)).toEqual(["declared_unavailable"]);
+    expect(after.eligible).toBe(true);
+    expect(after.verdict).toBe("eligible");
+    expect(after.reasons).toEqual([]);
     expect(after.availability).toBe("unavailable");
-    // The readiness axis is untouched by what a person said about their willingness.
+    expect(after.availabilityNotes.map(r => r.code)).toEqual(["declared_unavailable"]);
     expect(after.readiness).toEqual(before.readiness);
-    await expect(callerFor(drv).shifts.respond({ postRef: p.postRef })).rejects.toThrow(/cannot take/);
+    // What they say now is what counts: a person who declared unavailable may still say they would take it.
+    await callerFor(keen).shifts.respond({ postRef: p.postRef });
+    expect((await callerFor(drv).shifts.respond({ postRef: p.postRef })).recorded).toBe(true);
+    const pool_ = await callerFor(disp).shifts.candidates({ postRef: p.postRef });
+    expect(pool_.candidates.map(x => x.userId)).toEqual([keen, drv]);
   });
 
   it("puts a declarer whose window covers the start into the pool without them having responded, and tells them when work is posted", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
-    await operatorFor(pool, a, drv);
+    const drv = await worker(pool, a);
     await callerFor(drv).shifts.availabilitySet({ state: "available", windowStartsAt: DAY_OF, windowEndsAt: DAY_AFTER });
     const p = await postWork(disp, { regionCode: "HINTON" });
     const c = await callerFor(disp).shifts.candidates({ postRef: p.postRef });

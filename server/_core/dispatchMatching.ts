@@ -13,6 +13,10 @@
  *
  * Every score is accompanied by its reasons. There is no opaque ranking — if
  * LeaseOS suggests a candidate, a dispatcher can read exactly why.
+ *
+ * Resource booking conflicts are not decided here. The one answer is the award's
+ * own overlap query in dispatchTransaction.ts (awardAssignment → decideAward):
+ * SPINE item 2 removed the unwired copy that used to live in this file.
  */
 
 export type CapabilityKind =
@@ -439,41 +443,4 @@ export function filterVisiblePostings<
   return postings.filter(
     p => matchOperatorToJob(operator, equipment, p.requirements, asOf).matched
   );
-}
-
-/* ===================== resource conflict detection ===================== */
-
-export type Booking = {
-  resourceId: string;
-  jobCode: string;
-  startsAt: Date;
-  endsAt: Date;
-};
-
-export type BookingConflict = {
-  resourceId: string;
-  existingJob: string;
-  proposedJob: string;
-  message: string;
-};
-
-/** Half-open intervals: a job ending at 15:30 does not conflict with one starting at 15:30. */
-export function detectBookingConflicts(
-  proposed: Booking,
-  existing: Booking[]
-): BookingConflict[] {
-  return existing
-    .filter(
-      b =>
-        b.resourceId === proposed.resourceId &&
-        b.jobCode !== proposed.jobCode &&
-        proposed.startsAt < b.endsAt &&
-        b.startsAt < proposed.endsAt
-    )
-    .map(b => ({
-      resourceId: proposed.resourceId,
-      existingJob: b.jobCode,
-      proposedJob: proposed.jobCode,
-      message: `${proposed.resourceId} is assigned to ${b.jobCode} until ${b.endsAt.toISOString().slice(11, 16)} and is also proposed for ${proposed.jobCode} at ${proposed.startsAt.toISOString().slice(11, 16)}`,
-    }));
 }

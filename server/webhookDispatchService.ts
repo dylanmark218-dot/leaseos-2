@@ -52,7 +52,7 @@ import { domainEventOutbox, webhookDeliveries, webhookSubscriptions } from "../d
 import { deliveryOutcome, signPayload, subscribed } from "./_core/integrationGateway";
 import { mfaKey } from "./_core/externalIdentityPolicy";
 import { resolveWebhookSigningSecret } from "./webhookSecretService";
-import { environmentSecretKeys } from "./_core/secretKeys";
+import { secretKeyProvider } from "./_core/secretKeys";
 import { ENV } from "./_core/env";
 import { affectedRows } from "./_core/enforcementCommit";
 import { egressPost } from "./_core/egressHttp";
@@ -203,7 +203,7 @@ export async function dispatchWebhooks(args: DispatchArgs = {}): Promise<Dispatc
     const secretFor = async () => {
       if (secret === undefined) {
         try {
-          secret = await resolveWebhookSigningSecret(s, { keys: environmentSecretKeys(), legacyKey: key, isProduction: ENV.isProduction });
+          secret = await resolveWebhookSigningSecret(s, { keys: secretKeyProvider(), legacyKey: key, isProduction: ENV.isProduction });
         } catch (e) {
           secret = null;
           console.warn(`[webhooks] ${s.subscriptionRef}: signing secret unavailable; skipped — ${e instanceof Error ? e.message : String(e)}`);

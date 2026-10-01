@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
-import { callerFor, count, DAY_AFTER, DAY_BEFORE, job, member, operatorFor, org, postWork, rnd, rows, STARTS } from "./boardFixtures";
+import { callerFor, count, DAY_AFTER, DAY_BEFORE, job, member, org, postWork, rnd, rows, STARTS, worker } from "./boardFixtures";
 import { SENSITIVE_PERMISSIONS } from "./_core/recordsAuthorization";
 
 const URL = process.env.DATABASE_URL;
@@ -25,8 +25,7 @@ d("the post's life", () => {
   it("keeps a draft off the board, publishes it, closes it to responses, reopens it, and cancels it with its offers", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
-    await operatorFor(pool, a, drv);
+    const drv = await worker(pool, a);
     const p = await postWork(disp, { publish: false });
     expect(p.status).toBe("draft");
     expect((await callerFor(drv).shifts.list({})).posts.some(x => x.postRef === p.postRef)).toBe(false);
@@ -55,7 +54,7 @@ d("the post's life", () => {
   it("expires an open post on read once closesAt has passed, and refuses a response to it", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
+    const drv = await worker(pool, a);
     const p = await postWork(disp, { closesAt: new Date(Date.now() - 60_000) });
     expect((await callerFor(drv).shifts.get({ postRef: p.postRef })).post.status).toBe("expired");
     await expect(callerFor(drv).shifts.respond({ postRef: p.postRef })).rejects.toThrow(/expired/);
@@ -66,7 +65,7 @@ d("responses", () => {
   it("keeps one standing response per person, replaced in place, with the previous one in history", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
+    const drv = await worker(pool, a);
     const p = await postWork(disp);
     expect((await callerFor(drv).shifts.respond({ postRef: p.postRef, response: "interested" })).recorded).toBe(true);
     expect((await callerFor(drv).shifts.respond({ postRef: p.postRef, response: "interested" })).recorded).toBe(false);
@@ -83,7 +82,7 @@ d("responses", () => {
   it("answers a retried device mutation with what it already recorded", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
+    const drv = await worker(pool, a);
     const p = await postWork(disp);
     const key = { postRef: p.postRef, response: "available" as const, deviceId: `TAB-${rnd()}`, clientMutationId: `m-${rnd()}`, deviceCreatedAt: new Date(Date.now() - 3_600_000) };
     expect((await callerFor(drv).shifts.respond(key)).recorded).toBe(true);
@@ -96,7 +95,7 @@ d("responses", () => {
   it("refuses interest from somebody on approved leave, from what is on record", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
+    const drv = await worker(pool, a);
     const mgr = await member(pool, a, ["management"]);
     const leave = await callerFor(drv).timeOff.request({ category: "vacation", from: DAY_BEFORE, to: DAY_AFTER });
     await callerFor(mgr).timeOff.decide({ requestRef: leave.requestRef, decision: "approve" });
@@ -112,8 +111,8 @@ d("offers", () => {
   it("issues one live offer per person, lets only that person answer it once, and records both clocks", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
-    const other = await member(pool, a, ["driver"]);
+    const drv = await worker(pool, a);
+    const other = await worker(pool, a);
     const p = await postWork(disp);
     const o = await callerFor(disp).shifts.offer({ postRef: p.postRef, userId: drv });
     expect(o.requiresReadinessCheck).toBe(true);
@@ -138,7 +137,7 @@ d("offers", () => {
   it("withdraws an offer, after which it cannot be answered", async () => {
     const a = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
+    const drv = await worker(pool, a);
     const p = await postWork(disp);
     const o = await callerFor(disp).shifts.offer({ postRef: p.postRef, userId: drv, note: "first pick" });
     expect((await callerFor(disp).shifts.offerWithdraw({ offerRef: o.offerRef, reason: "filled another way" })).status).toBe("withdrawn");
@@ -153,7 +152,7 @@ d("the link to a slot", () => {
     const a = await org(pool), b = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
     const dispB = await member(pool, b, ["dispatcher"]);
-    const drv = await member(pool, a, ["driver"]);
+    const drv = await worker(pool, a);
     const j = await job(pool, a);
     const posting = await callerFor(disp).dispatch.createPosting({ jobId: j, roles: [{ roleCode: "PRIMARY_UNIT" }] });
     const jb = await job(pool, b);
@@ -178,9 +177,9 @@ d("the organization boundary", () => {
   it("hides one organization's post from another, on every door", async () => {
     const a = await org(pool), b = await org(pool);
     const disp = await member(pool, a, ["dispatcher"]);
-    const drvA = await member(pool, a, ["driver"]);
+    const drvA = await worker(pool, a);
     const dispB = await member(pool, b, ["dispatcher"]);
-    const drvB = await member(pool, b, ["driver"]);
+    const drvB = await worker(pool, b);
     const p = await postWork(disp);
     const o = await callerFor(disp).shifts.offer({ postRef: p.postRef, userId: drvA });
     expect((await callerFor(drvB).shifts.list({})).posts.some(x => x.postRef === p.postRef)).toBe(false);

@@ -13,27 +13,33 @@
  * is `unknown`, and unknown is not satisfied. This is the same read readiness, crews and the
  * calendar use; reconciling with main retired the board's own version of it.
  *
+ * **One rule decides who may take a post** (SPINE item 2, owner's ruling): `shiftEligibility` in
+ * `_core/openShifts.ts`, over `personFacts` — the records it reads, moved here from the router
+ * unchanged so the router and the Open Work preview read the same facts. The preview's verdict IS
+ * that rule's verdict. Declared availability and dispatch readiness are shown beside it as their own
+ * axes and never added to it: a second list of refusals would be a second rule.
+ *
  * **Readiness is a preview here.** `composeReadiness` is called for the post's start instant and
  * its verdict is shown with its blocker codes; nothing is stored, and nothing here is an award.
  * The stored, fingerprinted check the award consumes is `dispatch.evaluate`'s, made by a dispatcher
- * for the exact slot. A person with no operator record previews `unknown`, never `eligible`.
+ * for the exact slot, and the award refuses without it — readiness is enforced there, fail closed.
  */
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import {
-  crewMembers, crews, leaveRequests, operators, shiftInterests, shiftOffers,
+  crewMembers, crews, leaveRequests, operators, resourceBookings, shiftInterests, shiftOffers,
   shiftPostEvents, shiftPosts, workerAvailability,
 } from "../drizzle/schema";
 import type { DbOrTx } from "./_core/dbTypes";
 import { SINGLE_TENANT_ID, type ActingScope } from "./_core/actingScope";
-import { isAbsent, type LeaveRequest } from "./_core/timeOff";
-import { type CrewMember } from "./_core/crewCoverage";
+import type { LeaveRequest } from "./_core/timeOff";
+import { grantsInOrganization } from "./_core/recordsAuthorization";
 import {
-  availabilityReasons, candidatesFor, declaredStateAt, effectiveOfferStatus, effectivePostStatus,
-  type AvailabilityDeclaration, type AvailabilityPreferences, type AvailabilityState, type Candidate, type Ineligibility, type PostStatus, type ShiftPost,
+  availabilityReasons, declaredStateAt, effectiveOfferStatus, effectivePostStatus, shiftEligibility,
+  type AvailabilityDeclaration, type AvailabilityPreferences, type AvailabilityState, type Candidate, type IneligibilityCode, type PersonFacts, type PostStatus, type ShiftPost,
 } from "./_core/openShifts";
 import { composeReadiness } from "./readinessComposer";
 import { effectiveQualifications } from "./qualificationReads";
-import { listActiveUserRoleNames, operatorInScope, orgScopeWhere } from "./db";
+import { listActiveUserRoles, operatorForUserInScope, orgScopeWhere, userInScope } from "./db";
 
 export type ShiftPostRow = typeof shiftPosts.$inferSelect;
 
@@ -44,7 +50,7 @@ export function toShiftPost(row: ShiftPostRow): ShiftPost {
   return {
     postRef: row.postRef, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, location: row.location,
     requiredRole: row.requiredRole, requiredQualifications: JSON.parse(row.requiredQualificationsJson) as string[],
-    seats: row.seats, kind: row.kind,
+    seats: row.seats, kind: row.kind, status: row.status as PostStatus,
   };
 }
 
@@ -99,104 +105,126 @@ export async function declarersCovering(d: DbOrTx, scope: { tenantId: string }, 
 }
 
 /* ------------------------------------------------------------------ */
-/* The preview                                                          */
+/* The facts, and the preview                                           */
 /* ------------------------------------------------------------------ */
+
+/**
+ * The records `shiftEligibility` reads about one person, in the post's organization. Reads only;
+ * every judgement is the engine's. Someone outside the organization is not read at all.
+ */
+export async function personFacts(d: DbOrTx, tenantId: string, post: ShiftPost, userId: number): Promise<PersonFacts> {
+  const scope = { tenantId };
+  const none: PersonFacts = { userId, name: `user ${userId}`, inOrganization: false, roles: [], rosters: [], leave: [], commitments: [], licence: { kind: "none" }, qualifications: [] };
+  if (!(await userInScope(userId, scope))) return none;
+
+  const roles = grantsInOrganization(await listActiveUserRoles(userId), tenantId).map(g => g.role);
+
+  const rosterRows = await d.select({ on: crewMembers.rotationOnDays, off: crewMembers.rotationOffDays, anchor: crewMembers.rotationAnchor })
+    .from(crewMembers).innerJoin(crews, eq(crews.crewRef, crewMembers.crewRef))
+    .where(and(eq(crewMembers.userId, userId), isNull(crewMembers.leftAt), eq(crews.state, "active"),
+      tenantId === SINGLE_TENANT_ID ? or(isNull(crews.tenantId), eq(crews.tenantId, SINGLE_TENANT_ID)) : eq(crews.tenantId, tenantId)))
+    .limit(50);
+  const rosters = rosterRows.map(r => ({ rotation: r.on && r.anchor ? { onDays: r.on, offDays: r.off ?? 0, anchor: r.anchor, label: `${r.on}/${r.off ?? 0}` } : null }));
+
+  const leaveRows = await d.select().from(leaveRequests).where(and(
+    eq(leaveRequests.userId, userId), lte(leaveRequests.fromDate, post.startsAt), gte(leaveRequests.toDate, post.startsAt),
+  )).limit(50);
+  const leave: LeaveRequest[] = leaveRows.map(l => ({
+    requestRef: l.requestRef, userId: l.userId, category: l.category, urgency: l.urgency,
+    from: l.fromDate, to: l.toDate,
+    partialDay: l.partialFromTime && l.partialToTime ? { fromTime: l.partialFromTime, toTime: l.partialToTime } : null,
+    privateNote: null, requestedAt: l.requestedAt, status: l.status,
+    decidedByUserId: l.decidedByUserId, decidedAt: l.decidedAt, decisionNote: l.decisionNote,
+  } as LeaveRequest));
+
+  // The person's own operator record (operators.userId, owned by this organization). Two is a refusal, not a choice.
+  const op = await operatorForUserInScope(userId, scope);
+  let licence: PersonFacts["licence"] = { kind: op.kind === "ambiguous" ? "ambiguous" : "none" };
+  let commitments: PersonFacts["commitments"] = [];
+  if (op.kind === "resolved") {
+    const row = (await d.select({ licenseExpiresAt: operators.licenseExpiresAt }).from(operators).where(eq(operators.id, op.operatorId)).limit(1))[0];
+    licence = { kind: "recorded", expiresAt: row?.licenseExpiresAt ?? null };
+    const booked = await d.select().from(resourceBookings).where(and(
+      eq(resourceBookings.resourceType, "operator"), eq(resourceBookings.resourceRef, String(op.operatorId)),
+      lt(resourceBookings.startsAt, post.endsAt), gt(resourceBookings.endsAt, post.startsAt),
+      inArray(resourceBookings.bookingState, ["tentative", "confirmed"]),
+    )).limit(20);
+    commitments = booked.map(b => ({ assignmentRef: `booking ${b.id}${b.postingId != null ? ` (posting ${b.postingId})` : ""}`, startsAt: b.startsAt, endsAt: b.endsAt }));
+  }
+
+  const qualifications = post.requiredQualifications.length
+    ? (await effectiveQualifications(d, { tenantId, userId, at: post.startsAt, codes: post.requiredQualifications }))
+      .map(q => ({ code: q.code, held: q.held, notHeld: q.notHeld, reason: q.reason }))
+    : [];
+
+  return { userId, name: `user ${userId}`, inOrganization: true, roles, rosters, leave, commitments, licence, qualifications };
+}
 
 export type PreviewReason = { code: string; detail: string };
 
 export type Preview = {
   userId: number;
+  /** The one rule's answer (`shiftEligibility`): whether this person may take the post. */
+  eligible: boolean;
+  /**
+   * The same answer for a screen: `ineligible` when a recorded fact excludes them, `unknown` when
+   * every reason is something that could not be established. Both are "no" — unknown refuses
+   * exactly as a failed check does — the difference is only what the person can do about it.
+   */
   verdict: "eligible" | "ineligible" | "unknown";
+  /** The rule's reasons, unrenamed. */
   reasons: PreviewReason[];
-  /** The readiness composer's own answer for the post's start, or null when nothing could be composed. */
-  readiness: { verdict: string; blockerCodes: string[]; notEvaluated: string[] } | null;
+  /** The readiness composer's own answer for the post's start, or null when nothing could be composed. Its own axis. */
+  readiness: { verdict: string; blockerCodes: string[]; notEvaluated: string[]; operatorBlockers: PreviewReason[] } | null;
+  /** Declared availability at the post's start. Its own axis: a statement of willingness, never a refusal. */
   availability: AvailabilityState | "undeclared";
+  /** What the declaration says about this post (declines overtime, outside region, unavailable). */
+  availabilityNotes: PreviewReason[];
   interestExpressed: boolean;
 };
 
-/** Reason codes that make the preview `ineligible` rather than `unknown`. */
-const HARD: ReadonlySet<string> = new Set(["on_approved_leave", "not_rostered", "wrong_role", "overlaps_existing", "declared_unavailable", "licence_expired", "qualification_expired", "readiness_blocked"]);
+/** Codes of the rule that mean "could not be established" rather than "established and excluding". */
+const UNESTABLISHED: ReadonlySet<IneligibilityCode> = new Set<IneligibilityCode>(["no_licence_recorded", "qualification_unknown", "qualification_unverified"]);
 
-/**
- * The engine's candidate for one person: role, leave, rotation, overlap — the four things the
- * engine decides. Qualifications are passed as none here and answered by the canonical read, so
- * one question has one answer.
- */
-async function engineCandidate(d: DbOrTx, args: { post: ShiftPost; userId: number; name: string; roles: readonly string[] }): Promise<Candidate> {
-  const leave = (await d.select().from(leaveRequests).where(eq(leaveRequests.userId, args.userId)).limit(100)).map(toLeave);
-  const memberships = await d.select().from(crewMembers).where(and(eq(crewMembers.userId, args.userId), isNull(crewMembers.leftAt))).limit(20);
-  const rotated = memberships.find(m => m.rotationOnDays && m.rotationAnchor);
-  const member: CrewMember = {
-    userId: args.userId, name: args.name, roles: args.roles, currentQualifications: [], existingAssignments: [],
-    rotation: rotated ? { onDays: rotated.rotationOnDays!, offDays: rotated.rotationOffDays ?? 0, anchor: rotated.rotationAnchor!, label: `${rotated.rotationOnDays}/${rotated.rotationOffDays ?? 0}` } : null,
-    awayOn: leave.filter(l => isAbsent(l) && !l.partialDay && l.from <= args.post.startsAt && args.post.startsAt <= l.to).map(() => args.post.startsAt),
-  };
-  const [candidate] = candidatesFor({ post: { ...args.post, requiredQualifications: [] }, crew: [member], leave });
-  return candidate!;
+/** The rule's verdict for one person, from their records. Nothing in it is the caller's to supply. */
+export async function eligibilityOf(d: DbOrTx, args: { post: ShiftPostRow; userId: number; scope: ActingScope }): Promise<Candidate> {
+  const post = toShiftPost(args.post);
+  return shiftEligibility(post, await personFacts(d, args.scope.tenantId, post, args.userId));
 }
 
 /**
- * Could this person take this post, from what is on record — and what could not be established.
- *
- * Every reason is collected. `unknown` is a verdict of its own, not a soft `eligible`: a person
- * with no operator record, or a required ticket nobody has recorded, is shown as unknown with the
- * code that says why. `ineligible` is reserved for a fact that excludes them.
+ * Could this person take this post — the one rule — and, beside it, what they declared and what the
+ * readiness composer would say. Every reason is collected; nothing on the two side axes changes the
+ * verdict.
  */
 export async function previewFor(d: DbOrTx, args: { post: ShiftPostRow; userId: number; scope: ActingScope; now: Date }): Promise<Preview> {
   const post = toShiftPost(args.post);
-  const roles = await listActiveUserRoleNames(args.userId);
-  const op = (await d.select().from(operators).where(eq(operators.userId, args.userId)).limit(1))[0] ?? null;
-  const operatorInScopeRow = op ? await operatorInScope(op.id, { tenantId: args.scope.tenantId }) : null;
-  const reasons: PreviewReason[] = [];
-
-  const candidate = await engineCandidate(d, { post, userId: args.userId, name: op?.name ?? `user ${args.userId}`, roles });
-  for (const r of candidate.reasons) reasons.push({ code: r.code, detail: r.detail });
+  const candidate = await eligibilityOf(d, args);
+  const reasons = candidate.reasons.map(r => ({ code: r.code, detail: r.detail }));
+  const verdict: Preview["verdict"] = candidate.eligible ? "eligible"
+    : candidate.reasons.every(r => UNESTABLISHED.has(r.code)) ? "unknown" : "ineligible";
 
   const declarations = await declarationsFor(d, args.userId, args.scope);
   const availability = declaredStateAt(declarations, post.startsAt);
   const inForce = declarations.find(x => declaredStateAt([x], post.startsAt) !== "undeclared") ?? null;
-  for (const r of availabilityReasons({ state: availability, preferences: inForce?.preferences ?? null, post: { overtime: args.post.overtime, regionCode: args.post.regionCode } })) {
-    if (r.code === "undeclared") continue;   // reported as `availability`, not as a reason: silence is neither yes nor no
-    reasons.push(r);
-  }
-
-  // D-05, through the one read adapter, in the caller's organization.
-  const required = post.requiredQualifications;
-  const effective = required.length ? await effectiveQualifications(d, { tenantId: args.scope.tenantId, userId: args.userId, at: post.startsAt, codes: required }) : [];
-  for (const q of effective) {
-    if (q.held) continue;
-    // From the structured verdict, not by reading its prose.
-    reasons.push({
-      code: q.notHeld === "expired" ? "qualification_expired" : q.notHeld === "unverified" ? "qualification_unverified" : "qualification_unknown",
-      detail: q.reason,
-    });
-  }
+  const availabilityNotes = availabilityReasons({ state: availability, preferences: inForce?.preferences ?? null, post: { overtime: args.post.overtime, regionCode: args.post.regionCode } })
+    .filter(r => r.code !== "undeclared");   // silence is reported as `availability`, neither yes nor no
 
   let readiness: Preview["readiness"] = null;
-  if (!op || !operatorInScopeRow) {
-    reasons.push({ code: "no_operator_record", detail: "No operator record is linked to this person — nothing about their licence, hours or tickets can be established" });
-  } else {
+  const op = candidate.reasons.length && !candidate.eligible && candidate.reasons[0]!.code === "not_in_organization"
+    ? null : await operatorForUserInScope(args.userId, { tenantId: args.scope.tenantId });
+  if (op?.kind === "resolved") {
     try {
-      const r = await composeReadiness({ operatorId: op.id, unitId: args.post.unitId ?? null, trailerId: null, jobId: null, postingId: args.post.dispatchPostingId ?? null }, post.startsAt);
+      const r = await composeReadiness({ operatorId: op.operatorId, unitId: args.post.unitId ?? null, trailerId: null, jobId: null, postingId: args.post.dispatchPostingId ?? null }, post.startsAt);
       readiness = {
         verdict: r.eligibility.verdict, blockerCodes: r.eligibility.blockers.map(b => b.code),
         notEvaluated: r.capabilities.filter(c => c.status === "NOT_EVALUATED").map(c => c.capability),
+        // Findings about the person, for the card. A truck, job or route finding is not about the
+        // candidate; and none of these is a refusal here — the award's stored check is where they bind.
+        operatorBlockers: r.eligibility.blockers.filter(b => b.subject === "operator" && b.severity === "blocking").map(b => ({ code: b.code, detail: b.label })),
       };
-      for (const b of r.eligibility.blockers) {
-        // The board's own vocabulary for the licence findings it has always named. Every other
-        // BLOCKING finding ABOUT THE PERSON is carried under the composer's code, unrenamed, and
-        // makes them ineligible here too. A truck, job or route finding is not about the candidate
-        // — a post with no unit yet reads "inspection not on file" for a truck nobody has named —
-        // and a `review` or `unknown` finding is dispatch's question, answered by the stored check
-        // at award. Both stay on the readiness axis beside this verdict, never folded into it: the
-        // same rule the dispatcher board applies to staffing and readiness.
-        if (b.subject !== "operator") continue;
-        if (b.code === "operator_licence_missing" || b.code === "operator_licence_unknown") reasons.push({ code: "no_licence_recorded", detail: "No licence expiry on record — this cannot be established as current" });
-        else if (b.code === "operator_licence_expired") reasons.push({ code: "licence_expired", detail: b.label });
-        else if (b.severity === "blocking") reasons.push({ code: `readiness_blocked:${b.code}`, detail: b.label });
-      }
-    } catch (e) {
-      reasons.push({ code: "readiness_unavailable", detail: `Readiness could not be composed: ${(e as Error).message}` });
+    } catch {
+      readiness = null;
     }
   }
 
@@ -204,14 +232,7 @@ export async function previewFor(d: DbOrTx, args: { post: ShiftPostRow; userId: 
     eq(shiftInterests.postRef, args.post.postRef), eq(shiftInterests.userId, args.userId), isNull(shiftInterests.withdrawnAt),
   )).limit(1))[0];
 
-  const hard = reasons.some(r => HARD.has(r.code) || r.code.startsWith("readiness_blocked"));
-  const verdict: Preview["verdict"] = hard ? "ineligible" : reasons.length ? "unknown" : "eligible";
-  return { userId: args.userId, verdict, reasons, readiness, availability, interestExpressed: !!interest && interest.response !== "declined" };
-}
-
-/** The reasons that exclude a person from being offered or recorded as interested: facts, not unknowns. */
-export function hardReasons(preview: Preview): Ineligibility[] {
-  return preview.reasons.filter(r => HARD.has(r.code)).map(r => ({ code: r.code as Ineligibility["code"], detail: r.detail }));
+  return { userId: args.userId, eligible: candidate.eligible, verdict, reasons, readiness, availability, availabilityNotes, interestExpressed: !!interest && interest.response !== "declined" };
 }
 
 /* ------------------------------------------------------------------ */

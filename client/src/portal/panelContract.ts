@@ -29,14 +29,12 @@ export type PanelContract = {
 };
 
 export const PANEL_CONTRACTS: readonly PanelContract[] = [
-  { file: "PortalShell.tsx", procedures: ["portals.mine", "surfaces.myDay", "surfaces.exceptions", "surfaces.inbox"], portals: "every_portal" },
+  // v23.26 — `portals.mine` is gone from the shell: which workspaces this
+  // session holds now arrives with the identity and the organization, in one
+  // server-authoritative answer, and the switch itself goes through a procedure
+  // that refuses a workspace the caller does not hold.
+  { file: "PortalShell.tsx", procedures: ["session.selectWorkspace", "surfaces.myDay", "surfaces.exceptions", "surfaces.inbox"], portals: "every_portal" },
   { file: "UniversalSearch.tsx", procedures: ["surfaces.search"], portals: "every_portal" },
-  // The chooser and its neighbouring states are rendered BEFORE a portal is
-  // settled, so "every_portal" is the only honest restriction: at the moment it
-  // is on screen there is no portal to restrict it to. It calls nothing — every
-  // option arrives as a prop from PortalShell's own `portals.mine` — which is
-  // what keeps that true rather than merely stated.
-  { file: "PortalChooser.tsx", procedures: [], portals: "every_portal" },
   { file: "QuickCapture.tsx", procedures: [], portals: "every_portal" },
   { file: "SyncIndicator.tsx", procedures: [], portals: "every_portal" },
   { file: "panels/MyDayPanel.tsx", procedures: [], portals: "every_portal" },
@@ -55,6 +53,18 @@ export const PANEL_CONTRACTS: readonly PanelContract[] = [
     portals: "every_portal",
   },
   { file: "panels/BoardPanelView.tsx", procedures: [], portals: "every_portal" },
+  {
+    file: "panels/PeopleAccessPanel.tsx",
+    procedures: [
+      "people.list", "people.roleCatalogue", "people.detail", "people.setRoles",
+      "people.setDefaultWorkspace", "people.removeFromOrganization",
+      "people.invitations.list", "people.invitations.create", "people.invitations.cancel",
+      "people.accessResolution.list", "records.roles.resolveLegacy",
+    ],
+    portals: ["management"],
+    reason:
+      "B23.2 — who belongs to this organization and what they may do here. `roles.grant` is held by `management` alone and every procedure re-derives it, so this restriction is about not showing a screen that would refuse; it is not the boundary.",
+  },
   {
     file: "panels/SetupPanel.tsx",
     procedures: [

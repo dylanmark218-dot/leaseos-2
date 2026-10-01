@@ -191,6 +191,12 @@ d("a day on the lease, signed before the truck leaves", () => {
     // actually proved who they were.
     expect(sig[0]).toMatchObject({ signatureMethod: "portal_link", payloadHash: prep.snapshotHash, capturedLatitude: 53.5 });
     expect(sig[0].externalIdentityId).not.toBeNull();
+    // SPINE item 2 — this is the one signed-scope statement (fieldTicket.buildSignedScopeStatement was an
+    // unwired second one and is gone). It records the authority actually exercised and what was refused.
+    const [stmt] = await pool.execute<mysql.RowDataPacket[]>("SELECT signedScopeStatement FROM fieldTicketSignatures WHERE fieldTicketId = (SELECT id FROM fieldTickets WHERE ticketNumber = ?)", [t.ticketNumber]);
+    expect(String(stmt[0].signedScopeStatement)).toBe(
+      "Work performed confirmed: 9.58 h site billable, 1 load(s), standby 1.25 h (yes). Exercised: work_confirmation, time_confirmation, standby_approval. Not within authority: invoice_approval. Post-site: billing basis signed; final time pending.",
+    );
 
     // Frozen: no second signature, no new site event, no edit to lines.
     await expect(c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("17:10"), endedAt: at("17:30") })).rejects.toThrow(/frozen in the signed revision/);

@@ -106,7 +106,22 @@ describe("the open-work card", () => {
     expect(within(post).getByText("H2S").closest("li")!.textContent).toContain("✓");
     expect(within(post).getByText("route restrictions").closest("li")!.textContent).toContain("?");
     expect(within(post).getByText(/Dispatch gives the work/)).toBeInTheDocument();
-    fireEvent.click(within(post).getByRole("button", { name: "Interested" }));
+    // SPINE item 2: unknown refuses as a failed check does. The person may decline, not volunteer.
+    expect(within(post).getByRole("button", { name: "Interested" })).toBeDisabled();
+    fireEvent.click(within(post).getByRole("button", { name: "Decline" }));
+    expect(onRespond).toHaveBeenCalledWith("OS-1", "declined");
+  });
+
+  it("lets an eligible person say they are interested", () => {
+    const onRespond = vi.fn();
+    const ok = presentOpenWork(
+      { postRef: "OS-1", title: "Hydrovac operator", status: "open", requiredRole: "driver", requiredQualifications: ["H2S"], requiredEquipmentClass: null,
+        location: "Hinton area", regionCode: "HINTON", startsAt: new Date("2026-10-21T06:00:00Z"), endsAt: new Date("2026-10-21T18:00:00Z"), estimatedHours: 12, overtime: false, priority: "normal" },
+      { eligible: true, verdict: "eligible", reasons: [], availability: "available", interestExpressed: false, readinessNotEvaluated: [] },
+      null,
+    );
+    render(<BoardPanelView {...boardProps({ tab: "open_work", selectedPost: "OS-1", card: { kind: "loaded", value: ok }, onRespond })} />);
+    fireEvent.click(within(screen.getByRole("region", { name: "Post" })).getByRole("button", { name: "Interested" }));
     expect(onRespond).toHaveBeenCalledWith("OS-1", "interested");
   });
 
@@ -160,7 +175,7 @@ describe("usable on a phone and without colour", () => {
     cleanup();
     render(<BoardPanelView {...boardProps({ tab: "open_work", selectedPost: "OS-1", card: { kind: "loaded", value: card } })} />);
     // The ? is never alone: the unknown requirement is named in words beside it.
-    expect(screen.getByText(/unknown is not satisfied/)).toBeInTheDocument();
+    expect(screen.getAllByText(/unknown is not satisfied/).length).toBeGreaterThan(0);
   });
 
   it("keeps a write the device could not take on screen, as an alert", () => {

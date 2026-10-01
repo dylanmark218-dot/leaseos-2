@@ -64,6 +64,9 @@ function* walk(dir: string): Generator<string> {
 export const KIND_CLASS = {
   roleProcedure: "gated", externalProcedure: "gated", integrationProcedure: "gated",
   publicProcedure: "ungated", adminProcedure: "ungated",
+  // #64 (v23.26): signed in and audited, but no role or permission is checked, so every site is
+  // pinned like a public one. Its names are also pinned in SESSION_PROCEDURE_PERMISSIONS.
+  sessionProcedure: "ungated",
   protectedProcedure: "forbidden",
   permissionForProcedure: "helper", externalPermissionForProcedure: "helper", integrationPermissionForProcedure: "helper",
 } as const satisfies Record<string, "gated" | "ungated" | "forbidden" | "helper">;
@@ -139,7 +142,7 @@ export function censusOf(root: string): Census {
 }
 
 /** Kinds that bypass role authorisation. Every site of these must be pinned. */
-export const UNGATED_KINDS = ["publicProcedure", "adminProcedure"] as const;
+export const UNGATED_KINDS = ["publicProcedure", "adminProcedure", "sessionProcedure"] as const;
 
 export type Pin = { file: string; procedure: string | null; kind: string }[];
 

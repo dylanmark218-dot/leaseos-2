@@ -121,11 +121,18 @@ export type PostForCard = {
 };
 
 export type PreviewForCard = {
+  /** The one rule's answer (SPINE item 2). Absent from an older server: then `verdict` decides. */
+  eligible?: boolean;
   verdict: "eligible" | "ineligible" | "unknown";
+  /** The rule's reasons, unrenamed. */
   reasons: readonly { code: string; detail: string }[];
   availability: string;
+  /** What the person's declaration says about this post. Shown, never a refusal. */
+  availabilityNotes?: readonly { code: string; detail: string }[];
   interestExpressed: boolean;
   readinessNotEvaluated: readonly string[];
+  /** Readiness findings about the person. Its own axis: the award's stored check is where they bind. */
+  readinessBlockers?: readonly { code: string; detail: string }[];
 };
 
 export type OfferForCard = { offerRef: string; status: string; expiresAt: Date | null } | null;
@@ -163,15 +170,16 @@ const AVAILABILITY_WORDS: Record<string, string> = {
   undeclared: "No availability declared for this time",
 };
 
-/** Reason codes that are facts excluding a person, as opposed to things not established. */
-const EXCLUDING = new Set(["on_approved_leave", "not_rostered", "wrong_role", "overlaps_existing", "declared_unavailable", "licence_expired", "qualification_expired", "declines_overtime", "outside_region"]);
+/** The rule's codes that are facts excluding a person, as opposed to things not established. */
+const EXCLUDING = new Set(["not_in_organization", "on_approved_leave", "not_rostered", "wrong_role", "overlaps_existing", "licence_expired", "qualification_expired"]);
 
 const mentions = (detail: string, code: string) => detail.toLowerCase().includes(code.toLowerCase());
 
 export function presentOpenWork(post: PostForCard, me: PreviewForCard | null, offer: OfferForCard): OpenWorkCard {
   const reasons = me?.reasons ?? [];
   const has = (code: string) => reasons.some(r => r.code === code);
-  const noRecord = !me || has("no_operator_record");
+  // Whether the person may take it is the one rule's answer; `verdict` only says how it was reached.
+  const eligible = !!me && (me.eligible ?? me.verdict === "eligible");
 
   const facts = [
     post.requiredRole,
@@ -186,8 +194,8 @@ export function presentOpenWork(post: PostForCard, me: PreviewForCard | null, of
   const licence = reasons.find(r => r.code === "licence_expired" || r.code === "no_licence_recorded");
   requirements.push({
     label: "Driver licence",
-    mark: noRecord ? "unknown" : licence?.code === "licence_expired" ? "missing" : licence ? "unknown" : "held",
-    detail: noRecord ? "No operator record linked to you" : licence?.detail ?? null,
+    mark: !me ? "unknown" : licence?.code === "licence_expired" ? "missing" : licence ? "unknown" : "held",
+    detail: !me ? "Not checked yet" : licence?.detail ?? null,
   });
   for (const q of post.requiredQualifications) {
     const expired = reasons.find(r => r.code === "qualification_expired" && mentions(r.detail, q));
@@ -206,7 +214,11 @@ export function presentOpenWork(post: PostForCard, me: PreviewForCard | null, of
     if (r.code === "on_approved_leave") requirements.push({ label: "Not on leave", mark: "missing", detail: r.detail });
     if (r.code === "not_rostered") requirements.push({ label: "Rostered on", mark: "missing", detail: r.detail });
     if (r.code === "overlaps_existing") requirements.push({ label: "No other work at this time", mark: "missing", detail: r.detail });
-    if (r.code.startsWith("readiness_blocked:")) requirements.push({ label: r.detail, mark: "missing", detail: null });
+    if (r.code === "wrong_role") requirements.push({ label: `Role: ${post.requiredRole}`, mark: "missing", detail: r.detail });
+    if (r.code === "not_in_organization") requirements.push({ label: "In this organization", mark: "missing", detail: r.detail });
+  }
+  for (const b of me?.readinessBlockers ?? []) {
+    requirements.push({ label: b.detail, mark: "missing", detail: "A readiness finding — dispatch's check decides it when the work is given" });
   }
   for (const capability of me?.readinessNotEvaluated ?? []) {
     requirements.push({ label: capability, mark: "unknown", detail: "Not evaluated — checked when the work is given" });
@@ -214,21 +226,24 @@ export function presentOpenWork(post: PostForCard, me: PreviewForCard | null, of
 
   const verdict: OpenWorkCard["verdict"] =
     !me ? { label: "Not checked yet", tone: "unknown" }
-    : me.verdict === "eligible" ? { label: "Eligible from what is on record", tone: "ok" }
-    : me.verdict === "ineligible" ? { label: "Not eligible from what is on record", tone: "blocked" }
-    : { label: "Not established — the readiness check decides when the work is given", tone: "unknown" };
+    : eligible ? { label: "Eligible from what is on record", tone: "ok" }
+    : me.verdict === "unknown" ? { label: "Not established from what is on record — that refuses, as a failed check does", tone: "unknown" }
+    : { label: "Not eligible from what is on record", tone: "blocked" };
 
   const excluding = reasons.find(r => EXCLUDING.has(r.code));
+  const first = excluding ?? reasons[0];
   const open = post.status === "open";
-  const canRespond = open && me?.verdict !== "ineligible";
+  // Saying you would take it is refused unless the rule says you may; declining never is.
+  const canRespond = open && eligible;
   const canDecline = open;
   const actionNote = !open ? `This post is ${post.status}; it takes no responses`
-    : me?.verdict === "ineligible" && excluding ? `A recorded fact excludes you: ${excluding.detail}. You can still decline.`
+    : me && !eligible && first ? `${excluding ? "A recorded fact excludes you" : "Not established"}: ${first.detail}. You can still decline.`
     : null;
+  const notes = (me?.availabilityNotes ?? []).map(n => n.detail);
 
   return {
     postRef: post.postRef, title: post.title, facts, requirements, verdict,
-    availability: AVAILABILITY_WORDS[me?.availability ?? "undeclared"] ?? AVAILABILITY_WORDS.undeclared!,
+    availability: [AVAILABILITY_WORDS[me?.availability ?? "undeclared"] ?? AVAILABILITY_WORDS.undeclared!, ...notes].join(". "),
     canRespond, canDecline, actionNote,
     offer: offer ? { offerRef: offer.offerRef, label: OFFER_LABELS[offer.status] ?? "Offer status not recognised by this version", answerable: offer.status === "offered" } : null,
   };

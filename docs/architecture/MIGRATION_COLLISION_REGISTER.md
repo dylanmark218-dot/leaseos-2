@@ -22,36 +22,27 @@ other claimant takes the next number free on `main` *and* on all open branches a
 Reserved slots `0016`/`0017` are never used (CI gate 0). `0094`, `0095` and `0098` are historical gaps,
 and `0157` is historically used twice. None of those is reused.
 
-## Claim: 0205 and 0206 (Company Board + Open Work, 2026-09-25, `main` = `9569195`)
+## Current state (2026-10-01, `main` = `b93dea7`, scan at LA-1a)
 
-`main` migration head: **`0198_requirement_verification.sql`**. The scan above, rerun against `main` and every remote
-branch at this integration, found the highest claim anywhere to be `0204` (`driver-portfolio-credential-wallet`).
-
-| Number | Migration file | Branch | Was | Why it moved | Status |
-|---|---|---|---|---|---|
-| 0205 | `0205_board_membership.sql` | `claude/leaseos-communications-marketplace-p8ptqw` | `0182` | `0182` was claimed earlier by document-control-architecture (2026-09-24 01:11), safety-program-builder (01:25), customer-contract-rates (01:47) and integration-hub (01:49); this branch's claim was 01:52 | renumbered; PR against `main` |
-| 0206 | `0206_open_work_offers_availability.sql` | `claude/leaseos-communications-marketplace-p8ptqw` | `0183` | `0183` was claimed earlier by document-control-architecture (01:30), customer-contract-rates (01:47) and integration-hub (01:49); this branch's claim was 01:52 | renumbered; PR against `main` |
-
-Resolved on claim order, the SEC-004 precedent (`0185`): a number keeps its claimant when it was free everywhere at
-the claim, and this branch's `0182`/`0183` were not. `0184` was only ever *reserved* by this branch and never
-written; it is released and is not this feature's (`integration-hub`, `customer-contract-rates` hold it). The
-remaining `0182`/`0183`/`0184` claimants are unchanged by this entry. File contents unchanged; names only.
-
-**Next free number for new work: `0207`** (re-check with the scan before committing).
-
-## Current state (2026-09-25, `main` = `88608f3`, scan at C1b-2b)
-
-`main` migration head: **`0194_webhook_secret_ref.sql`**. `main` holds `0189` (C1b-1) and `0191`–`0194`
-(secret management). Numbers claimed by open branches above the head:
+`main` migration head: **`0209_operating_zone_scope.sql`**. `main` holds `0189`, `0191`–`0196`, `0198`,
+and `0209`. LA-1a claims `0202` and `0203` on this branch; both are below the current main head and do
+not collide with a main migration:
 
 | Number | Migration file | Branch | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|
-| 0195 | `0195_document_control_register.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
-| 0196 | `0196_document_control_numbering.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
-| 0197 | `0197_knowledge_provenance.sql` | `claude/leaseos-intelligence-engine-cr2fg1` | open branch | none (touches `knowledgeSources`/`knowledgeChunks`, new `knowledgeSnapshots`; C1b-2b does not touch those) | — |
-| 0198 | `0198_requirement_verification.sql` | `claude/leaseos-compliance-survey-5faxe8` (C1b-2b) | this branch | none | keeps 0198 |
+| 0202 | `0202_live_assist_sessions.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0202 |
+| 0203 | `0203_live_assist_events_append_only.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0203 |
 
-**Next free number for new work: `0199`** (re-check with the scan before committing). The 2026-09-24 table below
+**2026-09-25 (later), on merging main into `claude/leaseos-auth-workspace-system-t008ad` (#64):** its
+`0170_organization_scoped_role_grants.sql` and `0175_organization_invitations.sql` collided with main's
+`0170_dispatch_role_types` (#9) and `0175_session_families` (#30). Per the rule of thumb they were renumbered
+to **`0207`** and **`0208`**, the first slots free on main and on every open branch (the scan then showed
+`0199`–`0206` claimed: `0199`–`0201` mechanic-portal, `0202`–`0204` driver-portfolio, `0205`–`0206`
+communications-marketplace). `scripts/verify-migration-0170.sh` became `verify-migration-0207.sh`. Still
+open, not touched here: `0202`/`0203` are claimed twice — driver-portfolio (#16) and
+`claude/live-assist-architecture-qg4jgp` (no PR). Next free number at that time: `0209` (since taken by main for P0-A2.1; see the 2026-10-01 section below — next free is `0210`).
+
+**Next free number for new work: `0210`** (re-check with the scan before committing). The 2026-09-24 table below
 is kept for history; several of its claims have since merged or been renumbered by their authors.
 
 ## Earlier state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
@@ -254,3 +245,20 @@ number free everywhere.
 
 * **2026-10-01 (P0-A2.1)**: claimed `0209` (`operatingZones.orgRef`, nullable; NULL = the historical single
   tenant, as 0132 and 0148), recorded in the commit that creates the migration.
+
+## Claim: 0217–0219 (Customer, Contract and Rate Management, 2026-10-01)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0217 | `0217_customer_account_profile.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0217 |
+| 0218 | `0218_customer_contracts_rate_sheets.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0218 |
+| 0219 | `0219_job_commercial_context.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0219 |
+
+Written as `0182`–`0184` on 2026-09-24, when they were the first numbers free everywhere. By the merge of
+`main` (`c3f088b`) three other open branches held `0182`–`0184` (`document-control-architecture`,
+`integration-hub-subsystem`, `safety-compliance-program-builder`) and the highest claim on any remote ref
+was `0216`: `claude/relaxed-carson-qfcopf` took `0214` and `claude/leaseos-sign-attest-design-5993ar`
+took `0215`–`0216` while this merge was being gated, the second of them minutes before this branch
+pushed `0215`–`0217`. As the later, unmerged claimant this branch moved again, to the first
+three numbers free on `main` and on every open branch. No other branch was renumbered.
+

@@ -36,6 +36,12 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   // in-window dates only, so a departed date is already a non-event and dropping it from the
   // record would only lose the evidence that it was certified while it still mattered.
   "server/cash.test.ts": { dates: ["2026-09-25", "2026-09-28", "2026-09-30", "2026-10-02", "2026-10-10", "2026-10-20", "2026-11-20"], verdict: "clock_independent", reason: "statement periods and END are fixed ranges compared with each other, not with now" },
+  // Reviewed 2026-09-24, when 2026-10-15 came into the window as the clock advanced.
+  // All three are explicit parameters: 2026-10-31 is the fiscalYearEnd handed to
+  // buildSchedule and asserted as a string, 2026-10-15 is an explicit `asOf`, and
+  // 2026-10-20 is an explicit `disposedAt`. Each is compared with the others and
+  // with the fixed fiscal year, never with now. The file's real clock reads mint a
+  // key and stamp grantedAt/acquiredAt, and take part in none of those comparisons.
   "server/auditPackage.test.ts": { dates: ["2026-09-30"], verdict: "clock_independent", reason: "periodFrom/periodTo bound the package; nothing compares them with now" },
   "server/bulkFuel.test.ts": { dates: ["2026-09-30"], verdict: "clock_independent", reason: "statement period and anomaly window are fixed ranges" },
   "server/purchasingAp.test.ts": { dates: ["2026-09-30", "2026-10-02", "2026-10-08"], verdict: "clock_independent", reason: "fourWayMatch compares dates with each other, not with now" },

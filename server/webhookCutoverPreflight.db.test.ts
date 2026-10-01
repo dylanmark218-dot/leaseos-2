@@ -25,6 +25,7 @@ import {
 import { migrateWebhookSecrets, webhookSecretReadiness } from "./webhookSecretMigration";
 import { webhookCutoverPreflight, webhookCutoverPreflightFromEnvironment } from "./webhookCutoverPreflight";
 import { createEnvironmentKeyProvider, type KeyDescriptor, type SecretKeyProvider, type SecretPurpose } from "./_core/secretCrypto";
+import { fakeManagedKeyBackend } from "./_core/managedKeyBackend.fake";
 import { signPayload, verifySignature } from "./_core/integrationGateway";
 import { encryptSecret as legacyEnc } from "./_core/externalIdentityPolicy";
 import { createSecret, describeSecret, disableSecret } from "./secretStore";
@@ -280,7 +281,15 @@ d("the representative backfill — a production-shaped mix, bounded batches, not
   });
 
   it("the run to completion migrates every legacy row it can, reports the one it cannot, and stops", async () => {
-    const result = await migrateWebhookSecrets({ ...K, batchSize: 3 });
+    /*
+     * A whole-table run in a shared database. Other suites leave legacy rows encrypted under their
+     * own test keys, which fail under this suite's; a small batch made only of those would trip the
+     * per-batch no-progress break before this suite's rows were reached (seen with batchSize 3
+     * after a gateway suite left fifteen revoked rows). A wide batch keeps the property under test
+     * — "my rows migrate, the corrupt one is reported" — independent of what else is in the table,
+     * the same way E2/E9 use batchSize 50/500.
+     */
+    const result = await migrateWebhookSecrets({ ...K, batchSize: 500 });
     const corrupt = fixtures.find(f => f.label.startsWith("corrupt"))!;
     expect(result.failures.some(f => f.subscriptionRef === corrupt.ref), "the corrupt row is reported by reference").toBe(true);
     expect(result.complete, "a run with a failure never claims completion").toBe(false);
@@ -497,7 +506,7 @@ d("S2E2-T12..T14 — the production write, through the real store", () => {
     await expect(createSecret({ purpose: "WEBHOOK_SECRET", plaintext: "x", keys: envKeys, isProduction: true })).rejects.toThrow(/managed key provider/);
     expect(await count()).toBe(n0);
     const report = await webhookCutoverPreflightFromEnvironment(process.env, { orgRefs: [org("none")] });
-    expect(report.managedKeyProvider).toMatchObject({ ready: false, kind: "environment", activeWebhookKeyId: "webhook-v1" });
+    expect(report.managedKeyProvider).toMatchObject({ ready: false, kind: "environment", source: "configuration", backend: null, activeWebhookKeyId: "webhook-v1" });
     expect(report.productionCanonicalWrite).toMatchObject({ possible: false, reason: expect.stringMatching(/managed key provider/) });
   });
 
@@ -517,7 +526,8 @@ d("S2E2-T12..T14 — the production write, through the real store", () => {
     const noWebhook = managedFake({ MFA_SECRET: { keyId: "mfa-v1", hex: hexKey("9") } });
     await expect(createSecret({ purpose: "WEBHOOK_SECRET", plaintext: "x", keys: noWebhook, isProduction: true })).rejects.toThrow(/no active key configured for WEBHOOK_SECRET/);
     const report = await webhookCutoverPreflight({ keys: noWebhook, legacyKey: LEGACY, scope: { orgRefs: [org("none")] } });
-    expect(report.managedKeyProvider).toMatchObject({ ready: false, kind: "managed", activeWebhookKeyId: null, blockers: ["no active WEBHOOK_SECRET key is configured"] });
+    expect(report.managedKeyProvider).toMatchObject({ ready: false, kind: "managed", source: "supplied", activeWebhookKeyId: null });
+    expect(report.managedKeyProvider.blockers).toContain("no active WEBHOOK_SECRET key is configured");
     expect(report.productionCanonicalWrite.possible).toBe(false);
   });
 });
@@ -529,10 +539,21 @@ d("S2E2-T17 — fleet convergence cannot be silently assumed", () => {
     await subscription({ legacySecret: "legacy-paused", status: "paused", orgRef: o });
     await migrateWebhookSecrets({ ...K, batchSize: 50 });
 
-    const report = await webhookCutoverPreflight({ keys: managed, legacyKey: LEGACY, scope: { orgRefs: [o] } });
+    /*
+     * S2-KMS-A: "every other component ready" now means the provider came from configuration
+     * through the managed bootstrap — a test backend unwrapping the same key bytes the rows were
+     * written under — not a provider handed to the preflight. That is the only path that counts.
+     */
+    const fake = fakeManagedKeyBackend();
+    const managedEnv = {
+      ...process.env,
+      LEASEOS_SECRET_KEYS_SOURCE: "managed",
+      LEASEOS_MANAGED_KEYS: JSON.stringify({ backend: fake.backend.name, keys: { WEBHOOK_SECRET: { active: { keyId: "webhook-v1", wrapped: fake.wrap(Buffer.from(hexKey("7"), "hex")), backendKeyRef: fake.kekRef } } } }),
+    };
+    const report = await webhookCutoverPreflightFromEnvironment(managedEnv, { orgRefs: [o] }, { [fake.backend.name]: fake.backend });
 
     expect(report.webhookData.ready, "data is ready").toBe(true);
-    expect(report.managedKeyProvider, "provider is ready").toMatchObject({ ready: true, kind: "managed", activeWebhookKeyId: "webhook-v1" });
+    expect(report.managedKeyProvider, "provider is ready").toMatchObject({ ready: true, kind: "managed", source: "configuration", backend: "test-fake", activeWebhookKeyId: "webhook-v1" });
     expect(report.existingCanonicalSecrets, "references resolve").toMatchObject({ resolvable: true, checked: 2, unresolvable: [] });
     expect(report.productionCanonicalWrite, "the write is possible").toEqual({ possible: true, keyId: "webhook-v1" });
 
@@ -540,6 +561,20 @@ d("S2E2-T17 — fleet convergence cannot be silently assumed", () => {
     expect(report.cutoverAllowed).toBe(false);
     expect(report.blockers).toHaveLength(1);
     expect(report.blockers[0]).toMatch(/^fleet convergence not provable:/);
+  });
+
+  it("KMS-T15. a supplied managed fake proves the contract and is never counted as production readiness", async () => {
+    const o = org("kms15");
+    const report = await webhookCutoverPreflight({ keys: managed, legacyKey: LEGACY, scope: { orgRefs: [o] } });
+    expect(report.managedKeyProvider).toMatchObject({ ready: false, kind: "managed", source: "supplied", backend: null, activeWebhookKeyId: "webhook-v1" });
+    expect(report.managedKeyProvider.blockers).toEqual(["key provider was supplied to the preflight (a contract check), not resolved from this process's configuration"]);
+    // The write probe still answers the contract question honestly.
+    expect(report.productionCanonicalWrite).toEqual({ possible: true, keyId: "webhook-v1" });
+    expect(report.blockers.some(b => /supplied to the preflight/.test(b))).toBe(true);
+
+    // And a managed source with no backend in the build is the production truth today: refused, never environment.
+    const noAdapterEnv = { ...process.env, LEASEOS_SECRET_KEYS_SOURCE: "managed", LEASEOS_MANAGED_KEYS: JSON.stringify({ backend: "test-fake", keys: {} }) };
+    await expect(webhookCutoverPreflightFromEnvironment(noAdapterEnv, { orgRefs: [o] })).rejects.toThrow(/no managed key backend named "test-fake" exists in this build/);
   });
 
   it("the verdict is derived from the components and is never a stored field", async () => {

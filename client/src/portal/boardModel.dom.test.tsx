@@ -82,9 +82,12 @@ describe("the open-work card", () => {
     expect(marks(c)).toMatchObject({ H2S: "✓", "First Aid": "?", TDG: "✗" });
   });
 
-  it("marks everything ? for a person with no operator record, and for a card not yet checked", () => {
-    const none = presentOpenWork(post(), me({ verdict: "unknown", reasons: [{ code: "no_operator_record", detail: "x" }] }), null);
+  it("marks the licence ? for a person with no operator record, and everything ? for a card not yet checked", () => {
+    // SPINE item 2: the one rule reports a missing operator record as no_licence_recorded.
+    const none = presentOpenWork(post(), me({ verdict: "unknown", reasons: [{ code: "no_licence_recorded", detail: "No licence on record — this cannot be established as current" }] }), null);
     expect(none.requirements[0]).toMatchObject({ label: "Driver licence", mark: "unknown" });
+    expect(none.canRespond).toBe(false);
+    expect(none.canDecline).toBe(true);
     const unchecked = presentOpenWork(post(), null, null);
     expect(unchecked.requirements.every(r => r.mark === "unknown")).toBe(true);
     expect(unchecked.verdict.label).toBe("Not checked yet");

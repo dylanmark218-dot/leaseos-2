@@ -37,10 +37,40 @@ export const contentHashOf = (v: unknown): string => createHash("sha256").update
 /** Whether absence from a response means the publisher considers it over. */
 export type SnapshotSemantics = "full" | "incremental";
 
+/**
+ * Why a run did not produce a usable, complete listing — named, because a health line that says
+ * "failed" cannot be acted on. Each one wants a different first question: is the network down
+ * (`unreachable`, `timeout`), is our key wrong (`credential_rejected`), are we too fast
+ * (`rate_limited`), did the publisher change its shape (`parser_rejected`), or did it answer with
+ * less than the whole listing (`snapshot_incomplete`)?
+ */
+export type FeedFailureCategory =
+  | "unreachable"
+  | "timeout"
+  | "destination_refused"
+  | "credential_rejected"
+  | "rate_limited"
+  | "http_error"
+  | "unexpected_response"
+  | "parser_rejected"
+  | "snapshot_incomplete";
+
+export const FEED_FAILURE_CATEGORIES: readonly FeedFailureCategory[] = [
+  "unreachable", "timeout", "destination_refused", "credential_rejected", "rate_limited",
+  "http_error", "unexpected_response", "parser_rejected", "snapshot_incomplete",
+];
+
 export type FetchResult =
   | { status: "ok"; httpStatus: number; body: string; entityTag: string | null; sourceVersion: string | null }
   | { status: "not_modified"; httpStatus: 304; entityTag: string | null }
-  | { status: "error"; httpStatus: number | null; error: string };
+  | { status: "error"; httpStatus: number | null; error: string; category?: FeedFailureCategory; retryAfterSeconds?: number | null };
+
+/**
+ * Thrown by a parser when a response is only part of a listing the ingester would treat as whole.
+ * Failing the run withdraws nothing; ingesting a part as the whole withdraws everything not in it.
+ * Lives here, beside the withdrawal it protects, so every parser speaks the same refusal.
+ */
+export class IncompleteSnapshotError extends Error {}
 
 export interface FeedFetcher {
   /** The only place a credential is ever read, and it is read from the environment there. */
@@ -75,6 +105,16 @@ export type FeedRun = {
   sourceVersion: string | null;
   entityTag: string | null;
   errorText: string | null;
+  /** Null when nothing went wrong. Set on a failure, and on a success whose withdrawal was held. */
+  failureCategory: FeedFailureCategory | null;
+  /**
+   * True only when this run was a full listing that was allowed to withdraw what it no longer
+   * mentions. False when a full listing was received but withdrawal was held; null when no listing
+   * was received at all, or the feed is incremental and never withdraws.
+   */
+  snapshotComplete: boolean | null;
+  /** The publisher's Retry-After on a refusal, when it sent one. */
+  retryAfterSeconds?: number | null;
 };
 
 /** Turn one publisher record into an advisory, or say why it cannot be one. */
@@ -117,34 +157,45 @@ export async function ingestFeed(input: {
     recordsSeen: 0, recordsAccepted: 0, recordsRejected: 0, rejections: [],
     quotaUsedInWindow: null, quotaLimit: source.rateLimitCalls, responseHash: null,
     sourceVersion: null, entityTag: null, errorText: null,
+    failureCategory: null, snapshotComplete: null,
   };
+  const empty = { accepted: 0, unchanged: 0, superseded: 0, withdrawn: 0, rejected: 0 };
 
   /* 1. May we poll at all? A refusal is recorded, not swallowed. */
   const decision = shouldPoll(source, input.state, at, input.credential);
   if (!decision.poll) {
     const run: FeedRun = { ...base, outcome: "refused", refusedBecause: decision.blockedBy, errorText: decision.reason, finishedAt: at };
     await input.store.recordRun(run);
-    return { run, state: input.state, accepted: 0, unchanged: 0, superseded: 0, withdrawn: 0, rejected: 0 };
+    return { run, state: input.state, ...empty };
   }
 
-  /* 2. Fetch. */
+  /* 2. Fetch. Every call counts against the publisher's limit, whatever it answered. */
   let result: FetchResult;
   try {
     result = await input.fetcher.fetch({ source, entityTag: input.lastEntityTag ?? null });
   } catch (e) {
-    result = { status: "error", httpStatus: null, error: (e as Error).message };
+    result = { status: "error", httpStatus: null, error: (e as Error).message, category: "unreachable" };
   }
-  const state = recordCall(input.state, at, result.status === "error" ? { ok: false, reason: result.error } : { ok: true }, source);
+  /*
+   * The call is recorded once, after we know whether it produced something usable. A response that
+   * would not parse, or was only part of the listing, is a failed collection for health and backoff
+   * even though the HTTP exchange itself completed — "last success" must mean a listing we used.
+   */
+  const fail = (run: FeedRun, extra: { retryAfterSeconds?: number | null } = {}) => {
+    const state = recordCall(input.state, at, { ok: false, reason: run.errorText ?? run.failureCategory ?? "failed", retryAfterSeconds: extra.retryAfterSeconds ?? null }, source);
+    return { run: { ...run, quotaUsedInWindow: state.recentCallsAt.length, retryAfterSeconds: extra.retryAfterSeconds ?? null }, state };
+  };
 
   if (result.status === "not_modified") {
-    const run: FeedRun = { ...base, outcome: "not_modified", httpStatus: 304, entityTag: result.entityTag, finishedAt: new Date(at.getTime()) };
+    const state = recordCall(input.state, at, { ok: true }, source);
+    const run: FeedRun = { ...base, outcome: "not_modified", httpStatus: 304, entityTag: result.entityTag, quotaUsedInWindow: state.recentCallsAt.length, finishedAt: new Date(at.getTime()) };
     await input.store.recordRun(run);
-    return { run, state, accepted: 0, unchanged: 0, superseded: 0, withdrawn: 0, rejected: 0 };
+    return { run, state, ...empty };
   }
   if (result.status === "error") {
-    const run: FeedRun = { ...base, outcome: "failed", httpStatus: result.httpStatus, errorText: result.error, finishedAt: new Date(at.getTime()) };
-    await input.store.recordRun(run);
-    return { run, state, accepted: 0, unchanged: 0, superseded: 0, withdrawn: 0, rejected: 0 };
+    const f = fail({ ...base, outcome: "failed", httpStatus: result.httpStatus, errorText: result.error, failureCategory: result.category ?? "unreachable", finishedAt: new Date(at.getTime()) }, { retryAfterSeconds: result.retryAfterSeconds });
+    await input.store.recordRun(f.run);
+    return { ...f, ...empty };
   }
 
   /* 3. Parse and normalize. A record that will not normalize is counted. */
@@ -153,9 +204,15 @@ export async function ingestFeed(input: {
   try {
     raws = input.parse(result.body);
   } catch (e) {
-    const run: FeedRun = { ...base, outcome: "failed", httpStatus: result.httpStatus, responseHash: contentHashOf(result.body), errorText: `Response did not parse: ${(e as Error).message}`, finishedAt: new Date(at.getTime()) };
-    await input.store.recordRun(run);
-    return { run, state, accepted: 0, unchanged: 0, superseded: 0, withdrawn: 0, rejected: 0 };
+    const incomplete = e instanceof IncompleteSnapshotError;
+    const f = fail({
+      ...base, outcome: "failed", httpStatus: result.httpStatus, responseHash: contentHashOf(result.body),
+      errorText: incomplete ? `Incomplete listing, nothing withdrawn: ${(e as Error).message}` : `Response did not parse: ${(e as Error).message}`,
+      failureCategory: incomplete ? "snapshot_incomplete" : "parser_rejected", snapshotComplete: incomplete ? false : null,
+      finishedAt: new Date(at.getTime()),
+    });
+    await input.store.recordRun(f.run);
+    return { ...f, ...empty };
   }
 
   const normalized: (RoadAdvisory & { contentHash: string })[] = [];
@@ -169,8 +226,12 @@ export async function ingestFeed(input: {
   const existing = await input.store.activeByExternalRef(source.sourceKey);
   const byExternal = new Map(existing.map(e => [e.externalRef, e]));
   let accepted = 0, unchanged = 0, superseded = 0, withdrawn = 0;
+  // Within one listing an id appears once; a publisher that repeats one is answered once.
+  const seenThisRun = new Set<string>();
 
   for (const adv of normalized) {
+    if (seenThisRun.has(adv.externalRef)) continue;
+    seenThisRun.add(adv.externalRef);
     const held = byExternal.get(adv.externalRef);
     if (held && held.contentHash === adv.contentHash) { unchanged++; continue; }
     const advisoryRef = ref("ADV");
@@ -179,20 +240,39 @@ export async function ingestFeed(input: {
     if (held) { await input.store.supersede(held.advisoryRef, advisoryRef); superseded++; }
   }
 
-  /* 5. Absence means the publisher considers it over — but only for a snapshot. */
+  /*
+   * 5. Absence means the publisher considers it over — but only for a snapshot we can trust whole.
+   *
+   * Two listings are full in shape and not in substance. One with a rejected record: that record's
+   * id is unknown to us, so the advisory it would have refreshed looks absent and would be withdrawn
+   * by a parser defect. And an empty listing while advisories are held: an outage page or a quiet
+   * error answered `[]` is far likelier than every closure in a province ending in the same minute.
+   * Both keep what is held, ingest what arrived, and say the snapshot was not complete.
+   */
+  let snapshotComplete: boolean | null = null;
+  let heldBecause: string | null = null;
   if (input.snapshotSemantics === "full") {
-    const seen = new Set(normalized.map(a => a.externalRef));
-    for (const held of existing) {
-      if (!seen.has(held.externalRef)) { await input.store.withdraw(held.advisoryRef); withdrawn++; }
+    if (rejections.length > 0 && existing.length > 0) heldBecause = `${rejections.length} record(s) were rejected, so absence cannot be read as an ending; nothing withdrawn`;
+    else if (raws.length === 0 && existing.length > 0) heldBecause = `the listing was empty while ${existing.length} advisory(ies) are active — an empty answer is not read as all-clear; nothing withdrawn`;
+    if (heldBecause) {
+      snapshotComplete = false;
+    } else {
+      snapshotComplete = true;
+      for (const held of existing) {
+        if (!seenThisRun.has(held.externalRef)) { await input.store.withdraw(held.advisoryRef); withdrawn++; }
+      }
     }
   }
 
+  const ok = heldBecause === null || raws.length > 0;
+  const state = ok ? recordCall(input.state, at, { ok: true }, source) : recordCall(input.state, at, { ok: false, reason: heldBecause! }, source);
   const run: FeedRun = {
     ...base,
-    outcome: "succeeded", httpStatus: result.httpStatus,
+    outcome: ok ? "succeeded" : "failed", httpStatus: result.httpStatus,
     recordsSeen: raws.length, recordsAccepted: accepted, recordsRejected: rejections.length, rejections,
     responseHash: contentHashOf(result.body), sourceVersion: result.sourceVersion, entityTag: result.entityTag,
     quotaUsedInWindow: state.recentCallsAt.length, finishedAt: new Date(at.getTime()),
+    errorText: heldBecause, failureCategory: heldBecause ? "snapshot_incomplete" : null, snapshotComplete,
   };
   await input.store.recordRun(run);
   return { run, state, accepted, unchanged, superseded, withdrawn, rejected: rejections.length };
@@ -205,9 +285,9 @@ export async function ingestFeed(input: {
 export function runLine(run: FeedRun): string {
   switch (run.outcome) {
     case "refused": return `${run.sourceKey}: REFUSED (${run.refusedBecause}) — ${run.errorText ?? "no reason recorded"}`;
-    case "failed": return `${run.sourceKey}: FAILED${run.httpStatus ? ` HTTP ${run.httpStatus}` : ""} — ${run.errorText ?? "no error recorded"}`;
+    case "failed": return `${run.sourceKey}: FAILED${run.httpStatus ? ` HTTP ${run.httpStatus}` : ""}${run.failureCategory ? ` [${run.failureCategory}]` : ""} — ${run.errorText ?? "no error recorded"}`;
     case "not_modified": return `${run.sourceKey}: UNCHANGED — publisher reported no change since the last collection`;
     case "succeeded":
-      return `${run.sourceKey}: OK — ${run.recordsSeen} seen, ${run.recordsAccepted} new or revised, ${run.recordsRejected} rejected${run.recordsRejected ? ` (${run.rejections[0]?.reason ?? ""})` : ""}`;
+      return `${run.sourceKey}: OK — ${run.recordsSeen} seen, ${run.recordsAccepted} new or revised, ${run.recordsRejected} rejected${run.recordsRejected ? ` (${run.rejections[0]?.reason ?? ""})` : ""}${run.snapshotComplete === false ? ` · SNAPSHOT HELD — ${run.errorText ?? "withdrawal held"}` : ""}`;
   }
 }

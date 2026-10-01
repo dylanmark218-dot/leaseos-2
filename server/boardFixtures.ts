@@ -40,6 +40,24 @@ export async function operatorFor(pool: mysql.Pool, orgRef: string | null, userI
   return id;
 }
 
+/**
+ * On the organization's crew roster: an active crew membership with no rotation, so on shift every day.
+ * The open-shift rule (SPINE item 2, `shiftEligibility`) refuses anyone not rostered.
+ */
+export async function onRoster(pool: mysql.Pool, orgRef: string | null, userId: number) {
+  const crewRef = `CR-${rnd()}${rnd()}`.slice(0, 40);
+  await pool.execute("INSERT INTO crews (crewRef, tenantId, name, createdByUserId) VALUES (?,?,?,1)", [crewRef, orgRef ?? "default", `Crew ${crewRef}`]);
+  await pool.execute("INSERT INTO crewMembers (crewRef, userId, crewRole, joinedAt) VALUES (?, ?, 'driver', NOW())", [crewRef, userId]);
+}
+
+/** A driver the one rule lets take driver work: a member, with a licensed operator record, on the roster. */
+export async function worker(pool: mysql.Pool, orgRef: string | null) {
+  const userId = await member(pool, orgRef, ["driver"]);
+  await operatorFor(pool, orgRef, userId);
+  await onRoster(pool, orgRef, userId);
+  return userId;
+}
+
 export async function job(pool: mysql.Pool, orgRef: string | null) {
   const jobCode = `JOB-${rnd()}`;
   await pool.execute("INSERT INTO jobs (orgRef, jobCode, type, mode, customer, location, status, progress) VALUES (?,?,'water_haul','transport','Acme','LSD','dispatched',0)", [orgRef, jobCode]);

@@ -30,11 +30,18 @@ async function member(role: DomainRole, orgRef: string) {
   return id;
 }
 async function org() { const o = `ORG-${rnd()}`; await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [o, o]); return o; }
+/** On the single tenant's roster — an active crew membership — which the open-shift rule requires (SPINE item 2). */
+async function onRoster(userId: number) {
+  const crewRef = `CR-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+  await pool.execute("INSERT INTO crews (crewRef, tenantId, name, createdByUserId) VALUES (?, 'default', ?, 1)", [crewRef, crewRef]);
+  await pool.execute("INSERT INTO crewMembers (crewRef, userId, crewRole, joinedAt) VALUES (?, ?, 'driver', NOW())", [crewRef, userId]);
+}
 async function operatorRow(id: number) {
   // Open Work (#59) reaches a person's operator record through `operators.userId`, and #52 reads the
   // legacy licence date alone as unverified, so a ready driver also carries a verified licence document.
   await pool.execute("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())", [id, id, `Op ${rnd()}`, "1", new Date("2028-01-01T00:00:00Z")]);
   await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Driver licence', NOW(), ?, 'verified')", [id, new Date("2028-01-01T00:00:00Z")]);
+  await onRoster(id);
 }
 async function academy(userId: number, code: string, o: { status?: string; expiresAt?: Date | null; sourceKind?: string; complianceDocumentId?: number | null; createdAt?: Date } = {}) {
   const ref = `AQ-${rnd()}${rnd()}`;

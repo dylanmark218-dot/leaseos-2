@@ -39,7 +39,15 @@ async function establishedOperator(manager: number) {
   await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Driver licence', NOW(), DATE_ADD(NOW(), INTERVAL 400 DAY), 'verified')", [operatorId]);
   await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'medical_fitness', 'Medical', NOW(), DATE_ADD(NOW(), INTERVAL 300 DAY), 'verified')", [operatorId]);
   await pool.execute("INSERT INTO hosAttestations (operatorId, dutyDate, method, statement, hoursAvailableMinutesStated, attestedByUserId) VALUES (?, UTC_DATE(), 'paper_log_reviewed', 'Reviewed the paper log for today', 600, ?)", [operatorId, manager]);
+  await onRoster(driverUser);
   return { driverUser, operatorId };
+}
+
+/** On the single tenant's crew roster, which the open-shift rule requires before work is offered (SPINE item 2). */
+async function onRoster(userId: number) {
+  const crewRef = key("CR").slice(0, 40);
+  await pool.execute("INSERT INTO crews (crewRef, tenantId, name, createdByUserId) VALUES (?, 'default', ?, 1)", [crewRef, crewRef]);
+  await pool.execute("INSERT INTO crewMembers (crewRef, userId, crewRole, joinedAt) VALUES (?, ?, 'driver', NOW())", [crewRef, userId]);
 }
 
 /**
@@ -147,7 +155,10 @@ d("the award binds the slot through the canonical binding", () => {
 
   it("marks every other live offer not selected, and tells them", async () => {
     const s = await establishedScene();
+    // A second person the open-shift rule lets take the work: licensed and on the roster.
     const other = await withRole("driver");
+    await pool.execute("INSERT INTO operators (userId, name, licenseExpiresAt) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 400 DAY))", [other, `Op ${rnd()}`]);
+    await onRoster(other);
     const c = await acknowledgedCheck(s);
     await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: s.driverUser });
     const loser = await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: other });
@@ -168,8 +179,10 @@ d("readiness is the gate", () => {
     const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, 'B. Bare')", [bare]);
     const c = await caller(s.dispatcher).dispatch.evaluate({ ...s.subject, operatorId: Number(op.insertId) });
     expect(c.verdict).toBe("blocked");
-    await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: bare });
-    const a = await award(s, { userId: bare, checkId: c.checkId });
+    // No offer: the open-shift rule would refuse one (no licence on record) before readiness is reached.
+    // Awarding without an offer, with the dispatcher's reason, puts the readiness gate in front.
+    await expect(caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: bare })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    const a = await award(s, { userId: bare, checkId: c.checkId, reason: "covering by phone" });
     expect(a).toMatchObject({ ok: false, code: "readiness_refused" });
     expect((a as { refusals: string[] }).refusals.join(" ")).toMatch(/BLOCKED/);
     expect((await rows("SELECT status FROM dispatchRoles WHERE id = ?", [s.roleId]))[0]!.status).toBe("open");
