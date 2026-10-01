@@ -11,6 +11,7 @@
  * (`shifts.post`) stay three permissions. Only the work-taking action is gated by eligibility, and
  * an answer that cannot be established refuses.
  */
+import { conflictingBookingsWhere } from "./_core/bookingConflict";
 import { effectiveQualifications } from "./qualificationReads";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -69,11 +70,9 @@ async function personFacts(d: DbOrTx, tenantId: string, post: ShiftPost, userId:
   if (op.kind === "resolved") {
     const row = (await d.select({ licenseExpiresAt: operators.licenseExpiresAt }).from(operators).where(eq(operators.id, op.operatorId)).limit(1))[0];
     licence = { kind: "recorded", expiresAt: row?.licenseExpiresAt ?? null };
-    const booked = await d.select().from(resourceBookings).where(and(
-      eq(resourceBookings.resourceType, "operator"), eq(resourceBookings.resourceRef, String(op.operatorId)),
-      lt(resourceBookings.startsAt, post.endsAt), gt(resourceBookings.endsAt, post.startsAt),
-      inArray(resourceBookings.bookingState, ["tentative", "confirmed"]),
-    )).limit(20);
+    // The one booking-conflict rule (_core/bookingConflict.ts), the same one the award re-checks.
+    const booked = await d.select().from(resourceBookings)
+      .where(conflictingBookingsWhere({ type: "operator", ref: String(op.operatorId) }, post)).limit(20);
     commitments = booked.map(b => ({ assignmentRef: `booking ${b.id}${b.postingId != null ? ` (posting ${b.postingId})` : ""}`, startsAt: b.startsAt, endsAt: b.endsAt }));
   }
 
