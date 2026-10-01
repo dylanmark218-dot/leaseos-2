@@ -26,7 +26,7 @@ not duplicated, and item 2 does not delete it.
 | `openShifts` | shift eligibility, interest | `openShiftsRouter.ts` inline | **router copy deleted**; the engine's `shiftEligibility` is the one rule (owner's ruling: the union of both), and the router enforces it |
 | `complianceDocumentValidity` | document validity | `readinessComposer` / `dispatchReadiness` / tile and other readers | **resolved by #52** (rulings B and C); every reader now takes the canonical verdict |
 
-**All four pairs are resolved** (2026-10-01). Each has one implementation; the last two were settled by the owner's rulings and applied on `claude/spine-item2-openshifts-fieldticket` (§2, §3 and "Item 2 — completion" below). Item 2 is recorded **COMPLETE** only once that branch is merged and CI on the resulting `main` commit is green; that record follows the merge.
+**All four pairs are resolved** (2026-10-01). Each has one implementation; the last two were settled by the owner's rulings and applied on `claude/spine-item2-openshifts-fieldticket` (§2, §3 and "Item 2 — completion" below). Item 2 is recorded **COMPLETE** only once that branch is merged and CI on the resulting `main` commit is green. **That condition is met; see "Item 2 — COMPLETE" at the end.**
 
 ---
 
@@ -253,3 +253,14 @@ duplications are the ones that change refusals or billing, and those wait for a 
   - added: two DB suites (5 + 13 tests);
   - extended: the structural guard;
   - migrated: the engine unit tests (20).
+
+## Item 2 — COMPLETE (recorded 2026-10-01)
+
+- **Merged.** `claude/spine-item2-openshifts-fieldticket` merged to `main` as #89 (`3f2bcec`).
+- **CI on `main`.** The push run on `3f2bcec` itself (run 638) was **cancelled**, not failed: the next merge superseded it. The following `main` commits both contain `3f2bcec` and are **green**:
+  - `c3f088b` (#90), CI run 641: success;
+  - `b35bac4` (#98, the current head), CI run 663: success.
+- So item 2 is **COMPLETE** against `b35bac4`. Every pair in the table above has one implementation on `main`, and `server/spineItem2Duplicates.test.ts` refuses a second.
+- **Open follow-up that is not item 2's:** dylanmark218-dot/leaseos-2#59 must rebase onto `shiftEligibility` (§3).
+- **Next on the SPINE:** item 3, `offlineCapability` → HS1.
+

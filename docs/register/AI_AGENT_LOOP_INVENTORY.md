@@ -13,10 +13,10 @@ verdict.
 |---|---|
 | SPINE 1: BoundaryConfirmation resolver + chain rule | **merged** (#10, `6f52b57`) |
 | SPINE 1: receipt reader + 0179 trip-stop provenance (clears the 0169 release blocker) | **merged** ([dylanmark218-dot/leaseos-2#17](https://github.com/dylanmark218-dot/leaseos-2/pull/17), `d307ba4`) |
-| SPINE 2: resolve the four duplications (`dispatchMatching`, `openShifts`, `complianceDocumentValidity`, `fieldTicket`) | **all four pairs resolved** — #52, #60 and the openShifts/signature-status rulings (`claude/spine-item2-openshifts-fieldticket`); recorded COMPLETE once main CI is green after that merges; record: `docs/register/SPINE_ITEM2_DUPLICATIONS.md` |
-| SPINE 3: `offlineCapability` → HS1 | not started |
+| SPINE 2: resolve the four duplications (`dispatchMatching`, `openShifts`, `complianceDocumentValidity`, `fieldTicket`) | **COMPLETE**: #52, #60, #89; `main` CI green on `b35bac4` (run 663); record: `docs/register/SPINE_ITEM2_DUPLICATIONS.md` |
+| SPINE 3: `offlineCapability` → HS1 | **next** |
 | SPINE 4: the rest of the spine, in path order | not started |
-| Secretary model layer ("door 2") | **held off `main`**: [dylanmark218-dot/leaseos-2#7](https://github.com/dylanmark218-dot/leaseos-2/pull/7), declared unwired |
+| Secretary model layer ("door 2") | **on `main`, declared unwired**: [dylanmark218-dot/leaseos-2#7](https://github.com/dylanmark218-dot/leaseos-2/pull/7) merged (`c626146`); `server/_core/ai/` exists, `productionWorker.ts` still registers only the enforcement handler, and `assistant.draft` still calls `invokeLLM` inline |
 
 Nothing below changes that order. None of the AI work below may start until the SPINE is wired.
 
@@ -24,15 +24,15 @@ Nothing below changes that order. None of the AI work below may start until the 
 
 **IMPLEMENTED**: reached from a mounted `roleProcedure` or the production worker, on `main`.
 **PARTIAL**: some of it is reached, and a named piece is missing.
-**DECLARED_UNWIRED**: code and tests exist, and no production caller does. "(#7)" means the code is on
-the held Secretary branch, not on `main`.
+**DECLARED_UNWIRED**: code and tests exist, and no production caller does. "(#7)" marks code that
+arrived with the Secretary layer (#7, merged `c626146`); it is on `main` and unwired.
 **MISSING**: no code.
 
 ## Inventory
 
 | Concern | Existing modules | Status | What is missing for the loop |
 |---|---|---|---|
-| **Inference provider** | Door 1: `invokeLLM()`, `server/_core/llm.ts`. It is live, has one caller (`assistant.draft`, `server/routers.ts:690`, inside a request handler), and fails open on host. Door 2: `LlmProvider`, `OpenAiCompatibleProvider`, `MockLlmProvider`, `server/_core/ai/llm/*` (#7). These fail closed. | **PARTIAL** | Door 2 on `main`. Door 1 retired from the request handler. P9.1 fail-closed hardening. |
+| **Inference provider** | Door 1: `invokeLLM()`, `server/_core/llm.ts`. It is live, has one caller (`assistant.draft`, `server/routers.ts:859` at `b35bac4`, inside a request handler), and fails open on host. Door 2: `LlmProvider`, `OpenAiCompatibleProvider`, `MockLlmProvider`, `server/_core/ai/llm/*` (#7). These fail closed. | **PARTIAL** | Door 1 retired from the request handler. P9.1 fail-closed hardening. |
 | **Model routing** | `route()` / `routeOrThrow()` / `verifierFor()`, `server/_core/modelGateway.ts`, licence-gated | **DECLARED_UNWIRED** | A registered provider. For the first slice, `LLM_BASE_URL`/`LLM_MODEL` via `fromEnv()` is enough, so routing can stay unwired. |
 | **AgentJob / run** | `agentRuns` + `agent.start` / `get` / `awaitEvent`, state set only by `TRANSITIONS` (`server/agentRouter.ts`) | **PARTIAL** | An executor. Today a run records and performs nothing, by design. |
 | **Agent steps** | `agentSteps` (planned → running → completed/blocked/failed). A plan may only name registered capabilities. | **PARTIAL** | No code advances a step past `planned`. `startedAt`/`completedAt` are never set. |
@@ -60,7 +60,7 @@ The loop is: authenticated capture → durable job → authorized context → in
 ### Preconditions (decisions and merges, not code)
 
 1. The SPINE is wired (the moratorium).
-2. #7 merged, which puts door 2 on `main` as declared-unwired code.
+2. ~~#7 merged~~ **met** (`c626146`): door 2 is on `main` as declared-unwired code.
 3. The owner's carve-out ruling on retiring `invokeLLM` from `assistant.draft`. The target is zero
    model calls in request handlers.
 4. A configured provider (`LLM_BASE_URL`, `LLM_MODEL`). P9.1 lands first, so an unconfigured
