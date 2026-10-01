@@ -20,7 +20,7 @@
  * mark them too.
  */
 
-import { classifySendFailure, queueDisposition, retryDelayMs, type QueueDisposition } from "@shared/clientContract";
+import { classifySendFailure, queueDisposition, retryDelayMs, scopeTransition, type QueueDisposition, type ScopeTransition, type SessionObservation, type SessionScope } from "@shared/clientContract";
 import type { CaptureKind, Clock, Connectivity, FileVault, Keystore, LocalCapture, LocalStore, Transport } from "./contracts";
 import { canonicalJson, sha256Hex, sha256HexOfString, toBase64 } from "./crypto";
 import { Outbox } from "./outbox";
@@ -91,11 +91,25 @@ export type SyncOutcome = {
   next: Extract<QueueDisposition, "retry" | "reauth" | "upgrade"> | null;
   /** For `retry`: the earliest time an automatic pass will try again. */
   retryAt: string | null;
+  /**
+   * Set when the pass did not send because of who the device is acting for
+   * (`scopeTransition`): `switch` — the queue belongs to another sign-in or
+   * company; `hold` — the session is not confirmed; `revoked` — access was
+   * withdrawn, so the shell should also stop showing cached records.
+   */
+  scope?: Exclude<ScopeTransition, "keep">;
 };
 
 export class SyncEngine {
   private outbox: Outbox;
-  constructor(private deps: { store: LocalStore; vault: FileVault; keystore: Keystore; transport: Transport; connectivity: Connectivity; clock: Clock; platform: "android" | "ios" | "web"; jitter?: () => number }) {
+  constructor(private deps: { store: LocalStore; vault: FileVault; keystore: Keystore; transport: Transport; connectivity: Connectivity; clock: Clock; platform: "android" | "ios" | "web"; jitter?: () => number;
+    /**
+     * Asks the server who this session is and which company it acts for —
+     * `observeSession` over `session.context`. When given, nothing is sent
+     * unless that answer matches the person and company the queue was
+     * captured under. The shell supplies it; a test rig may leave it out.
+     */
+    session?: () => Promise<SessionObservation> }) {
     this.outbox = new Outbox(deps.store, deps.vault, deps.clock);
   }
 
@@ -133,6 +147,43 @@ export class SyncEngine {
   private async requeue(localId: string, reason: string): Promise<void> {
     const latest = await this.deps.store.getCapture(localId);
     if (latest?.syncState === "syncing") await this.deps.store.putCapture({ ...latest, syncState: "queued", lastError: reason, updatedAt: this.deps.clock.now().toISOString() });
+  }
+
+  /** The person and company this device's queue was captured under, once bound. */
+  async boundScope(): Promise<Pick<SessionScope, "userRef" | "tenantId"> | null> {
+    const userRef = await this.deps.store.getMeta("scopeUserRef");
+    const tenantId = await this.deps.store.getMeta("scopeTenantId");
+    return userRef && tenantId ? { userRef, tenantId } : null;
+  }
+
+  /**
+   * Null when the pass may send. The first confirmed session binds the queue;
+   * from then on only that person in that company can hand it over. Another
+   * sign-in gets `switch` — the shell opens a separate store for it under
+   * `localNamespace` — and this queue waits for its owner. It is never
+   * re-attributed by sending it under whoever is signed in now.
+   */
+  private async checkScope(): Promise<{ transition: Exclude<ScopeTransition, "keep">; reason: string; next: SyncOutcome["next"] } | null> {
+    if (!this.deps.session) return null;
+    let observed: SessionObservation;
+    try { observed = await this.deps.session(); }
+    catch (e) { observed = classifySendFailure(e) === "unauthenticated" ? { state: "unconfirmed", why: "sign_in" } : { state: "unreachable" }; }
+    const bound = await this.boundScope();
+    const transition = scopeTransition(bound, observed);
+    if (transition === "keep") return null;
+    if (transition === "switch" && !bound && observed.state === "confirmed") {
+      await this.deps.store.setMeta("scopeUserRef", observed.scope.userRef);
+      await this.deps.store.setMeta("scopeTenantId", observed.scope.tenantId);
+      return null;
+    }
+    if (transition === "revoked") return { transition, reason: "Your access to this company was withdrawn — captures stay on the device for an administrator and are not sent", next: null };
+    if (transition === "switch") return { transition, reason: "These captures were made under another sign-in or company — they wait for that person and are not sent under this one", next: null };
+    const why = observed.state === "unconfirmed" ? observed.why : "unreachable";
+    return {
+      transition,
+      reason: why === "sign_in" ? "Sign in again to send — captures stay queued on the device" : why === "choose_organization" ? "Choose which company you are working for to send — captures stay queued on the device" : "Could not confirm your session — captures stay queued on the device",
+      next: why === "sign_in" ? "reauth" : null,
+    };
   }
 
   /** Enroll once; the server assigns the device reference and the office activates it. */
@@ -176,6 +227,9 @@ export class SyncEngine {
 
     const queued = prioritizeQueuedCaptures(await this.deps.store.listCaptures({ syncState: "queued" })).slice(0, MAX_ITEMS_PER_PACKAGE);
     if (queued.length === 0) return none("Nothing to sync", "active");
+    // Asked only when there is something to send: who is signed in, and for which company.
+    const scope = await this.checkScope();
+    if (scope) return { ...none(scope.reason, "unknown", scope.next), scope: scope.transition };
 
     // Rotate an old key before pushing with it.
     let rotated = false;

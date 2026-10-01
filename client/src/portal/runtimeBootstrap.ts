@@ -14,10 +14,15 @@ import { Outbox } from "../runtime/outbox";
 import { SyncEngine } from "../runtime/syncEngine";
 import type { OutboxStatus, QuickCaptureAction } from "./viewModels";
 import type { Transport } from "../runtime/contracts";
+import type { SessionObservation } from "@shared/clientContract";
 
 export type MountedRuntime = { kind: "native" | "browser_fallback"; outboxStatus: () => Promise<OutboxStatus>; capture: (a: QuickCaptureAction, args?: { jobId?: number | null; unitId?: number | null; fields?: Record<string, unknown>; files?: { bytes: Uint8Array; fileName: string; mimeType: string }[] }) => Promise<{ localId: string }>; syncNow: () => Promise<unknown> };
 
-export function mountBrowserFallbackRuntime(transport: Transport): MountedRuntime {
+/**
+ * `session` is `observeSession` over `session.context`. Given, the engine sends a
+ * queue only under the person and company it was captured for (shared/clientContract.ts).
+ */
+export function mountBrowserFallbackRuntime(transport: Transport, session?: () => Promise<SessionObservation>): MountedRuntime {
   const g = globalThis as { leaseosRuntime?: MountedRuntime };
   if (g.leaseosRuntime) return g.leaseosRuntime;
   const tickingClock = { now: () => new Date() };
@@ -26,7 +31,7 @@ export function mountBrowserFallbackRuntime(transport: Transport): MountedRuntim
   const store = new MemoryStore();
   const connectivity = new FlagConnectivity(true);
   const outbox = new Outbox(store, vault, tickingClock);
-  const engine = new SyncEngine({ store, vault, keystore, transport, connectivity, clock: tickingClock, platform: "web" });
+  const engine = new SyncEngine({ store, vault, keystore, transport, connectivity, clock: tickingClock, platform: "web", session });
   if (typeof window !== "undefined") {
     // The connection coming back is a reason to try now, not after the back-off.
     window.addEventListener("online", () => { connectivity.isOnline = true; void engine.syncOnce({ force: true }); });

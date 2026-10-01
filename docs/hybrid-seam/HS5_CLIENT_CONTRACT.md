@@ -58,9 +58,22 @@ and stores cached records and queued work under `localNamespace(scope)`.
 - `keep` — same user and company.
 - `switch` — different user or company: new namespace; the old queue is held for its owner and
   never uploaded under the new session.
-- `hold` — server unreachable: keep capturing locally, upload nothing until confirmed.
+- `hold` — session not confirmed (server unreachable, sign-in needed, or several organizations
+  and none chosen): keep capturing locally, upload nothing until confirmed.
 - `revoked` — stop uploading and stop showing cached records; keep the unsent queue sealed for an
   administrator. Offline availability is never permission, and never bypasses dispatch gates.
+
+**The handshake already exists.** It is `session.context` (`server/sessionRouter.ts`); HS5 adds no
+second one. `observeSession(context)` maps its states: `ready` / `no_workspace` → confirmed;
+`organization_required` → unconfirmed, choose an organization; `unauthenticated` → unconfirmed, sign
+in; `no_membership` → revoked. A test ties its input type to the server's `SessionContext`, so a
+drift fails to compile.
+
+**Wired into `SyncEngine`** through an optional `session` dependency. Before a pass sends anything,
+it asks. The first confirmed session binds the queue (`boundScope()`); from then on only that
+person, in that company, can hand it over. Any other sign-in gets `scope: "switch"`, and the queue
+waits for its owner. The shell opens a separate store for the new sign-in under `localNamespace`. It
+asks only when something is queued.
 
 ### 3. Record versions
 
@@ -119,4 +132,10 @@ visibly instead of retrying forever.
   must call it. Until they exist, a held browser runtime clears when the page reloads (memory store).
 - **Record versions are a rule, not yet a column** on every editable table; server procedures
   adopt `classifyVersionedWrite` per record type.
-- **Session scope handshake** (`SessionScope` returned to the client) is typed, not yet a procedure.
+- **No shell passes `session` yet.** `mountBrowserFallbackRuntime(transport, session)` accepts it,
+  but nothing mounts that runtime today. Each installed shell must pass
+  `() => observeSession(await session.context())`.
+- **The queue is bound at the first confirmed send, not at capture.** Captures queued on a device
+  that has never confirmed a session go to whoever confirms first. Binding at capture time needs
+  the outbox to know the session, which is a shell concern. Until the shells do that, they should
+  confirm the session before allowing a capture.

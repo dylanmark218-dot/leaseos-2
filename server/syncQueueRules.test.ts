@@ -8,7 +8,7 @@
  * re-queues it".
  */
 import { describe, expect, it } from "vitest";
-import { classifySendFailure } from "@shared/clientContract";
+import { classifySendFailure, type SessionObservation } from "@shared/clientContract";
 import { FlagConnectivity, MemoryKeystore, MemoryStore, MemoryVault, SettableClock } from "../client/src/runtime/adapters/memory";
 import { Outbox } from "../client/src/runtime/outbox";
 import { SyncEngine } from "../client/src/runtime/syncEngine";
@@ -46,7 +46,7 @@ describe("classifySendFailure", () => {
 
 type Script = { upload?: (n: number) => unknown; seal?: (n: number) => unknown; pkg?: (n: number) => unknown };
 
-function rig(script: Script = {}) {
+function rig(script: Script = {}, session?: () => Promise<SessionObservation>) {
   const clock = new SettableClock(new Date("2026-09-24T12:00:00Z"));
   const keystore = new MemoryKeystore(clock);
   const vault = new MemoryVault(keystore);
@@ -65,7 +65,7 @@ function rig(script: Script = {}) {
       return { packageRef: i.packageRef, state: "hash_verified", verified: i.items.length, rejected: 0, conflicts: 0, itemVerdicts: i.items.map(it => ({ evidenceRecordId: it.evidenceRecordId, outcome: "verified" as const })) };
     },
   };
-  const engine = new SyncEngine({ store, vault, keystore, transport, connectivity: net, clock, platform: "android", jitter: () => 0 });
+  const engine = new SyncEngine({ store, vault, keystore, transport, connectivity: net, clock, platform: "android", jitter: () => 0, session });
   const queue = async (n: number) => {
     const ids: string[] = [];
     for (let i = 0; i < n; i++) {
@@ -168,5 +168,79 @@ describe("the sync engine applies the queue rules", () => {
     down = false;
     expect(await r.engine.syncOnce({ force: true })).toMatchObject({ synchronized: 1, retryAt: null });
     expect(await r.store.getMeta("syncRetryStreak")).toBe("0");
+  });
+});
+
+describe("the sync engine sends a queue only under the person and company it was captured for", () => {
+  const as = (userRef: string, tenantId: string) => ({ state: "confirmed" as const, scope: { userRef, tenantId } });
+
+  function scoped(initial: SessionObservation) {
+    let observed: SessionObservation | Error = initial;
+    const r = rig({}, async () => { if (observed instanceof Error) throw observed; return observed; });
+    return { ...r, set: (o: SessionObservation | Error) => { observed = o; } };
+  }
+
+  it("binds the queue to the first confirmed session, and keeps sending under it", async () => {
+    const r = scoped(as("7", "acme"));
+    await r.engine.enroll();
+    await r.queue(1);
+    expect(await r.engine.syncOnce()).toMatchObject({ synchronized: 1 });
+    expect(await r.engine.boundScope()).toEqual({ userRef: "7", tenantId: "acme" });
+    await r.queue(1);
+    expect(await r.engine.syncOnce()).toMatchObject({ synchronized: 1 });
+  });
+
+  it("never sends one person's or company's queue under another sign-in", async () => {
+    const r = scoped(as("7", "acme"));
+    await r.engine.enroll();
+    await r.queue(1);
+    await r.engine.syncOnce();
+    await r.queue(2);
+    for (const other of [as("8", "acme"), as("7", "other-co")]) {
+      r.set(other);
+      const out = await r.engine.syncOnce({ force: true });
+      expect(out).toMatchObject({ attempted: false, scope: "switch" });
+      expect(out.reason).toMatch(/another sign-in or company/);
+    }
+    expect(r.calls.uploads).toBe(1);
+    expect((await r.outbox.status()).counts.queued).toBe(2);
+    expect(await r.engine.boundScope()).toEqual({ userRef: "7", tenantId: "acme" }); // not re-bound
+    r.set(as("7", "acme"));
+    expect(await r.engine.syncOnce({ force: true })).toMatchObject({ synchronized: 2 });
+  });
+
+  it("holds while the session is unconfirmed, and says why", async () => {
+    const r = scoped({ state: "unconfirmed", why: "choose_organization" });
+    await r.engine.enroll();
+    await r.queue(1);
+    const choose = await r.engine.syncOnce();
+    expect(choose).toMatchObject({ attempted: false, scope: "hold", next: null });
+    expect(choose.reason).toMatch(/Choose which company/);
+    r.set(trpcError("UNAUTHORIZED", 401));
+    expect(await r.engine.syncOnce()).toMatchObject({ scope: "hold", next: "reauth" });
+    r.set(new TypeError("Failed to fetch"));
+    expect(await r.engine.syncOnce()).toMatchObject({ scope: "hold", next: null });
+    expect(r.calls.uploads).toBe(0);
+    expect(await r.engine.boundScope()).toBeNull();          // nothing bound by an unconfirmed session
+  });
+
+  it("stops on withdrawn access and keeps the queue", async () => {
+    const r = scoped(as("7", "acme"));
+    await r.engine.enroll();
+    await r.queue(1);
+    await r.engine.syncOnce();
+    await r.queue(1);
+    r.set({ state: "revoked" });
+    const out = await r.engine.syncOnce({ force: true });
+    expect(out).toMatchObject({ attempted: false, scope: "revoked" });
+    expect((await r.outbox.status()).counts).toMatchObject({ queued: 1, synchronized: 1 });
+  });
+
+  it("does not ask the server when there is nothing to send", async () => {
+    let asked = 0;
+    const { engine } = rig({}, async () => { asked++; return as("7", "acme"); });
+    await engine.enroll();
+    expect(await engine.syncOnce()).toMatchObject({ reason: "Nothing to sync" });
+    expect(asked).toBe(0);
   });
 });

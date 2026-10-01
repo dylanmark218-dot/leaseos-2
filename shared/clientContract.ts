@@ -253,22 +253,63 @@ export function localNamespace(scope: Pick<SessionScope, "userRef" | "tenantId">
  *   switch        a different user or company signed in — open a separate
  *                 namespace; the previous one's queue is held for its owner,
  *                 never uploaded under the new session
- *   hold          the server could not be reached to ask — keep capturing
- *                 locally, upload nothing until the session is confirmed
+ *   hold          the session is not confirmed — the server could not be
+ *                 reached, the person must sign in again, or they belong to
+ *                 several companies and have not chosen one. Keep capturing
+ *                 locally, upload nothing until it is confirmed
  *   revoked       access was withdrawn — stop uploading, stop showing cached
  *                 records, keep the unsent queue sealed for an administrator.
  *                 Offline availability is never permission.
  */
 export type ScopeTransition = "keep" | "switch" | "hold" | "revoked";
 
+/** What the device learned when it asked the server who it is. */
+export type SessionObservation =
+  | { state: "confirmed"; scope: Pick<SessionScope, "userRef" | "tenantId"> }
+  | { state: "unconfirmed"; why: "sign_in" | "choose_organization" }
+  | { state: "unreachable" }
+  | { state: "revoked" };
+
 export function scopeTransition(
   cached: Pick<SessionScope, "userRef" | "tenantId"> | null,
-  current: { state: "confirmed"; scope: Pick<SessionScope, "userRef" | "tenantId"> } | { state: "unreachable" } | { state: "revoked" },
+  current: SessionObservation,
 ): ScopeTransition {
   if (current.state === "revoked") return "revoked";
-  if (current.state === "unreachable") return "hold";
+  if (current.state === "unreachable" || current.state === "unconfirmed") return "hold";
   if (!cached) return "switch";
   return localNamespace(cached) === localNamespace(current.scope) ? "keep" : "switch";
+}
+
+/**
+ * Reads the answer of `session.context` (server/sessionRouter.ts) — the
+ * existing handshake; HS5 adds no second one. Only the fields a device needs
+ * are named, structurally, so this file still imports nothing.
+ *
+ *   ready, no_workspace     one organization established → confirmed. A
+ *                           workspace is a screen, not a company; evidence
+ *                           captured for the company may still be handed over.
+ *   organization_required   several memberships, none chosen → unconfirmed
+ *   unauthenticated         → unconfirmed, sign in
+ *   no_membership           every membership ended or suspended → revoked
+ */
+export function observeSession(ctx: {
+  state: "unauthenticated" | "no_membership" | "organization_required" | "no_workspace" | "ready";
+  user: { id: number | string } | null;
+  activeOrganization: { orgRef: string } | null;
+}): SessionObservation {
+  switch (ctx.state) {
+    case "unauthenticated":
+      return { state: "unconfirmed", why: "sign_in" };
+    case "organization_required":
+      return { state: "unconfirmed", why: "choose_organization" };
+    case "no_membership":
+      return { state: "revoked" };
+    case "ready":
+    case "no_workspace":
+      // A state that claims an organization but carries none is not a confirmation.
+      if (!ctx.user || !ctx.activeOrganization) return { state: "unconfirmed", why: "sign_in" };
+      return { state: "confirmed", scope: { userRef: String(ctx.user.id), tenantId: ctx.activeOrganization.orgRef } };
+  }
 }
 
 // ---------------------------------------------------------------------------

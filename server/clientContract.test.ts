@@ -25,6 +25,7 @@ import {
   formatSupportedContracts,
   localNamespace,
   negotiateContract,
+  observeSession,
   parseClientIdentity,
   parseContractVersion,
   procedureAllowed,
@@ -36,6 +37,7 @@ import {
 } from "@shared/clientContract";
 import { contractGateDecision, trpcPathsFromUrlPath } from "./_core/clientContractGate";
 import { appRouter } from "./routers";
+import type { SessionContext } from "./_core/workspaceAccess";
 import { readFileSync } from "node:fs";
 
 const withDrain: SupportedContracts = { minMajor: 3, maxMajor: 3, maxMinorOfMaxMajor: 2, drainOnlyMajors: [2] };
@@ -125,7 +127,28 @@ describe("company scope", () => {
     expect(scopeTransition(a, { state: "confirmed", scope: { ...a, userRef: "u2" } })).toBe("switch");
     expect(scopeTransition(null, { state: "confirmed", scope: a })).toBe("switch");
     expect(scopeTransition(a, { state: "unreachable" })).toBe("hold");
+    expect(scopeTransition(a, { state: "unconfirmed", why: "sign_in" })).toBe("hold");
+    expect(scopeTransition(null, { state: "unconfirmed", why: "choose_organization" })).toBe("hold");
     expect(scopeTransition(a, { state: "revoked" })).toBe("revoked");
+  });
+});
+
+describe("observeSession reads the existing session.context handshake", () => {
+  const org = { orgRef: "acme" };
+  it("maps every session state", () => {
+    expect(observeSession({ state: "ready", user: { id: 7 }, activeOrganization: org })).toEqual({ state: "confirmed", scope: { userRef: "7", tenantId: "acme" } });
+    expect(observeSession({ state: "no_workspace", user: { id: 7 }, activeOrganization: org })).toMatchObject({ state: "confirmed" });
+    expect(observeSession({ state: "organization_required", user: { id: 7 }, activeOrganization: null })).toEqual({ state: "unconfirmed", why: "choose_organization" });
+    expect(observeSession({ state: "unauthenticated", user: null, activeOrganization: null })).toEqual({ state: "unconfirmed", why: "sign_in" });
+    expect(observeSession({ state: "no_membership", user: { id: 7 }, activeOrganization: null })).toEqual({ state: "revoked" });
+  });
+  it("does not treat a ready state with no organization as a confirmation", () => {
+    expect(observeSession({ state: "ready", user: { id: 7 }, activeOrganization: null }).state).toBe("unconfirmed");
+  });
+  it("accepts what session.context actually returns", () => {
+    // Type-level: if the server's SessionContext drifts from what observeSession reads, this stops compiling.
+    const fromServer = (c: SessionContext) => observeSession(c);
+    expect(typeof fromServer).toBe("function");
   });
 });
 
