@@ -59,7 +59,10 @@ describe("the real tree", () => {
     // v23.31 took 0217–0219 (Customer, Contract and Rate Management): 0210–0216 are claimed by open
     // branches, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0219_job_commercial_context.sql");
-    expect(headSlot(files)).toBe("0219");
+    // Mechanic Portal CP2 took 0221–0222 (defect lifecycle and its guards): 0220 is claimed by
+    // `claude/eld-compliance-intelligence-ramlrd`, so head+1 would have collided; the register records the scan.
+    expect(files).toContain("0222_defect_lifecycle_guards.sql");
+    expect(headSlot(files)).toBe("0222");
     // S2-FLEET-A: 0213 (0213_runtime_instances), claimed when main's head was 0209 and 0210–0212 were held
     // by the driver-portfolio branch; 0214–0219 landed on main afterwards, so 0213 sits below the head and
     // applies by name like 0207/0208 and 0214–0216 do.
@@ -115,8 +118,10 @@ describe("the guard catches what it exists to catch", () => {
   });
 
   it("accepts a correctly allocated next migration", () => {
-    expect(auditMigrationSlots([...files, "0220_the_next_one.sql"])).toEqual([]);
-    expect(headSlot([...files, "0220_the_next_one.sql"])).toBe("0220");
+    // The slot after the real head, whatever it is today — so this case does not need moving each checkpoint.
+    const next = String(Number(headSlot(files)) + 1).padStart(4, "0");
+    expect(auditMigrationSlots([...files, `${next}_the_next_one.sql`])).toEqual([]);
+    expect(headSlot([...files, `${next}_the_next_one.sql`])).toBe(next);
   });
 
   it("gives every tolerated duplicate a reason that says something", () => {
