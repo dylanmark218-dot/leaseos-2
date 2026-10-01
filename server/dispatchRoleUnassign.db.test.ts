@@ -55,7 +55,7 @@ async function job(orgRef: string) {
  * suite's work order invisible to its own mechanic. Explicit ids keep this suite out of the range
  * anyone hardcodes, without changing another suite to accommodate this one.
  */
-let assetId = 1_400_000_000 + Math.floor(Math.random() * 40_000_000);
+let assetId = 1_560_000_000 + Math.floor(Math.random() * 40_000_000);
 const nextAssetId = () => assetId++;
 
 async function unit(orgRef: string) {
