@@ -19,6 +19,8 @@
  * native binding and is exercised only on a device.
  */
 
+import type { AttestFieldType, AttestInputKind, AttestMarkKind, AttestSessionSubmitResponse } from "@shared/attest";
+
 export type SyncState = "saved_locally" | "queued" | "syncing" | "synchronized" | "failed" | "conflict";
 
 /** What the device knew at the moment of capture. This is historical evidence, not server authorization. */
@@ -106,7 +108,94 @@ export interface LocalStore {
   listPackages(): Promise<LocalPackage[]>;
   getMeta(key: string): Promise<string | null>;
   setMeta(key: string, value: string): Promise<void>;
+  // SA2 — Sign & Attest (docs/sign-attest/SIGN_ATTEST_DESIGN.md §6.1–6.2).
+  putSignableRevision(r: LocalSignableRevision): Promise<void>;
+  getSignableRevision(revisionRef: string): Promise<LocalSignableRevision | null>;
+  listSignableRevisions(): Promise<LocalSignableRevision[]>;
+  putAttestSession(s: LocalAttestSession): Promise<void>;
+  getAttestSession(localId: string): Promise<LocalAttestSession | null>;
+  listAttestSessions(filter?: { state?: AttestSessionSyncState | AttestSessionSyncState[] }): Promise<LocalAttestSession[]>;
 }
+
+/* ------------------------------------------------------------------ */
+/* Sign & Attest on the device (SA2)                                     */
+/* ------------------------------------------------------------------ */
+
+export type LocalSignableField = {
+  fieldRef: string; fieldKey: string; fieldType: AttestFieldType; page: number;
+  xFrac: number; yFrac: number; widthFrac: number; heightFrac: number;
+  signerRef: string | null; required: boolean; signingOrder: number | null; subjectLineRef: string | null; state: string;
+};
+export type LocalSignableSigner = { signerRef: string; displayName: string; partyKind: string; signerRole: string; requiredAuth: string; userId: number | null; state: string };
+
+/**
+ * A document revision the device downloaded to sign where there is no signal (§6.1). The hash is the
+ * server's; the page images sit in the vault; a revision not in this store cannot be signed offline,
+ * and the UI says so rather than letting a session start against nothing.
+ */
+export type LocalSignableRevision = {
+  revisionRef: string;
+  /** The server row id, when known — lets the device relate its mark files to the revision at sealing. */
+  revisionId: number | null;
+  revisionHash: string;
+  instanceRef: string;
+  subjectType: string;
+  subjectRef: string;
+  title: string;
+  pageCount: number;
+  pageGeometry: unknown;
+  pageImages: { page: number; vaultRef: string; contentHash: string; mimeType: string }[];
+  fields: LocalSignableField[];
+  signers: LocalSignableSigner[];
+  /** What the mark files are sealed against: the vault refuses a record that relates to nothing. */
+  jobId: number | null;
+  unitId: number | null;
+  fetchedAt: string;
+  scope?: CaptureScope | null;
+};
+
+export type LocalAttestMark = {
+  fieldKey: string; fieldRef: string; fieldType: AttestFieldType;
+  markKind: AttestMarkKind; inputKind: AttestInputKind; valueText: string | null;
+  /** The `signature` captures holding the stroke document and its render, when drawn. */
+  strokeCaptureId: string | null; strokeHash: string | null;
+  renderCaptureId: string | null; renderedHash: string | null;
+  canvas: { widthPx: number; heightPx: number; devicePixelRatio: number; orientation: "portrait" | "landscape" } | null;
+  pointCount: number | null; strokeCount: number | null; durationMs: number | null; pressureAvailable: boolean | null;
+  recordedAt: string;
+};
+
+/**
+ * `started` is on the device and may still change; `queued` is signed by the device key and waits
+ * for its marks to synchronize and for a connection; the rest are the capture states with the same
+ * meaning. A failed session is retained with its code — the office decides, never the device.
+ */
+export type AttestSessionSyncState = "started" | "queued" | "syncing" | "synchronized" | "failed";
+
+export type LocalAttestSession = {
+  localId: string;
+  /** `${deviceRef}:${localId}` — minted here, signed here, unique on the server. */
+  sessionRef: string;
+  revisionRef: string;
+  revisionHashAtStart: string;
+  signerRef: string;
+  authMethod: "device_auth" | "witnessed";
+  consentVersion: string;
+  marks: LocalAttestMark[];
+  startedAt: string;
+  completedAt: string | null;
+  gps: { latitude: number; longitude: number } | null;
+  /** The device key's signature over the session at completion (capture-time binding, §6.2 step 3). */
+  deviceSignature: { keyFingerprint: string; signatureP1363Base64: string; signedAt: string } | null;
+  state: AttestSessionSyncState;
+  attempts: number;
+  lastError: string | null;
+  lastCode: string | null;
+  /** The server's answer, kept verbatim: the per-mark verdicts or the refusal and its handling. */
+  serverResult: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export interface FileVault {
   /** Encrypts and stores; returns the vault reference and the SHA-256 of the plaintext. */
@@ -136,6 +225,8 @@ export interface Transport {
   uploadEvidence(input: { title: string; category: string; fileName: string; mimeType: string; dataBase64: string; latitude?: number; longitude?: number; notes?: string; clientCaptureRef: string; capturedAt: Date }): Promise<{ id: number; alreadyUploaded?: boolean }>;
   sealEvidence(input: { evidenceId: number; contentHash: string; recordType: string; relationships: { entityType: string; entityId: number; relation: string }[]; deviceId: string; devicePlatform?: string }): Promise<{ ok: true; alreadySealed: boolean; manifestHash: string | null }>;
   receivePackage(input: { deviceRef: string; packageRef: string; queuedAt: Date; signedWithFingerprint: string; signedAt: Date; nonce: string; signatureP1363Base64: string; items: { evidenceRecordId: number; declaredContentHash: string; declaredManifestHash: string; computedContentHash: string; computedManifestHash: string; captureAuthorizationClaim: CaptureAuthorizationClaim; captureAuthorizationReason?: string | null }[]; recordUpdates: { recordType: string; recordRef: string; baseVersion: number; baseValues: Record<string, unknown>; deviceValues: Record<string, unknown> }[] }): Promise<{ packageRef: string; state: string; reason?: string; verified: number; rejected: number; conflicts: number; itemVerdicts?: { evidenceRecordId: number; outcome: "verified" | "rejected"; reason?: string }[] }>;
+  /** SA2 — `attest.submitSession`: the exact bytes the device signed, and the signature. The answer is never thrown. */
+  submitAttestSession(input: { deviceRef: string; signedWithFingerprint: string; signatureP1363Base64: string; signedPayloadJson: string }): Promise<AttestSessionSubmitResponse>;
 }
 
 export interface Connectivity { online(): Promise<boolean>; }

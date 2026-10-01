@@ -174,6 +174,8 @@ function transportFor(userId: number, faults: { dropAfterUploads?: number; dropO
       }
     },
     async receivePackage(i: Parameters<Transport["receivePackage"]>[0]) { t.packages++; return c.sync.receivePackage(i) as never; },
+    // SA2 — the signing-session envelope goes to its own procedure; `attestOffline.db.test.ts` exercises it.
+    async submitAttestSession(i: Parameters<Transport["submitAttestSession"]>[0]) { return c.attest.submitSession(i); },
   };
   return t;
 }

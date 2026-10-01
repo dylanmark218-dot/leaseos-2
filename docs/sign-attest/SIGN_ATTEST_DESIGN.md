@@ -9,7 +9,9 @@
 > ledger are no longer "branch only"); `fieldTicketSignatures` carries SPINE item 2's single signed-scope
 > statement. The entity model, the offline model and the conflicts stand as written. The SA1 build and its
 > owner ruling are recorded in `docs/sign-attest/SA1_OWNER_RULING.md` and
-> `docs/sign-attest/checkpoints/SA_IMPLEMENTATION_RECORD.md`.
+> `docs/sign-attest/checkpoints/SA_IMPLEMENTATION_RECORD.md`. SA1 merged as #104; SA2 (the pad and the
+> offline session, §6–7) was built on `240b2dd` under `SA2_OWNER_RULING.md` with no migration — a drawn
+> mark is two `signature` captures (strokes, render) rather than one capture with two files (§6.2 step 2).
 **Branch:** `claude/leaseos-sign-attest-design-5993ar`. **No production code in this checkpoint.** Design and plan only.
 **Companion:** `docs/sign-attest/SIGN_ATTEST_IMPLEMENTATION_PLAN.md` (phases, migrations, tests, first checkpoint).
 

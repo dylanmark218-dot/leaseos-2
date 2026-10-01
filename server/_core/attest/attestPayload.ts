@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { canonicalAttestPayload } from "../deviceSignature";
 import { canonicalJson } from "../auditPackage";
-import { CONSENT_TEXTS } from "../../../shared/attest";
+import { CONSENT_TEXTS, sessionSigningObject, type SessionSigningMark } from "../../../shared/attest";
 
 export const sha256Hex = (s: string | Buffer): string => createHash("sha256").update(s).digest("hex");
 
@@ -54,13 +54,10 @@ export const markPayloadHash = (m: MarkPayloadInput): string => sha256Hex(markPa
  * hash and the device's own signing time. Nothing server-assigned (ids, server timestamps) is in it,
  * because a device cannot sign what it has not seen.
  */
-export type SessionPayloadMark = { fieldKey: string; markKind: string; strokeHash: string | null; renderedHash: string | null; valueText: string | null };
+export type SessionPayloadMark = SessionSigningMark;
 export function sessionPayloadBytes(s: { sessionRef: string; revisionRef: string; revisionHash: string; signerRef: string; marks: readonly SessionPayloadMark[]; consentTextHash: string; signedAt: Date }): Buffer {
-  return canonicalAttestPayload({
-    v: 1, sessionRef: s.sessionRef, revisionRef: s.revisionRef, revisionHash: s.revisionHash, signerRef: s.signerRef,
-    marks: s.marks.map(m => ({ fieldKey: m.fieldKey, markKind: m.markKind, strokeHash: m.strokeHash, renderedHash: m.renderedHash, valueText: m.valueText })),
-    consentTextHash: s.consentTextHash, signedAt: s.signedAt.toISOString(),
-  });
+  // SA2 — the object is the shared one, so the device builds exactly what the server hashes.
+  return canonicalAttestPayload(sessionSigningObject({ ...s, signedAt: s.signedAt.toISOString() }));
 }
 
 export function signerIdentityOf(s: { partyKind: string; userId: number | null; externalIdentityId: number | null; displayName: string }): string {

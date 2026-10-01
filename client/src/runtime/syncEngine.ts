@@ -12,7 +12,8 @@
  * Key rotation happens here too, before the push, when the key is old.
  */
 
-import { isDirectCapture, type CaptureKind, type Clock, type Connectivity, type FileVault, type Keystore, type LocalCapture, type LocalStore, type Transport } from "./contracts";
+import { ATTEST_ENVELOPE_FORMAT, ATTEST_SESSION_FORMAT, attestRefusalIsSettled, type AttestEnvelope, type OfflineAttestMark } from "@shared/attest";
+import { isDirectCapture, type CaptureKind, type Clock, type Connectivity, type FileVault, type Keystore, type LocalAttestSession, type LocalCapture, type LocalStore, type Transport } from "./contracts";
 import { canonicalJson, sha256Hex, sha256HexOfString, toBase64 } from "./crypto";
 import { Outbox } from "./outbox";
 
@@ -70,6 +71,9 @@ export function prioritizeQueuedCaptures(captures: readonly LocalCapture[]): Loc
 }
 
 
+/** SA2 — what happened to the signing sessions waiting on the device: sent, settled, refused, or still waiting for their marks. */
+export type AttestSessionSyncOutcome = { sent: number; accepted: number; rejected: number; waiting: number };
+
 export type SyncOutcome = {
   attempted: boolean;
   reason: string;
@@ -79,7 +83,10 @@ export type SyncOutcome = {
   conflicts: number;
   deviceStatus: "active" | "revoked" | "unknown";
   rotatedKey: boolean;
+  sessions: AttestSessionSyncOutcome;
 };
+
+const NO_SESSIONS: AttestSessionSyncOutcome = { sent: 0, accepted: 0, rejected: 0, waiting: 0 };
 
 export class SyncEngine {
   private outbox: Outbox;
@@ -111,8 +118,90 @@ export class SyncEngine {
     return canonicalJson({ kind: c.kind, formKey: c.formKey, title: c.title, category: c.category, fields: c.fields, capturedAt: c.capturedAt, gps: c.gps, jobId: c.jobId, unitId: c.unitId, files: c.files.map(f => ({ fileName: f.fileName, mimeType: f.mimeType, bytes: f.bytes, contentHash: f.contentHash })) });
   }
 
+  /**
+   * One pass: the queued captures as a signed package, then (SA2) every signing session whose mark
+   * files are now on the server, as its own signed envelope. A session is never sent ahead of its
+   * marks: the server verifies the strokes it holds, so it must hold them first (§6.2 step 4).
+   */
   async syncOnce(): Promise<SyncOutcome> {
-    const none = (reason: string, deviceStatus: SyncOutcome["deviceStatus"] = "unknown"): SyncOutcome => ({ attempted: false, reason, packageRef: null, synchronized: 0, failed: 0, conflicts: 0, deviceStatus, rotatedKey: false });
+    const captures = await this.syncCaptures();
+    if (!captures.attempted && (captures.deviceStatus === "revoked" || /^Offline|not enrolled/.test(captures.reason))) return { ...captures, sessions: NO_SESSIONS };
+    const deviceRef = await this.deps.store.getMeta("deviceRef");
+    if (!deviceRef) return { ...captures, sessions: NO_SESSIONS };
+    const sessions = await this.pushAttestSessions(deviceRef);
+    const attempted = captures.attempted || sessions.sent > 0;
+    const reason = captures.attempted ? captures.reason : sessions.sent > 0 ? `Sent ${sessions.sent} signing session(s)` : sessions.waiting > 0 ? `${sessions.waiting} signing session(s) waiting for their marks to synchronize` : captures.reason;
+    return { ...captures, attempted, reason, sessions };
+  }
+
+  /**
+   * SA2 — the session envelope (§6.2–6.3). Built from the session the device key signed at completion
+   * plus the evidence ids its marks received when they synchronized; signed again by the current key
+   * at send time with a fresh nonce; sent as exact bytes. The answer is a code: settled sessions
+   * (accepted, already recorded, replayed) become synchronized; anything else is retained as failed
+   * with the office's reason, because retrying cannot change a superseded document.
+   */
+  async pushAttestSessions(deviceRef: string): Promise<AttestSessionSyncOutcome> {
+    const out: AttestSessionSyncOutcome = { sent: 0, accepted: 0, rejected: 0, waiting: 0 };
+    const put = async (s: LocalAttestSession, patch: Partial<LocalAttestSession>) => { await this.deps.store.putAttestSession({ ...s, ...patch, updatedAt: this.deps.clock.now().toISOString() }); };
+    for (const s of await this.deps.store.listAttestSessions({ state: "queued" })) {
+      if (!s.deviceSignature || !s.completedAt) continue;   // not completed: nothing to send
+      const marks: OfflineAttestMark[] = [];
+      let ready = true;
+      for (const m of s.marks) {
+        const ids: (number | null)[] = [];
+        for (const capId of [m.strokeCaptureId, m.renderCaptureId]) {
+          if (!capId) { ids.push(null); continue; }
+          const c = await this.deps.store.getCapture(capId);
+          if (!c || c.syncState !== "synchronized" || c.serverEvidenceId == null) { ready = false; break; }
+          ids.push(c.serverEvidenceId);
+        }
+        if (!ready) break;
+        marks.push({
+          fieldKey: m.fieldKey, markKind: m.markKind, inputKind: m.inputKind, valueText: m.valueText,
+          strokeEvidenceRecordId: ids[0] ?? null, strokeHash: m.strokeHash, renderedEvidenceRecordId: ids[1] ?? null, renderedHash: m.renderedHash,
+          canvas: m.canvas, pointCount: m.pointCount, strokeCount: m.strokeCount, durationMs: m.durationMs, pressureAvailable: m.pressureAvailable,
+        });
+      }
+      if (!ready) { out.waiting++; continue; }
+      const nowIso = this.deps.clock.now().toISOString();
+      const nonce = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(24))).map(b => b.toString(16).padStart(2, "0")).join("");
+      const envelope: AttestEnvelope = {
+        format: ATTEST_ENVELOPE_FORMAT, deviceRef, nonce, signedAt: nowIso, deviceClockAt: nowIso,
+        session: {
+          format: ATTEST_SESSION_FORMAT, sessionRef: s.sessionRef, revisionRef: s.revisionRef, revisionHashAtStart: s.revisionHashAtStart, signerRef: s.signerRef,
+          authMethod: s.authMethod, consentVersion: s.consentVersion, marks, startedAt: s.startedAt, completedAt: s.completedAt, gps: s.gps, capturedOffline: true, deviceSignature: s.deviceSignature,
+        },
+      };
+      const signedPayloadJson = canonicalJson(envelope);
+      const signatureP1363Base64 = await this.deps.keystore.signP1363(new TextEncoder().encode(signedPayloadJson));
+      await put(s, { state: "syncing", attempts: s.attempts + 1 });
+      let r: Awaited<ReturnType<Transport["submitAttestSession"]>>;
+      try {
+        r = await this.deps.transport.submitAttestSession({ deviceRef, signedWithFingerprint: await this.deps.keystore.fingerprint(), signatureP1363Base64, signedPayloadJson });
+      } catch (e) {
+        // A dropped connection is not a refusal: back to queued, reason kept, same session next time.
+        await put(s, { state: "queued", attempts: s.attempts + 1, lastError: e instanceof Error ? e.message : String(e) });
+        continue;
+      }
+      out.sent++;
+      if (r.state !== "rejected") { out.accepted++; await put(s, { state: "synchronized", attempts: s.attempts + 1, lastError: null, lastCode: null, serverResult: r }); continue; }
+      if (attestRefusalIsSettled(r.code)) { out.accepted++; await put(s, { state: "synchronized", attempts: s.attempts + 1, lastError: null, lastCode: r.code, serverResult: r }); continue; }
+      out.rejected++;
+      if (r.handling.action === "stop_and_prompt") {
+        // A wrong clock refuses every envelope the same way: hold this session as queued with the
+        // instruction, stop sending, and let the person fix the device. Nothing is lost.
+        await put(s, { state: "queued", attempts: s.attempts + 1, lastError: r.reason, lastCode: r.code, serverResult: r });
+        break;
+      }
+      if (r.code === "DEVICE_NOT_ACTIVE" || r.code === "DEVICE_NOT_ENROLLED") await this.deps.store.setMeta("deviceStatus", "revoked");
+      await put(s, { state: "failed", attempts: s.attempts + 1, lastError: r.reason, lastCode: r.code, serverResult: r });
+    }
+    return out;
+  }
+
+  private async syncCaptures(): Promise<Omit<SyncOutcome, "sessions">> {
+    const none = (reason: string, deviceStatus: SyncOutcome["deviceStatus"] = "unknown"): Omit<SyncOutcome, "sessions"> => ({ attempted: false, reason, packageRef: null, synchronized: 0, failed: 0, conflicts: 0, deviceStatus, rotatedKey: false });
     if (!(await this.deps.connectivity.online())) return none("Offline — captures are queued on the device and will sync when a connection returns");
     const deviceRef = await this.deps.store.getMeta("deviceRef");
     if (!deviceRef) return none("Device not enrolled");

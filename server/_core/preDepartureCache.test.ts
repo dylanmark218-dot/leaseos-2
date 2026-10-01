@@ -22,6 +22,18 @@ const JOB = {
 const allCached = (fetchedAt: Date | null = minutesAgo(5)) => (): CachedState => ({ present: true, fetchedAt } as CachedState);
 
 describe("the manifest is derived from the job's own facts", () => {
+  it("SA2 — lists a signing revision as needed on site, never as a reason to hold the truck", () => {
+    expect(manifestFor(JOB).map(i => i.kind)).not.toContain("signable_document");
+    const items = manifestFor({ ...JOB, signableDocuments: [{ revisionRef: "ATR-77", title: "Field ticket FT-2026-000812", signerRole: "driver" }] });
+    const doc = items.find(i => i.kind === "signable_document")!;
+    expect(doc).toMatchObject({ ref: "ATR-77", necessity: "required_on_site", staleAfterMinutes: 240 });
+    expect(doc.label).toContain("FT-2026-000812");
+    expect(doc.because).toMatch(/cannot be signed there/);
+    const v = evaluateDeparture(items, (i: CacheItem) => (i.kind === "signable_document" ? { present: false } : { present: true, fetchedAt: minutesAgo(5) }), NOW);
+    expect(v.mayDepart).toBe(true);
+    expect(v.neededOnSite.map(i => i.ref)).toEqual(["ATR-77"]);
+  });
+
   it("asks for no SDS when the job carries no dangerous goods", () => {
     const kinds = manifestFor(JOB).map(i => i.kind);
     expect(kinds).not.toContain("sds");

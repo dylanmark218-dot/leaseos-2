@@ -13,7 +13,7 @@ import { FlagConnectivity, MemoryKeystore, MemoryVault, SettableClock } from "..
 import { BoardQueue, INTERRUPTED, NoScope, type BoardTransport } from "../client/src/runtime/boardQueue";
 import { Outbox } from "../client/src/runtime/outbox";
 import { SyncEngine } from "../client/src/runtime/syncEngine";
-import { DIRECT_CAPTURE_KINDS, type CaptureKind, type LocalCapture, type LocalPackage, type LocalStore, type SyncState, type Transport } from "../client/src/runtime/contracts";
+import { DIRECT_CAPTURE_KINDS, type AttestSessionSyncState, type CaptureKind, type LocalAttestSession, type LocalCapture, type LocalPackage, type LocalSignableRevision, type LocalStore, type SyncState, type Transport } from "../client/src/runtime/contracts";
 
 const T0 = new Date("2026-10-20T14:00:00Z");
 const A = { orgKey: "ORG-A", userId: 7 };
@@ -35,6 +35,16 @@ class DiskStore implements LocalStore {
   async listPackages() { return Object.values(this.read<Record<string, LocalPackage>>("packages", {})); }
   async getMeta(k: string) { return this.read<Record<string, string>>("meta", {})[k] ?? null; }
   async setMeta(k: string, v: string) { const all = this.read<Record<string, string>>("meta", {}); all[k] = v; this.write("meta", all); }
+  // SA2 — the Sign & Attest records, on the same disk; nothing here exercises them.
+  async putSignableRevision(r: LocalSignableRevision) { const all = this.read<Record<string, LocalSignableRevision>>("revisions", {}); all[r.revisionRef] = r; this.write("revisions", all); }
+  async getSignableRevision(ref: string) { return this.read<Record<string, LocalSignableRevision>>("revisions", {})[ref] ?? null; }
+  async listSignableRevisions() { return Object.values(this.read<Record<string, LocalSignableRevision>>("revisions", {})); }
+  async putAttestSession(s: LocalAttestSession) { const all = this.read<Record<string, LocalAttestSession>>("sessions", {}); all[s.localId] = s; this.write("sessions", all); }
+  async getAttestSession(id: string) { return this.read<Record<string, LocalAttestSession>>("sessions", {})[id] ?? null; }
+  async listAttestSessions(filter?: { state?: AttestSessionSyncState | AttestSessionSyncState[] }) {
+    const want = filter?.state == null ? null : new Set(Array.isArray(filter.state) ? filter.state : [filter.state]);
+    return Object.values(this.read<Record<string, LocalAttestSession>>("sessions", {})).filter(s => !want || want.has(s.state));
+  }
 }
 
 /** A server keyed the way the real one is: (deviceId, clientMutationId) → one record. */

@@ -79,3 +79,81 @@ and the receipt is self-verifying by hash; the register row for a signed artifac
 artifact (SA3) and a Document Control definition for it; `evidenceAccessEvents` are not written for
 receipt exports because a receipt has no evidence record yet — the export is an `artifact_exported` event
 on the chain instead.
+
+---
+
+## Checkpoint SA2 — the finger / stylus pad, and the session signed where there is no signal (no migration)
+
+**Built on** `main` `240b2dd` (SA1 merged as #104 at `e1d8fd5`; #108 after it). Owner ruling:
+`docs/sign-attest/SA2_OWNER_RULING.md`.
+
+**What it adds.** One stroke engine shared by the pad, the device and the server
+(`shared/attestStrokes.ts`): normalisation (samples closer than 0.5 px coalesce; coordinates never
+rounded), a deterministic SVG renderer (Catmull-Rom → cubic Béziers, width from pressure when a pen
+reported it, fixed number formatting, no raster) and PDF path operators for SA3. The pad
+(`client/src/attest/SignaturePad.tsx` over `strokeCapture.ts`): Pointer Events with coalesced samples,
+`pointerType` recorded as the input kind, pressure only from a pen, a captured pointer clamped into the
+canvas, one kind of pointer per document, undo, clear; it draws into an SVG so the preview a signer sees
+is the bytes the office keeps. The signing screen (`AttestSigningScreen.tsx`): one signer's pending
+fields, a pad per drawn field, typed name, checkbox, approval, comment, the server's date; the consent
+sentence beside the revision's fingerprint; Sign only when every required field is marked; decline with
+a reason. The device runtime: `LocalSignableRevision` and `LocalAttestSession` on the `LocalStore`
+(memory adapter and the test stores), `AttestSigning` (a drawn mark is two `signature` captures in the
+encrypted vault — the stroke document and its render, both hashed — and the device key signs the
+session at completion over exactly the object the server hashes), and the sync engine's second step: a
+session is sent only after its mark files are on the server, as an envelope signed again at send time
+with a fresh nonce, and the answer is a code the device acts on (a replay settles; a wrong clock holds
+the queue with the instruction; everything else is retained as failed with the office's reason). The
+server: `attest.submitSession` (`server/_core/attest/attestOffline.ts`) — exact-wire shape, device
+admission (enrolled by the active organization, bound to the caller, active, keyed), envelope freshness
+by the device's clock with the skew recorded, envelope signature, nonce, the inner signature with
+whatever key the device held at completion and no ten-minute rule, then the sealed stroke bytes
+re-parsed, re-assessed and re-rendered against the declared hashes, then SA1's service. Events written
+from an offline session carry `clockSource = device`; the session row carries `deviceClockAt`,
+`clockSkewMs`, `capturedOffline`. `preDepartureCache` lists a `signable_document` as needed on site.
+
+**What it reused.** SA1's service unchanged in its rules (`submitSessionInTx` gained three recorded
+facts and `recordRejectedSession` was lifted out of it); `sessionPayloadBytes` now canonicalises the
+shared `sessionSigningObject`, so the device and the server build one object; `signatureFreshness`,
+`verifyP256PackageSignature`, `deviceKeyEvents` for a key rotated between capture and sync,
+`deviceSyncNonces` for the nonce; the evidence upload → seal → signed-package pipeline for the mark
+files exactly as for a photograph (`clientCaptureRef` idempotency included); the universal
+`attest.sign_own` for the envelope, with `attest.witness` checked in the handler for a witnessed
+session; `handleSyncRefusal`'s shape for the device-facing handling.
+
+**What it tested.** `server/attestOffline.db.test.ts`, through the router with the memory runtime: a
+driver signs a field ticket offline (strokes, a typed name, the server's date), the marks sync first and
+the session after in one pass, the rows name the device, the method, the skew and the device's time, the
+mark names its sealed strokes and render, events say `device`, the office's view and `attest.verify`
+agree, finalize and the receipt carry it; a duplicate sync answers `already_recorded` with no second row,
+and the very same bytes replayed answer the same; two devices signing one field — first completes it,
+second is a `FIELD_ALREADY_COMPLETED` row with both marks kept; voided while offline; the device revoked
+between its marks' arrival and its session's (`DEVICE_NOT_ACTIVE`, no session row, the device stops);
+a connection dropped before the envelope (back to queued), then a clock two days wrong
+(`CLOCK_SKEW_TOO_LARGE`, held as queued with "stop and prompt", no row), then the fixed clock sending
+the same session; a consultant's drawing witnessed on the driver's tablet; a mechanic refused
+`AUTH_METHOD_INSUFFICIENT` as a row; a device that edits its session after signing it
+(`SIGNATURE_INVALID`); a vault whose stored strokes are not the sealed ones (`MARK_HASH_MISMATCH`, field
+still pending). `server/_core/attest/attestStrokes.test.ts`: normalisation, render determinism across key
+order and across finger/pen, pressure runs, the dot, number formatting, PDF operators with y flipped, the
+bytes check in every refusing shape, the pad's state (pen with pressure, finger without, unknown pointer,
+mixing refused, clamping, undo, clear, byte-stable round trip), and a handling for every refusal code.
+`client/src/attest/SignaturePad.dom.test.tsx`: synthetic pointer events for a pen, a finger and a mouse;
+the words a signer reads; undo, clear and a cancelled stroke; the signing screen's gating of Sign on
+required marks and consent, the marks it hands over, the decline that needs a reason, the non-signer
+refused. `preDepartureCache.test.ts` gained the on-site item. Pins moved by one: 759 operational
+procedures, 833 cross-layer paths, 402 in the inventory.
+
+**Gate.** The full `scripts/ci-gate.sh` run was in progress against this commit; its counts are recorded
+in the follow-up commit. Before it: `tsc --noEmit` clean on both configs; the new pure, DOM and database
+suites green alongside the touched ones (`attest.db`, `siteCloseout`, `fieldRuntime`, `boardQueueDurable`,
+`commsVault`, `deviceSignature`, `documentationTruth`, the authorization pins).
+
+**Deliberately not in SA2.** See `SA2_OWNER_RULING.md`. In addition: envelope-level refusals (device,
+clock, key, nonce) are answered with codes and not written as session rows, because the handling asks
+the device to fix itself and send the same session again, and a rejected row under that `sessionRef`
+would refuse the retry — they remain visible in the authorization trail the gate writes; the server
+re-reads stroke bytes only on the offline path, where the bytes arrived through the vault pipeline
+(SA1's online `attest.sign` still checks the seal hash alone); a replaced drawn mark's vault files are
+deleted and its capture rows stay as drafts that were never queued; the pad records no keyboard input
+(a signer who cannot draw uses the typed-name or acknowledgement field the screen offers).

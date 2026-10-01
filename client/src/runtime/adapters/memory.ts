@@ -10,8 +10,8 @@
 import {
   NotOnDeviceError,
   type BarcodeScanner, type Clock, type Connectivity, type DecodedBarcode, type DeviceOcrResult,
-  type DocumentScanner, type FileVault, type Keystore, type LocalCapture, type LocalPackage,
-  type LocalStore, type OcrEngine, type ScannedPage, type SyncState,
+  type AttestSessionSyncState, type DocumentScanner, type FileVault, type Keystore, type LocalAttestSession, type LocalCapture, type LocalPackage,
+  type LocalSignableRevision, type LocalStore, type OcrEngine, type ScannedPage, type SyncState,
 } from "../contracts";
 import { decryptWithRawKey, encryptWithRawKey, generateRawKey, sha256Hex, toBase64 } from "../crypto";
 
@@ -29,6 +29,18 @@ export class MemoryStore implements LocalStore {
   async listPackages() { return Array.from(this.packages.values()).map(p => structuredClone(p)); }
   async getMeta(k: string) { return this.meta.get(k) ?? null; }
   async setMeta(k: string, v: string) { this.meta.set(k, v); }
+  // SA2 — Sign & Attest.
+  private revisions = new Map<string, LocalSignableRevision>();
+  private sessions = new Map<string, LocalAttestSession>();
+  async putSignableRevision(r: LocalSignableRevision) { this.revisions.set(r.revisionRef, structuredClone(r)); }
+  async getSignableRevision(ref: string) { const r = this.revisions.get(ref); return r ? structuredClone(r) : null; }
+  async listSignableRevisions() { return Array.from(this.revisions.values()).map(r => structuredClone(r)); }
+  async putAttestSession(s: LocalAttestSession) { this.sessions.set(s.localId, structuredClone(s)); }
+  async getAttestSession(id: string) { const s = this.sessions.get(id); return s ? structuredClone(s) : null; }
+  async listAttestSessions(filter?: { state?: AttestSessionSyncState | AttestSessionSyncState[] }) {
+    const want = filter?.state == null ? null : new Set(Array.isArray(filter.state) ? filter.state : [filter.state]);
+    return Array.from(this.sessions.values()).filter(s => !want || want.has(s.state)).map(s => structuredClone(s));
+  }
 }
 
 export class MemoryKeystore implements Keystore {

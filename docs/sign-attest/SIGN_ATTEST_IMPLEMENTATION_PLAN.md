@@ -75,6 +75,15 @@ regenerated; `docs/architecture/MIGRATION_COLLISION_REGISTER.md` refreshed with 
 
 ## Checkpoint SA2 — the pad and the offline session
 
+**Status: built 2026-10-01** on `main` `240b2dd` under the owner's SA2 ruling
+(`docs/sign-attest/SA2_OWNER_RULING.md`); no migration; record in
+`docs/sign-attest/checkpoints/SA_IMPLEMENTATION_RECORD.md`. Three details differ from the table below:
+a drawn mark is **two** `signature` captures (strokes, render) rather than one capture with two files,
+so the seal pipeline is untouched; the stroke engine lives in `shared/attestStrokes.ts` with
+`server/_core/attest/attestStrokes.ts` holding the server's bytes check (one renderer, three consumers);
+the field-placement editor and the staff review screen are left out by the ruling, so the checkpoint
+stays the pad.
+
 **Depends on:** SA1. **Does not depend on** the native shell (memory adapters prove it in Node, as
 the rest of the field runtime is proven today).
 

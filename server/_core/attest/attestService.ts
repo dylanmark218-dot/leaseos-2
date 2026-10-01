@@ -111,6 +111,10 @@ export type SubmitInput = {
   /** Caller-minted for idempotent retries; a repeat returns the first result. */
   sessionRef?: string | null;
   occurredAt?: Date;
+  /** SA2 — an offline session: the device's clock at send time, the skew the server measured, and whose clock `occurredAt` is. */
+  deviceClockAt?: Date | null;
+  clockSkewMs?: number | null;
+  clockSource?: "server" | "device";
 };
 
 export type SubmitResult = {
@@ -394,7 +398,7 @@ export async function assignSigner(db: Db, caller: Caller, revisionRef: string, 
 /* Submit — one act of signing                                          */
 /* ------------------------------------------------------------------ */
 
-type Rejection = { code: AttestRejectionCode; reason: string; detail?: Record<string, unknown> };
+export type Rejection = { code: AttestRejectionCode; reason: string; detail?: Record<string, unknown> };
 
 /** How the submission locates its revision: by the caller's organization, or by the portal identity the signer row names. */
 export type SubmitScope = { orgRef: string | null } | { externalIdentityId: number };
@@ -542,12 +546,14 @@ export async function submitSessionInTx(tx: Tx, actor: SubmitActor, scope: Submi
       witnessedByUserId: actor.kind === "witness" ? actor.userId : null,
       deviceRef: input.deviceAttestation?.deviceRef ?? null, fieldDeviceId: device.fieldDeviceId, keyFingerprint: input.deviceAttestation?.keyFingerprint ?? null,
       deviceSignatureBase64: input.deviceAttestation?.signatureP1363Base64 ?? null, deviceSignedAt: input.deviceAttestation?.signedAt ?? null,
-      capturedOffline: input.capturedOffline ?? false, consentVersion: input.consentVersion, consentTextHash: consentHash,
+      capturedOffline: input.capturedOffline ?? false, deviceClockAt: input.deviceClockAt ?? null, clockSkewMs: input.clockSkewMs ?? null,
+      consentVersion: input.consentVersion, consentTextHash: consentHash,
       capturedLatitude: input.gps?.latitude ?? null, capturedLongitude: input.gps?.longitude ?? null,
       state: "completed", startedAt: now, completedAt: now,
     });
     const sessionId = Number(sIns[0].insertId);
-    await appendEvent(tx, chain, { eventType: "signing_started", actor: actorRow, sessionId, sessionRef, occurredAt: now, detail: { signerRef: signer.signerRef, authMethod: input.authMethod, attestationVerifiedOver: input.deviceAttestation?.verifiedOver ?? (input.deviceAttestation ? "session_payload" : null) } });
+    const clockSource = input.clockSource ?? "server";
+    await appendEvent(tx, chain, { eventType: "signing_started", actor: actorRow, sessionId, sessionRef, occurredAt: now, clockSource, detail: { signerRef: signer.signerRef, authMethod: input.authMethod, capturedOffline: input.capturedOffline ?? false, attestationVerifiedOver: input.deviceAttestation?.verifiedOver ?? (input.deviceAttestation ? "session_payload" : null) } });
 
     const marksOut: SubmitResult["marks"] = [];
     for (const p of planned) {
@@ -561,7 +567,7 @@ export async function submitSessionInTx(tx: Tx, actor: SubmitActor, scope: Submi
       });
       const markId = Number(mIns[0].insertId);
       await tx.update(attestFields).set({ state: "completed", completedMarkId: markId }).where(eq(attestFields.id, p.field.id));
-      await appendEvent(tx, chain, { eventType: EVENT_FOR_FIELD[p.field.fieldType as AttestFieldType], actor: actorRow, sessionId, sessionRef, fieldId: p.field.id, fieldRef: p.field.fieldRef, markId, markRef, previousState: "pending", newState: "completed", occurredAt: now, detail: { fieldKey: p.field.fieldKey, markKind: p.mark.markKind, inputKind: p.mark.inputKind, payloadHash: p.payloadHash, subjectLineRef: p.field.subjectLineRef } });
+      await appendEvent(tx, chain, { eventType: EVENT_FOR_FIELD[p.field.fieldType as AttestFieldType], actor: actorRow, sessionId, sessionRef, fieldId: p.field.id, fieldRef: p.field.fieldRef, markId, markRef, previousState: "pending", newState: "completed", occurredAt: now, clockSource, detail: { fieldKey: p.field.fieldKey, markKind: p.mark.markKind, inputKind: p.mark.inputKind, payloadHash: p.payloadHash, subjectLineRef: p.field.subjectLineRef } });
       await emitOutbox(tx, rev, actorRow, "attest.field_completed", { sessionRef, signerRef: signer.signerRef, fieldRef: p.field.fieldRef, fieldKey: p.field.fieldKey, fieldType: p.field.fieldType, subjectLineRef: p.field.subjectLineRef, markRef, payloadHash: p.payloadHash }, now);
       marksOut.push({ fieldRef: p.field.fieldRef, fieldKey: p.field.fieldKey, markRef, payloadHash: p.payloadHash });
     }
@@ -572,7 +578,7 @@ export async function submitSessionInTx(tx: Tx, actor: SubmitActor, scope: Submi
     if (mine.length && mine.every(f => f.state === "completed")) {
       signerState = "completed";
       await tx.update(attestSigners).set({ state: "completed", completedAt: now }).where(eq(attestSigners.id, signer.id));
-      await appendEvent(tx, chain, { eventType: "signing_completed", actor: actorRow, sessionId, sessionRef, occurredAt: now, detail: { signerRef: signer.signerRef } });
+      await appendEvent(tx, chain, { eventType: "signing_completed", actor: actorRow, sessionId, sessionRef, occurredAt: now, clockSource, detail: { signerRef: signer.signerRef } });
       await emitOutbox(tx, rev, actorRow, "attest.signing_completed", { sessionRef, signerRef: signer.signerRef }, now);
     }
     let revisionState: AttestRevisionState = rev.state;
@@ -580,7 +586,7 @@ export async function submitSessionInTx(tx: Tx, actor: SubmitActor, scope: Submi
     if (completion.complete && rev.state === "open") {
       revisionState = "completed";
       await tx.update(attestDocumentRevisions).set({ state: "completed" }).where(eq(attestDocumentRevisions.id, rev.id));
-      await appendEvent(tx, chain, { eventType: "document_completed", actor: actorRow, occurredAt: now, previousState: "open", newState: "completed", detail: { notCompletedOptional: completion.pendingOptional } });
+      await appendEvent(tx, chain, { eventType: "document_completed", actor: actorRow, occurredAt: now, clockSource, previousState: "open", newState: "completed", detail: { notCompletedOptional: completion.pendingOptional } });
     }
     return { ok: true, result: { sessionRef, state: "completed", alreadyRecorded: false, revisionState, signerState, marks: marksOut } };
   }
@@ -595,6 +601,21 @@ export async function submitSession(db: Db, actor: SubmitActor, scope: SubmitSco
   // A refusal is a row. Written after the refusing transaction so it survives; the marks' evidence
   // records stay sealed in the vault as evidence of the attempt (§6.5).
   const { rejection } = outcome;
+  await recordRejectedSession(db, actor, input, { revisionId: outcome.revisionId, signerId: outcome.signerId, rejection }, now);
+  return refuse(trpcCodeForRejection(rejection.code), `${rejection.code}: ${rejection.reason}`, rejection.code, rejection.detail ?? {});
+}
+
+/**
+ * The rejected-session row and its `signing_rejected` event, outside any refusing transaction. SA2's
+ * offline envelope uses it too, for refusals it decides before the service runs (an inner signature
+ * that does not verify, strokes that do not render to the declared hash) — refusals a retry cannot
+ * change. Envelope-level refusals (device, clock, nonce) are not rows here: the handling tells the
+ * device to fix the device and send the same session again, and a rejected row under its
+ * `sessionRef` would make that impossible.
+ */
+export async function recordRejectedSession(db: Db, actor: SubmitActor, input: SubmitInput, outcome: { revisionId: number; signerId: number | null; rejection: Rejection }, now: Date = secs(new Date())): Promise<void> {
+  const actorRow = validateSubmitInput(actor, input);
+  const { rejection } = outcome;
   await db.transaction(async tx => {
     const chain = await lockRevision(tx, eq(attestDocumentRevisions.id, outcome.revisionId));
     if (!chain) return;
@@ -603,12 +624,12 @@ export async function submitSession(db: Db, actor: SubmitActor, scope: SubmitSco
       sessionRef: input.sessionRef ?? ref("ATS"), revisionId: chain.revision.id, signerId: outcome.signerId ?? 0, orgRef: chain.revision.orgRef, revisionHashAtStart: input.revisionHashAtStart, authMethod: input.authMethod,
       actorUserId: actor.kind === "external" ? null : actor.userId, actorExternalIdentityId: actor.kind === "external" ? actor.externalIdentityId : null, witnessedByUserId: actor.kind === "witness" ? actor.userId : null,
       deviceRef: input.deviceAttestation?.deviceRef ?? null, keyFingerprint: input.deviceAttestation?.keyFingerprint ?? null, capturedOffline: input.capturedOffline ?? false,
+      deviceClockAt: input.deviceClockAt ?? null, clockSkewMs: input.clockSkewMs ?? null,
       consentVersion: input.consentVersion, consentTextHash: consentHash, state: "rejected", rejectionCode: rejection.code, rejectionReason: rejection.reason.slice(0, 500), startedAt: now,
     });
-    await appendEvent(tx, chain, { eventType: "signing_rejected", actor: actorRow, sessionId: Number(sIns[0].insertId), occurredAt: now, detail: { code: rejection.code, reason: rejection.reason, ...(rejection.detail ?? {}) } });
+    await appendEvent(tx, chain, { eventType: "signing_rejected", actor: actorRow, sessionId: Number(sIns[0].insertId), occurredAt: now, clockSource: input.clockSource ?? "server", detail: { code: rejection.code, reason: rejection.reason, ...(rejection.detail ?? {}) } });
     await emitOutbox(tx, chain.revision, actorRow, "attest.signing_rejected", { code: rejection.code, signerRef: input.signerRef }, now);
   });
-  return refuse(trpcCodeForRejection(rejection.code), `${rejection.code}: ${rejection.reason}`, rejection.code, rejection.detail ?? {});
 }
 
 /* ------------------------------------------------------------------ */

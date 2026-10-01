@@ -3456,6 +3456,10 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "attest.placeFields": "attest.field.place",
   "attest.assignSigner": "attest.signer.assign",
   "attest.sign": "attest.sign_own",
+  // SA2 — the device envelope. Self-scoped like `attest.sign`: the device is bound to the caller and the
+  // signer row must name them; a witnessed session inside it is additionally checked against `attest.witness`
+  // in the handler (docs/sign-attest/SA2_OWNER_RULING.md).
+  "attest.submitSession": "attest.sign_own",
   "attest.witness": "attest.witness",
   "attest.decline": "attest.decline_own",
   "attest.finalize": "attest.finalize",

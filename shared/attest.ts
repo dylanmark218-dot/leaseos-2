@@ -173,6 +173,138 @@ export function assessStrokeDocument(doc: unknown): StrokeDocumentVerdict {
   return { ok: true, pointCount, strokeCount: d.strokes.length };
 }
 
+/* ------------------------------------------------------------------ */
+/* The offline session (§6.2–6.3, SA2) — built by the device, parsed by the server */
+/* ------------------------------------------------------------------ */
+
+export const ATTEST_SESSION_FORMAT = "leaseos-attest-session/1";
+export const ATTEST_ENVELOPE_FORMAT = "leaseos-attest-envelope/1";
+const hex64 = z.string().regex(/^[0-9a-f]{64}$/, "a 64-character sha256 hex digest");
+const isoTime = z.string().datetime();
+
+/** One mark as the device recorded it. Server-assigned facts (ids, server time) are absent by construction. */
+export const offlineMarkSchema = z.object({
+  fieldKey: z.string().min(1).max(80),
+  markKind: z.enum(ATTEST_MARK_KINDS),
+  inputKind: z.enum(ATTEST_INPUT_KINDS),
+  valueText: z.string().max(500).nullable(),
+  /** The evidence record ids the device learned when the mark's files synchronized (§6.3 step 1). */
+  strokeEvidenceRecordId: z.number().int().positive().nullable(),
+  strokeHash: hex64.nullable(),
+  renderedEvidenceRecordId: z.number().int().positive().nullable(),
+  renderedHash: hex64.nullable(),
+  canvas: z.object({ widthPx: z.number().int().positive(), heightPx: z.number().int().positive(), devicePixelRatio: z.number().positive(), orientation: z.enum(["portrait", "landscape"]) }).strict().nullable(),
+  pointCount: z.number().int().nonnegative().nullable(),
+  strokeCount: z.number().int().nonnegative().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  pressureAvailable: z.boolean().nullable(),
+}).strict();
+export type OfflineAttestMark = z.infer<typeof offlineMarkSchema>;
+
+/**
+ * The session the device signed at completion (capture-time binding). `authMethod` is the signer's
+ * own device key (`device_auth`) or the witness's (`witnessed`); nothing else signs offline.
+ */
+export const offlineSessionSchema = z.object({
+  format: z.literal(ATTEST_SESSION_FORMAT),
+  /** Device-relative: `${deviceRef}:${localId}` (§3, `attestSigningSessions.sessionRef`). */
+  sessionRef: z.string().min(8).max(120),
+  revisionRef: z.string().min(3).max(120),
+  revisionHashAtStart: hex64,
+  signerRef: z.string().min(3).max(120),
+  authMethod: z.enum(["device_auth", "witnessed"]),
+  consentVersion: z.string().min(1).max(40),
+  marks: z.array(offlineMarkSchema).min(1).max(200),
+  startedAt: isoTime,
+  completedAt: isoTime,
+  gps: z.object({ latitude: z.number(), longitude: z.number() }).strict().nullable(),
+  capturedOffline: z.boolean(),
+  deviceSignature: z.object({ keyFingerprint: z.string().min(16).max(80), signatureP1363Base64: z.string().min(80).max(128), signedAt: isoTime }).strict(),
+}).strict();
+export type OfflineAttestSession = z.infer<typeof offlineSessionSchema>;
+
+/** The envelope the device signs at send time, with a fresh nonce and its own clock (§6.3 step 2). */
+export const attestEnvelopeSchema = z.object({
+  format: z.literal(ATTEST_ENVELOPE_FORMAT),
+  deviceRef: z.string().min(1).max(64),
+  nonce: z.string().min(16).max(120),
+  signedAt: isoTime,
+  deviceClockAt: isoTime,
+  session: offlineSessionSchema,
+}).strict();
+export type AttestEnvelope = z.infer<typeof attestEnvelopeSchema>;
+
+export type SessionSigningMark = { fieldKey: string; markKind: string; strokeHash: string | null; renderedHash: string | null; valueText: string | null };
+/**
+ * The one object a device signs for a session, and the one the server hashes to verify it
+ * (`server/_core/attest/attestPayload.sessionPayloadBytes` canonicalises exactly this). Everything in
+ * it is known to the device before it signs; nothing server-assigned is in it.
+ */
+export function sessionSigningObject(s: { sessionRef: string; revisionRef: string; revisionHash: string; signerRef: string; marks: readonly SessionSigningMark[]; consentTextHash: string; signedAt: string }) {
+  return {
+    v: 1 as const, sessionRef: s.sessionRef, revisionRef: s.revisionRef, revisionHash: s.revisionHash, signerRef: s.signerRef,
+    marks: s.marks.map(m => ({ fieldKey: m.fieldKey, markKind: m.markKind, strokeHash: m.strokeHash, renderedHash: m.renderedHash, valueText: m.valueText })),
+    consentTextHash: s.consentTextHash, signedAt: s.signedAt,
+  };
+}
+
+/** What `attest.submitSession` answers. A rejection is an answer with a code the device acts on, never a thrown error the outbox would retry. */
+export type AttestSubmitRefusalCode = AttestRejectionCode | "NO_DEVICE_CLOCK";
+export type AttestSessionSubmitResponse =
+  | { state: "accepted" | "already_recorded"; sessionRef: string; revisionState: AttestRevisionState; signerState: string; marks: { fieldKey: string; fieldRef: string; markRef: string; payloadHash: string }[]; clockSkewMs: number | null }
+  | { state: "rejected"; sessionRef: string; code: AttestSubmitRefusalCode; reason: string; handling: AttestRefusalHandling; serverTimeIso: string; skewMs: number | null };
+
+/**
+ * What the device should DO about a refusal (the `handleSyncRefusal` shape, §6.3 step 4). Retrying
+ * cannot change a superseded document or a wrong clock; a device that retried those would show
+ * "syncing" for ever over a signature the office will never receive.
+ */
+export type AttestRefusalHandling =
+  | { action: "move_on"; reason: string }
+  | { action: "stop_and_prompt"; title: string; instruction: string }
+  | { action: "stop_and_escalate"; title: string; instruction: string };
+
+export function attestRefusalHandling(args: { code: AttestSubmitRefusalCode; skewMs?: number | null; serverTimeIso?: string }): AttestRefusalHandling {
+  const server = args.serverTimeIso ? ` The server's time is ${args.serverTimeIso}.` : "";
+  switch (args.code) {
+    case "REPLAY":
+      return { action: "move_on", reason: "The server already holds this session; the device records it as synchronized and moves on." };
+    case "CLOCK_SKEW_TOO_LARGE": {
+      const minutes = args.skewMs == null ? null : Math.round(args.skewMs / 60_000);
+      const by = minutes == null ? "" : ` by about ${Math.abs(Math.round(minutes / 60))} hour(s)${minutes > 0 ? " behind" : " ahead of"} the server`;
+      return { action: "stop_and_prompt", title: "This device's clock is wrong", instruction: `Your device's date and time are off${by}.${server} Set the device to network time, then sync again. The signature is held on the device and is not lost.` };
+    }
+    case "SIGNATURE_STALE":
+    case "NO_DEVICE_CLOCK":
+      return { action: "stop_and_prompt", title: "This device's clock is wrong", instruction: `The envelope was signed too long ago for the server to accept it.${server} Set the device to network time and sync again; the signature is held on the device.` };
+    case "DEVICE_NOT_ENROLLED":
+    case "DEVICE_NOT_ACTIVE":
+    case "KEY_FINGERPRINT_MISMATCH":
+      return { action: "stop_and_escalate", title: "This device cannot submit signatures", instruction: "This device is not enrolled, was suspended or revoked, or signs with a key the office never enrolled. The signature is held on the device and is not lost; the office has to re-enrol the device. Retrying will not change the answer." };
+    case "SIGNATURE_INVALID":
+    case "MALFORMED":
+    case "MARK_NOT_SEALED":
+    case "MARK_HASH_MISMATCH":
+      return { action: "stop_and_escalate", title: "The office has to look at this signature", instruction: "The server could not verify this session against the sealed strokes. It is held on the device and is not lost; retrying will not change the result, so tell the office rather than waiting." };
+    case "REVISION_MISMATCH":
+    case "DOCUMENT_VOIDED":
+    case "DOCUMENT_FINALIZED":
+    case "DOCUMENT_SUPERSEDED":
+      return { action: "stop_and_escalate", title: "The document changed before this signature arrived", instruction: "The document was amended, voided, finalized or superseded after this copy was signed. The strokes are kept as evidence of the attempt; the current revision has to be signed afresh. Retrying cannot change this." };
+    case "FIELD_ALREADY_COMPLETED":
+      return { action: "stop_and_escalate", title: "Somebody already signed this field", instruction: "Another device's signature for the same field reached the office first. Both are kept; the office decides. Retrying cannot change this." };
+    case "WRONG_SIGNER":
+    case "SIGNER_NOT_AUTHENTICATED":
+    case "AUTH_METHOD_INSUFFICIENT":
+    case "FIELD_NOT_ASSIGNED":
+    case "CONSENT_MISSING":
+      return { action: "stop_and_escalate", title: "This signature is not accepted from this signer", instruction: "The field is assigned to somebody else, the signer was revoked, the method is not strong enough for this signer, or the consent statement is unknown. The office has to re-request the signature; retrying will not change the answer." };
+  }
+}
+
+/** True when the device should mark the session synchronized rather than failed. */
+export const attestRefusalIsSettled = (code: AttestSubmitRefusalCode): boolean => attestRefusalHandling({ code }).action === "move_on";
+
 /** A field's box, as fractions of the unrotated page (D-03). */
 export const fieldBoxSchema = z.object({
   page: z.number().int().positive(),

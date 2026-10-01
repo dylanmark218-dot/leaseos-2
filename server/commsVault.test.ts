@@ -39,6 +39,9 @@ function fakeStore(): LocalStore {
     putPackage: async () => undefined, listPackages: async () => [],
     getMeta: async k => meta.get(k) ?? null,
     setMeta: async (k, v) => { meta.set(k, v); },
+    // SA2 — Sign & Attest records; the comms vault never touches them.
+    putSignableRevision: async () => undefined, getSignableRevision: async () => null, listSignableRevisions: async () => [],
+    putAttestSession: async () => undefined, getAttestSession: async () => null, listAttestSessions: async () => [],
   };
 }
 

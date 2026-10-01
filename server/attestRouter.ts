@@ -22,6 +22,8 @@ import {
   type Caller, type RefusalCode,
 } from "./_core/attest/attestService";
 import { attestProofFor } from "./_core/attest/attestProof";
+import { submitDeviceEnvelope } from "./_core/attest/attestOffline";
+import { permissionsFor } from "./_core/recordsAuthorization";
 import type { Db } from "./_core/dbTypes";
 
 async function db(): Promise<Db> {
@@ -101,6 +103,21 @@ export const attestRouter = router({
   sign: roleProcedure("attest.sign")
     .input(submitInput.extend({ authMethod: z.enum(["session_login", "device_auth"]).default("session_login") }).strict())
     .mutation(async ({ ctx, input }) => { const d = await db(); const c = await callerFor(d, ctx.user.id); return refusing(() => submitSession(d, { kind: "user", userId: ctx.user.id }, { orgRef: c.orgRef }, input)); }),
+
+  /**
+   * SA2 — the device envelope: a session signed offline by the device key, carried in an envelope signed
+   * again at send time (`docs/sign-attest/SA2_OWNER_RULING.md`; design §6.3). Self-scoped like `sign`: the
+   * device must be bound to the caller and the signer row must name them; a witnessed session inside it is
+   * accepted only from a caller who holds `attest.witness`. The answer is a code, never a thrown refusal.
+   */
+  submitSession: roleProcedure("attest.submitSession")
+    .input(z.object({ deviceRef: z.string().min(1).max(64), signedWithFingerprint: HEX64, signatureP1363Base64: z.string().min(80).max(128), signedPayloadJson: z.string().min(2).max(2_000_000) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const d = await db();
+      const c = await callerFor(d, ctx.user.id);
+      const canWitness = permissionsFor(ctx.roles).includes("attest.witness");
+      return submitDeviceEnvelope(d, { userId: ctx.user.id, tenantId: c.orgRef ?? SINGLE_TENANT_ID, orgRef: c.orgRef, canWitness }, input);
+    }),
 
   /** Witness a named signer who has no account (drawn in your presence, or filed from a paper scan). The row and the receipt say "witnessed". SENSITIVE. */
   witness: roleProcedure("attest.witness")

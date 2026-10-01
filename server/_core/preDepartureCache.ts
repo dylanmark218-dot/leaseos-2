@@ -19,7 +19,10 @@
 
 export type CacheItemKind =
   | "job" | "trip" | "route" | "map_tiles" | "facility" | "permit" | "sds" | "emergency_plan"
-  | "lease_location" | "communications";
+  | "lease_location" | "communications"
+  // SA2 — a document revision open for this driver's signature (or one they will witness), with its
+  // fixed hash, fields and page images, so it can be signed where there is no signal (design §6.1).
+  | "signable_document";
 
 /**
  * Why an item is on the list. `required_to_depart` blocks; `required_on_site` does not block the
@@ -78,6 +81,8 @@ export function manifestFor(job: {
   leaseLocation: string | null;
   /** True where the route crosses known dead zones, so the comms plan stops being optional. */
   hasCommunicationDeadZones: boolean;
+  /** SA2 — open signing revisions this driver signs or witnesses on site (`attest.list` for the job's tickets). */
+  signableDocuments?: { revisionRef: string; title: string; signerRole: string }[];
 }): CacheItem[] {
   const items: CacheItem[] = [
     { kind: "job", label: `Job ${job.jobCode}`, ref: job.jobCode, necessity: "required_to_depart",
@@ -114,6 +119,13 @@ export function manifestFor(job: {
   if (job.hasCommunicationDeadZones) {
     items.push({ kind: "communications", label: "Radio channels and dead-zone map", ref: `comms:${job.jobCode}`, necessity: "required_to_depart",
       because: "this route crosses known dead zones; the channel to call on is not something to look up once you are in one", staleAfterMinutes: 60 * 24 * 7 });
+  }
+  for (const s of job.signableDocuments ?? []) {
+    // Needed on site, not to depart: a ticket can be signed later, but a revision the device never
+    // downloaded cannot be signed offline at all (§6.1), and the lease is where the signal is not.
+    // Four hours, like the job: the hash is fixed, but the revision can be voided or superseded.
+    items.push({ kind: "signable_document", label: `${s.title} — for ${s.signerRole} signature`, ref: s.revisionRef, necessity: "required_on_site",
+      because: "it is signed at the lease, where there is no signal; a copy this device never downloaded cannot be signed there", staleAfterMinutes: 240 });
   }
   return items;
 }
