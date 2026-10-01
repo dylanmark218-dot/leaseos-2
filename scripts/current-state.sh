@@ -205,7 +205,12 @@ the snapshot, sent with the account's terms and an alert, listed, viewed
 and accepted in the customer portal; supplemental drafts for lines released
 by a resolved dispute or a void; disputes resolved upheld, credited or
 partial with the credit approved by a second person in AR; voids recorded,
-never deleted, refused where money is applied).
+never deleted, refused where money is applied) · the marketplace foundation (a
+client organization posts work, contractor organizations bid in write-once hashed
+revisions, the client awards with a reason and never by lowest price; sealed
+pricing withheld in the read model until bidding closes, the deadline enforced by
+the clock, readiness declared-only and saying so, every transition locked,
+versioned and on the trail — no UI and no automatic dispatch creation yet).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 

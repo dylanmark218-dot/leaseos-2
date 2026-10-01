@@ -39,9 +39,12 @@ and `0157` is historically used twice. None of those is reused.
 | 0172 | `0172_training_wallet_renewal_handoff.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | **was** with C1a's original `0172` | C1a moved off; this branch keeps 0172 |
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
+| 0189 | `0189_marketplace_bid_award.sql` | `claude/leaseos-marketplace-bidding-h3stdw` | none yet | `6f52b57` | open branch | none | first number free on `main` and on every open branch at 2026-10-01 (0175–0188 claimed: client-services-portal, driver-portfolio-api, document-control, integration-hub, safety-program-builder, assistant-proposal-tenancy, canadian-govt-apis, eld-compliance, training-academy-workforce) |
 
 ## Change log
 
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
   `claude/training-academy-workforce-q3mdse` had claimed `0172`/`0173` since the Checkpoint 0 survey.
   No other branch was renumbered.
+* **2026-10-01**: `claude/leaseos-marketplace-bidding-h3stdw` claims `0189` for the marketplace
+  foundation after scanning every remote branch; the highest number held anywhere was `0188`.

@@ -37,6 +37,13 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   // record would only lose the evidence that it was certified while it still mattered.
   "server/cash.test.ts": { dates: ["2026-09-25", "2026-09-28", "2026-09-30", "2026-10-02", "2026-10-10", "2026-10-20", "2026-11-20"], verdict: "clock_independent", reason: "statement periods and END are fixed ranges compared with each other, not with now" },
   "server/auditPackage.test.ts": { dates: ["2026-09-30"], verdict: "clock_independent", reason: "periodFrom/periodTo bound the package; nothing compares them with now" },
+  // Recorded 2026-10-01 with the file unchanged, as the 60-day window reached 2026-10-15. The three
+  // dates are the schedule's explicit `asOf`, the disposal date and the fiscal year end that `asOf`
+  // derives. `acquiredAt` is fixed at 2026-03-01, so `disposedAt < acquiredAt` and the pool's
+  // additions-before-asOf never involve the clock; the router's own real reads are the twin's
+  // `asOf` (the twin is read before the disposal and asserts cost, life and unknowns, not a date),
+  // the CCA rule's effective-date lookup, and the stamps on grants and reviews.
+  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "asOf is explicit and acquiredAt is fixed; every date comparison is between fixtures" },
   "server/bulkFuel.test.ts": { dates: ["2026-09-30"], verdict: "clock_independent", reason: "statement period and anomaly window are fixed ranges" },
   "server/purchasingAp.test.ts": { dates: ["2026-09-30", "2026-10-02", "2026-10-08"], verdict: "clock_independent", reason: "fourWayMatch compares dates with each other, not with now" },
   "server/workforce.test.ts": { dates: ["2026-09-30", "2026-11-01"], verdict: "clock_independent", reason: "offboardingClose receives an explicit `now`; the hire start date is already clock-relative (the earlier break)" },

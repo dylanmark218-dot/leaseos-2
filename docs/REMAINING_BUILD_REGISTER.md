@@ -327,3 +327,12 @@ Three things it deliberately does not do: redesign the UNKNOWN/silent-check beha
 tested), adopt an external router as the authority (finding a path is not permission to drive it),
 or import anything (M2).
 
+
+## P10 — marketplace / job exchange (the commercial layer between client and contractor organizations)
+
+| # | Checkpoint | Status | Definition of done |
+|---|---|---|---|
+| P10.1 | Posting + Bid + Award domain | **CORE BUILT (v23.26, `0189`)** — `server/_core/marketplace.ts` (pure: lifecycles, the bidding clock, the sealed rule, content hash, declared-only readiness), `server/_core/marketplaceService.ts` (locked, versioned, audited transactions; outbox in the same transaction), `server/marketplaceRouter.ts` (18 role-gated procedures acting for the membership organization); `docs/marketplace/CHECKPOINT_1_MARKETPLACE_FOUNDATION.md` | tenant isolation, immutable bid revisions, hash-bound award with rationale, sealed pricing enforced in the read model, deadline enforced by the clock, append-only trail; 29 pure + 7 database cases green under the gate — **no UI, no automatic dispatch creation** |
+| P10.2 | Award → canonical dispatch | OPEN | an accepted award creates the contract / work order and the `dispatchPostings` roles without re-entry; the client's tracking links activate from the award |
+| P10.3 | Verified readiness | OPEN | the readiness ladder's requirement rows read the compliance registry, insurance risk, HOS forecast and operator availability instead of the bidder's declaration; `UNKNOWN` rungs become answers |
+| P10.4 | Job board, matching, profiles, clarifications | OPEN | the social layer on the commercial core: board UI, category/region following with notifications, company profiles, the tender discussion thread whose answers become public clarifications |

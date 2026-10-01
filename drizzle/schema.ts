@@ -8872,3 +8872,185 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   wasLegalDetermination: boolean("wasLegalDetermination").notNull(),
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
+
+// ========================= MARKETPLACE (0189) =========================
+// The commercial layer between a CLIENT organization that needs work performed
+// and the CONTRACTOR organizations able to perform it. Distinct from the
+// dispatch posting/bid tables above, which record one company's own operators'
+// willingness to take a shift. Every row here carries the organization it
+// belongs to; a bid revision is write-once; an award binds to a content hash.
+// The rules live in server/_core/marketplace.ts (pure) and are applied by
+// server/_core/marketplaceService.ts.
+
+export const marketplacePostings = mysqlTable("marketplacePostings", {
+  id: int("id").autoincrement().primaryKey(),
+  postingRef: varchar("postingRef", { length: 64 }).notNull().unique(),
+  /** The organization posting the work. The only organization that may edit, close, award or cancel it. */
+  clientOrgRef: varchar("clientOrgRef", { length: 40 }).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  workType: varchar("workType", { length: 60 }).notNull(),
+  description: text("description"),
+  pickupLocation: varchar("pickupLocation", { length: 220 }),
+  pickupLsd: varchar("pickupLsd", { length: 40 }),
+  destination: varchar("destination", { length: 220 }),
+  destinationLsd: varchar("destinationLsd", { length: 40 }),
+  pickupLat: double("pickupLat"),
+  pickupLng: double("pickupLng"),
+  /** Thousandths of `quantityUnit` — 600 m³ is 600000 with unit M3. */
+  estimatedQuantityMillis: int("estimatedQuantityMillis"),
+  quantityUnit: varchar("quantityUnit", { length: 20 }),
+  equipmentType: varchar("equipmentType", { length: 120 }),
+  unitsRequired: int("unitsRequired"),
+  estimatedDurationMinutes: int("estimatedDurationMinutes"),
+  estimatedDistanceKm: double("estimatedDistanceKm"),
+  requestedStart: timestamp("requestedStart"),
+  deadline: timestamp("deadline"),
+  /** Enforced server-side: a bid at or after this instant is refused whatever the state says. */
+  biddingClosesAt: timestamp("biddingClosesAt"),
+  /** The rate structure the client asks bids in; `any` accepts every pricing type. */
+  pricingBasis: mysqlEnum("pricingBasis", ["fixed_price", "unit_rate", "hourly", "combination", "any"]).default("any").notNull(),
+  /** `sealed`: the client cannot read bid pricing until bidding closes. Enforced in the read model. */
+  visibility: mysqlEnum("visibility", ["open", "sealed"]).default("sealed").notNull(),
+  distribution: mysqlEnum("distribution", ["public", "invite_only"]).default("public").notNull(),
+  operatingArea: varchar("operatingArea", { length: 120 }),
+  currency: varchar("currency", { length: 3 }).default("CAD").notNull(),
+  /** `PostingRequirements` — certifications, permits, dangerous goods, insurance minimum, equipment. */
+  requirementsJson: text("requirementsJson").notNull(),
+  /** Supporting documents as name + sha256 + size; the bytes live in the vault. */
+  documentsJson: text("documentsJson").notNull(),
+  state: mysqlEnum("state", ["draft", "published", "bidding", "bidding_closed", "awarded", "contracted", "dispatched", "active", "completed", "closed", "cancelled"]).default("draft").notNull(),
+  /** Optimistic concurrency on every state change; a stale writer is refused, not merged. */
+  version: int("version").default(1).notNull(),
+  publishedAt: timestamp("publishedAt"),
+  biddingOpenedAt: timestamp("biddingOpenedAt"),
+  biddingClosedAt: timestamp("biddingClosedAt"),
+  awardedAt: timestamp("awardedAt"),
+  cancelledAt: timestamp("cancelledAt"),
+  cancelReason: varchar("cancelReason", { length: 500 }),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({
+  clientIdx: index("marketplacePostings_client_idx").on(t.clientOrgRef, t.state),
+  stateIdx: index("marketplacePostings_state_idx").on(t.state, t.biddingClosesAt),
+}));
+
+export const marketplaceInvitations = mysqlTable("marketplaceInvitations", {
+  id: int("id").autoincrement().primaryKey(),
+  invitationRef: varchar("invitationRef", { length: 64 }).notNull().unique(),
+  postingId: int("postingId").notNull(),
+  invitedOrgRef: varchar("invitedOrgRef", { length: 40 }).notNull(),
+  status: mysqlEnum("status", ["sent", "declined", "withdrawn"]).default("sent").notNull(),
+  invitedByUserId: int("invitedByUserId").notNull(),
+  respondedAt: timestamp("respondedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  postingOrg: uniqueIndex("marketplaceInvitations_posting_org_unique").on(t.postingId, t.invitedOrgRef),
+  invitedIdx: index("marketplaceInvitations_invited_idx").on(t.invitedOrgRef, t.status),
+}));
+
+/**
+ * The bid HEAD: one per (posting, bidder). Its state moves; its content does
+ * not live here except as the working draft. Every submission is a revision.
+ */
+export const marketplaceBids = mysqlTable("marketplaceBids", {
+  id: int("id").autoincrement().primaryKey(),
+  bidRef: varchar("bidRef", { length: 64 }).notNull().unique(),
+  postingId: int("postingId").notNull(),
+  bidderOrgRef: varchar("bidderOrgRef", { length: 40 }).notNull(),
+  state: mysqlEnum("state", ["draft", "submitted", "withdrawn", "shortlisted", "accepted", "rejected"]).default("draft").notNull(),
+  /** The revision that currently stands; NULL while draft or withdrawn. */
+  currentRevisionId: int("currentRevisionId"),
+  revisionCount: int("revisionCount").default(0).notNull(),
+  /** The only mutable content: the bidder's working draft. Submission freezes it into a revision. */
+  draftContentJson: text("draftContentJson"),
+  version: int("version").default(1).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  submittedAt: timestamp("submittedAt"),
+  withdrawnAt: timestamp("withdrawnAt"),
+  decidedAt: timestamp("decidedAt"),
+  decidedByUserId: int("decidedByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({
+  postingBidder: uniqueIndex("marketplaceBids_posting_bidder_unique").on(t.postingId, t.bidderOrgRef),
+  bidderIdx: index("marketplaceBids_bidder_idx").on(t.bidderOrgRef, t.state),
+}));
+
+/** Write-once. Nothing updates a row here; a changed bid is a new row with the next revision number. */
+export const marketplaceBidRevisions = mysqlTable("marketplaceBidRevisions", {
+  id: int("id").autoincrement().primaryKey(),
+  revisionRef: varchar("revisionRef", { length: 64 }).notNull().unique(),
+  bidId: int("bidId").notNull(),
+  postingId: int("postingId").notNull(),
+  bidderOrgRef: varchar("bidderOrgRef", { length: 40 }).notNull(),
+  revisionNumber: int("revisionNumber").notNull(),
+  /** `BidContent`, exactly as submitted. */
+  contentJson: text("contentJson").notNull(),
+  /** SHA-256 over the canonical serialization of `contentJson`. The award binds to this. */
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  pricingType: mysqlEnum("pricingType", ["fixed_price", "unit_rate", "hourly", "combination"]).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  /** NULL = no comparable total exists (a rate without an estimated quantity); `comparableBasis` says why. */
+  comparableTotalCents: int("comparableTotalCents"),
+  comparableBasis: varchar("comparableBasis", { length: 200 }).notNull(),
+  /** The readiness picture at submission — rows and verdict — as the bidder and the client both saw it. */
+  readinessJson: text("readinessJson").notNull(),
+  readinessVerdict: varchar("readinessVerdict", { length: 24 }).notNull(),
+  submittedByUserId: int("submittedByUserId").notNull(),
+  submittedAt: timestamp("submittedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  bidRevision: uniqueIndex("marketplaceBidRevisions_bid_revision_unique").on(t.bidId, t.revisionNumber),
+  postingIdx: index("marketplaceBidRevisions_posting_idx").on(t.postingId),
+}));
+
+/** One award per posting. Price is one consideration; the client's rationale is recorded with the decision. */
+export const marketplaceAwards = mysqlTable("marketplaceAwards", {
+  id: int("id").autoincrement().primaryKey(),
+  awardRef: varchar("awardRef", { length: 64 }).notNull().unique(),
+  postingId: int("postingId").notNull().unique(),
+  bidId: int("bidId").notNull(),
+  bidRevisionId: int("bidRevisionId").notNull(),
+  clientOrgRef: varchar("clientOrgRef", { length: 40 }).notNull(),
+  contractorOrgRef: varchar("contractorOrgRef", { length: 40 }).notNull(),
+  /** Copied from the revision at award time, so the award states what it bound to even if a row is later questioned. */
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  comparableTotalCents: int("comparableTotalCents"),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  rationale: text("rationale").notNull(),
+  readinessJson: text("readinessJson").notNull(),
+  state: mysqlEnum("state", ["awarded", "contracted", "cancelled"]).default("awarded").notNull(),
+  awardedByUserId: int("awardedByUserId").notNull(),
+  awardedAt: timestamp("awardedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  contractorIdx: index("marketplaceAwards_contractor_idx").on(t.contractorOrgRef, t.state),
+}));
+
+/** Append-only tender audit trail: every transition, who, from what, to what. Mirrors `dispatchAuditEvents`. */
+export const marketplaceEvents = mysqlTable("marketplaceEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  postingId: int("postingId").notNull(),
+  bidId: int("bidId"),
+  bidRevisionId: int("bidRevisionId"),
+  awardId: int("awardId"),
+  eventType: varchar("eventType", { length: 60 }).notNull(),
+  actorUserId: int("actorUserId"),
+  actorOrgRef: varchar("actorOrgRef", { length: 40 }),
+  previousState: varchar("previousState", { length: 40 }),
+  newState: varchar("newState", { length: 40 }),
+  detailJson: text("detailJson"),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  postingIdx: index("marketplaceEvents_posting_idx").on(t.postingId, t.occurredAt),
+}));
+
+export type MarketplacePostingRow = typeof marketplacePostings.$inferSelect;
+export type MarketplaceBidRow = typeof marketplaceBids.$inferSelect;
+export type MarketplaceBidRevisionRow = typeof marketplaceBidRevisions.$inferSelect;
+export type MarketplaceAwardRow = typeof marketplaceAwards.$inferSelect;
+export type MarketplaceEventRow = typeof marketplaceEvents.$inferSelect;
+export type MarketplaceInvitationRow = typeof marketplaceInvitations.$inferSelect;

@@ -96,6 +96,7 @@ import { telematicsRouter } from "./telematicsRouter";
 import { workforceRouter } from "./workforceRouter";
 import { trainingAcademyRouter } from "./trainingAcademyRouter";
 import { contractorOperationsRouter } from "./contractorOperationsRouter";
+import { marketplaceRouter } from "./marketplaceRouter";
 import { auditRouter } from "./auditRouter";
 import { spatialRouter } from "./spatialRouter";
 import { closeoutRouter } from "./closeoutRouter";
@@ -340,6 +341,7 @@ export const appRouter = router({
   payroll: payrollRouter,
   contractors: contractorRouter,
   contractorOperations: contractorOperationsRouter,
+  marketplace: marketplaceRouter,
   finance: financeRouter,
   portals: portalsRouter,
   funding: fundingRouter,

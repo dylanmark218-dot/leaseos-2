@@ -154,6 +154,10 @@ export type Permission =
   | "payroll.profile.write"
   // Contractor settlement is its own ledger, never employee payroll.
   | "contractor.read" | "contractor.write" | "contractor.approve"
+  // 0189 — the marketplace: a client organization posts work, contractor organizations bid,
+  // the client AWARDS. Posting and bidding are two sides and two permissions, so a company
+  // that only ever tenders work never holds the right to bid on its own postings by accident.
+  | "marketplace.read" | "marketplace.posting.manage" | "marketplace.bid.manage" | "marketplace.award"
   | "finance.entity.write"
   /* --- B20.13: funding & incentives --- */
   // Reading the opportunity pipeline is broad; recording a claim against an
@@ -431,6 +435,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "marketplace.read",
+    "marketplace.bid.manage",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -899,6 +905,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "hos.write",
     "contractor.read",
     "contractor.write",
+    "marketplace.read",
+    "marketplace.posting.manage",
+    "marketplace.bid.manage",
     "tax.expense.create",
     "funding.read",
     "funding.manage",
@@ -1118,6 +1127,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "contractor.read",
     "contractor.write",
     "contractor.approve",
+    "marketplace.read",
+    "marketplace.posting.manage",
+    "marketplace.bid.manage",
+    "marketplace.award",
     "finance.entity.write",
     "tax.expense.create",
     "funding.read",
@@ -1293,6 +1306,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    "marketplace.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.read_safety_summary",
@@ -1508,6 +1522,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "finance.entity.write",
     "contractor.read",
     "contractor.approve",
+    "marketplace.read",
+    "marketplace.award",
     "tax.rules.manage",
     "funding.read",
     "funding.manage",
@@ -1917,6 +1933,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // self-service grant into the restricted sector with no row saying the glass was
   // broken is that category, and without this it proceeded when the audit insert failed.
   "restricted.read",
+  // 0189 — an award binds two organizations to a hashed bid; a submission freezes an immutable
+  // revision. Neither may happen with no record of who authorized it.
+  "marketplace.award",
+  "marketplace.bid.manage",
 ] as const;
 
 export function isSensitivePermission(p: Permission): boolean {
@@ -2583,6 +2603,26 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "contractorOperations.payablesMine": "contractor.read",
   "contractorOperations.payableSubmitReview": "contractor.write",
   "contractorOperations.payableApprove": "contractor.approve",
+
+  /* ---- 0189: marketplace — posting + bid + award (checkpoint 1) ---- */
+  "marketplace.postingCreate": "marketplace.posting.manage",
+  "marketplace.postingUpdate": "marketplace.posting.manage",
+  "marketplace.postingPublish": "marketplace.posting.manage",
+  "marketplace.postingOpenBidding": "marketplace.posting.manage",
+  "marketplace.postingCloseBidding": "marketplace.posting.manage",
+  "marketplace.postingCancel": "marketplace.posting.manage",
+  "marketplace.postingInvite": "marketplace.posting.manage",
+  "marketplace.bidShortlist": "marketplace.posting.manage",
+  "marketplace.award": "marketplace.award",
+  "marketplace.postingGet": "marketplace.read",
+  "marketplace.postingsList": "marketplace.read",
+  "marketplace.postingEvents": "marketplace.read",
+  "marketplace.bidsForPosting": "marketplace.read",
+  "marketplace.bidsMine": "marketplace.read",
+  "marketplace.bidReadiness": "marketplace.bid.manage",
+  "marketplace.bidDraftSave": "marketplace.bid.manage",
+  "marketplace.bidSubmit": "marketplace.bid.manage",
+  "marketplace.bidWithdraw": "marketplace.bid.manage",
 
   /* ---- v21.3: IFTA ---- */
   "ifta.distanceRecord": "ifta.distance.record",
