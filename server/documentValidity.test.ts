@@ -224,10 +224,12 @@ describe("one rule, shared", () => {
   });
 
   it("classifies by a returned code rather than by matching prose", () => {
-    const src = readFileSync("server/openShiftsRouter.ts", "utf8");
-    expect(src).toContain("gap.why ===");
+    // SPINE item 2: open-shift eligibility is judged in the engine now; the router only reads.
+    const src = readFileSync("server/_core/openShifts.ts", "utf8");
+    expect(src).toContain('q?.notHeld === "expired"');
+    expect(src).toContain('q?.notHeld === "unverified"');
     // Matching on wording reclassified every unverified ticket the moment the
-    // wording improved.
-    expect(src).not.toContain('gap.reason.includes("verified it")');
+    // wording improved — in either file.
+    for (const f of [src, readFileSync("server/openShiftsRouter.ts", "utf8")]) expect(f).not.toMatch(/reason\.includes\(/);
   });
 });

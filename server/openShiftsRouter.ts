@@ -1,36 +1,89 @@
 /**
  * v22.20 (0091) — open shifts, reachable.
  *
- * `_core/openShifts.ts` decides eligibility; this reads the records it needs
- * and exposes the result. Two things it does that the engine cannot.
+ * SPINE item 2 (owner's ruling): `_core/openShifts.ts` `shiftEligibility` is the one answer to
+ * "may this person take this shift?". This router reads the records that answer needs — role
+ * grants, the organization's roster, approved leave, existing bookings, the person's own operator
+ * record and the qualification read adapter's standings — and enforces the verdict. It decides no
+ * eligibility itself; `spineItem2Duplicates.test.ts` keeps it that way.
  *
- * **Approved leave is read, not supplied.** `leaveRequests` exists now, so
- * whether somebody is away that day comes from the record rather than from a
- * caller's account of it.
- *
- * **Qualifications are reported unknown, because there is nowhere to read them
- * from.** This schema has no qualification store: `operators` carries a licence
- * class and expiry inline and nothing else. So a post requiring a ticket cannot
- * be satisfied from stored data, and the honest answer is `unknown` — which
- * blocks, exactly as an expired one would. Returning "eligible" because the
- * check could not run is the failure this whole system is built against, and it
- * would be very easy to write here.
+ * Seeing a post (`shifts.read`), saying you would take it (`shifts.interest`) and posting work
+ * (`shifts.post`) stay three permissions. Only the work-taking action is gated by eligibility, and
+ * an answer that cannot be established refuses.
  */
-import { readExpiry } from "./_core/documentValidity";
 import { effectiveQualifications } from "./qualificationReads";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
-import { leaveRequests, operators, shiftInterests, shiftPosts } from "../drizzle/schema";
-import { resolveActingScope } from "./_core/actingScope";
-import { isAbsent, type LeaveRequest } from "./_core/timeOff";
+import { getDb, listActiveUserRoles, operatorForUserInScope, userInScope } from "./db";
+import { crewMembers, crews, leaveRequests, operators, resourceBookings, shiftInterests, shiftPosts, type ShiftPostRow } from "../drizzle/schema";
+import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
+import { grantsInOrganization } from "./_core/recordsAuthorization";
+import { expressInterest, NotEligible, shiftEligibility, type PersonFacts, type ShiftPost } from "./_core/openShifts";
+import type { DbOrTx } from "./_core/dbTypes";
+import type { LeaveRequest } from "./_core/timeOff";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
 
-export type EligibilityReason = { code: "on_approved_leave" | "qualification_unknown" | "qualification_unverified" | "qualification_expired" | "licence_expired" | "no_licence_recorded"; detail: string };
+const asPost = (r: ShiftPostRow): ShiftPost => ({
+  postRef: r.postRef, title: r.title, startsAt: r.startsAt, endsAt: r.endsAt, location: r.location,
+  requiredRole: r.requiredRole, requiredQualifications: JSON.parse(r.requiredQualificationsJson) as string[],
+  seats: r.seats, kind: r.kind, status: r.status,
+});
+
+/**
+ * The records `shiftEligibility` reads about one person, in the post's organization. Reads only;
+ * every judgement is the engine's. Someone outside the organization is not read at all.
+ */
+async function personFacts(d: DbOrTx, tenantId: string, post: ShiftPost, userId: number): Promise<PersonFacts> {
+  const scope = { tenantId };
+  const none: PersonFacts = { userId, name: `user ${userId}`, inOrganization: false, roles: [], rosters: [], leave: [], commitments: [], licence: { kind: "none" }, qualifications: [] };
+  if (!(await userInScope(userId, scope))) return none;
+
+  const roles = grantsInOrganization(await listActiveUserRoles(userId), tenantId).map(g => g.role);
+
+  const rosterRows = await d.select({ on: crewMembers.rotationOnDays, off: crewMembers.rotationOffDays, anchor: crewMembers.rotationAnchor })
+    .from(crewMembers).innerJoin(crews, eq(crews.crewRef, crewMembers.crewRef))
+    .where(and(eq(crewMembers.userId, userId), isNull(crewMembers.leftAt), eq(crews.state, "active"),
+      tenantId === SINGLE_TENANT_ID ? or(isNull(crews.tenantId), eq(crews.tenantId, SINGLE_TENANT_ID)) : eq(crews.tenantId, tenantId)))
+    .limit(50);
+  const rosters = rosterRows.map(r => ({ rotation: r.on && r.anchor ? { onDays: r.on, offDays: r.off ?? 0, anchor: r.anchor, label: `${r.on}/${r.off ?? 0}` } : null }));
+
+  const leaveRows = await d.select().from(leaveRequests).where(and(
+    eq(leaveRequests.userId, userId), lte(leaveRequests.fromDate, post.startsAt), gte(leaveRequests.toDate, post.startsAt),
+  )).limit(50);
+  const leave: LeaveRequest[] = leaveRows.map(l => ({
+    requestRef: l.requestRef, userId: l.userId, category: l.category, urgency: l.urgency,
+    from: l.fromDate, to: l.toDate,
+    partialDay: l.partialFromTime && l.partialToTime ? { fromTime: l.partialFromTime, toTime: l.partialToTime } : null,
+    privateNote: null, requestedAt: l.requestedAt, status: l.status,
+    decidedByUserId: l.decidedByUserId, decidedAt: l.decidedAt, decisionNote: l.decisionNote,
+  } as LeaveRequest));
+
+  // The person's own operator record (operators.userId, owned by this organization). Two is a refusal, not a choice.
+  const op = await operatorForUserInScope(userId, scope);
+  let licence: PersonFacts["licence"] = { kind: op.kind === "ambiguous" ? "ambiguous" : "none" };
+  let commitments: PersonFacts["commitments"] = [];
+  if (op.kind === "resolved") {
+    const row = (await d.select({ licenseExpiresAt: operators.licenseExpiresAt }).from(operators).where(eq(operators.id, op.operatorId)).limit(1))[0];
+    licence = { kind: "recorded", expiresAt: row?.licenseExpiresAt ?? null };
+    const booked = await d.select().from(resourceBookings).where(and(
+      eq(resourceBookings.resourceType, "operator"), eq(resourceBookings.resourceRef, String(op.operatorId)),
+      lt(resourceBookings.startsAt, post.endsAt), gt(resourceBookings.endsAt, post.startsAt),
+      inArray(resourceBookings.bookingState, ["tentative", "confirmed"]),
+    )).limit(20);
+    commitments = booked.map(b => ({ assignmentRef: `booking ${b.id}${b.postingId != null ? ` (posting ${b.postingId})` : ""}`, startsAt: b.startsAt, endsAt: b.endsAt }));
+  }
+
+  const qualifications = post.requiredQualifications.length
+    ? (await effectiveQualifications(d, { tenantId, userId, at: post.startsAt, codes: post.requiredQualifications }))
+      .map(q => ({ code: q.code, held: q.held, notHeld: q.notHeld, reason: q.reason }))
+    : [];
+
+  return { userId, name: `user ${userId}`, inOrganization: true, roles, rosters, leave, commitments, licence, qualifications };
+}
 
 export const openShiftsRouter = router({
   /** Post a shift. */
@@ -103,49 +156,8 @@ export const openShiftsRouter = router({
       const post = (await d.select().from(shiftPosts).where(eq(shiftPosts.postRef, input.postRef)).limit(1))[0];
       if (!post || post.tenantId !== acting.tenantId) throw new TRPCError({ code: "NOT_FOUND", message: "No such shift post" });
 
-      const reasons: EligibilityReason[] = [];
-
-      /* Approved leave, read from the record. */
-      const leave = await d.select().from(leaveRequests).where(and(
-        eq(leaveRequests.userId, userId),
-        lte(leaveRequests.fromDate, post.startsAt),
-        gte(leaveRequests.toDate, post.startsAt),
-      )).limit(50);
-      const away = leave.some(l => isAbsent({
-        requestRef: l.requestRef, userId: l.userId, category: l.category, urgency: l.urgency,
-        from: l.fromDate, to: l.toDate,
-        partialDay: l.partialFromTime && l.partialToTime ? { fromTime: l.partialFromTime, toTime: l.partialToTime } : null,
-        privateNote: null, requestedAt: l.requestedAt, status: l.status,
-        decidedByUserId: l.decidedByUserId, decidedAt: l.decidedAt, decisionNote: l.decisionNote,
-      } as LeaveRequest) && !l.partialFromTime);
-      if (away) reasons.push({ code: "on_approved_leave", detail: "Away that day on leave already recorded" });
-
-      /* Licence, the one credential this schema actually stores. */
-      const operator = (await d.select().from(operators).where(eq(operators.id, userId)).limit(1))[0];
-      if (!operator?.licenseExpiresAt) {
-        reasons.push({ code: "no_licence_recorded", detail: "No licence expiry on record — this cannot be established as current" });
-      } else if (readExpiry(operator.licenseExpiresAt, post.startsAt, 0).expiry === "expired") {
-        reasons.push({ code: "licence_expired", detail: `Licence expires ${operator.licenseExpiresAt.toISOString().slice(0, 10)}, before this shift` });
-      }
-
-      /* Everything else the post asks for, now read from the qualification store. */
-      const required = JSON.parse(post.requiredQualificationsJson) as string[];
-      if (required.length) {
-        // C1b-3: the qualification read adapter (Academy first; legacy only as a marked fallback; the
-        // caller's organization). Matching logic below is unchanged.
-        const effective = await effectiveQualifications(d, { tenantId: acting.tenantId, userId, at: post.startsAt, codes: required });
-        for (const gap of effective.filter(e => !e.held).map(e => ({ code: e.code, reason: e.reason, why: e.notHeld! }))) {
-          reasons.push({
-            // From the structured verdict, not by reading its prose — the
-            // previous version matched on wording and silently reclassified
-            // every unverified ticket the moment that wording improved.
-            code: gap.why === "expired" ? "qualification_expired"
-              : gap.why === "unverified" ? "qualification_unverified"
-              : "qualification_unknown",
-            detail: gap.reason,
-          });
-        }
-      }
+      const verdict = shiftEligibility(asPost(post), await personFacts(d, acting.tenantId, asPost(post), userId));
+      const reasons = verdict.reasons;
 
       return {
         postRef: post.postRef, userId,
@@ -170,8 +182,14 @@ export const openShiftsRouter = router({
       const acting = await resolveActingScope(d, ctx.user.id);
       const post = (await d.select().from(shiftPosts).where(eq(shiftPosts.postRef, input.postRef)).limit(1))[0];
       if (!post || post.tenantId !== acting.tenantId) throw new TRPCError({ code: "NOT_FOUND", message: "No such shift post" });
-      if (post.kind !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "That is an assigned post; interest is not how it is filled" });
-      if (post.status !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `That post is ${post.status}` });
+      // The one rule, enforced: the caller's own records, never anything they sent. Fails closed.
+      const candidate = shiftEligibility(asPost(post), await personFacts(d, acting.tenantId, asPost(post), ctx.user.id));
+      try {
+        expressInterest({ post: asPost(post), candidate, at: input.at });
+      } catch (e) {
+        if (e instanceof NotEligible) throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
+        throw e;
+      }
 
       const existing = (await d.select().from(shiftInterests).where(and(
         eq(shiftInterests.postRef, input.postRef), eq(shiftInterests.userId, ctx.user.id), isNull(shiftInterests.withdrawnAt),

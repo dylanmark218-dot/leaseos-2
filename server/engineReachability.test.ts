@@ -93,7 +93,6 @@ const DECLARED_UNWIRED: Record<string, string> = {
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
   dashboardWidget: "widget contract; no dashboard surface consumes it yet",
   financialCalendar: "AP/AR and company-event projections; no financial surface yet",
-  openShifts: "eligibility engine; openShiftsRouter currently decides inline — a live duplication, not a gap",
   billing: "billing engine predates this audit; reachability not yet established",
   advisoryImpact: "road-advisory placement; feed scheduler is not started",
   eventEmitter: "event vocabulary; emitters write via raw SQL",
@@ -115,7 +114,7 @@ const DECLARED_UNWIRED: Record<string, string> = {
   "transport/placement": "publisher geometry to the point-and-radius advisoryImpact places; used only by the parsers above",
   "transport/fields": "date, severity and column-width coercions shared by the parsers above",
   feedScheduler: "backoff scheduler; nothing starts it from an entry point",
-  fieldTicket: "scope validation and job reconciliation have no live counterpart (job close). Its disposition split and statement builder duplicated closeout/invoicing and were removed (SPINE item 2); signature status still differs from closeoutRouter's and waits for a ruling",
+  fieldTicket: "scope validation and job reconciliation have no live counterpart (job close). Its disposition split and statement builder duplicated closeout/invoicing and were removed (SPINE item 2); its signature-status roll-up contradicted the owner's ruling (a signature is the state recorded at signing) and was removed too",
   heartbeat: "liveness helper; no monitor calls it",
   "managedKeyBackend.fake": "S2-KMS-A: the managed key backend tests stand in for a vendor adapter — a KEK it never exports, AES-GCM wrapping, the failure modes a real backend has. Imported by tests only, never by production (secretKeyWiring.test.ts pins that); the production backend registry is empty until S2-KMS-B proves the hosting platform",
   imageGeneration: "unused capability",
@@ -361,7 +360,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(86);
+    expect(unwired).toHaveLength(85);   // 86 → 85: openShifts wired as the one eligibility rule (SPINE item 2)
     expect(engines.length).toBeGreaterThan(130);
   });
 });
