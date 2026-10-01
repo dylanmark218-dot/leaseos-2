@@ -229,7 +229,9 @@ function importsOfBody(body: string, fromDir = ""): string[] {
 function reachableSet(srcs: Record<string, string>): Set<string> {
   const reached = new Set<string>();
   const queue: string[] = [];
-  const coreEntrypoints = new Set(["server/_core/index.ts", "server/_core/worker.ts"]);
+  // P0-C: three entrypoints — the production server, the standalone worker, and the development
+  // server, which is the only place the Vite module is reached from.
+  const coreEntrypoints = new Set(["server/_core/index.ts", "server/_core/worker.ts", "server/_core/dev.ts"]);
   for (const [path, body] of Object.entries(srcs)) {
     if (path.includes("_core/") && !coreEntrypoints.has(path)) continue;
     if (coreEntrypoints.has(path)) reached.add(path.split("/").pop()!.replace(/\.ts$/, ""));

@@ -21,10 +21,10 @@
  *   - audit package → its subject, resolved the same way as when it was prepared.
  */
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, isNull, notInArray, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { MySqlColumn } from "drizzle-orm/mysql-core";
-import { auditPackages, bankAccounts, incidentReports, insuranceClaims, insurancePolicies, bankStatements, capitalAssets, ccaSchedules, customerAccounts, customerCredits, disputeCases, externalIdentities, fuelAccounts, fuelStatements, fuelTransactions, gstReturns, iftaReturns, invoices, jurisdictionDistanceRecords, bulkFuelTanks, loads, organizationMemberships, portalSubmissions, purchaseAuthorizations, roadsideServiceEvents, safetyEvents, units, vendorBills, vendors, writeOffRequests } from "../drizzle/schema";
-import { bookOrgWhere, notFound, ownsBookOrg, ownsEntity, requireOwnedEntity, type FinanceScope } from "./_core/entityScope";
+import { auditPackages, bankAccounts, changeOrders, clientAdjustments, customerContractTerms, fieldTicketRevisions, fieldTickets, incidentReports, insuranceClaims, insurancePolicies, bankStatements, capitalAssets, ccaSchedules, customerAccounts, customerCredits, disputeCases, externalIdentities, fuelAccounts, fuelStatements, fuelTransactions, gstReturns, iftaReturns, invoices, jurisdictionDistanceRecords, bulkFuelTanks, loads, organizationMemberships, portalSubmissions, projectBudgets, purchaseAuthorizations, quotes, rfis, roadsideServiceEvents, safetyEvents, units, vendorBills, vendors, writeOffRequests } from "../drizzle/schema";
+import { bookOrgWhere, notFound, ownedEntityWhere, ownsBookOrg, ownsEntity, requireOwnedEntity, type FinanceScope } from "./_core/entityScope";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { requireProvableOwnership } from "./ownershipDomain";
 import { evidenceInScope, fieldTicketInScope, getDb, incidentInScope, jobInScope, jobScopeSubquery, operatorInScope, ownershipScopeWhere, tripInScope, unitInScope, userInScope } from "./db";
@@ -69,6 +69,63 @@ export async function disputeCaseInScope(db: Db, fs: FinanceScope, caseNumber: s
   const inv = (await db.select({ financialEntityId: invoices.financialEntityId }).from(invoices).where(eq(invoices.invoiceNumber, c.invoiceNumber)).limit(1))[0];
   if (!inv || !ownsEntity(fs, inv.financialEntityId)) throw notFound("Dispute case");
   return c;
+}
+
+// ── Projects and site closeout (P0-A3) ───────────────────────────────────────────────────────────
+/**
+ * The chain, read from the schema: a quote carries its book (`quotes.financialEntityId`); a budget,
+ * change order, RFI, contract terms and client adjustment carry the customer account
+ * (`customerAccountId`), and the account carries the book (`customerAccounts.financialEntityId`).
+ * `jobId` on any of them is a reference to an operational record, never ownership;
+ * `customerAccounts.orgRef` is the CLIENT organization a person linked (0136), never ownership.
+ * A field-ticket revision is its ticket's, and a ticket is its job's (P4.1, `fieldTicketInScope`).
+ */
+/** Subquery of the customer accounts whose book the caller owns. */
+export function ownedAccountIds(db: Db, fs: FinanceScope) {
+  return db.select({ id: customerAccounts.id }).from(customerAccounts).where(ownedEntityWhere(customerAccounts.financialEntityId, fs));
+}
+/** WHERE clause: rows keyed to a customer account whose book the caller owns. No books means no rows. */
+export function ownedAccountWhere(db: Db, customerAccountIdColumn: MySqlColumn, fs: FinanceScope): SQL {
+  return fs.entityIds.length ? inArray(customerAccountIdColumn, ownedAccountIds(db, fs)) : sql`false`;
+}
+async function accountBook(db: Db, customerAccountId: number): Promise<number | null> {
+  return (await db.select({ financialEntityId: customerAccounts.financialEntityId }).from(customerAccounts).where(eq(customerAccounts.id, customerAccountId)).limit(1))[0]?.financialEntityId ?? null;
+}
+/** A row keyed to a customer account: the account's book must be the caller's; otherwise the words a missing row gets. */
+async function ownedThroughAccount<T extends { customerAccountId: number }>(db: Db, row: T | undefined, fs: FinanceScope, what: string): Promise<T> {
+  if (!row || !ownsEntity(fs, await accountBook(db, row.customerAccountId))) throw missing(what);
+  return row;
+}
+export async function quoteInScope(db: Db, fs: FinanceScope, quoteRef: string) {
+  return owned((await db.select().from(quotes).where(eq(quotes.quoteRef, quoteRef)).limit(1))[0], r => r.financialEntityId, fs, "Quote not found");
+}
+export async function projectBudgetInScope(db: Db, fs: FinanceScope, budgetRef: string) {
+  return ownedThroughAccount(db, (await db.select().from(projectBudgets).where(eq(projectBudgets.budgetRef, budgetRef)).limit(1))[0], fs, "Budget not found");
+}
+export async function changeOrderInScope(db: Db, fs: FinanceScope, changeOrderRef: string) {
+  return ownedThroughAccount(db, (await db.select().from(changeOrders).where(eq(changeOrders.changeOrderRef, changeOrderRef)).limit(1))[0], fs, "Change order not found");
+}
+export async function rfiInScope(db: Db, fs: FinanceScope, rfiRef: string) {
+  return ownedThroughAccount(db, (await db.select().from(rfis).where(eq(rfis.rfiRef, rfiRef)).limit(1))[0], fs, "RFI not found");
+}
+export async function contractTermsInScope(db: Db, fs: FinanceScope, termsRef: string) {
+  return ownedThroughAccount(db, (await db.select().from(customerContractTerms).where(eq(customerContractTerms.termsRef, termsRef)).limit(1))[0], fs, "Terms not found");
+}
+export async function clientAdjustmentInScope(db: Db, fs: FinanceScope, adjustmentRef: string) {
+  return ownedThroughAccount(db, (await db.select().from(clientAdjustments).where(eq(clientAdjustments.adjustmentRef, adjustmentRef)).limit(1))[0], fs, "Adjustment not found");
+}
+/** A field ticket named by number, through its job (else its unit, else the single tenant): the closeout router's own wording. */
+export async function requireTicket(fs: FinanceScope, ticketNumber: string) {
+  const t = await fieldTicketInScope(ticketNumber, fs);
+  if (!t) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${ticketNumber} not found` });
+  return t;
+}
+/** A ticket revision (a signed document) is its ticket's. */
+export async function ticketRevisionInScope(db: Db, fs: FinanceScope, documentRef: string) {
+  const rev = (await db.select().from(fieldTicketRevisions).where(eq(fieldTicketRevisions.documentRef, documentRef)).limit(1))[0];
+  const t = rev ? (await db.select({ ticketNumber: fieldTickets.ticketNumber }).from(fieldTickets).where(eq(fieldTickets.id, rev.fieldTicketId)).limit(1))[0] : undefined;
+  if (!rev || !t || !(await fieldTicketInScope(t.ticketNumber, fs))) throw new TRPCError({ code: "NOT_FOUND", message: "Revision not found" });
+  return { rev, ticketNumber: t.ticketNumber };
 }
 
 // ── Bank ──────────────────────────────────────────────────────────────────────────────────────────

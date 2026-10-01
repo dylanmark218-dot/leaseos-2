@@ -29,9 +29,10 @@ const contextInput = z.object({
 });
 
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
-async function accountId(d: Awaited<ReturnType<typeof db>>, accountRef: string | undefined) {
+/** P0-A3 — a customer account named beside a book must be that book's account; another book's answers as a missing one. */
+async function accountId(d: Awaited<ReturnType<typeof db>>, accountRef: string | undefined, financialEntityId: number) {
   if (!accountRef) return null;
-  const a = (await d.select({ id: customerAccounts.id }).from(customerAccounts).where(eq(customerAccounts.accountRef, accountRef)).limit(1))[0];
+  const a = (await d.select({ id: customerAccounts.id }).from(customerAccounts).where(and(eq(customerAccounts.accountRef, accountRef), eq(customerAccounts.financialEntityId, financialEntityId))).limit(1))[0];
   if (!a) throw new TRPCError({ code: "NOT_FOUND", message: `No customer account ${accountRef}` });
   return a.id;
 }
@@ -42,7 +43,7 @@ async function vendorId(d: Awaited<ReturnType<typeof db>>, vendorRef: string | u
   return v.id;
 }
 async function context(d: Awaited<ReturnType<typeof db>>, input: z.infer<typeof contextInput>): Promise<ResolutionContext & { financialEntityId: number }> {
-  return { financialEntityId: input.financialEntityId, rateKind: input.rateKind, serviceCode: input.serviceCode, at: input.at, customerAccountId: await accountId(d, input.customerAccountRef), vendorId: await vendorId(d, input.vendorRef), projectRef: input.projectRef ?? null, siteRef: input.siteRef ?? null, contractRef: input.contractRef ?? null, jobId: input.jobId ?? null, branchCode: input.branchCode ?? null, unitId: input.unitId ?? null, resourceClass: input.resourceClass ?? null, conditionKey: input.conditionKey ?? null };
+  return { financialEntityId: input.financialEntityId, rateKind: input.rateKind, serviceCode: input.serviceCode, at: input.at, customerAccountId: await accountId(d, input.customerAccountRef, input.financialEntityId), vendorId: await vendorId(d, input.vendorRef), projectRef: input.projectRef ?? null, siteRef: input.siteRef ?? null, contractRef: input.contractRef ?? null, jobId: input.jobId ?? null, branchCode: input.branchCode ?? null, unitId: input.unitId ?? null, resourceClass: input.resourceClass ?? null, conditionKey: input.conditionKey ?? null };
 }
 async function definitionsFor(d: Awaited<ReturnType<typeof db>>, financialEntityId: number, serviceCode: string, rateKind: ChargeDefinition["rateKind"]): Promise<ChargeDefinition[]> {
   return (await d.select().from(chargeDefinitions).where(and(eq(chargeDefinitions.financialEntityId, financialEntityId), eq(chargeDefinitions.serviceCode, serviceCode), eq(chargeDefinitions.rateKind, rateKind)))) as ChargeDefinition[];
@@ -110,7 +111,7 @@ export const commercialSetupRouter = router({
         definitionRef, financialEntityId: input.financialEntityId, rateKind: input.rateKind, serviceCode: input.serviceCode, resourceClass: input.resourceClass ?? null, unitId: input.unitId ?? null,
         pricingMethod: input.pricingMethod, unit: input.unit, rateMillis: input.rateMillis ?? null, flatCents: input.flatCents ?? null, basisPoints: input.basisPoints ?? null, multiplierMillis: input.multiplierMillis ?? null, formula: input.formula ?? null,
         minimumQuantityMillis: input.minimumQuantityMillis ?? null, minimumChargeCents: input.minimumChargeCents ?? null, billingIncrementMillis: input.billingIncrementMillis ?? null, roundingMode: input.roundingMode, measurementBasis: input.measurementBasis, conditionKey: input.conditionKey ?? null,
-        scopeLevel: input.scopeLevel, customerAccountId: await accountId(d, input.customerAccountRef), vendorId: await vendorId(d, input.vendorRef), projectRef: input.projectRef ?? null, siteRef: input.siteRef ?? null, contractRef: input.contractRef ?? null, jobId: input.jobId ?? null, branchCode: input.branchCode ?? null,
+        scopeLevel: input.scopeLevel, customerAccountId: await accountId(d, input.customerAccountRef, input.financialEntityId), vendorId: await vendorId(d, input.vendorRef), projectRef: input.projectRef ?? null, siteRef: input.siteRef ?? null, contractRef: input.contractRef ?? null, jobId: input.jobId ?? null, branchCode: input.branchCode ?? null,
         effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo ?? null, sourceKind: input.sourceKind, sourceDocumentEvidenceId: input.sourceDocumentEvidenceId ?? null, sourceClause: input.sourceClause ?? null, approvalStatus: "proposed", proposedByUserId: ctx.user.id, notes: input.notes ?? null,
       });
       return { id: Number(ins[0]?.insertId ?? 0), definitionRef, approvalStatus: "proposed" as const, message: "Proposed. It prices nothing until a different person approves it." };
@@ -175,7 +176,7 @@ export const commercialSetupRouter = router({
       { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
 
     const d = await db();
-    const cid = await accountId(d, input.customerAccountRef);
+    const cid = await accountId(d, input.customerAccountRef, input.financialEntityId);
     const defs = (await d.select().from(chargeDefinitions).where(and(eq(chargeDefinitions.financialEntityId, input.financialEntityId), eq(chargeDefinitions.rateKind, "sell")))) as ChargeDefinition[];
     const forService = defs.filter(x => x.approvalStatus !== "rejected" && (x.serviceCode === input.serviceCode || x.serviceCode.startsWith(`${input.serviceCode}_`)) && (cid == null || x.customerAccountId == null || x.customerAccountId === cid));
     return { questions: rateSheetGaps(forService), definitions: forService.length };
