@@ -108,15 +108,16 @@ describe("S2E2-T17 and the key-material boundary — structural", () => {
   const strip = (body: string) => body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   const code = (p: string) => strip(readFileSync(p, "utf8"));
 
-  it("S2E2-T17. the preflight has no input that can mark the fleet compatible, and derives its verdict", () => {
+  it("S2E2-T17. the preflight has no input that can mark the fleet converged, and derives its verdict", () => {
     const preflight = code("server/webhookCutoverPreflight.ts");
     const args = preflight.match(/export type PreflightArgs = \{[\s\S]*?\n\};/)![0];
-    expect(args, "no caller-supplied fleet attestation").not.toMatch(/fleet|converged|attest/i);
-    expect(preflight, "the only fleet state the code constructs is not_provable").toMatch(/state: "not_provable",/);
-    // The type names the states a future mechanism may report (`state: "compatible";`); no value is
-    // ever constructed with them (`state: "compatible",` or `state: "compatible" }`).
-    expect(preflight).toMatch(/state: "compatible";/);
-    expect(preflight).not.toMatch(/state: "(?:compatible|incompatible)"\s*[,}]/);
+    expect(args, "no caller-supplied fleet attestation").not.toMatch(/fleet|converged|attest|evidence|inventory/i);
+    // S2-FLEET-A: the fleet component is READ from the observation service. The preflight constructs
+    // no fleet state of its own — not the blocked ones and above all not `converged`.
+    expect(preflight, "the fleet is observed, never received").toMatch(/fleetComponent\(await observeFleet\(\)\)/);
+    expect(preflight).not.toMatch(/state:\s*"(?:converged|observed_compatible_external_confirmation_required|observed_incompatible|not_observable|not_provable|compatible|incompatible)"/);
+    expect(preflight, "only the service's converged state lifts the fleet blocker").toMatch(/if \(fleet\.state !== "converged"\) blockers\.push/);
+    expect(preflight).not.toMatch(/fleetConverged|converged:\s*true/);
     expect(preflight, "the verdict is the conjunction of the components, not a field").toMatch(/cutoverAllowed: blockers\.length === 0/);
     expect(preflight).not.toMatch(/cutoverAllowed: true/);
     expect(preflight).not.toMatch(/releaseTwoReady|safeToCutover/);

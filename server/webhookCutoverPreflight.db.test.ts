@@ -30,6 +30,8 @@ import { signPayload, verifySignature } from "./_core/integrationGateway";
 import { encryptSecret as legacyEnc } from "./_core/externalIdentityPolicy";
 import { createSecret, describeSecret, disableSecret } from "./secretStore";
 import { dispatchWebhooks, setWebhookPoster } from "./webhookDispatchService";
+import { getDb } from "./db";
+import { newRuntimeInstanceIdentity, startRuntimeRegistration } from "./_core/runtimeRegistry";
 
 /* The dispatcher builds its keys from the environment; the fixtures below must agree with it. */
 process.env.LEASEOS_PORTAL_MFA_KEY = "8".repeat(64);
@@ -557,10 +559,62 @@ d("S2E2-T17 — fleet convergence cannot be silently assumed", () => {
     expect(report.existingCanonicalSecrets, "references resolve").toMatchObject({ resolvable: true, checked: 2, unresolvable: [] });
     expect(report.productionCanonicalWrite, "the write is possible").toEqual({ possible: true, keyId: "webhook-v1" });
 
-    expect(report.fleet.state).toBe("not_provable");
+    // S2-FLEET-A: the fleet is now observed rather than unprovable, but no observation made from
+    // inside the deployment can reach `converged` — that takes external deployment evidence.
+    expect(report.fleet.state).not.toBe("converged");
+    expect(["not_observable", "observed_incompatible", "observed_compatible_external_confirmation_required"]).toContain(report.fleet.state);
+    expect(report.fleet.externalConfirmation).toBe("none");
     expect(report.cutoverAllowed).toBe(false);
     expect(report.blockers).toHaveLength(1);
-    expect(report.blockers[0]).toMatch(/^fleet convergence not provable:/);
+    expect(report.blockers[0]).toMatch(/^fleet convergence (?:not observable|observed incompatible|observed compatible external confirmation required):/);
+  });
+
+  it("FLEET old-instance test (mandatory). a compatible server and a compatible worker, observed, do not make the fleet converged or the cutover allowed", async () => {
+    /*
+     * The case the whole mechanism exists to get right. Both processes that CAN register have, and
+     * both are compatible. A server deployed from a build older than the registry would not appear
+     * here at all — and nothing in this repository can tell that it exists. So the observation says
+     * precisely what it saw, the fleet state names the missing confirmation, and the cutover stays
+     * blocked for that reason alone.
+     */
+    const o = org("fleet-old");
+    await subscription({ legacySecret: "will-migrate", orgRef: o });
+    await migrateWebhookSecrets({ ...K, batchSize: 50 });
+    const fake = fakeManagedKeyBackend();
+    const managedEnv = {
+      ...process.env,
+      LEASEOS_SECRET_KEYS_SOURCE: "managed",
+      LEASEOS_MANAGED_KEYS: JSON.stringify({ backend: fake.backend.name, keys: { WEBHOOK_SECRET: { active: { keyId: "webhook-v1", wrapped: fake.wrap(Buffer.from(hexKey("7"), "hex")), backendKeyRef: fake.kekRef } } } }),
+    };
+
+    const db = (await getDb())!;
+    const build = { source: "artifact" as const, identity: { sha: "f".repeat(40), release: "v0.0", shaSource: "explicit" as const } };
+    const server = await startRuntimeRegistration(db, newRuntimeInstanceIdentity("server", build), { intervalMs: 60_000 });
+    const worker = await startRuntimeRegistration(db, newRuntimeInstanceIdentity("worker", build), { intervalMs: 60_000 });
+    try {
+      const report = await webhookCutoverPreflightFromEnvironment(managedEnv, { orgRefs: [o] }, { [fake.backend.name]: fake.backend });
+      expect(report.webhookData.ready).toBe(true);
+      expect(report.managedKeyProvider.ready).toBe(true);
+      expect(report.existingCanonicalSecrets.resolvable).toBe(true);
+      expect(report.productionCanonicalWrite.possible).toBe(true);
+
+      // Observed compatibility: yes.
+      expect(report.fleet.state).toBe("observed_compatible_external_confirmation_required");
+      expect(report.fleet.liveServers).toBeGreaterThanOrEqual(1);
+      expect(report.fleet.liveWorkers).toBeGreaterThanOrEqual(1);
+      expect(report.fleet.liveIncompatible).toEqual([]);
+      expect(report.fleet.liveBuilds).toContain("f".repeat(40));
+      expect(report.fleet.requiredCapabilities).toEqual(["webhook-secret-ref-read"]);
+      // Full convergence: no. Cutover: blocked, for the fleet alone.
+      expect(report.fleet.externalConfirmation).toBe("none");
+      expect(report.cutoverAllowed).toBe(false);
+      expect(report.blockers).toHaveLength(1);
+      expect(report.blockers[0]).toMatch(/^fleet convergence observed compatible external confirmation required: every live instance observed .* declares webhook-secret-ref-read; whether these are ALL the instances that exist cannot be established here/);
+      expect(report.fleet.reason).toMatch(/HOSTING_TARGET unknown/);
+    } finally {
+      await server.close();
+      await worker.close();
+    }
   });
 
   it("KMS-T15. a supplied managed fake proves the contract and is never counted as production readiness", async () => {
@@ -579,7 +633,7 @@ d("S2E2-T17 — fleet convergence cannot be silently assumed", () => {
 
   it("the verdict is derived from the components and is never a stored field", async () => {
     const report = await webhookCutoverPreflight({ keys: envKeys, legacyKey: LEGACY, scope: { orgRefs: [org("none")] } });
-    const independentlyReady = report.fleet.state === "compatible" && report.webhookData.ready && report.managedKeyProvider.ready && report.existingCanonicalSecrets.resolvable && report.productionCanonicalWrite.possible;
+    const independentlyReady = report.fleet.state === "converged" && report.webhookData.ready && report.managedKeyProvider.ready && report.existingCanonicalSecrets.resolvable && report.productionCanonicalWrite.possible;
     expect(report.cutoverAllowed).toBe(independentlyReady);
     expect(report.cutoverAllowed).toBe(report.blockers.length === 0);
     expect(Object.keys(report).sort()).toEqual(["blockers", "cutoverAllowed", "existingCanonicalSecrets", "fleet", "managedKeyProvider", "productionCanonicalWrite", "webhookData"]);

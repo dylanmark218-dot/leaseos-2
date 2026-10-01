@@ -239,9 +239,31 @@ number free everywhere.
 |---|---|---|---|---|---|---|
 | 0209 | `0209_operating_zone_scope.sql` | `security/operating-zone-tenant-model` | P0-A2.1 | claiming | none | keeps 0209 |
 
-**Next free number for new work: `0210`** (re-check with the scan before committing).
+**Next free number for new work was `0210`** at that scan — superseded; see the S2-FLEET-A section below.
 
 ## Change log (continued)
 
 * **2026-10-01 (P0-A2.1)**: claimed `0209` (`operatingZones.orgRef`, nullable; NULL = the historical single
   tenant, as 0132 and 0148), recorded in the commit that creates the migration.
+
+## State at the S2-FLEET-A claim (2026-10-01, `main` = `2a76920`, after PR #60)
+
+`main` migration head: **`0209_operating_zone_scope.sql`**, 186 migrations. Re-scanned across `main` and
+every remote branch at the moment of claiming (`git ls-tree` of each `origin/*` ref over `drizzle/`):
+the only numbers held anywhere beyond `main` are `0210`–`0212`, all on
+`claude/driver-portfolio-credential-wallet-ya8928` (`0210_driver_portfolio.sql`,
+`0211_driver_portfolio_events_append_only.sql`, `0212_driver_portfolio_api.sql`), which renumbered off
+`0202`–`0204` after the P0-A2.1 scan. The "next free: `0210`" line above was written before that move
+and would have collided, so `0213` is the first number free everywhere.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0210–0212 | `0210_driver_portfolio.sql`, `0211_driver_portfolio_events_append_only.sql`, `0212_driver_portfolio_api.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | #16 | open branch | none | keeps 0210–0212 |
+| 0213 | `0213_runtime_instances.sql` | `security/s2-fleet-runtime-identity` | S2-FLEET-A | claiming | none | keeps 0213 |
+
+**Next free number for new work: `0214`** (re-check with the scan before committing; a branch may have
+renumbered since, as driver-portfolio did between the P0-A2.1 and S2-FLEET-A scans).
+
+* **2026-10-01 (S2-FLEET-A)**: claimed `0213` (`runtimeInstances`: tenant-neutral runtime registry — per-process
+  build identity, capabilities, heartbeat and stop timestamps), recorded in the commit that creates the
+  migration. No branch renumbered.

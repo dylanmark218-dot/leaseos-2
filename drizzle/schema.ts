@@ -9582,3 +9582,26 @@ export const liveAssistPolicies = mysqlTable("liveAssistPolicies", {
   currentUnique: uniqueIndex("liveAssistPolicies_current_unique").on(t.orgRef, t.currentMarker),
 }));
 export type LiveAssistPolicyRow = typeof liveAssistPolicies.$inferSelect;
+
+/**
+ * S2-FLEET-A — one row per running process (server or standalone worker), from registration at
+ * startup until it marks itself stopped or its heartbeat expires. Deployment metadata only: no
+ * orgRef, no tenant or user API reads or writes it (`server/_core/runtimeRegistry.ts`,
+ * `server/fleetWiring.test.ts`). Identity columns are written by the INSERT and never updated;
+ * `lastHeartbeatAt` and `stoppedAt` are the only columns that move. Migration 0213.
+ */
+export const runtimeInstances = mysqlTable("runtimeInstances", {
+  id: int("id").autoincrement().primaryKey(),
+  instanceRef: varchar("instanceRef", { length: 48 }).notNull().unique(),
+  runtimeKind: mysqlEnum("runtimeKind", ["server", "worker"]).notNull(),
+  buildSha: varchar("buildSha", { length: 40 }),
+  buildRelease: varchar("buildRelease", { length: 32 }),
+  buildSource: mysqlEnum("buildSource", ["artifact", "unbuilt"]).notNull(),
+  capabilitiesJson: text("capabilitiesJson").notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  lastHeartbeatAt: timestamp("lastHeartbeatAt").defaultNow().notNull(),
+  stoppedAt: timestamp("stoppedAt"),
+}, (t) => ({
+  liveIdx: index("runtimeInstances_live_idx").on(t.stoppedAt, t.lastHeartbeatAt),
+}));
+export type RuntimeInstanceRow = typeof runtimeInstances.$inferSelect;
