@@ -70,6 +70,11 @@ export type EgressResponse = {
   /** Every URL requested, in order; the first is the caller's. */
   hops: string[];
   contentType: string | null;
+  /**
+   * The publisher's `Retry-After`, verbatim, when it sent one — the single response header a caller
+   * may read. A feed collector needs it to wait as long as it was asked to; nothing else crosses.
+   */
+  retryAfter: string | null;
   /** The body of a 2xx answer. A non-2xx body is not read. */
   bytes: Uint8Array;
   text(): string;
@@ -321,9 +326,9 @@ async function readBody(body: AsyncIterable<Uint8Array>, url: URL, limits: Egres
   return out;
 }
 
-function answer(status: number, url: URL, hops: string[], contentType: string | null, bytes: Uint8Array): EgressResponse {
+function answer(status: number, url: URL, hops: string[], contentType: string | null, bytes: Uint8Array, retryAfter: string | null = null): EgressResponse {
   const text = () => new TextDecoder("utf-8").decode(bytes);
-  return { ok: status >= 200 && status <= 299, status, url: url.href, hops, contentType, bytes, text, json: () => JSON.parse(text()) as unknown };
+  return { ok: status >= 200 && status <= 299, status, url: url.href, hops, contentType, retryAfter, bytes, text, json: () => JSON.parse(text()) as unknown };
 }
 
 /**
@@ -353,7 +358,7 @@ export async function guardedGet(target: string | URL, edges: EgressEdges, limit
           continue;
         }
         const contentType = res.headers["content-type"] ?? null;
-        if (res.status < 200 || res.status > 299) return answer(res.status, url, hops, contentType, new Uint8Array(0));
+        if (res.status < 200 || res.status > 299) return answer(res.status, url, hops, contentType, new Uint8Array(0), res.headers["retry-after"] ?? null);
         const media = (contentType ?? "").split(";")[0]!.trim().toLowerCase();
         if (limits.contentTypes.indexOf(media) < 0) throw new EgressRefused("content_type", `${url.host} answered ${media || "with no content type"}; expected ${limits.contentTypes.join(" or ")}`);
         const encoding = (res.headers["content-encoding"] ?? "identity").trim().toLowerCase();

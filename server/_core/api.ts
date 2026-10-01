@@ -15,6 +15,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { registerOAuthRoutes } from "./oauth";
 import { allowedOriginsFromEnv, crossSiteGuard, rateLimit } from "./httpHardening";
+import { organizationSelectionMiddleware } from "./organizationSelection";
 
 export function registerApi(app: Express): void {
   // #19: a cross-site write to the API is refused before any parser or procedure runs.
@@ -29,6 +30,12 @@ export function registerApi(app: Express): void {
   // A floor against one client hammering sign-in, per process. See rateLimit.
   app.use("/api/oauth", rateLimit({ windowMs: 60_000, max: 60 }));
   registerOAuthRoutes(app);
+  // v23.26 (#64) — the request's claimed organization, in scope for the whole handler. It carries a
+  // claim and never an authority: `resolveActingScope` checks it against the membership table on
+  // every request, so a forged cookie names an organization the caller has been proved to belong to
+  // or it names nothing. Registered on the mount ahead of tRPC (it runs `next` inside the scope)
+  // rather than in `createContext`, because a context factory returns before any procedure runs.
+  app.use(TRPC_MOUNT_PATH, organizationSelectionMiddleware);
   // tRPC API
   app.use(TRPC_MOUNT_PATH, createExpressMiddleware({ router: appRouter, createContext }));
 }

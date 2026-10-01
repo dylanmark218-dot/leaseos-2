@@ -237,7 +237,7 @@ describe("inbox and my day are self-scoped", () => {
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let userSeq = 260000 + Math.floor(Math.random() * 50000);
+let userSeq = 400_000_000 + Math.floor(Math.random() * 50000);
 const nextUser = () => userSeq++;
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
 beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 6 }); });

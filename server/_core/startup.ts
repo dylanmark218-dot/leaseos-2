@@ -14,6 +14,7 @@ import { createServer, type Server } from "http";
 import { registerApi } from "./api";
 import { startProductionWorker } from "./productionWorker";
 import { ENV, assertProductionSecrets } from "./env";
+import { bootstrapSecretKeys } from "./secretKeys";
 import { listenOnPort, resolveListenPort } from "./listen";
 import { createReadinessState, registerHealthRoutes } from "./health";
 import { securityHeaders, trustProxySetting } from "./httpHardening";
@@ -43,6 +44,12 @@ export async function startServer(frontend: Frontend): Promise<void> {
   // Before anything binds a port or starts a worker: a server that cannot
   // authenticate anyone should not reach the point of accepting requests.
   assertProductionSecrets(ENV, !isDevelopment);
+
+  // S2-KMS-A: the secret-key provider, once, before the worker or the API exist. A managed
+  // configuration whose backend cannot be reached throws here, the port is never bound and
+  // `/readyz` never says ready. The worker entrypoint makes the same call first (`worker.ts`).
+  const keys = await bootstrapSecretKeys();
+  console.log(`[secrets] key provider: ${keys.source}${keys.backend ? ` (${keys.backend})` : ""}`);
 
   const worker = await startProductionWorker();
   // The HTTP edge (#19): no framework banner, the proxy hops this deployment trusts, and the

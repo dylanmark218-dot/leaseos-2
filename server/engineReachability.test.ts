@@ -87,34 +87,22 @@ const DECLARED_UNWIRED: Record<string, string> = {
   osmLoadPlan: "M2 - reads an extraction and says what it refused. Pure; run end to end with osmImport and osmTopology over a real Edmonton slice (13,441 ways, 0 rejections, 29,369 edges). Not mounted: the procedure that would call it writes half a million rows, and that wants a database that is not dropped and rebuilt every gate run.",
   osmLoad: "M2 - an extract becomes a graph build. Pure by design: it returns a plan rather than writing one, because a road graph is worth counting and diffing against the build in use before it replaces it. Proven on 103,001 real Edmonton ways. The write step is the remaining piece and wants a database that is not dropped between gate runs.",
   migrationLedger: "the production migration ledger; reached from scripts/migrate.ts (the deploy path), not from a router — declared by the session that reconciled 5f3bef4",
+  requiredSuites: "B23.1B — which test suites the gate refuses to pass without, and the pure check that reads vitest's JSON report. Unwired on purpose and permanently: its caller is scripts/verify-gate-run.ts, run by ci-gate.sh after the suite. A request has no opinion about whether the authorization suites ran.",
+  migrationSlots: "B23.1A — the migration filename guard. Unwired on purpose and permanently: it inspects the repository's own `drizzle/` filenames, which is a fact about the tree rather than about any request, so the only caller is `migrationSlots.test.ts` and gate 0 of ci-gate.sh. A router that could answer 'is our migration numbering sound' would be answering it about the server's deployed copy, too late to matter.",
   offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
   dashboardWidget: "widget contract; no dashboard surface consumes it yet",
   financialCalendar: "AP/AR and company-event projections; no financial surface yet",
-  openShifts: "eligibility engine; openShiftsRouter currently decides inline — a live duplication, not a gap",
   billing: "billing engine predates this audit; reachability not yet established",
-  advisoryImpact: "road-advisory placement; feed scheduler is not started",
-  eventEmitter: "event vocabulary; emitters write via raw SQL",
-  feedCollector: "feed quota and clearance gates; scheduler not started",
-  feedIngest: "feed ingestion lifecycle; scheduler not started",
   billingAdjustment: "adjustment rules; same unestablished reachability as billing",
   dataApi: "shape declarations only",
   dataIngestion: "import path not wired",
-  dispatchMatching: "matching engine; dispatch surface uses its own path",
+  dispatchMatching: "suitability match and posting visibility; no live counterpart (no posting feed or capability data yet). Booking conflicts were a duplicate of the award's own check and were removed (SPINE item 2)",
   disposalReconciliation: "reconciliation engine; no procedure calls it",
   domainEmitters: "event vocabulary; emitted from raw SQL paths",
-  feedHttp: "HTTP edge; scheduler not started in production",
-  // The Canadian 511 tranche (2026-09-24): per-province endpoints and parsers over the feed layer
-  // above, declared for the same reason it is — nothing starts the scheduler that would call them.
-  "transport/providerRegistry": "per-province endpoint, key location and parser over feedCollector/feedHttp/feedIngest; scheduler not started",
-  "transport/ibi511": "the 511 platform parser shared by AB, ON, MB, NB, YT and NL; reached only through providerRegistry",
-  "transport/drivebcOpen511": "DriveBC Open511 parser; reached only through providerRegistry",
-  "transport/quebecRoadworks": "Québec MTMD roadworks parser; reached only through providerRegistry",
-  "transport/placement": "publisher geometry to the point-and-radius advisoryImpact places; used only by the parsers above",
-  "transport/fields": "date, severity and column-width coercions shared by the parsers above",
-  feedScheduler: "backoff scheduler; nothing starts it from an entry point",
-  fieldTicket: "ticket engine; router path predates it",
+  fieldTicket: "scope validation and job reconciliation have no live counterpart (job close). Its disposition split and statement builder duplicated closeout/invoicing and were removed (SPINE item 2); its signature-status roll-up contradicted the owner's ruling (a signature is the state recorded at signing) and was removed too",
   heartbeat: "liveness helper; no monitor calls it",
+  "managedKeyBackend.fake": "S2-KMS-A: the managed key backend tests stand in for a vendor adapter — a KEK it never exports, AES-GCM wrapping, the failure modes a real backend has. Imported by tests only, never by production (secretKeyWiring.test.ts pins that); the production backend registry is empty until S2-KMS-B proves the hosting platform",
   imageGeneration: "unused capability",
   jurisdiction: "profile lookup; callers use their own",
   map: "map geometry helpers; callers use the routing adapter path instead",
@@ -315,19 +303,8 @@ describe("every engine is reached, or says why not", () => {
       "osmImport",
       "osmTopology",
       // Declared before their consumers were, each waiting on the same wiring.
-      "advisoryImpact",
       "deviceManifest",
-      "eventEmitter",
-      "feedCollector",
-      "feedIngest",
       "monitoringNotice",
-      // The provincial parsers and their helpers, imported only by providerRegistry and each
-      // other. They leave with the feed layer, when the scheduler is started.
-      "transport/drivebcOpen511",
-      "transport/fields",
-      "transport/ibi511",
-      "transport/placement",
-      "transport/quebecRoadworks",
       // SPINE item 1, landing as one chain before its router: boundaryEvidence holds the
       // chain rule and imports boundaryConfirmation, which imports siteBaseline's types.
       // Not the `billing` shape — nothing else in the tree answers "which boundaries does
@@ -358,7 +335,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(83);   // SPINE item 2: -1 complianceDocumentValidity, now reached — dispatch (credentials, medical fitness, insurance proof), the documentExpiry tile, the insurance office, the exception centre, the passport and foreign TDG recognition all read the verdict through it; no other engine moved   // +21 AI Secretary model-layer modules. They existed as `server/ai/`, outside this census entirely, and were moved under `_core/` so the guard can see them; every one is declared unwired above under the SPINE moratorium (docs/register/SPINE_WIRING_PLAN.md:3). The number rising is the census becoming honest, not the gap growing: the modules were always unwired, and this is the first run in which that is stated.   // Canadian 511 tranche: +6 transport/* (providerRegistry and the parsers it routes to), declared above; unwired for the same reason feedCollector/feedIngest/feedHttp are   // SPINE item 1: +2 boundaryConfirmation (the resolver) and boundaryEvidence (the chain rule), declared above; the receipt reader is not in this repository — tripStops has no updatedAt here   // census repair: -2 +3. externalSourceSeeds and externalDataRegistry left the declared list because they are reached — db.ts loads the first with `await import`, which the old regex could not see, and its declaration read "no application path reaches this engine". knowledge/evaluationState, knowledge/perimeter and knowledge/repository entered it because coreEngines now recurses; server/_core/knowledge/ was outside the census entirely, nine modules that could be neither reached nor declared   // B23.0 closeout: +4 trip-operations engines (safetyBinder, siteBaseline, tripBillingProjection, tripPassportPackage), declared above and wired by nobody yet   // v23.24 merge: their 49 + 1 — the four OSM loader cores landed unwired this line (osmImport, osmTopology, osmLoadPlan, osmLoad: the build runs from scripts, not from a router, and a router that rebuilds the road graph on request is not something to expose), and the union is 50, counted from DECLARED_UNWIRED rather than taken from either pin: the one entry their side still does not carry is complianceDocumentValidity (merged in from the parallel B28 port at v22.24, unwired because the documentExpiry tile decides expiry inline; see its entry above)   // v22.58: +1 demoDataset (reached from the demo path, declared above);   // v22.35: +1 migrationLedger (reached from scripts/migrate.ts, declared above);   // v22.23: +7 B28 semantics/promotion-gate modules, declared above; the sheet-serial modules are wired through academy.sheetPrintRun/sheetScanFile through trainingAcademyRouter (0123/0122)   // v22.21: loadSense wired through integrationRouter; one further engine reached by the recovered knowledge tranche
+    expect(unwired).toHaveLength(73);   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });

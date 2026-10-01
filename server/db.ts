@@ -79,8 +79,10 @@ import {
   users,
   externalIdentities,
   integrationClients,
-  coreRecordOwnership, organizationMemberships, fieldTickets, incidentReports, loads } from "../drizzle/schema";
+  coreRecordOwnership, organizationInvitationRoles, organizationInvitations, organizationMemberships, organizations, fieldTickets, incidentReports, loads } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { membershipIsLive, type MembershipFact } from "./_core/workspaceAccess";
+import { grantsInOrganization, type RoleGrant } from "./_core/recordsAuthorization";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -1176,14 +1178,14 @@ export async function listProposalFields(proposalId: string) {
  * deleted at revoke time, so "what could this person do in March" stays an
  * answerable question.
  */
-export async function listActiveUserRoles(
-  userId: number
-): Promise<{ role: string; scopeRef: string | null }[]> {
+export async function listActiveUserRoles(userId: number): Promise<RoleGrant[]> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db
     .select({
       role: userRoleAssignments.role,
+      scopeType: userRoleAssignments.scopeType,
+      orgRef: userRoleAssignments.orgRef,
       scopeRef: userRoleAssignments.scopeRef,
     })
     .from(userRoleAssignments)
@@ -1193,7 +1195,46 @@ export async function listActiveUserRoles(
         isNull(userRoleAssignments.revokedAt)
       )
     );
-  return rows.map(r => ({ role: r.role as string, scopeRef: r.scopeRef ?? null }));
+  // B23.1 — the scope travels with the grant. `scopeType` is optional in the
+  // TYPE only so pre-B23.1 pure fixtures still compile; the production reader
+  // always populates it, and a grant arriving here without one would be read as
+  // platform-global, so it is never left to a default.
+  return rows.map(r => ({
+    role: r.role as string,
+    scopeType: r.scopeType as RoleGrant["scopeType"],
+    orgRef: r.orgRef ?? null,
+    scopeRef: r.scopeRef ?? null,
+  }));
+}
+
+/**
+ * B23.1 — the grants that authorize in the organization this request is acting
+ * for, and the organization itself.
+ *
+ * The choke point. `roleProcedure` calls this instead of `listActiveUserRoles`,
+ * so every one of the ~650 gated procedures inherits the organization boundary
+ * without being edited — the same way B23.0's organization selection reached
+ * every tenant-scoped reader through `resolveActingScope`.
+ *
+ * It THROWS the same refusals `resolveActingScope` throws — `AmbiguousOrganization`
+ * when a person is a live member of several companies and has selected none,
+ * `MembershipRevoked` when every membership they had is over — because those
+ * are answers about authority and the gate is where authority is decided. Both
+ * are translated to named tRPC refusals in `roleProcedure`.
+ */
+export async function listRoleGrantsInActingOrganization(
+  userId: number
+): Promise<{ grants: RoleGrant[]; organization: string | null }> {
+  const db = await getDb();
+  if (!db) return { grants: [], organization: null };
+  const [acting, grants] = await Promise.all([
+    resolveActingScope(db, userId),
+    listActiveUserRoles(userId),
+  ]);
+  return {
+    grants: grantsInOrganization(grants, acting.tenantId),
+    organization: acting.tenantId,
+  };
 }
 
 /**
@@ -1218,9 +1259,15 @@ export async function listActiveUserRoles(
  * `RoleGrant[]` to `authorize()`, the way `roleProcedure` does. A caller asking
  * which roles a person holds for a non-authorization reason wants
  * `listRoleNamesAnyScope`.
+ *
+ * B23.1 — the same argument now applies one level out. A name is stripped of
+ * its organization as well as its branch, so returning a role granted by
+ * another company would launder it into authority here, which is the exact bug
+ * this checkpoint closes. The projection is therefore taken from the acting
+ * organization's grants, not the account's. It still only ever narrows.
  */
 export async function listActiveUserRoleNames(userId: number): Promise<string[]> {
-  return (await listActiveUserRoles(userId))
+  return (await listRoleGrantsInActingOrganization(userId)).grants
     .filter(r => r.scopeRef == null)
     .map(r => r.role);
 }
@@ -1233,16 +1280,53 @@ export async function listActiveUserRoleNames(userId: number): Promise<string[]>
  * one branch is still a driver, and still needs the driver's training — dropping
  * confined roles there would silently stop demanding a required course, which is
  * the same class of failure as over-granting, pointed the other way.
+ *
+ * B23.1A — the one reader deliberately left unscoped, and the reasoning is the
+ * same one level out: a driver at one company is a driver, and a grant this
+ * deployment quarantined as `unscoped_legacy` still describes work that person
+ * was doing. Demanding the training is the safe direction; withholding it is
+ * not. `readinessComposer` is its only caller and consumes it as a training
+ * requirement, never as permission. It DOES exclude revoked grants, because a
+ * grant that ended is not a duty anybody still has.
+ *
+ * If a second caller ever appears, check it against that sentence before
+ * reusing this: everything about authorization wants
+ * `listRoleGrantsInActingOrganization` instead.
  */
 export async function listRoleNamesAnyScope(userId: number): Promise<string[]> {
   return (await listActiveUserRoles(userId)).map(r => r.role);
 }
 
 /**
- * Count of users currently holding management. Used only by the bootstrap
- * path, which must refuse to run once anybody holds it.
+ * Count of users currently holding management IN ONE ORGANIZATION.
+ *
+ * B23.1A — the organization argument is required and is what makes the bootstrap
+ * usable in a multi-tenant deployment at all. Counted across every organization,
+ * as this did, the first company to bootstrap would close the door on every
+ * company created afterwards: they could never appoint a first administrator,
+ * because somebody somewhere else already held management.
+ *
+ * `null` means the historical single tenant, written explicitly so "count
+ * everywhere" cannot be reached by omitting an argument.
+ *
+ * It counts grants belonging to THIS organization, and deliberately not
+ * platform-wide (`scopeType='global'`) ones. That looks like the unsafe
+ * direction and is not, for a specific reason: a platform-wide management
+ * holder cannot appoint anybody here. `records.roles.grant` takes its
+ * organization from the ACTOR's acting scope, which comes from the actor's own
+ * membership — so a platform-wide admin with no membership in this company
+ * grants into the historical single tenant, never into it. Counting their
+ * grant as "this company already has an administrator" would close the only
+ * door into a company nobody can otherwise enter, permanently, for every
+ * organization created after the one legacy global grant.
+ *
+ * The population is not ignored: `bootstrapManagementRole` returns it,
+ * `records.roles.bootstrapStatus` reports it, and `role-grant-diagnostic.sh`
+ * exits 3 while any exist.
  */
-export async function countActiveManagementGrants(): Promise<number> {
+export async function countActiveManagementGrants(
+  organization: string | null
+): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
   const rows = await db
@@ -1251,6 +1335,32 @@ export async function countActiveManagementGrants(): Promise<number> {
     .where(
       and(
         eq(userRoleAssignments.role, "management"),
+        organization === null
+          ? isNull(userRoleAssignments.orgRef)
+          : eq(userRoleAssignments.orgRef, organization),
+        isNull(userRoleAssignments.revokedAt)
+      )
+    );
+  return rows.length;
+}
+
+/**
+ * Count of PLATFORM-WIDE grants of any role.
+ *
+ * B23.1A — `global` crosses every organization. After 0170 the backfill creates
+ * none, and no ordinary path writes one, so this number should be zero forever.
+ * It exists so the deployment check and the bootstrap can both say "nobody holds
+ * cross-tenant authority" as a measured fact rather than an assumption.
+ */
+export async function countPlatformWideGrants(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const rows = await db
+    .select({ id: userRoleAssignments.id })
+    .from(userRoleAssignments)
+    .where(
+      and(
+        eq(userRoleAssignments.scopeType, "global"),
         isNull(userRoleAssignments.revokedAt)
       )
     );
@@ -1262,17 +1372,40 @@ export async function countActiveManagementGrants(): Promise<number> {
  *
  * Fail-closed authorization means nobody can grant a role until somebody holds
  * `roles.grant`, and nobody holds it while the table is empty. This is the only
- * path across that gap, and it closes behind itself: it refuses once any active
- * management grant exists, it grants exactly `management` and nothing else, and
- * it requires a platform admin. Platform admin is not itself a domain role —
- * an admin is not automatically a mechanic, HR or legal.
+ * path across that gap, and it closes behind itself: it refuses once an active
+ * management grant exists in that organization, it grants exactly `management`
+ * and nothing else, and it requires a platform admin. Platform admin is not
+ * itself a domain role — an admin is not automatically a mechanic, HR or legal.
+ *
+ * ## B23.1A — bootstrap no longer creates platform authority
+ *
+ * It wrote `scopeType: 'global'`. Before 0170 that was the only value an
+ * ordinary grant could have and meant nothing in particular; after 0170 it
+ * means *reaches every organization in the deployment*. So the convenience path
+ * for appointing a company's first administrator had quietly become the one
+ * remaining way to mint a cross-tenant authority — exactly the distinction this
+ * checkpoint exists to draw.
+ *
+ * It now writes an ORGANIZATION-scoped grant, and the organization is derived
+ * from the target's own membership rather than named by the caller:
+ *
+ *   exactly one live membership -> management in that company
+ *   none at all                 -> management in the historical single tenant
+ *   more than one               -> REFUSED. Which company is being bootstrapped
+ *                                  is not a thing to guess, and a platform
+ *                                  admin guessing it is how one company's first
+ *                                  administrator ends up administering another.
+ *
+ * There is no path here to platform-wide authority any more, deliberately. If
+ * this deployment ever needs a genuine cross-tenant operator, that is its own
+ * mechanism with its own review — not a side effect of onboarding.
  */
 export async function bootstrapManagementRole(args: {
   targetUserId: number;
   performedByUserId: number;
   reason: string;
 }): Promise<
-  | { ok: true; grantId: number | undefined }
+  | { ok: true; grantId: number | undefined; organization: string; platformWideGrants: number }
   | { ok: false; reason: string }
 > {
   const db = await getDb();
@@ -1281,11 +1414,28 @@ export async function bootstrapManagementRole(args: {
     return { ok: false, reason: "Bootstrap requires a stated reason" };
   }
 
-  const existing = await countActiveManagementGrants();
+  // Which company is being opened. Read from the target's membership, never
+  // from the caller — a platform admin may perform the bootstrap, but may not
+  // choose whose company it lands in.
+  const memberships = (await listMembershipFacts(args.targetUserId)).filter(m =>
+    membershipIsLive(m, new Date())
+  );
+  const orgs = Array.from(new Set(memberships.map(m => m.orgRef)));
+  if (orgs.length > 1) {
+    return {
+      ok: false,
+      reason:
+        `Bootstrap refused — this user is a live member of ${orgs.length} organizations. ` +
+        "Which one is being bootstrapped has to be established, not guessed.",
+    };
+  }
+  const organization = orgs[0] ?? SINGLE_TENANT_ID;
+
+  const existing = await countActiveManagementGrants(organization);
   if (existing > 0) {
     return {
       ok: false,
-      reason: `Bootstrap is closed — ${existing} active management grant(s) already exist`,
+      reason: `Bootstrap is closed — ${existing} active management grant(s) already exist in this organization`,
     };
   }
 
@@ -1293,7 +1443,9 @@ export async function bootstrapManagementRole(args: {
   const grantId = await grantUserRole({
     userId: args.targetUserId,
     role: "management",
-    scopeType: "global",
+    // Organization-scoped, never platform-wide. See the note above.
+    scopeType: "organization",
+    orgRef: organization,
     grantedByUserId: args.performedByUserId,
     grantedAt: now,
   });
@@ -1306,7 +1458,574 @@ export async function bootstrapManagementRole(args: {
     occurredAt: now,
   });
 
-  return { ok: true, grantId };
+  // B23.1A — reported, not counted against the bootstrap. See
+  // `countActiveManagementGrants` for why a platform-wide holder does not close
+  // this door, and why pretending otherwise would lock the company out.
+  return { ok: true, grantId, organization, platformWideGrants: await countPlatformWideGrants() };
+}
+
+/* ==================================================================
+ * v23.26 — the session surface's two reads and one write.
+ *
+ * Every membership row for a user, whatever its status, joined to its
+ * organization's status. Deliberately unfiltered: the session resolver needs
+ * to tell "you never had a membership here" (the historical single tenant)
+ * apart from "your membership ended" (a refusal with a sentence a person can
+ * act on), and a query that returned only live rows would collapse the two.
+ * ================================================================== */
+export async function listMembershipFacts(userId: number): Promise<MembershipFact[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({ m: organizationMemberships, orgName: organizations.name, orgStatus: organizations.status })
+    .from(organizationMemberships)
+    .leftJoin(organizations, eq(organizations.orgRef, organizationMemberships.orgRef))
+    .where(eq(organizationMemberships.userId, userId));
+  return rows.map(r => ({
+    membershipRef: r.m.membershipRef,
+    orgRef: r.m.orgRef,
+    organizationName: r.orgName ?? r.m.orgRef,
+    // A membership pointing at no organization row resolves to "closed", not to
+    // "active". There is no status to read, and an unreadable status is not a
+    // live one.
+    organizationStatus: (r.orgStatus ?? "closed") as MembershipFact["organizationStatus"],
+    membershipType: r.m.membershipType,
+    membershipStatus: r.m.status,
+    effectiveFrom: r.m.effectiveFrom,
+    effectiveTo: r.m.effectiveTo,
+    branchId: r.m.branchId,
+    defaultWorkspace: r.m.defaultWorkspace,
+  }));
+}
+
+/**
+ * Remember which workspace a person last entered, on the membership it belongs
+ * to.
+ *
+ * `organizationMemberships.defaultWorkspace` has been in the schema since
+ * 0086 and nothing has ever read or written it. It is the right home: the
+ * preference belongs to a person *in one company*, so a driver at one employer
+ * and a mechanic at another each keep their own. It is a PREFERENCE — the
+ * resolver checks it against the workspaces actually open before honouring it,
+ * so a stored value cannot outlive the access that justified it.
+ */
+export async function rememberDefaultWorkspace(args: {
+  membershipRef: string;
+  workspace: string;
+}): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(organizationMemberships)
+    .set({ defaultWorkspace: args.workspace })
+    .where(eq(organizationMemberships.membershipRef, args.membershipRef));
+}
+
+/* ==================================================================
+ * B23.2 — People & Access.
+ *
+ * Every function here takes the organization as an argument that the CALLER
+ * resolved from the acting scope. None of them accepts one from a request, and
+ * none of them has a code path that reads across organizations — the isolation
+ * is in the shape of the query rather than in a filter somebody has to
+ * remember. A row belonging to another company is simply not selected, which
+ * is what makes "not found" the honest answer rather than a disguised refusal.
+ * ================================================================== */
+
+/** Everyone with a membership row in this organization, live or not. */
+export async function listOrganizationPeople(orgRef: string): Promise<
+  Array<{
+    userId: number;
+    displayName: string;
+    email: string | null;
+    membershipRef: string;
+    status: "active" | "suspended" | "ended";
+    membershipType: string;
+    defaultWorkspace: string | null;
+    effectiveFrom: Date;
+    effectiveTo: Date | null;
+    roles: string[];
+  }>
+> {
+  const db = await getDb();
+  if (!db) return [];
+  const members = await db
+    .select({ m: organizationMemberships, userName: users.name, userEmail: users.email })
+    .from(organizationMemberships)
+    .leftJoin(users, eq(users.id, organizationMemberships.userId))
+    .where(eq(organizationMemberships.orgRef, orgRef));
+  if (members.length === 0) return [];
+
+  // Only THIS organization's grants. A person who also drives for another
+  // company has roles there; they are not this administrator's business and
+  // never enter the query.
+  const ids = members.map((r: { m: { userId: number } }) => r.m.userId);
+  const grants = await db
+    .select({ userId: userRoleAssignments.userId, role: userRoleAssignments.role })
+    .from(userRoleAssignments)
+    .where(
+      and(
+        inArray(userRoleAssignments.userId, ids),
+        eq(userRoleAssignments.orgRef, orgRef),
+        isNull(userRoleAssignments.revokedAt)
+      )
+    );
+  const byUser = new Map<number, string[]>();
+  for (const g of grants) byUser.set(g.userId, [...(byUser.get(g.userId) ?? []), g.role]);
+
+  return members.map((r: { m: typeof organizationMemberships.$inferSelect; userName: string | null; userEmail: string | null }) => ({
+    userId: r.m.userId,
+    displayName: r.userName ?? `User ${r.m.userId}`,
+    email: r.userEmail ?? null,
+    membershipRef: r.m.membershipRef,
+    status: r.m.status,
+    membershipType: r.m.membershipType,
+    defaultWorkspace: r.m.defaultWorkspace,
+    effectiveFrom: r.m.effectiveFrom,
+    effectiveTo: r.m.effectiveTo,
+    roles: (byUser.get(r.m.userId) ?? []).sort(),
+  }));
+}
+
+/** One person, if they belong to this organization. Null is "not found here". */
+export async function personInOrganization(orgRef: string, userId: number) {
+  const people = await listOrganizationPeople(orgRef);
+  return people.find(p => p.userId === userId) ?? null;
+}
+
+/** Whether the organization itself is trading. A suspended company opens for nobody. */
+export async function organizationStatus(orgRef: string): Promise<{ name: string; active: boolean } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select().from(organizations).where(eq(organizations.orgRef, orgRef)).limit(1);
+  if (!row) return null;
+  return { name: row.name, active: row.status === "active" };
+}
+
+/**
+ * Create an invitation and its roles in one transaction.
+ *
+ * Only the digest is stored. The caller holds the raw token and returns it to
+ * the administrator exactly once; it reaches no row and no log.
+ *
+ * The unique `pendingKey` generated column is what actually prevents two
+ * administrators creating two live invitations for the same person at the same
+ * moment — checked by the database rather than by a read-then-write race.
+ */
+export async function createInvitation(args: {
+  orgRef: string;
+  invitationRef: string;
+  tokenDigest: string;
+  emailHint: string | null;
+  displayNameHint: string | null;
+  roles: readonly string[];
+  defaultWorkspace: string | null;
+  expiresAt: Date;
+  invitedByUserId: number;
+  now: Date;
+}): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  return db.transaction(async tx => {
+    const inserted = await tx.insert(organizationInvitations).values({
+      invitationRef: args.invitationRef,
+      orgRef: args.orgRef,
+      emailHint: args.emailHint,
+      displayNameHint: args.displayNameHint,
+      tokenDigest: args.tokenDigest,
+      status: "pending",
+      expiresAt: args.expiresAt,
+      invitedByUserId: args.invitedByUserId,
+      invitedAt: args.now,
+      defaultWorkspace: args.defaultWorkspace,
+    });
+    const invitationId = Number(inserted[0]?.insertId ?? 0);
+    for (const role of args.roles) {
+      await tx.insert(organizationInvitationRoles).values({ invitationId, role });
+    }
+    return invitationId;
+  });
+}
+
+/** This organization's invitations, newest first, with their roles. */
+export async function listInvitations(orgRef: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select()
+    .from(organizationInvitations)
+    .where(eq(organizationInvitations.orgRef, orgRef))
+    .orderBy(desc(organizationInvitations.id))
+    .limit(500);
+  if (rows.length === 0) return [];
+  const roleRows = await db
+    .select()
+    .from(organizationInvitationRoles)
+    .where(inArray(organizationInvitationRoles.invitationId, rows.map((r: { id: number }) => r.id)));
+  const byInvitation = new Map<number, string[]>();
+  for (const r of roleRows) byInvitation.set(r.invitationId, [...(byInvitation.get(r.invitationId) ?? []), r.role]);
+  // The digest never leaves this function.
+  return rows.map((r: typeof organizationInvitations.$inferSelect) => ({
+    invitationRef: r.invitationRef,
+    emailHint: r.emailHint,
+    displayNameHint: r.displayNameHint,
+    status: r.status,
+    expiresAt: r.expiresAt,
+    invitedAt: r.invitedAt,
+    invitedByUserId: r.invitedByUserId,
+    acceptedAt: r.acceptedAt,
+    acceptedByUserId: r.acceptedByUserId,
+    cancelledAt: r.cancelledAt,
+    cancelReason: r.cancelReason,
+    defaultWorkspace: r.defaultWorkspace,
+    roles: (byInvitation.get(r.id) ?? []).sort(),
+  }));
+}
+
+/**
+ * Cancel a pending invitation belonging to this organization.
+ *
+ * Returns false for one that is already accepted, already cancelled, or
+ * belongs elsewhere — all the same answer, because distinguishing them would
+ * tell an administrator about another company's rows.
+ */
+export async function cancelInvitation(args: {
+  orgRef: string;
+  invitationRef: string;
+  cancelledByUserId: number;
+  reason: string;
+  now: Date;
+}): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  return db.transaction(async tx => {
+    const [row] = await tx
+      .select()
+      .from(organizationInvitations)
+      .where(
+        and(
+          eq(organizationInvitations.invitationRef, args.invitationRef),
+          eq(organizationInvitations.orgRef, args.orgRef),
+          eq(organizationInvitations.status, "pending")
+        )
+      )
+      .for("update")
+      .limit(1);
+    if (!row) return false;
+    await tx
+      .update(organizationInvitations)
+      .set({
+        status: "cancelled",
+        cancelledAt: args.now,
+        cancelledByUserId: args.cancelledByUserId,
+        cancelReason: args.reason.slice(0, 300),
+      })
+      .where(eq(organizationInvitations.id, row.id));
+    return true;
+  });
+}
+
+/**
+ * The invitation a raw token names, looked up by digest, with its roles.
+ *
+ * Returns the row whatever its state: the caller decides, through
+ * `acceptanceCheck`, so that "expired" and "cancelled" get their own sentences
+ * instead of collapsing into "not found".
+ */
+export async function findInvitationByDigest(tokenDigest: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db
+    .select()
+    .from(organizationInvitations)
+    .where(eq(organizationInvitations.tokenDigest, tokenDigest))
+    .limit(1);
+  if (!row) return null;
+  const roles = await db
+    .select({ role: organizationInvitationRoles.role })
+    .from(organizationInvitationRoles)
+    .where(eq(organizationInvitationRoles.invitationId, row.id));
+  return { row, roles: roles.map((r: { role: string }) => r.role) };
+}
+
+/**
+ * Accept an invitation: membership and every initial grant, or nothing.
+ *
+ * The invitation is re-read INSIDE the transaction and locked, so a cancel
+ * landing between the caller's check and this write loses rather than racing.
+ * `accepted` is set on the same row in the same transaction, which is what
+ * makes a second acceptance impossible rather than merely unlikely.
+ */
+export async function acceptInvitationTransactionally(args: {
+  tokenDigest: string;
+  acceptingUserId: number;
+  membershipRef: string;
+  now: Date;
+}): Promise<
+  | { ok: true; orgRef: string; roles: string[]; membershipRef: string }
+  | { ok: false; reason: "not_found" | "not_pending" | "expired" | "already_member" }
+> {
+  const db = await getDb();
+  if (!db) return { ok: false, reason: "not_found" };
+  return db.transaction(async tx => {
+    const [row] = await tx
+      .select()
+      .from(organizationInvitations)
+      .where(eq(organizationInvitations.tokenDigest, args.tokenDigest))
+      .for("update")
+      .limit(1);
+    if (!row) return { ok: false, reason: "not_found" as const };
+    if (row.status !== "pending") return { ok: false, reason: "not_pending" as const };
+    if (args.now >= row.expiresAt) return { ok: false, reason: "expired" as const };
+
+    // A live membership already here makes acceptance a no-op rather than a
+    // second membership row. Re-granting the invited roles on top would be a
+    // silent privilege change nobody asked for.
+    const existing = await tx
+      .select()
+      .from(organizationMemberships)
+      .where(
+        and(
+          eq(organizationMemberships.orgRef, row.orgRef),
+          eq(organizationMemberships.userId, args.acceptingUserId),
+          eq(organizationMemberships.status, "active")
+        )
+      )
+      .limit(1);
+    if (existing.length > 0) return { ok: false, reason: "already_member" as const };
+
+    const roleRows = await tx
+      .select({ role: organizationInvitationRoles.role })
+      .from(organizationInvitationRoles)
+      .where(eq(organizationInvitationRoles.invitationId, row.id));
+    const roles = roleRows.map((r: { role: string }) => r.role);
+
+    await tx.insert(organizationMemberships).values({
+      membershipRef: args.membershipRef,
+      orgRef: row.orgRef,
+      userId: args.acceptingUserId,
+      membershipType: "employee",
+      status: "active",
+      defaultWorkspace: row.defaultWorkspace,
+      effectiveFrom: args.now,
+      createdByUserId: row.invitedByUserId,
+    });
+
+    for (const role of roles) {
+      // B23.1 shape, always: organization-confined, never platform-wide, and
+      // the organization is the invitation's own rather than anything a request
+      // could name.
+      await tx.insert(userRoleAssignments).values({
+        userId: args.acceptingUserId,
+        role: role as never,
+        scopeType: "organization",
+        orgRef: row.orgRef,
+        scopeRef: null,
+        grantedByUserId: row.invitedByUserId,
+        grantedAt: args.now,
+      });
+    }
+
+    await tx
+      .update(organizationInvitations)
+      .set({ status: "accepted", acceptedAt: args.now, acceptedByUserId: args.acceptingUserId })
+      .where(eq(organizationInvitations.id, row.id));
+
+    return { ok: true as const, orgRef: row.orgRef, roles, membershipRef: args.membershipRef };
+  });
+}
+
+/**
+ * End a person's membership of ONE organization, with its grants, atomically.
+ *
+ * This is the organization-level offboarding B23.2 exposes, and the whole
+ * reason it is here rather than reusing `workforce.offboardingRevokeAccess`:
+ * that path also revokes field devices and drives an offboarding record, which
+ * is a different act. This one ends access to this company and touches nothing
+ * anywhere else — a person who also works for another employer keeps that job.
+ *
+ * The last-administrator count and the write happen in one transaction over
+ * locked rows, so two administrators removing each other concurrently cannot
+ * both pass the check.
+ */
+export async function endOrganizationMembership(args: {
+  orgRef: string;
+  targetUserId: number;
+  actorUserId: number;
+  reason: string;
+  now: Date;
+}): Promise<
+  | { ok: true; rolesRevoked: number }
+  | { ok: false; reason: "not_found" | "last_administrator"; remainingAdmins?: number }
+> {
+  const db = await getDb();
+  if (!db) return { ok: false, reason: "not_found" };
+  return db.transaction(async tx => {
+    const [membership] = await tx
+      .select()
+      .from(organizationMemberships)
+      .where(
+        and(
+          eq(organizationMemberships.orgRef, args.orgRef),
+          eq(organizationMemberships.userId, args.targetUserId),
+          eq(organizationMemberships.status, "active")
+        )
+      )
+      .for("update")
+      .limit(1);
+    if (!membership) return { ok: false, reason: "not_found" as const };
+
+    // Locked before counting: this is the row another concurrent removal would
+    // also have to take, which is what serialises the two.
+    const managementGrants = await tx
+      .select({ id: userRoleAssignments.id, userId: userRoleAssignments.userId })
+      .from(userRoleAssignments)
+      .where(
+        and(
+          eq(userRoleAssignments.orgRef, args.orgRef),
+          eq(userRoleAssignments.role, "management" as never),
+          isNull(userRoleAssignments.revokedAt)
+        )
+      )
+      .for("update");
+    const remaining = managementGrants.filter((g: { userId: number }) => g.userId !== args.targetUserId).length;
+    const targetIsAdmin = managementGrants.some((g: { userId: number }) => g.userId === args.targetUserId);
+    if (targetIsAdmin && remaining === 0) {
+      return { ok: false, reason: "last_administrator" as const, remainingAdmins: 0 };
+    }
+
+    const grants = await tx
+      .select({ id: userRoleAssignments.id })
+      .from(userRoleAssignments)
+      .where(
+        and(
+          eq(userRoleAssignments.userId, args.targetUserId),
+          eq(userRoleAssignments.orgRef, args.orgRef),
+          isNull(userRoleAssignments.revokedAt)
+        )
+      );
+    if (grants.length > 0) {
+      await tx
+        .update(userRoleAssignments)
+        .set({ revokedAt: args.now, revokedByUserId: args.actorUserId, revokeReason: args.reason.slice(0, 300) })
+        .where(
+          and(
+            eq(userRoleAssignments.userId, args.targetUserId),
+            eq(userRoleAssignments.orgRef, args.orgRef),
+            isNull(userRoleAssignments.revokedAt)
+          )
+        );
+    }
+
+    await tx
+      .update(organizationMemberships)
+      .set({ status: "ended", effectiveTo: args.now })
+      .where(eq(organizationMemberships.id, membership.id));
+
+    return { ok: true as const, rolesRevoked: grants.length };
+  });
+}
+
+/**
+ * Revoke one role, refusing to remove the organization's last administrator.
+ *
+ * Same transaction, same lock, same reason as `endOrganizationMembership`.
+ * Returns the count so a caller can tell "revoked" from "there was nothing to
+ * revoke" without a second query that could disagree with this one.
+ */
+export async function revokeRoleWithAdminGuard(args: {
+  orgRef: string;
+  targetUserId: number;
+  role: string;
+  actorUserId: number;
+  reason: string;
+  now: Date;
+}): Promise<{ ok: true; revoked: number } | { ok: false; reason: "last_administrator" }> {
+  const db = await getDb();
+  if (!db) return { ok: true, revoked: 0 };
+  return db.transaction(async tx => {
+    const managementGrants = await tx
+      .select({ id: userRoleAssignments.id, userId: userRoleAssignments.userId })
+      .from(userRoleAssignments)
+      .where(
+        and(
+          eq(userRoleAssignments.orgRef, args.orgRef),
+          eq(userRoleAssignments.role, "management" as never),
+          isNull(userRoleAssignments.revokedAt)
+        )
+      )
+      .for("update");
+    if (args.role === "management") {
+      const remaining = managementGrants.filter((g: { userId: number }) => g.userId !== args.targetUserId).length;
+      if (managementGrants.some((g: { userId: number }) => g.userId === args.targetUserId) && remaining === 0) {
+        return { ok: false, reason: "last_administrator" as const };
+      }
+    }
+    const target = and(
+      eq(userRoleAssignments.userId, args.targetUserId),
+      eq(userRoleAssignments.role, args.role as never),
+      eq(userRoleAssignments.orgRef, args.orgRef),
+      isNull(userRoleAssignments.revokedAt)
+    );
+    const matched = await tx.select({ id: userRoleAssignments.id }).from(userRoleAssignments).where(target);
+    if (matched.length === 0) return { ok: true as const, revoked: 0 };
+    await tx
+      .update(userRoleAssignments)
+      .set({ revokedAt: args.now, revokedByUserId: args.actorUserId, revokeReason: args.reason.slice(0, 300) })
+      .where(target);
+    return { ok: true as const, revoked: matched.length };
+  });
+}
+
+/**
+ * Quarantined grants held by people who are live members of THIS organization.
+ *
+ * An `unscoped_legacy` grant has `orgRef IS NULL` — it belongs to no company,
+ * which is exactly why it authorizes nowhere. So there is no such thing as
+ * "Org A's quarantined grants", and this is the honest substitute: rows whose
+ * HOLDER is somebody this administrator already employs. It is the same
+ * predicate `records.roles.resolveLegacy` enforces before resolving, so the
+ * list cannot offer a row the mutation would refuse.
+ *
+ * It leaks nothing. The administrator already knows this person works for them;
+ * the row adds only a role name and a date, and never suggests that another
+ * company exists or might be the grant's origin.
+ */
+export async function listUnresolvedLegacyForOrganization(orgRef: string, now: Date) {
+  const db = await getDb();
+  if (!db) return [];
+  const members = await db
+    .select({ userId: organizationMemberships.userId })
+    .from(organizationMemberships)
+    .where(
+      and(eq(organizationMemberships.orgRef, orgRef), eq(organizationMemberships.status, "active"))
+    );
+  if (members.length === 0) return [];
+  const ids = Array.from(new Set(members.map((m: { userId: number }) => m.userId)));
+  const rows = await db
+    .select({
+      id: userRoleAssignments.id,
+      userId: userRoleAssignments.userId,
+      role: userRoleAssignments.role,
+      grantedAt: userRoleAssignments.grantedAt,
+      name: users.name,
+    })
+    .from(userRoleAssignments)
+    .leftJoin(users, eq(users.id, userRoleAssignments.userId))
+    .where(
+      and(
+        inArray(userRoleAssignments.userId, ids),
+        eq(userRoleAssignments.scopeType, "unscoped_legacy"),
+        isNull(userRoleAssignments.revokedAt)
+      )
+    );
+  return rows.map((r: { id: number; userId: number; role: string; grantedAt: Date; name: string | null }) => ({
+    legacyGrantId: r.id,
+    userId: r.userId,
+    displayName: r.name ?? `User ${r.userId}`,
+    role: r.role,
+    grantedAt: r.grantedAt,
+  }));
 }
 
 export async function grantUserRole(input: InsertUserRoleAssignment) {
@@ -1316,15 +2035,102 @@ export async function grantUserRole(input: InsertUserRoleAssignment) {
   return result[0]?.insertId;
 }
 
+/**
+ * Revoke a grant.
+ *
+ * B23.1 — `organization` is REQUIRED, and it is the whole point of the change.
+ * This function used to match on (userId, role) alone, so revoking a driver at
+ * one employer revoked them at every employer: a person who drives for two
+ * companies lost both jobs when one of them let them go. `null` means the
+ * historical single tenant and is written explicitly, never defaulted, so that
+ * "revoke everywhere" cannot be reached by forgetting an argument.
+ *
+ * Returns how many grants were actually revoked, so a caller can tell the
+ * difference between "revoked" and "there was nothing to revoke" instead of
+ * reporting success either way.
+ */
 export async function revokeUserRole(args: {
   userId: number;
   role: string;
+  organization: string | null;
   revokedByUserId: number;
   reason: string;
-}) {
+}): Promise<number> {
   const db = await getDb();
-  if (!db) return undefined;
-  return db
+  if (!db) return 0;
+  const target = and(
+    eq(userRoleAssignments.userId, args.userId),
+    eq(userRoleAssignments.role, args.role as never),
+    args.organization === null
+      ? isNull(userRoleAssignments.orgRef)
+      : eq(userRoleAssignments.orgRef, args.organization),
+    isNull(userRoleAssignments.revokedAt)
+  );
+  const matched = await db
+    .select({ id: userRoleAssignments.id })
+    .from(userRoleAssignments)
+    .where(target);
+  if (matched.length === 0) return 0;
+  await db
+    .update(userRoleAssignments)
+    .set({
+      revokedAt: new Date(),
+      revokedByUserId: args.revokedByUserId,
+      revokeReason: args.reason,
+    })
+    .where(target);
+  return matched.length;
+}
+
+/**
+ * B23.1A — one quarantined grant, by the id the diagnostic prints.
+ *
+ * Returns it only while it is BOTH quarantined and live, so a resolved grant is
+ * indistinguishable from one that never existed. That is what makes resolution
+ * safely repeatable: a second attempt with the same id finds nothing rather
+ * than issuing a second grant.
+ */
+export async function findUnresolvedLegacyGrant(
+  grantId: number
+): Promise<{ id: number; userId: number; role: string } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const row = (
+    await db
+      .select({
+        id: userRoleAssignments.id,
+        userId: userRoleAssignments.userId,
+        role: userRoleAssignments.role,
+      })
+      .from(userRoleAssignments)
+      .where(
+        and(
+          eq(userRoleAssignments.id, grantId),
+          eq(userRoleAssignments.scopeType, "unscoped_legacy"),
+          isNull(userRoleAssignments.revokedAt)
+        )
+      )
+      .limit(1)
+  )[0];
+  return row ? { id: row.id, userId: row.userId, role: row.role as string } : null;
+}
+
+/**
+ * Revoke exactly one grant, by id.
+ *
+ * Distinct from `revokeUserRole`, which matches on (user, role, organization),
+ * because a quarantined grant has NO organization — so the ordinary revoke
+ * would match every organization-less grant that person holds, platform-wide
+ * ones included. Resolving one legacy row must touch one legacy row.
+ */
+export async function revokeGrantById(args: {
+  grantId: number;
+  revokedByUserId: number;
+  reason: string;
+}): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db
     .update(userRoleAssignments)
     .set({
       revokedAt: new Date(),
@@ -1332,12 +2138,31 @@ export async function revokeUserRole(args: {
       revokeReason: args.reason,
     })
     .where(
+      and(eq(userRoleAssignments.id, args.grantId), isNull(userRoleAssignments.revokedAt))
+    );
+  return true;
+}
+
+/** Whether this person already holds this role in this organization. */
+export async function holdsRoleInOrganization(args: {
+  userId: number;
+  role: string;
+  organization: string;
+}): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db
+    .select({ id: userRoleAssignments.id })
+    .from(userRoleAssignments)
+    .where(
       and(
         eq(userRoleAssignments.userId, args.userId),
         eq(userRoleAssignments.role, args.role as never),
+        eq(userRoleAssignments.orgRef, args.organization),
         isNull(userRoleAssignments.revokedAt)
       )
     );
+  return rows.length > 0;
 }
 
 /**

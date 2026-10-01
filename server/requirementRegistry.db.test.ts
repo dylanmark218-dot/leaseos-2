@@ -95,7 +95,7 @@ describe("which revision stands for a key (rows written before C1b-2b)", () => {
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let userSeq = 884_000_000 + Math.floor(Math.random() * 50_000);
+let userSeq = 414_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 beforeAll(async () => { if (DB_URL) pool = mysql.createPool({ uri: DB_URL, connectionLimit: 4 }); });
 afterAll(async () => { await pool?.end(); });

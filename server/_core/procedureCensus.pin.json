@@ -38,5 +38,25 @@
   "file": "server/routers.ts",
   "procedure": "revokeAll",
   "kind": "publicProcedure"
+ },
+ {
+  "file": "server/sessionRouter.ts",
+  "procedure": "context",
+  "kind": "sessionProcedure"
+ },
+ {
+  "file": "server/sessionRouter.ts",
+  "procedure": "selectOrganization",
+  "kind": "sessionProcedure"
+ },
+ {
+  "file": "server/sessionRouter.ts",
+  "procedure": "selectWorkspace",
+  "kind": "sessionProcedure"
+ },
+ {
+  "file": "server/sessionRouter.ts",
+  "procedure": "acceptInvitation",
+  "kind": "sessionProcedure"
  }
 ]
