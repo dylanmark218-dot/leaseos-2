@@ -18,7 +18,7 @@ capture kinds (`board_message`, `board_acknowledgement`, `shift_response`) that 
 their own procedure with the capture's `localId` as the mutation id and are excluded from
 `SyncEngine` packaging. Without the native shell the queue is in memory and the screen says so.
 Answering an offer is online-only, and says so. `board.read` now returns `acknowledgedByMe`.
-All four checkpoints are built; nothing is merged.
+All four checkpoints are built; nothing is merged. Integrated with main's SPINE item 2 ruling on 2026-10-01 (§5.4).
 
 **Checkpoint 5 (decision freeze and field hardening) is on the branch.** D-1…D-6 are recorded with
 their final disposition in §14. Three places where the built code was looser than the decision it
@@ -311,6 +311,22 @@ Response lifecycle, adapted to the repository's vocabulary:
 A post is awardable only when `dispatchRoleId IS NOT NULL`. An unlinked post (a shift with no job yet) can collect responses and offers, and the dispatcher links it — `shifts.link({ postRef, roleId })`, `dispatch.assign`, `jobInScope` on the role's posting — before awarding. There is no path from an unlinked post to `filled`. This is the request's "an open-work posting is not necessarily a new job record" made exact: the post is not a job, and it cannot dispatch anyone until it names the slot on a job.
 
 ### 5.4 Eligibility preview — `eligible | ineligible | unknown` with reasons
+
+> **Superseded at integration with main (2026-10-01): SPINE item 2, owner's ruling.** Main made
+> `_core/openShifts.ts` `shiftEligibility(post, PersonFacts)` the one answer to "may this person take
+> this posted shift?" (role in the organization, roster and hitch, approved leave, overlapping
+> bookings, the person's own licence, and qualifications from the read adapter), enforced by the
+> router and guarded by `spineItem2Duplicates.test.ts`. Open Work now sits on that rule instead of
+> beside it: `openShiftsService.personFacts` (main's reader, moved unchanged) feeds `shiftEligibility`,
+> and the preview's verdict **is** its verdict — `unknown` only names the case where every reason is
+> something not established, and it refuses exactly as a failed check does. `respond` (except
+> `declined`), `offer` and the candidate pool enforce the same verdict; `shifts.eligibility` and
+> `shifts.expressInterest` call it directly. Two things this section listed as refusals are **no
+> longer refusals**: a declared unavailability (shown as `availabilityNotes`, and it ranks the person
+> last in the pool) and a blocking readiness finding about the person (shown as
+> `readiness.operatorBlockers`; the award's stored, fingerprinted check is where readiness binds, fail
+> closed). A person with no operator record is the rule's `no_licence_recorded`. The text below is
+> the Checkpoint 2 design, kept for the record.
 
 `shifts.candidates({ postRef })` (dispatcher) and the per-person flag on `shifts.list` (the person's own) come from one resolver, `previewFor(post, userId, now)`, which composes only things that already decide:
 
