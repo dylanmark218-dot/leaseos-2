@@ -33,11 +33,20 @@ async function onRoster(userId: number) {
   await pool.execute("INSERT INTO crews (crewRef, tenantId, name, createdByUserId) VALUES (?, 'default', ?, 1)", [crewRef, crewRef]);
   await pool.execute("INSERT INTO crewMembers (crewRef, userId, crewRole, joinedAt) VALUES (?, ?, 'driver', NOW())", [crewRef, userId]);
 }
-/** An operator row with a licence, since that is the one credential stored. */
+/**
+ * An operator row with a licence, since that is the one credential stored.
+ *
+ * 0206 — `operators.userId` is the mapping the board reads (design C-10). The row used to be
+ * seeded with `id = userId` and no `userId`, which only worked because the eligibility read
+ * conflated the two; it now names the person it belongs to.
+ */
 async function operatorWithLicence(userId: number, expires: Date | null) {
   await pool.execute(
     "INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())",
     [userId, userId, `Op ${rnd()}`, "1", expires]);
+  // #52 (on main): the legacy operators.licenseExpiresAt date alone is an unverified licence, so a ready
+  // driver also needs a verified driver_licence document. Same expiry, so an expired fixture stays expired.
+  if (expires) await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Driver licence', NOW(), ?, 'verified')", [userId, expires]);
   await onRoster(userId);
 }
 const postShift = (dispatcher: number, over: Record<string, unknown> = {}) =>

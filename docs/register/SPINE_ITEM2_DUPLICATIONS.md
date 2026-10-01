@@ -71,8 +71,8 @@ imports it.
 
 **Follow-up (2026-10-01): the rule itself, not just the removed copy.** Deleting `detectBookingConflicts`
 left the rule written out twice in live code and once more in memory, agreeing only by coincidence:
-the award's SQL (`dispatchTransaction.awardAssignment`), the open-shift router's SQL
-(`openShiftsRouter.personFacts`, added by #89) and an `overlaps` helper in `_core/openShifts.ts`. The
+the award's SQL (`dispatchTransaction.awardAssignment`), the open-shift read's SQL
+(`personFacts`, added by #89 in the router and moved to `openShiftsService.ts` by #59) and an `overlaps` helper in `_core/openShifts.ts`. The
 names guard could not see them because they were new names, not re-declared ones.
 
 - **One rule:** `server/_core/bookingConflict.ts` — `ACTIVE_BOOKING_STATES` (tentative, confirmed),
@@ -89,7 +89,7 @@ names guard could not see them because they were new names, not re-declared ones
   and requires the predicate and the function to select the same rows (10 of 64 per resource).
 - **Guard** (`server/spineItem2Duplicates.test.ts`, "a booking conflict has one definition"): only
   `bookingConflict.ts` reads `resourceBookings`' window or state columns or names the holding states;
-  the award and the router must call `conflictingBookingsWhere`; the open-shift engine compares no
+  the award and `openShiftsService.personFacts` must call `conflictingBookingsWhere`; the open-shift engine compares no
   window with a window and declares no `overlaps`. Each of main's three copies, restored, fails it.
 
 **Concepts C1/C2, suitability match and posting visibility: not duplicated.**

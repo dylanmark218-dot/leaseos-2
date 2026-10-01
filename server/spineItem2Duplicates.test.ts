@@ -195,7 +195,7 @@ describe("SPINE item 2 — a booking conflict has one definition", () => {
   });
 
   it("the award's final revalidation and open-shift eligibility both ask conflictingBookingsWhere", () => {
-    for (const f of ["server/_core/dispatchTransaction.ts", "server/openShiftsRouter.ts"]) {
+    for (const f of ["server/_core/dispatchTransaction.ts", "server/openShiftsService.ts"]) {
       expect(readFileSync(f, "utf8"), f).toMatch(/\bconflictingBookingsWhere\(/);
     }
   });
