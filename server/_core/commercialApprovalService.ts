@@ -10,6 +10,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { MySql2Database } from "drizzle-orm/mysql2";
 import { commercialApprovalPolicies, commercialApprovalSignatures, commercialApprovals, userRoleAssignments } from "../../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./actingScope";
+import { grantsInOrganization, type RoleGrant } from "./recordsAuthorization";
 import { ledgerProgress, mayApprove, type LedgerApproval } from "./commercialApprovals";
 import { approvalRequirementFor, type ApprovalPolicyRow, type ApprovalRequirement } from "./commercialPolicy";
 
@@ -27,8 +28,19 @@ export type DecideResult =
 export async function decide(db: Db, args: { actorUserId: number; category: string; subjectType: string; subjectRef: string; amountCents: number; preparedByUserId: number | null; decision: "approved" | "refused"; note?: string }): Promise<DecideResult> {
   const scope = await resolveActingScope(db as never, args.actorUserId);
   const bookOrgRef = scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId;
-  // F1 — only grants in force. A revoked role never satisfies, refuses or counts toward an approval.
-  const roles = (await db.select({ role: userRoleAssignments.role }).from(userRoleAssignments).where(and(eq(userRoleAssignments.userId, args.actorUserId), isNull(userRoleAssignments.revokedAt)))).map(r => r.role as string);
+  // B23.1 — the roles that authorize an approval in THIS company, and only the
+  // ones still in force. This read previously filtered neither: it returned
+  // every row for the user, revoked grants included, across every organization
+  // they had ever held a role in. A commercial approval is a financial act, so
+  // it is the last place either should have been true.
+  const roles = grantsInOrganization(
+    (await db
+      .select({ role: userRoleAssignments.role, scopeType: userRoleAssignments.scopeType, orgRef: userRoleAssignments.orgRef, scopeRef: userRoleAssignments.scopeRef })
+      .from(userRoleAssignments)
+      .where(and(eq(userRoleAssignments.userId, args.actorUserId), isNull(userRoleAssignments.revokedAt)))
+    ).map(r => ({ role: r.role as string, scopeType: r.scopeType as RoleGrant["scopeType"], orgRef: r.orgRef ?? null, scopeRef: r.scopeRef ?? null })),
+    scope.tenantId,
+  ).map(g => g.role);
 
   // The ledger row for this subject, created on first contact with the requirement snapshotted.
   //

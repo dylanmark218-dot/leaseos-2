@@ -43,7 +43,8 @@ import {
   type WebhookSecretRefusal,
 } from "./webhookSecretService";
 import { webhookSecretReadiness, type WebhookReadinessScope, type WebhookSecretReadiness } from "./webhookSecretMigration";
-import { environmentSecretKeys, legacyMfaKey } from "./_core/secretKeys";
+import { legacyMfaKey, resolveSecretKeyProvider } from "./_core/secretKeys";
+import type { ManagedKeyBackend } from "./_core/managedSecretKeys";
 import type { SecretKeyProvider } from "./_core/secretCrypto";
 
 export type FleetConvergence =
@@ -72,6 +73,15 @@ export type WebhookDataReadiness = {
 export type ManagedKeyProviderReadiness = {
   ready: boolean;
   kind: SecretKeyProvider["kind"];
+  /**
+   * S2-KMS-A. Where the provider came from. `"configuration"` means it was resolved the way the
+   * server and worker resolve theirs — from this process's configuration, through the managed
+   * bootstrap when so configured. `"supplied"` means a caller handed one in, which proves the API
+   * contract and nothing about production; it is never counted as ready.
+   */
+  source: "configuration" | "supplied";
+  /** The managed backend that unwrapped the keys, when managed and from configuration. */
+  backend: string | null;
   /** Metadata only: the id the next envelope would carry, or null when no key is active. */
   activeWebhookKeyId: string | null;
   blockers: string[];
@@ -180,7 +190,15 @@ async function scanSubscriptions(args: PreflightArgs) {
   return { enabledUnresolvable, canonicalUnresolvable, canonicalChecked };
 }
 
-export async function webhookCutoverPreflight(args: PreflightArgs): Promise<WebhookCutoverPreflight> {
+/** A provider handed in by a caller: the contract is checked, production readiness is not claimed. */
+export function webhookCutoverPreflight(args: PreflightArgs): Promise<WebhookCutoverPreflight> {
+  return preflight(args, { source: "supplied", backend: null });
+}
+
+async function preflight(
+  args: PreflightArgs,
+  provenance: { source: "configuration" | "supplied"; backend: string | null }
+): Promise<WebhookCutoverPreflight> {
   const counts = await webhookSecretReadiness(args.scope);
   const scan = await scanSubscriptions(args);
 
@@ -223,9 +241,14 @@ export async function webhookCutoverPreflight(args: PreflightArgs): Promise<Webh
   if (activeWebhookKeyId === null && providerBlockers.every(b => !b.startsWith("key provider unavailable"))) {
     providerBlockers.push("no active WEBHOOK_SECRET key is configured");
   }
+  if (provenance.source !== "configuration") {
+    providerBlockers.push("key provider was supplied to the preflight (a contract check), not resolved from this process's configuration");
+  }
   const managedKeyProvider: ManagedKeyProviderReadiness = {
     ready: providerBlockers.length === 0,
     kind: args.keys.kind,
+    source: provenance.source,
+    backend: provenance.backend,
     activeWebhookKeyId,
     blockers: providerBlockers,
   };
@@ -262,10 +285,18 @@ export async function webhookCutoverPreflight(args: PreflightArgs): Promise<Webh
   };
 }
 
-/** The preflight as production would run it: the environment's provider and legacy key. */
-export function webhookCutoverPreflightFromEnvironment(
+/**
+ * The preflight as production would run it: the provider resolved from configuration by the same
+ * `resolveSecretKeyProvider` the server and worker bootstrap with, and the legacy key. A managed
+ * configuration whose bootstrap fails rejects here, exactly as startup would; there is no
+ * environment fallback. `backends` exists so a test can stand in a managed backend; production
+ * passes none and gets `productionManagedKeyBackends()`.
+ */
+export async function webhookCutoverPreflightFromEnvironment(
   env: NodeJS.ProcessEnv = process.env,
-  scope?: WebhookReadinessScope
+  scope?: WebhookReadinessScope,
+  backends?: Record<string, ManagedKeyBackend>
 ): Promise<WebhookCutoverPreflight> {
-  return webhookCutoverPreflight({ keys: environmentSecretKeys(env), legacyKey: legacyMfaKey(env), scope });
+  const resolved = await resolveSecretKeyProvider(env, backends);
+  return preflight({ keys: resolved.provider, legacyKey: legacyMfaKey(env), scope }, { source: "configuration", backend: resolved.backend });
 }

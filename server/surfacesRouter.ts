@@ -31,6 +31,23 @@ import { deriveExceptions, summarize, visibleTo } from "./_core/exceptionCentre"
 import { CHAIN_READ_PERMISSION, loadExceptionSources, loadInbox, loadTimeline, resolveChainAround, searchEverything } from "./surfacesService";
 import { composeSession } from "./_core/portalComposition";
 
+/**
+ * B23.1A — why these synthetic grants carry no organization, and why that is
+ * correct here rather than a gap.
+ *
+ * `listActiveUserRoleNames` resolves the caller's acting organization and
+ * returns names only from grants that organization issued, dropping
+ * branch-confined and quarantined ones. So the filtering has already happened
+ * by the time these names exist, and what comes back means "roles you hold,
+ * here, unconfined". Rebuilding them as `{ role, scopeRef: null }` and letting
+ * `authorize` read the absent `scopeType` as platform-global widens nothing:
+ * the set it is applied to is already this organization's.
+ *
+ * The rule to keep: this projection must be fed from an organization-scoped
+ * source. A caller that swapped in `listActiveUserRoles` or
+ * `listRoleNamesAnyScope` here would be handing `authorize` another company's
+ * roles with the evidence of where they came from stripped off.
+ */
 async function grantsFor(userId: number): Promise<{ roles: string[]; grants: RoleGrant[] }> {
   const roles = (await listActiveUserRoleNames(userId)).filter(isDomainRole);
   return { roles, grants: roles.map(role => ({ role, scopeRef: null })) };

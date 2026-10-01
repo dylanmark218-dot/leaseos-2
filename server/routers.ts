@@ -45,6 +45,7 @@ import { storageKeyInput } from "./_core/storageKey";
  */
 const REFUSED = z.undefined({ message: "Trust-bearing value refused: this state is established by its own review, verification or transition procedure, never by a create or capture." }).optional();
 import { systemRouter } from "./_core/systemRouter";
+import { peopleRouter } from "./peopleRouter";
 import { recordsRouter } from "./recordsRouter";
 import {
   contractorRouter,
@@ -69,6 +70,8 @@ async function scopeFor(userId: number) {
   return { tenantId: (await resolveActingScope(db, userId)).tenantId };
 }
 import { securityIncidentsRouter } from "./securityIncidentsRouter";
+import { sessionRouter } from "./sessionRouter";
+import { clearOrganizationSelectionCookie } from "./_core/organizationSelectionCookie";
 import { commercialOfficeRouter } from "./commercialOfficeRouter";
 import { documentControlRouter } from "./documentControlRouter";
 import { facilityDirectoryRouter } from "./facilityDirectoryRouter";
@@ -82,6 +85,7 @@ import { branchRolesFor } from "./_core/widgetRoleKeys";
 import { isDomainRole, permissionsForDomainRole } from "./_core/recordsAuthorization";
 import {
   listActiveUserRoles,
+  recordAuthorizationDecision,
   actingScopeFor,
   evidenceInScope,
   jobInScope,
@@ -104,6 +108,7 @@ import { createJobUnitGated } from "./dispatchEnforcementService";
 import { iftaRouter } from "./iftaRouter";
 import { fuelOpsRouter } from "./fuelOpsRouter";
 import { periodRouter } from "./periodRouter";
+import { paperworkRouter } from "./paperworkRouter";
 import { gstRouter } from "./gstRouter";
 import { arRouter, bankRouter } from "./cashRouter";
 import { commercialRouter, portalAdminRouter } from "./commercialRouter";
@@ -120,6 +125,7 @@ import { readinessRouter } from "./readinessRouter";
 import { messageBoardRouter } from "./messageBoardRouter";
 import { assistantAskRouter } from "./assistantAskRouter";
 import { agentRouter } from "./agentRouter";
+import { liveAssistRouter } from "./liveAssistRouter";
 import { hosRouter } from "./hosRouter";
 import { portalRouter } from "./portalRouter";
 import { shopRouter } from "./shopRouter";
@@ -349,6 +355,7 @@ export const appRouter = router({
   facilityDirectory: facilityDirectoryRouter,
   system: systemRouter,
   comms: commsRouter,
+  paperwork: paperworkRouter,
   enforcement: enforcementRouter,
   timeOff: timeOffRouter,
   shifts: openShiftsRouter,
@@ -358,7 +365,10 @@ export const appRouter = router({
   board: messageBoardRouter,
   assistantAsk: assistantAskRouter,
   agent: agentRouter,
+  liveAssist: liveAssistRouter,
   hos: hosRouter,
+  // B23.2 — who belongs to this organization and what they may do here.
+  people: peopleRouter,
   records: recordsRouter,
   payroll: payrollRouter,
   contractors: contractorRouter,
@@ -403,6 +413,11 @@ export const appRouter = router({
   // v21.18 — machines only; gated by integrationProcedure, never by roles.
   inbound: inboundRouter,
   insurance: insuranceRouter,
+  /**
+   * v23.26 — identity, organization and workspace, resolved server-side.
+   * The shell reads `session.context`; nothing it returns is an authority.
+   */
+  session: sessionRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
 
@@ -422,6 +437,23 @@ export const appRouter = router({
       // path leaves the browser holding a live credential.
       clearAccessCookie(ctx.req, ctx.res);
       clearRefreshCookie(ctx.req, ctx.res);
+      // v23.26 — the organization selection is part of the session, so it ends
+      // with it. Leaving it behind would hand the next person to use this
+      // browser a pre-selected tenant, which is a confusing way to start and a
+      // bad way to end.
+      clearOrganizationSelectionCookie(ctx.req, ctx.res);
+      // Through the same table every other security decision is written to.
+      // A sign-out is the event an access review most often needs and the one
+      // a system that only logs refusals never has.
+      await recordAuthorizationDecision({
+        actorUserId: ctx.user?.id ?? null,
+        procedureName: "auth.logout",
+        permission: "portal.compose_own",
+        rolesHeld: null,
+        outcome: ctx.user ? "allowed" : "denied_unauthenticated",
+        detail: "session ended",
+        occurredAt: new Date(),
+      });
       return { success: true } as const;
     }),
 

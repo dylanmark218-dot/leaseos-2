@@ -23,6 +23,15 @@
  * has its own accessor.
  */
 import { createEnvironmentKeyProvider, type PurposeKeyConfig, type SecretKeyProvider, type SecretPurpose } from "./secretCrypto";
+import {
+  ManagedKeyBootstrapError,
+  assertNoRawKeyMaterial,
+  loadManagedSecretKeyProvider,
+  validateManagedKeyConfig,
+  type ManagedKeyBackend,
+  type ManagedKeyConfig,
+  type ManagedSecretKeyProvider,
+} from "./managedSecretKeys";
 
 /** The environment variable carrying each purpose's active key, per the approved design. */
 const ACTIVE_KEY_ENV: Record<SecretPurpose, string> = {
@@ -65,6 +74,140 @@ export function environmentSecretKeys(env: NodeJS.ProcessEnv = process.env): Sec
   }
 
   return createEnvironmentKeyProvider(config);
+}
+
+/* ------------------------------------------------------------------ S2-KMS-A: the production source */
+
+/**
+ * Where a process gets its keys from. `"environment"` is the S2-A..E provider above — development,
+ * test and controlled staging. `"managed"` is the bootstrap in `managedSecretKeys.ts`: wrapped
+ * references in configuration, unwrapped once at startup by a managed backend, and the only way a
+ * production write can happen (OWNER DECISION S2-1).
+ *
+ * Unset means `"environment"`, deliberately: every deployment that exists today has environment
+ * keys and no managed backend, and this checkpoint ships no adapter. The switch is explicit so
+ * that turning it on is a configuration act with a name, and so that once it is on there is no
+ * path back to environment keys inside the process — see `secretKeyProvider()`.
+ */
+export type SecretKeySource = "environment" | "managed";
+
+export function secretKeySource(env: NodeJS.ProcessEnv = process.env): SecretKeySource {
+  const v = env.LEASEOS_SECRET_KEYS_SOURCE;
+  if (v === undefined || v === "" || v === "environment") return "environment";
+  if (v === "managed") return "managed";
+  throw new Error(`LEASEOS_SECRET_KEYS_SOURCE must be "environment" or "managed" (was ${JSON.stringify(v)})`);
+}
+
+/**
+ * The managed configuration, parsed and refused if it carries anything but references.
+ * `LEASEOS_MANAGED_KEYS` is JSON of `ManagedKeyConfig`: a backend name, and per purpose an active
+ * and zero or more retired `{ keyId, wrapped, backendKeyRef }` entries. Raw 64-hex key material
+ * anywhere in it is refused before parsing finishes.
+ */
+export function managedKeyConfigFromEnv(env: NodeJS.ProcessEnv = process.env): ManagedKeyConfig {
+  const raw = env.LEASEOS_MANAGED_KEYS;
+  if (!raw) throw new ManagedKeyBootstrapError("LEASEOS_MANAGED_KEYS is not set", "config_missing");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new ManagedKeyBootstrapError("LEASEOS_MANAGED_KEYS is not valid JSON", "config_shape");
+  }
+  assertNoRawKeyMaterial(parsed, "LEASEOS_MANAGED_KEYS");
+  // The strict schema: every field named, every extra field refused, before anything is cast and
+  // before a backend is looked up. `null` or `[]` here is a coded refusal, not a TypeError later.
+  return validateManagedKeyConfig(parsed);
+}
+
+/**
+ * The backends a production build can name. EMPTY, and honestly so: the hosting survey for
+ * S2-KMS-A found no evidence of the production platform, so no vendor adapter exists yet. A
+ * `"managed"` source therefore fails the bootstrap in production today — which is the correct
+ * answer, not a gap to paper over. S2-KMS-B adds the adapter for the platform once it is proven.
+ * Tests supply their own backend through `resolveSecretKeyProvider`'s second argument; nothing
+ * registers a backend here at runtime.
+ */
+export function productionManagedKeyBackends(): Record<string, ManagedKeyBackend> {
+  return {};
+}
+
+export type ResolvedSecretKeys = {
+  provider: SecretKeyProvider;
+  source: SecretKeySource;
+  /** The backend that unwrapped the keys, when managed. */
+  backend: string | null;
+};
+
+/**
+ * Build the provider the configuration asks for. Asynchronous because the managed path is; the
+ * environment path simply resolves. Never falls back: a managed source whose bootstrap fails
+ * throws, and the caller — startup, the worker, an operational script — is expected to stop.
+ */
+export async function resolveSecretKeyProvider(
+  env: NodeJS.ProcessEnv = process.env,
+  backends: Record<string, ManagedKeyBackend> = productionManagedKeyBackends(),
+  options: { require?: SecretPurpose[] } = {}
+): Promise<ResolvedSecretKeys> {
+  const source = secretKeySource(env);
+  if (source === "environment") return { provider: environmentSecretKeys(env), source, backend: null };
+
+  const config = managedKeyConfigFromEnv(env);
+  const backend = backends[config.backend];
+  if (!backend) {
+    throw new ManagedKeyBootstrapError(
+      `no managed key backend named ${JSON.stringify(config.backend)} exists in this build (available: ${Object.keys(backends).join(", ") || "none"})`,
+      "backend_unknown"
+    );
+  }
+  const provider: ManagedSecretKeyProvider = await loadManagedSecretKeyProvider({ config, backend, require: options.require });
+  return { provider, source, backend: provider.backend };
+}
+
+/* The one provider this process serves crypto from, once bootstrapped. */
+let installed: ResolvedSecretKeys | null = null;
+
+/**
+ * Bootstrap once per process, before anything can accept work: `startup.ts` (server) and
+ * `worker.ts` (standalone worker) both call this first, so the two can never disagree about where
+ * keys come from. A second call returns the same provider; it never re-contacts the backend.
+ */
+export async function bootstrapSecretKeys(
+  env: NodeJS.ProcessEnv = process.env,
+  backends: Record<string, ManagedKeyBackend> = productionManagedKeyBackends(),
+  options: { require?: SecretPurpose[] } = {}
+): Promise<ResolvedSecretKeys> {
+  if (installed) return installed;
+  installed = await resolveSecretKeyProvider(env, backends, options);
+  return installed;
+}
+
+/**
+ * The synchronous accessor every call site uses. Three cases, and the third is the point:
+ *
+ *   bootstrapped                            → the installed provider, whatever its kind;
+ *   not bootstrapped, source "environment"  → the environment provider (tests, scripts, dev);
+ *   not bootstrapped, source "managed"      → THROW. A process configured for managed keys that
+ *                                             reaches a crypto call without having bootstrapped is
+ *                                             misordered or has failed startup; handing it
+ *                                             environment keys here would be the silent fallback
+ *                                             this checkpoint exists to make impossible.
+ */
+export function secretKeyProvider(env: NodeJS.ProcessEnv = process.env): SecretKeyProvider {
+  if (installed) return installed.provider;
+  if (secretKeySource(env) === "managed") {
+    throw new ManagedKeyBootstrapError("managed secret keys are configured but have not been bootstrapped in this process", "not_bootstrapped");
+  }
+  return environmentSecretKeys(env);
+}
+
+/** What was installed, for readiness reports. Null until bootstrap. */
+export function installedSecretKeys(): ResolvedSecretKeys | null {
+  return installed;
+}
+
+/** Tests only: forget the installed provider so the next bootstrap runs again. */
+export function resetSecretKeysForTests(): void {
+  installed = null;
 }
 
 /**

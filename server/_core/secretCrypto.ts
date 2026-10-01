@@ -48,6 +48,9 @@ const TAG_BYTES = 16;
  */
 const KEY_ID = /^[a-z][a-z0-9]*-v[1-9][0-9]*$/;
 
+/** The key-id shape, for the managed bootstrap to validate configuration before any unwrap. */
+export const isValidKeyId = (keyId: unknown): keyId is string => typeof keyId === "string" && KEY_ID.test(keyId);
+
 const isPurpose = (v: unknown): v is SecretPurpose =>
   typeof v === "string" && (SECRET_PURPOSES as readonly string[]).includes(v);
 
