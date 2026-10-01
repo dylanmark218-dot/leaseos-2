@@ -17,9 +17,13 @@
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
 import {
+  commercialJobChains,
   contractorBusinessProfiles,
+  dispatchPostings,
   domainEventOutbox,
+  jobs,
   marketplaceAwards,
+  marketplaceContracts,
   marketplaceBidRevisions,
   marketplaceBids,
   marketplaceEvents,
@@ -27,12 +31,15 @@ import {
   marketplacePostings,
   organizations,
   type MarketplaceAwardRow,
+  type MarketplaceContractRow,
   type MarketplaceBidRevisionRow,
   type MarketplaceBidRow,
   type MarketplacePostingRow,
 } from "../../drizzle/schema";
 import type { Db, DbOrTx, Tx } from "./dbTypes";
 import { buildOutboxRow } from "./eventEmitter";
+import { nextSequence, pad2 } from "./commercialChainNumbers";
+import { createPosting as createDispatchPosting } from "../dispatchRoleService";
 import {
   EMPTY_REQUIREMENTS,
   assessBidReadiness,
@@ -709,4 +716,151 @@ export async function postingEvents(db: Db, actor: MarketplaceActor, args: { pos
   const mine = await db.select({ id: marketplaceBids.id }).from(marketplaceBids).where(and(eq(marketplaceBids.postingId, posting.id), eq(marketplaceBids.bidderOrgRef, actor.orgRef)));
   const myBidIds = new Set(mine.map(m => m.id));
   return events.filter(e => e.bidId == null || myBidIds.has(e.bidId)).map(e => (e.bidId == null && e.eventType === "invitation_sent" ? { ...e, detailJson: null } : e));
+}
+
+/* ===================== the award → dispatch bridge (0190) ===================== */
+
+/** The legacy job's `mode`, read from the work type the client chose. Nothing downstream is decided by this alone. */
+export function jobModeForWorkType(workType: string): "general" | "hydrovac" | "recovery" | "transport" {
+  const w = workType.toUpperCase();
+  if (w.includes("HYDROVAC")) return "hydrovac";
+  if (w.includes("RECOVERY") || w.includes("TOW")) return "recovery";
+  if (/HAUL|TRANSPORT|FLUID|WATER|GRAVEL|HOTSHOT|VAC|HEAVY/.test(w)) return "transport";
+  return "general";
+}
+
+/**
+ * The client issues the contract. In ONE transaction: the posting advances
+ * awarded → contracted, the award to `contracted`, the job is created — owned
+ * by the CONTRACTOR organization with the client as its customer, so the
+ * contractor's own dispatch, tickets and billing run on it — and the commercial
+ * chain is numbered by the same allocator contractor-office chains use. The
+ * contract row ties them together and carries the award's content hash.
+ */
+export async function issueContract(db: Db, actor: MarketplaceActor, args: PostingTransitionArgs, now = new Date()) {
+  return db.transaction(async tx => {
+    const posting = await lockPosting(tx, args.postingRef);
+    assertClient(posting, actor);
+    assertVersion(args.expectedVersion, posting.version);
+    const to = advancePosting(posting, "contract");
+    const [award] = await tx.select().from(marketplaceAwards).where(eq(marketplaceAwards.postingId, posting.id)).for("update").limit(1);
+    if (!award || award.state !== "awarded") throw refused(award ? `The award is ${award.state}; only a standing award can be contracted.` : "This posting carries no award to contract.");
+    const [existing] = await tx.select({ contractRef: marketplaceContracts.contractRef }).from(marketplaceContracts).where(eq(marketplaceContracts.postingId, posting.id)).limit(1);
+    if (existing) throw conflict(`This posting already carries contract ${existing.contractRef}.`);
+    const [client] = await tx.select({ name: organizations.name }).from(organizations).where(eq(organizations.orgRef, posting.clientOrgRef)).limit(1);
+
+    const jobCode = makeRef("JOB");
+    await tx.insert(jobs).values({
+      orgRef: award.contractorOrgRef,
+      customerOrgRef: posting.clientOrgRef,
+      jobCode,
+      type: posting.workType,
+      mode: jobModeForWorkType(posting.workType),
+      customer: (client?.name ?? posting.clientOrgRef).slice(0, 160),
+      location: (posting.pickupLocation ?? posting.pickupLsd ?? posting.operatingArea ?? posting.title).slice(0, 220),
+      latitude: posting.pickupLat,
+      longitude: posting.pickupLng,
+      status: "dispatched",
+      progress: 0,
+    });
+    const [job] = await tx.select({ id: jobs.id }).from(jobs).where(eq(jobs.jobCode, jobCode)).limit(1);
+    if (!job) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Job creation failed." });
+
+    const chainRef = makeRef("CHN");
+    const chainNumber = `${jobCode}-C${pad2(await nextSequence(tx, `CONTRACT:${job.id}`))}`;
+    await tx.insert(commercialJobChains).values({
+      chainRef, chainNumber, rootJobId: job.id, parentChainRef: null,
+      assigningOrgRef: posting.clientOrgRef, performingOrgRef: award.contractorOrgRef, customerOrgRef: posting.clientOrgRef,
+      operatingCarrierOrgRef: award.contractorOrgRef, equipmentOwnerOrgRef: null,
+      // The bid and the award are the two consents; the chain records the relationship they made.
+      relationshipType: "INDEPENDENT_CONTRACTOR", status: "accepted", createdByUserId: actor.userId,
+    });
+
+    const contractRef = makeRef("CON");
+    await tx.insert(marketplaceContracts).values({
+      contractRef, awardId: award.id, postingId: posting.id, clientOrgRef: posting.clientOrgRef, contractorOrgRef: award.contractorOrgRef,
+      contentHash: award.contentHash, jobId: job.id, jobCode, chainRef, chainNumber, issuedByUserId: actor.userId, issuedAt: now,
+    });
+    await tx.update(marketplaceAwards).set({ state: "contracted" }).where(eq(marketplaceAwards.id, award.id));
+    await tx.update(marketplacePostings).set({ state: to, version: posting.version + 1 }).where(eq(marketplacePostings.id, posting.id));
+    await record(tx, actor, { postingId: posting.id, awardId: award.id, bidId: award.bidId, eventType: "contract_issued", previousState: "awarded", newState: "contracted", detail: { contractRef, jobId: job.id, jobCode, chainRef, chainNumber, contractorOrgRef: award.contractorOrgRef, contentHash: award.contentHash } }, now);
+    await record(tx, actor, { postingId: posting.id, eventType: "posting_contract", previousState: posting.state, newState: to, detail: { contractRef } }, now);
+    return { contractRef, postingRef: posting.postingRef, state: to, version: posting.version + 1, jobId: job.id, jobCode, chainRef, chainNumber, contractorOrgRef: award.contractorOrgRef };
+  });
+}
+
+/**
+ * The contractor dispatches its contract: the canonical dispatch posting is
+ * created through `dispatchRoleService.createPosting` — the same door a
+ * dispatcher's screen uses — in the CONTRACTOR's scope, one `PRIMARY_UNIT`
+ * slot per unit the posting required. That door runs its own transaction, so
+ * this is two steps made safe by idempotence: a dispatch posting that already
+ * exists for the contract's job is bound rather than duplicated, and a second
+ * call on a dispatched contract returns what it has.
+ */
+export async function dispatchContract(db: Db, actor: MarketplaceActor, args: { contractRef: string }, now = new Date()) {
+  const [contract] = await db.select().from(marketplaceContracts).where(eq(marketplaceContracts.contractRef, args.contractRef)).limit(1);
+  // The client sees its contract; only the contractor dispatches it. A stranger sees nothing.
+  if (!contract || (contract.contractorOrgRef !== actor.orgRef && contract.clientOrgRef !== actor.orgRef)) throw notFound("Contract");
+  if (contract.contractorOrgRef !== actor.orgRef) throw forbidden("Only the contractor organization dispatches its contract; the client's part ended at issue.");
+  if (contract.state === "dispatched" && contract.dispatchPostingId) {
+    return { contractRef: contract.contractRef, dispatchPostingId: contract.dispatchPostingId, dispatchPostingNumber: contract.dispatchPostingNumber, roleIds: [] as number[], alreadyDispatched: true as const };
+  }
+  if (contract.state !== "issued") throw refused(`A ${contract.state} contract cannot be dispatched.`);
+  const [posting] = await db.select().from(marketplacePostings).where(eq(marketplacePostings.id, contract.postingId)).limit(1);
+  if (!posting) throw notFound("Posting");
+
+  const [prior] = await db.select({ id: dispatchPostings.id, postingNumber: dispatchPostings.postingNumber }).from(dispatchPostings).where(eq(dispatchPostings.jobId, contract.jobId)).orderBy(asc(dispatchPostings.id)).limit(1);
+  let created: { postingId: number; postingNumber: string; roleIds: number[] };
+  if (prior) created = { postingId: prior.id, postingNumber: prior.postingNumber, roleIds: [] };
+  else {
+    const requirements = parseRequirements(posting.requirementsJson);
+    const units = Math.max(1, posting.unitsRequired ?? 1);
+    created = await createDispatchPosting({
+      jobId: contract.jobId,
+      distribution: "direct_assignment",
+      roles: Array.from({ length: units }, (_, i) => ({
+        roleCode: "PRIMARY_UNIT",
+        roleLabel: `${posting.equipmentType ?? "Unit"} ${i + 1} of ${units}`,
+        required: true,
+        requiredEquipmentClass: requirements.equipmentTypes[0] ?? null,
+      })),
+      actorUserId: actor.userId,
+      scope: { tenantId: actor.orgRef },
+    });
+  }
+
+  return db.transaction(async tx => {
+    const mp = await lockPosting(tx, posting.postingRef);
+    const [locked] = await tx.select().from(marketplaceContracts).where(eq(marketplaceContracts.id, contract.id)).for("update").limit(1);
+    if (!locked) throw notFound("Contract");
+    if (locked.state === "dispatched" && locked.dispatchPostingId) {
+      return { contractRef: locked.contractRef, dispatchPostingId: locked.dispatchPostingId, dispatchPostingNumber: locked.dispatchPostingNumber, roleIds: [] as number[], alreadyDispatched: true as const };
+    }
+    const to = advancePosting(mp, "dispatch");
+    await tx.update(marketplaceContracts).set({ state: "dispatched", dispatchPostingId: created.postingId, dispatchPostingNumber: created.postingNumber, dispatchedByUserId: actor.userId, dispatchedAt: now }).where(eq(marketplaceContracts.id, locked.id));
+    await tx.update(marketplacePostings).set({ state: to, version: mp.version + 1 }).where(eq(marketplacePostings.id, mp.id));
+    await record(tx, actor, { postingId: mp.id, awardId: locked.awardId, eventType: "contract_dispatched", previousState: "issued", newState: "dispatched", detail: { contractRef: locked.contractRef, dispatchPostingId: created.postingId, dispatchPostingNumber: created.postingNumber, roleIds: created.roleIds, reusedExistingPosting: !!prior } }, now);
+    await record(tx, actor, { postingId: mp.id, eventType: "posting_dispatch", previousState: mp.state, newState: to, detail: { contractRef: locked.contractRef } }, now);
+    return { contractRef: locked.contractRef, dispatchPostingId: created.postingId, dispatchPostingNumber: created.postingNumber, roleIds: created.roleIds, alreadyDispatched: false as const };
+  });
+}
+
+function presentContract(c: MarketplaceContractRow, viewerOrgRef: string) {
+  return { ...c, isClient: c.clientOrgRef === viewerOrgRef, isContractor: c.contractorOrgRef === viewerOrgRef };
+}
+
+/** A contract, to either of its parties. */
+export async function getContract(db: Db, actor: MarketplaceActor, args: { contractRef: string }) {
+  const [c] = await db.select().from(marketplaceContracts).where(eq(marketplaceContracts.contractRef, args.contractRef)).limit(1);
+  if (!c || (c.clientOrgRef !== actor.orgRef && c.contractorOrgRef !== actor.orgRef)) throw notFound("Contract");
+  const [posting] = await db.select({ postingRef: marketplacePostings.postingRef, title: marketplacePostings.title, state: marketplacePostings.state }).from(marketplacePostings).where(eq(marketplacePostings.id, c.postingId)).limit(1);
+  const [chain] = await db.select({ status: commercialJobChains.status, relationshipType: commercialJobChains.relationshipType }).from(commercialJobChains).where(eq(commercialJobChains.chainRef, c.chainRef)).limit(1);
+  return { ...presentContract(c, actor.orgRef), posting: posting ?? null, chain: chain ?? null };
+}
+
+/** Every contract this organization is a party to, newest first. */
+export async function contractsMine(db: Db, actor: MarketplaceActor) {
+  const rows = await db.select().from(marketplaceContracts).where(or(eq(marketplaceContracts.clientOrgRef, actor.orgRef), eq(marketplaceContracts.contractorOrgRef, actor.orgRef))).orderBy(desc(marketplaceContracts.createdAt));
+  return rows.map(c => presentContract(c, actor.orgRef));
 }

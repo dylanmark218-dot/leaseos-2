@@ -130,6 +130,26 @@ export const marketplaceRouter = router({
     return svc.awardPosting(db, actor, input);
   }),
 
+  /* ---- the award → dispatch bridge (0190) ---- */
+  /** The client issues the contract: the job (owned by the contractor) and the commercial chain are created from the award, nothing re-entered. */
+  contractIssue: roleProcedure("marketplace.contractIssue").input(z.object({ postingRef: ref, ...withVersion })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.issueContract(db, actor, input);
+  }),
+  /** The contractor dispatches: the canonical dispatch posting and its unit slots, through the same door its dispatcher's screen uses. Gated by dispatch.assign. */
+  contractDispatch: roleProcedure("marketplace.contractDispatch").input(z.object({ contractRef: ref })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.dispatchContract(db, actor, input);
+  }),
+  contractGet: roleProcedure("marketplace.contractGet").input(z.object({ contractRef: ref })).query(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.getContract(db, actor, input);
+  }),
+  contractsMine: roleProcedure("marketplace.contractsMine").query(async ({ ctx }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.contractsMine(db, actor);
+  }),
+
   /* ---- reading ---- */
   postingGet: roleProcedure("marketplace.postingGet").input(z.object({ postingRef: ref })).query(async ({ ctx, input }) => {
     const { db, actor } = await actorFor(ctx.user.id);

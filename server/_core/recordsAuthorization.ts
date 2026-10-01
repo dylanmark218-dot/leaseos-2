@@ -2623,6 +2623,12 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "marketplace.bidDraftSave": "marketplace.bid.manage",
   "marketplace.bidSubmit": "marketplace.bid.manage",
   "marketplace.bidWithdraw": "marketplace.bid.manage",
+  /* ---- 0190: the award → dispatch bridge. Issuing is the client's posting right; dispatching is the
+     contractor's DISPATCH right — the same permission its dispatcher's screen needs to create a posting. ---- */
+  "marketplace.contractIssue": "marketplace.posting.manage",
+  "marketplace.contractDispatch": "dispatch.assign",
+  "marketplace.contractGet": "marketplace.read",
+  "marketplace.contractsMine": "marketplace.read",
 
   /* ---- v21.3: IFTA ---- */
   "ifta.distanceRecord": "ifta.distance.record",

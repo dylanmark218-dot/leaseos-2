@@ -9054,3 +9054,38 @@ export type MarketplaceBidRevisionRow = typeof marketplaceBidRevisions.$inferSel
 export type MarketplaceAwardRow = typeof marketplaceAwards.$inferSelect;
 export type MarketplaceEventRow = typeof marketplaceEvents.$inferSelect;
 export type MarketplaceInvitationRow = typeof marketplaceInvitations.$inferSelect;
+
+/**
+ * 0190 — the award → dispatch bridge. One contract per award: the client issues it, which creates
+ * the job (owned by the CONTRACTOR organization, with the client as its customer) and the
+ * commercial chain; the contractor then dispatches it through the canonical dispatch posting
+ * door, and the posting it created is recorded here so the whole chain reads back:
+ * posting → bid → award → contract → job → dispatch posting → roles.
+ */
+export const marketplaceContracts = mysqlTable("marketplaceContracts", {
+  id: int("id").autoincrement().primaryKey(),
+  contractRef: varchar("contractRef", { length: 64 }).notNull().unique(),
+  awardId: int("awardId").notNull().unique(),
+  postingId: int("postingId").notNull().unique(),
+  clientOrgRef: varchar("clientOrgRef", { length: 40 }).notNull(),
+  contractorOrgRef: varchar("contractorOrgRef", { length: 40 }).notNull(),
+  /** Copied from the award: what the contract binds to. */
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  jobId: int("jobId").notNull().unique(),
+  jobCode: varchar("jobCode", { length: 32 }).notNull(),
+  chainRef: varchar("chainRef", { length: 80 }).notNull(),
+  chainNumber: varchar("chainNumber", { length: 120 }).notNull(),
+  /** NULL until the contractor dispatches; then the canonical `dispatchPostings` row. */
+  dispatchPostingId: int("dispatchPostingId").unique(),
+  dispatchPostingNumber: varchar("dispatchPostingNumber", { length: 64 }),
+  state: mysqlEnum("state", ["issued", "dispatched", "cancelled"]).default("issued").notNull(),
+  issuedByUserId: int("issuedByUserId").notNull(),
+  issuedAt: timestamp("issuedAt").notNull(),
+  dispatchedByUserId: int("dispatchedByUserId"),
+  dispatchedAt: timestamp("dispatchedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  contractorIdx: index("marketplaceContracts_contractor_idx").on(t.contractorOrgRef, t.state),
+  clientIdx: index("marketplaceContracts_client_idx").on(t.clientOrgRef, t.state),
+}));
+export type MarketplaceContractRow = typeof marketplaceContracts.$inferSelect;

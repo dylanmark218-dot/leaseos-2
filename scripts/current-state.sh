@@ -210,7 +210,10 @@ client organization posts work, contractor organizations bid in write-once hashe
 revisions, the client awards with a reason and never by lowest price; sealed
 pricing withheld in the read model until bidding closes, the deadline enforced by
 the clock, readiness declared-only and saying so, every transition locked,
-versioned and on the trail — no UI and no automatic dispatch creation yet).
+versioned and on the trail; the award bridged to the canonical dispatch: the
+client issues a contract that creates the contractor-owned job and its commercial
+chain, and the contractor dispatches it through the one dispatch posting door,
+idempotently — no UI yet).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 
