@@ -1,0 +1,35 @@
+{
+  "id": "12-corrected-value",
+  "note": "\"Seventeen — no, sixteen.\" The self-correction in the narration itself.",
+  "transcript": "Arrived 12:00, unloaded 12:10 to 12:55. Seventeen thousand — no, sixteen thousand litres on the meter.",
+  "context": {
+    "formKey": "unload_stop",
+    "formVersion": 1,
+    "tripRef": "TRIP-2026-004821",
+    "unitNumber": "T-118",
+    "unitTankCapacityLitres": 16000,
+    "vehicleMoving": false
+  },
+  "modelResponse": {
+    "fields": {
+      "arrivedAt": { "value": "12:00", "status": "stated", "evidenceQuote": "Arrived 12:00", "evidenceRef": null },
+      "waitMinutes": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "delayReason": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "operationStartedAt": { "value": "12:10", "status": "stated", "evidenceQuote": "unloaded 12:10", "evidenceRef": null },
+      "operationCompletedAt": { "value": "12:55", "status": "stated", "evidenceQuote": "to 12:55", "evidenceRef": null },
+      "quantity": { "value": 16000, "status": "ambiguous", "evidenceQuote": "Seventeen thousand — no, sixteen thousand litres on the meter", "evidenceRef": null, "alternatives": [17000, 16000] },
+      "measurementMethod": { "value": "Meter", "status": "stated", "evidenceQuote": "on the meter", "evidenceRef": null },
+      "departedAt": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null }
+    },
+    "notes": null,
+    "outOfScope": false,
+    "injectionSuspected": false
+  },
+  "expect": {
+    "verdicts": { "quantity": "REVIEW" },
+    "reasonCodes": { "quantity": ["ambiguous_reading"] },
+    "silentGuesses": 0,
+    "outOfScope": false,
+    "injectionSuspected": false
+  }
+}

@@ -8,10 +8,11 @@
  * entity outside the scope is "not found" — never "forbidden", which would confirm it exists.
  */
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import type { MySqlColumn } from "drizzle-orm/mysql-core";
 import type { MySql2Database } from "drizzle-orm/mysql2";
 import { contractorSettlements, employeePayrollProfiles, financialEntities, payPeriods, payRuns, payrollAdjustments, payrollDisputes } from "../../drizzle/schema";
-import { SINGLE_TENANT_ID } from "./actingScope";
+import { AmbiguousOrganization, RevivedFallbackRefused, SINGLE_TENANT_ID, resolveActingScopeStrict } from "./actingScope";
 
 type Db = MySql2Database<Record<string, unknown>>;
 export type MoneyScope = { tenantId: string };
@@ -68,4 +69,68 @@ export async function assertSettlementInScope(db: Db, settlementRef: string, sco
 export async function periodIdsForEntities(db: Db, entityIds: number[]): Promise<number[]> {
   if (!entityIds.length) return [];
   return (await db.select({ id: payPeriods.id }).from(payPeriods).where(inArray(payPeriods.financialEntityId, entityIds))).map(r => r.id);
+}
+
+/**
+ * F1 — the money boundary for one request: the acting organization and the books it owns.
+ *
+ * Established once, from server-owned context, by `moneyScoped()` in `trpc.ts`; a handler reads it
+ * from `ctx.money` and never from input. Holding a finance role in another organization changes
+ * nothing here — the chain is caller → organization → book → record, and roles are checked
+ * separately by `roleProcedure`.
+ */
+export type FinanceScope = MoneyScope & { entityIds: readonly number[] };
+
+export async function financeScopeFor(db: Db, userId: number): Promise<FinanceScope> {
+  let tenantId: string;
+  // P0-A3 — the strict resolver (P0-A1): a membership that ended, lapsed or was suspended is not
+  // replaced by the single-tenant fallback, and no role grant revives it. Money follows the same
+  // rule as hours of service, telematics and operating zones.
+  try { tenantId = (await resolveActingScopeStrict(db as never, userId)).tenantId; }
+  catch (e) {
+    // Two live memberships: which company's books this request touches has to be established, not guessed.
+    if (e instanceof AmbiguousOrganization) throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
+    if (e instanceof RevivedFallbackRefused) throw new TRPCError({ code: "FORBIDDEN", message: "No active organization membership" });
+    throw e;
+  }
+  const scope = { tenantId };
+  return { ...scope, entityIds: await entityIdsInScope(db, scope) };
+}
+
+/**
+ * Whether the book is one the caller's organization owns. A record assigned to no book (NULL) is in
+ * nobody's scope — not the single tenant's, not the first organization to ask. Legacy rows like that
+ * are found by `legacyFinanceOwnershipAudit` and assigned explicitly, never at read time.
+ */
+export function ownsEntity(fs: FinanceScope, financialEntityId: number | null | undefined): financialEntityId is number {
+  return financialEntityId != null && fs.entityIds.includes(financialEntityId);
+}
+/** The book, if the caller owns it; otherwise "<what> not found", the same answer a missing row gets. */
+export function requireOwnedEntity(fs: FinanceScope, financialEntityId: number | null | undefined, what: string): number {
+  if (!ownsEntity(fs, financialEntityId)) throw notFound(what);
+  return financialEntityId;
+}
+/** WHERE clause: rows keyed to a book the caller owns. No books means no rows, never all rows. */
+export function ownedEntityWhere(column: MySqlColumn, fs: FinanceScope): SQL {
+  return fs.entityIds.length ? inArray(column, [...fs.entityIds]) : sql`false`;
+}
+/**
+ * WHERE clause for rows keyed to an organization by `bookOrgRef` (vendors 0149, commercial office 0133):
+ * the single tenant's rows carry NULL or "default", an organization's carry its ref.
+ */
+export function bookOrgWhere(column: MySqlColumn, fs: FinanceScope): SQL {
+  return fs.tenantId === SINGLE_TENANT_ID ? or(isNull(column), eq(column, SINGLE_TENANT_ID))! : eq(column, fs.tenantId);
+}
+export function ownsBookOrg(fs: FinanceScope, bookOrgRef: string | null | undefined): boolean {
+  return fs.tenantId === SINGLE_TENANT_ID ? bookOrgRef == null || bookOrgRef === SINGLE_TENANT_ID : bookOrgRef === fs.tenantId;
+}
+
+/**
+ * F1.1 — the same boundary for routers outside finance (compliance, requirements, calibration, dispatch):
+ * the caller's acting organization must own this entity. Any other id answers "<what> not found". The
+ * entity is the company's legal entity (0146), not a finance concept, so no finance context is involved.
+ */
+export async function assertCallerOwnsEntity(db: Db, userId: number, financialEntityId: number, what = `Financial entity ${financialEntityId}`): Promise<void> {
+  const fs = await financeScopeFor(db, userId);
+  if (!ownsEntity(fs, financialEntityId)) throw /^No such |not found$/.test(what) ? new TRPCError({ code: "NOT_FOUND", message: what }) : notFound(what);
 }

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  detectBookingConflicts,
   filterVisiblePostings,
   matchOperatorToJob,
   type EquipmentProfile,
@@ -224,47 +223,5 @@ describe("filterVisiblePostings", () => {
     );
     expect(visible).toHaveLength(1);
     expect(visible[0].requirements.jobCode).toBe("JOB-2026-008841");
-  });
-});
-
-describe("detectBookingConflicts", () => {
-  const b = (resourceId: string, jobCode: string, sh: number, eh: number) => ({
-    resourceId,
-    jobCode,
-    startsAt: new Date(Date.UTC(2026, 7, 31, sh, 0)),
-    endsAt: new Date(Date.UTC(2026, 7, 31, eh, 0)),
-  });
-
-  it("detects an overlapping assignment on the same unit", () => {
-    const c = detectBookingConflicts(b("VAC-27", "JOB-8850", 14, 18), [
-      b("VAC-27", "JOB-8841", 6, 16),
-    ]);
-    expect(c).toHaveLength(1);
-    expect(c[0].message).toContain("assigned to JOB-8841");
-    expect(c[0].message).toContain("also proposed for JOB-8850");
-  });
-
-  it("allows a back-to-back assignment starting exactly when the previous ends", () => {
-    expect(
-      detectBookingConflicts(b("VAC-27", "JOB-8850", 16, 20), [
-        b("VAC-27", "JOB-8841", 6, 16),
-      ])
-    ).toHaveLength(0);
-  });
-
-  it("does not report a conflict across different resources", () => {
-    expect(
-      detectBookingConflicts(b("VAC-27", "JOB-8850", 14, 18), [
-        b("VAC-31", "JOB-8841", 6, 16),
-      ])
-    ).toHaveLength(0);
-  });
-
-  it("does not report a job conflicting with itself on re-save", () => {
-    expect(
-      detectBookingConflicts(b("VAC-27", "JOB-8841", 6, 16), [
-        b("VAC-27", "JOB-8841", 6, 16),
-      ])
-    ).toHaveLength(0);
   });
 });

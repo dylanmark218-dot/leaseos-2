@@ -1,8 +1,13 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { vi, beforeAll, describe, expect, it } from "vitest";
+
+// F1.1 — this suite exercises a deployment that is one ownership domain (no organization yet), where the
+// ownerless customer insurance requirements are provably the single tenant's. The predicate itself, and the refusal once organizations
+// exist, are proved against the real database in tenantScopeFinance.db.test.ts.
+vi.mock("./ownershipDomain", async importOriginal => ({ ...(await importOriginal<typeof import("./ownershipDomain")>()), singleOwnershipDomain: async () => true, requireProvableOwnership: async () => undefined }));
 import mysql from "mysql2/promise";
 import {
   assessCoverage, certificatesAffectedByRenewal, claimFinancials, dispatchInsuranceGate, matchCustomerRequirements,
-  renewalCalendar, roadsideInsuranceItems, type PolicyRecord,
+  proofFromDocuments, renewalCalendar, roadsideInsuranceItems, type PolicyRecord,
 } from "./_core/insuranceRisk";
 import { appRouter } from "./routers";
 import { grantUserRole } from "./db";
@@ -10,11 +15,17 @@ import { authorize, type DomainRole } from "./_core/recordsAuthorization";
 
 const NOW = new Date("2026-09-10T12:00:00Z");
 const days = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
+/**
+ * SPINE item 2: a proof is the canonical verdict on proof rows, so fixtures build it the same way
+ * production does — from a row, through `proofFromDocuments` — rather than hand-writing a verdict.
+ */
+const proofDoc = (expiresAt: Date | null, verificationStatus: "needs_review" | "verified" | "rejected", at: Date) =>
+  proofFromDocuments([{ id: 1, docType: "insurance_proof", title: "Proof", issuedAt: null, expiresAt, verificationStatus, capturedAt: new Date(at.getTime() - 86_400_000) }], at);
 const policy = (over: Partial<PolicyRecord> = {}): PolicyRecord => ({
   policyRef: "POL-1", policyType: "commercial_auto", effectiveAt: days(-200), expiresAt: days(165), status: "active",
   coverageVerificationStatus: "coverage_verified",
   coverages: [{ coverageType: "commercial_auto", limitAmount: 5_000_000, additionalInsuredEndorsement: true }],
-  document: { expiresAt: days(165), verificationStatus: "verified" }, ...over,
+  document: proofDoc(days(165), "verified", NOW), ...over,
 });
 
 /* ------------------------------------------------------------------ */
@@ -36,7 +47,7 @@ describe("document_missing is not coverage_expired", () => {
   });
 
   it("reviews when the proof expired but the policy has not", () => {
-    const a = assessCoverage({ coverageType: "commercial_auto", policies: [policy({ document: { expiresAt: days(-5), verificationStatus: "verified" } })], now: NOW });
+    const a = assessCoverage({ coverageType: "commercial_auto", policies: [policy({ document: proofDoc(days(-5), "verified", NOW) })], now: NOW });
     expect(a.status).toBe("document_expired");
     expect(a.effect).toBe("review");
     expect(a.reason).toContain("refresh the document");
@@ -207,7 +218,7 @@ d("one policy, fifty trucks, one document; a collision; a customer certificate",
     const office = await withRole("office");
     const dispatcher = await withRole("dispatcher");
     const bookkeeper = await withRole("bookkeeper");
-    const entityId = 260000 + Math.floor(Math.random() * 90000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1.1 — a real book: a made-up entity id is "not found"
     const [ev] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, storageKey, capturedAt, capturedBy, status) VALUES ('Fleet policy', 'insurance', ?, NOW(), ?, 'verified')", [key("s3").slice(0, 60), office]);
     const evidenceId = Number(ev.insertId);
 
@@ -220,7 +231,9 @@ d("one policy, fifty trucks, one document; a collision; a customer certificate",
     expect(pol.coverageVerificationStatus).toBe("coverage_reported");
 
     // Cover three units under it. The one document relates to all three.
-    const unitIds = [1001, 1002, 1003].map(n => n + Math.floor(Math.random() * 900000));
+    // F1.1 — real units (the single tenant's, unowned): a policy covers trucks that exist in the caller's scope.
+    const unitIds: number[] = [];
+    for (let i = 0; i < 3; i++) unitIds.push(Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [key("U").slice(0, 40)]))[0].insertId));
     const cov = await callerFor(office).insurance.coverageAssign({ policyRef: pol.policyRef, entities: unitIds.map(id => ({ entityType: "unit" as const, entityId: id })), coveredFrom: days(-100) });
     expect(cov.covered).toBe(3);
     const [rels] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM evidenceRelationships WHERE evidenceRecordId = ? AND role = 'insured_under'", [evidenceId]);
@@ -290,7 +303,7 @@ d("one policy, fifty trucks, one document; a collision; a customer certificate",
 
   it("refuses a certificate on unverified coverage", async () => {
     const office = await withRole("office");
-    const entityId = 270000 + Math.floor(Math.random() * 90000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1.1 — a real book: a made-up entity id is "not found"
     const pol = await callerFor(office).insurance.policyRecord({ financialEntityId: entityId, policyType: "cargo", insurerName: "Q", policyNumber: key("PN"), effectiveAt: days(-10), expiresAt: days(355), coverages: [{ coverageType: "cargo", limitAmount: 100000 }] });
     await expect(callerFor(office).insurance.certificateIssue({ policyRef: pol.policyRef, recipientCustomerRef: "X" })).rejects.toThrow(/verify the coverage before issuing/);
   });
@@ -336,17 +349,17 @@ describe("when the policy and the document disagree, the policy decides first", 
   const pol = (over: Partial<import("./_core/insuranceRisk").PolicyRecord> = {}): import("./_core/insuranceRisk").PolicyRecord => ({
     policyRef: "POL-1", policyType: "commercial_auto", effectiveAt: d(-300), expiresAt: d(65), status: "active",
     coverageVerificationStatus: "coverage_verified", coverages: [{ coverageType: "commercial_auto", limitAmount: 5_000_000, additionalInsuredEndorsement: true }],
-    document: { expiresAt: d(65), verificationStatus: "verified" }, ...over,
+    document: proofDoc(d(65), "verified", NOWP), ...over,
   });
 
   it("calls an expired policy with a perfectly verified current proof card coverage_expired — the card does not resurrect the policy", () => {
-    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ expiresAt: d(-2), document: { expiresAt: d(300), verificationStatus: "verified" } })], now: NOWP });
+    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ expiresAt: d(-2), document: proofDoc(d(300), "verified", NOWP) })], now: NOWP });
     expect(a.status).toBe("coverage_expired");
     expect(a.effect).toBe("blocked");
   });
 
   it("calls a current policy with an expired proof card document_expired — review, the truck is still insured", () => {
-    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ document: { expiresAt: d(-10), verificationStatus: "verified" } })], now: NOWP });
+    const a = assessCoverage({ coverageType: "commercial_auto", policies: [pol({ document: proofDoc(d(-10), "verified", NOWP) })], now: NOWP });
     expect(a.status).toBe("document_expired");
     expect(a.effect).toBe("review");
     expect(a.reason).toContain("refresh the document");

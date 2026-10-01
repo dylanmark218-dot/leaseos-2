@@ -1,4 +1,9 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { vi, beforeAll, describe, expect, it } from "vitest";
+
+// F1.1 — this suite exercises a deployment that is one ownership domain (no organization yet), where the
+// ownerless equipment credentials are provably the single tenant's. The predicate itself, and the refusal once organizations
+// exist, are proved against the real database in tenantScopeFinance.db.test.ts.
+vi.mock("./ownershipDomain", async importOriginal => ({ ...(await importOriginal<typeof import("./ownershipDomain")>()), singleOwnershipDomain: async () => true, requireProvableOwnership: async () => undefined }));
 import mysql from "mysql2/promise";
 import {
   calibrationEffectOnUse, calibrationImpact, calibrationStatus, equipmentAuthorization, evaluateWorkContext,
@@ -232,17 +237,20 @@ d("a scale found wrong for three weeks", () => {
   it("answers which loads and invoices depended on it", async () => {
     const shopLead = await withRole("shop_lead");
     const mechanic = await withRole("mechanic");
-    const entityId = 800000 + Math.floor(Math.random() * 90000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1.1 — a real book: a made-up entity id is "not found"
 
     const dev = await callerFor(mechanic).calibration.deviceRegister({ financialEntityId: entityId, deviceType: "truck_scale", measures: "gross_weight", unitOfMeasure: "kg", calibrationIntervalDays: 180 });
     await callerFor(mechanic).calibration.eventRecord({ deviceRef: dev.deviceRef, eventType: "calibrated", performedAt: new Date("2026-06-12T00:00:00Z") });
 
     // Three loads measured on it: one before the suspect window, two inside.
     const bookId = 500000 + Math.floor(Math.random() * 90000);
+    // The loads get their own job. A hard-coded job 1 is whatever suite created the first job, and its
+    // audit package then gathers these loads as its own (order-dependent; surfaced by F1.1's reordering).
+    const jobId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, createdAt) VALUES (?, 'hydrovac', 'Scale fixture', 'LSD 04-12-045-08W4', 'on_site', NOW())", [key("JOB").slice(0, 40)]))[0].insertId);
     const mk = async (createdAt: string, withBook: boolean) => {
       const [r] = await pool.execute<mysql.ResultSetHeader>(
-        "INSERT INTO loads (loadNumber, jobId, measurementMethod, measurementDeviceId, chainState, billingBookId, createdAt) VALUES (?, 1, 'scale', ?, 'weighed', ?, ?)",
-        [key("LD").slice(0, 40), dev.deviceId, withBook ? bookId : null, createdAt]
+        "INSERT INTO loads (loadNumber, jobId, measurementMethod, measurementDeviceId, chainState, billingBookId, createdAt) VALUES (?, ?, 'scale', ?, 'weighed', ?, ?)",
+        [key("LD").slice(0, 40), jobId, dev.deviceId, withBook ? bookId : null, createdAt]
       );
       return Number(r.insertId);
     };
@@ -276,11 +284,13 @@ d("a scale found wrong for three weeks", () => {
 
   it("records an employer authorization as pending until all four elements exist", async () => {
     const safety = await withRole("safety");
-    const entityId = 810000 + Math.floor(Math.random() * 90000);
-    const partial = await callerFor(safety).requirement.authorize({ userId: 77, financialEntityId: entityId, equipmentType: "hydrovac", trainingEvidenceId: 1 });
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1.1 — a real book: a made-up entity id is "not found"
+    // F1.2 — the suite's own (unowned, single-tenant) evidence: "evidence 1" may belong to an organization on a fresh database.
+    const evidenceId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt) VALUES ('Hydrovac training', 'training', NOW())"))[0].insertId);
+    const partial = await callerFor(safety).requirement.authorize({ userId: 77, financialEntityId: entityId, equipmentType: "hydrovac", trainingEvidenceId: evidenceId });
     expect(partial.status).toBe("pending");
     expect(partial.note).toContain("all be on record");
-    const full = await callerFor(safety).requirement.authorize({ userId: 77, financialEntityId: entityId, equipmentType: "hydrovac", trainingEvidenceId: 1, competencyAssessedAt: new Date(), instructionsAcknowledgedAt: new Date() });
+    const full = await callerFor(safety).requirement.authorize({ userId: 77, financialEntityId: entityId, equipmentType: "hydrovac", trainingEvidenceId: evidenceId, competencyAssessedAt: new Date(), instructionsAcknowledgedAt: new Date() });
     expect(full.status).toBe("authorized");
     const [rows] = await pool.execute<mysql.RowDataPacket[]>("SELECT status, authorizedByUserId FROM operatorEquipmentAuthorizations WHERE authorizationRef = ?", [full.authorizationRef]);
     expect(rows[0].status).toBe("authorized");
@@ -289,9 +299,12 @@ d("a scale found wrong for three weeks", () => {
 
   it("evaluates a work context through the API with packs from the profile", async () => {
     const dispatcher = await withRole("dispatcher");
+    // F1.1 — a real book and a real (unowned, single-tenant) operator: invented ids are "not found" now.
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);
+    const workerId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Op ${Math.random().toString(36).slice(2, 8)}`]))[0].insertId);
     const r = await callerFor(dispatcher).requirement.workAuthorization({
-      financialEntityId: 1, jurisdiction: "CA-AB", companyAttributes: { activities: ["hydrovac"] },
-      worker: { id: 999999, attributes: {} }, equipment: { id: 999999, equipmentType: "hydrovac", attributes: { poweredMobile: true } },
+      financialEntityId: entityId, jurisdiction: "CA-AB", companyAttributes: { activities: ["hydrovac"] },
+      worker: { id: workerId, attributes: {} }, equipment: { id: 999999, equipmentType: "hydrovac", attributes: { poweredMobile: true } },
       work: { workType: "ground_disturbance", attributes: {} },
     });
     expect(r.activePacks).toContain("ab.ground_disturbance");

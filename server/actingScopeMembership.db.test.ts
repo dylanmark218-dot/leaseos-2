@@ -15,13 +15,19 @@
  * Testing the resolver alone would leave the interesting part — what the
  * composed session tells the client about an ended membership — unproven.
  *
- * **What this establishes, and it is two different answers.** Every invalid
- * membership state is correctly excluded: suspended, ended, not yet started and
- * expired all fail to resolve an organization. What follows is that the caller
- * lands on the single-tenant fallback rather than being refused, still holding
- * every role grant. Their former organization's records are gone — those rows
- * carry its `orgRef` — and their session is not.
+ * **What this establishes.** Every invalid membership state is excluded:
+ * suspended, ended, not yet started and expired all fail to resolve an
+ * organization. On main before the auth-workspace checkpoint (#64) the caller
+ * then fell through to the single-tenant fallback, still holding every role
+ * grant — the finding this file first recorded. #64 closes it: a person whose
+ * memberships are all excluded is refused ("No active organization membership"), and two
+ * live memberships are refused until one is chosen, rather than reported and
+ * left for the client. A user who never had a membership still gets the
+ * single-tenant fallback, which exists for deployments that predate
+ * organizations.
  */
+const INACTIVE = /No active organization membership/;
+const CHOOSE = /Choose which organization/;
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
@@ -115,32 +121,28 @@ d("membership state decides the acting organization", () => {
     expect(session.organization.defaultWorkspace).toBe("field_workforce");
   }, 20_000);
 
-  it("excludes a suspended membership — the filter is SQL, and it runs", async () => {
+  it("excludes a suspended membership — the status filter runs, and refuses the caller", async () => {
     const a = await org();
     const u = await member({ orgRef: a, status: "suspended", defaultWorkspace: "field_workforce" });
-    const session = await callerFor(u).portals.mine();
-    expect(session.organization.state).toBe("single_tenant_fallback");
+    await expect(callerFor(u).portals.mine()).rejects.toThrow(INACTIVE);
   }, 20_000);
 
-  it("excludes an ended membership", async () => {
+  it("excludes an ended membership, and refuses the caller", async () => {
     const a = await org();
     const u = await member({ orgRef: a, status: "ended" });
-    const session = await callerFor(u).portals.mine();
-    expect(session.organization.state).toBe("single_tenant_fallback");
+    await expect(callerFor(u).portals.mine()).rejects.toThrow(INACTIVE);
   }, 20_000);
 
-  it("excludes a membership that has not started", async () => {
+  it("excludes a membership that has not started, and refuses the caller", async () => {
     const a = await org();
     const u = await member({ orgRef: a, effectiveFrom: future });
-    const session = await callerFor(u).portals.mine();
-    expect(session.organization.state).toBe("single_tenant_fallback");
+    await expect(callerFor(u).portals.mine()).rejects.toThrow(INACTIVE);
   }, 20_000);
 
-  it("excludes a membership whose end date has passed", async () => {
+  it("excludes a membership whose end date has passed, and refuses the caller", async () => {
     const a = await org();
     const u = await member({ orgRef: a, effectiveTo: past });
-    const session = await callerFor(u).portals.mine();
-    expect(session.organization.state).toBe("single_tenant_fallback");
+    await expect(callerFor(u).portals.mine()).rejects.toThrow(INACTIVE);
   }, 20_000);
 
   it("cannot store a membership dated past the TIMESTAMP ceiling", async () => {
@@ -158,7 +160,7 @@ d("membership state decides the acting organization", () => {
     ).rejects.toThrow(/Incorrect datetime value/);
   }, 20_000);
 
-  it("reports two live memberships as ambiguous rather than picking one", async () => {
+  it("refuses two live memberships until one is chosen, rather than picking one", async () => {
     const a = await org();
     const b = await org();
     const u = await member({ orgRef: a });
@@ -166,26 +168,21 @@ d("membership state decides the acting organization", () => {
       "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01 00:00:00',1)",
       [`MEM-${rnd()}`, b, u]
     );
-    const session = await callerFor(u).portals.mine();
-    expect(session.organization.state).toBe("ambiguous");
+    await expect(callerFor(u).portals.mine()).rejects.toThrow(CHOOSE);
   }, 20_000);
 });
 
 d("a preference cannot outlive the membership that holds it", () => {
   it("does not carry defaultWorkspace from a membership that no longer resolves", async () => {
-    // The preference lives on the membership row, and the row is only read when
-    // a membership resolved. So an ended membership's saved workspace never
-    // reaches the client at all — it cannot be stale, because it is absent.
+    // The preference lives on the membership row. An ended membership now ends
+    // the session outright, so its saved workspace cannot reach the client.
     const a = await org();
     const u = await member({
       orgRef: a,
       status: "ended",
       defaultWorkspace: "executive",
     });
-    const session = await callerFor(u).portals.mine();
-    expect(session.organization.state).toBe("single_tenant_fallback");
-    if (session.organization.state !== "single_tenant_fallback") throw new Error("unreachable");
-    expect(session.organization.defaultWorkspace).toBeNull();
+    await expect(callerFor(u).portals.mine()).rejects.toThrow(INACTIVE);
   }, 20_000);
 
   it("does not let a saved preference name a portal the roles do not compose", async () => {
@@ -205,27 +202,23 @@ d("a preference cannot outlive the membership that holds it", () => {
   }, 20_000);
 });
 
-d("what an ended membership does not take away", () => {
-  it("leaves the session composing portals from role grants that were never revoked", async () => {
-    // The finding, at the layer it matters. Ending a membership writes nothing
-    // to userRoleAssignments, so the grants survive and portals still compose.
-    // Offboarding has to revoke the grants; ending the membership is not enough.
+d("what an ended membership takes away (the finding, closed by #64)", () => {
+  it("ends the session even though role grants were never revoked", async () => {
+    // Ending a membership still writes nothing to userRoleAssignments; the refusal
+    // no longer depends on offboarding revoking the grants as well.
     const a = await org();
     const u = await member({ orgRef: a, status: "ended", role: "driver" });
-    const session = await callerFor(u).portals.mine();
-
-    expect(session.organization.state).toBe("single_tenant_fallback");
-    expect(session.portals.length).toBeGreaterThan(0);
-    expect(session.roles).toContain("driver");
+    await expect(callerFor(u).portals.mine()).rejects.toThrow(INACTIVE);
   }, 20_000);
 
-  it("is indistinguishable from a user who never had a membership", async () => {
+  it("is told apart from a user who never had a membership", async () => {
     const a = await org();
     const ended = await member({ orgRef: a, status: "ended", role: "driver" });
     const never = await member({ orgRef: null, role: "driver" });
 
-    const a1 = await callerFor(ended).portals.mine();
-    const a2 = await callerFor(never).portals.mine();
-    expect(a1.organization).toEqual(a2.organization);
+    await expect(callerFor(ended).portals.mine()).rejects.toThrow(INACTIVE);
+    const session = await callerFor(never).portals.mine();
+    expect(session.organization.state).toBe("single_tenant_fallback");
+    expect(session.portals.length).toBeGreaterThan(0);
   }, 20_000);
 });
