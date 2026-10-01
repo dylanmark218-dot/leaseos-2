@@ -91,10 +91,17 @@ function material(keyId: string, hex: string): KeyDescriptor {
  * Environment-backed provider. Reads nothing itself — the caller assembles the configuration, so
  * this module never touches `process.env` and the structural guard on master-key variables has a
  * single place to point at.
+ *
+ * ALWAYS `kind: "environment"`. An earlier version took an option that let the caller label this
+ * provider `"managed"`. Nothing in production used it, but its existence was the one code path by
+ * which key material held in a process environment could be reported as managed — and with it,
+ * OWNER DECISION S2-1's production refusal became a matter of which string a caller passed. S2-E
+ * Phase 2A removed it: a provider may report `"managed"` only when it is a different implementation
+ * whose material is actually controlled by a managed key system, and that implementation does not
+ * exist in this repository yet. Tests that need a managed-shaped provider build one of their own.
  */
 export function createEnvironmentKeyProvider(
-  config: Partial<Record<SecretPurpose, PurposeKeyConfig>>,
-  options: { kind?: "environment" | "managed" } = {}
+  config: Partial<Record<SecretPurpose, PurposeKeyConfig>>
 ): SecretKeyProvider {
   const resolved = new Map<SecretPurpose, { active: KeyDescriptor; all: Map<string, KeyDescriptor> }>();
 
@@ -112,7 +119,7 @@ export function createEnvironmentKeyProvider(
   }
 
   return {
-    kind: options.kind ?? "environment",
+    kind: "environment",
     getActiveKey: purpose => resolved.get(purpose)?.active ?? null,
     getDecryptKey: (purpose, keyId) => resolved.get(purpose)?.all.get(keyId) ?? null,
   };
