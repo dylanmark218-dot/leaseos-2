@@ -1,10 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
-import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
-import { appRouter } from "../routers";
-import { createContext } from "./context";
+import { registerApi } from "./api";
 import { serveStatic, setupVite } from "./vite";
 import { startProductionWorker } from "./productionWorker";
 import { ENV, assertProductionSecrets } from "./env";
@@ -36,18 +33,9 @@ async function startServer() {
   assertProductionSecrets(ENV, !isDevelopment);
 
   const worker = await startProductionWorker();
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  registerOAuthRoutes(app);
-  // tRPC API
-  app.use(
-    "/api/trpc",
-    createExpressMiddleware({
-      router: appRouter,
-      createContext,
-    })
-  );
+  // Body parsers, the OAuth callback and the tRPC mount — one registration, shared with the HTTP
+  // regression so the test drives the production mounting (P0-B).
+  registerApi(app);
   // development mode uses Vite, production mode uses static files
   if (isDevelopment) {
     await setupVite(app, server);
