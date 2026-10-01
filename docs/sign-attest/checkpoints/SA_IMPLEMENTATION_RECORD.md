@@ -144,10 +144,17 @@ required marks and consent, the marks it hands over, the decline that needs a re
 refused. `preDepartureCache.test.ts` gained the on-site item. Pins moved by one: 759 operational
 procedures, 833 cross-layer paths, 402 in the inventory.
 
-**Gate.** The full `scripts/ci-gate.sh` run was in progress against this commit; its counts are recorded
-in the follow-up commit. Before it: `tsc --noEmit` clean on both configs; the new pure, DOM and database
-suites green alongside the touched ones (`attest.db`, `siteCloseout`, `fieldRuntime`, `boardQueueDurable`,
-`commsVault`, `deviceSignature`, `documentationTruth`, the authorization pins).
+**Gate** (`scripts/ci-gate.sh`, run locally against MariaDB 10.11 on the pinned Node 22.23.3, 2026-10-01,
+commit `dbd1810`): 194 migrations apply from an empty database (none new); table parity 451/451;
+`tsc --noEmit` clean on both configs; procedure census clean; 464 test files / 6965 tests — 461 files
+green, three red: `a11yCoverage` (the two new components had jsdom suites but were not yet run through
+the axe rules — five surfaces added to `client/src/a11y/a11y.dom.test.tsx` in the follow-up commit, 177
+cases green), `registerClaims` (the register said `preDepartureCache.test.ts` had 11 cases; it has 12 —
+the register row now says so), and `documentValidityCanonical`'s census, which asserts that
+`_core/openShifts.ts` does not import `./documentValidity` and fails identically on `main` at
+`e1d8fd5` before any SA2 change (the import arrived with #59's merge of `main`); SA2 touches neither
+file. Counts in `LEASEOS_CURRENT_STATE.md` are regenerated: 779 role-authorized procedures, 464 test
+files.
 
 **Deliberately not in SA2.** See `SA2_OWNER_RULING.md`. In addition: envelope-level refusals (device,
 clock, key, nonce) are answered with codes and not written as session rows, because the handling asks

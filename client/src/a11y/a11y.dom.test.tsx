@@ -27,6 +27,22 @@ import { ContractView, type ContractDetail, type ContractViewProps } from "../pa
 import { RateSheetView, type RateSheetDetail, type RateSheetViewProps } from "../pages/RateSheetView";
 import { BoardPanelView, type BoardPanelViewProps } from "../portal/panels/BoardPanelView";
 import { presentOpenWork } from "../portal/boardModel";
+import { SignaturePad } from "../attest/SignaturePad";
+import { AttestSigningScreen } from "../attest/AttestSigningScreen";
+import type { LocalSignableField } from "../runtime/contracts";
+
+/** SA2 — a field ticket on a tablet at the lease: a drawn signature, a printed name, an optional comment, the server's date, and another signer's field that must not show. */
+const a11yField = (over: Partial<LocalSignableField> & Pick<LocalSignableField, "fieldKey" | "fieldType">): LocalSignableField => ({
+  fieldRef: `ATF-${over.fieldKey}`, page: 1, xFrac: 0.1, yFrac: 0.1, widthFrac: 0.3, heightFrac: 0.08, signerRef: "ATS-1", required: true, signingOrder: null, subjectLineRef: null, state: "pending", ...over,
+});
+const a11yRevision = {
+  revisionRef: "ATR-77", revisionHash: "ab".repeat(32), instanceRef: "FT-2026-000812", title: "Field ticket FT-2026-000812",
+  fields: [a11yField({ fieldKey: "driver_sig", fieldType: "signature" }), a11yField({ fieldKey: "line_3", fieldType: "initials", subjectLineRef: "FTL-3", yFrac: 0.2 }), a11yField({ fieldKey: "driver_name", fieldType: "printed_name", yFrac: 0.3 }), a11yField({ fieldKey: "ok", fieldType: "approval", yFrac: 0.4 }), a11yField({ fieldKey: "ack", fieldType: "checkbox", yFrac: 0.5 }), a11yField({ fieldKey: "note", fieldType: "comment", required: false, yFrac: 0.6 }), a11yField({ fieldKey: "dated", fieldType: "date_signed", yFrac: 0.7 }), a11yField({ fieldKey: "consultant_sig", fieldType: "signature", signerRef: "ATS-2" })],
+  signers: [
+    { signerRef: "ATS-1", displayName: "Dana Driver", partyKind: "internal_user", signerRole: "driver", requiredAuth: "device_auth", userId: 7, state: "active" },
+    { signerRef: "ATS-2", displayName: "M. Johnson", partyKind: "named_witnessed", signerRole: "consultant", requiredAuth: "witnessed", userId: null, state: "invited" },
+  ],
+};
 
 /** 0205/0206 — the Board, read in a cab: conversations with a queued message, and an open-work card. */
 function board(o: Partial<BoardPanelViewProps> = {}): BoardPanelViewProps {
@@ -302,6 +318,15 @@ const surfaces = [
   { name: "board — offline conversation with a queued message and a bulletin to acknowledge", render: () => render(<BoardPanelView {...board()} />) },
   { name: "board — a write the device refused and conversations that failed to load", render: () => render(<BoardPanelView {...board({ online: true, writeNotice: "Not signed in to an organization on this device — nothing was kept", channels: { kind: "failed", message: "Network down" }, visibleChannels: [] })} />) },
   { name: "board — open-work card with an offer", render: () => render(<BoardPanelView {...board({ online: true, tab: "open_work", selectedPost: "OS-1", card: { kind: "loaded", value: boardCard }, pendingResponse: { response: "interested", state: "queued", lastError: null } })} />) },
+
+  // SA2 — Sign & Attest on a tablet in sunlight: the pad alone, the signing screen with every field
+  // kind and the consent sentence, the screen refusing a person who is not a signer, and the pad
+  // disabled while a submission is in flight.
+  { name: "signature pad — empty", render: () => render(<SignaturePad fieldRef="ATF-driver_sig" label="Driver signature" widthFrac={0.3} heightFrac={0.08} />) },
+  { name: "signature pad — disabled", render: () => render(<SignaturePad fieldRef="ATF-driver_sig" label="Driver signature" widthFrac={0.3} heightFrac={0.08} disabled />) },
+  { name: "signing screen — a driver's fields with the consent sentence", render: () => render(<AttestSigningScreen revision={a11yRevision} signerRef="ATS-1" onSubmit={() => {}} onDecline={() => {}} />) },
+  { name: "signing screen — a refused submission", render: () => render(<AttestSigningScreen revision={a11yRevision} signerRef="ATS-1" onSubmit={() => {}} onDecline={() => {}} error="REVISION_MISMATCH: the document changed after this copy was opened." busy={false} />) },
+  { name: "signing screen — not a signer", render: () => render(<AttestSigningScreen revision={a11yRevision} signerRef="ATS-9" onSubmit={() => {}} onDecline={() => {}} />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {
