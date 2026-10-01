@@ -63,7 +63,10 @@ describe("the real tree", () => {
     // every lower slot above main's head was held by some open branch when it was claimed, and the
     // register records each scan.
     expect(files).toContain("0220_eld_event_ledger.sql");
-    expect(headSlot(files)).toBe("0220");
+    // Mechanic Portal CP2 took 0221–0222 (defect lifecycle and its guards): 0220 is claimed by
+    // `claude/eld-compliance-intelligence-ramlrd`, so head+1 would have collided; the register records the scan.
+    expect(files).toContain("0222_defect_lifecycle_guards.sql");
+    expect(headSlot(files)).toBe("0222");
   });
 
   it("keeps the reserved slots empty", () => {
@@ -114,8 +117,10 @@ describe("the guard catches what it exists to catch", () => {
   });
 
   it("accepts a correctly allocated next migration", () => {
-    expect(auditMigrationSlots([...files, "0221_the_next_one.sql"])).toEqual([]);
-    expect(headSlot([...files, "0221_the_next_one.sql"])).toBe("0221");
+    // The slot after the real head, whatever it is today — so this case does not need moving each checkpoint.
+    const next = String(Number(headSlot(files)) + 1).padStart(4, "0");
+    expect(auditMigrationSlots([...files, `${next}_the_next_one.sql`])).toEqual([]);
+    expect(headSlot([...files, `${next}_the_next_one.sql`])).toBe(next);
   });
 
   it("gives every tolerated duplicate a reason that says something", () => {

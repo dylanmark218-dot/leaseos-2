@@ -43,6 +43,8 @@ const cashRouter = readFileSync("server/cashRouter.ts", "utf8");
 const commercialRouter = readFileSync("server/commercialRouter.ts", "utf8");
 const portalRouter = readFileSync("server/portalRouter.ts", "utf8");
 const shopRouter = readFileSync("server/shopRouter.ts", "utf8");
+const maintenanceRouter = readFileSync("server/maintenanceRouter.ts", "utf8");
+const fleetPortfolioRouter = readFileSync("server/fleetPortfolioRouter.ts", "utf8");
 const assetRouter = readFileSync("server/assetRouter.ts", "utf8");
 const projectRouter = readFileSync("server/projectRouter.ts", "utf8");
 const integrationRouter = readFileSync("server/integrationRouter.ts", "utf8");
@@ -89,7 +91,7 @@ const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
  * payrollRouter.ts both draw from it. Checking only one would let a declared
  * permission go unwired without anyone noticing.
  */
-const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + attestRouter + eldRouter].join("\n");
+const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + attestRouter + eldRouter, maintenanceRouter, fleetPortfolioRouter].join("\n");
 
 const countBuilders = (src: string, builder: string) =>
   (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
@@ -177,7 +179,7 @@ describe("migrated operational procedures", () => {
     // 40-procedure payroll/finance surface, all gated from the start.
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
     // The merged surface includes 8 Live Assist, 2 paperwork, 23 Document Control, and 10 auth-workspace procedures.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(761);   // ELD: +3 eld.{eventsAppend,deviceIntegrity,hosStatus} on top of main;   // SA1: +14 attest.* (server/attestRouter.ts);   // merge of main (b35bac4) into #59: main 723 + #59's 21 (7 board.*, 14 shifts.*);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(780);   // ELD: +3 eld.{eventsAppend,deviceIntegrity,hosStatus} on top of main;   // 0221: +7 maintenance.{defectReport,defectTriage,defectSendToShop,taskAdd,taskSetStatus,returnToService,defectHistory} (fleet maintenance CP2);   // 0200: +9 fleet.{unitState,holdList,holdPlace,holdRelease,meterReadings,meterProgress,meterRecord,meterDecide,history} (portfolio foundation);   // 0199: +3 maintenance.{workOrderAssignment,workOrderAssign,workOrderCancel} (fleet maintenance CP1);   // SA1: +14 attest.* (server/attestRouter.ts);   // merge of main (b35bac4) into #59: main 723 + #59's 21 (7 board.*, 14 shifts.*);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 
@@ -240,6 +242,8 @@ describe("migrated operational procedures", () => {
 
   it("has no bare protectedProcedure in the shop or the asset register", () => {
     expect(countBuilders(shopRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(maintenanceRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(fleetPortfolioRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(assetRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(projectRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(integrationRouter, "protectedProcedure")).toBe(0);
@@ -328,9 +332,20 @@ describe("the untouched API is counted, not forgotten", () => {
     expect(inventory).not.toContain("— next");
   });
 
-  it("keeps the inventory document in step with the code", () => {
+  it("keeps the inventory document in step with the code: every row is its router's count, and the total is their sum", () => {
+    // CP1.5 — this used to pin one hand-written total ("356", then "368") and nothing else, and nine rows
+    // drifted below their routers unseen (complianceRouter listed 9 with 18). Every row is now read from
+    // its router; `node scripts/procedure-inventory.mjs` writes the numbers.
     expect(inventory).toContain("ROLE_AUTHORIZED");
-    expect(inventory).toContain("401");   // 387 + SA1's 14 attest.* procedures
+    const rows = Array.from(inventory.matchAll(/^\| `(server\/[^`]+)` \| `ROLE_AUTHORIZED`[^|]*\| \*\*(\d+)\*\*[^|]*\|$/gm));
+    expect(rows.length).toBeGreaterThanOrEqual(28);
+    const drift = rows
+      .map(r => ({ file: r[1]!, listed: Number(r[2]), actual: (readFileSync(r[1]!, "utf8").match(/roleProcedure\(\s*"/g) ?? []).length }))   // the script's own definition
+      .filter(r => r.listed !== r.actual)
+      .map(r => `${r.file}: listed ${r.listed}, router has ${r.actual}`);
+    expect(drift, "Run: node scripts/procedure-inventory.mjs").toEqual([]);
+    const sum = rows.reduce((n, r) => n + Number(r[2]), 0);
+    expect(inventory).toMatch(new RegExp(`^\\*\\*${sum} role-authorized procedures across the surfaces listed above\\.`, "m"));
   });
 });
 
