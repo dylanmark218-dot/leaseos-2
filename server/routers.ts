@@ -127,6 +127,7 @@ import { messageBoardRouter } from "./messageBoardRouter";
 import { assistantAskRouter } from "./assistantAskRouter";
 import { agentRouter } from "./agentRouter";
 import { liveAssistRouter } from "./liveAssistRouter";
+import { attestRouter } from "./attestRouter";
 import { hosRouter } from "./hosRouter";
 import { portalRouter } from "./portalRouter";
 import { shopRouter } from "./shopRouter";
@@ -403,6 +404,8 @@ export const appRouter = router({
   invoicing: invoicingRouter,
   geo: geoRouter,
   closeout: closeoutRouter,
+  // SA1 — Sign & Attest: the signing foundation (docs/sign-attest/SA1_OWNER_RULING.md).
+  attest: attestRouter,
   portalAdmin: portalAdminRouter,
   // v21.10 — external identities only; gated by externalProcedure, never by roles.
   portal: portalRouter,

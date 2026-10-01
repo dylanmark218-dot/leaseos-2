@@ -278,6 +278,21 @@ took `0215`–`0216` while this merge was being gated, the second of them minute
 pushed `0215`–`0217`. As the later, unmerged claimant this branch moved again, to the first
 three numbers free on `main` and on every open branch. No other branch was renumbered.
 
+
+## State at the Sign & Attest SA1 merge (2026-10-01, `main` = `ce27fec`, after PR #98, #59 and #102)
+
+`main` migration head: **`0219_job_commercial_context.sql`** (v23.31 took `0217`–`0219`, renumbered around
+Sign & Attest's claim; `0205`/`0206` landed with #59). This branch (PR #104) holds **`0214`–`0216`**
+(`0214_sign_attest_foundation`, `0215_sign_attest_events`, `0216_sign_attest_guards`): below main's head,
+colliding with nothing on main, applied by name. The earlier provisional claim of `0182`–`0184` in the
+design document is withdrawn (those numbers were taken by other branches).
+
+**Next free number for new work after this merge: `0220`** (re-check with the scan before committing).
+
+## Change log (continued)
+
+* **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.
+
 ## Claim: 0220 (ELD event ledger, 2026-10-01, `main` = `b35bac4`)
 
 | Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
@@ -291,4 +306,11 @@ holds `0187` and the highest number held on `main` or any remote branch at the m
 `0219` (`claude/leaseos-customer-contract-rates-jkrw1i`). Recorded in the commit that renames the
 migration, per the 2026-09-25 correction above. No other branch was renumbered.
 
-**Next free number for new work: `0221`** (re-check with the scan before committing).
+**Collision found 2026-10-02 at the merge of `main` `240b2dd`:** `claude/integration-hub-subsystem-6nzrkw`
+created `0220_integration_hub_connectors.sql` (and `0221`–`0223`) in `12e9c1b`, 2026-10-01T23:24Z,
+twenty-three minutes after this branch claimed `0220` in `853c82e` (23:01Z) and recorded it here. Neither
+branch is on `main`. Under the rule of thumb at the top of this file, the first to merge keeps `0220` and
+the other renumbers at its own rebase; this branch does not renumber pre-emptively, and does not rename
+the other branch's files.
+
+**Next free number for new work: `0224`** (re-check with the scan before committing).
