@@ -245,3 +245,20 @@ number free everywhere.
 
 * **2026-10-01 (P0-A2.1)**: claimed `0209` (`operatingZones.orgRef`, nullable; NULL = the historical single
   tenant, as 0132 and 0148), recorded in the commit that creates the migration.
+
+## Claim: 0217–0219 (Customer, Contract and Rate Management, 2026-10-01)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0217 | `0217_customer_account_profile.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0217 |
+| 0218 | `0218_customer_contracts_rate_sheets.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0218 |
+| 0219 | `0219_job_commercial_context.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0219 |
+
+Written as `0182`–`0184` on 2026-09-24, when they were the first numbers free everywhere. By the merge of
+`main` (`c3f088b`) three other open branches held `0182`–`0184` (`document-control-architecture`,
+`integration-hub-subsystem`, `safety-compliance-program-builder`) and the highest claim on any remote ref
+was `0216`: `claude/relaxed-carson-qfcopf` took `0214` and `claude/leaseos-sign-attest-design-5993ar`
+took `0215`–`0216` while this merge was being gated, the second of them minutes before this branch
+pushed `0215`–`0217`. As the later, unmerged claimant this branch moved again, to the first
+three numbers free on `main` and on every open branch. No other branch was renumbered.
+

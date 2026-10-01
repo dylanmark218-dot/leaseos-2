@@ -126,6 +126,11 @@ surfaces (exceptions, inbox, my day, search, timeline) · dispatch gate with
 enforcement setting · IFTA · GST/HST · period close · bank reconciliation ·
 accounts receivable, credits, collections, write-offs · customer identity ·
 commercial core (terms, POs and AFEs, customer rate cards, billing check) ·
+customer, contract and rate management (the customer profile with its
+contacts and roles, contracts with a lifecycle and supersession, rate sheets
+as versioned groups of charge definitions approved as a unit, conditioned
+rate lines, the job's frozen commercial snapshot, the billable commercial
+context the next Billing checkpoint consumes) ·
 external identities and the customer / vendor / facility portal · the site
 sign-off chain (clocks, frozen revisions, signature authority, post-site
 supplement, delay and road-hazard evidence, three closes) · portal
@@ -277,8 +282,7 @@ readiness — every step the server's answer.
 
 Native shell (Capacitor), encrypted SQLite, hardware keystore, native file
 vault, camera, GPS, biometric signing, local notifications. Browser/mobile
-end-to-end tests. LoadSense authenticated gateway ingestion/native BLE service and hardware deployment (the recovered protocol, calibration/stability/material-movement engines and persistence model are present; the production machine-authenticated device edge is not yet wired). Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). Contracts and MSAs as
-records; WBS below cost code; earned-value schedules. AI extraction of rate sheets from
+end-to-end tests. LoadSense authenticated gateway ingestion/native BLE service and hardware deployment (the recovered protocol, calibration/stability/material-movement engines and persistence model are present; the production machine-authenticated device edge is not yet wired). Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). WBS below cost code; earned-value schedules. AI extraction of rate sheets from
 uploaded documents (a proposal path exists; the document reader that fills
 it does not); formula pricing is recorded, not evaluated. inbound
 vendor bills and facility tickets by machine (portal only). GPS on the

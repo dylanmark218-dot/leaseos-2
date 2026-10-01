@@ -94,7 +94,6 @@ const DECLARED_UNWIRED: Record<string, string> = {
   dashboardWidget: "widget contract; no dashboard surface consumes it yet",
   financialCalendar: "AP/AR and company-event projections; no financial surface yet",
   billing: "billing engine predates this audit; reachability not yet established",
-  eventEmitter: "event vocabulary; emitters write via raw SQL",
   billingAdjustment: "adjustment rules; same unestablished reachability as billing",
   dataApi: "shape declarations only",
   dataIngestion: "import path not wired",
@@ -305,7 +304,6 @@ describe("every engine is reached, or says why not", () => {
       "osmTopology",
       // Declared before their consumers were, each waiting on the same wiring.
       "deviceManifest",
-      "eventEmitter",
       "monitoringNotice",
       // SPINE item 1, landing as one chain before its router: boundaryEvidence holds the
       // chain rule and imports boundaryConfirmation, which imports siteBaseline's types.
@@ -337,7 +335,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(74);   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
+    expect(unwired).toHaveLength(73);   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });

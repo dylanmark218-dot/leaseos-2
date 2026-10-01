@@ -23,6 +23,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
+import { commercialScope, jobSnapshotCaptureIfReady } from "./customerCommercialService";
+import { financeScopeFor } from "./_core/entityScope";
 import { getDb, jobInScope, listActiveUserRoleNames } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { assertEntityInScope } from "./_core/entityScope";
@@ -117,11 +119,22 @@ export const dispatchGateRouter = router({
       distribution: z.enum(["direct_assignment", "public_internal_bid", "invite_only", "selected_pool", "on_call", "emergency", "subcontractor_bid"]).optional(),
       roles: z.array(ROLE_DRAFT).max(40).optional(),
     }))
-    .mutation(async ({ ctx, input }) =>
-      createPosting({
+    .mutation(async ({ ctx, input }) => {
+      const posting = await createPosting({
         jobId: input.jobId, distribution: input.distribution, roles: input.roles,
         actorUserId: ctx.user.id, scope: await scopeOf(ctx.user.id),
-      })),
+      });
+      // v23.31 — the posting is the job's activation point: freeze its commercial basis now, so a
+      // later rate change never moves what this job is billed under. A job with no customer assigned
+      // is not refused here (dispatch owns that decision through the readiness gate); a basis that
+      // cannot be frozen (no governing sheet version, contract not active) is reported, not thrown.
+      // The scope is resolved after the posting exists; a caller whose money scope cannot be established
+      // gets the posting and a refused capture, never a lost posting.
+      const commercial = await commercialScope(ctx.user.id, financeScopeFor)
+        .then(scope => jobSnapshotCaptureIfReady(scope, { userId: ctx.user.id, roles: ((ctx as { roles?: readonly string[] }).roles ?? []) }, input.jobId))
+        .catch((e: unknown) => ({ outcome: "refused" as const, detail: e instanceof Error ? e.message : "commercial scope could not be established" }));
+      return { ...posting, commercial };
+    }),
 
   addRole: roleProcedure("dispatch.addRole")
     .input(z.object({ postingId: z.number().int().positive() }).and(ROLE_DRAFT))
