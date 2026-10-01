@@ -29,7 +29,7 @@
  * claim is made about zeroing it — JavaScript cannot guarantee that, and pretending otherwise would
  * be worse than saying so.
  */
-import { resolveSecret } from "./secretStore";
+import { probeSecretWrite, resolveSecret } from "./secretStore";
 import type { SecretKeyProvider } from "./_core/secretCrypto";
 import { decryptSecret as legacyDecrypt } from "./_core/externalIdentityPolicy";
 
@@ -90,6 +90,77 @@ export async function resolveWebhookSigningSecret(
   }
 
   throw new Error("webhook signing refused: this subscription has no signing secret");
+}
+
+/**
+ * Why a subscription could not be signed for, as a category rather than a message. S2-E Phase 2A's
+ * preflight reports these per subscription so an operator can tell a damaged record from a missing
+ * key without being handed either a secret or an envelope.
+ *
+ *   missing_or_wrong_purpose — the reference names no WEBHOOK_SECRET row (the store answers the two
+ *                              cases identically on purpose; this does too)
+ *   disabled                 — the referenced secret has been disabled
+ *   key_unavailable          — the provider holds no key for the envelope's key id, or no active key
+ *   undecryptable            — the envelope is present but authentication failed under the key held
+ *   malformed_envelope       — the stored envelope does not parse
+ *   legacy_key_missing       — legacy ciphertext with no legacy key configured
+ *   legacy_undecryptable     — legacy ciphertext the legacy key cannot open (corrupt, or wrong key)
+ *   unsignable               — neither representation is present
+ */
+export type WebhookSecretRefusal =
+  | "missing_or_wrong_purpose"
+  | "disabled"
+  | "key_unavailable"
+  | "undecryptable"
+  | "malformed_envelope"
+  | "legacy_key_missing"
+  | "legacy_undecryptable"
+  | "unsignable"
+  | "unknown";
+
+function classifyRefusal(row: WebhookSecretColumns, message: string): WebhookSecretRefusal {
+  if (!row.secretRef && !row.secretEnc) return "unsignable";
+  if (!row.secretRef) {
+    // The legacy path: the only two ways it fails are no key, or a key that cannot open the bytes.
+    // The primitive's own errors are Node's, and name neither the key nor the plaintext.
+    return /legacy key is not configured/.test(message) ? "legacy_key_missing" : "legacy_undecryptable";
+  }
+  if (/no such secret/.test(message)) return "missing_or_wrong_purpose";
+  if (/secret is disabled/.test(message)) return "disabled";
+  if (/no key .* configured|no active key configured/.test(message)) return "key_unavailable";
+  if (/authentication failed/.test(message)) return "undecryptable";
+  if (/secret envelope:|envelope is/.test(message)) return "malformed_envelope";
+  return "unknown";
+}
+
+/**
+ * Is this subscription signable right now? The same resolution the dispatcher performs, with the
+ * secret discarded the moment it is known to exist. Nothing a caller receives from this function
+ * can be used to sign anything — it answers yes, or why not.
+ */
+export async function probeWebhookSigningSecret(
+  row: WebhookSecretColumns,
+  k: WebhookSecretKeys
+): Promise<{ resolvable: true } | { resolvable: false; refusal: WebhookSecretRefusal }> {
+  try {
+    await resolveWebhookSigningSecret(row, k);
+    return { resolvable: true };
+  } catch (error) {
+    return { resolvable: false, refusal: classifyRefusal(row, error instanceof Error ? error.message : "") };
+  }
+}
+
+/**
+ * Could production create a canonical WEBHOOK_SECRET under this provider? Answered without creating
+ * one — see `probeSecretWrite`. Always asked as production: the question the cutover preflight
+ * needs answered is whether the *production* write is possible, and a development process asking
+ * "could I write?" about itself would answer yes under an environment provider and hide exactly the
+ * refusal production will hit.
+ */
+export function probeWebhookCanonicalWrite(
+  keys: SecretKeyProvider
+): { possible: true; keyId: string } | { possible: false; reason: string } {
+  return probeSecretWrite({ purpose: "WEBHOOK_SECRET", keys, isProduction: true });
 }
 
 /**
