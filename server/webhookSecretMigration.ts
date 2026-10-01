@@ -24,11 +24,12 @@
  * legacy, still signing, still delivering — and reported as a failure. `secretEnc` is never cleared
  * in Phase 1: it is the rollback path.
  */
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { webhookSubscriptions } from "../drizzle/schema";
 import { createSecret, disableSecret, resolveSecret } from "./secretStore";
 import { readWebhookSecretForMigration } from "./webhookSecretService";
+import { affectedRows } from "./_core/enforcementCommit";
 import type { SecretKeyProvider } from "./_core/secretCrypto";
 
 async function database() {
@@ -164,8 +165,13 @@ async function migrateOne(
     .set({ secretRef } as never)
     .where(and(eq(webhookSubscriptions.id, row.id), isNull(webhookSubscriptions.secretRef)));
 
-  const affected = (updated as unknown as { rowsAffected?: number })?.rowsAffected;
-  if (affected === 0) {
+  /*
+   * Read through `affectedRows`, which knows the shapes the mysql2 driver actually returns
+   * (`[ResultSetHeader, fields]`). The first version read `.rowsAffected` off the array itself,
+   * which is always undefined — so the comparison below was never true, and a run that lost the
+   * race left its secret active and unreferenced. S2-E Phase 2A's race test found it.
+   */
+  if (affectedRows(updated) === 0) {
     /*
      * Another run won the race and this one's secret is an orphan. Disabling it rather than leaving
      * it resolvable is the orphan-prevention rule: an unreferenced but live secret in the store is
@@ -183,14 +189,26 @@ async function migrateOne(
  * begun or something wrote a row it should not have.
  */
 export type WebhookSecretReadiness = {
+  /** Every subscription row, whatever its status. */
   total: number;
+  /** Rows with `status = 'active'` — the only ones the dispatcher selects. */
   enabled: number;
+  /** `secretEnc` present, `secretRef` absent: signs from legacy ciphertext under the shared key. */
   legacyOnly: number;
+  /** Both present: signs from the canonical reference; the ciphertext is the rollback path. */
   transitional: number;
+  /** `secretRef` only: signs from the canonical reference and nothing else can read it. */
   canonicalOnly: number;
+  /** Neither present: cannot sign. */
   invalidBothNull: number;
   /** Enabled subscriptions that would fail to sign right now: the both-null ones. */
   enabledUnsignable: number;
+  /**
+   * Enabled subscriptions still signing from legacy ciphertext. The count behind
+   * `noEnabledLegacyDependence`, exposed so a report can say *how far* from zero, not only
+   * whether.
+   */
+  enabledLegacyOnly: number;
   /**
    * True when no enabled subscription still depends on the legacy key to sign.
    *
@@ -201,11 +219,15 @@ export type WebhookSecretReadiness = {
   noEnabledLegacyDependence: boolean;
 };
 
-export async function webhookSecretReadiness(): Promise<WebhookSecretReadiness> {
+/** Narrow a report to some tenants. Fleet-wide when absent; a test's own fixtures when present. */
+export type WebhookReadinessScope = { orgRefs?: string[] };
+
+export async function webhookSecretReadiness(scope: WebhookReadinessScope = {}): Promise<WebhookSecretReadiness> {
   const db = await database();
   const enc = webhookSubscriptions.secretEnc;
   const ref = webhookSubscriptions.secretRef;
   const enabled = sql`${webhookSubscriptions.status} = 'active'`;
+  const within = scope.orgRefs ? inArray(webhookSubscriptions.orgRef, scope.orgRefs) : undefined;
 
   const [counts] = await db
     .select({
@@ -218,7 +240,8 @@ export async function webhookSecretReadiness(): Promise<WebhookSecretReadiness> 
       enabledUnsignable: sql<number>`SUM(CASE WHEN ${enabled} AND ${enc} IS NULL AND ${ref} IS NULL THEN 1 ELSE 0 END)`,
       enabledLegacyOnly: sql<number>`SUM(CASE WHEN ${enabled} AND ${enc} IS NOT NULL AND ${ref} IS NULL THEN 1 ELSE 0 END)`,
     })
-    .from(webhookSubscriptions);
+    .from(webhookSubscriptions)
+    .where(within);
 
   const n = (v: unknown) => Number(v ?? 0);
 
@@ -230,6 +253,7 @@ export async function webhookSecretReadiness(): Promise<WebhookSecretReadiness> 
     canonicalOnly: n(counts?.canonicalOnly),
     invalidBothNull: n(counts?.invalidBothNull),
     enabledUnsignable: n(counts?.enabledUnsignable),
+    enabledLegacyOnly: n(counts?.enabledLegacyOnly),
     noEnabledLegacyDependence: n(counts?.enabledLegacyOnly) === 0,
   };
 }
