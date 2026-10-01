@@ -404,16 +404,9 @@ export async function getRecentZoneStateForTrip(
   }
   return state;
 }
-export async function listDutyRecords(operatorId?: number) {
-  const db = await getDb();
-  if (!db) return [];
-  return db
-    .select()
-    .from(dutyRecords)
-    .where(operatorId ? eq(dutyRecords.operatorId, operatorId) : undefined)
-    .orderBy(desc(dutyRecords.startedAt))
-    .limit(500);
-}
+// P0-A1 — `listDutyRecords(operatorId?)` used to live here: every company's duty records when no
+// operator was named. It is gone rather than guarded, so the unscoped form cannot be called back
+// into use; the list is `listDutyRecordsInScope` in server/hosScope.ts.
 export async function createDutyRecord(input: InsertDutyRecord) {
   const db = await getDb();
   if (!db) return undefined;
