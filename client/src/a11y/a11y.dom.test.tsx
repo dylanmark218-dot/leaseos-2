@@ -18,8 +18,13 @@ import type { BoardTileView } from "../widgets/WidgetBoard";
 import { listOfferable } from "../../../server/_core/widgetService";
 import type { RoleActor } from "../../../server/_core/roleActor";
 import { demonstration, fromQuery } from "../showcase/panelSource";
-import { LoginView } from "../pages/LoginView";
-import { NoPortalAvailable, OrganizationSelectionRequired, PortalChooser } from "../portal/PortalChooser";
+import { SignInView } from "../session/SignInView";
+import { WorkspaceChooserView } from "../session/WorkspaceChooserView";
+import { AccessDeniedView } from "../session/AccessDeniedView";
+import { PeopleAccessView, type PeopleAccessViewProps } from "../people/PeopleAccessView";
+import { CustomersView, type CustomerProfile, type CustomersViewProps } from "../pages/CustomersView";
+import { ContractView, type ContractDetail, type ContractViewProps } from "../pages/ContractView";
+import { RateSheetView, type RateSheetDetail, type RateSheetViewProps } from "../pages/RateSheetView";
 import { FileManagerView } from "../records/FileManagerView";
 import { counts as fileCounts, detail as fileDetail, fileManagerProps } from "../test/fileManagerFixtures";
 
@@ -143,12 +148,91 @@ const a11yTiles: BoardTileView[] = [
 ];
 const A11Y_DRIVER: RoleActor = { roles: ["driver"], permissions: [] } as never;
 
-const a11yPortals = [
-  { portal: "field_workforce", displayName: "Field Workforce", purpose: "Perform daily work — assignments, inspections, loads, tickets, evidence" },
-  { portal: "fleet_maintenance", displayName: "Fleet Maintenance", purpose: "Work orders, defects and vehicle maintenance" },
-];
+const PERSON = {
+  userId: 123, displayName: "Dylan Hutchings", membershipStatus: "active" as const, membershipType: "employee",
+  roles: ["driver"], workspaces: ["field_workforce"], defaultWorkspace: "field_workforce",
+  effectiveFrom: "2026-01-04T00:00:00Z", effectiveTo: null, live: true,
+};
+const peopleProps = (over: Partial<PeopleAccessViewProps> = {}): PeopleAccessViewProps => ({
+  organizationName: "ABC Transport",
+  people: [PERSON, { ...PERSON, userId: 456, displayName: "Former Person", membershipStatus: "ended" as const, roles: [], workspaces: [], live: false, effectiveTo: "2026-08-01T00:00:00Z" }],
+  invitations: [
+    { invitationRef: "INV-1", emailHint: "new@example.test", displayNameHint: "R. Cardinal", roles: ["driver"], view: "pending" as const, expiresAt: "2027-10-01T00:00:00Z", invitedAt: "2026-01-02T00:00:00Z" },
+    { invitationRef: "INV-2", emailHint: "old@example.test", displayNameHint: null, roles: ["office"], view: "expired" as const, expiresAt: "2026-01-01T00:00:00Z", invitedAt: "2026-08-01T00:00:00Z" },
+  ],
+  needsResolution: [{ legacyGrantId: 88, userId: 123, displayName: "Dylan Hutchings", role: "mechanic", grantedAt: "2025-03-02T00:00:00Z" }],
+  roleCatalogue: [
+    { role: "driver", description: "Field jobs, trips and field paperwork.", workspaces: [{ key: "field_workforce", label: "Field Workforce" }] },
+    { role: "mechanic", description: "Maintenance work and work orders.", workspaces: [{ key: "fleet_maintenance", label: "Fleet Maintenance" }] },
+  ],
+  ...over,
+});
+
+/* v23.31 — the commercial screens: customers, one contract, one rate sheet, in the states a person meets. */
+const a11yHistory = [{ id: 1, eventType: "customer_created", fromStatus: null, toStatus: "active", reason: null, actorUserId: 3, actorRole: "office", occurredAt: "2026-06-01T12:00:00Z", changesJson: '{"name":{"from":null,"to":"Bighorn Energy"}}' }];
+const a11yProfile = (o: Partial<CustomerProfile> = {}): CustomerProfile => ({
+  accountRef: "CUST-1", customerNumber: "CN-2026-000007", name: "Bighorn Energy", legalName: "Bighorn Energy Ltd.", tradeName: null, customerType: "producer_operator", status: "active", holdReason: null, province: "AB", archivedAt: null, paymentTermsDays: 45,
+  taxStatus: "taxable", gstNumber: "123456789RT0001", defaultCurrency: "CAD", creditLimitCents: 25_000_000, requiresPurchaseOrder: true, requiresAfe: false, requiredReferenceKinds: ["cost_centre"], billingFrequency: "per_job", notes: null,
+  billingAddress: { line1: "1 Main St", city: "Calgary", province: "AB", postalCode: "T2P 1A1" }, physicalAddress: null, country: "CA", rowVersion: 2, archiveReason: null, createdAt: "2026-06-01", updatedAt: "2026-06-02",
+  contacts: [{ contactRef: "CT-1", displayName: "Kyle", title: "Company man", company: "Consultants Inc", phone: "403-555-0100", mobile: null, email: null, status: "active", roles: [{ roleKey: "site_contact", isPrimary: true, status: "active" }] }],
+  contracts: [{ contractRef: "CTR-1", contractNumber: "MSA-2026-014", title: "Master service agreement", status: "active", effectiveFrom: "2026-06-01", effectiveTo: null, version: 1 }],
+  rateSheets: [{ rateSheetRef: "RSH-1", name: "2026 hydrovac", sheetNumber: "RSHT-2026-000001", status: "active", currentVersion: { versionRef: "RSV-1", version: 1, effectiveFrom: "2026-06-01", effectiveTo: null }, pending: 0 }],
+  purchaseOrders: [{ poRef: "PO-1", poNumber: "PO-4471", afeNumber: null, authorizedCents: 5_000_000, validFrom: "2026-06-01", validTo: null, status: "open" }],
+  jobs: [{ snapshotRef: "JCS-1", jobId: 42, capturedAt: "2026-06-15", contractRef: "CTR-1", rateSheetVersionRef: "RSV-1", poNumber: "PO-4471", job: { jobCode: "JOB-2026-000042", status: "dispatched", type: "Hydrovac", location: "LSD 4-12" } }],
+  ...o,
+});
+const customers = (o: Partial<CustomersViewProps> = {}): CustomersViewProps => ({
+  offline: false, filter: { q: "", status: "", customerType: "", includeArchived: false }, onFilter: () => {},
+  list: { kind: "loaded", data: [{ accountRef: "CUST-1", customerNumber: "CN-2026-000007", name: "Bighorn Energy", legalName: null, customerType: "producer_operator", status: "active", holdReason: null, province: "AB", archivedAt: null, paymentTermsDays: 45 }] },
+  selected: "CUST-1", onSelect: () => {}, profile: { kind: "loaded", data: a11yProfile() }, tab: "overview", onTab: () => {},
+  history: { kind: "loaded", data: a11yHistory }, documents: { kind: "loaded", data: [] }, canWrite: true, canArchive: true,
+  onCreate: () => {}, creating: false, financialEntityId: "12", onFinancialEntityId: () => {}, onHold: () => {}, onArchive: () => {}, onReactivate: () => {}, onContactCreate: () => {},
+  onOpenContract: () => {}, onOpenRateSheet: () => {}, onOpenJob: () => {}, ...o,
+});
+const a11yContract = (o: Partial<ContractDetail> = {}): ContractDetail => ({
+  contractRef: "CTR-1", contractNumber: "MSA-2026-014", title: "Master service agreement", contractType: "msa", status: "active", version: 1, effectiveFrom: "2026-06-01", effectiveTo: "2027-05-31", poRequirement: "required", requiredReferenceKinds: [], customerReferences: { msa: "MSA-2026-014" },
+  paymentTermsDays: 30, billingInstructions: "Attach the signed ticket", notes: null, renewalKind: "manual", renewalNoticeDays: 60, usedOperationallyAt: "2026-06-15", rowVersion: 3,
+  submittedByUserId: 3, submittedAt: "2026-06-01", approvedByUserId: 4, approvedAt: "2026-06-02", approvalNote: "signed copy in the vault", suspensionReason: null, terminationReason: null,
+  customer: { accountRef: "CUST-1", name: "Bighorn Energy", customerNumber: "CN-2026-000007" }, terms: null,
+  rateSheets: [{ rateSheetRef: "RSH-1", name: "2026 hydrovac", sheetNumber: "RSHT-2026-000001", status: "active" }], documents: [{ documentRef: "DOC-1", documentType: "msa", title: "Signed MSA", version: 1, status: "current", registeredAt: "2026-06-01" }],
+  jobs: [{ snapshotRef: "JCS-1", jobId: 42, status: "current", capturedAt: "2026-06-15", job: { jobCode: "JOB-2026-000042", status: "dispatched" } }], lineage: [], history: a11yHistory, renewal: { state: "in_term", daysRemaining: 240, noticeDue: "2027-04-01" }, ...o,
+});
+const contractProps = (o: Partial<ContractViewProps> = {}): ContractViewProps => ({ offline: false, contract: { kind: "loaded", data: a11yContract() }, canWrite: true, canApprove: true, canGovern: true, busy: false, onSubmit: () => {}, onDecide: () => {}, onStatus: () => {}, onSupersede: () => {}, onOpenCustomer: () => {}, onOpenRateSheet: () => {}, onOpenContract: () => {}, onOpenJob: () => {}, ...o });
+const a11ySheet = (o: Partial<RateSheetDetail> = {}): RateSheetDetail => ({
+  rateSheetRef: "RSH-1", name: "2026 hydrovac", sheetNumber: "RSHT-2026-000001", currency: "CAD", status: "active", notes: null, confidential: true, currentVersion: "RSV-1",
+  customer: { accountRef: "CUST-1", name: "Bighorn Energy", customerNumber: "CN-2026-000007" }, contract: { contractRef: "CTR-1", contractNumber: "MSA-2026-014", title: "MSA", status: "active" },
+  versions: [
+    { versionRef: "RSV-2", version: 2, status: "draft", effectiveFrom: "2026-07-01", effectiveTo: null, contentHash: null, notes: null, submittedByUserId: null, approvedByUserId: null, approvedAt: null, rejectionReason: null, usedOperationallyAt: null, rowVersion: 1, jobs: [], lines: [{ definitionRef: "CHG-3", lineNo: 1, serviceCode: "hydrovac_hour", lineKind: "hourly_equipment", label: "Hydrovac truck", pricingMethod: "per_unit", unit: "hour", measurementBasis: "any", conditionKey: null, applicability: [], approvalStatus: "proposed", version: 1, sourceClause: null, effectiveFrom: "2026-07-01", effectiveTo: null, rateMillis: 215_000, flatCents: null, basisPoints: null, multiplierMillis: null, minimumQuantityMillis: 4000, minimumChargeCents: null, billingIncrementMillis: 250, roundingMode: "nearest", currency: "CAD" }] },
+    { versionRef: "RSV-1", version: 1, status: "approved", effectiveFrom: "2026-06-01", effectiveTo: null, contentHash: "a".repeat(64), notes: null, submittedByUserId: 3, approvedByUserId: 4, approvedAt: "2026-06-02", rejectionReason: null, usedOperationallyAt: "2026-06-15", rowVersion: 3, jobs: [{ snapshotRef: "JCS-1", jobId: 42, status: "current", capturedAt: "2026-06-15", job: { jobCode: "JOB-2026-000042" } }], lines: [
+      { definitionRef: "CHG-1", lineNo: 1, serviceCode: "hydrovac_hour", lineKind: "hourly_equipment", label: "Hydrovac truck", pricingMethod: "per_unit", unit: "hour", measurementBasis: "any", conditionKey: null, applicability: [], approvalStatus: "approved", version: 1, sourceClause: "§4.1", effectiveFrom: "2026-06-01", effectiveTo: null, rateMillis: 185_000, flatCents: null, basisPoints: null, multiplierMillis: null, minimumQuantityMillis: 4000, minimumChargeCents: null, billingIncrementMillis: 250, roundingMode: "nearest", currency: "CAD" },
+      { definitionRef: "CHG-2", lineNo: 2, serviceCode: "hydrovac_hour", lineKind: "night_shift", label: "Night shift", pricingMethod: "per_unit", unit: "hour", measurementBasis: "any", conditionKey: null, applicability: [{ kind: "shift", op: "eq", value: "night" }], approvalStatus: "approved", version: 1, sourceClause: null, effectiveFrom: "2026-06-01", effectiveTo: null, rateMillis: 215_000, flatCents: null, basisPoints: null, multiplierMillis: null, minimumQuantityMillis: null, minimumChargeCents: null, billingIncrementMillis: null, roundingMode: "nearest", currency: "CAD" },
+    ] },
+  ],
+  documents: [], history: a11yHistory, ...o,
+});
+const withheld = (): RateSheetDetail => { const s = a11ySheet({ confidential: false }); return { ...s, versions: s.versions.map(v => ({ ...v, lines: v.lines.map(({ rateMillis: _r, flatCents: _f, basisPoints: _b, multiplierMillis: _m, minimumQuantityMillis: _q, minimumChargeCents: _c, billingIncrementMillis: _i, roundingMode: _o, currency: _cu, ...rest }) => rest) })) }; };
+const sheetProps = (o: Partial<RateSheetViewProps> = {}): RateSheetViewProps => ({ offline: false, sheet: { kind: "loaded", data: a11ySheet() }, selectedVersion: null, onSelectVersion: () => {}, canPropose: true, canApprove: true, busy: false, onVersionCreate: () => {}, onLineAdd: () => {}, onLineRemove: () => {}, onSubmit: () => {}, onDecide: () => {}, onOpenCustomer: () => {}, onOpenContract: () => {}, onOpenJob: () => {}, ...o });
 
 const surfaces = [
+  { name: "customers — overview", render: () => render(<CustomersView {...customers()} />) },
+  { name: "customers — contacts, with the add form", render: () => render(<CustomersView {...customers({ tab: "contacts" })} />) },
+  { name: "customers — contracts and rate sheets", render: () => render(<CustomersView {...customers({ tab: "rate_sheets" })} />) },
+  { name: "customers — jobs", render: () => render(<CustomersView {...customers({ tab: "jobs" })} />) },
+  { name: "customers — billing settings and governance", render: () => render(<CustomersView {...customers({ tab: "billing" })} />) },
+  { name: "customers — audit history", render: () => render(<CustomersView {...customers({ tab: "history" })} />) },
+  { name: "customers — on hold, offline", render: () => render(<CustomersView {...customers({ offline: true, profile: { kind: "loaded", data: a11yProfile({ status: "on_hold", holdReason: "90 days overdue" }) } })} />) },
+  { name: "customers — archived", render: () => render(<CustomersView {...customers({ tab: "billing", profile: { kind: "loaded", data: a11yProfile({ status: "inactive", archivedAt: "2026-08-01", archiveReason: "ceased trading" }) } })} />) },
+  { name: "customers — empty list, nothing selected", render: () => render(<CustomersView {...customers({ selected: null, list: { kind: "empty", note: "No customer matches." } })} />) },
+  { name: "customers — read refused", render: () => render(<CustomersView {...customers({ list: { kind: "unauthorized" }, profile: { kind: "unauthorized" } })} />) },
+  { name: "customers — read failed", render: () => render(<CustomersView {...customers({ list: { kind: "failed", message: "Database unavailable" }, profile: { kind: "loading" } })} />) },
+  { name: "contract — active, frozen by a job", render: () => render(<ContractView {...contractProps()} />) },
+  { name: "contract — awaiting approval", render: () => render(<ContractView {...contractProps({ contract: { kind: "loaded", data: a11yContract({ status: "pending_approval", usedOperationallyAt: null, approvedAt: null, approvedByUserId: null, documents: [], jobs: [], rateSheets: [] }) } })} />) },
+  { name: "contract — suspended", render: () => render(<ContractView {...contractProps({ contract: { kind: "loaded", data: a11yContract({ status: "suspended", suspensionReason: "insurance lapsed" }) } })} />) },
+  { name: "contract — read failed", render: () => render(<ContractView {...contractProps({ contract: { kind: "failed", message: "Database unavailable" } })} />) },
+  { name: "rate sheet — a draft version with the line form", render: () => render(<RateSheetView {...sheetProps({ selectedVersion: "RSV-2" })} />) },
+  { name: "rate sheet — the approved version, frozen by a job", render: () => render(<RateSheetView {...sheetProps({ selectedVersion: "RSV-1" })} />) },
+  { name: "rate sheet — prices withheld", render: () => render(<RateSheetView {...sheetProps({ sheet: { kind: "loaded", data: withheld() }, canPropose: false, canApprove: false })} />) },
+  { name: "rate sheet — loading, offline", render: () => render(<RateSheetView {...sheetProps({ offline: true, sheet: { kind: "loading" } })} />) },
   { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
   { name: "dispatch readiness — blocked", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked)} />) },
   { name: "dispatch readiness — query failed", render: () => render(<DispatchReadinessView {...readinessPanel({ kind: "failed", message: "Database unavailable" })} />) },
@@ -170,18 +254,26 @@ const surfaces = [
   { name: "widget tile — unknown", render: () => render(<WidgetTileShell title="Hours Remaining" variant="kpi" payload={unknown("no verified duty record loaded")} />) },
   { name: "add-widget picker", render: () => render(<AddWidgetPicker offers={listOfferable(A11Y_DRIVER)} alreadyAdded={[]} onAdd={() => {}} />) },
   { name: "showcase panel — demonstration", render: () => render(<SourcedPanel title="Route alternatives" source={demonstration("no routing engine result is read on this page")}><p>body</p></SourcedPanel>) },
-  // The sign-in and workspace-selection screens. Read in a cab and in a shop,
-  // on a phone and on a desktop, which is exactly what the three viewports are
-  // for. Each error state is run separately: the alert and status regions only
-  // exist in those states, and a rule that never sees them has not checked them.
-  { name: "login — first visit", render: () => render(<LoginView reason="unauthenticated" busy={false} onSignIn={() => {}} />) },
-  { name: "login — session expired", render: () => render(<LoginView reason="expired" busy={false} detail="Signed out after inactivity" onSignIn={() => {}} />) },
-  { name: "login — sign-in failed", render: () => render(<LoginView reason="auth_error" busy={false} detail="invalid oauth state" onSignIn={() => {}} />) },
-  { name: "login — in flight", render: () => render(<LoginView reason="unauthenticated" busy onSignIn={() => {}} />) },
-  { name: "workspace chooser", render: () => render(<PortalChooser options={a11yPortals} notReached={[{ portal: "executive", displayName: "Executive", purpose: "company-wide performance" }]} onChoose={() => {}} />) },
-  { name: "workspace chooser — declined default and link", render: () => render(<PortalChooser options={a11yPortals} rejectedDefault="executive" rejectedRequest="executive" onChoose={() => {}} />) },
-  { name: "no workspace available", render: () => render(<NoPortalAvailable notReached={a11yPortals} onSignOut={() => {}} />) },
-  { name: "organization selection required", render: () => render(<OrganizationSelectionRequired detail="member of 2 organizations" />) },
+  // v23.31 — the screens a person meets before anything else. A driver signs in
+  // on a phone in a cab and a mechanic on a shop tablet with wet hands, so these
+  // are the last surfaces in the product that may fail a contrast or a name-role
+  // rule.
+  { name: "sign in", render: () => render(<SignInView methods={[{ key: "leaseos", label: "Sign in to LeaseOS", detail: "LeaseOS uses your organization's single sign-on.", onSelect: () => {} }]} notice="Your session has ended. Sign in to continue." />) },
+  { name: "sign in — refused", render: () => render(<SignInView methods={[{ key: "leaseos", label: "Sign in to LeaseOS", detail: "single sign-on", onSelect: () => {} }]} error="Sign-in could not be completed. Try again." intendedLabel="the page you were opening (/portal/field_workforce)" />) },
+  { name: "workspace chooser", render: () => render(<WorkspaceChooserView displayName="Dana Reyes" workspaces={[{ key: "field_workforce", label: "Field", description: "Driver operations, jobs, routes and paperwork" }, { key: "fleet_maintenance", label: "Mechanic", description: "Work orders, repairs and vehicle maintenance" }]} activeWorkspace="field_workforce" onSelectWorkspace={() => {}} onSignOut={() => {}} />) },
+  { name: "organization chooser", render: () => render(<WorkspaceChooserView organizations={[{ orgRef: "ORG-A", name: "ABC Transport", membershipType: "employee" }, { orgRef: "ORG-B", name: "Northern Hauling", membershipType: "contractor" }]} activeOrgRef={null} workspaces={[]} onSelectWorkspace={() => {}} onSelectOrganization={() => {}} />) },
+  { name: "access denied — no workspace", render: () => render(<AccessDeniedView kind="no_workspace" onSignOut={() => {}} />) },
+  { name: "access denied — workspace not open", render: () => render(<AccessDeniedView kind="workspace_not_open" onGoToWorkspace={() => {}} workspaceLabel="Field" onSignOut={() => {}} />) },
+
+  // B23.2 — People & Access. An administrative screen, and a manager may reach
+  // it from a phone in a yard, so all four sections and the person detail go
+  // through the rules rather than only the one that happens to render first.
+  { name: "people & access — active", render: () => render(<PeopleAccessView {...peopleProps()} />) },
+  { name: "people & access — invitations", render: () => render(<PeopleAccessView {...peopleProps({ section: "invitations", issuedLink: { invitationRef: "INV-1", token: "tok" } })} />) },
+  { name: "people & access — needs resolution", render: () => render(<PeopleAccessView {...peopleProps({ section: "resolution" })} />) },
+  { name: "people & access — former", render: () => render(<PeopleAccessView {...peopleProps({ section: "former" })} />) },
+  { name: "people & access — person detail", render: () => render(<PeopleAccessView {...peopleProps({ selected: { person: PERSON, workspaceOptions: [{ key: "field_workforce", label: "Field Workforce" }] } })} />) },
+  { name: "people & access — refusal", render: () => render(<PeopleAccessView {...peopleProps({ error: "This is the last management access in ABC Transport." })} />) },
   // The Records & File Manager: folders, list and inspector together, then the states that only
   // exist when something is refused or missing — an alert must be reachable in each.
   { name: "records — list and inspector", render: () => render(<FileManagerView {...fileManagerProps()} />) },

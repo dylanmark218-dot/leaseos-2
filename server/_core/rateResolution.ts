@@ -10,6 +10,8 @@
  * decides what each viewer may see.
  */
 
+import { evaluateApplicability, type ContextAttributes } from "./rateApplicability";
+
 export type RateKind = "sell" | "vendor_payable" | "payroll_reference" | "internal_cost";
 export type ScopeLevel = "job_override" | "change_order" | "po_afe" | "project_site" | "customer_contract" | "customer_rate_card" | "branch" | "company";
 export type PricingMethod = "per_unit" | "flat" | "minimum_charge" | "percentage_markup" | "fixed_markup" | "multiplier" | "formula";
@@ -21,6 +23,8 @@ export const PRECEDENCE: readonly ScopeLevel[] = ["job_override", "change_order"
 
 export type ChargeDefinition = {
   id: number; definitionRef: string; rateKind: RateKind; serviceCode: string; resourceClass: string | null; unitId: number | null;
+  /** v23.31 — a rate line on a sheet version carries its conditions; null on every definition proposed directly. */
+  applicabilityJson?: string | null; rateSheetVersionId?: number | null; lineKind?: string | null;
   pricingMethod: PricingMethod; unit: Unit; rateMillis: number | null; flatCents: number | null; basisPoints: number | null; multiplierMillis: number | null;
   minimumQuantityMillis: number | null; minimumChargeCents: number | null; billingIncrementMillis: number | null; roundingMode: "nearest" | "up" | "down";
   measurementBasis: MeasurementBasis; conditionKey: string | null;
@@ -32,6 +36,10 @@ export type ResolutionContext = {
   rateKind: RateKind; serviceCode: string; at: Date;
   customerAccountId?: number | null; vendorId?: number | null; projectRef?: string | null; siteRef?: string | null; contractRef?: string | null; jobId?: number | null; branchCode?: string | null; unitId?: number | null; resourceClass?: string | null;
   conditionKey?: string | null;
+  /** v23.31 — what the job knows about itself (shift, province, equipment class, …) for conditioned rate lines. */
+  attributes?: ContextAttributes | null;
+  /** v23.31 — when set, only definitions on this sheet version (or with no sheet at all) are considered: a snapshotted job prices from its pinned version. */
+  rateSheetVersionId?: number | null;
 };
 
 export type Resolution =
@@ -55,12 +63,18 @@ export function scopeApplies(d: ChargeDefinition, ctx: ResolutionContext): boole
   if (d.resourceClass != null && ctx.resourceClass != null && d.resourceClass !== ctx.resourceClass) return false;
   if (d.conditionKey != null && d.conditionKey !== (ctx.conditionKey ?? null)) return false;
   if (d.rateKind === "vendor_payable" && (ctx.vendorId ?? null) == null) return false;   // a payable is owed to someone
+  // v23.31 — a job pinned to a sheet version prices from that version; a line on another version of the same or another sheet is not in play.
+  if (ctx.rateSheetVersionId != null && d.rateSheetVersionId != null && d.rateSheetVersionId !== ctx.rateSheetVersionId) return false;
+  // v23.31 — conditioned rate lines: every condition must hold; an attribute the context lacks never holds.
+  if (d.applicabilityJson != null && d.applicabilityJson !== "" && !evaluateApplicability(d.applicabilityJson, ctx.attributes ?? {}).applies) return false;
   return true;
 }
 
-/** How many scope fields a definition names: the more it names, the more specific it is. */
+/** How many scope fields a definition names, plus its conditions: the more it names, the more specific it is. */
 export function specificity(d: ChargeDefinition): number {
-  return [d.customerAccountId, d.vendorId, d.projectRef, d.siteRef, d.contractRef, d.jobId, d.branchCode, d.unitId, d.resourceClass, d.conditionKey].filter(x => x != null).length;
+  const scope = [d.customerAccountId, d.vendorId, d.projectRef, d.siteRef, d.contractRef, d.jobId, d.branchCode, d.unitId, d.resourceClass, d.conditionKey].filter(x => x != null).length;
+  const conditions = d.applicabilityJson ? evaluateApplicability(d.applicabilityJson, {}).specificity : 0;
+  return scope + conditions;
 }
 
 /** Deterministic precedence over approved, in-window, applicable definitions. Never "something close". */
@@ -73,6 +87,12 @@ export function resolveRate(defs: readonly ChargeDefinition[], ctx: ResolutionCo
   const expired = defs.filter(d => wasApproved(d) && !inWindow(d, ctx.at) && scopeApplies(d, ctx));
   if (proposedOnly.length) reasons.push(`${proposedOnly.length} proposed definition(s) apply but are not approved — a proposal prices nothing`);
   if (expired.length) reasons.push(`${expired.length} approved definition(s) match but are outside their effective window at ${ctx.at.toISOString().slice(0, 10)}`);
+  // v23.31 — a conditioned line that was set aside says which condition failed, so "no rate" is never a mystery.
+  for (const d of defs) {
+    if (!d.applicabilityJson || !wasApproved(d) || !inWindow(d, ctx.at) || d.rateKind !== ctx.rateKind || d.serviceCode !== ctx.serviceCode) continue;
+    const a = evaluateApplicability(d.applicabilityJson, ctx.attributes ?? {});
+    if (!a.applies) reasons.push(`${d.definitionRef} set aside: ${a.reasons.filter(x => !/^[a-z_]+ (=|∈|≥|≤|in \[)/.test(x)).join("; ") || "conditions not met"}`);
+  }
   for (const level of PRECEDENCE) {
     // Within a level the most specific definition wins — one that names the condition, the unit, the site — and only equal specificity is a conflict.
     const atLevel = applicable.filter(d => d.scopeLevel === level);

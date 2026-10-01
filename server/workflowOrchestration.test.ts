@@ -1,6 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 
+// A unit id no test creates. These rows only need a unitId to satisfy the column;
+// the literal 1 used here before collided with whichever suite happened to create
+// the first unit in a fresh database, handing that suite's truck open critical
+// defects (complianceReadinessC1a failed on exactly that, order-dependently).
+const NO_SUCH_UNIT = 2_000_000_000;
+
 /**
  * Workflow orchestration, against a real database.
  *
@@ -136,7 +142,7 @@ d("outbox atomicity", () => {
     await conn.beginTransaction();
     await conn.execute(
       "INSERT INTO maintenanceDefects (unitId, title, severity, status, reportedAt) VALUES (?,?,?,?,NOW())",
-      [1, `Critical defect on ${unit}`, "critical", "open"]
+      [NO_SUCH_UNIT, `Critical defect on ${unit}`, "critical", "open"]
     );
     await conn.execute(
       `INSERT INTO domainEventOutbox (eventId, eventType, aggregateType, aggregateId, tenantId, payloadJson, occurredAt)

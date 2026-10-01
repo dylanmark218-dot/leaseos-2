@@ -32,7 +32,21 @@ async function member(role: string) {
   await pool.execute(
     "INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())",
     [userId, role]);
+  orgOf.set(userId, orgRef);
   return userId;
+}
+const orgOf = new Map<number, string>();
+/**
+ * P0-A1 — an operator the member's organization owns. `hos.status` resolves the operator through
+ * the tenant boundary now, so a bare user id is "Operator N not found"; the fixture has to make
+ * the record it claims to ask about.
+ */
+async function operatorOf(userId: number): Promise<number> {
+  const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, userId) VALUES (?, ?)", [`Driver ${rnd()}`, userId]);
+  const orgRef = orgOf.get(userId);
+  if (!orgRef) throw new Error(`fixture: user ${userId} was not created by member()`);
+  await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,'operator',?,1)", [orgRef, r.insertId]);
+  return r.insertId;
 }
 
 d("the figure is in the database", () => {
@@ -96,7 +110,7 @@ d("a candidate determines nothing", () => {
   it("answers unknown for a driver under the southern schedule", async () => {
     const userId = await member("driver");
     const status = await callerFor(userId).hos.status({
-      operatorId: userId, carrierAuthority: "federal", jurisdiction: "CA",
+      operatorId: await operatorOf(userId), carrierAuthority: "federal", jurisdiction: "CA",
       latitude: 53.5, at: new Date("2026-09-13T18:00:00Z"),
     }) as { determination: { verdict: string; determinations: { limitKey: string; result: string; limitMinutes: number | null }[] } };
 
@@ -158,7 +172,7 @@ d("one human action changes exactly one thing", () => {
     } as never);
 
     const after = await callerFor(driver).hos.status({
-      operatorId: driver, carrierAuthority: "federal", jurisdiction, latitude: 53.5, at,
+      operatorId: await operatorOf(driver), carrierAuthority: "federal", jurisdiction, latitude: 53.5, at,
     }) as { determination: { verdict: string; determinations: { limitKey: string; result: string }[] } };
 
     const byKey = new Map(after.determination.determinations.map((x) => [x.limitKey, x.result]));

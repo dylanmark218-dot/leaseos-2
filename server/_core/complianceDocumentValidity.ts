@@ -22,7 +22,7 @@ import type { DocumentType } from "./documentExtraction";
 export type ComplianceDocumentRow = {
   id: number;
   docType: string;
-  title: string;
+  title: string | null;
   issuedAt: Date | null;
   expiresAt: Date | null;
   verificationStatus: "needs_review" | "verified" | "rejected";
@@ -33,7 +33,7 @@ export type ComplianceDocumentRow = {
 export type ExpiringDocument = {
   documentId: number;
   docType: string;
-  title: string;
+  title: string | null;
   state: ValidityState;
   expiresAt: Date | null;
   daysRemaining: number | null;
@@ -62,15 +62,80 @@ const asVersion = (r: ComplianceDocumentRow, index: number): DocumentVersion => 
   uploadedAt: r.capturedAt,
 });
 
+/**
+ * One type's rows, in version order. `capturedAt` is the ordinal; `id` breaks a tie, because rows
+ * captured in the same instant would otherwise take whatever order the database returned them in,
+ * and the same records must always yield the same verdict.
+ */
+const versionsOf = (rows: readonly ComplianceDocumentRow[], docType: string): ComplianceDocumentRow[] =>
+  rows.filter(r => r.docType === docType)
+    .sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime() || a.id - b.id);
+
 /** The engine's verdict for one document type, from that type's rows alone. */
 export function complianceDocumentValidity(
   rows: readonly ComplianceDocumentRow[], docType: string, at: Date, noticeDays = 30,
 ): Validity {
-  const forType = rows
-    .filter(r => r.docType === docType)
-    .sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime())
-    .map(asVersion);
-  return validityOf(forType, at, noticeDays);
+  return validityOf(versionsOf(rows, docType).map(asVersion), at, noticeDays);
+}
+
+/**
+ * SPINE item 2 — the one answer every consumer reads: dispatch, the documentExpiry tile, the
+ * insurance proof and medical fitness. It is `validityOf`'s verdict, plus the three facts a
+ * consumer needs to present it without re-deciding it.
+ */
+export type ComplianceVerdict = Validity & {
+  /** The accepted type whose verdict stands; null only when no type was asked about. */
+  docType: string | null;
+  /** The row the verdict names, so a consumer can link to it. Null when nothing is on file. */
+  documentId: number | null;
+  /**
+   * `unverified` only: the date the newest unchecked row claims. Nobody has verified it, so it
+   * may never CLEAR anything — but a claim that the document has already lapsed is still evidence
+   * of expiry, and `claimLapsed` says so. Every other state carries the verdict's own expiry.
+   */
+  claimedExpiresAt: Date | null;
+  claimLapsed: boolean;
+};
+
+/**
+ * Where several types satisfy one requirement (an inspection is a CVIP certificate or an annual
+ * inspection; insurance is proven by a proof or a card), each is judged on its own rows and the
+ * most favourable verdict stands, because any one of them satisfies it. Ties keep the order the
+ * types were given in.
+ */
+export const FAVOURABLE: Readonly<Record<ValidityState, number>> = {
+  in_force: 0, expiring: 1, incomplete: 2, unverified: 3, not_yet_effective: 4, expired: 5, rejected: 6, none: 7,
+};
+
+export function complianceRequirementValidity(
+  rows: readonly ComplianceDocumentRow[], docTypes: readonly string[], at: Date, noticeDays = 30,
+): ComplianceVerdict {
+  return mostFavourableVerdict(docTypes.map(docType => {
+    const versions = versionsOf(rows, docType);
+    const v = validityOf(versions.map(asVersion), at, noticeDays);
+    const named = v.version != null ? versions[v.version - 1] ?? null : null;
+    const claimedExpiresAt = v.state === "unverified" ? named?.expiresAt ?? null : v.expiresAt;
+    const verdict: ComplianceVerdict = {
+      ...v, docType, documentId: named?.id ?? null, claimedExpiresAt,
+      claimLapsed: v.state === "unverified" && claimedExpiresAt !== null && claimedExpiresAt.getTime() < at.getTime(),
+    };
+    return verdict;
+  }));
+}
+
+/**
+ * Of several verdicts on things that each satisfy the same requirement, the one that stands: the
+ * most favourable, ties in the order given. Used by `complianceRequirementValidity` across types,
+ * and by the passport across the subjects of a work combination. It chooses between verdicts; it
+ * never reaches one.
+ */
+export function mostFavourableVerdict(verdicts: readonly ComplianceVerdict[]): ComplianceVerdict {
+  const ranked = verdicts.map((verdict, order) => ({ verdict, order }))
+    .sort((a, b) => FAVOURABLE[a.verdict.state] - FAVOURABLE[b.verdict.state] || a.order - b.order);
+  return ranked[0]?.verdict ?? {
+    state: "none", version: null, expiresAt: null, daysRemaining: null, reason: "No document type was asked about",
+    docType: null, documentId: null, claimedExpiresAt: null, claimLapsed: false,
+  };
 }
 
 /**
@@ -83,7 +148,7 @@ export function complianceDocumentValidity(
  * list this function was not given.
  */
 const SEVERITY: Readonly<Record<ValidityState, number>> = {
-  expired: 0, rejected: 1, expiring: 2, unverified: 3, in_force: 4, none: 5,
+  expired: 0, rejected: 1, incomplete: 2, not_yet_effective: 3, expiring: 4, unverified: 5, in_force: 6, none: 7,
 };
 
 export function documentExpiry(
@@ -96,10 +161,10 @@ export function documentExpiry(
   }
   const out: ExpiringDocument[] = [];
   for (const [docType, group] of Array.from(byType.entries())) {
-    const v = complianceDocumentValidity(group, docType, at, noticeDays);
-    const newest = group.slice().sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime())[0]!;
+    const v = complianceRequirementValidity(group, [docType], at, noticeDays);
+    const named = group.find(r => r.id === v.documentId) ?? versionsOf(group, docType)[group.length - 1]!;
     out.push({
-      documentId: newest.id, docType, title: newest.title,
+      documentId: named.id, docType, title: named.title,
       state: v.state, expiresAt: v.expiresAt, daysRemaining: v.daysRemaining, reason: v.reason,
     });
   }

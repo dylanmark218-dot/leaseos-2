@@ -51,6 +51,28 @@ one that requires no code.
 Whichever you choose, the other source should stop being editable on that path, or the next person
 to adjust it will believe they changed something.
 
+### Decided — 2026-09-23 (owner, recorded with Finance F1)
+
+**Both apply, and neither bypasses the other.** This is closest to option 3, with the precedence
+stated as roles rather than as "the more restrictive wins":
+
+- **Spending limit** (`spendingLimits`, per book, effective-dated) is *how much authority* an actor or
+  role holds. It is a ceiling, never a grant: a limit cannot approve anything the ladder says needs
+  someone else.
+- **Approval ladder** (`commercialApprovalPolicies`, category `purchase_order`) is *which approvals*
+  the transaction requires, including the second person at the top tier.
+- A purchase order is authorized only when **both** are satisfied: every approval the ladder requires
+  is recorded, and each approver's own spending authority covers the amount.
+- **No self-approval** unless an organization policy explicitly permits it.
+- A **missing or ambiguous** policy or limit **fails closed** (REVIEW), never "unlimited".
+
+**Not implemented in F1.** F1 was scoped to tenant isolation. The code still behaves as measured
+above, and one behaviour now **contradicts the decision**: `purchasing.request` self-authorizes a
+request within the requester's own spending limit (`status: "approved"`, `approvedByUserId` = the
+requester) without consulting the ladder. Implementing the decision changes the purchase-order path
+and is scheduled with procurement (Finance F4). Until then, the `purchase_order` ladder tiers remain
+dead configuration on that path.
+
 ---
 
 ## P6.6 — the approval-ladder role mapping

@@ -1,0 +1,58 @@
+name: Feature request
+description: Something LeaseOS should be able to do and cannot
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the operational problem first. A proposed solution is welcome, but the
+        problem is what gets designed against.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: >
+        What cannot be done today, who is blocked by it, and what they do instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Required outcome
+      description: >
+        What must be true once this exists — in terms of what a person can do, not of
+        how it is built.
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: >
+        Anything this must respect. Leave a line blank if it does not apply.
+      value: |
+        Safety:
+        Compliance / regulatory:
+        Authorization — who may do this, and who must not:
+        Tenant scope — whose records are in reach:
+        Offline / poor connectivity:
+        Audit — what must be recorded:
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: >
+        How someone decides this is finished. Include the cases that must be *refused*,
+        not only the ones that must work.
+      placeholder: |
+        - A dispatcher can …
+        - A driver cannot …
+        - Attempting … is refused with …
+    validations:
+      required: true

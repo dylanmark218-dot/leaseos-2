@@ -8,17 +8,24 @@
  * overwritten.
  */
 
+import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, evidenceInScope, getDb, jobInScope, operatorInScope, unitInScope, userInScope } from "./db";
+import { assertCallerOwnsEntity } from "./_core/entityScope";
+import { requireProvableOwnership } from "./ownershipDomain";
 import { carrierProfileReviews, complianceConsents, complianceDocuments, complianceRequirements, writtenProgramVersions } from "../drizzle/schema";
 import {
-  abstractRequestPermitted, buildPassport, composeJobPassport, medicalFitnessForDispatch, nextRenewalDue,
+  abstractRequestPermitted, buildPassport, composeJobPassport, MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch, nextRenewalDue,
   type Credential, type Passport, type Requirement, type Subject,
 } from "./_core/compliancePassport";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
+import { loadRequirementRegistry } from "./requirementRegistry";
+import {
+  VerificationError, proposeRequirement, recordApproval, requirementProvenance, setVerificationPolicy, withdrawRevision,
+} from "./requirementVerification";
 import {
   COMPLIANCE_KNOWLEDGE_CATALOG,
   evaluateDangerousGoodsAssist,
@@ -28,23 +35,35 @@ import { evaluateDriverQualification } from "./_core/driverTraining";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const SUBJECT = z.enum(["operator", "unit", "trailer", "carrier", "job", "user"]);
+/**
+ * Every subject a requirement can be written for — the column's enum. `requirementLoad` used
+ * `SUBJECT` above, so an equipment, attachment or work-context requirement (which work
+ * authorization evaluates) could never be loaded; only its seed could exist (C1b-2).
+ */
+const REQUIREMENT_SUBJECT = z.enum(["operator", "unit", "trailer", "carrier", "job", "user", "equipment", "attachment", "work_context"]);
 
-async function loadRequirements(): Promise<Requirement[]> {
-  const db = await getDb();
-  const seeded = [...COMPLIANCE_REQUIREMENT_SEEDS];
-  if (!db) return seeded;
-  const rows = await db.select().from(complianceRequirements);
-  const loaded: Requirement[] = rows.map(r => ({
-    requirementKey: r.requirementKey, version: r.version, family: r.family, title: r.title,
-    subjectType: r.subjectType, jurisdiction: r.jurisdiction,
-    appliesWhen: r.appliesWhenJson ? JSON.parse(r.appliesWhenJson) : null,
-    satisfiedByDocTypes: JSON.parse(r.satisfiedByDocTypes), renewalIntervalDays: r.renewalIntervalDays,
-    warnDaysBeforeExpiry: r.warnDaysBeforeExpiry, missingSeverity: r.missingSeverity,
-    verificationStatus: r.verificationStatus, effectiveFrom: r.effectiveFrom, effectiveUntil: r.effectiveUntil,
-  }));
-  // A loaded row supersedes the seed with the same key.
-  const keys = new Set(loaded.map(l => l.requirementKey));
-  return [...loaded, ...seeded.filter(s => !keys.has(s.requirementKey))];
+/** The registry at `now` for the caller's organization: governing stored revisions, then unreplaced seeds. */
+const loadRequirements = (tenantId: string): Promise<Requirement[]> => loadRequirementRegistry(COMPLIANCE_REQUIREMENT_SEEDS, new Date(), tenantId);
+
+const VERIFY_INPUT = z.object({
+  requirementKey: z.string().min(3).max(120), version: z.number().int().positive(),
+  target: z.enum(["CITATION_VERIFIED", "SOURCE_DOCUMENT_VERIFIED"]),
+  decision: z.enum(["approve", "reject"]), reason: z.string().min(10).max(2000),
+  /** Required for SOURCE_DOCUMENT_VERIFIED: the admitted source revision it was checked against. */
+  sourceRevisionRef: z.string().max(64).nullable().optional(),
+});
+
+/** A verification refusal as the API reports it: another organization's revision is simply not found. */
+async function asTrpc<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!(e instanceof VerificationError)) throw e;
+    const code = e.code === "NOT_FOUND" || e.code === "UNKNOWN_PACK" ? "NOT_FOUND"
+      : e.code === "SELF_VERIFICATION" || e.code === "SAME_VERIFIER" ? "FORBIDDEN"
+      : e.code === "OVERLAPPING_REVISION" ? "CONFLICT" : "PRECONDITION_FAILED";
+    throw new TRPCError({ code, message: `${e.code}: ${e.message}` });
+  }
 }
 
 async function loadCredentials(ownerType: string, ownerId: number): Promise<Credential[]> {
@@ -52,21 +71,48 @@ async function loadCredentials(ownerType: string, ownerId: number): Promise<Cred
   if (!db) return [];
   const rows = await db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, ownerType as never), eq(complianceDocuments.ownerId, ownerId)));
   return rows.map(r => ({
+    id: r.id, capturedAt: r.capturedAt, ownerKey: `${r.ownerType}:${r.ownerId}`,
     docType: r.docType, requirementKey: r.requirementKey, issuedAt: r.issuedAt, expiresAt: r.expiresAt,
     verificationStatus: r.verificationStatus, privateDetail: r.privateDetail, jurisdiction: r.jurisdiction,
   }));
 }
 
-async function passportFor(subjectType: Subject["subjectType"], subjectId: number, jurisdiction: string, attributes: Record<string, unknown>): Promise<Passport> {
-  const [requirements, credentials] = await Promise.all([loadRequirements(), loadCredentials(subjectType, subjectId)]);
+type OwnerType = "operator" | "unit" | "job" | "trailer" | "carrier" | "user" | "equipment";
+/**
+ * F1.2 — the subject of a credential or passport is one the caller's organization may see, through the
+ * owner it already has: an operator or unit (trailers are units) through coreRecordOwnership, a job
+ * through jobs.orgRef, a person through their membership, a carrier through the company's legal entity
+ * (0146 — the id programPublish and profileReviewRecord record carrier compliance against). Anything
+ * else answers `what`, the same answer a missing subject gets. Equipment has no owner yet: refused while
+ * more than one company exists (UNKNOWN OWNERSHIP != GLOBAL ACCESS).
+ */
+async function requireSubjectInScope(userId: number, ownerType: OwnerType, ownerId: number, what: string): Promise<void> {
+  if (ownerType === "equipment") return requireProvableOwnership("Equipment credentials", "equipment records carry an owner");
+  if (ownerType === "carrier") {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    return assertCallerOwnsEntity(db as never, userId, ownerId, what);
+  }
+  const scope = await actingScopeFor(userId);
+  const visible = ownerType === "operator" ? await operatorInScope(ownerId, scope)
+    : ownerType === "unit" || ownerType === "trailer" ? await unitInScope(ownerId, scope)
+    : ownerType === "job" ? await jobInScope(ownerId, scope)
+    : await userInScope(ownerId, scope);
+  if (!visible) throw new TRPCError({ code: "NOT_FOUND", message: what });
+}
+
+async function passportFor(tenantId: string, subjectType: Subject["subjectType"], subjectId: number, jurisdiction: string, attributes: Record<string, unknown>): Promise<Passport> {
+  const [requirements, credentials] = await Promise.all([loadRequirements(tenantId), loadCredentials(subjectType, subjectId)]);
   return buildPassport({ subject: { subjectType, jurisdiction, attributes }, requirements, credentials, now: new Date() });
 }
 
 export const complianceRouter = router({
   passport: roleProcedure("compliance.passport")
     .input(z.object({ subjectType: SUBJECT, subjectId: z.number().int().positive(), jurisdiction: z.string().min(2).max(80), attributes: z.record(z.string(), z.unknown()).default({}) }))
-    .query(async ({ input }) => {
-      const p = await passportFor(input.subjectType, input.subjectId, input.jurisdiction, input.attributes);
+    .query(async ({ ctx, input }) => {
+      await requireSubjectInScope(ctx.user.id, input.subjectType, input.subjectId, "Subject not found");
+      const tenantId = (await actingScopeFor(ctx.user.id)).tenantId;
+      const p = await passportFor(tenantId, input.subjectType, input.subjectId, input.jurisdiction, input.attributes);
       // Private detail never rides out on a passport. Items are requirement
       // level; the credential row is not included.
       return p;
@@ -80,27 +126,32 @@ export const complianceRouter = router({
       unit: z.object({ id: z.number().int().positive(), attributes: z.record(z.string(), z.unknown()).default({}) }).nullable(),
       trailer: z.object({ id: z.number().int().positive(), attributes: z.record(z.string(), z.unknown()).default({}) }).nullable().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      // F1.2 — every named subject is proven before any is read: one foreign subject refuses the whole job.
+      for (const [type, s] of [["carrier", input.carrier], ["operator", input.operator], ["unit", input.unit], ["trailer", input.trailer]] as const)
+        if (s) await requireSubjectInScope(ctx.user.id, type, s.id, "Subject not found");
+      const tenantId = (await actingScopeFor(ctx.user.id)).tenantId;
       const parts: Record<string, Passport | null> = {
-        carrier: input.carrier ? await passportFor("carrier", input.carrier.id, input.jurisdiction, input.carrier.attributes) : null,
-        operator: input.operator ? await passportFor("operator", input.operator.id, input.jurisdiction, input.operator.attributes) : null,
-        unit: input.unit ? await passportFor("unit", input.unit.id, input.jurisdiction, input.unit.attributes) : null,
+        carrier: input.carrier ? await passportFor(tenantId, "carrier", input.carrier.id, input.jurisdiction, input.carrier.attributes) : null,
+        operator: input.operator ? await passportFor(tenantId, "operator", input.operator.id, input.jurisdiction, input.operator.attributes) : null,
+        unit: input.unit ? await passportFor(tenantId, "unit", input.unit.id, input.jurisdiction, input.unit.attributes) : null,
       };
-      if (input.trailer !== undefined) parts.trailer = input.trailer ? await passportFor("trailer", input.trailer.id, input.jurisdiction, input.trailer.attributes) : null;
+      if (input.trailer !== undefined) parts.trailer = input.trailer ? await passportFor(tenantId, "trailer", input.trailer.id, input.jurisdiction, input.trailer.attributes) : null;
       return composeJobPassport(parts);
     }),
 
   /** The only shape medical fitness takes outside HR. */
   medicalEligibility: roleProcedure("compliance.medicalEligibility")
     .input(z.object({ operatorId: z.number().int().positive() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) return { eligible: "unknown" as const, reviewDue: null };
+      await requireSubjectInScope(ctx.user.id, "operator", input.operatorId, "Operator not found");
+      // Every medical_fitness row, not the one with the latest date: which row is in force is the
+      // canonical verdict's decision, and the dispatch composer asks it the same way.
       const rows = await db.select().from(complianceDocuments)
-        .where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, input.operatorId), eq(complianceDocuments.docType, "medical_fitness")))
-        .orderBy(desc(complianceDocuments.expiresAt)).limit(1);
-      const r = rows[0];
-      return medicalFitnessForDispatch(r ? { docType: r.docType, expiresAt: r.expiresAt, verificationStatus: r.verificationStatus, privateDetail: r.privateDetail } : null, new Date());
+        .where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, input.operatorId), inArray(complianceDocuments.docType, [...MEDICAL_FITNESS_DOC_TYPES])));
+      return medicalFitnessForDispatch(complianceRequirementValidity(rows, MEDICAL_FITNESS_DOC_TYPES, new Date()));
     }),
 
   credentialRecord: roleProcedure("compliance.credentialRecord")
@@ -112,9 +163,12 @@ export const complianceRouter = router({
       jurisdiction: z.string().max(80).nullable().optional(), source: z.string().max(220).nullable().optional(),
       privateDetail: z.boolean().default(false), evidenceRecordId: z.number().int().positive().nullable().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.2 — a credential is filed only against the caller's own subject, with the caller's own evidence.
+      await requireSubjectInScope(ctx.user.id, input.ownerType, input.ownerId, "Credential owner not found");
+      if (input.evidenceRecordId != null && !(await evidenceInScope(input.evidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       // Recorded is not verified. Every credential enters as needs_review.
       const ins = await db.insert(complianceDocuments).values({
         ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, requirementKey: input.requirementKey ?? null,
@@ -133,6 +187,8 @@ export const complianceRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const rows = await db.select().from(complianceDocuments).where(eq(complianceDocuments.id, input.credentialId)).limit(1);
       if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Credential not found" });
+      // F1.2 — another company's credential is not found, not verifiable.
+      await requireSubjectInScope(ctx.user.id, rows[0].ownerType, rows[0].ownerId, "Credential not found");
       await db.update(complianceDocuments).set({ verificationStatus: input.outcome, verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(eq(complianceDocuments.id, input.credentialId));
       return { credentialId: input.credentialId, verificationStatus: input.outcome };
     }),
@@ -147,6 +203,9 @@ export const complianceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.2 — consent is recorded for the caller's own people, against the caller's own signature evidence.
+      await requireSubjectInScope(ctx.user.id, "user", input.subjectUserId, "Subject not found");
+      if (input.signatureEvidenceRecordId != null && !(await evidenceInScope(input.signatureEvidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       const consentRef = ref("CONSENT");
       await db.insert(complianceConsents).values({
         consentRef, subjectUserId: input.subjectUserId, consentType: input.consentType, purpose: input.purpose,
@@ -158,38 +217,99 @@ export const complianceRouter = router({
     }),
 
   /**
-   * Load or verify a requirement. Controller-only and sensitive, for the same
-   * reason as tax rules: this is the act that lets a passport say READY. An
-   * unverified source cannot produce a verified requirement.
+   * Propose a requirement revision (C1b-2b). The name is kept for existing callers; what it does is
+   * proposal creation, and nothing else. It used to let a controller store a requirement as `verified`
+   * in one step by saying its source was verified — the proposer verifying their own rule. That path is
+   * gone: `sourceVerified` and `requestedStatus` are still accepted so old callers do not break, and are
+   * ignored. Verification is `requirementVerify` (and `requirementSecondApprove` for a blocking rule),
+   * by other people, through the ledger.
    */
   requirementLoad: roleProcedure("compliance.requirementLoad")
     .input(z.object({
       requirementKey: z.string().min(3).max(120), family: z.string().min(2).max(60), title: z.string().min(3).max(220),
-      subjectType: SUBJECT, jurisdiction: z.string().min(1).max(80), appliesWhen: z.record(z.string(), z.unknown()).nullable().optional(),
+      /** C1b-2: the pack this requirement belongs to; it applies only where the pack is active. */
+      packKey: z.string().min(2).max(80).nullable().optional(),
+      subjectType: REQUIREMENT_SUBJECT, jurisdiction: z.string().min(1).max(80), appliesWhen: z.record(z.string(), z.unknown()).nullable().optional(),
       satisfiedByDocTypes: z.array(z.string().min(1)).min(1), renewalIntervalDays: z.number().int().positive().nullable().optional(),
       warnDaysBeforeExpiry: z.number().int().nonnegative().default(30), missingSeverity: z.enum(["review", "blocked"]).default("review"),
+      /** The citation: issuing authority, section or equally precise citation, official URL, instrument. */
       sourceAuthority: z.string().max(220).nullable().optional(), sourceUrl: z.string().max(600).nullable().optional(), sourceReference: z.string().max(300).nullable().optional(),
-      sourceVerified: z.boolean().default(false), requestedStatus: z.enum(["unverified", "verified"]).default("unverified"), effectiveFrom: z.coerce.date(),
+      instrumentTitle: z.string().max(400).nullable().optional(),
+      authorityType: z.enum(["law", "official_guidance", "recognized_standard", "manufacturer"]).nullable().optional(),
+      /** The date the rule takes effect, or `effectiveDateUnknown: true` — recorded, never guessed. */
+      effectiveFrom: z.coerce.date().nullable().optional(), effectiveDateUnknown: z.boolean().default(false),
+      effectiveUntil: z.coerce.date().nullable().optional(),
+      /** Accepted for old callers; ignored. A proposal is never verified. */
+      sourceVerified: z.boolean().default(false), requestedStatus: z.enum(["unverified", "verified"]).default("unverified"),
     }))
     .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const stored = input.requestedStatus === "verified" && input.sourceVerified && input.sourceAuthority?.trim() ? "verified" : "unverified";
-      const prior = await db.select({ version: complianceRequirements.version }).from(complianceRequirements).where(eq(complianceRequirements.requirementKey, input.requirementKey)).orderBy(desc(complianceRequirements.version)).limit(1);
-      const version = (prior[0]?.version ?? 0) + 1;
-      if (prior[0]) {
-        // The previous version is superseded, not overwritten.
-        await db.update(complianceRequirements).set({ verificationStatus: "superseded", effectiveUntil: input.effectiveFrom })
-          .where(and(eq(complianceRequirements.requirementKey, input.requirementKey), eq(complianceRequirements.version, prior[0].version)));
+      if (!input.effectiveFrom && !input.effectiveDateUnknown) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Record the effective date, or record explicitly that it is unknown (effectiveDateUnknown)" });
       }
-      await db.insert(complianceRequirements).values({
-        requirementKey: input.requirementKey, version, family: input.family, title: input.title, subjectType: input.subjectType, jurisdiction: input.jurisdiction,
-        appliesWhenJson: input.appliesWhen ? JSON.stringify(input.appliesWhen) : null, satisfiedByDocTypes: JSON.stringify(input.satisfiedByDocTypes),
-        renewalIntervalDays: input.renewalIntervalDays ?? null, warnDaysBeforeExpiry: input.warnDaysBeforeExpiry, missingSeverity: input.missingSeverity,
-        sourceAuthority: input.sourceAuthority ?? null, sourceUrl: input.sourceUrl ?? null, sourceReference: input.sourceReference ?? null,
-        effectiveFrom: input.effectiveFrom, verificationStatus: stored, verifiedByUserId: stored === "verified" ? ctx.user.id : null, verifiedAt: stored === "verified" ? new Date() : null,
-      });
-      return { requirementKey: input.requirementKey, version, storedStatus: stored, note: stored === "unverified" && input.requestedStatus === "verified" ? "Stored unverified: a requirement cannot be verified unless its source is verified and names an authority" : undefined };
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      const r = await asTrpc(() => proposeRequirement({
+        requirementKey: input.requirementKey, family: input.family, title: input.title, packKey: input.packKey ?? null,
+        subjectType: input.subjectType, jurisdiction: input.jurisdiction, appliesWhen: input.appliesWhen ?? null,
+        satisfiedByDocTypes: input.satisfiedByDocTypes, renewalIntervalDays: input.renewalIntervalDays ?? null,
+        warnDaysBeforeExpiry: input.warnDaysBeforeExpiry, missingSeverity: input.missingSeverity,
+        instrumentTitle: input.instrumentTitle ?? null, issuingAuthority: input.sourceAuthority ?? null,
+        citation: input.sourceReference ?? null, officialUrl: input.sourceUrl ?? null, authorityType: input.authorityType ?? null,
+        effectiveFrom: input.effectiveFrom ?? null, effectiveDateUnknown: input.effectiveDateUnknown, effectiveUntil: input.effectiveUntil ?? null,
+      }, ctx.user.id, orgRef, new Date()));
+      return {
+        requirementKey: r.requirementKey, version: r.version, storedStatus: "unverified" as const, level: r.level,
+        note: input.requestedStatus === "verified" || input.sourceVerified
+          ? "Stored as a proposal. A requirement is verified by people other than its proposer (requirementVerify), never by the proposer's own flag"
+          : undefined,
+      };
+    }),
+
+  /** First verification of a revision — citation or source document. Never the proposer. */
+  requirementVerify: roleProcedure("compliance.requirementVerify")
+    .input(VERIFY_INPUT)
+    .mutation(async ({ ctx, input }) => {
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      return asTrpc(() => recordApproval({ ...input, step: 1 }, ctx.user.id, orgRef, new Date()));
+    }),
+
+  /** Second, independent verification of a dispatch-blocking revision. Neither the proposer nor the first verifier. */
+  requirementSecondApprove: roleProcedure("compliance.requirementSecondApprove")
+    .input(VERIFY_INPUT)
+    .mutation(async ({ ctx, input }) => {
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      return asTrpc(() => recordApproval({ ...input, step: 2 }, ctx.user.id, orgRef, new Date()));
+    }),
+
+  /** Withdraw a revision. Recorded as an event; the revision and its verification history remain. */
+  requirementWithdraw: roleProcedure("compliance.requirementWithdraw")
+    .input(z.object({ requirementKey: z.string().min(3).max(120), version: z.number().int().positive(), reason: z.string().min(10).max(1000) }))
+    .mutation(async ({ ctx, input }) => {
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      return asTrpc(() => withdrawRevision(input.requirementKey, input.version, input.reason, ctx.user.id, orgRef, new Date()));
+    }),
+
+  /**
+   * Governance policy: whether an authority / domain / jurisdiction may still be verified by citation
+   * alone. Append-only; a change is a new row. Not a UI toggle: it is the act that closes the
+   * citation route for an authority once its source documents are admitted.
+   */
+  verificationPolicySet: roleProcedure("compliance.verificationPolicySet")
+    .input(z.object({
+      issuingAuthority: z.string().max(220).nullable().optional(), domain: z.string().max(60).nullable().optional(),
+      jurisdiction: z.string().max(80).nullable().optional(),
+      mode: z.enum(["CITATION_ALLOWED", "SOURCE_DOCUMENT_REQUIRED"]), reason: z.string().min(20).max(2000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      return setVerificationPolicy(input, input.mode, input.reason, ctx.user.id, orgRef);
+    }),
+
+  /** Why LeaseOS trusted each revision of a requirement: citation, fingerprint and every event. */
+  requirementProvenance: roleProcedure("compliance.requirementProvenance")
+    .input(z.object({ requirementKey: z.string().min(3).max(120) }))
+    .query(async ({ ctx, input }) => {
+      const orgRef = (await actingScopeFor(ctx.user.id)).tenantId;
+      return asTrpc(() => requirementProvenance(input.requirementKey, orgRef));
     }),
 
   programPublish: roleProcedure("compliance.programPublish")
@@ -201,8 +321,18 @@ export const complianceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.1 — the program is the caller's own company's; so is the version it supersedes. (A program key is
+      // not unique across companies: publishing "safety-manual" must never supersede another company's.)
+      await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);
+      if (input.documentEvidenceRecordId != null && !(await evidenceInScope(input.documentEvidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       const prior = await db.select({ id: writtenProgramVersions.id, version: writtenProgramVersions.version }).from(writtenProgramVersions)
-        .where(and(eq(writtenProgramVersions.programKey, input.programKey), isNull(writtenProgramVersions.supersededAt))).orderBy(desc(writtenProgramVersions.version)).limit(1);
+        .where(and(eq(writtenProgramVersions.programKey, input.programKey), eq(writtenProgramVersions.financialEntityId, input.financialEntityId), isNull(writtenProgramVersions.supersededAt))).orderBy(desc(writtenProgramVersions.version)).limit(1);
+      // Program keys are unique across LeaseOS (UNIQUE programKey+version) until the schema scopes them per company.
+      // A key another company holds is refused as taken — never superseded, never a database error.
+      if (!prior[0]) {
+        const elsewhere = (await db.select({ id: writtenProgramVersions.id }).from(writtenProgramVersions).where(and(eq(writtenProgramVersions.programKey, input.programKey), ne(writtenProgramVersions.financialEntityId, input.financialEntityId))).limit(1))[0];
+        if (elsewhere) throw new TRPCError({ code: "CONFLICT", message: `Program key ${input.programKey} is already in use — choose another key` });
+      }
       const version = (prior[0]?.version ?? 0) + 1;
       const now = new Date();
       await db.insert(writtenProgramVersions).values({
@@ -227,6 +357,9 @@ export const complianceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1.1 — recorded against the caller's own company only.
+      await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);
+      if (input.evidenceRecordId != null && !(await evidenceInScope(input.evidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       // Anything on the regulator's profile that LeaseOS does not know about is
       // an exception to investigate, not a number to file.
       const unmatched = Math.max(0, input.inspectionsOnProfile - input.knownInspections) + Math.max(0, input.convictionsOnProfile - input.knownConvictions) + Math.max(0, input.collisionsOnProfile - input.knownCollisions);

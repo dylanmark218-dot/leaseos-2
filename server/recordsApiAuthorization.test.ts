@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { appRouter } from "./routers";
 import { recordsRouter } from "./recordsRouter";
 import {
@@ -57,7 +58,11 @@ async function userWithRoles(roles: DomainRole[], scopeRef?: string) {
     await grantUserRole({
       userId,
       role,
-      scopeType: scopeRef ? "branch" : "global",
+      // B23.1A (0170) — a grant names the organization it speaks for. These
+      // fixtures create no membership, so they act for the historical single
+      // tenant, which is what `resolveActingScope` resolves them to.
+      scopeType: scopeRef ? "branch" : "organization",
+      orgRef: SINGLE_TENANT_ID,
       scopeRef: scopeRef ?? null,
       grantedByUserId: 1,
       grantedAt: new Date(),
@@ -84,8 +89,9 @@ async function attempt(fn: () => Promise<unknown>): Promise<"forbidden" | "passe
 }
 
 d("the gate is on every records procedure", () => {
-  it("declares a permission for all 21 procedures", () => {
-    expect(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length).toBe(21);
+  it("declares a permission for all 23 procedures", () => {
+    // Records & File Manager: +3 records.files.*;  B23.1A: +1 records.roles.resolveLegacy;  B23.1: +1 records.roles.revoke
+    expect(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length).toBe(23);   // +3 records.files.{list,get,download};  + main's one since #64's base
   });
 
   it("mounts records on the app router", () => {
@@ -283,6 +289,7 @@ d("revocation takes effect on the next request", () => {
     ).toBe("passed_gate");
 
     await revokeUserRole({
+      organization: SINGLE_TENANT_ID,
       userId,
       role: "safety",
       revokedByUserId: 1,
@@ -300,7 +307,7 @@ d("active grant uniqueness is enforced by the database", () => {
   it("refuses a duplicate active grant", async () => {
     const userId = newUserId();
     await grantUserRole({
-      userId, role: "mechanic", scopeType: "global",
+      userId, role: "mechanic", scopeType: "organization", orgRef: SINGLE_TENANT_ID,
       grantedByUserId: 1, grantedAt: new Date(),
     });
     // 0020's UNIQUE(userId, role, scopeRef, revokedAt) did not catch this:
@@ -308,7 +315,7 @@ d("active grant uniqueness is enforced by the database", () => {
     // exactly the row where revokedAt IS NULL.
     await expect(
       grantUserRole({
-        userId, role: "mechanic", scopeType: "global",
+        userId, role: "mechanic", scopeType: "organization", orgRef: SINGLE_TENANT_ID,
         grantedByUserId: 1, grantedAt: new Date(),
       })
     ).rejects.toThrow();
@@ -318,12 +325,17 @@ d("active grant uniqueness is enforced by the database", () => {
   it("allows a regrant after revocation and keeps the history", async () => {
     const userId = newUserId();
     await grantUserRole({
-      userId, role: "office", scopeType: "global",
+      userId, role: "office", scopeType: "organization", orgRef: SINGLE_TENANT_ID,
       grantedByUserId: 1, grantedAt: new Date(),
     });
-    await revokeUserRole({ userId, role: "office", revokedByUserId: 1, reason: "moved" });
+    // Revoked in the organization the grant belongs to. `organization: null`
+    // here matched nothing after 0170 and the regrant collided on the unique
+    // key — a revoke aimed at the wrong organization is a no-op, by design.
+    expect(
+      await revokeUserRole({ userId, role: "office", organization: SINGLE_TENANT_ID, revokedByUserId: 1, reason: "moved" })
+    ).toBe(1);
     await grantUserRole({
-      userId, role: "office", scopeType: "global",
+      userId, role: "office", scopeType: "organization", orgRef: SINGLE_TENANT_ID,
       grantedByUserId: 1, grantedAt: new Date(),
     });
 
@@ -333,14 +345,16 @@ d("active grant uniqueness is enforced by the database", () => {
     );
     expect(rows.length).toBe(2);
     expect(rows[0].activeGrantKey).toBeNull();
-    expect(rows[1].activeGrantKey).toBe(`${userId}:office:*`);
+    // B23.1A (0170): the key gained the organization, so `driver @ ABC` and
+    // `driver @ XYZ` stop colliding. Branch is still the last segment.
+    expect(rows[1].activeGrantKey).toBe(`${userId}:office:${SINGLE_TENANT_ID}:*`);
   });
 
   it("keeps branch scopes independently valid", async () => {
     const userId = newUserId();
     const now = new Date();
-    await grantUserRole({ userId, role: "dispatcher", scopeType: "branch", scopeRef: "GP", grantedByUserId: 1, grantedAt: now });
-    await grantUserRole({ userId, role: "dispatcher", scopeType: "branch", scopeRef: "EDM", grantedByUserId: 1, grantedAt: now });
+    await grantUserRole({ userId, role: "dispatcher", scopeType: "branch", orgRef: SINGLE_TENANT_ID, scopeRef: "GP", grantedByUserId: 1, grantedAt: now });
+    await grantUserRole({ userId, role: "dispatcher", scopeType: "branch", orgRef: SINGLE_TENANT_ID, scopeRef: "EDM", grantedByUserId: 1, grantedAt: now });
     // listActiveUserRoles, not the name projection: this asserts grantUserRole's
     // per-branch uniqueness key, and the name projection now reports global roles
     // only — which for this user is none.
@@ -348,7 +362,7 @@ d("active grant uniqueness is enforced by the database", () => {
 
     // Same branch twice is still a duplicate.
     await expect(
-      grantUserRole({ userId, role: "dispatcher", scopeType: "branch", scopeRef: "GP", grantedByUserId: 1, grantedAt: now })
+      grantUserRole({ userId, role: "dispatcher", scopeType: "branch", orgRef: SINGLE_TENANT_ID, scopeRef: "GP", grantedByUserId: 1, grantedAt: now })
     ).rejects.toThrow();
   });
 
@@ -357,10 +371,10 @@ d("active grant uniqueness is enforced by the database", () => {
     const grants = (await import("./db")).listActiveUserRoles;
     const held = await grants(userId);
     expect(
-      authorize({ userId, grants: held, permission: "maintenance.read_defect", resourceBranch: "GP" }).allowed
+      authorize({ userId, grants: held, permission: "maintenance.read_defect", organization: SINGLE_TENANT_ID, resourceBranch: "GP" }).allowed
     ).toBe(true);
     expect(
-      authorize({ userId, grants: held, permission: "maintenance.read_defect", resourceBranch: "EDM" }).allowed
+      authorize({ userId, grants: held, permission: "maintenance.read_defect", organization: SINGLE_TENANT_ID, resourceBranch: "EDM" }).allowed
     ).toBe(false);
   });
 });
@@ -369,7 +383,9 @@ d("management bootstrap", () => {
   it("refuses once any active management grant exists", async () => {
     // Ordered after the positive tests above, which have already created
     // management holders — the path must be closed by then.
-    const before = await countActiveManagementGrants();
+    // B23.1A — the bootstrap closes per organization. These fixtures hold no
+    // membership, so the organization they act for is the historical single tenant.
+    const before = await countActiveManagementGrants(SINGLE_TENANT_ID);
     expect(before).toBeGreaterThan(0);
 
     const result = await bootstrapManagementRole({
@@ -396,7 +412,7 @@ d("management bootstrap", () => {
     await pool.execute(
       "UPDATE userRoleAssignments SET revokedAt = NOW(), revokedByUserId = 1, revokeReason = 'test reset' WHERE role = 'management' AND revokedAt IS NULL"
     );
-    expect(await countActiveManagementGrants()).toBe(0);
+    expect(await countActiveManagementGrants(SINGLE_TENANT_ID)).toBe(0);
 
     const target = newUserId();
     const result = await bootstrapManagementRole({
@@ -449,6 +465,9 @@ d("denials reach the audit table", () => {
       "SELECT rolesHeld FROM authorizationDecisions WHERE actorUserId = ? ORDER BY id DESC LIMIT 1",
       [userId]
     );
-    expect(rows[0].rolesHeld).toBe("dispatcher@GP");
+    // B23.1A — the organization is part of the decision, so it is part of the
+    // record of it: "@<org>,<role>/<branch>". An access review that cannot tell
+    // which company a refusal happened in cannot review anything.
+    expect(rows[0].rolesHeld).toBe(`@${SINGLE_TENANT_ID},dispatcher/GP`);
   });
 });

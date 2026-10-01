@@ -69,9 +69,15 @@ import * as svc from "./recordsService";
 import {
   bootstrapManagementRole,
   countActiveManagementGrants,
+  countPlatformWideGrants,
+  findUnresolvedLegacyGrant,
   grantUserRole,
+  holdsRoleInOrganization,
   listActiveUserRoles,
+  revokeGrantById,
+  revokeUserRole,
 } from "./db";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 
 /** Company default policy until a verified statutory source is loaded. */
 const DEFAULT_POLICY: RetentionPolicy = {
@@ -87,6 +93,19 @@ const DEFAULT_POLICY: RetentionPolicy = {
 
 const forbidden = (message: string) =>
   new TRPCError({ code: "FORBIDDEN", message });
+
+/**
+ * The roles this surface may grant, revoke or resolve.
+ *
+ * B23.1A — one list rather than three copies of the same enum. The finance
+ * roles (bookkeeper, payroll_admin, tax_preparer, controller,
+ * external_accountant) are deliberately absent, as they were before: they are
+ * granted by whatever process owns the books, not from here.
+ */
+export const GRANTABLE_ROLES = [
+  "driver", "dispatcher", "mechanic", "shop_lead", "safety",
+  "office", "management", "hr", "legal", "auditor",
+] as const;
 
 const relationshipInput = z.object({
   entityType: z.enum([
@@ -156,6 +175,10 @@ export const recordsRouter = router({
           userId: ctx.user.id,
           operatorId: me.operatorId,
           grants: await listActiveUserRoles(ctx.user.id),
+          // B23.1A — the organization the gate already decided in. Without it
+          // `authorize` cannot judge an organization-confined grant and refuses
+          // it, which after 0170 is every grant a real user holds.
+          organization: ctx.organization,
           permission: "evidence.seal",
           // v21.6 — a record is the capturer's until an operator relation says
           // otherwise: the user who uploaded it may seal it from a device that
@@ -274,6 +297,7 @@ export const recordsRouter = router({
             userId: ctx.user.id,
             operatorId: me.operatorId,
             grants,
+            organization: ctx.organization,   // B23.1A — see records.evidence.seal
             permission: "evidence.send",
             subject: { ownerOperatorId: s.ownerOperatorId },
           });
@@ -357,6 +381,7 @@ export const recordsRouter = router({
           userId: ctx.user.id,
           operatorId: me.operatorId,
           grants: await listActiveUserRoles(ctx.user.id),
+          organization: ctx.organization,   // B23.1A — see records.evidence.seal
           permission: "evidence.delete_device_copy",
           subject: { ownerOperatorId: subject.ownerOperatorId },
         });
@@ -984,6 +1009,7 @@ export const recordsRouter = router({
         const auth = authorizeMechanicRelease({
           userId: ctx.user.id,
           grants,
+          organization: ctx.organization,   // B23.1A — see records.evidence.seal
           technicianUserId: ctx.user.id,
         });
         if (!auth.allowed) throw forbidden(auth.detail ?? "Cannot record a release");
@@ -1274,40 +1300,219 @@ export const recordsRouter = router({
         if (!result.ok) {
           throw new TRPCError({ code: "FORBIDDEN", message: result.reason });
         }
-        return { bootstrapped: true, targetUserId: input.targetUserId };
+        // B23.1A — the organization the grant landed in is part of the answer.
+        // A bootstrap that does not say which company it opened is a bootstrap
+        // nobody can check afterwards.
+        return {
+          bootstrapped: true,
+          targetUserId: input.targetUserId,
+          organization: result.organization,
+        };
       }),
 
-    /** Whether the bootstrap path is still open. Safe for an admin to read. */
+    /**
+     * Whether the bootstrap path is still open, and whether anybody holds
+     * cross-tenant authority. Safe for a platform admin to read.
+     *
+     * B23.1A — "open" is now a per-organization question, so this reports the
+     * historical single tenant, which is the only organization a deployment
+     * with no `organizations` rows has. A named company's own bootstrap state
+     * is answered when that company's first administrator is appointed, and the
+     * grant that appoints them is scoped to them.
+     */
     bootstrapStatus: adminProcedure.query(async () => {
-      const active = await countActiveManagementGrants();
-      return { open: active === 0, activeManagementGrants: active };
+      const active = await countActiveManagementGrants(SINGLE_TENANT_ID);
+      const platformWide = await countPlatformWideGrants();
+      return {
+        open: active === 0,
+        activeManagementGrants: active,
+        // Should be zero forever: 0170's backfill creates none and no ordinary
+        // path writes one. A non-zero value is worth an operator's attention.
+        platformWideGrants: platformWide,
+      };
     }),
 
     grant: roleProcedure("records.roles.grant")
       .input(
         z.object({
           targetUserId: z.number().int(),
-          role: z.enum([
-            "driver", "dispatcher", "mechanic", "shop_lead", "safety",
-            "office", "management", "hr", "legal", "auditor",
-          ]),
+          role: z.enum(GRANTABLE_ROLES),
           scopeRef: z.string().max(64).optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
-        // P4.1: a role is granted only to a person in the caller's scope.
-        if (!(await userInScope(input.targetUserId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
-      // P4.1: a role is granted only to a person in the caller's scope.
-      if (!(await userInScope(input.targetUserId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
+        // B23.1 — the organization comes from the ACTOR's verified acting
+        // scope, never from the request. An administrator cannot name the
+        // company a grant lands in, so "I administer somewhere, therefore let
+        // me grant here" has no input to travel on. This is the same rule
+        // `resolveActingScope` applies to every tenant-scoped write.
+        const acting = await actingScopeFor(ctx.user.id);
+
+        // P4.1: a role is granted only to a person in the caller's scope —
+        // which, after B23.1, means a person who is a live member of the same
+        // organization the grant will be written into.
+        if (!(await userInScope(input.targetUserId, acting))) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
+        }
+
         const id = await grantUserRole({
           userId: input.targetUserId,
           role: input.role,
-          scopeType: input.scopeRef ? "branch" : "global",
+          scopeType: input.scopeRef ? "branch" : "organization",
+          // For a deployment with no organizations this is SINGLE_TENANT_ID,
+          // which is exactly what `resolveActingScope` resolves such callers
+          // to — so a grant written before organizations existed and one
+          // written now match the same acting scope.
+          orgRef: acting.tenantId,
           scopeRef: input.scopeRef ?? null,
           grantedByUserId: ctx.user.id,
           grantedAt: new Date(),
         });
-        return { granted: true, assignmentId: id ?? null };
+        return { granted: true, assignmentId: id ?? null, organization: acting.tenantId };
+      }),
+
+    /**
+     * B23.1 — take a role away, in one organization.
+     *
+     * There was no revoke procedure at all before this: the only path that
+     * revoked anything was offboarding, and it revoked every grant the account
+     * held anywhere. An administrator who wanted to stop one person driving
+     * had no way to do it that did not also stop them wrenching for a
+     * different company.
+     *
+     * Scoped exactly like the grant: the organization is the actor's own, the
+     * target must be a member of it, and a grant issued by another company is
+     * simply not found here.
+     */
+    revoke: roleProcedure("records.roles.revoke")
+      .input(
+        z.object({
+          targetUserId: z.number().int(),
+          role: z.enum(GRANTABLE_ROLES),
+          reason: z.string().min(3).max(1000),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const acting = await actingScopeFor(ctx.user.id);
+        if (!(await userInScope(input.targetUserId, acting))) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
+        }
+        const revoked = await revokeUserRole({
+          userId: input.targetUserId,
+          role: input.role,
+          organization: acting.tenantId,
+          revokedByUserId: ctx.user.id,
+          reason: input.reason,
+        });
+        if (revoked === 0) {
+          // Not "already revoked": from here, a grant this organization did not
+          // issue does not exist. Saying so would confirm the person holds it
+          // somewhere else.
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `No active ${input.role} grant issued by this organization`,
+          });
+        }
+        return { revoked, organization: acting.tenantId };
+      }),
+
+    /**
+     * B23.1A — resolve one grant migration 0170 refused to attribute.
+     *
+     * 0170 quarantined every grant whose holder already belonged to more than
+     * one company, because attributing it would have handed real authority to
+     * whichever company the migration guessed. Those people have lost access
+     * until somebody who actually knows says where the grant belongs. This is
+     * the door for saying it.
+     *
+     * It is deliberately NOT "set the organization on that row". The row is
+     * history — it records what was true before organization scope existed —
+     * so resolution issues a NEW, properly scoped grant and revokes the legacy
+     * one with a reason pointing at its replacement. The before and the after
+     * both stay answerable.
+     *
+     * The organization is the ACTOR's, never the request's: an administrator of
+     * ABC resolving a quarantined grant resolves it into ABC, which is the only
+     * company they are entitled to speak for. Resolving it into XYZ is not a
+     * permission they are missing; it is not a thing this procedure can do.
+     *
+     * Repeatable without being dangerous: the legacy row is found only while it
+     * is still quarantined and live, so a second call with the same id finds
+     * nothing and says so rather than issuing a second grant.
+     */
+    resolveLegacy: roleProcedure("records.roles.resolveLegacy")
+      .input(
+        z.object({
+          legacyGrantId: z.number().int().positive(),
+          reason: z.string().min(3).max(1000),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const acting = await actingScopeFor(ctx.user.id);
+
+        const legacy = await findUnresolvedLegacyGrant(input.legacyGrantId);
+        if (!legacy) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "No unresolved legacy grant with that identifier",
+          });
+        }
+
+        // The holder must be someone this organization actually employs. A
+        // quarantined grant belonged to a person in several companies; only the
+        // ones they are still a live member of may claim it.
+        if (!(await userInScope(legacy.userId, acting))) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "No unresolved legacy grant with that identifier",
+          });
+        }
+
+        // Grantable here means grantable at all: the same list `roles.grant`
+        // accepts. A legacy row naming a role outside it is not something to
+        // reissue quietly.
+        if (!GRANTABLE_ROLES.includes(legacy.role as (typeof GRANTABLE_ROLES)[number])) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Role "${legacy.role}" cannot be granted through this surface; revoke the legacy grant instead`,
+          });
+        }
+
+        // Already holds it here — the legacy row is simply redundant. Retire it
+        // rather than failing on the uniqueness key, and say which happened.
+        const already = await holdsRoleInOrganization({
+          userId: legacy.userId,
+          role: legacy.role,
+          organization: acting.tenantId,
+        });
+
+        let assignmentId: number | undefined;
+        if (!already) {
+          assignmentId = await grantUserRole({
+            userId: legacy.userId,
+            role: legacy.role as never,
+            scopeType: "organization",
+            orgRef: acting.tenantId,
+            grantedByUserId: ctx.user.id,
+            grantedAt: new Date(),
+          });
+        }
+
+        await revokeGrantById({
+          grantId: legacy.id,
+          revokedByUserId: ctx.user.id,
+          // The revoke reason is where the two rows are tied together, so an
+          // access review a year from now can follow one to the other.
+          reason: `resolved into ${acting.tenantId}${assignmentId ? ` as grant ${assignmentId}` : " (already held)"} — ${input.reason}`,
+        });
+
+        return {
+          resolved: true,
+          organization: acting.tenantId,
+          role: legacy.role,
+          assignmentId: assignmentId ?? null,
+          alreadyHeld: already,
+        };
       }),
   }),
 });
