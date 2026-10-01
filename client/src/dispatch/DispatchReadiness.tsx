@@ -12,7 +12,7 @@
  *   that reads as clear. Nothing here recombines it, and the overall verdict stays `verdict`.
  */
 import { trpc } from "@/lib/trpc";
-import { DispatchReadinessView, type ReadinessPanelState } from "./DispatchReadinessView";
+import { DispatchReadinessView, type ReadinessPanelState, type SchedulingPanelState } from "./DispatchReadinessView";
 
 export default function DispatchReadiness({ jobId }: { jobId: number }) {
   const validJob = Number.isInteger(jobId) && jobId > 0;
@@ -40,10 +40,27 @@ export default function DispatchReadiness({ jobId }: { jobId: number }) {
     }
   );
 
+  /*
+   * B23.3 — the scheduling answer for the same pair, beside the gate's own. `work.scheduleAssess`
+   * is behind `work.scheduling`; a dispatcher holds it, and a failed or refused read is shown as
+   * that rather than hidden. The window is the job's own bookings when it has any, and the server
+   * says which basis it used.
+   */
+  const scheduling = trpc.work.scheduleAssess.useQuery(
+    { operatorIds: [subject?.operatorId ?? 1], unitId: subject?.unitId ?? undefined, jobId },
+    { enabled: subject !== null, retry: false, staleTime: 0, gcTime: 0 }
+  );
+
   const refresh = () => {
     void assignments.refetch();
-    if (subject) void readiness.refetch();
+    if (subject) { void readiness.refetch(); void scheduling.refetch(); }
   };
+
+  const schedulingState: SchedulingPanelState | null =
+    !subject ? null
+    : scheduling.isError ? { kind: "failed", message: scheduling.error.message }
+    : scheduling.isPending ? { kind: "loading" }
+    : { kind: "loaded", assessment: scheduling.data?.ranked[0] ? { ...scheduling.data.ranked[0], basis: scheduling.data.basis } : null };
 
   const state: ReadinessPanelState =
     !validJob ? { kind: "failed", message: `"${String(jobId)}" is not a job.` }
@@ -61,7 +78,8 @@ export default function DispatchReadiness({ jobId }: { jobId: number }) {
       capabilities={readiness.data?.capabilities ?? null}
       capabilityVerdict={readiness.data?.capabilityVerdict ?? null}
       onRefresh={refresh}
-      refreshing={assignments.isFetching || readiness.isFetching}
+      refreshing={assignments.isFetching || readiness.isFetching || scheduling.isFetching}
+      scheduling={schedulingState}
     />
   );
 }

@@ -983,6 +983,11 @@ missing determination or an unrostered person reads UNKNOWN, which never rounds
 to feasible; the duty window's end is labelled as a projection from a clock read
 at a moment; and the answer is advice — nothing is booked by asking, and the
 readiness gate still runs at award.
+The answer sits on the dispatcher's readiness panel beside the gate's own
+verdict, in its own words — feasible, review, cannot say, not feasible — never
+"ready": the job's bookings give the window and the answer says so, the unit's
+own bookings are taken for the unit, and every finding carries a link derived
+from its reference by one rule.
 
 An inspector can now be handed one: a time-limited grant is issued against a
 unit, the code carries its reference rather than any authority, and opening it

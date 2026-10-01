@@ -52,15 +52,43 @@ Pinned counts moved deliberately: operational procedures 662 → 663, mounted pa
 inventory 389 → 390. `server/capitalAssets.test.ts` was reviewed for the calendar-fixture tripwire
 as its date entered the three-week band.
 
+## B23.3 — on the readiness panel, with the unit's own bookings
+
+The dispatcher's readiness panel (`client/src/dispatch/DispatchReadiness.tsx`) now asks
+`work.scheduleAssess` for the job's assigned operator and unit beside the gate's own verdict, and
+`DispatchReadinessView` renders the answer as a scheduling strip: the composed sentence, each
+finding with its engine and the server's own link, and the basis of the window. The strip's words
+are feasible, feasible with review, cannot say, not feasible — never "ready" — and the panel's
+dom test asks the same safety question of the whole document it always asked. A failed or refused
+read is shown as that; nothing is shown in its place.
+
+The procedure grew to serve the panel honestly:
+- candidates by `operatorIds` as well as `userIds`; an operator record with no user is named in
+  `skipped`, never silently dropped;
+- the window may come from the job: the job's own bookings give it and the duration, and the
+  answer's `basis` says so; a job with no booking yet gets the next twelve hours and an eight-hour
+  job, and the answer says that too;
+- the unit's own bookings are overlaid as taken spans (`resourceBooking:unit:<id>`), narrowing the
+  window for the unit the way a person's booking narrows it for them;
+- every finding carries a `deepLink` derived from its reference by one rule (`linkFor`), never
+  typed by hand: an HOS reference opens the HOS console, a calendar or booking reference opens
+  the work calendar, a readiness reference opens nothing because the finding is already on that
+  panel.
+
+Tests: `server/_core/schedulingIntelligence.test.ts` +2 (unit spans, links), 
+`server/schedulingIntelligence.db.test.ts` +1 (by operator and job, the unit's booking, every
+link), `client/src/dispatch/DispatchReadinessView.dom.test.tsx` +4 (absent unless supplied, the
+sentence and the links, never "Ready", failures on screen), two more axe surfaces.
+
 ## Known limitations
 
 - HOS duty status is not yet fed into the availability read; the composite reads it only through
   the determination.
-- Equipment availability is the readiness composer's verdict; unit bookings in `resourceBookings`
-  are not yet overlaid as taken spans for the unit.
-- No screen yet. The dispatch readiness panel is the natural host for the ranked list.
+- The panel assesses the job's assigned pair only; ranking a candidate pool for an unassigned
+  posting is the next use of the same procedure.
 
 ## Recommended next checkpoint
 
-Put the ranked answer on the dispatcher's readiness panel beside the gate's own verdict, with each
-finding's reference opening the record it cites, and overlay unit bookings as taken spans.
+Offer the ranked candidate pool on an open posting (`dispatchPostings`) through the same
+procedure, with the pool's eligibility from `dispatchMatching` as one more cited engine, so a
+dispatcher staffing a job sees who could take it and why the rest could not.

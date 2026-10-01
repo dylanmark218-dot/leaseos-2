@@ -47,6 +47,29 @@ export type CapabilityRow = { capability: string; status: string; detail?: strin
  */
 export type CapabilityVerdict = { status: string; explanation: string; missingRequired: readonly string[] };
 
+/**
+ * B23.3 — one finding from Scheduling Intelligence, exactly as `work.scheduleAssess` sends it. The
+ * link is the server's, derived from the reference; the panel never composes one.
+ */
+export type SchedulingFinding = { engine: string; state: "ok" | "review" | "block" | "unknown"; line: string; ref: string | null; deepLink: string | null };
+
+export type SchedulingAssessment = {
+  verdict: "FEASIBLE" | "FEASIBLE_WITH_REVIEW" | "NOT_FEASIBLE" | "UNKNOWN";
+  summary: string;
+  availableFrom: string | Date | null;
+  dutyWindowEndsAt: string | Date | null;
+  findings: SchedulingFinding[];
+  window: { from: string | Date; to: string | Date };
+  /** Where the window and the duration came from, in the server's words. */
+  basis: string;
+};
+
+/** The scheduling strip's state. Absent (undefined) means the panel does not show it at all. */
+export type SchedulingPanelState =
+  | { kind: "loading" }
+  | { kind: "failed"; message: string }
+  | { kind: "loaded"; assessment: SchedulingAssessment | null };
+
 export type ReadinessPanelState =
   | { kind: "loading" }
   | { kind: "failed"; message: string }
@@ -67,7 +90,67 @@ export type DispatchReadinessViewProps = {
   capabilityVerdict: CapabilityVerdict | null;
   onRefresh: () => void;
   refreshing: boolean;
+  /**
+   * B23.3 — the scheduling answer beside the gate's own. Advice, composed from engines that already
+   * decided; it never becomes the verdict above and it never says "ready" — its words are
+   * feasible, review, cannot say, not feasible.
+   */
+  scheduling?: SchedulingPanelState | null;
 };
+
+const SCHEDULING_WORDS: Record<SchedulingAssessment["verdict"], { label: string; tone: string }> = {
+  FEASIBLE: { label: "Feasible", tone: "border-emerald-600 bg-emerald-50 text-emerald-900" },
+  FEASIBLE_WITH_REVIEW: { label: "Feasible with review", tone: "border-amber-600 bg-amber-50 text-amber-900" },
+  UNKNOWN: { label: "Cannot say", tone: "border-slate-600 bg-slate-100 text-slate-900" },
+  NOT_FEASIBLE: { label: "Not feasible", tone: "border-red-700 bg-red-50 text-red-900" },
+};
+const FINDING_TONE: Record<SchedulingFinding["state"], string> = { ok: "text-emerald-800", review: "text-amber-800", block: "text-red-800", unknown: "text-slate-600" };
+const hhmm = (v: string | Date) => new Date(v).toISOString().slice(11, 16) + "Z";
+
+/** The scheduling strip. Rendered only when the container supplies it; a failed read is a failure on screen. */
+function SchedulingSection({ scheduling }: { scheduling: SchedulingPanelState }) {
+  return (
+    <section aria-label="Scheduling" className="space-y-2" data-testid="scheduling">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Scheduling</h2>
+      {scheduling.kind === "loading" && <p className="text-sm text-slate-600">Composing the scheduling answer…</p>}
+      {scheduling.kind === "failed" && (
+        <p role="alert" data-testid="scheduling-failed" className="rounded border border-red-700 bg-red-50 p-3 text-sm text-red-900">
+          The scheduling answer could not be read: {scheduling.message}. Nothing is shown in its place.
+        </p>
+      )}
+      {scheduling.kind === "loaded" && !scheduling.assessment && (
+        <p data-testid="scheduling-none" className="rounded border border-slate-400 bg-slate-50 p-3 text-sm">No scheduling answer was returned for this assignment.</p>
+      )}
+      {scheduling.kind === "loaded" && scheduling.assessment && (() => {
+        const a = scheduling.assessment;
+        const w = SCHEDULING_WORDS[a.verdict];
+        return (
+          <div data-testid="scheduling-verdict" data-scheduling={a.verdict} className={`space-y-2 rounded border p-3 ${w.tone}`}>
+            <div className="flex items-start justify-between gap-3">
+              <span className="text-sm font-medium">{a.summary}</span>
+              <span className="inline-block rounded border px-2 py-0.5 text-sm font-medium">{w.label}</span>
+            </div>
+            <p className="text-xs opacity-80">
+              Window {hhmm(a.window.from)}–{hhmm(a.window.to)}{a.availableFrom ? ` · free from ${hhmm(a.availableFrom)}` : ""}{a.dutyWindowEndsAt ? ` · duty window projected to end ${hhmm(a.dutyWindowEndsAt)}` : ""} · {a.basis}
+            </p>
+            <ul data-testid="scheduling-findings" className="space-y-1 text-sm">
+              {a.findings.map((f, i) => (
+                <li key={`${f.engine}-${i}`} className={FINDING_TONE[f.state]}>
+                  <span className="font-medium">{f.engine}</span>: {f.line}
+                  {f.deepLink ? <> <a className="underline" href={f.deepLink}>Open {f.ref ?? "the record"}</a></> : f.ref ? <span className="opacity-70"> ({f.ref})</span> : null}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs opacity-80">
+              Advice composed from engines that already decided, each line naming its engine. It never
+              becomes the verdict above; dispatch assigns, and the readiness gate runs at award.
+            </p>
+          </div>
+        );
+      })()}
+    </section>
+  );
+}
 
 const TONE: Record<Presented["readiness"], string> = {
   ready: "border-emerald-600 bg-emerald-50 text-emerald-900",
@@ -112,7 +195,7 @@ function Frame({ jobId, subject, children, onRefresh, refreshing }: {
 }
 
 export function DispatchReadinessView(props: DispatchReadinessViewProps) {
-  const { jobId, subject, state, capabilities, capabilityVerdict, onRefresh, refreshing } = props;
+  const { jobId, subject, state, capabilities, capabilityVerdict, onRefresh, refreshing, scheduling } = props;
   const frame = (children: React.ReactNode) =>
     <Frame jobId={jobId} subject={subject} onRefresh={onRefresh} refreshing={refreshing}>{children}</Frame>;
 
@@ -254,6 +337,8 @@ export function DispatchReadinessView(props: DispatchReadinessViewProps) {
               ))}
         </ul>
       </section>
+
+      {scheduling ? <SchedulingSection scheduling={scheduling} /> : null}
     </>
   );
 }

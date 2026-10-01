@@ -2,7 +2,7 @@
  * B23.2 — Scheduling Intelligence composes; it does not decide again. Every date fixed.
  */
 import { describe, expect, it } from "vitest";
-import { assessSchedule, earliestFree, rankAssessments, type ScheduleInput } from "./schedulingIntelligence";
+import { assessSchedule, earliestFree, linkFor, rankAssessments, type ScheduleInput } from "./schedulingIntelligence";
 import { determine, type Clocks, type HosRuleProfile } from "./hos";
 import type { AvailabilityResult } from "./calendarEvents";
 
@@ -128,5 +128,28 @@ describe("ranking", () => {
     ]);
     // E is rostered off but free from 06:00; B is free only from 07:00 — earlier availability wins inside the review rank.
     expect(ranked.map(r => [r.candidate.label, r.verdict])).toEqual([["C", "FEASIBLE"], ["E", "FEASIBLE_WITH_REVIEW"], ["B", "FEASIBLE_WITH_REVIEW"], ["A", "UNKNOWN"], ["D", "NOT_FEASIBLE"]]);
+  });
+});
+
+describe("the unit, and where a finding goes", () => {
+  it("a booking of the unit itself is taken for the unit, narrows the window, and blocks when the job no longer fits", () => {
+    const fits = assessSchedule(base({ unitBookings: [{ from: T(6), to: T(9), ref: "RB-U1" }], estimatedDurationMinutes: 4 * 60 }));
+    expect(fits.availableFrom).toEqual(T(9));
+    expect(fits.findings[0]).toMatchObject({ engine: "dispatch", state: "review", line: "Unit 147 is already booked 06:00Z–09:00Z (resourceBooking:unit:RB-U1).", deepLink: "/work" });
+    const blocked = assessSchedule(base({ unitBookings: [{ from: T(11), to: T(13), ref: "RB-U1" }], estimatedDurationMinutes: 8 * 60 }));
+    expect(blocked.verdict).toBe("NOT_FEASIBLE");
+    expect(blocked.findings.find(f => f.state === "block")!.line).toMatch(/does not fit before 11:00Z \(resourceBooking:unit:RB-U1\)/);
+    // A booking outside the window is not a finding at all.
+    expect(assessSchedule(base({ unitBookings: [{ from: T(19), to: T(21), ref: "RB-U2" }] })).findings.some(f => /RB-U2/.test(f.line))).toBe(false);
+  });
+
+  it("every finding carries a link derived from its reference, and none is typed by hand", () => {
+    expect(linkFor("hos.status:7@2027-04-12T06:00:00.000Z")).toBe("/hos-verification");
+    expect(linkFor("calendarEvent")).toBe("/work");
+    expect(linkFor("resourceBooking:unit:RB-1")).toBe("/work");
+    expect(linkFor("dispatch.readiness:7/147")).toBeNull();
+    expect(linkFor(null)).toBeNull();
+    const a = assessSchedule(base());
+    for (const f of a.findings) expect(f.deepLink, f.line).toBe(linkFor(f.ref));
   });
 });

@@ -42,7 +42,24 @@ export type Finding = {
   line: string;
   /** The reference to go and look at, when the engine supplied one. */
   ref: string | null;
+  /** Where tapping the finding goes. Derived from the reference, never typed by hand; null when there is nowhere to go. */
+  deepLink: string | null;
 };
+
+/**
+ * The screen a reference opens. Derived the way calendarProjection derives its links: from the
+ * reference's kind, so a wrong link traces to one rule. `hos.status:<op>@<at>` opens the HOS
+ * console; `dispatch.readiness:<op>/<unit>` the readiness panel; a record type opens the work
+ * calendar, where the window is shown and the record itself only to those who may read it.
+ */
+export function linkFor(ref: string | null): string | null {
+  if (!ref) return null;
+  if (ref.startsWith("hos.status:")) return "/hos-verification";
+  if (ref.startsWith("dispatch.readiness:")) return null;   // the finding is already on that panel
+  if (ref === "calendarEvent" || ref === "leaveRequest" || ref === "crewMember") return "/work";
+  if (ref.startsWith("resourceBooking")) return "/work";
+  return null;
+}
 
 export type ScheduleVerdict = "FEASIBLE" | "FEASIBLE_WITH_REVIEW" | "NOT_FEASIBLE" | "UNKNOWN";
 
@@ -70,6 +87,8 @@ export type ScheduleInput = {
   /** How much of it is driving. Null when dispatch has no estimate; the driving check then reads unknown. */
   estimatedDriveMinutes: number | null;
   availability: AvailabilityResult;
+  /** Dispatch's bookings of the unit itself, from the dispatch context. Taken for the unit the way a person's booking is taken for them. */
+  unitBookings?: readonly { from: Date; to: Date; ref: string }[];
   hos: HosFacts | null;
   readiness: ReadinessFacts | null;
   now: Date;
@@ -93,6 +112,7 @@ export type ScheduleAssessment = {
 const WINDOW_LIMITS = ["shift_elapsed_minutes", "daily_on_duty_minutes", "shift_on_duty_minutes"] as const;
 
 const fmt = (d: Date) => d.toISOString().slice(11, 16) + "Z";
+const finding = (f: Omit<Finding, "deepLink">): Finding => ({ ...f, deepLink: linkFor(f.ref) });
 
 /* ------------------------------------------------------------------ */
 /* The calendar                                                         */
@@ -112,46 +132,51 @@ export function earliestFree(window: ScheduleWindow, spans: readonly { from: Dat
 
 function calendarFindings(input: ScheduleInput): { findings: Finding[]; availableFrom: Date | null } {
   const a = input.availability;
-  const availableFrom = earliestFree(input.window, a.windows);
+  const unitSpans = (input.unitBookings ?? [])
+    .filter(b => b.from.getTime() < input.window.to.getTime() && b.to.getTime() > input.window.from.getTime())
+    .map(b => ({ from: new Date(Math.max(b.from.getTime(), input.window.from.getTime())), to: new Date(Math.min(b.to.getTime(), input.window.to.getTime())), status: "ASSIGNED" as const, basis: `resourceBooking:unit:${b.ref}` }));
+  const availableFrom = earliestFree(input.window, [...a.windows, ...unitSpans]);
   const findings: Finding[] = [];
-  const taken = a.windows.filter(w => w.status === "UNAVAILABLE" || w.status === "ASSIGNED").sort((x, y) => x.from.getTime() - y.from.getTime());
+  const taken = [...a.windows.filter(w => w.status === "UNAVAILABLE" || w.status === "ASSIGNED"), ...unitSpans].sort((x, y) => x.from.getTime() - y.from.getTime());
   // A taken span narrows the window; it blocks only when what is left cannot hold the job.
   for (const w of taken) {
-    findings.push({
+    findings.push(finding({
       engine: w.status === "ASSIGNED" ? "dispatch" : "calendar",
       state: "review",
-      line: w.status === "ASSIGNED"
+      line: w.basis.startsWith("resourceBooking:unit:")
+        ? `${input.unit?.label ?? "The unit"} is already booked ${fmt(w.from)}–${fmt(w.to)} (${w.basis}).`
+        : w.status === "ASSIGNED"
         ? `Already booked ${fmt(w.from)}–${fmt(w.to)} (${w.basis}).`
         : `Unavailable ${fmt(w.from)}–${fmt(w.to)} (${w.basis}); what for is not part of this answer.`,
       ref: w.basis,
-    });
+    }));
   }
   if (availableFrom === null) {
-    findings.push({ engine: "calendar", state: "block", line: "The whole window is spoken for.", ref: null });
+    findings.push(finding({ engine: "calendar", state: "block", line: "The whole window is spoken for.", ref: null }));
     return { findings, availableFrom };
   }
   const projectedEnd = availableFrom.getTime() + input.estimatedDurationMinutes * 60_000;
   const nextTaken = taken.find(w => w.from.getTime() > availableFrom.getTime());
   const room = Math.min(input.window.to.getTime(), nextTaken?.from.getTime() ?? Infinity);
   if (projectedEnd > room) {
-    findings.push({ engine: nextTaken?.status === "ASSIGNED" && nextTaken.from.getTime() < input.window.to.getTime() ? "dispatch" : "calendar", state: "block", line: `Free from ${fmt(availableFrom)}, but a ${input.estimatedDurationMinutes} min job does not fit before ${fmt(new Date(room))}${nextTaken && nextTaken.from.getTime() <= input.window.to.getTime() ? ` (${nextTaken.basis})` : " (the end of the window)"}.`, ref: nextTaken?.basis ?? null });
+    findings.push(finding({ engine: nextTaken?.status === "ASSIGNED" && nextTaken.from.getTime() < input.window.to.getTime() ? "dispatch" : "calendar", state: "block", line: `Free from ${fmt(availableFrom)}, but a ${input.estimatedDurationMinutes} min job does not fit before ${fmt(new Date(room))}${nextTaken && nextTaken.from.getTime() <= input.window.to.getTime() ? ` (${nextTaken.basis})` : " (the end of the window)"}.`, ref: nextTaken?.basis ?? null }));
     return { findings, availableFrom };
   }
   switch (a.status) {
     case "UNKNOWN":
-      findings.push({ engine: "calendar", state: "unknown", line: "No rotation, duty record or booking covers this window; nobody has established that this person is working.", ref: null });
+      findings.push(finding({ engine: "calendar", state: "unknown", line: "No rotation, duty record or booking covers this window; nobody has established that this person is working.", ref: null }));
       break;
     case "OFF_DUTY":
-      findings.push({ engine: "calendar", state: "review", line: "Rostered off for this window; asking them in is a decision, not a default.", ref: null });
+      findings.push(finding({ engine: "calendar", state: "review", line: "Rostered off for this window; asking them in is a decision, not a default.", ref: null }));
       break;
     case "AVAILABLE":
     case "ON_DUTY":
-      findings.push({ engine: "calendar", state: "ok", line: `Rostered and free from ${fmt(availableFrom)}.`, ref: null });
+      findings.push(finding({ engine: "calendar", state: "ok", line: `Rostered and free from ${fmt(availableFrom)}.`, ref: null }));
       break;
     case "UNAVAILABLE":
     case "ASSIGNED":
       // Partly taken: the spans above say where; what is left is stated here.
-      findings.push({ engine: "calendar", state: "review", line: `Free from ${fmt(availableFrom)}; earlier in the window is taken.`, ref: null });
+      findings.push(finding({ engine: "calendar", state: "review", line: `Free from ${fmt(availableFrom)}; earlier in the window is taken.`, ref: null }));
       break;
   }
   return { findings, availableFrom };
@@ -164,16 +189,16 @@ function calendarFindings(input: ScheduleInput): { findings: Finding[]; availabl
 function hosFindings(input: ScheduleInput, startAt: Date | null): { findings: Finding[]; dutyWindowEndsAt: Date | null } {
   const findings: Finding[] = [];
   if (!input.hos) {
-    findings.push({ engine: "hos", state: "unknown", line: "No hours-of-service determination was read for this person.", ref: null });
+    findings.push(finding({ engine: "hos", state: "unknown", line: "No hours-of-service determination was read for this person.", ref: null }));
     return { findings, dutyWindowEndsAt: null };
   }
   const { determination: d, asOf, ref } = input.hos;
   if (d.verdict === "exceeded") {
-    findings.push({ engine: "hos", state: "block", line: `Hours of service: ${d.explanation}`, ref });
+    findings.push(finding({ engine: "hos", state: "block", line: `Hours of service: ${d.explanation}`, ref }));
     return { findings, dutyWindowEndsAt: null };
   }
   if (d.verdict === "unknown") {
-    findings.push({ engine: "hos", state: "unknown", line: `Hours of service: ${d.explanation}`, ref });
+    findings.push(finding({ engine: "hos", state: "unknown", line: `Hours of service: ${d.explanation}`, ref }));
     return { findings, dutyWindowEndsAt: null };
   }
   // Within every verified limit. Project the duty window's end from the tightest window clock.
@@ -186,23 +211,23 @@ function hosFindings(input: ScheduleInput, startAt: Date | null): { findings: Fi
     const projectedEnd = new Date(start.getTime() + input.estimatedDurationMinutes * 60_000);
     if (projectedEnd.getTime() > dutyWindowEndsAt.getTime()) {
       const short = Math.round((projectedEnd.getTime() - dutyWindowEndsAt.getTime()) / 60_000);
-      findings.push({ engine: "hos", state: "block", line: `The remaining hours of service (${tightest.limitKey.replace(/_/g, " ")}: ${Math.round(tightest.remainingMinutes!)} min as of ${fmt(asOf)}) mean the projected job cannot finish before the duty window ends at ${fmt(dutyWindowEndsAt)} — short by ${short} min. Projected from the clock, not a determination.`, ref });
+      findings.push(finding({ engine: "hos", state: "block", line: `The remaining hours of service (${tightest.limitKey.replace(/_/g, " ")}: ${Math.round(tightest.remainingMinutes!)} min as of ${fmt(asOf)}) mean the projected job cannot finish before the duty window ends at ${fmt(dutyWindowEndsAt)} — short by ${short} min. Projected from the clock, not a determination.`, ref }));
     } else {
-      findings.push({ engine: "hos", state: "ok", line: `Duty window projected to end ${fmt(dutyWindowEndsAt)} (${tightest.limitKey.replace(/_/g, " ")}, as of ${fmt(asOf)}); the job is projected to finish ${fmt(projectedEnd)}.`, ref });
+      findings.push(finding({ engine: "hos", state: "ok", line: `Duty window projected to end ${fmt(dutyWindowEndsAt)} (${tightest.limitKey.replace(/_/g, " ")}, as of ${fmt(asOf)}); the job is projected to finish ${fmt(projectedEnd)}.`, ref }));
     }
   } else {
-    findings.push({ engine: "hos", state: "unknown", line: "Within every verified limit, but no verified window limit gives a duty-window end to project from.", ref });
+    findings.push(finding({ engine: "hos", state: "unknown", line: "Within every verified limit, but no verified window limit gives a duty-window end to project from.", ref }));
   }
   if (input.estimatedDriveMinutes != null) {
     const f = tripFeasibility(d, input.estimatedDriveMinutes);
-    findings.push({
+    findings.push(finding({
       engine: "hos",
       state: f.feasible === "yes" ? "ok" : f.feasible === "no" ? "block" : "unknown",
       line: `Driving: ${f.reasons[0]}`,
       ref,
-    });
+    }));
   } else {
-    findings.push({ engine: "hos", state: "unknown", line: "Driving: dispatch gave no driving estimate, so the driving limit was not compared.", ref });
+    findings.push(finding({ engine: "hos", state: "unknown", line: "Driving: dispatch gave no driving estimate, so the driving limit was not compared.", ref }));
   }
   return { findings, dutyWindowEndsAt };
 }
@@ -212,15 +237,15 @@ function hosFindings(input: ScheduleInput, startAt: Date | null): { findings: Fi
 /* ------------------------------------------------------------------ */
 
 function readinessFindings(input: ScheduleInput): Finding[] {
-  if (!input.unit) return [{ engine: "readiness", state: "unknown", line: "No unit named; equipment readiness was not evaluated.", ref: null }];
-  if (!input.readiness) return [{ engine: "readiness", state: "unknown", line: `Readiness for ${input.unit.label} was not read.`, ref: null }];
+  if (!input.unit) return [finding({ engine: "readiness", state: "unknown", line: "No unit named; equipment readiness was not evaluated.", ref: null })];
+  if (!input.readiness) return [finding({ engine: "readiness", state: "unknown", line: `Readiness for ${input.unit.label} was not read.`, ref: null })];
   const r = input.readiness;
   const named = r.blockers.slice(0, 4).map(b => b.label).join("; ");
   switch (r.verdict) {
-    case "blocked": return [{ engine: "readiness", state: "block", line: `${input.unit.label} with ${input.candidate.label}: blocked — ${named || "see the readiness panel"}.`, ref: r.ref }];
-    case "eligible_review": return [{ engine: "readiness", state: "review", line: `${input.unit.label} with ${input.candidate.label}: needs review — ${named || "see the readiness panel"}.`, ref: r.ref }];
-    case "unknown": return [{ engine: "readiness", state: "unknown", line: `${input.unit.label} with ${input.candidate.label}: not established — ${named || "an axis could not be evaluated"}.`, ref: r.ref }];
-    case "eligible": return [{ engine: "readiness", state: "ok", line: `${input.unit.label} with ${input.candidate.label}: ready as of the last composition.`, ref: r.ref }];
+    case "blocked": return [finding({ engine: "readiness", state: "block", line: `${input.unit.label} with ${input.candidate.label}: blocked — ${named || "see the readiness panel"}.`, ref: r.ref })];
+    case "eligible_review": return [finding({ engine: "readiness", state: "review", line: `${input.unit.label} with ${input.candidate.label}: needs review — ${named || "see the readiness panel"}.`, ref: r.ref })];
+    case "unknown": return [finding({ engine: "readiness", state: "unknown", line: `${input.unit.label} with ${input.candidate.label}: not established — ${named || "an axis could not be evaluated"}.`, ref: r.ref })];
+    case "eligible": return [finding({ engine: "readiness", state: "ok", line: `${input.unit.label} with ${input.candidate.label}: ready as of the last composition.`, ref: r.ref })];
   }
 }
 

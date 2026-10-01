@@ -643,9 +643,13 @@ export const workRouter = router({
    */
   scheduleAssess: roleProcedure("work.scheduleAssess")
     .input(z.object({
-      userIds: z.array(z.number().int().positive()).min(1).max(20),
-      from: z.coerce.date(), to: z.coerce.date(),
-      estimatedDurationMinutes: z.number().int().min(1).max(7 * 24 * 60),
+      /** Candidates by user, by operator record, or both. At least one. */
+      userIds: z.array(z.number().int().positive()).max(20).default([]),
+      operatorIds: z.array(z.number().int().positive()).max(20).default([]),
+      /** The window. Optional when a job is named: the job's own bookings give it, and the answer says so. */
+      from: z.coerce.date().optional(), to: z.coerce.date().optional(),
+      /** Optional when a job is named: the booking's length, else eight hours, and the answer says so. */
+      estimatedDurationMinutes: z.number().int().min(1).max(7 * 24 * 60).optional(),
       estimatedDriveMinutes: z.number().int().min(0).max(10_000).optional(),
       unitId: z.number().int().positive().optional(),
       jobId: z.number().int().positive().optional(),
@@ -655,19 +659,57 @@ export const workRouter = router({
     .query(async ({ ctx, input }) => {
       const d = await db();
       const c = await caller(d, ctx);
-      if (input.to.getTime() <= input.from.getTime() || input.to.getTime() - input.from.getTime() > 14 * DAY) throw new TRPCError({ code: "BAD_REQUEST", message: "The window must be ahead of its start and at most 14 days" });
+      // Who is being asked about: operator records resolve to their users; a record with no user is skipped and named.
+      const userIds = new Set(input.userIds);
+      const skipped: string[] = [];
+      if (input.operatorIds.length) {
+        const ops = await d.select({ id: operators.id, userId: operators.userId }).from(operators).where(inArray(operators.id, input.operatorIds));
+        for (const id of input.operatorIds) {
+          const op = ops.find(o => o.id === id);
+          if (op?.userId) userIds.add(op.userId); else skipped.push(`operator ${id} has no user`);
+        }
+      }
+      if (!userIds.size) throw new TRPCError({ code: "BAD_REQUEST", message: skipped.length ? `Nobody to assess: ${skipped.join("; ")}` : "Name at least one candidate" });
+      // The window: given, or the job's own bookings, or the next twelve hours — and the answer says which.
+      let from = input.from ?? null, to = input.to ?? null;
+      let basis: string;
+      let duration = input.estimatedDurationMinutes ?? null;
+      if (from && to) {
+        basis = "window as asked";
+      } else if (input.jobId) {
+        const jobBookings = await d.select().from(resourceBookings).where(and(eq(resourceBookings.jobId, input.jobId), inArray(resourceBookings.bookingState, ["tentative", "confirmed"]))).limit(50);
+        if (jobBookings.length) {
+          from = new Date(Math.min(...jobBookings.map(b => b.startsAt.getTime())));
+          to = new Date(Math.max(...jobBookings.map(b => b.endsAt.getTime())));
+          basis = `window from job ${input.jobId}'s ${jobBookings.length} booking(s)`;
+          duration = duration ?? Math.max(1, Math.round((to.getTime() - from.getTime()) / 60_000));
+        } else {
+          from = input.now; to = new Date(input.now.getTime() + 12 * 3_600_000);
+          basis = `job ${input.jobId} has no booking yet, so the next twelve hours were assumed`;
+        }
+      } else {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Give a window, or a job whose bookings give one" });
+      }
+      if (duration == null) { duration = 8 * 60; basis += "; an eight-hour job was assumed"; }
+      else if (input.estimatedDurationMinutes == null) basis += "; the duration is the booking's length";
+      if (to.getTime() <= from.getTime() || to.getTime() - from.getTime() > 14 * DAY) throw new TRPCError({ code: "BAD_REQUEST", message: "The window must be ahead of its start and at most 14 days" });
       const unit = input.unitId ? (await d.select({ id: units.id, unitNumber: units.unitNumber }).from(units).where(eq(units.id, input.unitId)).limit(1))[0] ?? null : null;
       if (input.unitId && !unit) throw new TRPCError({ code: "NOT_FOUND", message: "No such unit" });
+      // The unit's own bookings, from dispatch: taken for the unit the way a person's booking is taken for them.
+      const unitBookings = unit
+        ? (await d.select().from(resourceBookings).where(and(eq(resourceBookings.resourceType, "unit"), eq(resourceBookings.resourceRef, String(unit.id)), inArray(resourceBookings.bookingState, ["tentative", "confirmed"]))).limit(200))
+            .map(b => ({ from: b.startsAt, to: b.endsAt, ref: String(b.id) }))
+        : [];
       const assessments: ScheduleAssessment[] = [];
-      for (const userId of Array.from(new Set(input.userIds))) {
-        const { entries } = await calendarFor(d, { forUserId: userId, acting: c.acting, from: input.from, to: input.to, audience: { kind: "operational", userId: c.userId }, now: input.now });
-        const availability = availabilityFor({ userId, from: input.from, to: input.to, entries: entries as VisibleEvent[], rotationOn: await rotationOnFor(d, userId, input.from) });
+      for (const userId of Array.from(userIds)) {
+        const { entries } = await calendarFor(d, { forUserId: userId, acting: c.acting, from, to, audience: { kind: "operational", userId: c.userId }, now: input.now });
+        const availability = availabilityFor({ userId, from, to, entries: entries as VisibleEvent[], rotationOn: await rotationOnFor(d, userId, from) });
         const op = (await d.select({ id: operators.id, name: operators.name }).from(operators).where(eq(operators.userId, userId)).limit(1))[0] ?? null;
         // HOS: the determination the HOS screen shows, read as of the window's start; nothing is computed here.
         let hos: Parameters<typeof assessSchedule>[0]["hos"] = null;
         if (op) {
-          const r = await determinationFor(d, { ...(input.hos ?? {}), at: input.from, operatorId: op.id });
-          hos = { determination: r.determination, asOf: input.from, ref: `hos.status:${op.id}@${input.from.toISOString()}` };
+          const r = await determinationFor(d, { ...(input.hos ?? {}), at: from, operatorId: op.id });
+          hos = { determination: r.determination, asOf: from, ref: `hos.status:${op.id}@${from.toISOString()}` };
         }
         // Readiness: the composer's own verdict for this person on this unit, never re-derived.
         let readiness: Parameters<typeof assessSchedule>[0]["readiness"] = null;
@@ -682,13 +724,13 @@ export const workRouter = router({
         assessments.push(assessSchedule({
           candidate: { userId, label: op?.name ?? `user ${userId}` },
           unit: unit ? { unitId: unit.id, label: `Unit ${unit.unitNumber}` } : null,
-          window: { from: input.from, to: input.to },
-          estimatedDurationMinutes: input.estimatedDurationMinutes, estimatedDriveMinutes: input.estimatedDriveMinutes ?? null,
-          availability, hos: op ? hos : null, readiness, now: input.now,
+          window: { from, to },
+          estimatedDurationMinutes: duration, estimatedDriveMinutes: input.estimatedDriveMinutes ?? null,
+          availability, unitBookings, hos: op ? hos : null, readiness, now: input.now,
         }));
-        if (!op) assessments[assessments.length - 1]!.findings.unshift({ engine: "hos", state: "unknown", line: "No operator record for this person; hours of service and readiness were not read.", ref: null });
+        if (!op) assessments[assessments.length - 1]!.findings.unshift({ engine: "hos", state: "unknown", line: "No operator record for this person; hours of service and readiness were not read.", ref: null, deepLink: null });
       }
-      return { from: input.from, to: input.to, ranked: rankAssessments(assessments), note: "Advice composed from engines that already decided, each line citing its engine. UNKNOWN is not feasible. Dispatch assigns; the readiness gate runs at award." };
+      return { from, to, basis, skipped, ranked: rankAssessments(assessments), note: "Advice composed from engines that already decided, each line citing its engine. UNKNOWN is not feasible. Dispatch assigns; the readiness gate runs at award." };
     }),
 
   /** What the worker runs each heartbeat, on demand. Idempotent: run it twice and the second pass changes nothing. */

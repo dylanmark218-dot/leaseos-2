@@ -104,4 +104,36 @@ d("one answer for dispatch, composed and cited", () => {
     await expect(caller(dispatcher).work.scheduleAssess({ userIds: [driver], from: TO, to: FROM, estimatedDurationMinutes: 60, now: NOW })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(caller(dispatcher).work.scheduleAssess({ userIds: [driver], from: FROM, to: TO, estimatedDurationMinutes: 60, unitId: 999_999_999, now: NOW })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
+
+  it("B23.3 — asked by operator and job: the window is the job's booking, the unit's own booking is taken for the unit, and every finding carries its link", async () => {
+    const dispatcher = await person("dispatcher");
+    const driver = await person("driver");
+    const opId = await operatorFor(driver, "Dylan");
+    const u = await unit();
+    const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Acme', 'LSD 04-12-052-09W5', 'dispatched', 0)", [`JOB-${rnd()}`.slice(0, 40)]);
+    const jobId = Number(job.insertId);
+    await pool.execute("INSERT INTO resourceBookings (resourceType, resourceRef, jobId, startsAt, endsAt, bookingState) VALUES ('operator', ?, ?, ?, ?, 'confirmed')", [String(opId), jobId, local(2027, 4, 12, 6), local(2027, 4, 12, 14)]);
+    // Another job holds the unit for the first three hours of that window.
+    await pool.execute("INSERT INTO resourceBookings (resourceType, resourceRef, jobId, startsAt, endsAt, bookingState) VALUES ('unit', ?, NULL, ?, ?, 'confirmed')", [String(u.id), local(2027, 4, 12, 6), local(2027, 4, 12, 9)]);
+
+    const r = await caller(dispatcher).work.scheduleAssess({ operatorIds: [opId], unitId: u.id, jobId, now: NOW });
+    expect(r.basis).toBe(`window from job ${jobId}'s 1 booking(s); the duration is the booking's length`);
+    expect(r.from.toISOString()).toBe(local(2027, 4, 12, 6).toISOString());
+    expect(r.to.toISOString()).toBe(local(2027, 4, 12, 14).toISOString());
+    const a = r.ranked[0]!;
+    expect(a.candidate.userId).toBe(driver);
+    const unitSpan = a.findings.find(f => /is already booked/.test(f.line))!;
+    expect(unitSpan).toMatchObject({ engine: "dispatch", state: "review", deepLink: "/work" });
+    expect(unitSpan.line).toMatch(new RegExp(`^Unit ${u.unitNumber} is already booked .*\\(resourceBooking:unit:`));
+    // The person's own booking for this very job is taken too — the window is what the job holds, and the unit's booking leaves 09:00–14:00 for an eight-hour booking.
+    expect(a.verdict).toBe("NOT_FEASIBLE");
+    for (const f of a.findings) expect(f).toHaveProperty("deepLink");
+    expect(a.findings.find(f => f.engine === "hos")!.deepLink).toBe("/hos-verification");
+
+    // No booking at all: the next twelve hours are assumed, and the answer says so.
+    const [bare] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Acme', 'LSD 04-12-052-09W5', 'dispatched', 0)", [`JOB-${rnd()}`.slice(0, 40)]);
+    const none = await caller(dispatcher).work.scheduleAssess({ operatorIds: [opId], jobId: Number(bare.insertId), now: NOW });
+    expect(none.basis).toMatch(/has no booking yet, so the next twelve hours were assumed; an eight-hour job was assumed/);
+    await expect(caller(dispatcher).work.scheduleAssess({ operatorIds: [999_999_999], jobId, now: NOW })).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringMatching(/operator 999999999 has no user/) });
+  });
 });

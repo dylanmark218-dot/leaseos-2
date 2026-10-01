@@ -376,3 +376,52 @@ describe("the overall verdict stays the server's", () => {
     expect(screen.getByTestId("capability-route restrictions")).toHaveAttribute("data-readiness", "blocked");
   });
 });
+
+/* ── B23.3. the scheduling strip beside the gate ───────────────────────────── */
+
+describe("the scheduling strip", () => {
+  const assessment = (verdict: "FEASIBLE" | "FEASIBLE_WITH_REVIEW" | "NOT_FEASIBLE" | "UNKNOWN") => ({
+    verdict, summary: "Dylan and Unit 147 are available for this job from 06:00Z, but the remaining hours of service mean the projected job cannot finish before the duty window ends at 10:00Z.",
+    availableFrom: "2027-04-12T06:00:00Z", dutyWindowEndsAt: "2027-04-12T10:00:00Z", window: { from: "2027-04-12T06:00:00Z", to: "2027-04-12T18:00:00Z" }, basis: "window from job 41's 1 booking(s); the duration is the booking's length",
+    findings: [
+      { engine: "calendar", state: "ok" as const, line: "Rostered and free from 06:00Z.", ref: null, deepLink: null },
+      { engine: "hos", state: "block" as const, line: "The remaining hours of service mean the projected job cannot finish before the duty window ends at 10:00Z.", ref: "hos.status:7@2027-04-12T06:00:00.000Z", deepLink: "/hos-verification" },
+      { engine: "readiness", state: "review" as const, line: "Unit 147 with Dylan: needs review — Medical review due.", ref: "dispatch.readiness:7/12", deepLink: null },
+    ],
+  });
+
+  it("is absent unless the container supplies it", () => {
+    render(<DispatchReadinessView {...props()} />);
+    expect(screen.queryByTestId("scheduling")).toBeNull();
+  });
+
+  it("shows the composed sentence, each finding with its engine, and the server's link — and never the word Ready", () => {
+    render(<DispatchReadinessView {...props({ state: { kind: "loaded", result: result({ verdict: "blocked", blockers: [blocker()] }) }, scheduling: { kind: "loaded", assessment: assessment("NOT_FEASIBLE") } })} />);
+    const strip = screen.getByTestId("scheduling-verdict");
+    expect(strip.getAttribute("data-scheduling")).toBe("NOT_FEASIBLE");
+    expect(strip).toHaveTextContent(/cannot finish before the duty window ends/);
+    expect(strip).toHaveTextContent("Not feasible");
+    expect(strip).toHaveTextContent("window from job 41's 1 booking(s)");
+    const link = screen.getByRole("link", { name: /Open hos\.status:7@/ });
+    expect(link.getAttribute("href")).toBe("/hos-verification");
+    // A finding with nowhere to go shows its reference and no link.
+    expect(screen.queryByRole("link", { name: /dispatch\.readiness/ })).toBeNull();
+    expect(strip).toHaveTextContent("(dispatch.readiness:7/12)");
+    expect(saysReadyAnywhere()).toBe(false);
+  });
+
+  it("a feasible answer still does not say Ready, and never touches the verdict above", () => {
+    render(<DispatchReadinessView {...props({ state: { kind: "loaded", result: result({ verdict: "blocked", blockers: [blocker()] }) }, scheduling: { kind: "loaded", assessment: assessment("FEASIBLE") } })} />);
+    expect(screen.getByTestId("scheduling-verdict")).toHaveTextContent("Feasible");
+    expect(saysReadyAnywhere()).toBe(false);
+    expect(overall().getAttribute("data-readiness")).toBe("blocked");
+  });
+
+  it("a failed read is a failure on screen, and an empty answer says so", () => {
+    render(<DispatchReadinessView {...props({ scheduling: { kind: "failed", message: "Requires work.scheduling" } })} />);
+    expect(screen.getByTestId("scheduling-failed")).toHaveTextContent("Requires work.scheduling");
+    cleanup();
+    render(<DispatchReadinessView {...props({ scheduling: { kind: "loaded", assessment: null } })} />);
+    expect(screen.getByTestId("scheduling-none")).toBeInTheDocument();
+  });
+});

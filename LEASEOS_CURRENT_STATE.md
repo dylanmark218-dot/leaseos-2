@@ -16,7 +16,7 @@ here can be added rather than read.
 | Permissions | **360** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **127** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **313 / 4231** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **313 / 4234** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -933,6 +933,11 @@ missing determination or an unrostered person reads UNKNOWN, which never rounds
 to feasible; the duty window's end is labelled as a projection from a clock read
 at a moment; and the answer is advice — nothing is booked by asking, and the
 readiness gate still runs at award.
+The answer sits on the dispatcher's readiness panel beside the gate's own
+verdict, in its own words — feasible, review, cannot say, not feasible — never
+"ready": the job's bookings give the window and the answer says so, the unit's
+own bookings are taken for the unit, and every finding carries a link derived
+from its reference by one rule.
 
 An inspector can now be handed one: a time-limited grant is issued against a
 unit, the code carries its reference rather than any authority, and opening it
