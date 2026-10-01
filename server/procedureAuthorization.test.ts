@@ -329,7 +329,7 @@ describe("the untouched API is counted, not forgotten", () => {
 
   it("keeps the inventory document in step with the code", () => {
     expect(inventory).toContain("ROLE_AUTHORIZED");
-    expect(inventory).toContain("387");
+    expect(inventory).toContain("416");
   });
 });
 
