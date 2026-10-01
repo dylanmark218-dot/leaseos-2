@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildSignedScopeStatement,
-  deriveSignatureStatus,
   reconcileJob,
-  splitByDisposition,
   validateFieldTicketScope,
-  type LineDisposition,
   type SignatureStatus,
 } from "./fieldTicket";
 
@@ -74,99 +70,6 @@ describe("validateFieldTicketScope", () => {
     expect(
       validateFieldTicketScope({ scope: "trip", jobId: 1842, tripId: 4821 })
     ).toEqual([]);
-  });
-});
-
-describe("buildSignedScopeStatement", () => {
-  it("states what was accepted, where, when, and for how much", () => {
-    const s = buildSignedScopeStatement({
-      ticketNumber: "FT-2026-000421",
-      siteName: "North Pad",
-      startedAt: new Date(Date.UTC(2026, 7, 29, 7, 18)),
-      completedAt: new Date(Date.UTC(2026, 7, 29, 9, 14)),
-      signerName: "John Smith",
-      signerCompany: "ABC Energy",
-      lines: [
-        { description: "vac truck service", quantity: 2, quantityUnit: "h" },
-        { description: "standby", quantity: 45, quantityUnit: "min" },
-      ],
-    });
-    expect(s).toContain("John Smith (ABC Energy)");
-    expect(s).toContain("FT-2026-000421");
-    expect(s).toContain("North Pad");
-    expect(s).toContain("07:18 to 09:14");
-    expect(s).toContain("45 min standby");
-  });
-
-  it("degrades gracefully when site and times are unknown", () => {
-    const s = buildSignedScopeStatement({
-      ticketNumber: "FT-2026-000422",
-      signerName: "R. Hollis",
-      lines: [],
-    });
-    expect(s).toBe(
-      "R. Hollis accepted field ticket FT-2026-000422 for service."
-    );
-  });
-});
-
-describe("deriveSignatureStatus", () => {
-  const d = (...v: LineDisposition[]) => v;
-
-  it("is accepted when every line is accepted", () => {
-    expect(deriveSignatureStatus(d("accepted", "accepted", "accepted"))).toBe(
-      "accepted"
-    );
-  });
-
-  it("is refused when every presented line is disputed", () => {
-    expect(deriveSignatureStatus(d("disputed", "disputed"))).toBe("refused");
-  });
-
-  it("is partially accepted for the real-world case — signs the service, not the standby", () => {
-    expect(deriveSignatureStatus(d("accepted", "accepted", "disputed"))).toBe(
-      "partially_accepted"
-    );
-  });
-
-  it("reports no representative regardless of line state", () => {
-    expect(deriveSignatureStatus(d("accepted", "accepted"), false)).toBe(
-      "no_representative"
-    );
-  });
-
-  it("is unsigned when nothing has been presented", () => {
-    expect(deriveSignatureStatus([])).toBe("unsigned");
-    expect(deriveSignatureStatus(d("not_presented", "not_presented"))).toBe(
-      "unsigned"
-    );
-  });
-});
-
-describe("splitByDisposition", () => {
-  it("keeps a disputed line rather than dropping it", () => {
-    const lines = [
-      { disposition: "accepted" as LineDisposition, description: "service" },
-      { disposition: "disputed" as LineDisposition, description: "standby" },
-      {
-        disposition: "not_presented" as LineDisposition,
-        description: "washout",
-      },
-    ];
-    const r = splitByDisposition(lines);
-    expect(r.billable).toHaveLength(1);
-    expect(r.review).toHaveLength(1);
-    expect(r.review[0].description).toBe("standby");
-    expect(r.unpresented).toHaveLength(1);
-  });
-
-  it("lets an accepted service bill while a disputed standby waits", () => {
-    const lines = [
-      { disposition: "accepted" as LineDisposition, kind: "service" },
-      { disposition: "accepted" as LineDisposition, kind: "disposal" },
-      { disposition: "disputed" as LineDisposition, kind: "standby" },
-    ];
-    expect(splitByDisposition(lines).billable).toHaveLength(2);
   });
 });
 

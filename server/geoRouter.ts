@@ -21,6 +21,7 @@ import { UNREGISTERED_SOURCE, accessConfidence, corridorSegments, reverseLookup,
 import { evaluateRoute, type RoadSegmentInput } from "./_core/routeEvaluation";
 import { NOT_ROUTABLE, buildGraph, shortestPath, snapToGraph, type Graph, type GraphSegment } from "./_core/roadGraph";
 import type { RequiredCheck } from "./_core/routingCompiler";
+import { transportFeedStatus } from "./transportFeedRuntime";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
@@ -138,6 +139,20 @@ export const geoRouter = router({
     }),
 
   /** Import ATS legal subdivisions for one township. Alberta serves 1,000 features per page; the run records what came back. */
+  /**
+   * The provincial road-information feeds: where each stands (rights, key, enabled, database) and
+   * how its collection is going, plus the attribution each publisher requires shown. Read-only, and
+   * held to the same permission as clearing a source, because it is the screen that decision is
+   * made from.
+   *
+   * The environment is read here only to learn whether a key is configured and which feeds are
+   * enabled; the projection carries "present" or "missing", never a value and never the variable's
+   * name, and no request URL, response body or recorded error text.
+   */
+  transportFeeds: roleProcedure("geo.transportFeeds").query(async () => {
+    return transportFeedStatus(await getDb(), process.env, new Date());
+  }),
+
   atsImportTownship: roleProcedure("geo.atsImportTownship")
     .input(z.object({ meridian: z.number().int().min(1).max(6), rangeNumber: z.number().int().min(1).max(30), township: z.number().int().min(1).max(126), sections: z.array(z.number().int().min(1).max(36)).max(36).optional() }))
     .mutation(async ({ ctx, input }) => {

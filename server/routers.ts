@@ -1,9 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { COOKIE_NAME, REFRESH_COOKIE_NAME } from "@shared/const";
+import { REFRESH_COOKIE_NAME } from "@shared/const";
 import { redeemRefresh, revokeAllForOpenId, revokeFamily } from "./sessionFamilyService";
-import { ACCESS_TOKEN_TTL_MS, REFRESH_ABSOLUTE_TTL_MS } from "./_core/sessionFamily";
 import { sdk } from "./_core/sdk";
+import { ENV } from "./_core/env";
 import { isTrustedOrigin } from "./_core/csrf";
+import { clearAccessCookie, clearRefreshCookie, issueAccessCookie, issueRefreshCookie } from "./_core/cookies";
+
+/**
+ * P0-B — the surface a refresh family must belong to.
+ *
+ * The same rule `verifySession` applies to the access token: enforced when this server knows its
+ * own identity, and not in a checkout that has none (development, the test suite), where refusing
+ * every family would turn a missing variable into an outage. Production always has one
+ * (`assertProductionSecrets`), so there a family minted for another surface — or for none — is
+ * refused the way a retired verifier is, and nothing about which families exist is disclosed.
+ */
+const expectedFamilyApp = (): { appId: string } | undefined => (ENV.appId ? { appId: ENV.appId } : undefined);
 
 /**
  * The refresh cookie carries `familyRef.verifier`. Split on the FIRST dot only: the reference is
@@ -33,8 +45,8 @@ import { storageKeyInput } from "./_core/storageKey";
  * A present value is refused, not silently dropped, so an old client learns.
  */
 const REFUSED = z.undefined({ message: "Trust-bearing value refused: this state is established by its own review, verification or transition procedure, never by a create or capture." }).optional();
-import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
+import { peopleRouter } from "./peopleRouter";
 import { recordsRouter } from "./recordsRouter";
 import {
   contractorRouter,
@@ -50,6 +62,7 @@ import { surfacesRouter } from "./surfacesRouter";
 import { widgetsRouter, type WidgetDeps } from "./widgetsRouter";
 import { manifestCustodyRouter } from "./manifestCustodyRouter";
 import { resolveActingScope } from "./_core/actingScope";
+import { hosScopeFor, listDutyRecordsInScope, requireHosOperatorInScope, selfOperatorInScope } from "./hosScope";
 
 /** 0132 — the acting tenant for the legacy readers; a user with no membership acts as the historical single tenant. */
 async function scopeFor(userId: number) {
@@ -59,7 +72,10 @@ async function scopeFor(userId: number) {
 }
 
 import { securityIncidentsRouter } from "./securityIncidentsRouter";
+import { sessionRouter } from "./sessionRouter";
+import { clearOrganizationSelectionCookie } from "./_core/organizationSelectionCookie";
 import { commercialOfficeRouter } from "./commercialOfficeRouter";
+import { documentControlRouter } from "./documentControlRouter";
 import { facilityDirectoryRouter } from "./facilityDirectoryRouter";
 import type { WidgetLayoutStore } from "./_core/widgetService";
 import { drizzleWidgetLayoutStore } from "./widgetLayouts";
@@ -71,6 +87,7 @@ import { branchRolesFor } from "./_core/widgetRoleKeys";
 import { isDomainRole, permissionsForDomainRole } from "./_core/recordsAuthorization";
 import {
   listActiveUserRoles,
+  recordAuthorizationDecision,
   actingScopeFor,
   evidenceInScope,
   jobInScope,
@@ -84,19 +101,21 @@ import {
   trackingSubjectInScope,
   transferTrackingNumber,
   tripStopTripId,
-  zoneEventTripId,
   unitSafetyPlanUnitId,
   tripRefInScope,
+  getUserByOpenId,
 } from "./db";
 import { dispatchGateRouter } from "./dispatchRouter";
 import { createJobUnitGated } from "./dispatchEnforcementService";
 import { iftaRouter } from "./iftaRouter";
 import { fuelOpsRouter } from "./fuelOpsRouter";
 import { periodRouter } from "./periodRouter";
+import { paperworkRouter } from "./paperworkRouter";
 import { gstRouter } from "./gstRouter";
 import { arRouter, bankRouter } from "./cashRouter";
 import { commercialRouter, portalAdminRouter } from "./commercialRouter";
 import { commercialSetupRouter } from "./commercialSetupRouter";
+import { customerCommercialRouter } from "./customerCommercialRouter";
 import { invoicingRouter } from "./invoicingRouter";
 import { geoRouter } from "./geoRouter";
 import { commsRouter } from "./commsRouter";
@@ -109,6 +128,7 @@ import { readinessRouter } from "./readinessRouter";
 import { messageBoardRouter } from "./messageBoardRouter";
 import { assistantAskRouter } from "./assistantAskRouter";
 import { agentRouter } from "./agentRouter";
+import { liveAssistRouter } from "./liveAssistRouter";
 import { hosRouter } from "./hosRouter";
 import { portalRouter } from "./portalRouter";
 import { shopRouter } from "./shopRouter";
@@ -190,34 +210,20 @@ import {
   listTripStops,
   createTripStop,
   updateTripStop,
-  listOperatingZones,
-  createOperatingZone,
-  listDutyRecords,
   createDutyRecord,
   listWorkOrders,
   createWorkOrder,
   updateWorkOrder,
-  listTripBreadcrumbs,
-  listZoneEvents,
   updateZoneEvent,
  getDb } from "./db";
 import { ingestBreadcrumb } from "./_core/tripGps";
 import { routingSourceStatus } from "./_core/routingSource";
-import { operators as operatorsTable, trips as tripsTable } from "../drizzle/schema";
-import { and as andOp, eq as eqOp, inArray as inArrayOp } from "drizzle-orm";
-
-/** The session's operator record, or null. Identity is resolved, never named by the request. */
-async function operatorForUser(userId: number) {
-  const db = await getDb();
-  if (!db) return null;
-  return (await db.select({ id: operatorsTable.id }).from(operatorsTable).where(eqOp(operatorsTable.userId, userId)).limit(1))[0] ?? null;
-}
-/** The operator's one active trip, or null. A breadcrumb binds to this, not to a trip the request names. */
-async function activeTripForOperator(operatorId: number) {
-  const db = await getDb();
-  if (!db) return null;
-  return (await db.select({ id: tripsTable.id, unitId: tripsTable.unitId }).from(tripsTable).where(andOp(eqOp(tripsTable.operatorId, operatorId), inArrayOp(tripsTable.status, ["loading", "in_transit", "unloading"]))).limit(1))[0] ?? null;
-}
+// P0-A2 — the GPS trace and the geofence proposals reach the database only through the telematics
+// boundary. The unscoped `operatorForUser` / `activeTripForOperator` helpers that lived here, and
+// `listZoneEvents` / `zoneEventTripId` in db.ts, are gone: an operator record and an active trip are
+// the acting organization's or they are nobody's here.
+import { activeTripForOperatorInScope, listZoneEventsInScope, requireZoneEventInScope, selfOperatorInTelematicsScope, telematicsScopeFor, tripBreadcrumbsInScope } from "./telematicsScope";
+import { createOperatingZoneInScope, listOperatingZonesInScope, operatingZoneScopeFor } from "./operatingZoneScope";
 /** A scan's access role is the strongest role the caller holds, in the scan audit's vocabulary. */
 function scanRoleOf(roles: readonly string[]): "inspection" | "driver" | "mechanic" | "dispatcher" | "admin" {
   if (roles.includes("management") || roles.includes("controller")) return "admin";
@@ -350,9 +356,11 @@ export const appRouter = router({
   manifestCustody: manifestCustodyRouter,
   securityIncidents: securityIncidentsRouter,
   commercialOffice: commercialOfficeRouter,
+  documentControl: documentControlRouter,
   facilityDirectory: facilityDirectoryRouter,
   system: systemRouter,
   comms: commsRouter,
+  paperwork: paperworkRouter,
   enforcement: enforcementRouter,
   timeOff: timeOffRouter,
   shifts: openShiftsRouter,
@@ -362,7 +370,10 @@ export const appRouter = router({
   board: messageBoardRouter,
   assistantAsk: assistantAskRouter,
   agent: agentRouter,
+  liveAssist: liveAssistRouter,
   hos: hosRouter,
+  // B23.2 — who belongs to this organization and what they may do here.
+  people: peopleRouter,
   records: recordsRouter,
   payroll: payrollRouter,
   contractors: contractorRouter,
@@ -389,6 +400,7 @@ export const appRouter = router({
   ar: arRouter,
   commercial: commercialRouter,
   commercialSetup: commercialSetupRouter,
+  customerCommercial: customerCommercialRouter,
   invoicing: invoicingRouter,
   geo: geoRouter,
   closeout: closeoutRouter,
@@ -411,6 +423,11 @@ export const appRouter = router({
   // v21.18 — machines only; gated by integrationProcedure, never by roles.
   inbound: inboundRouter,
   insurance: insuranceRouter,
+  /**
+   * v23.26 — identity, organization and workspace, resolved server-side.
+   * The shell reads `session.context`; nothing it returns is an authority.
+   */
+  session: sessionRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
 
@@ -426,10 +443,26 @@ export const appRouter = router({
       const presented = readRefreshCookie(ctx.req);
       if (presented) await revokeFamily(presented.familyRef, "logout");
 
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      ctx.res.clearCookie(REFRESH_COOKIE_NAME, {
-        ...getSessionCookieOptions(ctx.req, { refresh: true }), maxAge: -1,
+      // Cleared with the attributes they were issued with (P0-B): a deletion that names another
+      // path leaves the browser holding a live credential.
+      clearAccessCookie(ctx.req, ctx.res);
+      clearRefreshCookie(ctx.req, ctx.res);
+      // v23.26 — the organization selection is part of the session, so it ends
+      // with it. Leaving it behind would hand the next person to use this
+      // browser a pre-selected tenant, which is a confusing way to start and a
+      // bad way to end.
+      clearOrganizationSelectionCookie(ctx.req, ctx.res);
+      // Through the same table every other security decision is written to.
+      // A sign-out is the event an access review most often needs and the one
+      // a system that only logs refusals never has.
+      await recordAuthorizationDecision({
+        actorUserId: ctx.user?.id ?? null,
+        procedureName: "auth.logout",
+        permission: "portal.compose_own",
+        rolesHeld: null,
+        outcome: ctx.user ? "allowed" : "denied_unauthenticated",
+        detail: "session ended",
+        occurredAt: new Date(),
       });
       return { success: true } as const;
     }),
@@ -453,22 +486,22 @@ export const appRouter = router({
       const presented = readRefreshCookie(ctx.req);
       if (!presented) throw new TRPCError({ code: "UNAUTHORIZED", message: "No refresh credential" });
 
-      const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date());
+      const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date(), expectedFamilyApp());
       if (out.kind !== "ok") {
-        ctx.res.clearCookie(REFRESH_COOKIE_NAME, {
-          ...getSessionCookieOptions(ctx.req, { refresh: true }), maxAge: -1,
-        });
+        clearRefreshCookie(ctx.req, ctx.res);
         throw new TRPCError({ code: "UNAUTHORIZED", message: "Session expired. Sign in again." });
       }
 
-      const accessToken = await sdk.createSessionToken(out.openId, { name: "" });
-      ctx.res.cookie(COOKIE_NAME, accessToken, {
-        ...getSessionCookieOptions(ctx.req), maxAge: ACCESS_TOKEN_TTL_MS,
-      });
-      ctx.res.cookie(REFRESH_COOKIE_NAME, `${presented.familyRef}.${out.verifier}`, {
-        ...getSessionCookieOptions(ctx.req, { refresh: true }),
-        maxAge: REFRESH_ABSOLUTE_TTL_MS,
-      });
+      /*
+       * P0-B — the replacement access token carries the account's name, as the login's did.
+       * `verifySession` refuses a token whose `name` is empty, so a refresh that minted one with
+       * `name: ""` handed the browser a credential the next request would reject — the session
+       * still ended fifteen minutes after login even once the cookie reached this procedure.
+       */
+      const who = await getUserByOpenId(out.openId);
+      const accessToken = await sdk.createSessionToken(out.openId, { name: who?.name || "" });
+      issueAccessCookie(ctx.req, ctx.res, accessToken);
+      issueRefreshCookie(ctx.req, ctx.res, { familyRef: presented.familyRef, verifier: out.verifier });
       return { ok: true as const };
     }),
 
@@ -479,9 +512,12 @@ export const appRouter = router({
       }
       const presented = readRefreshCookie(ctx.req);
       if (!presented) throw new TRPCError({ code: "UNAUTHORIZED", message: "No refresh credential" });
-      const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date());
+      const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date(), expectedFamilyApp());
       if (out.kind !== "ok") throw new TRPCError({ code: "UNAUTHORIZED", message: "Session expired." });
       await revokeAllForOpenId(out.openId, "revoked_all");
+      // Every family is dead; the credentials this browser holds are cleared with them (P0-B).
+      clearAccessCookie(ctx.req, ctx.res);
+      clearRefreshCookie(ctx.req, ctx.res);
       return { ok: true as const };
     }),
   }),
@@ -754,10 +790,15 @@ export const appRouter = router({
         }),
     }),
     operatingZones: router({
-      list: roleProcedure("operatingZones.list").query(() => listOperatingZones()),
+      // P0-A2.1 — an operating zone is the acting organization's geofence. The list is filtered in
+      // the query to the caller's organization; a new zone is stamped with it, never with an
+      // organization named in the input; and the GPS engine (server/_core/tripGps.ts) evaluates a
+      // trip against its own organization's zones only, read from trips.orgRef.
+      list: roleProcedure("operatingZones.list").query(async ({ ctx }) => listOperatingZonesInScope(await operatingZoneScopeFor(ctx.user.id))),
       create: roleProcedure("operatingZones.create")
         .input(
           z.object({
+            orgRef: REFUSED,
             name: z.string().min(1).max(180),
             zoneType: z.enum(["loading", "unloading", "both"]),
             locationId: z.number().int().optional(),
@@ -771,7 +812,10 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) => createOperatingZone(input)),
+        .mutation(async ({ ctx, input }) => {
+          const { orgRef: _refused, ...zone } = input;
+          return createOperatingZoneInScope(await operatingZoneScopeFor(ctx.user.id), zone);
+        }),
     }),
     assistant: router({
       forms: roleProcedure("assistant.forms").query(() =>
@@ -1024,38 +1068,30 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
-        
-          const own = await operatorForUser(ctx.user.id);
-          const active = own ? await activeTripForOperator(own.id) : null;
+          // P0-A2 — the operator record and the active trip are both resolved inside the acting
+          // organization. A driver who left company B does not keep sending positions to B's trip
+          // through their old operator row, and an ex-member is refused at the scope step.
+          const scope = await telematicsScopeFor(ctx.user.id);
+          const own = await selfOperatorInTelematicsScope(scope, ctx.user.id);
+          const active = own ? await activeTripForOperatorInScope(scope, own.id) : null;
           if (!active) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No active trip is assigned to the signed-in operator; a position is not attached to a trip it was not assigned to" });
           if (input.tripId != null && input.tripId !== active.id) throw new TRPCError({ code: "FORBIDDEN", message: `The signed-in operator's active trip is ${active.id}; a breadcrumb is not attached to another trip` });
           return ingestBreadcrumb({ ...input, tripId: active.id, unitId: active.unitId ?? undefined });
         }),
       breadcrumbs: roleProcedure("gps.breadcrumbs")
         .input(z.object({ tripId: z.number().int() }))
-        .query(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
-        return listTripBreadcrumbs(input.tripId);
-      }),
+        .query(async ({ ctx, input }) => tripBreadcrumbsInScope(await telematicsScopeFor(ctx.user.id), input.tripId)),
       // Pending proposals a driver/dispatcher hasn't ruled on yet. Omit tripId
-      // to review pending events across all active trips (dispatch view).
+      // to review pending events across the organization's active trips (dispatch view).
       pendingZoneEvents: roleProcedure("gps.pendingZoneEvents")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
-        .query(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
-        return listZoneEvents(input?.tripId, "pending");
-      }),
+        .query(async ({ ctx, input }) => listZoneEventsInScope(await telematicsScopeFor(ctx.user.id), input?.tripId, "pending")),
       zoneEvents: roleProcedure("gps.zoneEvents")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
-        .query(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
-        return listZoneEvents(input?.tripId);
-      }),
+        .query(async ({ ctx, input }) =>
+          // P0-A2 — filtered in the query to the trips the caller's organization owns. The P4.1 guard
+          // only ever checked a NAMED trip; the unfiltered list was every company's proposals.
+          listZoneEventsInScope(await telematicsScopeFor(ctx.user.id), input?.tripId)),
       // The human-in-the-loop step: a confirmed event can optionally be linked
       // to the tripStop it resolves (e.g. sets arrivedAt). Rejecting it leaves
       // the tripStop entirely untouched — the GPS engine never overwrites a
@@ -1069,10 +1105,10 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        { const tid = await zoneEventTripId(input.id); if (tid != null && !(await tripInScope(tid, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Zone event ${input.id} not found` }); }
-        
-          await updateZoneEvent(input.id, {
+          // P0-A2 — the proposal must belong to a trip the caller's organization owns; a foreign
+          // one is refused exactly as a nonexistent one, before anything is written.
+          const ze = await requireZoneEventInScope(await telematicsScopeFor(ctx.user.id), input.id);
+          await updateZoneEvent(ze.id, {
             status: input.action === "confirm" ? "confirmed" : "rejected",
             confirmedAt: new Date(),
             confirmedBy: ctx.user.id,
@@ -1086,10 +1122,12 @@ export const appRouter = router({
       list: roleProcedure("dutyRecords.list")
         .input(z.object({ operatorId: z.number().int().optional() }).optional())
         .query(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input?.operatorId != null && !(await operatorInScope(input.operatorId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Operator ${input.operatorId} not found` });
-        return listDutyRecords(input?.operatorId);
-      }),
+          // P0-A1 — filtered in the query to the operators the caller's organization owns. The P4.1
+          // guard above this only ever checked a NAMED operator; the unfiltered list was every
+          // company's duty records, newest 500. A foreign operator id is refused by the boundary
+          // exactly as a nonexistent one is.
+          return listDutyRecordsInScope(await hosScopeFor(ctx.user.id), input?.operatorId);
+        }),
       create: roleProcedure("dutyRecords.create")
         .input(
           z.object({
@@ -1113,10 +1151,13 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input?.operatorId != null && !(await operatorInScope(input.operatorId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Operator ${input.operatorId} not found` });
-        
-          const own = await operatorForUser(ctx.user.id);
+          // P0-A1 — whichever operator this names, the caller's organization must own it: a named
+          // operator (an amendment) through the boundary, the signed-in driver's own through the
+          // scoped self-resolution. An operator record another company owns is not the driver's
+          // here, so a driver who left company B does not keep writing B's duty records.
+          const scope = await hosScopeFor(ctx.user.id);
+          if (input.operatorId != null) await requireHosOperatorInScope(scope, input.operatorId);
+          const own = await selfOperatorInScope(scope, ctx.user.id);
           const roles = (ctx as unknown as { roles?: readonly string[] }).roles ?? [];
           const amending = input.operatorId != null && input.operatorId !== own?.id;
           if (amending && !roles.some(r => r === "dispatcher" || r === "hr" || r === "management")) throw new TRPCError({ code: "FORBIDDEN", message: "A duty record names the operator of the signed-in driver; recording for another operator is an amendment for dispatch, HR or management" });
@@ -1662,7 +1703,13 @@ export const appRouter = router({
       }),
       }),
       documents: router({
-        list: roleProcedure("documents.list").query(async ({ ctx }) => listComplianceDocuments(await scopeFor(ctx.user.id))),
+        list: roleProcedure("documents.list")
+          // Optional: one owner's documents. Narrows the organization's list; it never widens it —
+          // the scope predicate still applies. The documentExpiry tile reads this, because the
+          // canonical verdict needs an owner's whole history, not whatever of it made the org's
+          // newest hundred.
+          .input(z.object({ ownerType: z.enum(["operator", "unit", "trailer", "equipment", "job"]), ownerId: z.number().int().positive() }).optional())
+          .query(async ({ ctx, input }) => listComplianceDocuments(await scopeFor(ctx.user.id), input)),
         create: roleProcedure("documents.create")
           .input(
             z.object({

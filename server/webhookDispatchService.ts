@@ -52,9 +52,10 @@ import { domainEventOutbox, webhookDeliveries, webhookSubscriptions } from "../d
 import { deliveryOutcome, signPayload, subscribed } from "./_core/integrationGateway";
 import { mfaKey } from "./_core/externalIdentityPolicy";
 import { resolveWebhookSigningSecret } from "./webhookSecretService";
-import { environmentSecretKeys } from "./_core/secretKeys";
+import { secretKeyProvider } from "./_core/secretKeys";
 import { ENV } from "./_core/env";
 import { affectedRows } from "./_core/enforcementCommit";
+import { egressPost } from "./_core/egressHttp";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -75,7 +76,28 @@ export const WEBHOOK_ATTEMPT_TIMEOUT_MS = 10_000;
 export const WEBHOOK_CLAIM_LEASE_MS = 5 * 60_000;
 
 export type Poster = (url: string, body: string, headers: Record<string, string>) => Promise<{ status: number } | { error: string }>;
-const defaultPoster: Poster = async (url, body, headers) => { try { const r = await fetch(url, { method: "POST", body, headers, signal: AbortSignal.timeout(WEBHOOK_ATTEMPT_TIMEOUT_MS) }); return { status: r.status }; } catch (e) { return { error: e instanceof Error ? e.message : String(e) }; } };
+/**
+ * Through the egress guard, not `fetch`.
+ *
+ * The destination is typed by a tenant administrator and `integration.webhookSubscribe`
+ * checked only that it began with `https://`. A bare `fetch` therefore delivered wherever
+ * they pointed it — a loopback admin port, the database host, the cloud metadata endpoint at
+ * 169.254.169.254 — and the retry schedule delivered there six times over about fifteen
+ * hours. The permission decides who may subscribe; it says nothing about where the request
+ * goes, and only a check at connect time can, because the name is resolved again at send
+ * time, hours after it was stored.
+ *
+ * A refusal is returned as this attempt's `error`, so it is recorded and retried like any
+ * other delivery failure and stays visible in the attempt history rather than vanishing.
+ */
+const defaultPoster: Poster = async (url, body, headers) => {
+  try {
+    const r = await egressPost(url, { body, headers, timeoutMs: WEBHOOK_ATTEMPT_TIMEOUT_MS });
+    return { status: r.status };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+};
 let poster: Poster = defaultPoster;
 export function setWebhookPoster(p: Poster) { poster = p; }
 export function currentWebhookPoster(): Poster { return poster; }
@@ -181,7 +203,7 @@ export async function dispatchWebhooks(args: DispatchArgs = {}): Promise<Dispatc
     const secretFor = async () => {
       if (secret === undefined) {
         try {
-          secret = await resolveWebhookSigningSecret(s, { keys: environmentSecretKeys(), legacyKey: key, isProduction: ENV.isProduction });
+          secret = await resolveWebhookSigningSecret(s, { keys: secretKeyProvider(), legacyKey: key, isProduction: ENV.isProduction });
         } catch (e) {
           secret = null;
           console.warn(`[webhooks] ${s.subscriptionRef}: signing secret unavailable; skipped — ${e instanceof Error ? e.message : String(e)}`);

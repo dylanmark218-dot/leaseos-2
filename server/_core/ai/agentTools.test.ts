@@ -195,7 +195,7 @@ describe("what a tool call actually does", () => {
       clientCaptureId: "CAP-1",
     });
     expect(plan.input.formKey).toBe("unload_stop");
-    expect(plan.input.idempotencyKey).toBe("propose.unloadStop:CAP-1");
+    expect(plan.input.idempotencyKey).toBe(idempotencyKeyFor({ toolKey: "propose.unloadStop", clientCaptureId: "CAP-1" }));
   });
 
   it("resolves the procedure to a caller path", () => {
@@ -208,7 +208,7 @@ describe("what a tool call actually does", () => {
     expect(
       planToolCall({ tool: tool("propose.unloadStop"), input: {}, clientCaptureId: "CAP-1" })
         .idempotencyKey
-    ).toBe("propose.unloadStop:CAP-1");
+    ).toBe(idempotencyKeyFor({ toolKey: "propose.unloadStop", clientCaptureId: "CAP-1" }));
     expect(
       planToolCall({ tool: tool("read.tripStops"), input: {}, clientCaptureId: "CAP-1" })
         .idempotencyKey

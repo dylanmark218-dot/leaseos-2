@@ -47,6 +47,7 @@
 import { HUMAN_AUTHORIZATION_PERMISSIONS, NEVER_AUTONOMOUS } from "../../actionGateway";
 import { permissionForProcedure, type ProcedureName } from "../../recordsAuthorization";
 import { FORMS } from "../../aiProposal";
+import { sha256 } from "../../evidenceSeal";
 
 export type ToolCategory = "read" | "propose" | "human_step";
 
@@ -293,10 +294,31 @@ export function spendStep(allowlist: TaskAllowlist, spent: number): number {
  * recognised rather than billed. Generated server-side per call it would not be
  * an idempotency key at all — it would be a new record every retry, which is
  * exactly the double-bill this exists to prevent.
+ *
+ * Hashed, because the key is stored where it has to fit: `assistant.draft`
+ * takes it as the proposal id, capped at 40 characters (a `varchar(40)`), and a
+ * propose tool's key plus a UUID capture id is 55–59 raw. The input is a JSON
+ * array rather than a joined string so no capture id can impersonate another
+ * tool's key through a separator. The identity is (toolKey, capture): a tool's
+ * procedure and pinned form are constants of its registry entry that no caller
+ * supplies, so the tool key already names them.
+ *
+ * Versioned, and the value is pinned by test: a key that changes shape silently
+ * stops recognising replays. A new format is IK2, never a changed IK1.
  */
 export function idempotencyKeyFor(args: {
   clientCaptureId: string;
   toolKey: string;
 }): string {
-  return `${args.toolKey}:${args.clientCaptureId}`;
+  return `IK1-${sha256(JSON.stringify(["IK1", args.toolKey, args.clientCaptureId])).slice(0, 36)}`;
+}
+
+/**
+ * The extraction worker's proposal id for a capture: `PROP-` and the first 35
+ * hex of sha256(captureId), 40 characters. The device's own id, so a replayed
+ * capture proposes once. Kept out of the job body, which must not look like it
+ * writes anything.
+ */
+export function proposalIdForCapture(clientCaptureId: string): string {
+  return `PROP-${sha256(clientCaptureId).slice(0, 35)}`;
 }

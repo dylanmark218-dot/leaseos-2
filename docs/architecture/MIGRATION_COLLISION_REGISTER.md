@@ -22,10 +22,11 @@ other claimant takes the next number free on `main` *and* on all open branches a
 Reserved slots `0016`/`0017` are never used (CI gate 0). `0094`, `0095` and `0098` are historical gaps,
 and `0157` is historically used twice. None of those is reused.
 
-## Current state (2026-09-25, `main` = `88608f3`, scan at C1b-2b)
+## Current state (2026-10-01, `main` = `b93dea7`, scan at LA-1a)
 
-`main` migration head: **`0194_webhook_secret_ref.sql`**. `main` holds `0189` (C1b-1) and `0191`–`0194`
-(secret management). Numbers claimed by open branches above the head:
+`main` migration head: **`0209_operating_zone_scope.sql`**. `main` holds `0189`, `0191`–`0196`, `0198`,
+and `0209`. LA-1a claims `0202` and `0203` on this branch; both are below the current main head and do
+not collide with a main migration:
 
 | Number | Migration file | Branch | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|
@@ -36,8 +37,19 @@ and `0157` is historically used twice. None of those is reused.
 | 0199 | `0199_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | keeps 0199 (moved from `0198` when C1b-2b merged first; see the claim below) |
 | 0200 | `0200_fleet_portfolio_foundation.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | keeps 0200 |
 | 0201 | `0201_fleet_portfolio_guards.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | keeps 0201 |
+| 0202 | `0202_live_assist_sessions.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0202 |
+| 0203 | `0203_live_assist_events_append_only.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0203 |
 
-**Next free number for new work: `0202`** (re-check with the scan before committing). The 2026-09-24 table below
+**2026-09-25 (later), on merging main into `claude/leaseos-auth-workspace-system-t008ad` (#64):** its
+`0170_organization_scoped_role_grants.sql` and `0175_organization_invitations.sql` collided with main's
+`0170_dispatch_role_types` (#9) and `0175_session_families` (#30). Per the rule of thumb they were renumbered
+to **`0207`** and **`0208`**, the first slots free on main and on every open branch (the scan then showed
+`0199`–`0206` claimed: `0199`–`0201` mechanic-portal, `0202`–`0204` driver-portfolio, `0205`–`0206`
+communications-marketplace). `scripts/verify-migration-0170.sh` became `verify-migration-0207.sh`. Still
+open, not touched here: `0202`/`0203` are claimed twice — driver-portfolio (#16) and
+`claude/live-assist-architecture-qg4jgp` (no PR). Next free number at that time: `0209` (since taken by main for P0-A2.1; see the 2026-10-01 section below — next free is `0210`).
+
+**Next free number for new work: `0210`** (re-check with the scan before committing). The 2026-09-24 table below
 is kept for history; several of its claims have since merged or been renumbered by their authors.
 
 ## Earlier state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
@@ -134,8 +146,21 @@ first number free everywhere. `claude/integration-hub-subsystem-6nzrkw`'s `0183`
 `webhookDeliveries.claimedAt`/`claimedBy`. When that branch rebases onto this one, its `0183` drops those
 two columns rather than this migration being renumbered (see
 `audit/hardening-2026-09-24/SEC-004-WEBHOOK-DELIVERY-INTEGRITY.md`).
+## State at Document Control Checkpoint A (2026-09-23, `main` = `0cd4817`)
+
+Scan run with the command above against every remote branch. Claims found: `0170` (eld-compliance,
+auth-workspace, work-calendar), `0172`–`0175` (training-academy-workforce), `0175`–`0177`
+(driver-portfolio ×2). `0178` was the first number free on `main` and on every open branch.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0178 | `0178_document_control_definitions.sql` | `claude/document-control-architecture-jlffzk` | none yet | open branch | none at claim time | keeps 0178 unless a branch merges ahead with it; re-check at PR time |
+| 0179+ | Document Control checkpoints B–F (register extension, numbering ledger, templates, mappings, intake) | same branch | none yet | planned | — | consecutive from 0178; re-check at PR time |
 
 ## Change log
+
+* **2026-09-23 (later)**: Document Control claims `0178` after a fresh scan; driver-portfolio had moved to
+  `0175`–`0177` and training-academy to `0172`–`0175` since the C1a scan.
 
 * **2026-09-23**: C1a merged (#12, `42c454f`), so `0174` is on main. PR #9 was brought onto main (merge-base `42c454f`).
 * **2026-09-23**: created at C1a integration. C1a moved `0172 → 0174` because
@@ -183,6 +208,29 @@ claiming, not taken from this line.
   numbers were verified free across every branch before use, and none collided. The register is the
   repository's record of that verification, and three merges' worth of it was missing. Also recorded
   the `0185` double-claim, resolved in SEC-004's favour on claim order. No migration file renamed.
+## State at Document Control adoption (2026-09-24, `main` = `1680e94`)
+
+The owner adopted `claude/document-control-architecture-jlffzk` as the Document Control implementation
+(`docs/document-control/DC_RECONCILIATION_BRIEF_2026-09-24.md`) and ruled that its checkpoints A–C land
+first. They land from `claude/document-control-design-imsd3n`. Scan run with the command above against
+every remote branch: claims now reach `0188` (`0187` eld-compliance and training-academy, `0188`
+training-academy). `main` holds `0179_trip_stop_provenance.sql`, so the branch's `0179` could not keep
+its number.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0178 | `0178_document_control_definitions.sql` | `claude/document-control-design-imsd3n` (from `…-jlffzk`) | #29 | only claimant | none | keeps 0178 |
+| 0195 | `0195_document_control_register.sql` | same | #29 | first number free after every claim at the 2026-09-25 rebase | none | **built as 0179**, adopted as 0189, **renamed 0195** (see change log); content unchanged, header says so |
+| 0196 | `0196_document_control_numbering.sql` | same | #29 | next free | none | **built as 0180**, adopted as 0190, **renamed 0196** to stay after 0195; content unchanged |
+| 0181–0183 | Document Control D–H (templates, intake, disposal) | `claude/document-control-architecture-jlffzk` | none | held under the D-00 carve-out | 0182/0183 also claimed by four and three other branches | renumber past every claim when that work is ruled in |
+
+* **2026-09-24 (Document Control adoption)**: `0179 → 0189` and `0180 → 0190` for Document Control;
+  `0178` kept. No other branch's file renamed.
+* **2026-09-25 (Document Control rebase onto `main` `14b5df2`)**: `0189` turned out to be claimed three
+  times — C1b-1 (`claude/leaseos-compliance-survey-5faxe8`, PR #15) first, then this PR and
+  `claude/mechanic-portal-domain-82efa9`. Following the rule of thumb and the SEC-004 claim-order
+  precedent, this PR moved off it at its own rebase: `0189 → 0195` and `0190 → 0196` (`0191`–`0193` are
+  on `main`; `0194` is held by PR #50). `0178` unchanged. No other branch's file renamed.
 
 ## State at the S2-E Phase 1 claim (2026-09-25, `main` = `14b5df2`, after PR #20 and #49)
 
@@ -200,3 +248,39 @@ anywhere is `0193`, so `0194` is the first free everywhere.
   migration**, rather than afterwards. That ordering is the correction for the `0191`–`0193`
   omission recorded above: those numbers were each verified free before use, but the verification
   went unrecorded, and this register is the only place that verification survives.
+
+## State at the P0-A2.1 claim (2026-10-01, `main` = `64f784d`, after PR #73)
+
+`main` migration head: **`0198_requirement_verification.sql`**, 181 migrations (0197 unused). Re-scanned
+across `main` and every remote branch (a superset of every open-PR head) at the moment of claiming:
+numbers held somewhere beyond `main` are `0199`–`0208` (`claude/driver-portfolio-credential-wallet-ya8928`
+0202–0204, `claude/leaseos-auth-workspace-system-t008ad` 0207–0208, and others), so `0209` is the first
+number free everywhere.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0209 | `0209_operating_zone_scope.sql` | `security/operating-zone-tenant-model` | P0-A2.1 | claiming | none | keeps 0209 |
+
+**Next free number for new work: `0210`** (re-check with the scan before committing).
+
+## Change log (continued)
+
+* **2026-10-01 (P0-A2.1)**: claimed `0209` (`operatingZones.orgRef`, nullable; NULL = the historical single
+  tenant, as 0132 and 0148), recorded in the commit that creates the migration.
+
+## Claim: 0217–0219 (Customer, Contract and Rate Management, 2026-10-01)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0217 | `0217_customer_account_profile.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0217 |
+| 0218 | `0218_customer_contracts_rate_sheets.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0218 |
+| 0219 | `0219_job_commercial_context.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0219 |
+
+Written as `0182`–`0184` on 2026-09-24, when they were the first numbers free everywhere. By the merge of
+`main` (`c3f088b`) three other open branches held `0182`–`0184` (`document-control-architecture`,
+`integration-hub-subsystem`, `safety-compliance-program-builder`) and the highest claim on any remote ref
+was `0216`: `claude/relaxed-carson-qfcopf` took `0214` and `claude/leaseos-sign-attest-design-5993ar`
+took `0215`–`0216` while this merge was being gated, the second of them minutes before this branch
+pushed `0215`–`0217`. As the later, unmerged claimant this branch moved again, to the first
+three numbers free on `main` and on every open branch. No other branch was renumbered.
+

@@ -1,0 +1,16 @@
+{
+  "package": "leaseos-compliance-permits-templates",
+  "version": "1.0.0",
+  "createdDate": "2026-09-22",
+  "documents": [
+    "dot_fmcsa_registration_authority",
+    "oilfield_waste_tracking_generator",
+    "norm_survey_handling",
+    "environmental_spill_report"
+  ],
+  "engine": {
+    "name": "LeaseOS typed proposal / document workflow",
+    "compatibleFormDefinition": true,
+    "notes": "Current repo supports scalar FormDefinition fields; richer JSON layer includes sections/repeatables for future renderer support."
+  }
+}
