@@ -45,6 +45,14 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   "server/fieldroute.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "the document is created with expiresAt; only its creation is asserted" },
   "server/gst.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "period-bound arithmetic (2026-Q3 ends 1 October); no comparison with now" },
   "server/ifta.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "quarter-bound arithmetic; no comparison with now" },
+  // Reviewed 2026-10-01, when 2026-10-15 entered the 21-day window. The dates are fiscal-year
+  // arithmetic, not deadlines: the fixture entity's year ends 10/31, so asOf 2026-10-15 selects the
+  // year ending 2026-10-31 and the 2026-10-20 disposal falls inside it. Every call passes them
+  // explicitly; the router's own clock reads are a tax-rule lookup, the twin's asOf, audit stamps and
+  // defaults that apply only when asOf is omitted, and assertPeriodOpen reads stored period state,
+  // not now. Confirmed by running the suite under libfaketime at 2026-10-01, 2026-10-16, 2026-11-15
+  // and 2027-06-01: 8/8 at each, DB suite included.
+  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "fiscal-year arithmetic: asOf, disposedAt and the year end are passed explicitly and compared with each other and with stored period state, never with now" },
   "server/qualificationStore.test.ts": { dates: ["2026-10-01", "2026-11-10"], verdict: "clock_independent", reason: "the expired holding is evaluated against the shift's explicit STARTS, not now" },
 };
 
