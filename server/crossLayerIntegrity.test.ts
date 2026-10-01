@@ -36,7 +36,7 @@ describe("client ↔ server parity", () => {
     expect(missing, `client references procedures the server does not mount: ${missing.join(", ")}`).toEqual([]);
   });
   it("the router mounts a stable, large surface", () => {
-    expect(serverPaths.size).toBe(728);
+    expect(serverPaths.size).toBe(736);
     expect(serverPaths.has("facilityDirectory.driverView")).toBe(true);
     expect(serverPaths.has("commercialOffice.approvals.requirement")).toBe(true);
   });

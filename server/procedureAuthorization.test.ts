@@ -63,6 +63,7 @@ const calendarRouter = readFileSync("server/calendarRouter.ts", "utf8");
 const readinessRouter = readFileSync("server/readinessRouter.ts", "utf8");
 const messageBoardRouter = readFileSync("server/messageBoardRouter.ts", "utf8");
 const agentRouter = readFileSync("server/agentRouter.ts", "utf8");
+const liveAssistRouter = readFileSync("server/liveAssistRouter.ts", "utf8");
 const hosRouter = readFileSync("server/hosRouter.ts", "utf8");
 const closeoutRouter = readFileSync("server/closeoutRouter.ts", "utf8");
 const insuranceRouter = readFileSync("server/insuranceRouter.ts", "utf8");
@@ -83,7 +84,7 @@ const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
  * payrollRouter.ts both draw from it. Checking only one would let a declared
  * permission go unwired without anyone noticing.
  */
-const OPERATIONAL_SOURCES = [routers, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter].join("\n");
+const OPERATIONAL_SOURCES = [routers, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter].join("\n");
 
 const countBuilders = (src: string, builder: string) =>
   (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
@@ -169,8 +170,8 @@ describe("migrated operational procedures", () => {
   it("has migrated the entire operational surface", () => {
     // 85 unreviewed at B20.3, 57 after B20.4, 0 after B20.6. B20.7 added the
     // 40-procedure payroll/finance surface, all gated from the start.
-    // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(664);
+    // The merged surface adds 8 LA-1a session procedures and 23 Document Control procedures.
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(672);
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 
@@ -323,7 +324,7 @@ describe("the untouched API is counted, not forgotten", () => {
 
   it("keeps the inventory document in step with the code", () => {
     expect(inventory).toContain("ROLE_AUTHORIZED");
-    expect(inventory).toContain("356");
+    expect(inventory).toContain("387");
   });
 });
 
