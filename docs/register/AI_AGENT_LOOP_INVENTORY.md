@@ -12,8 +12,8 @@ verdict.
 | Step | State |
 |---|---|
 | SPINE 1: BoundaryConfirmation resolver + chain rule | **merged** (#10, `6f52b57`) |
-| SPINE 1: receipt reader + 0179 trip-stop provenance (clears the 0169 release blocker) | **open, mergeable**: [dylanmark218-dot/leaseos-2#17](https://github.com/dylanmark218-dot/leaseos-2/pull/17), waiting on owner review |
-| SPINE 2: resolve the four duplications (`dispatchMatching`, `openShifts`, `complianceDocumentValidity`, `fieldTicket`) | not started; next once #17 lands |
+| SPINE 1: receipt reader + 0179 trip-stop provenance (clears the 0169 release blocker) | **merged** ([dylanmark218-dot/leaseos-2#17](https://github.com/dylanmark218-dot/leaseos-2/pull/17), `d307ba4`) |
+| SPINE 2: resolve the four duplications (`dispatchMatching`, `openShifts`, `complianceDocumentValidity`, `fieldTicket`) | **complete** — #52, #60 and the openShifts/signature-status rulings; record: `docs/register/SPINE_ITEM2_DUPLICATIONS.md` |
 | SPINE 3: `offlineCapability` → HS1 | not started |
 | SPINE 4: the rest of the spine, in path order | not started |
 | Secretary model layer ("door 2") | **held off `main`**: [dylanmark218-dot/leaseos-2#7](https://github.com/dylanmark218-dot/leaseos-2/pull/7), declared unwired |
