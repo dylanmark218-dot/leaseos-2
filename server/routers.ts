@@ -553,6 +553,9 @@ export const appRouter = router({
           }
           if (input.clientCaptureRef) {
             const existing = await findEvidenceByClientCaptureRef(input.clientCaptureRef);
+            // SEC-1: idempotent for the person who uploaded it. The reference is globally unique, so
+            // anyone else sending it is refused — never handed that record's id and storage key.
+            if (existing && existing.capturedBy !== ctx.user.id) throw new TRPCError({ code: "CONFLICT", message: "This capture reference is already in use" });
             if (existing) return { id: existing.id, key: existing.storageKey ?? "", alreadyUploaded: true as const };
           }
           const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "-");

@@ -206,7 +206,7 @@ export async function listEvidenceRecords(scope: TenantScope) {
 export async function findEvidenceByClientCaptureRef(clientCaptureRef: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const rows = await db.select({ id: evidenceRecords.id, storageKey: evidenceRecords.storageKey, storageUrl: evidenceRecords.storageUrl }).from(evidenceRecords).where(eq(evidenceRecords.clientCaptureRef, clientCaptureRef)).limit(1);
+  const rows = await db.select({ id: evidenceRecords.id, storageKey: evidenceRecords.storageKey, storageUrl: evidenceRecords.storageUrl, capturedBy: evidenceRecords.capturedBy }).from(evidenceRecords).where(eq(evidenceRecords.clientCaptureRef, clientCaptureRef)).limit(1);
   return rows[0];
 }
 
