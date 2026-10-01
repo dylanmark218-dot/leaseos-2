@@ -41,7 +41,7 @@ d("a lost tablet with personal information on it", () => {
     expect(early.closed).toBe(false);
     expect(early.blockers.join(" ")).toMatch(/no privacy breach assessment/);
     // Uncertain is a decision — and it still blocks closure, by its own reason.
-    await callerFor(safety).securityIncidents.timelineAppend({ incidentRef: opened.incidentRef, eventType: "contained", detail: "Remote wipe confirmed by MDM", occurredAt: new Date() });
+    await callerFor(safety).securityIncidents.statusChange({ incidentRef: opened.incidentRef, eventType: "contained", detail: "Remote wipe confirmed by MDM", occurredAt: new Date() });
     await callerFor(safety).securityIncidents.breachAssess({ incidentRef: opened.incidentRef, jurisdiction: "AB", applicableLaw: "PIPA (Alberta)", sensitivity: "high", misuseLikelihood: "unknown", notificationDecision: "uncertain", decisionReason: "Wipe confirmed but the device was unencrypted for eleven hours; harm cannot be ruled out yet" });
     const mid = await callerFor(safety).securityIncidents.close({ incidentRef: opened.incidentRef, closedAt: new Date() });
     expect(mid.closed).toBe(false);
@@ -78,5 +78,29 @@ d("a lost tablet with personal information on it", () => {
     expect(all.find(x => x.key === `security-assess:${opened.incidentRef}`)?.action).toMatch(/uncertain is an answer; pending is not/);
     await expect(callerFor(outsider).securityIncidents.view({ incidentRef: opened.incidentRef })).rejects.toThrow(/not found/);
     expect((await callerFor(outsider).securityIncidents.list()).some(i => i.incidentRef === opened.incidentRef)).toBe(false);
+  }, 20_000);
+
+  /*
+   * SEC-1 item 6. timelineAppend sat under incident.create, which drivers, dispatchers and mechanics
+   * hold, and four of its event types moved the incident's status — so a driver could mark an
+   * incident contained or recovering, or reopen a closed one. State now moves only through
+   * statusChange, under incident.review; anyone who may report may still add notes.
+   */
+  it("a reporter adds notes but does not move the incident's state; a reviewer does", async () => {
+    const a = await org(); const driver = await member(a, "driver"); const safety = await member(a, "safety");
+    const opened = await callerFor(driver).securityIncidents.open({ incidentType: "lost_device", title: "Phone left in the crew truck", discoveredAt: new Date() });
+    await expect(callerFor(driver).securityIncidents.timelineAppend({ incidentRef: opened.incidentRef, eventType: "evidence_added", detail: "Photo of the cab", occurredAt: new Date() })).resolves.toMatchObject({ status: "open" });
+    await expect(callerFor(driver).securityIncidents.timelineAppend({ incidentRef: opened.incidentRef, eventType: "contained" as never, occurredAt: new Date() })).rejects.toThrow();
+    await expect(callerFor(driver).securityIncidents.statusChange({ incidentRef: opened.incidentRef, eventType: "contained", occurredAt: new Date() })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const [still] = await pool.query<mysql.RowDataPacket[]>("SELECT status FROM securityIncidents WHERE incidentRef = ?", [opened.incidentRef]);
+    expect(still[0]!.status).toBe("open");
+    await expect(callerFor(safety).securityIncidents.statusChange({ incidentRef: opened.incidentRef, eventType: "contained", occurredAt: new Date() })).resolves.toMatchObject({ status: "contained" });
+  }, 20_000);
+
+  it("names only an organization that exists as affected", async () => {
+    const a = await org(), b = await org(); const safety = await member(a, "safety");
+    const opened = await callerFor(safety).securityIncidents.open({ incidentType: "cross_tenant_access", title: "Link opened by the wrong customer", discoveredAt: new Date() });
+    await expect(callerFor(safety).securityIncidents.organizationAffect({ incidentRef: opened.incidentRef, orgRef: `ORG-NONE-${rnd()}` })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(callerFor(safety).securityIncidents.organizationAffect({ incidentRef: opened.incidentRef, orgRef: b })).resolves.toMatchObject({ orgRef: b });
   }, 20_000);
 });
