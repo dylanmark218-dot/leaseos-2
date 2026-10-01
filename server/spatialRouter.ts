@@ -127,23 +127,30 @@ export const spatialRouter = router({
       const live = await db.select().from(structures).where(inArray(structures.segmentId, ids));
       const segments: RoadSegmentInput[] = input.segments.map(s => {
         const attrs: SegmentAttribute[] = [];
-        // One row per check: a verified row over an unverified one, and the latest within each; superseded rows do not apply.
+        // Restrictions: the date-windowed set `applicableRestrictions` resolves (one governing row per check, verified first); superseded rows do not apply.
         // v22.15 — a restriction applies on a date or it does not apply at all; what its window excludes is reported, never silently dropped.
         const windowed = applicableRestrictions(rs.filter(x => x.segmentId === s.segmentId), input.at);
         for (const { row, state } of windowed.setAside) dateNotes.push(`${s.label}: ${row.checkKey.replace(/_/g, " ")} restriction ${row.restrictionRef} is ${state.replace(/_/g, " ")} on ${input.at.toISOString().slice(0, 10)} and was not applied`);
         const mine = windowed.applied;
-        const seen = new Set<string>();
-        for (const r of mine) { if (seen.has(r.checkKey)) continue; seen.add(r.checkKey); attrs.push({ check: r.checkKey as RequiredCheck, limitValue: r.limitValue, textValue: r.textValue, jurisdiction: r.jurisdiction, source: r.source, sourceVersion: r.sourceVersion, verifiedAt: r.verifiedAt?.toISOString() ?? null, confidence: r.verificationStatus === "verified" ? "authority_confirmed" : "unverified" }); }
+        // The recorded unit travels with the limit: a limit in a unit the check does not understand is
+        // UNKNOWN in the evaluator, never compared as if it were kilograms or metres.
+        for (const r of mine) attrs.push({ check: r.checkKey as RequiredCheck, limitValue: r.limitValue, textValue: r.textValue, unit: r.unit, jurisdiction: r.jurisdiction, source: `restriction ${r.restrictionRef}: ${r.source}`, sourceVersion: r.sourceVersion, verifiedAt: r.verifiedAt?.toISOString() ?? null, confidence: r.verificationStatus === "verified" ? "authority_confirmed" : "unverified" });
         for (const b of bs.filter(x => x.segmentId === s.segmentId)) {
           const conf = b.verifiedAt ? "authority_confirmed" : "unverified";
           if (b.postedWeightKg != null) attrs.push({ check: "bridge_capacity", limitValue: b.postedWeightKg, jurisdiction: b.jurisdiction, source: b.source, sourceVersion: b.sourceVersion, verifiedAt: b.verifiedAt?.toISOString() ?? null, confidence: conf });
           if (b.postedAxleGroupKg != null) attrs.push({ check: "bridge_axle_limit", limitValue: b.postedAxleGroupKg, jurisdiction: b.jurisdiction, source: b.source, sourceVersion: b.sourceVersion, verifiedAt: b.verifiedAt?.toISOString() ?? null, confidence: conf });
           if (b.clearanceM != null) attrs.push({ check: "bridge_clearance", limitValue: b.clearanceM, jurisdiction: b.jurisdiction, source: b.source, sourceVersion: b.sourceVersion, verifiedAt: b.verifiedAt?.toISOString() ?? null, confidence: conf });
         }
-        // v22.15 — structures recorded against this segment contribute what the road itself does not state.
+        /*
+         * T2 (defect 1B) — every structure on the segment contributes its limits, including for a check a
+         * road restriction already covers. This used to skip them ("contribute what the road itself does
+         * not state"), so a 5.0 m road clearance hid a 4.2 m overpass. Which limit controls is the
+         * evaluator's decision, made over all of them; the router's job is to hand over everything that
+         * applies here, now, and nothing that does not (windowing and supersession stay upstream).
+         */
         for (const st of live.filter(x => x.segmentId === s.segmentId)) {
           const contributed = structureAttributes(st, input.at);
-          for (const a of contributed.attributes) { if (seen.has(a.check)) continue; seen.add(a.check); attrs.push(a); }
+          attrs.push(...contributed.attributes.map(a => ({ ...a, source: `structure ${st.structureRef}: ${a.source ?? st.label}` })));
           structureNotes.push(...contributed.notes);
         }
         return { segmentId: s.segmentId, label: s.label, lengthKm: s.lengthKm, attributes: attrs };
@@ -249,15 +256,62 @@ export const spatialRouter = router({
        * The stored evidence is the authority. It is already written per segment and per check by
        * the evaluator, so there is a fact to consult instead of a claim to trust.
        */
+      // A caller who says the route is blocked is declining to approve it; that is honoured as a refusal.
       if (input.dispatchStatus === "blocked") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A blocked route is not approved" });
-      const failing = await db.select({ segmentId: routeEvidenceEntries.segmentId, checkKey: routeEvidenceEntries.checkKey, reason: routeEvidenceEntries.reason })
-        .from(routeEvidenceEntries)
-        .where(and(inArray(routeEvidenceEntries.segmentId, input.segmentIds), eq(routeEvidenceEntries.result, "fail")));
-      if (failing.length) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: `ROUTE_HAS_FAILING_EVIDENCE: ${failing.length} check(s) on this route evaluated FAIL and no approval clears them — ${failing.slice(0, 3).map(f => `${f.segmentId} ${f.checkKey}: ${f.reason}`).join("; ")}`,
-        });
+      /*
+       * T2 (defects 2 and 3) — the verdict an approval carries is the EVALUATION's, never the caller's.
+       *
+       * `dispatchStatus` on the approval is the one route-legality verdict readiness reads, and it used
+       * to be whatever string the caller sent: an evaluation that found nothing (UNKNOWN) could be
+       * approved as "clear". And the FAIL refusal read every FAIL ever recorded on these segments, so
+       * an old evaluation of a different load blocked a newer one that passed, while UNKNOWN was never
+       * consulted at all.
+       *
+       * Now: with an evaluation named, that evaluation — and only it — decides. It must be this unit's,
+       * made on the unit's current profile, and cover every segment approved; any FAIL in it refuses;
+       * UNKNOWN and REVIEW are carried into the stored verdict exactly as `evaluateRoute` maps them.
+       * Without one, nothing has been evaluated, and the approval says so (`not_evaluated`, which
+       * readiness reads as route_not_evaluated). The caller's string is kept only as what it is — a
+       * claim — and never becomes the verdict.
+       */
+      let verdict: "clear" | "warning" | "review" | "not_evaluated";
+      if (input.evaluationRef) {
+        const rows = await db.select().from(routeEvidenceEntries).where(eq(routeEvidenceEntries.evaluationRef, input.evaluationRef));
+        if (!rows.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `No evaluation ${input.evaluationRef} is on record` });
+        const p = (await db.select({ id: vehicleProfiles.id, verificationStatus: vehicleProfiles.verificationStatus }).from(vehicleProfiles).where(eq(vehicleProfiles.unitId, input.unitId)).limit(1))[0];
+        const expectedProfile = p ? `unit:${input.unitId}:vp${p.id}:${p.verificationStatus}` : null;
+        if (!expectedProfile || rows.some(r => r.routeProfileId !== expectedProfile)) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `EVALUATION_NOT_FOR_THIS_ROUTE: evaluation ${input.evaluationRef} was made for ${rows[0]!.routeProfileId}, not unit ${input.unitId}'s current profile — evaluate this unit as it stands now` });
+        }
+        const covered = new Set(rows.map(r => r.segmentId));
+        const uncovered = input.segmentIds.filter(id => !covered.has(id.slice(0, 64)));
+        if (uncovered.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `EVALUATION_NOT_FOR_THIS_ROUTE: evaluation ${input.evaluationRef} does not cover ${uncovered.length} of this route's segments (${uncovered.slice(0, 3).join(", ")})` });
+        const fails = rows.filter(r => r.result === "fail");
+        if (fails.length) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `ROUTE_HAS_FAILING_EVIDENCE: evaluation ${input.evaluationRef} found ${fails.length} check(s) FAIL and no approval clears them — ${fails.slice(0, 3).map(f => `${f.segmentId} ${f.checkKey}: ${f.reason}`).join("; ")}`,
+          });
+        }
+        const on = (axis: string, result: string) => rows.some(r => r.axis === axis && r.result === result);
+        // The same mapping evaluateRoute uses, applied to what it stored.
+        verdict = on("legal", "unknown") || on("feasible", "unknown") ? "warning"
+          : rows.some(r => r.result === "review") ? "review"
+          : on("preferred", "unknown") ? "warning"
+          : "clear";
+      } else {
+        // Nothing evaluated, so nothing to scope a FAIL to: any FAIL recorded on these segments still
+        // refuses (S10.4 — a known FAIL remains a FAIL), and the verdict is honestly "not evaluated".
+        const failing = await db.select({ segmentId: routeEvidenceEntries.segmentId, checkKey: routeEvidenceEntries.checkKey, reason: routeEvidenceEntries.reason })
+          .from(routeEvidenceEntries)
+          .where(and(inArray(routeEvidenceEntries.segmentId, input.segmentIds), eq(routeEvidenceEntries.result, "fail")));
+        if (failing.length) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `ROUTE_HAS_FAILING_EVIDENCE: ${failing.length} check(s) on this route evaluated FAIL and no approval clears them — ${failing.slice(0, 3).map(f => `${f.segmentId} ${f.checkKey}: ${f.reason}`).join("; ")}`,
+          });
+        }
+        verdict = "not_evaluated";
       }
       if (input.buildRef) {
         const build = (await db.select({ buildRef: roadGraphBuilds.buildRef, status: roadGraphBuilds.status }).from(roadGraphBuilds).where(eq(roadGraphBuilds.buildRef, input.buildRef)).limit(1))[0];
@@ -269,8 +323,8 @@ export const spatialRouter = router({
       }
       const deps = await routeDependencies(db, { unitId: input.unitId, segmentIds: input.segmentIds, load: input.load, permitRefs: input.permitRefs, requiredChecks: input.requiredChecks, at: input.at, buildRef: input.buildRef ?? null });
       const approvalRef = `RA-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      await db.insert(routeApprovals).values({ approvalRef, evaluationRef: input.evaluationRef ?? null, tripId: input.tripId ?? null, jobId: input.jobId ?? null, unitId: input.unitId, originRef: input.originRef, destinationRef: input.destinationRef, dispatchStatus: input.dispatchStatus, segmentIdsJson: JSON.stringify(input.segmentIds), buildRef: input.buildRef ?? null, fingerprintJson: JSON.stringify(deps), fingerprintHash: fingerprintHash(deps), explanation: input.explanation, approvedByUserId: ctx.user.id });
-      return { approvalRef, status: "approved" as const, buildRef: input.buildRef ?? null, geographyRecorded: !!input.buildRef, fingerprintHash: fingerprintHash(deps), dependencies: Object.keys(deps) };
+      await db.insert(routeApprovals).values({ approvalRef, evaluationRef: input.evaluationRef ?? null, tripId: input.tripId ?? null, jobId: input.jobId ?? null, unitId: input.unitId, originRef: input.originRef, destinationRef: input.destinationRef, dispatchStatus: verdict, segmentIdsJson: JSON.stringify(input.segmentIds), buildRef: input.buildRef ?? null, fingerprintJson: JSON.stringify(deps), fingerprintHash: fingerprintHash(deps), explanation: input.explanation, approvedByUserId: ctx.user.id });
+      return { approvalRef, status: "approved" as const, dispatchStatus: verdict, claimedDispatchStatus: input.dispatchStatus, buildRef: input.buildRef ?? null, geographyRecorded: !!input.buildRef, fingerprintHash: fingerprintHash(deps), dependencies: Object.keys(deps) };
     }),
 
   /** Is this approval still the answer? Anything that changed is named in the words a dispatcher would use. */
@@ -290,7 +344,7 @@ export const spatialRouter = router({
       if (a.status === "revoked" || a.status === "superseded") return { approvalRef: a.approvalRef, status: a.status, stale: true, changed: [], reasons: [`This approval is ${a.status}`] };
       // The one recheck, shared with the provincial feed runtime (server/routeDependencies.ts).
       const s = await recheckRouteApproval(db, a, input.at);
-      return { approvalRef: a.approvalRef, status: s.stale ? "stale" as const : "approved" as const, stale: s.stale, changed: s.changed, reasons: s.stale ? s.reasons : ["Nothing this route depended on has changed"], dispatchStatus: a.dispatchStatus, approvedAt: a.approvedAt };
+      return { approvalRef: a.approvalRef, status: s.stale ? "stale" as const : "approved" as const, stale: s.stale, changed: s.changed, reasons: s.stale ? s.reasons : ["Nothing this route depended on has changed"], notRechecked: s.notRechecked, dispatchStatus: a.dispatchStatus, approvedAt: a.approvedAt };
     }),
 
   routeRequest: roleProcedure("spatial.routeRequest").input(z.object({ unitId: z.number().int().positive(), originRef: z.string().min(1).max(120), destinationRef: z.string().min(1).max(120), tripId: z.number().int().positive().optional(), jobId: z.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {

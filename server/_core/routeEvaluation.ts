@@ -58,6 +58,8 @@ export type SegmentAttribute = {
   /** Absent means the map has no data — which is `unknown`, never `pass`. */
   limitValue?: number | null;
   textValue?: string | null;
+  /** The unit the limit was recorded in. Absent means the check's own unit (kg or m). */
+  unit?: string | null;
   jurisdiction?: string | null;
   source?: string | null;
   sourceVersion?: string | null;
@@ -171,6 +173,16 @@ function evaluateCheck(
         inputs: { vehicleValue, limitValue: null, unit: numeric.unit },
       };
     }
+    // Units are compared only when they are the check's own. A limit recorded in tonnes or feet is
+    // real evidence that this evaluator cannot read, so it is UNKNOWN — never silently treated as kg/m.
+    if (attr.unit != null && attr.unit.trim() !== "" && canonicalUnit(attr.unit) !== numeric.unit) {
+      return {
+        ...base,
+        result: "unknown",
+        reason: `${segment.label} records its ${check.replace(/_/g, " ")} limit as ${attr.limitValue} ${attr.unit}; only ${numeric.unit} is compared, so it is not read`,
+        inputs: { vehicleValue, limitValue: null, unit: numeric.unit },
+      };
+    }
     const passes = vehicleValue <= attr.limitValue;
     return {
       ...base,
@@ -258,6 +270,44 @@ function combineAxis(results: CheckResult[]): CheckResult {
   return "pass";
 }
 
+/** "kg", "kilograms", "M", "metres"… → the check's own unit, or the input lower-cased when it is not one. */
+function canonicalUnit(unit: string): string {
+  const u = unit.trim().toLowerCase();
+  if (["kg", "kgs", "kilogram", "kilograms"].includes(u)) return "kg";
+  if (["m", "metre", "metres", "meter", "meters"].includes(u)) return "m";
+  return u;
+}
+
+const RESULT_SEVERITY: Record<CheckResult, number> = { fail: 3, unknown: 2, review: 1, pass: 0 };
+
+/**
+ * T2 (defect 1A) — the controlling entry for one check on one segment.
+ *
+ * Every attribute handed in for the check is evaluated, and the worst result governs: a FAIL from
+ * any applicable limit is a FAIL, an UNKNOWN limit is never outvoted by a passing one, and among
+ * equal results the tightest numeric limit is the one cited. Applicability — the right segment,
+ * in force at the evaluation instant, not superseded — is settled before evidence reaches here
+ * (`applicableRestrictions`, `structureAttributes`), so this compares only like with like.
+ *
+ * That is `sourcePrecedence`'s asymmetric rule in evaluator terms: a lower-authority source can
+ * tighten a limit (its FAIL governs) and can never loosen one (its PASS cannot outvote another
+ * source's FAIL). It used to take whichever attribute was listed first, so a 5.0 m road clearance
+ * listed before a 4.2 m overpass passed a 4.5 m truck.
+ */
+function controllingEntry(check: RequiredCheck, attrs: SegmentAttribute[], vehicle: VehicleValues, segment: RoadSegmentInput): EvidenceEntry {
+  if (attrs.length === 0) return evaluateCheck(check, undefined, vehicle, segment);
+  const entries = attrs.map(a => evaluateCheck(check, a, vehicle, segment));
+  const governing = entries.reduce((best, e) => {
+    const d = RESULT_SEVERITY[e.result] - RESULT_SEVERITY[best.result];
+    if (d !== 0) return d > 0 ? e : best;
+    const el = e.inputs.limitValue, bl = best.inputs.limitValue;
+    return el != null && (bl == null || el < bl) ? e : best;
+  });
+  return entries.length > 1
+    ? { ...governing, reason: `${governing.reason} (controlling of ${entries.length} applicable ${check.replace(/_/g, " ")} records)` }
+    : governing;
+}
+
 export function evaluateRoute(
   requiredChecks: RequiredCheck[],
   segments: RoadSegmentInput[],
@@ -266,9 +316,16 @@ export function evaluateRoute(
   const evidence: EvidenceEntry[] = [];
 
   for (const segment of segments) {
-    for (const check of requiredChecks) {
-      const attr = segment.attributes.find(a => a.check === check);
-      evidence.push(evaluateCheck(check, attr, vehicle, segment));
+    /*
+     * The checks asked for, plus every legal or physical check this segment holds recorded evidence
+     * for. A posted 45,000 kg bridge on the segment is a fact about this truck on this road whether
+     * or not the caller listed `bridge_capacity`; leaving it out because nobody asked is how a road
+     * gross limit of 63,500 kg passed a 50,000 kg truck over it.
+     */
+    const evidenced = segment.attributes.map(a => a.check).filter(c => CHECK_AXIS[c] === "legal" || CHECK_AXIS[c] === "feasible");
+    const checks = Array.from(new Set([...requiredChecks, ...evidenced]));
+    for (const check of checks) {
+      evidence.push(controllingEntry(check, segment.attributes.filter(a => a.check === check), vehicle, segment));
     }
   }
 

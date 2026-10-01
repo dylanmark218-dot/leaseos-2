@@ -150,7 +150,21 @@ export type ApprovalRecheck = {
   reasons: string[];
   /** True when this recheck is what moved the approval from approved to stale. */
   becameStale: boolean;
+  /**
+   * Dependencies this recheck carried forward as recorded instead of re-reading, and why. Said out
+   * loud so "nothing changed" is never read as "the permits were checked and are still good".
+   */
+  notRechecked: { dependency: keyof RouteDependencies; reason: string }[];
 };
+
+/**
+ * T2 (defect 4) — permit references are free text the approver typed. LeaseOS holds no permit record
+ * to look them up in (movement permits are not built: owner decision D-01), so there is no current
+ * state to rebuild the dependency from, and the approval stores only the hash of the references. The
+ * hash is carried, and the recheck names that it was carried, rather than implying a refresh.
+ */
+const PERMITS_NOT_RECHECKED = "Permit references are recorded as the approver gave them. LeaseOS holds no permit record to re-read (movement permits are not built — owner decision D-01), so whether those permits are still valid was not re-checked.";
+const NO_PERMITS = hashPart([]);
 
 /**
  * Is this approval still the answer? The only staleness computation — the procedure and the feed
@@ -158,15 +172,16 @@ export type ApprovalRecheck = {
  * ends is a change too, and a person re-approves.
  */
 export async function recheckRouteApproval(db: Db, a: RouteApprovalRow, at: Date): Promise<ApprovalRecheck> {
-  if (a.status === "revoked" || a.status === "superseded") {
-    return { approvalRef: a.approvalRef, status: a.status, stale: true, changed: [], reasons: [`This approval is ${a.status}`], becameStale: false };
-  }
   const approved = JSON.parse(a.fingerprintJson) as RouteDependencies;
+  const notRechecked: ApprovalRecheck["notRechecked"] = approved.permitSet !== NO_PERMITS ? [{ dependency: "permitSet", reason: PERMITS_NOT_RECHECKED }] : [];
+  if (a.status === "revoked" || a.status === "superseded") {
+    return { approvalRef: a.approvalRef, status: a.status, stale: true, changed: [], reasons: [`This approval is ${a.status}`], becameStale: false, notRechecked };
+  }
   const current = await routeDependencies(db, { unitId: a.unitId, segmentIds: JSON.parse(a.segmentIdsJson) as string[], load: approved.loadProfile, permitRefs: [], requiredChecks: [], at, buildRef: a.buildRef, carryOver: approved });
   const s = stalenessAgainst(approved, current);
   const becameStale = s.stale && a.status === "approved";
   if (becameStale) await db.update(routeApprovals).set({ status: "stale", staleReasonsJson: JSON.stringify(s.reasons), stalenessDetectedAt: new Date() }).where(eq(routeApprovals.id, a.id));
-  return { approvalRef: a.approvalRef, status: s.stale ? "stale" : "approved", stale: s.stale, changed: s.changed, reasons: s.reasons, becameStale };
+  return { approvalRef: a.approvalRef, status: s.stale ? "stale" : "approved", stale: s.stale, changed: s.changed, reasons: s.reasons, becameStale, notRechecked };
 }
 
 export type AdvisoryInvalidation = {
