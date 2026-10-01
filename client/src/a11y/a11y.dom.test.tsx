@@ -27,6 +27,31 @@ import { ContractView, type ContractDetail, type ContractViewProps } from "../pa
 import { RateSheetView, type RateSheetDetail, type RateSheetViewProps } from "../pages/RateSheetView";
 import { FileManagerView } from "../records/FileManagerView";
 import { counts as fileCounts, detail as fileDetail, fileManagerProps } from "../test/fileManagerFixtures";
+import { BoardPanelView, type BoardPanelViewProps } from "../portal/panels/BoardPanelView";
+import { presentOpenWork } from "../portal/boardModel";
+
+/** 0205/0206 — the Board, read in a cab: conversations with a queued message, and an open-work card. */
+function board(o: Partial<BoardPanelViewProps> = {}): BoardPanelViewProps {
+  const at = new Date("2026-10-20T14:00:00Z");
+  const channels = [{ channelRef: "CH-D", type: "dispatch", name: "Dispatch — North", unacknowledged: 0 }, { channelRef: "CH-S", type: "safety", name: "Safety", unacknowledged: 1 }];
+  return {
+    online: false, durableQueue: false, tab: "dispatch", onTab: () => {},
+    channels: { kind: "loaded", value: channels }, visibleChannels: channels.slice(0, 1), selectedChannel: "CH-D", onSelectChannel: () => {},
+    messages: { kind: "loaded", value: [{ messageRef: "MSG-1", authorLabel: "User 7", mine: false, priority: "urgent", body: "Road closed at KM 42", deviceCreatedAt: at, serverReceivedAt: at, requiresAcknowledgement: true, acknowledgedByMe: false, pendingAcknowledgement: null }] },
+    pendingMessages: [{ localId: "L-1", body: "Leaving the lease now", state: "queued", lastError: null, capturedAt: at }],
+    onSend: () => {}, onAcknowledge: () => {},
+    work: { kind: "loaded", value: [{ postRef: "OS-1", title: "Hydrovac operator", requiredRole: "driver", startsAt: new Date("2026-10-21T06:00:00Z"), place: "Hinton area", overtime: true, myResponse: "interested" }] },
+    selectedPost: null, onSelectPost: () => {}, card: { kind: "none" }, myResponse: null, pendingResponse: null, onRespond: () => {},
+    offerAnswer: { kind: "idle" }, onAnswerOffer: () => {}, queueSummary: { waiting: 1, refused: 0 }, onRetry: () => {},
+    ...o,
+  };
+}
+const boardCard = presentOpenWork(
+  { postRef: "OS-1", title: "Hydrovac operator", status: "open", requiredRole: "driver", requiredQualifications: ["H2S", "First Aid"], requiredEquipmentClass: "hydrovac",
+    location: "Hinton area", regionCode: "HINTON", startsAt: new Date("2026-10-21T06:00:00Z"), endsAt: new Date("2026-10-21T18:00:00Z"), estimatedHours: 12, overtime: true, priority: "callout" },
+  { verdict: "unknown", reasons: [{ code: "qualification_unknown", detail: "No First Aid on record — unknown is not satisfied" }], availability: "available", interestExpressed: true, readinessNotEvaluated: ["route restrictions"] },
+  { offerRef: "OFF-1", status: "offered", expiresAt: null },
+);
 
 afterEach(cleanup);
 
@@ -274,6 +299,11 @@ const surfaces = [
   { name: "people & access — former", render: () => render(<PeopleAccessView {...peopleProps({ section: "former" })} />) },
   { name: "people & access — person detail", render: () => render(<PeopleAccessView {...peopleProps({ selected: { person: PERSON, workspaceOptions: [{ key: "field_workforce", label: "Field Workforce" }] } })} />) },
   { name: "people & access — refusal", render: () => render(<PeopleAccessView {...peopleProps({ error: "This is the last management access in ABC Transport." })} />) },
+
+  // 0205/0206 — the Board, read in a cab: three states, the alert regions included.
+  { name: "board — offline conversation with a queued message and a bulletin to acknowledge", render: () => render(<BoardPanelView {...board()} />) },
+  { name: "board — a write the device refused and conversations that failed to load", render: () => render(<BoardPanelView {...board({ online: true, writeNotice: "Not signed in to an organization on this device — nothing was kept", channels: { kind: "failed", message: "Network down" }, visibleChannels: [] })} />) },
+  { name: "board — open-work card with an offer", render: () => render(<BoardPanelView {...board({ online: true, tab: "open_work", selectedPost: "OS-1", card: { kind: "loaded", value: boardCard }, pendingResponse: { response: "interested", state: "queued", lastError: null } })} />) },
   // The Records & File Manager: folders, list and inspector together, then the states that only
   // exist when something is refused or missing — an alert must be reachable in each.
   { name: "records — list and inspector", render: () => render(<FileManagerView {...fileManagerProps()} />) },

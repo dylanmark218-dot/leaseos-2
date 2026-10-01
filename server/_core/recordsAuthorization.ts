@@ -277,6 +277,8 @@ export type Permission =
   | "timeOff.request" | "timeOff.decide" | "timeOff.schedulingRead"
   // v22.20 — open shifts. Posting work and wanting it are different acts.
   | "shifts.post" | "shifts.read" | "shifts.interest"
+  // 0206 — declaring your own availability is a statement about yourself and nobody else.
+  | "shifts.availability_own"
   // v22.20 — crews. Reading a forecast and changing who is on a crew differ.
   | "crews.read" | "crews.manage"
   // v22.20 — calendar. Your own is not the same act as somebody else's.
@@ -287,6 +289,9 @@ export type Permission =
   | "assistant.ask" | "assistant.curate"
   // v22.20 — the board. Creating a channel is not the same as posting in one.
   | "board.read" | "board.post" | "board.manage"
+  // 0205 — publishing company-wide or emergency is not posting; reading a private conversation as
+  // a moderator is neither reading nor managing, and every use of it is an event.
+  | "board.publish" | "board.moderate"
   // v22.20 — the agent. Asking it to work, acting, and approving differ.
   | "agent.use" | "agent.act" | "agent.approve" | "agent.read"
   // LA-1a — Live Assist, the session spine only.
@@ -350,7 +355,25 @@ export type Permission =
   // v22.21 — Training Academy. Learner permissions are universal but self-scoped in the router.
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
-  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage";
+  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
+  // 0199 — fleet maintenance, checkpoint 1. Assigning a work order names who owns the repair; cancelling
+  // one can leave a defect unrepaired, so it is sensitive.
+  | "maintenance.workorder.assign" | "maintenance.workorder.cancel"
+  // 0200 — the Fleet & Equipment Portfolio's foundation. Placing and releasing a hold decide whether a
+  // unit may move, and verifying a meter reading makes it count; all three are sensitive. Which hold
+  // TYPES a role may place or release is decided in `_core/fleetPortfolio.ts`, below the permission.
+  | "fleet.hold.place" | "fleet.hold.release" | "fleet.meter.record" | "fleet.meter.verify"
+  // 0221 — fleet maintenance, checkpoint 2. Triage decides a defect's severity (lowering a critical frees
+  // a safety hold); return to service is the second person's verification that lifts a defect's hold.
+  | "maintenance.defect.triage" | "maintenance.defect.send_to_shop" | "maintenance.task.write"
+  | "maintenance.return_to_service.record"
+  // SA1 — Sign & Attest (docs/sign-attest/SIGN_ATTEST_DESIGN.md §13). Opening a revision fixes a hash;
+  // placing fields and assigning signers shape what is signed; signing is self-scoped; witnessing is
+  // the one act that places another person's mark and says so; finalize, void, supersede and export
+  // are evidence acts. All but the reads are SENSITIVE.
+  | "attest.read" | "attest.document.open" | "attest.field.place" | "attest.signer.assign"
+  | "attest.sign_own" | "attest.decline_own" | "attest.witness"
+  | "attest.finalize" | "attest.void" | "attest.supersede" | "attest.export";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -369,6 +392,11 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.document.open",
+    "attest.field.place",
+    "attest.witness",
     "commercial.job.summary",
     "live_assist.use",
     "document.read",
@@ -457,6 +485,14 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    // 0221 — opening a work order from a defect.
+    "maintenance.defect.send_to_shop",
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.document.open",
+    "attest.field.place",
+    "attest.signer.assign",
+    "board.publish",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -646,6 +682,16 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "telematics.fault.acknowledge",
     "spatial.read",
     "spatial.vehicle.manage",
+    // 0200 — Fleet & Equipment Portfolio foundation.
+    "fleet.hold.place",
+    "fleet.hold.release",
+    "fleet.meter.record",
+    // 0221 — fleet maintenance, checkpoint 2: triage, send to shop, the repair's tasks, return to service.
+    "maintenance.defect.triage",
+    "maintenance.defect.send_to_shop",
+    "maintenance.task.write",
+    "maintenance.return_to_service.record",
+    "fleet.meter.verify",
   ],
   shop_lead: [
     "live_assist.use",
@@ -738,8 +784,30 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.read",
     "spatial.vehicle.manage",
     "spatial.vehicle.verify",
+    // 0199 — fleet maintenance, checkpoint 1.
+    "maintenance.workorder.assign",
+    "maintenance.workorder.cancel",
+    // 0200 — Fleet & Equipment Portfolio foundation.
+    "fleet.hold.place",
+    "fleet.hold.release",
+    "fleet.meter.record",
+    // 0221 — fleet maintenance, checkpoint 2.
+    "maintenance.defect.triage",
+    "maintenance.defect.send_to_shop",
+    "maintenance.task.write",
+    "maintenance.return_to_service.record",
+    "fleet.meter.verify",
   ],
   safety: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.document.open",
+    "attest.field.place",
+    "attest.signer.assign",
+    "attest.witness",
+    "attest.finalize",
+    "board.publish",
+    "board.moderate",
     "live_assist.review",
     "document.read",
     "document.intake",
@@ -868,8 +936,25 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
       // 0163 (P4.2): the designated compliance authority named in the owner decision.
     "loadsense.calibration.sweep",
+    // 0200 — Fleet & Equipment Portfolio foundation.
+    "fleet.hold.place",
+    "fleet.hold.release",
+    // 0221 — the second person who returns a unit to service; a critical defect's safety hold is theirs to lift.
+    "maintenance.return_to_service.record",
+    // 0221 — and they decide severity: lowering a critical defect frees its safety hold, which safety may release.
+    "maintenance.defect.triage",
   ],
   office: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.document.open",
+    "attest.field.place",
+    "attest.signer.assign",
+    "attest.witness",
+    "attest.finalize",
+    "attest.void",
+    "attest.supersede",
+    "attest.export",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -1046,8 +1131,24 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.access.decide",
     "geo.access.passage",
     "spatial.structure.record",
+    // 0200 — Fleet & Equipment Portfolio foundation.
+    "fleet.meter.record",
+    // 0221 — opening a work order from a defect.
+    "maintenance.defect.send_to_shop",
   ],
   management: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.document.open",
+    "attest.field.place",
+    "attest.signer.assign",
+    "attest.witness",
+    "attest.finalize",
+    "attest.void",
+    "attest.supersede",
+    "attest.export",
+    "board.publish",
+    "board.moderate",
     "live_assist.use",
     "live_assist.administer",
     "live_assist.review",
@@ -1326,6 +1427,15 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.verify",
     "spatial.route.approve",
     "geo.graph.build",
+    // 0199 — fleet maintenance, checkpoint 1.
+    "maintenance.workorder.assign",
+    "maintenance.workorder.cancel",
+    // 0200 — Fleet & Equipment Portfolio foundation.
+    "fleet.hold.place",
+    "fleet.hold.release",
+    // 0221 — return to service (a safety hold is management's or safety's to lift).
+    "maintenance.return_to_service.record",
+    "fleet.meter.verify",
   ],
   hr: [
     "document.read",
@@ -1404,6 +1514,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.export",
     "document.read",
     "facility.directory.read",
     "evidence.read_job_operational",
@@ -1836,6 +1949,12 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // SA1 — signing or declining your OWN assigned field: the service resolves the signer row to
+  // `ctx.user.id` and refuses anything else (WRONG_SIGNER). Nobody signs for somebody else.
+  "attest.sign_own",
+  "attest.decline_own",
+  // 0206 — a person's own availability reads and writes `ctx.user.id` and nothing the request could name.
+  "shifts.availability_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -1934,6 +2053,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "crews.manage",
   // A channel decides who may read a conversation.
   "board.manage",
+  // An emergency or company-wide bulletin demands acknowledgement from everyone it reaches.
+  "board.publish",
+  // Reading a private conversation as a moderator is an access nobody in it agreed to.
+  "board.moderate",
   // What is loaded decides what every later answer can cite.
   "assistant.curate",
   // Approving an agent action is authorising a machine to affect the company.
@@ -2086,6 +2209,27 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // self-service grant into the restricted sector with no row saying the glass was
   // broken is that category, and without this it proceeded when the audit insert failed.
   "restricted.read",
+  // 0199 — a cancelled work order can leave a defect unrepaired. It may not happen unrecorded.
+  "maintenance.workorder.cancel",
+  // 0200 — a hold placed or released decides whether a unit may move; a verified meter reading counts.
+  "fleet.hold.place",
+  "fleet.hold.release",
+  "fleet.meter.verify",
+  // 0221 — triage can lower a critical defect, which frees a safety hold; return to service puts a unit back on the road.
+  "maintenance.defect.triage",
+  "maintenance.return_to_service.record",
+  // SA1 — Sign & Attest: every act that creates or ends signing evidence fails closed when its
+  // authorization row cannot be written. A mark with no record of who was allowed to place it is
+  // the label this subsystem exists to end.
+  "attest.document.open",
+  "attest.field.place",
+  "attest.signer.assign",
+  "attest.sign_own",
+  "attest.witness",
+  "attest.finalize",
+  "attest.void",
+  "attest.supersede",
+  "attest.export",
 ] as const;
 
 export function isSensitivePermission(p: Permission): boolean {
@@ -3103,9 +3247,25 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "timeOff.schedulingRead": "timeOff.schedulingRead",
   "shifts.post": "shifts.post",
   "shifts.list": "shifts.read",
+  "shifts.get": "shifts.read",
   "shifts.eligibility": "shifts.read",
+  "shifts.candidates": "shifts.read",
   "shifts.expressInterest": "shifts.interest",
+  "shifts.respond": "shifts.interest",
+  "shifts.offerRespond": "shifts.interest",
   "shifts.interests": "shifts.read",
+  // 0206 — the post's lifecycle and its offers are the poster's acts; linking a post to a slot is
+  // an assignment act and carries the binding's own permission.
+  "shifts.publish": "shifts.post",
+  "shifts.close": "shifts.post",
+  "shifts.cancel": "shifts.post",
+  "shifts.offer": "shifts.post",
+  "shifts.offerWithdraw": "shifts.post",
+  "shifts.link": "dispatch.assign",
+  "shifts.award": "dispatch.assign",
+  "shifts.availabilitySet": "shifts.availability_own",
+  "shifts.availabilityMine": "shifts.availability_own",
+  "shifts.availabilityFor": "shifts.read",
   "crews.create": "crews.manage",
   "crews.addMember": "crews.manage",
   "crews.removeMember": "crews.manage",
@@ -3124,6 +3284,16 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "assistant.passageList": "assistant.curate",
   "assistant.measureRetrieval": "assistant.ask",
   "board.createChannel": "board.manage",
+  "board.direct": "board.post",
+  // Membership of a channel is changed by `board.manage`, or by a moderator or manager OF THAT
+  // CHANNEL — a channel role, decided inside the procedure. The gate is the posting permission so a
+  // group's own moderator can reach it; the procedure refuses anybody who is neither.
+  "board.memberAdd": "board.post",
+  "board.memberRemove": "board.post",
+  "board.members": "board.read",
+  "board.mine": "board.read",
+  "board.moderateRead": "board.moderate",
+  "board.moderateWithdraw": "board.moderate",
   "board.post": "board.post",
   "board.read": "board.read",
   "board.open": "board.read",
@@ -3360,6 +3530,31 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
 
+  /* ---- 0199: fleet maintenance, checkpoint 1 ---- */
+  "maintenance.workOrderAssignment": "maintenance.read_defect",
+  "maintenance.workOrderAssign": "maintenance.workorder.assign",
+  "maintenance.workOrderCancel": "maintenance.workorder.cancel",
+
+  /* ---- 0200: Fleet & Equipment Portfolio foundation ---- */
+  "fleet.unitState": "fleet.read",
+  "fleet.holdList": "fleet.read",
+  "fleet.holdPlace": "fleet.hold.place",
+  "fleet.holdRelease": "fleet.hold.release",
+  "fleet.meterReadings": "fleet.read",
+  "fleet.meterProgress": "fleet.read",
+  "fleet.meterRecord": "fleet.meter.record",
+  "fleet.meterDecide": "fleet.meter.verify",
+  "fleet.history": "fleet.read",
+
+  /* ---- 0221: fleet maintenance, checkpoint 2 — defect to return to service ---- */
+  "maintenance.defectReport": "maintenance.write_defect",
+  "maintenance.defectTriage": "maintenance.defect.triage",
+  "maintenance.defectSendToShop": "maintenance.defect.send_to_shop",
+  "maintenance.taskAdd": "maintenance.task.write",
+  "maintenance.taskSetStatus": "maintenance.task.write",
+  "maintenance.returnToService": "maintenance.return_to_service.record",
+  "maintenance.defectHistory": "maintenance.read_defect",
+
   /* ---- the page scanner: guidance and review, both read-only ----
    * Both answer "what does this paperwork need"; neither writes, links or
    * confirms anything, so both sit on the ordinary compliance read rather
@@ -3368,6 +3563,22 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
    * either — that is the same question, and it already has an answer. */
   "paperwork.guidance": "compliance.read",
   "paperwork.reviewScan": "compliance.read",
+
+  /* ---- SA1: Sign & Attest (server/attestRouter.ts) ---- */
+  "attest.open": "attest.document.open",
+  "attest.placeFields": "attest.field.place",
+  "attest.assignSigner": "attest.signer.assign",
+  "attest.sign": "attest.sign_own",
+  "attest.witness": "attest.witness",
+  "attest.decline": "attest.decline_own",
+  "attest.finalize": "attest.finalize",
+  "attest.void": "attest.void",
+  "attest.supersede": "attest.supersede",
+  "attest.view": "attest.read",
+  "attest.list": "attest.read",
+  "attest.verify": "attest.read",
+  "attest.proof": "attest.read",
+  "attest.exportReceipt": "attest.export",
 } as const satisfies Record<string, Permission>;
 
 /**
@@ -3444,10 +3655,12 @@ export type ExternalPermission =
   | "portal.customer.adjust" | "portal.customer.documents"
   | "portal.self" | "portal.customer.read" | "portal.customer.dispute" | "portal.customer.sign" | "portal.customer.decide"
   | "portal.vendor.read" | "portal.vendor.submit"
-  | "portal.facility.read" | "portal.facility.submit";
+  | "portal.facility.read" | "portal.facility.submit"
+  // SA1 — a customer identity reads the signing revisions that name it and signs its own fields.
+  | "portal.attest.read" | "portal.attest.sign";
 
 export const EXTERNAL_KIND_PERMISSIONS: Record<"customer" | "vendor" | "facility", readonly ExternalPermission[]> = {
-  customer: ["portal.customer.commit", "portal.invitation.accept", "portal.credential.manage", "portal.customer.adjust", "portal.customer.documents", "portal.self", "portal.customer.read", "portal.customer.dispute", "portal.customer.sign", "portal.customer.decide"],
+  customer: ["portal.customer.commit", "portal.invitation.accept", "portal.credential.manage", "portal.customer.adjust", "portal.customer.documents", "portal.self", "portal.customer.read", "portal.customer.dispute", "portal.customer.sign", "portal.customer.decide", "portal.attest.read", "portal.attest.sign"],
   vendor: ["portal.invitation.accept", "portal.credential.manage", "portal.self", "portal.vendor.read", "portal.vendor.submit"],
   facility: ["portal.invitation.accept", "portal.credential.manage", "portal.self", "portal.facility.read", "portal.facility.submit"],
 };
@@ -3488,6 +3701,11 @@ export const EXTERNAL_PROCEDURE_PERMISSIONS = {
   "portal.invoiceAccept": "portal.customer.decide",
   "portal.fieldTicketView": "portal.customer.read",
   "portal.fieldTicketSign": "portal.customer.sign",
+  /* ---- SA1: Sign & Attest through the portal ---- */
+  "portal.attestList": "portal.attest.read",
+  "portal.attestView": "portal.attest.read",
+  "portal.attestSign": "portal.attest.sign",
+  "portal.attestDecline": "portal.attest.sign",
   "portal.fieldTicketLineDecide": "portal.customer.decide",
   "portal.vendorStatement": "portal.vendor.read",
   "portal.vendorBillSubmit": "portal.vendor.submit",
@@ -3502,7 +3720,7 @@ export const EXTERNAL_PROCEDURE_PERMISSIONS = {
 // set: `portal.credential.manage`, which governs the lesser `tokenRotate`, was already
 // in it. Without it, a token could be issued in the one circumstance where nothing
 // recorded that it had been.
-export const EXTERNAL_SENSITIVE_PERMISSIONS: readonly ExternalPermission[] = ["portal.customer.commit", "portal.credential.manage", "portal.invitation.accept", "portal.customer.adjust", "portal.customer.documents", "portal.customer.dispute", "portal.customer.sign", "portal.customer.decide", "portal.vendor.submit", "portal.facility.submit"];
+export const EXTERNAL_SENSITIVE_PERMISSIONS: readonly ExternalPermission[] = ["portal.customer.commit", "portal.credential.manage", "portal.invitation.accept", "portal.customer.adjust", "portal.customer.documents", "portal.customer.dispute", "portal.customer.sign", "portal.customer.decide", "portal.vendor.submit", "portal.facility.submit", "portal.attest.sign"];
 
 export function externalPermissionForProcedure(name: string): ExternalPermission | null {
   return (EXTERNAL_PROCEDURE_PERMISSIONS as Record<string, ExternalPermission>)[name] ?? null;

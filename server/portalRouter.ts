@@ -33,10 +33,16 @@ import { invoiceBalanceCents } from "./_core/accountsReceivable";
 import { decideLine, loadTicket, recordSignature, snapshotFor } from "./closeoutRouter";
 import { whyTheseHours, type PostSiteAuthorization, type SiteSnapshot, type Supplement } from "./_core/siteCloseout";
 import { signatoryAuthorities } from "../drizzle/schema";
+import { ATTEST_INPUT_KINDS, ATTEST_MARK_KINDS, CONSENT_VERSION_V1 } from "../shared/attest";
+import { AttestRefusal, declineSession, listRevisions, submitSession, viewRevision, type RefusalCode } from "./_core/attest/attestService";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const ext = (ctx: unknown) => (ctx as { external: ExternalContext }).external;
+const ATTEST_CODE: Record<RefusalCode, TRPCError["code"]> = { not_found: "NOT_FOUND", bad_request: "BAD_REQUEST", conflict: "CONFLICT", precondition: "PRECONDITION_FAILED", forbidden: "FORBIDDEN" };
+async function attestRefusing<T>(work: () => Promise<T>): Promise<T> {
+  try { return await work(); } catch (err) { if (err instanceof AttestRefusal) throw new TRPCError({ code: ATTEST_CODE[err.code], message: err.message }); throw err; }
+}
 
 async function submit(external: ExternalContext, kind: "vendor_bill" | "disposal_ticket" | "invoice_dispute", payload: unknown) {
   const db = await getDb();
@@ -587,6 +593,49 @@ export const portalRouter = router({
       const supp = [...x.revisions].reverse().find(r => r.kind === "post_site_supplement");
       const supplement = supp ? (JSON.parse(supp.snapshotJson) as { supplement: Supplement }).supplement : null;
       return { tickets, detail: { ticket: t, snapshot: snap, snapshotHash: x.revisions[0]?.snapshotHash ?? snapshotFor(x).hash, lines: x.lines, signature: x.signature ? { signerName: x.signature.signerName, signedAt: x.signature.capturedAt, exercised: x.signature.authoritiesExercised ? JSON.parse(x.signature.authoritiesExercised) : [], withinAuthority: x.signature.withinAuthority, method: x.signature.signatureMethod } : null, revisions, why: whyTheseHours(snap, x.signature?.signerName ?? null, supplement) } };
+    }),
+
+  /* ---- SA1: Sign & Attest through the portal. The identity's scope is the signer row that names it; the request never says whose document. ---- */
+  attestList: externalProcedure("portal.attestList")
+    .input(z.object({ limit: z.number().int().positive().max(200).optional() }).strict().optional())
+    .query(async ({ ctx, input }) => {
+      const e = ext(ctx); const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      await logAccess(e, "view", "attestRevisions", "mine", null, null);
+      return listRevisions(db as never, { externalIdentityId: e.identityId }, { limit: input?.limit });
+    }),
+  attestView: externalProcedure("portal.attestView")
+    .input(z.object({ revisionRef: z.string().min(3).max(120) }).strict())
+    .query(async ({ ctx, input }) => {
+      const e = ext(ctx); const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const view = await attestRefusing(() => viewRevision(db as never, { externalIdentityId: e.identityId }, input.revisionRef));
+      await logAccess(e, "view", "attestRevision", input.revisionRef, view.revision.revisionHash, null);
+      return view;
+    }),
+  /** The identity signs its OWN assigned fields; a field assigned to anyone else is refused and the attempt is a row. */
+  attestSign: externalProcedure("portal.attestSign")
+    .input(z.object({
+      revisionRef: z.string().min(3).max(120), signerRef: z.string().min(3).max(120), revisionHashAtStart: z.string().regex(/^[a-f0-9]{64}$/),
+      consentVersion: z.string().min(1).max(40).default(CONSENT_VERSION_V1),
+      marks: z.array(z.object({ fieldKey: z.string().min(1).max(80), markKind: z.enum(ATTEST_MARK_KINDS), inputKind: z.enum(ATTEST_INPUT_KINDS), valueText: z.string().max(500).nullable().optional(), strokeEvidenceRecordId: z.number().int().positive().nullable().optional(), strokeHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), renderedEvidenceRecordId: z.number().int().positive().nullable().optional(), renderedHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional() }).strict()).min(1).max(200),
+      gps: z.object({ latitude: z.number(), longitude: z.number() }).strict().nullable().optional(), sessionRef: z.string().min(8).max(120).nullable().optional(),
+    }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const e = ext(ctx); const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const r = await attestRefusing(() => submitSession(db as never, { kind: "external", externalIdentityId: e.identityId }, { externalIdentityId: e.identityId }, { ...input, authMethod: "portal_link" }));
+      await logAccess(e, "sign", "attestRevision", input.revisionRef, input.revisionHashAtStart, r.sessionRef);
+      return r;
+    }),
+  attestDecline: externalProcedure("portal.attestDecline")
+    .input(z.object({ revisionRef: z.string().min(3).max(120), signerRef: z.string().min(3).max(120), reason: z.string().min(3).max(500) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const e = ext(ctx); const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const r = await attestRefusing(() => declineSession(db as never, { kind: "external", externalIdentityId: e.identityId }, { externalIdentityId: e.identityId }, input));
+      await logAccess(e, "decide", "attestRevision", input.revisionRef, null, "declined");
+      return r;
     }),
 
   /** The consultant signs on their own device. Authority comes from the binding, never the request. */

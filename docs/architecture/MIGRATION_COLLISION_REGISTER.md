@@ -30,8 +30,18 @@ not collide with a main migration:
 
 | Number | Migration file | Branch | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|
+| 0195 | `0195_document_control_register.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
+| 0196 | `0196_document_control_numbering.sql` | `claude/document-control-design-imsd3n` | open branch | none | — |
+| 0197 | `0197_knowledge_provenance.sql` | `claude/leaseos-intelligence-engine-cr2fg1` | open branch | none (touches `knowledgeSources`/`knowledgeChunks`, new `knowledgeSnapshots`; C1b-2b does not touch those) | — |
+| 0198 | `0198_requirement_verification.sql` | `claude/leaseos-compliance-survey-5faxe8` (C1b-2b) | this branch | none | keeps 0198 |
+| 0199 | `0199_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | keeps 0199 (moved from `0198` when C1b-2b merged first; see the claim below) |
+| 0200 | `0200_fleet_portfolio_foundation.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | keeps 0200 |
+| 0201 | `0201_fleet_portfolio_guards.sql` | `claude/mechanic-portal-domain-82efa9` | open branch | none | keeps 0201 |
 | 0202 | `0202_live_assist_sessions.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0202 |
 | 0203 | `0203_live_assist_events_append_only.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0203 |
+| 0220 | `0220_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | open branch | none | — (seen in the CP2 scan, 2026-10-01) |
+| 0221 | `0221_defect_lifecycle.sql` | `claude/mechanic-portal-domain-82efa9` (mechanic CP2) | open branch | none | keeps 0221 |
+| 0222 | `0222_defect_lifecycle_guards.sql` | `claude/mechanic-portal-domain-82efa9` (mechanic CP2) | open branch | none | keeps 0222 (trigger DDL in its own file) |
 
 **2026-09-25 (later), on merging main into `claude/leaseos-auth-workspace-system-t008ad` (#64):** its
 `0170_organization_scoped_role_grants.sql` and `0175_organization_invitations.sql` collided with main's
@@ -90,6 +100,33 @@ Next free number at that time: `0191` (superseded above).
 * **2026-09-24 (C1b-1)**: rescanned after #6, #9, #11, #10, #13, #17, #18, #21, #23–#25 merged. C1b-1 takes
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
+
+## Claim: 0221, 0222 (mechanic portal CP2 — defect to return to service, 2026-10-01)
+
+| Number | Migration file | Branch | PR | Base | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0221 | `0221_defect_lifecycle.sql` | `claude/mechanic-portal-domain-82efa9` | none | `038dffc` (contains `main` `b35bac4`) | gated on the branch | none | keeps 0221 |
+| 0222 | `0222_defect_lifecycle_guards.sql` | `claude/mechanic-portal-domain-82efa9` | none | `038dffc` | gated on the branch | none | keeps 0222 (trigger DDL in its own file) |
+
+Drafted as `0220`/`0221`. The scan of `origin/main` and all 120 remote refs immediately before writing found
+`main` ending at `0219` and `claude/eld-compliance-intelligence-ramlrd` holding `0220_eld_event_ledger.sql`,
+so this checkpoint takes the first two numbers above every claim. No environment had applied either.
+Next free number: `0223`.
+
+## Claim: 0199, 0200, 0201 (mechanic portal CP1 and the Fleet & Equipment Portfolio foundation, 2026-09-25)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0199 | `0199_work_order_ownership.sql` | `claude/mechanic-portal-domain-82efa9` | none | `3d05d32` | gated on the branch | none | keeps 0199. Drafted as `0175`, then `0189`, then `0198`; each was taken first (`0189` by C1b-1, `0198` by C1b-2b, both merged to `main`), and it moved before any environment applied it |
+| 0200 | `0200_fleet_portfolio_foundation.sql` | `claude/mechanic-portal-domain-82efa9` | none | `3d05d32` | gated on the branch | none | keeps 0200. The portfolio design's own `0182` was taken long ago |
+| 0201 | `0201_fleet_portfolio_guards.sql` | `claude/mechanic-portal-domain-82efa9` | none | `3d05d32` | gated on the branch | none | keeps 0201 (trigger DDL in its own file) |
+
+First chosen as `0198`–`0200` by scanning `origin/main` and all 93 remote refs, when the highest number any
+other ref held was `0197` (`claude/leaseos-intelligence-engine-cr2fg1`). The scan repeated immediately
+before finalizing (94 refs, `main` = `3d05d32`) found C1b-2b's `0198_requirement_verification.sql` merged to
+`main` (#54), so all three moved up one; no other ref holds anything above `0198`. `0190` is unclaimed everywhere but
+was not taken: it would sort before `main`'s `0191`–`0194`, so a fresh database and a deployed one would
+apply it in different orders.
 
 ## Earlier state (2026-09-23, `main` = `42c454f`, after PR #4, PR #5 and C1a #12)
 
@@ -262,3 +299,17 @@ took `0215`–`0216` while this merge was being gated, the second of them minute
 pushed `0215`–`0217`. As the later, unmerged claimant this branch moved again, to the first
 three numbers free on `main` and on every open branch. No other branch was renumbered.
 
+
+## State at the Sign & Attest SA1 merge (2026-10-01, `main` = `ce27fec`, after PR #98, #59 and #102)
+
+`main` migration head: **`0219_job_commercial_context.sql`** (v23.31 took `0217`–`0219`, renumbered around
+Sign & Attest's claim; `0205`/`0206` landed with #59). This branch (PR #104) holds **`0214`–`0216`**
+(`0214_sign_attest_foundation`, `0215_sign_attest_events`, `0216_sign_attest_guards`): below main's head,
+colliding with nothing on main, applied by name. The earlier provisional claim of `0182`–`0184` in the
+design document is withdrawn (those numbers were taken by other branches).
+
+**Next free number for new work after this merge: `0220`** (re-check with the scan before committing).
+
+## Change log (continued)
+
+* **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.

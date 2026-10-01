@@ -40,7 +40,7 @@ const heldBy = (role: DomainRole) => new Set(permissionsForDomainRole(role));
  * is the implementation; this table is the decision. They are compared both
  * ways, so a type cannot move category, appear or disappear in one place only.
  */
-const POLICY: Record<string, string> = {
+const POLICY: Record<string, string | null> = {
   // The work and its paperwork — job-operational
   field_ticket: "evidence.read_job_operational",
   daily_log: "evidence.read_job_operational",
@@ -72,6 +72,11 @@ const POLICY: Record<string, string> = {
   employment_record: "evidence.read_personnel",
   // legal
   legal_correspondence: "evidence.read_legal",
+  // Sign & Attest — classified, deliberately in no category: owner-only until SA decides
+  signature_strokes: null,
+  signature_render: null,
+  signed_artifact: null,
+  attest_receipt: null,
 };
 
 /** The seal's own vocabulary, as `EvidenceRecordType` declares it. */
@@ -79,6 +84,7 @@ const SEAL_TYPES = [
   "daily_log", "pre_trip", "post_trip_dvir", "manifest", "load_ticket", "disposal_ticket", "scale_ticket",
   "field_ticket", "bill_receipt", "safety_meeting", "incident", "near_miss", "defect_report", "work_order",
   "inspection", "permit", "photo", "other",
+  "signature_strokes", "signature_render", "signed_artifact", "attest_receipt",
 ];
 
 describe("classification policy", () => {
@@ -95,7 +101,7 @@ describe("classification policy", () => {
   });
 
   it("only ever names a real read category", () => {
-    for (const c of Object.values(READ_CATEGORY_BY_RECORD_TYPE)) expect(EVIDENCE_READ_CATEGORIES).toContain(c);
+    for (const c of Object.values(READ_CATEGORY_BY_RECORD_TYPE)) if (c !== null) expect(EVIDENCE_READ_CATEGORIES).toContain(c);
   });
 
   it("classifies every type the seal does not know yet into a narrow category, never job-operational", () => {
@@ -138,7 +144,7 @@ describe("who each policy group reaches", () => {
 
   it("reaches exactly the holders of the mapped category — the file manager widens no grant", () => {
     for (const [type, category] of Object.entries(POLICY)) {
-      expect(reaches(type), type).toEqual(holders(category as Permission));
+      expect(reaches(type), type).toEqual(category === null ? [] : holders(category as Permission));
     }
   });
 
@@ -149,6 +155,15 @@ describe("who each policy group reaches", () => {
   it("keeps receipts away from the field and the shop", () => {
     for (const r of ["driver", "dispatcher", "mechanic", "shop_lead", "safety"] as DomainRole[]) {
       expect(reaches("bill_receipt"), r).not.toContain(r);
+    }
+  });
+
+  it("keeps signatures and signed artifacts out of every category", () => {
+    for (const t of ["signature_strokes", "signature_render", "signed_artifact", "attest_receipt"]) {
+      expect(readCategoryFor(t), t).toBeNull();
+      expect(reaches(t), t).toEqual([]);
+      // ...and the signer keeps their own, as listForOperator already gives them.
+      expect(fileVisibility({ held: heldBy("driver"), recordType: t, isOwner: true }).visible, t).toBe(true);
     }
   });
 

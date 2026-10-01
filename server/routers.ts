@@ -33,6 +33,7 @@ function readRefreshCookie(req: { headers?: { cookie?: string } }): { familyRef:
   return { familyRef: value.slice(0, dot), verifier: value.slice(dot + 1) };
 }
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits, requireUnitInScope } from "./unitScope";
 import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
 /**
@@ -69,6 +70,7 @@ async function scopeFor(userId: number) {
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   return { tenantId: (await resolveActingScope(db, userId)).tenantId };
 }
+
 import { securityIncidentsRouter } from "./securityIncidentsRouter";
 import { sessionRouter } from "./sessionRouter";
 import { clearOrganizationSelectionCookie } from "./_core/organizationSelectionCookie";
@@ -127,9 +129,12 @@ import { messageBoardRouter } from "./messageBoardRouter";
 import { assistantAskRouter } from "./assistantAskRouter";
 import { agentRouter } from "./agentRouter";
 import { liveAssistRouter } from "./liveAssistRouter";
+import { attestRouter } from "./attestRouter";
 import { hosRouter } from "./hosRouter";
 import { portalRouter } from "./portalRouter";
 import { shopRouter } from "./shopRouter";
+import { maintenanceRouter } from "./maintenanceRouter";
+import { fleetPortfolioRouter } from "./fleetPortfolioRouter";
 import { assetRouter } from "./assetRouter";
 import { projectRouter } from "./projectRouter";
 import { inboundRouter, integrationRouter } from "./integrationRouter";
@@ -400,10 +405,16 @@ export const appRouter = router({
   invoicing: invoicingRouter,
   geo: geoRouter,
   closeout: closeoutRouter,
+  // SA1 — Sign & Attest: the signing foundation (docs/sign-attest/SA1_OWNER_RULING.md).
+  attest: attestRouter,
   portalAdmin: portalAdminRouter,
   // v21.10 — external identities only; gated by externalProcedure, never by roles.
   portal: portalRouter,
   shop: shopRouter,
+  // 0199 — fleet maintenance, checkpoint 1: who owns a work order, and cancelling one.
+  maintenance: maintenanceRouter,
+  // 0200 — the Fleet & Equipment Portfolio: holds, the meter record, the unit's operational state.
+  fleet: fleetPortfolioRouter,
   asset: assetRouter,
   project: projectRouter,
   integration: integrationRouter,
@@ -646,8 +657,16 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(async ({ ctx, input }) =>
-          createTrip({
+        .mutation(async ({ ctx, input }) => {
+          const scope = await scopeFor(ctx.user.id);
+          /*
+           * A trip may not name a unit the caller's organization cannot see. This wrote any unitId it
+           * was given, so one organization could put a trip — its distance, its odometer, its IFTA
+           * miles — on another organization's truck. Scoped as every unit-keyed write is, and out of
+           * scope is "not found", worded exactly as for a unit that does not exist.
+           */
+          if (input.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+          return createTrip({
             ...input,
             distanceKm:
               input.distanceKm ??
@@ -655,8 +674,8 @@ export const appRouter = router({
               input.odometerEndKm !== undefined
                 ? Math.max(0, input.odometerEndKm - input.odometerStartKm)
                 : undefined),
-          }, await scopeFor(ctx.user.id))
-        ),
+          }, scope);
+        }),
       update: roleProcedure("trips.update")
         .input(
           z.object({
@@ -833,6 +852,7 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
+          await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — before the model is asked anything; the proposal would be visible to the unit's owner
           if (input.idempotencyKey) {
             const existing = await getAssistantProposal(input.idempotencyKey);
             if (existing) {
@@ -1167,8 +1187,10 @@ export const appRouter = router({
         .input(z.object({ unitId: z.number().int().optional() }).optional())
         .query(async ({ ctx, input }) => {
         // P4.1: scope guard
-        if (input?.unitId != null && !(await unitInScope(input.unitId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
-        return listWorkOrders(input?.unitId);
+        const scope = await scopeFor(ctx.user.id);
+        if (input?.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+        // 0199 — without a unit this listed every organization's work orders. It lists the caller's.
+        return listWorkOrders(input?.unitId, scope);
       }),
       create: roleProcedure("workOrders.create")
         .input(
@@ -1205,22 +1227,19 @@ export const appRouter = router({
         .mutation(async ({ ctx, input }) => {
         // P4.1: scope guard
         if (input?.unitId != null && !(await unitInScope(input.unitId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
-        return createWorkOrder(input);
+        return createWorkOrder({ ...input, openedByUserId: ctx.user.id });
       }),
       update: roleProcedure("workOrders.update")
         .input(
           z.object({
             id: z.number().int().positive(),
-            status: z
-              .enum([
-                "draft",
-                "open",
-                "in_progress",
-                "waiting_parts",
-                "ready_for_service",
-                "closed",
-              ])
-              .optional(),
+            /*
+             * 0199 — status is not editable here. This took any status, including backwards, and so
+             * walked around `shop.workOrderAdvance`'s forward-only rule; a status sent now is refused
+             * at the schema, not dropped quietly. Moving a work order is `shop.workOrderAdvance`;
+             * cancelling one is `maintenance.workOrderCancel`.
+             */
+            status: REFUSED,
             priority: z.enum(["routine", "urgent", "critical"]).optional(),
             startedAt: z.coerce.date().optional(),
             completedAt: z.coerce.date().optional(),
@@ -1237,7 +1256,7 @@ export const appRouter = router({
         // P4.1: scope guard
         if (!(await workOrderInScope(input.id, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.id} not found` });
         
-          const { id, ...values } = input;
+          const { id, status: _refused, ...values } = input;
           return updateWorkOrder(id, values);
         }),
     }),
@@ -1658,6 +1677,9 @@ export const appRouter = router({
         // P4.1: scope guard
         const actingScope = await scopeFor(ctx.user.id);
         if (input?.jobId != null && !(await jobInScope(input.jobId, actingScope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        // CP1.5 (sweep #22) — the job was scoped, the unit only through a check in enforced mode. A job
+        // may not take another organization's truck, in any mode.
+        await requireUnitInScope(input.unitId, actingScope);
          // C1a — the check relied on must belong to the caller's organization too.
          const r = await createJobUnitGated({ ...input, actingScope }); return r.id; }),
       }),

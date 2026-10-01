@@ -26,6 +26,7 @@ import type { MySqlColumn } from "drizzle-orm/mysql-core";
 import { auditPackages, bankAccounts, changeOrders, clientAdjustments, customerContractTerms, fieldTicketRevisions, fieldTickets, incidentReports, insuranceClaims, insurancePolicies, bankStatements, capitalAssets, ccaSchedules, customerAccounts, customerCredits, disputeCases, externalIdentities, fuelAccounts, fuelStatements, fuelTransactions, gstReturns, iftaReturns, invoices, jurisdictionDistanceRecords, bulkFuelTanks, loads, organizationMemberships, portalSubmissions, projectBudgets, purchaseAuthorizations, quotes, rfis, roadsideServiceEvents, safetyEvents, units, vendorBills, vendors, writeOffRequests } from "../drizzle/schema";
 import { bookOrgWhere, notFound, ownedEntityWhere, ownsBookOrg, ownsEntity, requireOwnedEntity, type FinanceScope } from "./_core/entityScope";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
+import { requireUnitInScope, type UnitArgument } from "./unitScope";
 import { requireProvableOwnership } from "./ownershipDomain";
 import { evidenceInScope, fieldTicketInScope, getDb, incidentInScope, jobInScope, jobScopeSubquery, operatorInScope, ownershipScopeWhere, tripInScope, unitInScope, userInScope } from "./db";
 
@@ -165,8 +166,9 @@ export async function roadsideEventInScope(db: Db, fs: FinanceScope, eventRef: s
 }
 
 // ── Operational references a finance record may name ─────────────────────────────────────────────
-export async function requireUnit(fs: FinanceScope, unitId: number | null | undefined) {
-  if (unitId != null && !(await unitInScope(unitId, fs))) throw notFound("Unit");
+/** CP1.5 — the one unit refusal (`server/unitScope.ts`): "Unit <id> not found", another organization's or missing alike. */
+export async function requireUnit(fs: FinanceScope, unitId: number | null | undefined, label: UnitArgument = "Unit") {
+  await requireUnitInScope(unitId, fs, label);
 }
 export async function requireJob(fs: FinanceScope, jobId: number | null | undefined) {
   if (jobId != null && !(await jobInScope(jobId, fs))) throw notFound("Job");

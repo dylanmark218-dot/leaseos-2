@@ -88,7 +88,18 @@ export const SEALED_TYPE_READ_CATEGORY = {
   incident: "evidence.read_safety_summary",
   near_miss: "evidence.read_safety_summary",
   bill_receipt: "evidence.read_commercial",
-} as const satisfies Record<EvidenceRecordType, ReadCategory>;
+  // Sign & Attest (SA1). Deliberately NO category — owner-only through
+  // evidence.read_own — until Sign & Attest decides who browses them. A stroke
+  // document is handwriting the SA1 design keeps from becoming biometric
+  // material; a rendered mark is a reusable image of someone's signature; a
+  // signed artifact can be a field ticket or an HR consent, which its type
+  // cannot tell apart; a receipt is audit material. SA1 reads them through its
+  // own procedures, so nobody loses access by this.
+  signature_strokes: null,
+  signature_render: null,
+  signed_artifact: null,
+  attest_receipt: null,
+} as const satisfies Record<EvidenceRecordType, ReadCategory | null>;
 
 /**
  * Types the seal does not know yet, classified in advance — every one into a
@@ -105,7 +116,8 @@ export const FORWARD_TYPE_READ_CATEGORY = {
   legal_correspondence: "evidence.read_legal",
 } as const satisfies Record<string, Exclude<ReadCategory, "evidence.read_job_operational">>;
 
-export const READ_CATEGORY_BY_RECORD_TYPE: Readonly<Record<string, ReadCategory>> = {
+/** `null` is a decision, not a gap: classified, and deliberately in no category. */
+export const READ_CATEGORY_BY_RECORD_TYPE: Readonly<Record<string, ReadCategory | null>> = {
   ...SEALED_TYPE_READ_CATEGORY,
   ...FORWARD_TYPE_READ_CATEGORY,
 };
@@ -117,7 +129,7 @@ export const READ_CATEGORY_BY_RECORD_TYPE: Readonly<Record<string, ReadCategory>
  */
 export function readCategoryFor(recordType: string): ReadCategory | null {
   return Object.prototype.hasOwnProperty.call(READ_CATEGORY_BY_RECORD_TYPE, recordType)
-    ? READ_CATEGORY_BY_RECORD_TYPE[recordType]!
+    ? READ_CATEGORY_BY_RECORD_TYPE[recordType] ?? null
     : null;
 }
 

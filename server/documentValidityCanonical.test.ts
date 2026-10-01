@@ -11,6 +11,7 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { readExpiry, validityOf, type DocumentVersion } from "./_core/documentValidity";
 
@@ -75,12 +76,48 @@ const rel = (f: string) => path.relative(path.resolve(__dirname, ".."), f);
 
 describe("census", () => {
   it("the four qualification readers no longer read workerQualifications; only the adapter does", () => {
-    for (const f of ["readinessRouter.ts", "openShiftsRouter.ts", "crewRouter.ts", "calendarRouter.ts"]) {
+    // Open work's reader is openShiftsService since 0206 (#59); its router reads no qualification store.
+    expect(read("openShiftsRouter.ts")).not.toContain("workerQualifications");
+    for (const f of ["readinessRouter.ts", "openShiftsService.ts", "crewRouter.ts", "calendarRouter.ts"]) {
       expect(read(f), f).not.toContain("workerQualifications");
       expect(read(f), f).toContain('from "./qualificationReads"');
     }
     const readers = productionFiles.filter((f) => /from\(workerQualifications\)/.test(readFileSync(f, "utf8"))).map(rel);
     expect(readers).toEqual(["server/qualificationReads.ts"]);
+  });
+
+  it("open work consumes the adapter's verdict and decides no qualification itself", () => {
+    // Structural, from the import graph and the call sites rather than from text: the open-work files
+    // may reach a qualification only through `effectiveQualifications`. They import no validity engine,
+    // no qualification or credential table, and the service calls the adapter.
+    const ENGINES = ["./_core/qualificationValidity", "./_core/documentValidity", "./_core/complianceDocumentValidity",
+      "./qualificationValidity", "./documentValidity", "./complianceDocumentValidity"];
+    const STORES = ["academyQualifications", "workerQualifications", "complianceDocuments"];
+    const files = ["openShiftsService.ts", "openShiftsRouter.ts", "_core/openShifts.ts", "shiftAwardService.ts"];
+    let adapterCalls = 0;
+    for (const f of files) {
+      const src = ts.createSourceFile(f, read(f), ts.ScriptTarget.Latest, true);
+      const visit = (n: ts.Node): void => {
+        if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier)) {
+          const from = n.moduleSpecifier.text;
+          const names = n.importClause?.namedBindings && ts.isNamedImports(n.importClause.namedBindings)
+            ? n.importClause.namedBindings.elements.map(e => (e.propertyName ?? e.name).text) : [];
+          // The one exception, and it is not a qualification: the open-shift rule (SPINE item 2,
+          // `shiftEligibility`) judges the driver's licence date with the existing `readExpiry` rather
+          // than a second copy of "is this date past". Exactly that file, exactly that one name.
+          const licenceDate = f === "_core/openShifts.ts" && from === "./documentValidity" && !n.importClause?.name
+            && names.length === 1 && names[0] === "readExpiry";
+          if (!licenceDate) expect(ENGINES, `${f} imports the validity engine ${from}`).not.toContain(from);
+          if (from.endsWith("drizzle/schema")) {
+            for (const t of STORES) expect(names, `${f} reads ${t} directly`).not.toContain(t);
+          }
+        }
+        if (f === "openShiftsService.ts" && ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "effectiveQualifications") adapterCalls++;
+        ts.forEachChild(n, visit);
+      };
+      visit(src);
+    }
+    expect(adapterCalls).toBeGreaterThan(0);
   });
 
   it("24. no production writer of workerQualifications exists, and none was added", () => {
