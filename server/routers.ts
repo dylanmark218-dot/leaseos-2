@@ -187,8 +187,6 @@ import {
   listTripStops,
   createTripStop,
   updateTripStop,
-  listOperatingZones,
-  createOperatingZone,
   createDutyRecord,
   listWorkOrders,
   createWorkOrder,
@@ -202,6 +200,7 @@ import { routingSourceStatus } from "./_core/routingSource";
 // `listZoneEvents` / `zoneEventTripId` in db.ts, are gone: an operator record and an active trip are
 // the acting organization's or they are nobody's here.
 import { activeTripForOperatorInScope, listZoneEventsInScope, requireZoneEventInScope, selfOperatorInTelematicsScope, telematicsScopeFor, tripBreadcrumbsInScope } from "./telematicsScope";
+import { createOperatingZoneInScope, listOperatingZonesInScope, operatingZoneScopeFor } from "./operatingZoneScope";
 /** A scan's access role is the strongest role the caller holds, in the scan audit's vocabulary. */
 function scanRoleOf(roles: readonly string[]): "inspection" | "driver" | "mechanic" | "dispatcher" | "admin" {
   if (roles.includes("management") || roles.includes("controller")) return "admin";
@@ -727,10 +726,15 @@ export const appRouter = router({
         }),
     }),
     operatingZones: router({
-      list: roleProcedure("operatingZones.list").query(() => listOperatingZones()),
+      // P0-A2.1 — an operating zone is the acting organization's geofence. The list is filtered in
+      // the query to the caller's organization; a new zone is stamped with it, never with an
+      // organization named in the input; and the GPS engine (server/_core/tripGps.ts) evaluates a
+      // trip against its own organization's zones only, read from trips.orgRef.
+      list: roleProcedure("operatingZones.list").query(async ({ ctx }) => listOperatingZonesInScope(await operatingZoneScopeFor(ctx.user.id))),
       create: roleProcedure("operatingZones.create")
         .input(
           z.object({
+            orgRef: REFUSED,
             name: z.string().min(1).max(180),
             zoneType: z.enum(["loading", "unloading", "both"]),
             locationId: z.number().int().optional(),
@@ -744,7 +748,10 @@ export const appRouter = router({
             notes: z.string().optional(),
           })
         )
-        .mutation(({ input }) => createOperatingZone(input)),
+        .mutation(async ({ ctx, input }) => {
+          const { orgRef: _refused, ...zone } = input;
+          return createOperatingZoneInScope(await operatingZoneScopeFor(ctx.user.id), zone);
+        }),
     }),
     assistant: router({
       forms: roleProcedure("assistant.forms").query(() =>

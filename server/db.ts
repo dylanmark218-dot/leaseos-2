@@ -37,7 +37,6 @@ import {
   InsertRouteDecision,
   InsertTrip,
   InsertTripStop,
-  InsertOperatingZone,
   InsertDutyRecord,
   InsertWorkOrder,
   InsertTripBreadcrumb,
@@ -52,7 +51,6 @@ import {
   routeDecisions,
   trips,
   tripStops,
-  operatingZones,
   dutyRecords,
   workOrders,
   jobChargeLines,
@@ -302,30 +300,9 @@ export async function updateTripStop(
   await db.update(tripStops).set(input).where(eq(tripStops.id, id));
   return true;
 }
-export async function listOperatingZones() {
-  const db = await getDb();
-  if (!db) return [];
-  return db
-    .select()
-    .from(operatingZones)
-    .orderBy(desc(operatingZones.createdAt))
-    .limit(200);
-}
-export async function createOperatingZone(input: InsertOperatingZone) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.insert(operatingZones).values(input);
-  return result[0]?.insertId;
-}
-export async function listActiveOperatingZones() {
-  const db = await getDb();
-  if (!db) return [];
-  return db
-    .select()
-    .from(operatingZones)
-    .where(eq(operatingZones.active, 1))
-    .limit(500);
-}
+// P0-A2.1 — `listOperatingZones`, `createOperatingZone` and `listActiveOperatingZones` (every
+// organization's zones, and the engine's "all active zones") are retired; the scoped forms are in
+// server/operatingZoneScope.ts.
 
 export async function createTripBreadcrumb(input: InsertTripBreadcrumb) {
   const db = await getDb();
