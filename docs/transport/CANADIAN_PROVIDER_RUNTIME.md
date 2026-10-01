@@ -5,6 +5,9 @@ step. This covers the runtime only. Which provinces publish what, and under whic
 [`CANADIAN_PROVIDER_MATRIX.md`](CANADIAN_PROVIDER_MATRIX.md). The licence record itself is in
 `DATA_SOURCES.md` and the `externalDataSources` table.
 
+**Checkpoint record:** [`checkpoints/T1_CANADIAN_PROVIDER_RUNTIME.md`](checkpoints/T1_CANADIAN_PROVIDER_RUNTIME.md)
+(gate-verified SHA, counts, environment).
+
 **Production does not collect anything yet.** All the code below exists and is tested against a
 real database, but nothing in production calls `runTransportFeedTick`. Turning collection on is an
 owner decision; see [Production enablement](#production-enablement).
