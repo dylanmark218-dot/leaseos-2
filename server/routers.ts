@@ -84,7 +84,6 @@ import {
   trackingSubjectInScope,
   transferTrackingNumber,
   tripStopTripId,
-  zoneEventTripId,
   unitSafetyPlanUnitId,
   tripRefInScope,
 } from "./db";
@@ -194,27 +193,15 @@ import {
   listWorkOrders,
   createWorkOrder,
   updateWorkOrder,
-  listTripBreadcrumbs,
-  listZoneEvents,
   updateZoneEvent,
  getDb } from "./db";
 import { ingestBreadcrumb } from "./_core/tripGps";
 import { routingSourceStatus } from "./_core/routingSource";
-import { operators as operatorsTable, trips as tripsTable } from "../drizzle/schema";
-import { and as andOp, eq as eqOp, inArray as inArrayOp } from "drizzle-orm";
-
-/** The session's operator record, or null. Identity is resolved, never named by the request. */
-async function operatorForUser(userId: number) {
-  const db = await getDb();
-  if (!db) return null;
-  return (await db.select({ id: operatorsTable.id }).from(operatorsTable).where(eqOp(operatorsTable.userId, userId)).limit(1))[0] ?? null;
-}
-/** The operator's one active trip, or null. A breadcrumb binds to this, not to a trip the request names. */
-async function activeTripForOperator(operatorId: number) {
-  const db = await getDb();
-  if (!db) return null;
-  return (await db.select({ id: tripsTable.id, unitId: tripsTable.unitId }).from(tripsTable).where(andOp(eqOp(tripsTable.operatorId, operatorId), inArrayOp(tripsTable.status, ["loading", "in_transit", "unloading"]))).limit(1))[0] ?? null;
-}
+// P0-A2 — the GPS trace and the geofence proposals reach the database only through the telematics
+// boundary. The unscoped `operatorForUser` / `activeTripForOperator` helpers that lived here, and
+// `listZoneEvents` / `zoneEventTripId` in db.ts, are gone: an operator record and an active trip are
+// the acting organization's or they are nobody's here.
+import { activeTripForOperatorInScope, listZoneEventsInScope, requireZoneEventInScope, selfOperatorInTelematicsScope, telematicsScopeFor, tripBreadcrumbsInScope } from "./telematicsScope";
 /** A scan's access role is the strongest role the caller holds, in the scan audit's vocabulary. */
 function scanRoleOf(roles: readonly string[]): "inspection" | "driver" | "mechanic" | "dispatcher" | "admin" {
   if (roles.includes("management") || roles.includes("controller")) return "admin";
@@ -1009,38 +996,30 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
-        
-          const own = await operatorForUser(ctx.user.id);
-          const active = own ? await activeTripForOperator(own.id) : null;
+          // P0-A2 — the operator record and the active trip are both resolved inside the acting
+          // organization. A driver who left company B does not keep sending positions to B's trip
+          // through their old operator row, and an ex-member is refused at the scope step.
+          const scope = await telematicsScopeFor(ctx.user.id);
+          const own = await selfOperatorInTelematicsScope(scope, ctx.user.id);
+          const active = own ? await activeTripForOperatorInScope(scope, own.id) : null;
           if (!active) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No active trip is assigned to the signed-in operator; a position is not attached to a trip it was not assigned to" });
           if (input.tripId != null && input.tripId !== active.id) throw new TRPCError({ code: "FORBIDDEN", message: `The signed-in operator's active trip is ${active.id}; a breadcrumb is not attached to another trip` });
           return ingestBreadcrumb({ ...input, tripId: active.id, unitId: active.unitId ?? undefined });
         }),
       breadcrumbs: roleProcedure("gps.breadcrumbs")
         .input(z.object({ tripId: z.number().int() }))
-        .query(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
-        return listTripBreadcrumbs(input.tripId);
-      }),
+        .query(async ({ ctx, input }) => tripBreadcrumbsInScope(await telematicsScopeFor(ctx.user.id), input.tripId)),
       // Pending proposals a driver/dispatcher hasn't ruled on yet. Omit tripId
-      // to review pending events across all active trips (dispatch view).
+      // to review pending events across the organization's active trips (dispatch view).
       pendingZoneEvents: roleProcedure("gps.pendingZoneEvents")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
-        .query(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
-        return listZoneEvents(input?.tripId, "pending");
-      }),
+        .query(async ({ ctx, input }) => listZoneEventsInScope(await telematicsScopeFor(ctx.user.id), input?.tripId, "pending")),
       zoneEvents: roleProcedure("gps.zoneEvents")
         .input(z.object({ tripId: z.number().int().optional() }).optional())
-        .query(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        if (input?.tripId != null && !(await tripInScope(input.tripId, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
-        return listZoneEvents(input?.tripId);
-      }),
+        .query(async ({ ctx, input }) =>
+          // P0-A2 — filtered in the query to the trips the caller's organization owns. The P4.1 guard
+          // only ever checked a NAMED trip; the unfiltered list was every company's proposals.
+          listZoneEventsInScope(await telematicsScopeFor(ctx.user.id), input?.tripId)),
       // The human-in-the-loop step: a confirmed event can optionally be linked
       // to the tripStop it resolves (e.g. sets arrivedAt). Rejecting it leaves
       // the tripStop entirely untouched — the GPS engine never overwrites a
@@ -1054,10 +1033,10 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
-        // P4.1: scope guard
-        { const tid = await zoneEventTripId(input.id); if (tid != null && !(await tripInScope(tid, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Zone event ${input.id} not found` }); }
-        
-          await updateZoneEvent(input.id, {
+          // P0-A2 — the proposal must belong to a trip the caller's organization owns; a foreign
+          // one is refused exactly as a nonexistent one, before anything is written.
+          const ze = await requireZoneEventInScope(await telematicsScopeFor(ctx.user.id), input.id);
+          await updateZoneEvent(ze.id, {
             status: input.action === "confirm" ? "confirmed" : "rejected",
             confirmedAt: new Date(),
             confirmedBy: ctx.user.id,
