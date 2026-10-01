@@ -94,7 +94,7 @@ export type ExternalReferenceType = (typeof EXTERNAL_REFERENCE_TYPES)[number];
  * was. The four older polymorphic-link conventions are mapped, not migrated
  * (design D-DC-06).
  */
-export const DOCUMENT_LINK_KINDS = ["operator", "unit", "trailer", "equipment", "job", "trip", "load", "manifest", "disposal_ticket", "field_ticket", "work_order", "incident", "near_miss", "safety_meeting", "invoice", "customer", "facility", "daily_log", "inspection", "expense_record", "financial_entity", "tax_year", "user", "fuel_transaction", "customer_account", "vendor", "billing_book", "purchase_order", "material", "written_program", "document", "dispatch", "organization", "qualification"] as const;
+export const DOCUMENT_LINK_KINDS = ["operator", "unit", "trailer", "equipment", "job", "trip", "load", "manifest", "disposal_ticket", "field_ticket", "work_order", "incident", "near_miss", "safety_meeting", "invoice", "customer", "facility", "daily_log", "inspection", "expense_record", "financial_entity", "tax_year", "user", "fuel_transaction", "customer_account", "vendor", "billing_book", "purchase_order", "material", "written_program", "document", "dispatch", "organization", "qualification", "attest_revision", "attest_mark"] as const;
 export type DocumentLinkKind = (typeof DOCUMENT_LINK_KINDS)[number];
 
 /** `evidenceRelationships.entityType` (camelCase enum) → the one link vocabulary. */
@@ -103,6 +103,8 @@ export const EVIDENCE_ENTITY_TO_LINK_KIND: Record<string, DocumentLinkKind> = {
   disposalTicket: "disposal_ticket", fieldTicket: "field_ticket", workOrder: "work_order", incident: "incident", nearMiss: "near_miss", safetyMeeting: "safety_meeting",
   invoice: "invoice", customer: "customer", facility: "facility", dailyLog: "daily_log", inspection: "inspection", expenseRecord: "expense_record",
   financialEntity: "financial_entity", taxYear: "tax_year", user: "user", fuelTransaction: "fuel_transaction",
+  // SA1 — a stroke file, a rendered mark or a receipt files against the signing revision and the mark.
+  attestRevision: "attest_revision", attestMark: "attest_mark",
 };
 
 export const DEFINITION_KEY_PATTERN = /^[a-z][a-z0-9_]{1,39}$/;

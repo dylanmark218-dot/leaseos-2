@@ -1293,6 +1293,8 @@ export const fieldTicketSignatures = mysqlTable("fieldTicketSignatures", {
   deviceKeyFingerprint: varchar("deviceKeyFingerprint", { length: 80 }),
   deviceSignatureBase64: text("deviceSignatureBase64"),
   deviceSignedAt: timestamp("deviceSignedAt"),
+  /** SA1 (0214) — the Sign & Attest session that holds this signature's mark and chain. NULL = signed before Sign & Attest. */
+  attestSessionRef: varchar("attestSessionRef", { length: 120 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -2772,6 +2774,8 @@ export const evidenceRelationships = mysqlTable("evidenceRelationships", {
     "expenseRecord", "financialEntity", "taxYear", "user",
     // v20.18
     "fuelTransaction",
+    // SA1 (0214) — a stroke file, a rendered mark or a receipt files against the signing revision and the mark.
+    "attestRevision", "attestMark",
   ]).notNull(),
   entityId: int("entityId"),
   entityRef: varchar("entityRef", { length: 64 }),
@@ -4907,6 +4911,27 @@ export const customerAccounts = mysqlTable("customerAccounts", {
   postSiteBillingRuleJson: text("postSiteBillingRuleJson"),
   status: mysqlEnum("status", ["active", "on_hold", "inactive"]).default("active").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  // 0217 — the account profile: the canonical commercial party. Additive; NULL/defaulted for every prior row.
+  customerNumber: varchar("customerNumber", { length: 40 }),
+  legalName: varchar("legalName", { length: 220 }),
+  tradeName: varchar("tradeName", { length: 220 }),
+  customerType: mysqlEnum("customerType", ["producer_operator", "oilfield_service", "prime_contractor", "consultant", "disposal_company", "municipality", "construction", "trucking", "other"]).default("other").notNull(),
+  billingAddressJson: text("billingAddressJson"),
+  physicalAddressJson: text("physicalAddressJson"),
+  province: varchar("province", { length: 8 }),
+  country: varchar("country", { length: 2 }).default("CA").notNull(),
+  gstNumber: varchar("gstNumber", { length: 20 }),
+  taxStatus: mysqlEnum("taxStatus", ["taxable", "zero_rated", "exempt", "unknown"]).default("unknown").notNull(),
+  defaultCurrency: varchar("defaultCurrency", { length: 3 }).default("CAD").notNull(),
+  requiredReferenceKindsJson: text("requiredReferenceKindsJson"),
+  notes: text("notes"),
+  createdByUserId: int("createdByUserId"),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  archivedAt: timestamp("archivedAt"),
+  archivedByUserId: int("archivedByUserId"),
+  archiveReason: varchar("archiveReason", { length: 400 }),
+  rowVersion: int("rowVersion").default(1).notNull(),
 });
 export type InsertCustomerAccount = typeof customerAccounts.$inferInsert;
 
@@ -6107,6 +6132,12 @@ export const chargeDefinitions = mysqlTable("chargeDefinitions", {
   rejectionReason: varchar("rejectionReason", { length: 400 }),
   notes: varchar("notes", { length: 600 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  // 0218 — a rate line is a charge definition on a rate sheet version; the kind and the conditions the resolver reads.
+  rateSheetVersionId: int("rateSheetVersionId"),
+  lineNo: int("lineNo"),
+  lineKind: varchar("lineKind", { length: 40 }),
+  label: varchar("label", { length: 220 }),
+  applicabilityJson: text("applicabilityJson"),
 });
 export type ChargeDefinitionRow = typeof chargeDefinitions.$inferSelect;
 export type InsertChargeDefinition = typeof chargeDefinitions.$inferInsert;
@@ -7123,9 +7154,27 @@ export const shiftPosts = mysqlTable("shiftPosts", {
   requiredRole: varchar("requiredRole", { length: 60 }).notNull(),
   requiredQualificationsJson: text("requiredQualificationsJson").notNull(),
   seats: int("seats").default(1).notNull(),
-  status: mysqlEnum("status", ["open", "filled", "cancelled", "expired"]).default("open").notNull(),
+  status: mysqlEnum("status", ["draft", "open", "closed", "filled", "cancelled", "expired"]).default("open").notNull(),
   postedByUserId: int("postedByUserId").notNull(),
   postedAt: timestamp("postedAt").notNull(),
+  /* 0206 — the slot this post fills. NULL = not yet linked to a job; an unlinked post cannot be filled. */
+  dispatchPostingId: int("dispatchPostingId"),
+  dispatchRoleId: int("dispatchRoleId"),
+  unitId: int("unitId"),
+  requiredEquipmentClass: varchar("requiredEquipmentClass", { length: 60 }),
+  overtime: boolean("overtime").default(false).notNull(),
+  estimatedHours: int("estimatedHours"),
+  regionCode: varchar("regionCode", { length: 60 }),
+  /** Display and sort only; never an input to eligibility. */
+  priority: mysqlEnum("priority", ["normal", "callout", "hotshot", "emergency"]).default("normal").notNull(),
+  publishedAt: timestamp("publishedAt"),
+  closesAt: timestamp("closesAt"),
+  closedAt: timestamp("closedAt"),
+  filledAt: timestamp("filledAt"),
+  filledByUserId: int("filledByUserId"),
+  cancelledAt: timestamp("cancelledAt"),
+  cancelledByUserId: int("cancelledByUserId"),
+  cancelReason: varchar("cancelReason", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type ShiftPostRow = typeof shiftPosts.$inferSelect;
@@ -7136,9 +7185,79 @@ export const shiftInterests = mysqlTable("shiftInterests", {
   userId: int("userId").notNull(),
   expressedAt: timestamp("expressedAt").notNull(),
   withdrawnAt: timestamp("withdrawnAt"),
+  /* 0206 — one standing response per person per post; replaced in place, the previous one audited. */
+  response: mysqlEnum("response", ["interested", "available", "request_assignment", "declined"]).default("interested").notNull(),
+  note: varchar("note", { length: 400 }),
+  deviceCreatedAt: timestamp("deviceCreatedAt"),
+  deviceId: varchar("deviceId", { length: 64 }),
+  clientMutationId: varchar("clientMutationId", { length: 64 }),
+  updatedAt: timestamp("updatedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type ShiftInterestRow = typeof shiftInterests.$inferSelect;
+
+/* ---- 0206: offers, marketplace audit, availability ---- */
+
+export const shiftOffers = mysqlTable("shiftOffers", {
+  id: int("id").autoincrement().primaryKey(),
+  offerRef: varchar("offerRef", { length: 64 }).notNull().unique(),
+  postRef: varchar("postRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  offeredByUserId: int("offeredByUserId").notNull(),
+  offeredAt: timestamp("offeredAt").notNull(),
+  expiresAt: timestamp("expiresAt"),
+  status: mysqlEnum("status", ["offered", "accepted", "declined", "withdrawn", "expired", "awarded", "not_selected"]).default("offered").notNull(),
+  respondedAt: timestamp("respondedAt"),
+  deviceRespondedAt: timestamp("deviceRespondedAt"),
+  responseDeviceId: varchar("responseDeviceId", { length: 64 }),
+  responseClientMutationId: varchar("responseClientMutationId", { length: 64 }),
+  responseNote: varchar("responseNote", { length: 400 }),
+  /** The `dispatchRoleAssignmentEvents.id` the award produced — the one link to the slot. */
+  awardEventId: int("awardEventId"),
+  /** PERSISTENT generated: `postRef:userId` while offered/accepted, NULL otherwise. Never written by the application. */
+  liveOfferKey: varchar("liveOfferKey", { length: 140 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ShiftOfferRow = typeof shiftOffers.$inferSelect;
+
+/** Marketplace audit. Append-only. */
+export const shiftPostEvents = mysqlTable("shiftPostEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  postRef: varchar("postRef", { length: 64 }).notNull(),
+  eventType: mysqlEnum("eventType", ["created", "published", "linked", "closed", "reopened", "cancelled", "expired", "response_recorded", "response_withdrawn", "offer_issued", "offer_accepted", "offer_declined", "offer_withdrawn", "offer_expired", "awarded", "not_selected", "award_refused"]).notNull(),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 60 }).notNull(),
+  subjectUserId: int("subjectUserId"),
+  detail: varchar("detail", { length: 600 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  deviceOccurredAt: timestamp("deviceOccurredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ShiftPostEventRow = typeof shiftPostEvents.$inferSelect;
+
+/** A declaration a person makes about their own willingness. Consumed by the candidate pool, never by readiness. */
+export const workerAvailability = mysqlTable("workerAvailability", {
+  id: int("id").autoincrement().primaryKey(),
+  availabilityRef: varchar("availabilityRef", { length: 64 }).notNull().unique(),
+  /** NULL = the historical single tenant (0132 convention). */
+  orgRef: varchar("orgRef", { length: 64 }),
+  userId: int("userId").notNull(),
+  state: mysqlEnum("state", ["available", "unavailable", "on_call", "available_for_overtime"]).notNull(),
+  windowStartsAt: timestamp("windowStartsAt"),
+  windowEndsAt: timestamp("windowEndsAt"),
+  preferencesJson: text("preferencesJson"),
+  declaredAt: timestamp("declaredAt").notNull(),
+  deviceDeclaredAt: timestamp("deviceDeclaredAt"),
+  deviceId: varchar("deviceId", { length: 64 }),
+  clientMutationId: varchar("clientMutationId", { length: 64 }),
+  source: mysqlEnum("source", ["self", "dispatcher"]).default("self").notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  supersededAt: timestamp("supersededAt"),
+  supersededByRef: varchar("supersededByRef", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type WorkerAvailabilityRow = typeof workerAvailability.$inferSelect;
 
 /* ---- v22.20 (0092): qualifications ---- */
 
@@ -7215,17 +7334,54 @@ export const messageChannels = mysqlTable("messageChannels", {
   id: int("id").autoincrement().primaryKey(),
   channelRef: varchar("channelRef", { length: 64 }).notNull().unique(),
   tenantId: varchar("tenantId", { length: 40 }),
-  type: mysqlEnum("type", ["announcement", "dispatch", "safety", "maintenance", "field_operations", "road_conditions", "training", "general", "job", "client", "private", "emergency"]).notNull(),
+  type: mysqlEnum("type", ["announcement", "dispatch", "safety", "maintenance", "field_operations", "road_conditions", "training", "general", "job", "client", "private", "emergency", "direct", "group", "department", "unit", "shift"]).notNull(),
   name: varchar("name", { length: 220 }).notNull(),
   jobRef: varchar("jobRef", { length: 64 }),
   /** What makes a channel external. Access is decided here, not per message. */
   clientRef: varchar("clientRef", { length: 64 }),
   crewRef: varchar("crewRef", { length: 64 }),
+  /** 0205 — how a person is admitted: today's open rule, the crew rule, or an explicit member row. */
+  membershipMode: mysqlEnum("membershipMode", ["open", "explicit", "crew"]).default("open").notNull(),
   archived: boolean("archived").default(false).notNull(),
   createdByUserId: int("createdByUserId").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type MessageChannelRow = typeof messageChannels.$inferSelect;
+
+/* ---- 0205: board membership ---- */
+
+export const messageChannelMembers = mysqlTable("messageChannelMembers", {
+  id: int("id").autoincrement().primaryKey(),
+  channelRef: varchar("channelRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  /** A channel role, not a domain role. Confers nothing outside this channel. */
+  memberRole: mysqlEnum("memberRole", ["member", "moderator", "dispatcher", "manager", "read_only"]).default("member").notNull(),
+  source: mysqlEnum("source", ["manual", "job_assignment", "crew", "direct"]).default("manual").notNull(),
+  joinedAt: timestamp("joinedAt").notNull(),
+  leftAt: timestamp("leftAt"),
+  mutedAt: timestamp("mutedAt"),
+  addedByUserId: int("addedByUserId").notNull(),
+  /** PERSISTENT generated: `channelRef:userId` while live, NULL once left. Never written by the application. */
+  liveMemberKey: varchar("liveMemberKey", { length: 140 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type MessageChannelMemberRow = typeof messageChannelMembers.$inferSelect;
+
+/** Membership, moderation and emergency audit. Append-only. */
+export const messageChannelEvents = mysqlTable("messageChannelEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  channelRef: varchar("channelRef", { length: 64 }).notNull(),
+  eventType: mysqlEnum("eventType", ["member_added", "member_left", "member_role_changed", "channel_archived", "emergency_posted", "moderator_read", "moderator_withdraw"]).notNull(),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 60 }).notNull(),
+  subjectUserId: int("subjectUserId"),
+  messageRef: varchar("messageRef", { length: 64 }),
+  detail: varchar("detail", { length: 600 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type MessageChannelEventRow = typeof messageChannelEvents.$inferSelect;
 
 export const boardMessages = mysqlTable("boardMessages", {
   id: int("id").autoincrement().primaryKey(),
@@ -7241,6 +7397,8 @@ export const boardMessages = mysqlTable("boardMessages", {
   deviceCreatedAt: timestamp("deviceCreatedAt").notNull(),
   serverReceivedAt: timestamp("serverReceivedAt"),
   deviceId: varchar("deviceId", { length: 64 }),
+  /** 0205 — with `deviceId`, the replay identity: a retried post returns the message it already wrote. */
+  clientMutationId: varchar("clientMutationId", { length: 64 }),
   requiresAcknowledgement: boolean("requiresAcknowledgement").default(false).notNull(),
   withdrawnAt: timestamp("withdrawnAt"),
   withdrawnByUserId: int("withdrawnByUserId"),
@@ -7256,6 +7414,8 @@ export const messageReceipts = mysqlTable("messageReceipts", {
   deliveredAt: timestamp("deliveredAt"),
   openedAt: timestamp("openedAt"),
   acknowledgedAt: timestamp("acknowledgedAt"),
+  /** 0205 — the device's clock at acknowledgement. `acknowledgedAt` stays the server's. */
+  deviceAcknowledgedAt: timestamp("deviceAcknowledgedAt"),
   /** The server witnesses acceptance, so it may record it. */
   acceptedAt: timestamp("acceptedAt"),
   actionedAt: timestamp("actionedAt"),
@@ -9654,3 +9814,502 @@ export const liveAssistPolicies = mysqlTable("liveAssistPolicies", {
   currentUnique: uniqueIndex("liveAssistPolicies_current_unique").on(t.orgRef, t.currentMarker),
 }));
 export type LiveAssistPolicyRow = typeof liveAssistPolicies.$inferSelect;
+
+/* =========================================================== * Sign & Attest, SA1 (0214–0216) — docs/sign-attest/SIGN_ATTEST_DESIGN.md §3.
+ *
+ * A signature is of a HASH, not of a row. `attestDocumentRevisions` names a
+ * document revision and fixes its fingerprint; every field, signer, session,
+ * mark and event hangs off that row. The document itself stays where its
+ * domain keeps it (a field-ticket revision, a sealed evidence record, a
+ * register row) — nothing here copies it.
+ *
+ * `orgRef` NULL = the historical single tenant (0132). `orgScopeKey` is
+ * COALESCE(orgRef,'default'), maintained by the write path so a unique index
+ * can see the split a NULL would hide from it (the DC 0178/0179 pattern).
+ * `finalizedKey` is a persistent generated column: the instance key while
+ * `state = 'finalized'`, NULL otherwise — the database's own refusal of two
+ * finalized revisions of one instance (the 0021 `activeGrantKey` precedent).
+ * ================================================================== */
+
+export const attestDocumentRevisions = mysqlTable("attestDocumentRevisions", {
+  id: int("id").autoincrement().primaryKey(),
+  revisionRef: varchar("revisionRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  orgScopeKey: varchar("orgScopeKey", { length: 64 }).default("default").notNull(),
+  /** Stable across revisions: the ticket number, the evidence tracking number, the register root ref. */
+  instanceRef: varchar("instanceRef", { length: 120 }).notNull(),
+  revision: int("revision").notNull(),
+  subjectType: varchar("subjectType", { length: 40 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  subjectId: int("subjectId"),
+  /** The fingerprint before signing, recomputed by the server from the subject — never from input. */
+  revisionHash: varchar("revisionHash", { length: 64 }).notNull(),
+  pageCount: int("pageCount").default(1).notNull(),
+  pageGeometryJson: text("pageGeometryJson"),
+  state: mysqlEnum("state", ["open", "completed", "finalized", "voided", "superseded"]).default("open").notNull(),
+  completionRule: varchar("completionRule", { length: 40 }).default("all_required_fields").notNull(),
+  finalizedAt: timestamp("finalizedAt"),
+  finalizedByUserId: int("finalizedByUserId"),
+  artifactId: int("artifactId"),
+  receiptHash: varchar("receiptHash", { length: 64 }),
+  eventChainHead: varchar("eventChainHead", { length: 64 }),
+  /** Generated PERSISTENT by 0214; never written by the application. */
+  finalizedKey: varchar("finalizedKey", { length: 200 }),
+  supersedesRevisionId: int("supersedesRevisionId"),
+  supersededByRevisionId: int("supersededByRevisionId"),
+  voidedAt: timestamp("voidedAt"),
+  voidedByUserId: int("voidedByUserId"),
+  voidReason: varchar("voidReason", { length: 500 }),
+  /** Who opened it: a staff user, or a portal identity through a producer. One is set. */
+  openedByUserId: int("openedByUserId"),
+  openedByExternalIdentityId: int("openedByExternalIdentityId"),
+  openedAt: timestamp("openedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  instanceRevision: uniqueIndex("attestDocumentRevisions_instance_revision_uq").on(t.orgScopeKey, t.instanceRef, t.revision),
+  finalizedUnique: uniqueIndex("attestDocumentRevisions_finalized_uq").on(t.finalizedKey),
+  subject: index("attestDocumentRevisions_subject_idx").on(t.orgScopeKey, t.subjectType, t.subjectRef),
+}));
+export type AttestDocumentRevisionRow = typeof attestDocumentRevisions.$inferSelect;
+
+export const attestFields = mysqlTable("attestFields", {
+  id: int("id").autoincrement().primaryKey(),
+  fieldRef: varchar("fieldRef", { length: 64 }).notNull().unique(),
+  revisionId: int("revisionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  fieldKey: varchar("fieldKey", { length: 80 }).notNull(),
+  /** shared/attest.ts ATTEST_FIELD_TYPES; varchar so a later type is a value, not a column. */
+  fieldType: varchar("fieldType", { length: 32 }).notNull(),
+  page: int("page").default(1).notNull(),
+  /** Fractions of the unrotated page (D-03), top-left origin. */
+  xFrac: double("xFrac").notNull(),
+  yFrac: double("yFrac").notNull(),
+  widthFrac: double("widthFrac").notNull(),
+  heightFrac: double("heightFrac").notNull(),
+  signerRole: varchar("signerRole", { length: 60 }).notNull(),
+  assignedSignerId: int("assignedSignerId"),
+  required: boolean("required").default(true).notNull(),
+  signingOrder: int("signingOrder"),
+  /** The billing anchor: the domain line this initial acknowledges (a fieldTicketLines id, a load ref). */
+  subjectLineRef: varchar("subjectLineRef", { length: 120 }),
+  groupKey: varchar("groupKey", { length: 80 }),
+  layoutRef: varchar("layoutRef", { length: 64 }),
+  state: mysqlEnum("state", ["pending", "completed", "declined", "voided"]).default("pending").notNull(),
+  /** Unique: the database refuses a second completion of one field (§6.5 race 3). */
+  completedMarkId: int("completedMarkId"),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  revisionKey: uniqueIndex("attestFields_revision_key_uq").on(t.revisionId, t.fieldKey),
+  completedMark: uniqueIndex("attestFields_completed_mark_uq").on(t.completedMarkId),
+}));
+export type AttestFieldRow = typeof attestFields.$inferSelect;
+
+export const attestSigners = mysqlTable("attestSigners", {
+  id: int("id").autoincrement().primaryKey(),
+  signerRef: varchar("signerRef", { length: 64 }).notNull().unique(),
+  revisionId: int("revisionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  partyKind: mysqlEnum("partyKind", ["internal_user", "external_identity", "named_witnessed"]).notNull(),
+  userId: int("userId"),
+  externalIdentityId: int("externalIdentityId"),
+  displayName: varchar("displayName", { length: 180 }).notNull(),
+  company: varchar("company", { length: 180 }),
+  signerRole: varchar("signerRole", { length: 60 }).notNull(),
+  /** The weakest authMethod acceptable for this signer (shared/attest.ts ATTEST_AUTH_METHODS). */
+  requiredAuth: varchar("requiredAuth", { length: 40 }).default("session_login").notNull(),
+  signingOrder: int("signingOrder"),
+  state: mysqlEnum("state", ["invited", "active", "completed", "declined", "revoked"]).default("active").notNull(),
+  invitedByUserId: int("invitedByUserId"),
+  invitedAt: timestamp("invitedAt").notNull(),
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  revision: index("attestSigners_revision_idx").on(t.revisionId),
+}));
+export type AttestSignerRow = typeof attestSigners.$inferSelect;
+
+export const attestSigningSessions = mysqlTable("attestSigningSessions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Server-minted, or device-relative (`${deviceRef}:${localId}`) for an offline session (SA2). */
+  sessionRef: varchar("sessionRef", { length: 120 }).notNull().unique(),
+  revisionId: int("revisionId").notNull(),
+  signerId: int("signerId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  /** Must equal the revision's hash at submit; a stale copy is refused, never rebased (§6.5 race 1). */
+  revisionHashAtStart: varchar("revisionHashAtStart", { length: 64 }).notNull(),
+  authMethod: mysqlEnum("authMethod", ["session_login", "device_auth", "portal_link", "witnessed", "paper_scan"]).notNull(),
+  actorUserId: int("actorUserId"),
+  actorExternalIdentityId: int("actorExternalIdentityId"),
+  witnessedByUserId: int("witnessedByUserId"),
+  // 0157 shape. No biometric material, ever: the platform biometric unlocks the key on the device.
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  fieldDeviceId: int("fieldDeviceId"),
+  keyFingerprint: varchar("keyFingerprint", { length: 80 }),
+  deviceSignatureBase64: text("deviceSignatureBase64"),
+  deviceSignedAt: timestamp("deviceSignedAt"),
+  capturedOffline: boolean("capturedOffline").default(false).notNull(),
+  deviceClockAt: timestamp("deviceClockAt"),
+  clockSkewMs: int("clockSkewMs"),
+  consentVersion: varchar("consentVersion", { length: 40 }).notNull(),
+  consentTextHash: varchar("consentTextHash", { length: 64 }).notNull(),
+  capturedLatitude: double("capturedLatitude"),
+  capturedLongitude: double("capturedLongitude"),
+  state: mysqlEnum("state", ["started", "completed", "declined", "abandoned", "rejected"]).notNull(),
+  rejectionCode: varchar("rejectionCode", { length: 40 }),
+  rejectionReason: varchar("rejectionReason", { length: 500 }),
+  syncPackageId: int("syncPackageId"),
+  startedAt: timestamp("startedAt").notNull(),
+  completedAt: timestamp("completedAt"),
+  receivedAt: timestamp("receivedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  revision: index("attestSigningSessions_revision_idx").on(t.revisionId),
+  signer: index("attestSigningSessions_signer_idx").on(t.signerId),
+}));
+export type AttestSigningSessionRow = typeof attestSigningSessions.$inferSelect;
+
+export const attestMarks = mysqlTable("attestMarks", {
+  id: int("id").autoincrement().primaryKey(),
+  markRef: varchar("markRef", { length: 120 }).notNull().unique(),
+  sessionId: int("sessionId").notNull(),
+  fieldId: int("fieldId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  markKind: varchar("markKind", { length: 32 }).notNull(),
+  inputKind: varchar("inputKind", { length: 16 }).notNull(),
+  /** The canonical stroke document, sealed in the vault (recordType signature_strokes). Required when markKind = drawn. */
+  strokeEvidenceRecordId: int("strokeEvidenceRecordId"),
+  strokeHash: varchar("strokeHash", { length: 64 }),
+  /** The rendered mark (SVG) or the paper scan, sealed in the vault. */
+  renderedEvidenceRecordId: int("renderedEvidenceRecordId"),
+  renderedHash: varchar("renderedHash", { length: 64 }),
+  canvasWidthPx: int("canvasWidthPx"),
+  canvasHeightPx: int("canvasHeightPx"),
+  devicePixelRatio: double("devicePixelRatio"),
+  orientation: varchar("orientation", { length: 16 }),
+  pointCount: int("pointCount"),
+  strokeCount: int("strokeCount"),
+  durationMs: int("durationMs"),
+  pressureAvailable: boolean("pressureAvailable"),
+  valueText: varchar("valueText", { length: 500 }),
+  /** sha256 of the canonical mark payload (§8.2): the mark is bound to the revision hash whatever the method. */
+  payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
+  savedMarkId: int("savedMarkId"),
+  completedAt: timestamp("completedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  session: index("attestMarks_session_idx").on(t.sessionId),
+  field: index("attestMarks_field_idx").on(t.fieldId),
+}));
+export type AttestMarkRow = typeof attestMarks.$inferSelect;
+
+export const attestArtifacts = mysqlTable("attestArtifacts", {
+  id: int("id").autoincrement().primaryKey(),
+  artifactRef: varchar("artifactRef", { length: 64 }).notNull().unique(),
+  revisionId: int("revisionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  kind: mysqlEnum("kind", ["finalized_pdf", "audit_receipt", "page_render"]).notNull(),
+  storageKey: varchar("storageKey", { length: 512 }),
+  /** The audit receipt is canonical JSON small enough to live on the row (the fieldTicketRevisions.snapshotJson precedent). */
+  manifestJson: text("manifestJson"),
+  mimeType: varchar("mimeType", { length: 120 }).notNull(),
+  byteLength: int("byteLength").notNull(),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  sourceRevisionHash: varchar("sourceRevisionHash", { length: 64 }).notNull(),
+  eventChainHead: varchar("eventChainHead", { length: 64 }).notNull(),
+  rendererKey: varchar("rendererKey", { length: 40 }).notNull(),
+  rendererVersion: varchar("rendererVersion", { length: 20 }).notNull(),
+  evidenceRecordId: int("evidenceRecordId"),
+  registerDocumentId: int("registerDocumentId"),
+  generatedByUserId: int("generatedByUserId").notNull(),
+  generatedAt: timestamp("generatedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  revision: index("attestArtifacts_revision_idx").on(t.revisionId),
+}));
+export type AttestArtifactRow = typeof attestArtifacts.$inferSelect;
+
+/**
+ * The append-only, hash-chained trail (0215; guarded by 0216). `eventHash` is
+ * sha256(prevEventHash ∥ canonical(event)); the chain head is copied to the
+ * revision at finalization so a reader with no application code can still
+ * tell an edited history from an intact one.
+ */
+export const attestEvents = mysqlTable("attestEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  revisionId: int("revisionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  sequence: int("sequence").notNull(),
+  eventType: varchar("eventType", { length: 60 }).notNull(),
+  sessionId: int("sessionId"),
+  fieldId: int("fieldId"),
+  markId: int("markId"),
+  artifactId: int("artifactId"),
+  actorSource: mysqlEnum("actorSource", ["human", "system", "external", "integration"]).notNull(),
+  actorUserId: int("actorUserId"),
+  actorExternalIdentityId: int("actorExternalIdentityId"),
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  previousState: varchar("previousState", { length: 40 }),
+  newState: varchar("newState", { length: 40 }),
+  detailJson: text("detailJson"),
+  prevEventHash: varchar("prevEventHash", { length: 64 }),
+  eventHash: varchar("eventHash", { length: 64 }).notNull(),
+  clockSource: mysqlEnum("clockSource", ["server", "device"]).default("server").notNull(),
+  occurredAt: timestamp("occurredAt").notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+}, (t) => ({
+  seq: uniqueIndex("attestEvents_seq_unique").on(t.revisionId, t.sequence),
+  type: index("attestEvents_type_idx").on(t.revisionId, t.eventType),
+}));
+export type AttestEventRow = typeof attestEvents.$inferSelect;
+/** 0217 — a person at the customer, keyed to the account; roles are rows (customerContactRoles). */
+export const customerContacts = mysqlTable("customerContacts", {
+  id: int("id").autoincrement().primaryKey(),
+  contactRef: varchar("contactRef", { length: 40 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  displayName: varchar("displayName", { length: 180 }).notNull(),
+  title: varchar("title", { length: 120 }),
+  company: varchar("company", { length: 220 }),
+  phone: varchar("phone", { length: 60 }),
+  mobile: varchar("mobile", { length: 60 }),
+  email: varchar("email", { length: 220 }),
+  preferredChannel: mysqlEnum("preferredChannel", ["phone", "sms", "email", "portal"]),
+  externalIdentityId: int("externalIdentityId"),
+  signatoryAuthorityId: int("signatoryAuthorityId"),
+  status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  notes: varchar("notes", { length: 600 }),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+});
+
+/** 0217 — one role a contact holds for the account, effective-dated; ended, never deleted. */
+export const customerContactRoles = mysqlTable("customerContactRoles", {
+  id: int("id").autoincrement().primaryKey(),
+  contactId: int("contactId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  roleKey: varchar("roleKey", { length: 40 }).notNull(),
+  isPrimary: boolean("isPrimary").default(false).notNull(),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  status: mysqlEnum("status", ["active", "ended"]).default("active").notNull(),
+  assignedByUserId: int("assignedByUserId").notNull(),
+  assignedAt: timestamp("assignedAt").defaultNow().notNull(),
+  endedByUserId: int("endedByUserId"),
+  endedAt: timestamp("endedAt"),
+});
+
+/** 0217 — the commercial change ledger: append-only, written in the change's own transaction. */
+export const commercialAuditEvents = mysqlTable("commercialAuditEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  subjectType: mysqlEnum("subjectType", ["customer_account", "customer_contact", "customer_contract", "rate_sheet", "rate_sheet_version", "rate_line", "job_commercial_context", "job_commercial_snapshot", "customer_purchase_order"]).notNull(),
+  subjectRef: varchar("subjectRef", { length: 80 }).notNull(),
+  subjectId: int("subjectId"),
+  eventType: varchar("eventType", { length: 60 }).notNull(),
+  fromStatus: varchar("fromStatus", { length: 40 }),
+  toStatus: varchar("toStatus", { length: 40 }),
+  changesJson: text("changesJson"),
+  relatedRef: varchar("relatedRef", { length: 80 }),
+  jobId: int("jobId"),
+  reason: varchar("reason", { length: 500 }),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 60 }).notNull(),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** 0218 — a contract with a lifecycle; its billability rules live in customerContractTerms (termsId). */
+export const customerContracts = mysqlTable("customerContracts", {
+  id: int("id").autoincrement().primaryKey(),
+  contractRef: varchar("contractRef", { length: 40 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  contractNumber: varchar("contractNumber", { length: 80 }).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  contractType: mysqlEnum("contractType", ["msa", "rate_agreement", "service_agreement", "work_order", "purchase_order", "framework", "other"]).default("msa").notNull(),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  status: mysqlEnum("status", ["draft", "pending_approval", "active", "suspended", "expired", "terminated", "superseded"]).default("draft").notNull(),
+  poRequirement: mysqlEnum("poRequirement", ["inherit", "required", "not_required"]).default("inherit").notNull(),
+  requiredReferenceKindsJson: text("requiredReferenceKindsJson"),
+  customerReferencesJson: text("customerReferencesJson"),
+  paymentTermsDays: int("paymentTermsDays"),
+  billingInstructions: text("billingInstructions"),
+  notes: text("notes"),
+  termsId: int("termsId"),
+  renewalKind: mysqlEnum("renewalKind", ["none", "manual", "auto"]).default("manual").notNull(),
+  renewalNoticeDays: int("renewalNoticeDays"),
+  version: int("version").default(1).notNull(),
+  supersedesContractId: int("supersedesContractId"),
+  supersededByContractId: int("supersededByContractId"),
+  submittedByUserId: int("submittedByUserId"),
+  submittedAt: timestamp("submittedAt"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  approvalNote: varchar("approvalNote", { length: 400 }),
+  activatedAt: timestamp("activatedAt"),
+  suspendedAt: timestamp("suspendedAt"),
+  suspendedByUserId: int("suspendedByUserId"),
+  suspensionReason: varchar("suspensionReason", { length: 400 }),
+  terminatedAt: timestamp("terminatedAt"),
+  terminatedByUserId: int("terminatedByUserId"),
+  terminationReason: varchar("terminationReason", { length: 400 }),
+  expiredAt: timestamp("expiredAt"),
+  usedOperationallyAt: timestamp("usedOperationallyAt"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+});
+
+/** 0218 — a customer's rate sheet: the document whose versions group charge definitions. */
+export const rateSheets = mysqlTable("rateSheets", {
+  id: int("id").autoincrement().primaryKey(),
+  rateSheetRef: varchar("rateSheetRef", { length: 40 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  contractId: int("contractId"),
+  name: varchar("name", { length: 220 }).notNull(),
+  sheetNumber: varchar("sheetNumber", { length: 80 }),
+  currency: varchar("currency", { length: 3 }).default("CAD").notNull(),
+  status: mysqlEnum("status", ["active", "retired"]).default("active").notNull(),
+  notes: text("notes"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+});
+
+/** 0218 — one approved-as-a-unit revision of a sheet; its lines are chargeDefinitions rows. */
+export const rateSheetVersions = mysqlTable("rateSheetVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  versionRef: varchar("versionRef", { length: 40 }).notNull().unique(),
+  rateSheetId: int("rateSheetId").notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  version: int("version").notNull(),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  status: mysqlEnum("status", ["draft", "pending_approval", "approved", "rejected", "superseded", "retired"]).default("draft").notNull(),
+  contentHash: varchar("contentHash", { length: 64 }),
+  notes: text("notes"),
+  supersedesVersionId: int("supersedesVersionId"),
+  supersededByVersionId: int("supersededByVersionId"),
+  submittedByUserId: int("submittedByUserId"),
+  submittedAt: timestamp("submittedAt"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  rejectedByUserId: int("rejectedByUserId"),
+  rejectedAt: timestamp("rejectedAt"),
+  rejectionReason: varchar("rejectionReason", { length: 400 }),
+  usedOperationallyAt: timestamp("usedOperationallyAt"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+});
+
+/** 0219 — the job's live commercial assignment: customer, bill-to, contract, sheet, PO. */
+export const jobCommercialContexts = mysqlTable("jobCommercialContexts", {
+  id: int("id").autoincrement().primaryKey(),
+  jobId: int("jobId").notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  billToCustomerAccountId: int("billToCustomerAccountId"),
+  contractId: int("contractId"),
+  rateSheetId: int("rateSheetId"),
+  pinnedRateSheetVersionId: int("pinnedRateSheetVersionId"),
+  purchaseOrderId: int("purchaseOrderId"),
+  referenceWaiverReason: varchar("referenceWaiverReason", { length: 400 }),
+  referenceWaivedByUserId: int("referenceWaivedByUserId"),
+  referenceWaivedAt: timestamp("referenceWaivedAt"),
+  notes: varchar("notes", { length: 600 }),
+  currentSnapshotId: int("currentSnapshotId"),
+  setByUserId: int("setByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+});
+
+/** 0219 — the other companies and people on a job, as references. */
+export const jobCommercialParties = mysqlTable("jobCommercialParties", {
+  id: int("id").autoincrement().primaryKey(),
+  jobId: int("jobId").notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  partyRole: varchar("partyRole", { length: 40 }).notNull(),
+  customerAccountId: int("customerAccountId"),
+  contactId: int("contactId"),
+  orgRef: varchar("orgRef", { length: 64 }),
+  freeText: varchar("freeText", { length: 220 }),
+  status: mysqlEnum("status", ["active", "ended"]).default("active").notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+  endedByUserId: int("endedByUserId"),
+  endedAt: timestamp("endedAt"),
+});
+
+/** 0219 — PO, work order, AFE, cost centre and the customer's other references, one row per kind. */
+export const jobCommercialReferences = mysqlTable("jobCommercialReferences", {
+  id: int("id").autoincrement().primaryKey(),
+  jobId: int("jobId").notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  referenceKind: varchar("referenceKind", { length: 40 }).notNull(),
+  referenceValue: varchar("referenceValue", { length: 120 }).notNull(),
+  customerPurchaseOrderId: int("customerPurchaseOrderId"),
+  source: mysqlEnum("source", ["office", "dispatch", "customer_portal", "field", "import"]).default("office").notNull(),
+  status: mysqlEnum("status", ["active", "ended"]).default("active").notNull(),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+  endedByUserId: int("endedByUserId"),
+  endedAt: timestamp("endedAt"),
+});
+
+/** 0219 — the immutable commercial basis of a job; billing reads this and never the live sheet. */
+export const jobCommercialSnapshots = mysqlTable("jobCommercialSnapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  snapshotRef: varchar("snapshotRef", { length: 40 }).notNull().unique(),
+  jobId: int("jobId").notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  sequenceNo: int("sequenceNo").notNull(),
+  reason: mysqlEnum("reason", ["activation", "correction", "manual"]).notNull(),
+  status: mysqlEnum("status", ["current", "superseded"]).default("current").notNull(),
+  capturedByUserId: int("capturedByUserId").notNull(),
+  capturedAt: timestamp("capturedAt").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  customerAccountRef: varchar("customerAccountRef", { length: 64 }).notNull(),
+  customerNumber: varchar("customerNumber", { length: 40 }),
+  customerName: varchar("customerName", { length: 220 }).notNull(),
+  billToCustomerAccountId: int("billToCustomerAccountId").notNull(),
+  contractId: int("contractId"),
+  contractRef: varchar("contractRef", { length: 40 }),
+  contractNumber: varchar("contractNumber", { length: 80 }),
+  contractVersion: int("contractVersion"),
+  termsId: int("termsId"),
+  termsRef: varchar("termsRef", { length: 64 }),
+  termsVersion: int("termsVersion"),
+  rateSheetId: int("rateSheetId"),
+  rateSheetVersionId: int("rateSheetVersionId"),
+  rateSheetVersionRef: varchar("rateSheetVersionRef", { length: 40 }),
+  rateSheetVersion: int("rateSheetVersion"),
+  rateSheetContentHash: varchar("rateSheetContentHash", { length: 64 }),
+  purchaseOrderId: int("purchaseOrderId"),
+  poRef: varchar("poRef", { length: 64 }),
+  poNumber: varchar("poNumber", { length: 80 }),
+  paymentTermsDays: int("paymentTermsDays").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  poRequired: boolean("poRequired").notNull(),
+  billingInstructions: text("billingInstructions"),
+  payloadJson: text("payloadJson").notNull(),
+  payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
+  supersedesSnapshotId: int("supersedesSnapshotId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});

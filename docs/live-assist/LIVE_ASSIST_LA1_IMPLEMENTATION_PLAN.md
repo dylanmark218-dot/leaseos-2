@@ -3,7 +3,7 @@
 Companion to `docs/live-assist/LIVE_ASSIST_DESIGN.md`. Section references (§) are to that document. D-*
 are its owner decisions (§20); P-* are the preconditions in §2 below.
 
-**Status: LA-1a built (2026-09-25) under a narrow owner carve-out; LA-1b, LA-1c and LA-1d remain blocked.**
+**Status: LA-1a built (2026-09-25) under a narrow owner carve-out and merged to `main` by PR #81 (2026-10-01); LA-1b, LA-1c and LA-1d remain blocked** (`docs/live-assist/LA1B_READINESS.md`).
 The ruling, and exactly what it does and does not authorize, is `docs/live-assist/LA1A_OWNER_RULING.md`.
 The rest of this document is still the plan for the blocked sub-checkpoints; §3 records how LA-1a was
 actually built and where it differs from what is written here.
@@ -103,6 +103,12 @@ LA-1a opened; see the collision register). Differences from the plan below, each
   that used the same `startKey` is answered with the winner's session; one with a different key is refused
   with `CONFLICT`. A deadlock victim among concurrent inserts is retried up to three times after a short
   pause, then refused with `CONFLICT`, never an internal error.
+- **Worker dependency boundary (recorded after merge):** the merge of `main` into the LA-1a branch
+  (`3dfcb3e`, by the Copilot agent) added `zod` to the production worker's pinned dependency set in
+  `server/productionDependencyBoundary.test.ts`, because the worker now imports the Live Assist service,
+  which validates the stored policy snapshot with `zod`. `zod` is a declared production dependency, so
+  the worker graph is still entirely production; the change was made inside a merge commit and is
+  recorded here so it is not mistaken for an unexplained widening.
 - **Deadline invariant:** `idleDeadlineAt <= hardDeadlineAt` always, so the sweep finds every due session
   through the `(state, idleDeadlineAt)` index instead of scanning a table that keeps every lifecycle row.
 

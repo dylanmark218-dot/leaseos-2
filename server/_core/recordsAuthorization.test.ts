@@ -535,6 +535,10 @@ describe("payroll and tax authorization boundaries", () => {
       "academy.certificate.sign_own", "academy.direct_supervision_attest_own",
       // 0212 — the Driver Wallet: the caller's own operator record.
       "portfolio.read_own", "portfolio.submit_own", "portfolio.share_own",
+      // SA1 — your own signature or decline; the signer row must name ctx.user.id.
+      "attest.sign_own", "attest.decline_own",
+      // 0206 — your own availability declaration.
+      "shifts.availability_own",
     ]);
   });
 

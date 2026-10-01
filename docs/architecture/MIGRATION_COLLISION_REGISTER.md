@@ -49,7 +49,7 @@ free on `main` and on every remote branch at the time of the scan (`0205`–`020
 communications-marketplace and auth-workspace branches). The three move together because 0211's triggers and
 0212's ALTERs act on 0210's tables.
 
-**Next free number for new work: `0213`** (re-check with the scan before committing). The 2026-09-24 table below
+**Next free number for new work:** see the latest section below (`0220` at the SA1 merge). The 2026-09-24 table below
 is kept for history; several of its claims have since merged or been renumbered by their authors.
 
 ## Earlier state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
@@ -274,3 +274,34 @@ number free everywhere.
   tenant, as 0132 and 0148), recorded in the commit that creates the migration.
 * **2026-10-01 (PR #16)**: the driver portfolio renumbers `0202`–`0204` → `0210`–`0212` after LA-1a merged
   `0202`/`0203`; next free `0213`.
+
+## Claim: 0217–0219 (Customer, Contract and Rate Management, 2026-10-01)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0217 | `0217_customer_account_profile.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0217 |
+| 0218 | `0218_customer_contracts_rate_sheets.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0218 |
+| 0219 | `0219_job_commercial_context.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0219 |
+
+Written as `0182`–`0184` on 2026-09-24, when they were the first numbers free everywhere. By the merge of
+`main` (`c3f088b`) three other open branches held `0182`–`0184` (`document-control-architecture`,
+`integration-hub-subsystem`, `safety-compliance-program-builder`) and the highest claim on any remote ref
+was `0216`: `claude/relaxed-carson-qfcopf` took `0214` and `claude/leaseos-sign-attest-design-5993ar`
+took `0215`–`0216` while this merge was being gated, the second of them minutes before this branch
+pushed `0215`–`0217`. As the later, unmerged claimant this branch moved again, to the first
+three numbers free on `main` and on every open branch. No other branch was renumbered.
+
+
+## State at the Sign & Attest SA1 merge (2026-10-01, `main` = `ce27fec`, after PR #98, #59 and #102)
+
+`main` migration head: **`0219_job_commercial_context.sql`** (v23.31 took `0217`–`0219`, renumbered around
+Sign & Attest's claim; `0205`/`0206` landed with #59). This branch (PR #104) holds **`0214`–`0216`**
+(`0214_sign_attest_foundation`, `0215_sign_attest_events`, `0216_sign_attest_guards`): below main's head,
+colliding with nothing on main, applied by name. The earlier provisional claim of `0182`–`0184` in the
+design document is withdrawn (those numbers were taken by other branches).
+
+**Next free number for new work after this merge: `0220`** (re-check with the scan before committing).
+
+## Change log (continued)
+
+* **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.

@@ -114,9 +114,17 @@ export type RouteDependencies = {
    * compared on the dependencies they actually carried.
    */
   communicationsPlan?: string;
+  /**
+   * The provincial road advisories that touch this route's geometry and are material to it — a
+   * closure, a restriction, or anything major or of unknown severity. A closure appearing, ending
+   * or changing severity on THIS route moves the hash; one on a road nearby does not. Advisory
+   * evidence makes an approval stale, which asks a person to look again; it never makes a route
+   * legal or illegal. Optional, so approvals recorded before it are compared on what they carried.
+   */
+  liveAdvisories?: string;
 };
 export const DEPENDENCY_LABELS: Record<keyof RouteDependencies, string> = {
-  vehicleProfile: "the unit's profile", loadProfile: "the load", permitSet: "the permits", restrictionSet: "the restrictions in force", structureSet: "the structures on the route", roadFabric: "the imported road data", requiredChecks: "the checks required", communicationsPlan: "the radio channels on the route",
+  vehicleProfile: "the unit's profile", loadProfile: "the load", permitSet: "the permits", restrictionSet: "the restrictions in force", structureSet: "the structures on the route", roadFabric: "the imported road data", requiredChecks: "the checks required", communicationsPlan: "the radio channels on the route", liveAdvisories: "the provincial road advisories on the route",
 };
 
 export function hashPart(value: unknown): string {

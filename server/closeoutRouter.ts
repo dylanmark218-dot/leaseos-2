@@ -28,6 +28,9 @@ async function actingScopeFor(userId: number) {
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { fieldDevices } from "../drizzle/schema";
 import { canonicalSignaturePayload, checkSignatureAttestation } from "./_core/deviceSignature";
+import { produceFieldTicketSignature } from "./_core/attest/attestProducers";
+import { AttestRefusal } from "./_core/attest/attestService";
+import { coreRecordOwnership } from "../drizzle/schema";
 import { clientAdjustments, customerAccounts, customerContractTerms, delayEvents, disposalTickets, fieldTicketDocuments, fieldTicketEvents, fieldTicketLines, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, jobs, loads, payrollAdjustments, roadHazardObservations, signatoryAuthorities, tripStops, weatherObservations } from "../drizzle/schema";
 import { EVENT_CLOCK, canonicalJson, classifyDelay, closeoutState, composeSiteSnapshot, lineDecision, postSiteSupplement, sha256, signatureDecision, whyTheseHours, type Authority, type DelayRules, type EventType, type PostSiteAuthorization, type SiteSnapshot, type Supplement, type TicketEvent, type TicketLine } from "./_core/siteCloseout";
 
@@ -101,12 +104,33 @@ deviceAttestation?: { deviceRef: string; keyFingerprint: string; signatureP1363B
     });
     if (!verdict.ok) throw new TRPCError({ code: "FORBIDDEN", message: `${verdict.code}: ${verdict.reason}` });
   }
-  await x.db.insert(fieldTicketSignatures).values({ fieldTicketId: x.t.id, revision: 1, result: d.refused.length ? "partially_accepted" : "accepted", signerName: args.signer.name, signerCompany: args.signer.company, signerRole: args.signer.role, signerPhone: args.signer.phone ?? null, authoritiesExercised: JSON.stringify(d.exercised), withinAuthority: d.withinAuthority, signedScopeStatement: scope, postSiteAuthorizationJson: args.postSiteAuthorization ? JSON.stringify(args.postSiteAuthorization) : null, signatureStorageKey: args.paperScanEvidenceRecordId ? `evidence:${args.paperScanEvidenceRecordId}` : null, signatureMethod: args.method, payloadHash: hash, capturedAt: now, capturedLatitude: args.gps?.latitude ?? null, capturedLongitude: args.gps?.longitude ?? null, capturedOffline: args.offline, witnessedByOperatorId: args.witnessedByOperatorId, deviceRef: args.deviceAttestation?.deviceRef ?? null, deviceKeyFingerprint: args.deviceAttestation?.keyFingerprint ?? null, deviceSignatureBase64: args.deviceAttestation?.signatureP1363Base64 ?? null, deviceSignedAt: args.deviceAttestation?.signedAt ?? null, externalIdentityId: args.externalIdentityId });
   const documentRef = `${x.t.ticketNumber}-R1`;
-  await x.db.insert(fieldTicketRevisions).values({ documentRef, fieldTicketId: x.t.id, revision: 1, kind: "site_signed", snapshotJson: canonicalJson(snapshot), snapshotHash: hash, billableHoursSite: snapshot.siteBillableHours, billableHoursPostSite: null, generatedByUserId: args.generatedByUserId, generatedAt: now });
-  await x.db.update(fieldTickets).set({ status: "closed", signatureStatus: d.refused.length ? "partially_accepted" : "accepted" }).where(eq(fieldTickets.id, x.t.id));
+  /*
+   * SA1 — the on-spine producer (docs/sign-attest/SIGN_ATTEST_DESIGN.md §11.1). The R1 revision is
+   * written first because it is the document the signature is OF; Sign & Attest opens a signing
+   * revision on its hash, assigns the consultant, runs the one session and hands back the refs the
+   * signature row keeps. All of it commits with the signature and the ticket's state, or none does.
+   * The ticket's organization is its job's (else its unit's owner, else the single tenant) — the same
+   * answer fieldTicketInScope gives — never taken from the request.
+   */
+  const orgRef = x.job?.orgRef ?? (x.t.unitId != null
+    ? ((await x.db.select({ orgRef: coreRecordOwnership.orgRef }).from(coreRecordOwnership).where(and(eq(coreRecordOwnership.recordType, "unit"), eq(coreRecordOwnership.recordId, x.t.unitId))).limit(1))[0]?.orgRef ?? null)
+    : null);
+  let produced: Awaited<ReturnType<typeof produceFieldTicketSignature>>;
+  try {
+    produced = await x.db.transaction(async tx => {
+      await tx.insert(fieldTicketRevisions).values({ documentRef, fieldTicketId: x.t.id, revision: 1, kind: "site_signed", snapshotJson: canonicalJson(snapshot), snapshotHash: hash, billableHoursSite: snapshot.siteBillableHours, billableHoursPostSite: null, generatedByUserId: args.generatedByUserId, generatedAt: now });
+      const p = await produceFieldTicketSignature(tx, { orgRef, documentRef, signer: { name: args.signer.name, company: args.signer.company, role: args.signer.role }, method: args.method, externalIdentityId: args.externalIdentityId, witnessUserId: args.generatedByUserId, deviceAttestation: args.deviceAttestation ?? null, paperScanEvidenceRecordId: args.paperScanEvidenceRecordId, offline: args.offline, gps: args.gps, now });
+      await tx.insert(fieldTicketSignatures).values({ ...{ fieldTicketId: x.t.id, revision: 1, result: d.refused.length ? "partially_accepted" : "accepted", signerName: args.signer.name, signerCompany: args.signer.company, signerRole: args.signer.role, signerPhone: args.signer.phone ?? null, authoritiesExercised: JSON.stringify(d.exercised), withinAuthority: d.withinAuthority, signedScopeStatement: scope, postSiteAuthorizationJson: args.postSiteAuthorization ? JSON.stringify(args.postSiteAuthorization) : null, signatureStorageKey: args.paperScanEvidenceRecordId ? `evidence:${args.paperScanEvidenceRecordId}` : null, signatureMethod: args.method, payloadHash: hash, capturedAt: now, capturedLatitude: args.gps?.latitude ?? null, capturedLongitude: args.gps?.longitude ?? null, capturedOffline: args.offline, witnessedByOperatorId: args.witnessedByOperatorId, deviceRef: args.deviceAttestation?.deviceRef ?? null, deviceKeyFingerprint: args.deviceAttestation?.keyFingerprint ?? null, deviceSignatureBase64: args.deviceAttestation?.signatureP1363Base64 ?? null, deviceSignedAt: args.deviceAttestation?.signedAt ?? null, externalIdentityId: args.externalIdentityId }, attestSessionRef: p.sessionRef });
+      await tx.update(fieldTickets).set({ status: "closed", signatureStatus: d.refused.length ? "partially_accepted" : "accepted" }).where(eq(fieldTickets.id, x.t.id));
+      return p;
+    });
+  } catch (e) {
+    if (e instanceof AttestRefusal) throw new TRPCError({ code: e.code === "not_found" ? "NOT_FOUND" : e.code === "forbidden" ? "FORBIDDEN" : e.code === "conflict" ? "CONFLICT" : e.code === "bad_request" ? "BAD_REQUEST" : "PRECONDITION_FAILED", message: e.message });
+    throw e;
+  }
   await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "r1_available", ticketNumber: x.t.ticketNumber, subjectRef: documentRef });
-  return { documentRef, revision: 1, snapshotHash: hash, exercised: d.exercised, refused: d.refused, withinAuthority: d.withinAuthority, signedAt: now };
+  return { documentRef, revision: 1, snapshotHash: hash, exercised: d.exercised, refused: d.refused, withinAuthority: d.withinAuthority, signedAt: now, attest: { revisionRef: produced.revisionRef, sessionRef: produced.sessionRef, payloadHash: produced.payloadHash } };
 }
 
 export async function decideLine(args: { ticketNumber: string; lineId: number; disposition: "accepted" | "disputed"; customerQuantity: number | null; customerStatement: string | null; customerAccountIdMustMatch: number | null }) {

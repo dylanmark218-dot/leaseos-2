@@ -207,14 +207,17 @@ describe("one rule, shared", () => {
     const reads = readFileSync("server/qualificationReads.ts", "utf8");
     expect(reads).toContain('from "./_core/qualificationValidity"');
     expect(reads).toContain('from "./_core/documentValidity"');
-    for (const f of ["openShiftsRouter", "readinessRouter", "crewRouter", "calendarRouter"]) {
+    // 0206 moved open work's eligibility read out of its router into openShiftsService, so that is
+    // the open-shift reader this holds to the adapter; the router reads no qualification store at all.
+    expect(readFileSync("server/openShiftsRouter.ts", "utf8")).not.toContain("workerQualifications");
+    for (const f of ["openShiftsService", "readinessRouter", "crewRouter", "calendarRouter"]) {
       const src = readFileSync(`server/${f}.ts`, "utf8");
       expect(src, f).toContain('from "./qualificationReads"');
     }
   });
 
   it("leaves no router deciding a verification state by hand", () => {
-    for (const f of ["openShiftsRouter", "readinessRouter"]) {
+    for (const f of ["openShiftsRouter", "openShiftsService", "readinessRouter"]) {
       const src = readFileSync(`server/${f}.ts`, "utf8");
       // Reading the column to load rows is fine; branching on its values is the
       // second implementation.
@@ -224,10 +227,12 @@ describe("one rule, shared", () => {
   });
 
   it("classifies by a returned code rather than by matching prose", () => {
-    const src = readFileSync("server/openShiftsRouter.ts", "utf8");
-    expect(src).toContain("gap.why ===");
+    // SPINE item 2: open-shift eligibility is judged in the engine now; the router only reads.
+    const src = readFileSync("server/_core/openShifts.ts", "utf8");
+    expect(src).toContain('q?.notHeld === "expired"');
+    expect(src).toContain('q?.notHeld === "unverified"');
     // Matching on wording reclassified every unverified ticket the moment the
-    // wording improved.
-    expect(src).not.toContain('gap.reason.includes("verified it")');
+    // wording improved — in either file.
+    for (const f of [src, readFileSync("server/openShiftsRouter.ts", "utf8")]) expect(f).not.toMatch(/reason\.includes\(/);
   });
 });

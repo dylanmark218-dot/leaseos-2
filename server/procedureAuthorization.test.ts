@@ -50,6 +50,7 @@ const telematicsRouter = readFileSync("server/telematicsRouter.ts", "utf8");
 const workforceRouter = readFileSync("server/workforceRouter.ts", "utf8");
 const auditRouter = readFileSync("server/auditRouter.ts", "utf8");
 const spatialRouter = readFileSync("server/spatialRouter.ts", "utf8");
+const customerCommercialRouter = readFileSync("server/customerCommercialRouter.ts", "utf8");
 const commercialSetupRouter = readFileSync("server/commercialSetupRouter.ts", "utf8");
 const invoicingRouter = readFileSync("server/invoicingRouter.ts", "utf8");
 const geoRouter = readFileSync("server/geoRouter.ts", "utf8");
@@ -79,6 +80,7 @@ const paperworkRouter = readFileSync("server/paperworkRouter.ts", "utf8");
 const driverPortfolioRouter = readFileSync("server/driverPortfolioRouter.ts", "utf8");
 // DC-A (0178): Document Control.
 const documentControlRouter = readFileSync("server/documentControlRouter.ts", "utf8");
+const attestRouter = readFileSync("server/attestRouter.ts", "utf8");   // SA1
 const inventory = readFileSync("PROCEDURE_AUTHORIZATION_INVENTORY.md", "utf8");
 const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
 
@@ -87,7 +89,7 @@ const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
  * payrollRouter.ts both draw from it. Checking only one would let a declared
  * permission go unwired without anyone noticing.
  */
-const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + driverPortfolioRouter].join("\n");
+const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + attestRouter + driverPortfolioRouter].join("\n");
 
 const countBuilders = (src: string, builder: string) =>
   (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
@@ -179,7 +181,8 @@ describe("migrated operational procedures", () => {
     // 85 unreviewed at B20.3, 57 after B20.4, 0 after B20.6. B20.7 added the
     // 40-procedure payroll/finance surface, all gated from the start.
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(699)   // main 682 (662 + 10 auth workspace + 8 Live Assist + 2 paperwork); driver portfolio: +17 driverPortfolio.* (wallet, history, shares, submit, dispatch readiness, portfolio, audit, expiry dashboard, verification queue/verify, requirements);   // Document Control A–C (0178/0195/0196): +23 documentControl.* procedures;   // C1b-2b: +5 compliance.{requirementVerify,requirementSecondApprove,requirementWithdraw,verificationPolicySet,requirementProvenance};   // canonical assignment: +3 dispatch.{createPosting,addRole,listRoles};   // v22.40: +3 commercialOffice.{organizationCreate,organizationsList,facilityStatementsList} (P7.9);   // v22.38: +9 commercialOffice.document* (P7.7, 0144);   // v22.36: +2 facilityDirectory.{hydrovacImport,duplicates};   // v22.35: +6 facilityDirectory.{arcgisPresets,arcgisInspect,arcgisImportFeatures,arcgisImportFromLayer,arcgisRuns,lsdFind} (0142);   // v22.34: +1 facilityDirectory.seedBrief (0141);   // v22.33: +5 facilityDirectory.{hoursSet,callAheadRecord,waitReport,nearby,driverView} (0140);   // v22.32: +14 facilityDirectory.* (0139, re-based from feature/facility-map-v7);   // v22.31: +5 commercialOffice.{glAccountSet,glMappingSet,glList,glExportReadiness,profitabilityByDimension} (P7.6, 0138);   // v22.30: +1 commercialOffice.apAgingByOrganization (P7.5, 0137);   // v22.29: +2 commercialOffice.{arAgingByOrganization,approvalLedger} (P7.4, 0136);   // v22.28: +4 commercialOffice.facilityStatement* (P7.3, 0135);   // v22.27: +4 commercialOffice.link* (P7.2, 0134);   // v22.26: +15 commercialOffice.* (P7.1, 0133: role types, roles, settings, numbering, approvals, categories);   // v22.23: +2 academy.{sheetPrintRun,sheetScanFile} (0125); +3 widgets.{offerable,boardResolve,layoutSave} (B28);   // v22.22: +6 academy (tdgCoverageSet/Approve/Status, inspectorRequestCreate/Assemble/List)   // v22.21: +4 integration.{ownershipAssign,ownershipList,loadSenseBindGateway,loadSenseCalibrate} (were wired under clientRegister/inboundList names)   // v22.21: census re-baselined to the real map (ChatGPT recovery commits added entries without bumping it); +14 contractorOperations.* (wired by procedure name)   // v22.21: +1 hos.limitPromote (recovered 0093)   // v22.20: +5 agent runtime   // v22.20: +1 (source licence review)   // v22.7: +13 commercial setup; v22.8: +2 (ticket pricing, vendor rate variances); v22.9: +3 invoicing; v22.10: +2 (render, send); v22.11: +2 (void, disputeResolve); v22.13: +5 geo; v22.14: +6 (legal land, entrances, corridor); v22.15: +4 (structures, route approvals); v22.16: +2 (graph build, route compute); v22.17: +16 communications; v22.18: +4 (policy propose/approve/current, channel retire); v22.20: +1 (source licence review); v22.19: +4 (package build/fetch/acknowledge/status); v22.20: +7 hours of service   // v22.67: +6 automationPolicy.{resolve,set,setEntitlement,operationalOverride,history,snapshotFor} (P8.2) +1 hos.attestHours (P8.3), +1 hos.recordScannedLog, +8 restrictedVault.* (P8.5), +1 restrictedVault.restrictedIndex, +1 device.verifySeal (P1.2)
+    // The merged surface includes 8 Live Assist, 2 paperwork, 23 Document Control, and 10 auth-workspace procedures.
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(775);   // driver portfolio (#16): +17 driverPortfolio.*;   // SA1: +14 attest.* (server/attestRouter.ts);   // merge of main (b35bac4) into #59: main 723 + #59's 21 (7 board.*, 14 shifts.*);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 
@@ -249,7 +252,7 @@ describe("migrated operational procedures", () => {
     expect(countBuilders(workforceRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(auditRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(spatialRouter, "protectedProcedure")).toBe(0);
-    expect(countBuilders(commercialSetupRouter + invoicingRouter + geoRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter, "protectedProcedure")).toBe(0);
     // the inbound router mounts only the machine gate
     const inbound = integrationRouter.slice(integrationRouter.indexOf("export const inboundRouter"));
     expect(countBuilders(inbound, "roleProcedure")).toBe(0);
@@ -270,7 +273,7 @@ describe("migrated operational procedures", () => {
     // The portal router must never mount a role procedure: an external identity is not a domain-role user.
     expect(countBuilders(portalRouter, "roleProcedure")).toBe(0);
     const external = [...portalRouter.matchAll(/externalProcedure\("([^"]+)"\)/g)].map(m => m[1]);
-    expect(external.length).toBe(36);   // v22.10: + invoices, invoiceView, invoiceAccept // v21.17: + quotes, quote acceptance, change-order authorization, RFI answers
+    expect(external.length).toBe(40);   // SA1: +4 portal.attest{List,View,Sign,Decline}   // v22.10: + invoices, invoiceView, invoiceAccept // v21.17: + quotes, quote acceptance, change-order authorization, RFI answers
     for (const name of external) expect(EXTERNAL_PROCEDURE_PERMISSIONS, name).toHaveProperty(name);
     expect(Object.keys(EXTERNAL_PROCEDURE_PERMISSIONS).sort()).toEqual([...external].sort());
     // And no internal router mounts an external procedure.
@@ -334,7 +337,7 @@ describe("the untouched API is counted, not forgotten", () => {
 
   it("keeps the inventory document in step with the code", () => {
     expect(inventory).toContain("ROLE_AUTHORIZED");
-    expect(inventory).toContain("404 role-authorized procedures");   // main 387 + driverPortfolio.* 17
+    expect(inventory).toContain("418 role-authorized procedures");   // 387 + SA1's 14 attest.* + driverPortfolio.* 17
   });
 });
 
