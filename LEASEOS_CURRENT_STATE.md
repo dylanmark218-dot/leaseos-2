@@ -6,22 +6,41 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **v23.25** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **430** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **187** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **707** | `roleProcedure(` call sites across all routers |
+| Release | **v23.30** | `LEASEOS_RELEASE` (or explicit argument 1) |
+| Tables | **432** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **189** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **719** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
 | Permissions | **376** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **142** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **16** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **427 / 5867** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **436 / 6068** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
 
-Records vault · roles and server-side authorization · payroll, finance, tax
+Records vault · roles and server-side authorization, scoped to the
+organization that granted them — with the migration that scoped them verified
+against a real MariaDB (pre-state, legacy rows of every shape, apply, assert),
+a read-only diagnostic that counts the quarantine before and after deployment,
+a bootstrap that can no longer mint cross-tenant authority, a resolution
+procedure for the grants the migration refused to guess at, a CI gate that
+now proves which suites ran from vitest's own report rather than by grepping
+coloured output, and People & Access — the first surface that creates a
+membership at all, through an invitation claimed with a one-time token and an
+authenticated identity rather than an unverified email: a role issued by one company authorizes
+nothing in another, capabilities and workspaces are computed from the acting
+organization's grants rather than filtered afterwards, branch grants name
+their organization explicitly because branch identifiers have no owner, grant
+and revoke are organization-specific, and a pre-scope grant that could not be
+attributed without guessing is quarantined rather than assigned · one identity
+across several jobs: the session surface that resolves membership,
+organization and workspace server-side, refuses a workspace the caller does
+not hold, ends access with the membership rather than with the grant, and
+verifies a named organization against the membership table before it scopes
+anything · payroll, finance, tax
 rules (unverified) · geospatial source registry (8 verified licences, 10
 blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card
@@ -164,8 +183,11 @@ browser fallback. Carried communication packages: fetched, hash-verified on
 this side, written to the encrypted vault, read back before being acknowledged,
 read again on every open, and refused rather than shown when they no longer
 match what was stored — proven in Node against the runtime contracts, with the
-native vault still a stub. Internal portal: shell, switcher, My Day, exceptions,
-inbox, timeline, search, sync indicator, quick capture, view-models.
+native vault still a stub. Internal portal: shell, server-authoritative switcher, My Day,
+exceptions, inbox, timeline, search, sync indicator, quick capture,
+view-models. Sign-in, organization chooser, workspace chooser and the refusal
+screens at `/login` and `/workspaces`, each rendering only what the server
+offered and each run through the axe WCAG A/AA rules at three widths.
 Training Academy at `/training-academy`: course catalog, My Training, current-version lesson completion, locked/unlocked final assessment, results, certificate/qualification portfolio, and self-signing of pending regulated certificates.
 Customer portal at `/customer`: invitation acceptance, job board,
 pre-clearance, signing screen, chain of custody, adjustments, line disputes,

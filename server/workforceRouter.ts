@@ -8,6 +8,7 @@ import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb, revokeUserRole } from "./db";
+import { resolveActingScope } from "./_core/actingScope";
 import { applicantScreenings, applicants, competencySignoffs, complianceDocuments, fieldDevices, offboardings, onboardingPlans, onboardingTasks, operators, probationReviews, serializedTools, toolCheckouts, trainingRecords, userRoleAssignments } from "../drizzle/schema";
 import { COURSE_CREDENTIALS, competencyDecision, hireReadiness, offboardingClose, onboardingGaps, probationDecision, screeningRecordDecision, trainingVerification } from "./_core/workforce";
 
@@ -25,6 +26,23 @@ const DRIVER_ONBOARDING = [
   { taskCode: "tdg", title: "TDG certificate on file", credentialDocType: "tdg_certificate", credentialValidDays: 3 * 365, dueDays: 14 },
   { taskCode: "ride_along", title: "Ride-along with a senior operator", credentialDocType: null, credentialValidDays: null, dueDays: 14 },
 ] as const;
+
+/**
+ * B23.1A — live grants this person holds that belong to NO organization.
+ *
+ * `scopeType='global'` is platform-wide authority: it reaches every company in
+ * the deployment, so no single company's offboarding can revoke it. Counted so
+ * that the one door an offboarding cannot shut is named in its own words
+ * instead of vanishing when the revoke was scoped to the acting organization.
+ */
+async function platformWideGrantsHeldBy(db: Awaited<ReturnType<typeof dbOrThrow>>, userId: number): Promise<number> {
+  const rows = await db.select({ id: userRoleAssignments.id }).from(userRoleAssignments).where(and(
+    eq(userRoleAssignments.userId, userId),
+    eq(userRoleAssignments.scopeType, "global"),
+    isNull(userRoleAssignments.revokedAt),
+  ));
+  return rows.length;
+}
 
 async function ownerFor(userId: number): Promise<{ ownerType: "operator" | "user"; ownerId: number }> {
   const db = await dbOrThrow();
@@ -245,12 +263,43 @@ export const workforceRouter = router({
     const db = await dbOrThrow();
     const o = (await db.select().from(offboardings).where(eq(offboardings.offboardingRef, input.offboardingRef)).limit(1))[0];
     if (!o) throw new TRPCError({ code: "NOT_FOUND", message: "Offboarding not found" });
-    const roles = await db.select().from(userRoleAssignments).where(and(eq(userRoleAssignments.userId, o.userId), isNull(userRoleAssignments.revokedAt)));
-    for (const r of roles) await revokeUserRole({ userId: o.userId, role: r.role, revokedByUserId: ctx.user.id, reason: `offboarding ${o.offboardingRef}` });
+    // B23.1 — offboarding ends employment at THIS company, not everywhere.
+    //
+    // This used to select every un-revoked grant the account held and revoke
+    // each one, so a driver who also wrenched for a different employer lost
+    // that job too the moment one of them processed an offboarding. The grants
+    // revoked are now only the ones this organization issued.
+    const acting = await resolveActingScope(db, ctx.user.id);
+    const roles = await db.select().from(userRoleAssignments).where(and(
+      eq(userRoleAssignments.userId, o.userId),
+      eq(userRoleAssignments.orgRef, acting.tenantId),
+      isNull(userRoleAssignments.revokedAt),
+    ));
+    for (const r of roles) await revokeUserRole({ userId: o.userId, role: r.role, organization: acting.tenantId, revokedByUserId: ctx.user.id, reason: `offboarding ${o.offboardingRef}` });
     const devices = await db.select().from(fieldDevices).where(and(eq(fieldDevices.userId, o.userId), isNull(fieldDevices.revokedAt)));
     for (const d of devices) await db.update(fieldDevices).set({ status: "revoked", revokedAt: new Date(), revokedByUserId: ctx.user.id, revocationReason: `offboarding ${o.offboardingRef}` }).where(eq(fieldDevices.id, d.id));
     await db.update(offboardings).set({ rolesRevokedAt: new Date(), devicesRevokedAt: new Date() }).where(eq(offboardings.id, o.id));
-    return { offboardingRef: o.offboardingRef, rolesRevoked: roles.length, devicesRevoked: devices.length };
+    return {
+      offboardingRef: o.offboardingRef,
+      rolesRevoked: roles.length,
+      devicesRevoked: devices.length,
+      // B23.1A — a door this company cannot shut, counted rather than ignored.
+      //
+      // Scoping the revoke to the acting organization was the fix for a
+      // dual-employed worker losing their other job. It also means a
+      // PLATFORM-WIDE grant (`scopeType='global'`, belonging to no
+      // organization) survives an offboarding untouched, and the person walks
+      // out still holding authority in every company in the deployment.
+      //
+      // It is not revoked here: one employer cannot unilaterally strip
+      // platform authority, and if it could, so could any other. 0170's
+      // backfill creates none of these and nothing in the codebase issues one
+      // any more, so the honest treatment is to report the number in the act
+      // that would otherwise have hidden it. Close is not blocked on it —
+      // there is no procedure that could clear it, and a door with no key is a
+      // dead end rather than a control.
+      platformWideGrantsUntouched: await platformWideGrantsHeldBy(db, o.userId),
+    };
   }),
 
   offboardingStatus: roleProcedure("workforce.offboardingStatus").input(z.object({ offboardingRef: z.string().min(1).max(64) })).query(async ({ ctx, input }) => {
@@ -263,13 +312,24 @@ export const workforceRouter = router({
     const o = (await db.select().from(offboardings).where(eq(offboardings.offboardingRef, input.offboardingRef)).limit(1))[0];
     if (!o) throw new TRPCError({ code: "NOT_FOUND", message: "Offboarding not found" });
     const [roles, devices, tools] = await Promise.all([
-      db.select({ id: userRoleAssignments.id }).from(userRoleAssignments).where(and(eq(userRoleAssignments.userId, o.userId), isNull(userRoleAssignments.revokedAt))),
+      // B23.1A — this organization's grants only. Offboarding revokes what
+      // THIS company issued, so counting a person's other employer's roles
+      // here would mean a dual-employed worker's offboarding could never
+      // close: it would forever report roles the revoke step cannot touch.
+      db.select({ id: userRoleAssignments.id }).from(userRoleAssignments).where(and(eq(userRoleAssignments.userId, o.userId), eq(userRoleAssignments.orgRef, (await actingScopeFor(ctx.user.id)).tenantId), isNull(userRoleAssignments.revokedAt))),
       db.select({ id: fieldDevices.id }).from(fieldDevices).where(and(eq(fieldDevices.userId, o.userId), isNull(fieldDevices.revokedAt))),
       db.select({ id: toolCheckouts.id, toolId: toolCheckouts.toolId }).from(toolCheckouts).where(and(eq(toolCheckouts.workerUserId, o.userId), isNull(toolCheckouts.returnedAt))),
     ]);
     const c = offboardingClose({ activeRoles: roles.length, activeDevices: devices.length, activeIdentities: 0, toolsOut: tools.length, finalPayProposed: !!o.finalPayProposedAt, lastDay: o.lastDay, now: new Date() });
     const toolRows = tools.length ? await db.select({ id: serializedTools.id, serial: serializedTools.serial }).from(serializedTools) : [];
-    return { offboardingRef: o.offboardingRef, status: o.status, canClose: c.permitted, open: c.open, toolsOut: tools.map(t => toolRows.find(x => x.id === t.toolId)?.serial ?? String(t.toolId)) };
+    return {
+      offboardingRef: o.offboardingRef, status: o.status, canClose: c.permitted, open: c.open,
+      toolsOut: tools.map(t => toolRows.find(x => x.id === t.toolId)?.serial ?? String(t.toolId)),
+      // B23.1A — see offboardingRevokeAccess. Reported beside `open` rather
+      // than inside it: `open` is what THIS offboarding can close, and this is
+      // the one thing it cannot.
+      platformWideGrants: await platformWideGrantsHeldBy(db, o.userId),
+    };
   }),
 
   offboardingClose: roleProcedure("workforce.offboardingClose").input(z.object({ offboardingRef: z.string().min(1).max(64), finalPayProposed: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
@@ -284,7 +344,11 @@ export const workforceRouter = router({
     if (o.status === "complete") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Already complete" });
     if (input.finalPayProposed && !o.finalPayProposedAt) await db.update(offboardings).set({ finalPayProposedAt: new Date() }).where(eq(offboardings.id, o.id));
     const [roles, devices, tools] = await Promise.all([
-      db.select({ id: userRoleAssignments.id }).from(userRoleAssignments).where(and(eq(userRoleAssignments.userId, o.userId), isNull(userRoleAssignments.revokedAt))),
+      // B23.1A — this organization's grants only. Offboarding revokes what
+      // THIS company issued, so counting a person's other employer's roles
+      // here would mean a dual-employed worker's offboarding could never
+      // close: it would forever report roles the revoke step cannot touch.
+      db.select({ id: userRoleAssignments.id }).from(userRoleAssignments).where(and(eq(userRoleAssignments.userId, o.userId), eq(userRoleAssignments.orgRef, (await actingScopeFor(ctx.user.id)).tenantId), isNull(userRoleAssignments.revokedAt))),
       db.select({ id: fieldDevices.id }).from(fieldDevices).where(and(eq(fieldDevices.userId, o.userId), isNull(fieldDevices.revokedAt))),
       db.select({ id: toolCheckouts.id }).from(toolCheckouts).where(and(eq(toolCheckouts.workerUserId, o.userId), isNull(toolCheckouts.returnedAt))),
     ]);

@@ -128,7 +128,9 @@ describe("2./3. every bare import of the production graphs is a builtin or a pro
   });
   it("the worker graph is small and entirely production", () => {
     const names = [...graphs["server/_core/worker.ts"]!.bare.keys()].map(packageName).filter(n => !BUILTINS.has(n));
-    expect(new Set(names)).toEqual(new Set(["dotenv", "mysql2", "drizzle-orm", "zod"]));
+    // `cookie` (a production dependency) since #64: actingScope reads the request's organization claim
+    // from organizationSelection, which also parses the selection cookie on the web path.
+    expect(new Set(names)).toEqual(new Set(["dotenv", "mysql2", "drizzle-orm", "cookie", "zod"]));
   });
 });
 

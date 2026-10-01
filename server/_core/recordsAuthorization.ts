@@ -2045,8 +2045,91 @@ export function isDomainRole(value: string): value is DomainRole {
   return Object.prototype.hasOwnProperty.call(GRANTS, value);
 }
 
-/** A grant as stored: a role, optionally confined to one branch. */
-export type RoleGrant = { role: string; scopeRef?: string | null };
+/**
+ * B23.1 — how far a grant reaches.
+ *
+ * `global` is PLATFORM-WIDE: it reaches every organization in the deployment.
+ * Before B23.1 it was the only value an ordinary business role could be
+ * written with, because there was no organization scope to write — so every
+ * driver grant ever issued claimed authority in every company. That is the
+ * bug this enum exists to end, and `global` now means what its name says and
+ * nothing else. The backfill assigns it to nobody; granting it is a deliberate
+ * act, and `organizationScopedRoles.test.ts` pins that it crosses boundaries
+ * by design rather than by accident.
+ *
+ * `organization` is the ordinary case: authority inside one company.
+ *
+ * `branch` is narrower still, and names its organization EXPLICITLY. There is
+ * no `branches` table in this schema — `branchId` is a bare varchar on eight
+ * tables with no organization ownership — so a branch cannot tell us which
+ * company it belongs to. Deriving one would be exactly the ambiguous
+ * relationship through which authority leaks, so a branch grant carries both.
+ *
+ * `unscoped_legacy` is what the backfill writes for a grant it could not
+ * safely attribute: the holder already belonged to more than one organization
+ * when organization scope arrived, so no organization can be inferred without
+ * guessing whose authority to hand over. It authorizes nothing, anywhere,
+ * until an administrator re-grants it explicitly. The row is preserved so the
+ * history stays answerable.
+ */
+export type RoleScopeType = "global" | "organization" | "branch" | "unscoped_legacy";
+
+/**
+ * A grant as stored: a role, the organization that issued it, and how far it
+ * reaches inside that organization.
+ *
+ * `scopeType` is optional in the TYPE only so the pure fixtures written before
+ * B23.1 still compile; a grant with no `scopeType` is read as platform-global,
+ * which is the honest reading of the pre-B23.1 data model. The production
+ * reader always populates it — `db.listActiveUserRoles` selects the column and
+ * `organizationScopedRoles.db.test.ts` pins that it never returns one without.
+ */
+export type RoleGrant = {
+  role: string;
+  /** The branch, when `scopeType` is `branch`. */
+  scopeRef?: string | null;
+  scopeType?: RoleScopeType;
+  /** The organization that issued this grant. Null only for platform-global. */
+  orgRef?: string | null;
+};
+
+/** Whether a grant is deliberate platform-wide authority rather than a company's. */
+export function isPlatformGlobal(grant: RoleGrant): boolean {
+  return (grant.scopeType ?? "global") === "global";
+}
+
+/**
+ * The grants that authorize inside one organization.
+ *
+ * The whole B23.1 invariant, in one function, so that capability projection,
+ * workspace composition and the procedure gate all ask the same question and
+ * cannot answer it differently.
+ *
+ * Fails closed at every branch: an organization-confined grant naming no
+ * organization reaches nothing, an unrecognized scope type reaches nothing,
+ * and a quarantined legacy grant reaches nothing. Only a platform-global grant
+ * survives without an organization match, and that is the point of it.
+ */
+export function grantsInOrganization(
+  grants: readonly RoleGrant[],
+  organization: string | null | undefined
+): RoleGrant[] {
+  return grants.filter(g => {
+    const scope = g.scopeType ?? "global";
+    if (scope === "global") return true;
+    if (scope === "organization" || scope === "branch") {
+      // A confined grant that names no organization is malformed, not broad.
+      if (!g.orgRef) return false;
+      // An unresolved organization cannot judge a confined grant, so it does
+      // not apply — the same rule the branch axis below already runs on.
+      if (!organization) return false;
+      return g.orgRef === organization;
+    }
+    // `unscoped_legacy`, and anything a future migration adds before this
+    // function learns about it.
+    return false;
+  });
+}
 
 export type AuthorizationOutcome =
   | "allowed"
@@ -2087,6 +2170,21 @@ function normalizeGrants(args: {
  * branch to cross into. Before this, both were treated as `null`, nobody
  * outside this module ever supplied a branch, and every confined grant passed
  * every generic gate. Universal (self-scoped) permissions are unaffected.
+ *
+ * B23.1 — `organization` is the OUTER scope and is checked first, because the
+ * branch axis cannot defend a boundary it knows nothing about: branch
+ * identifiers are bare strings with no owner, so "BRANCH-A1" in one company
+ * and "BRANCH-A1" in another are indistinguishable to the branch check. The
+ * organization must therefore be settled before the branch is consulted at
+ * all. It is resolved server-side from membership, exactly like the branch,
+ * and is never read from a request.
+ *
+ * `organization` follows the same `undefined` rule: a caller that did not
+ * resolve one cannot judge an organization-confined grant, so only
+ * platform-global authority passes an unresolved gate. Universal
+ * (self-scoped) permissions still ride past the SCOPE filter — your own pay
+ * and your own inbox are yours in whichever company you are standing in — but
+ * they are granted only after the denial sweep, exactly as before.
  */
 export function authorize(args: {
   userId: number | null | undefined;
@@ -2094,6 +2192,8 @@ export function authorize(args: {
   grants?: readonly RoleGrant[];
   permission: Permission;
   resourceBranch?: string | null;
+  /** The organization the request is acting for. Server-resolved, never client-supplied. */
+  organization?: string | null;
 }): AuthorizationResult {
   if (!args.userId) {
     return {
@@ -2119,9 +2219,31 @@ export function authorize(args: {
     };
   }
 
+  // B23.1 — the organization boundary, before anything else.
+  //
+  // Universal (self-scoped) permissions ride past the BRANCH filter below but
+  // NOT past this one. Holding a grant in another company does not make you
+  // somebody here, and "your own inbox, in a company that has granted you
+  // nothing" is a question with no good answer — so it is refused rather than
+  // guessed.
+  const inOrganization = grantsInOrganization(recognized, args.organization);
+  if (inOrganization.length === 0) {
+    return {
+      allowed: false,
+      outcome: "denied_scope",
+      effectiveRoles: [],
+      // Says what is wrong without naming which other company granted the
+      // role: a refusal is not a directory of a person's other employers.
+      detail:
+        args.organization == null
+          ? "Roles are confined to an organization and this operation did not resolve one — platform-wide authority is required here"
+          : "No role granted by this organization authorizes this operation",
+    };
+  }
+
   const branchUnresolved = args.resourceBranch === undefined;
   const universal = (UNIVERSAL_PERMISSIONS as readonly string[]).includes(args.permission);
-  const inScope = recognized.filter(
+  const inScope = inOrganization.filter(
     g =>
       g.scopeRef == null ||
       universal ||
@@ -2206,6 +2328,16 @@ export function authorizeRecordScope(args: {
   permission: Permission;
   subject: RecordScopeSubject;
   resourceBranch?: string | null;
+  /**
+   * B23.1A — forwarded to `authorize`, and callers must supply it.
+   *
+   * Omitting it is not "unscoped", it is "organization unresolved", which
+   * makes every organization-confined grant inapplicable — i.e. every grant
+   * 0170 leaves behind. This wrapper spreads `args` straight through, so the
+   * axis was silently dropped at all three call sites until a fixture stopped
+   * writing platform-global grants.
+   */
+  organization?: string | null;
 }): AuthorizationResult {
   const base = authorize(args);
   if (!base.allowed) return base;
@@ -2242,6 +2374,8 @@ export function authorizeMechanicRelease(args: {
   grants?: readonly RoleGrant[];
   technicianUserId: number;
   resourceBranch?: string | null;
+  /** B23.1A — see `authorizeRecordScope`. Forwarded to `authorize`. */
+  organization?: string | null;
 }): AuthorizationResult {
   const base = authorize({ ...args, permission: "maintenance.record_release" });
   if (!base.allowed) return base;
@@ -2283,6 +2417,15 @@ export const RECORDS_PROCEDURE_PERMISSIONS = {
   "records.retention.disposition": "retention.dispose",
   "records.roadside.open": "roadside.open",
   "records.roles.grant": "roles.grant",
+  // B23.1 — taking a role away is the same authority as giving one, and is
+  // held under the same permission. Before this there was no revoke procedure
+  // at all: the only path that revoked anything was offboarding, which revoked
+  // every grant the account held in every organization.
+  "records.roles.revoke": "roles.grant",
+  // B23.1A — resolving a grant 0170 quarantined is issuing one: same authority,
+  // same permission, and the organization comes from the actor's scope either
+  // way.
+  "records.roles.resolveLegacy": "roles.grant",
 } as const satisfies Record<string, Permission>;
 
 export type RecordsProcedure = keyof typeof RECORDS_PROCEDURE_PERMISSIONS;
@@ -3058,6 +3201,29 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "workforce.probationDecide": "hr.probation.decide",
   "workforce.offboardingOpen": "hr.offboarding.manage",
   "workforce.offboardingRevokeAccess": "hr.access.revoke",
+
+  /* B23.2 — People & Access.
+   *
+   * Every one of these maps to `roles.grant`, which `authorize()` gives to
+   * `management` alone and which is already in SENSITIVE_PERMISSIONS, so the
+   * audit row is written before the act and a failure to write it refuses.
+   *
+   * No new permission was introduced, deliberately. `personnel.read` would
+   * have been the obvious home for the read surfaces, but it reaches
+   * dispatcher, office, HR and payroll_admin — and "who holds what access" is
+   * an access-administration question rather than an HR-record one. Starting
+   * narrow leaves the decision to widen it with an owner; starting wide is not
+   * reversible in practice. */
+  "people.roleCatalogue": "roles.grant",
+  "people.list": "roles.grant",
+  "people.detail": "roles.grant",
+  "people.setRoles": "roles.grant",
+  "people.setDefaultWorkspace": "roles.grant",
+  "people.removeFromOrganization": "roles.grant",
+  "people.invitations.list": "roles.grant",
+  "people.invitations.create": "roles.grant",
+  "people.invitations.cancel": "roles.grant",
+  "people.accessResolution.list": "roles.grant",
   "workforce.offboardingStatus": "hr.offboarding.manage",
   "workforce.offboardingClose": "hr.offboarding.manage",
 
@@ -3140,6 +3306,43 @@ export function permissionForProcedure(name: string): Permission | null {
     null
   );
 }
+
+/* ==================================================================
+ * v23.26 — The session surface.
+ *
+ * Three procedures, and it is a closed list on purpose. `sessionProcedure`
+ * requires authentication but no domain role, which is the only gate in this
+ * system that a person holding nothing can pass — so the set of things it may
+ * be used for is declared here rather than left to whoever writes the next
+ * router. `procedureAuthorization.test.ts` pins it.
+ *
+ * All three carry `portal.compose_own`: the existing universal permission for
+ * "assemble MY session from MY roles". They read `ctx.user.id`, the grants the
+ * gate already loaded, and the memberships those imply. Nobody composes
+ * somebody else's session, which is what makes the permission universal in the
+ * first place.
+ * ================================================================== */
+
+export const SESSION_PROCEDURE_PERMISSIONS = {
+  "session.context": "portal.compose_own",
+  "session.selectOrganization": "portal.compose_own",
+  "session.selectWorkspace": "portal.compose_own",
+  /*
+   * B23.2 — accepting an invitation is the one People & Access act that CANNOT
+   * be a `roleProcedure`: the person accepting holds nothing in the
+   * organization they are joining, which is the entire point. That is the case
+   * `sessionProcedure` was built for in B23.0 — "the one gate an account
+   * holding nothing can pass" — so it belongs here, on a list that is closed in
+   * code and pinned by the census rather than open by default.
+   *
+   * It is not a hole: the gate still requires an authenticated identity, and
+   * the invitation token is verified against a stored digest inside the
+   * transaction that creates the membership.
+   */
+  "session.acceptInvitation": "portal.compose_own",
+} as const satisfies Record<string, Permission>;
+
+export type SessionProcedureName = keyof typeof SESSION_PROCEDURE_PERMISSIONS;
 
 /* ==================================================================
  * v21.10 — External identities
