@@ -28,7 +28,7 @@ describe("readiness defect repair — preconditions", () => {
 
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let userSeq = 710000 + Math.floor(Math.random() * 40000);
+let userSeq = 403_000_000 + Math.floor(Math.random() * 40000);
 const nextUser = () => userSeq++;
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 const caller = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
