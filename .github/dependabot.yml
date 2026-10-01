@@ -1,0 +1,48 @@
+version: 2
+
+# Conservative on purpose. Every dependency bump has to clear scripts/ci-gate.sh — a
+# full MariaDB run of the whole suite — so a flood of simultaneous pull requests costs
+# far more to verify than it saves. Nothing here merges on its own.
+updates:
+  # pnpm projects are handled by the npm ecosystem; Dependabot reads pnpm-lock.yaml.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    groups:
+      # One pull request for the routine patch traffic, so review attention goes to the
+      # bumps that can actually change behaviour.
+      patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+    ignore:
+      # The package manager is pinned by `packageManager` in package.json, complete with
+      # an integrity hash that Corepack enforces, and CI deliberately passes no version
+      # to pnpm/action-setup so that pin is the single source of truth. A Dependabot bump
+      # of the devDependency would put the two into disagreement.
+      - dependency-name: "pnpm"
+      # Node's type definitions track the runtime, not the registry: raising them ahead
+      # of the Node version CI runs lets Node-only-in-a-newer-major APIs type-check and
+      # then fail in production. This moves when the runtime moves, by hand.
+      - dependency-name: "@types/node"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(actions)"

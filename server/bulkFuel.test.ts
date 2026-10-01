@@ -164,7 +164,7 @@ d("a yard tank and a card statement, through the ledger", () => {
     // `loadQuarter` is correctly scoped by financialEntityId, so the id itself was
     // the only shared thing. A real auto-increment cannot repeat within a run,
     // which removes the collision rather than making it rarer.
-    const entityId = 950000 + unitId;
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
 
     // A tank in Alberta. A stated dispense enters needs_review; a metered one whose meter disagrees is refused.
     const tank = await callerFor(shopLead).fuel.tankRegister({ financialEntityId: entityId, name: "Yard tank 1", location: "Nisku yard", jurisdiction: "CA-AB", fuelType: "diesel", capacityLitres: 10000, varianceTolerancePct: 2 });

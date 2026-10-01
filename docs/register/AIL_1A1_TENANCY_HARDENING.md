@@ -111,7 +111,7 @@ neither.
 receipt could be refused because org A had filed one with the same vendor, date and total. That
 confirmed A's document existed and put A's prior metadata into B's decision.
 
-**After.** A prior matches only if its proposal's proved owner (0185) is the committing organization:
+**After.** A prior matches only if its proposal's proved owner (0210) is the committing organization:
 `documentFingerprints.proposalId IN (proposals where tenantId = acting)`, inside the commit
 transaction. A fingerprint whose proposal is unresolved matches nobody.
 

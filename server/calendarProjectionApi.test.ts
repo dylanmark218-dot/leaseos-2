@@ -16,15 +16,22 @@ beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, co
 const caller = (id: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id, role: "user" } as never });
 async function withRole(role: DomainRole) { const id = seq++; await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
 const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
+/** On the single tenant's roster — an active crew membership — which the open-shift rule requires (SPINE item 2). */
+async function onRoster(userId: number) {
+  const crewRef = `CR-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+  await pool.execute("INSERT INTO crews (crewRef, tenantId, name, createdByUserId) VALUES (?, 'default', ?, 1)", [crewRef, crewRef]);
+  await pool.execute("INSERT INTO crewMembers (crewRef, userId, crewRole, joinedAt) VALUES (?, ?, 'driver', NOW())", [crewRef, userId]);
+}
 
 const FROM = new Date("2027-02-01T00:00:00Z");
 const day = (n: number) => new Date(FROM.getTime() + n * 86_400_000);
 
 async function ticket(userId: number, code: string, expiresAt: Date | null, state = "verified") {
   await pool.execute(
-    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt)
-     VALUES (?,?,?,?,?,?,?,NOW())`,
-    [`WQ-${rnd()}${rnd()}`, "default", userId, code, state, expiresAt, 1]);
+    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt, verifiedByUserId, verifiedAt)
+     VALUES (?,?,?,?,?,?,?,NOW(),?,?)`,
+    // C1b-3: a legacy holding counts as verified only with a recorded verifier.
+    [`WQ-${rnd()}${rnd()}`, "default", userId, code, state, expiresAt, 1, state === "verified" ? 1 : null, state === "verified" ? new Date() : null]);
 }
 
 d("every event names the record it came from", () => {
@@ -67,6 +74,9 @@ d("every event names the record it came from", () => {
   it("projects an expressed interest and says it is not an assignment", async () => {
     const dispatcher = await withRole("dispatcher");
     const driver = await withRole("driver");
+    // A worker the open-shift rule passes: licensed (their own operator record) and on the roster.
+    await pool.execute("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())", [driver, driver, `Op ${rnd()}`, "1", new Date("2030-01-01T00:00:00Z")]);
+    await onRoster(driver);
     const p = await caller(dispatcher).shifts.post({ title: "Night vac", startsAt: day(6), endsAt: day(7), requiredRole: "driver" });
     await caller(driver).shifts.expressInterest({ postRef: p.postRef });
     const c = await caller(driver).calendar.mine({ from: FROM, days: 14 });

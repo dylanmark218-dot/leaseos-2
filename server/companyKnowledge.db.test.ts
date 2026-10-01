@@ -159,8 +159,8 @@ d("AIL-1B: company intelligence is the organization's, governed, and checked", (
 
   it("gives a person in two organizations nothing until which one they act for is established", async () => {
     const both = await person([A, B], ["safety"]);
-    await expect(ck(both).list()).rejects.toThrow(/organizations/);
-    await expect(ck(both).propose(statement(`m ${rnd()}`, "x"))).rejects.toThrow(/organizations/);
+    await expect(ck(both).list()).rejects.toThrow(/organization/);
+    await expect(ck(both).propose(statement(`m ${rnd()}`, "x"))).rejects.toThrow(/organization/);
   });
 
   it("is enforced by the database too: no unreviewed approval, no self-review, no empty owner", async () => {

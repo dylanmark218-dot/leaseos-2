@@ -52,7 +52,9 @@ describe("the monolith's create paths refuse trust-bearing input at the schema",
     const refused = (src.match(/^\s+([a-zA-Z]+): REFUSED,/gm) ?? []).map(l => l.trim().split(":")[0]!);
     // AIL-1A: +5 on assistant.draft (createdByUserId, orgRef, organizationId, tenantDerivedFrom, tenantId) —
     // whose proposal it is comes from the session's acting scope, never from the body.
-    expect(refused.sort()).toEqual(["accessRole", "authMethod", "classificationStatus", "confidence", "confidence", "createdByUserId", "documentHash", "inspectionStatus", "maintenanceStatus", "orgRef", "organizationId", "source", "status", "status", "status", "status", "status", "tenantDerivedFrom", "tenantId", "unitId", "verificationStatus", "verifiedAt", "verifiedAt"]);
+    // P0-A2.1 — `orgRef` on operatingZones.create: the organization a zone belongs to is the caller's
+    // live membership, never a value in the request.
+    expect(refused.sort()).toEqual(["accessRole", "authMethod", "classificationStatus", "confidence", "confidence", "createdByUserId", "documentHash", "inspectionStatus", "maintenanceStatus", "orgRef", "orgRef", "organizationId", "source", "status", "status", "status", "status", "status", "tenantDerivedFrom", "tenantId", "unitId", "verificationStatus", "verifiedAt", "verifiedAt"]);
     expect(src).toContain('const REFUSED = z.undefined(');
   });
 });
@@ -117,12 +119,14 @@ d("an authorized caller cannot establish a trusted state through a create", () =
   });
   it("scans: the access role is the caller's, not the caller's claim", async () => {
     const driver = await withRole("driver");
-    await expect(callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: 1, scannedAt: new Date(), accessRole: "admin" } as never)).rejects.toThrow(REFUSED);
-    const id = await callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: 1, scannedAt: new Date() });
+    // Its own (unowned, single-tenant) unit: "unit 1" is whichever suite created the first unit, and may be an organization's.
+    const unitId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [`U-${Math.random().toString(36).slice(2, 10)}`]))[0].insertId);
+    await expect(callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: unitId, scannedAt: new Date(), accessRole: "admin" } as never)).rejects.toThrow(REFUSED);
+    const id = await callerFor(driver).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: unitId, scannedAt: new Date() });
     const [row] = await pool.execute<mysql.RowDataPacket[]>("SELECT accessRole FROM scanAudits WHERE id = ?", [rowId(id)]);
     expect(row[0].accessRole).toBe("driver");
     const management = await withRole("management");
-    const mid = await callerFor(management).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: 1, scannedAt: new Date() });
+    const mid = await callerFor(management).fieldRoute.scans.create({ scanType: "qr", subjectType: "unit", subjectId: unitId, scannedAt: new Date() });
     const [mrow] = await pool.execute<mysql.RowDataPacket[]>("SELECT accessRole FROM scanAudits WHERE id = ?", [rowId(mid)]);
     expect(mrow[0].accessRole).toBe("admin");
   });

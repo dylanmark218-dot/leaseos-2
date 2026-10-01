@@ -5,7 +5,8 @@ organization records rather than model memory (R-1). This covers its terminology
 SOP knowledge, facility and customer conventions, approved preferences, known gaps and verified
 corrections.
 
-Baseline: `eb6b6dd` (TEN-EXC-1 `cd961cf`, approved, plus a remote fixture-review commit). Branch:
+Baseline: `eb6b6dd` (TEN-EXC-1 `cd961cf`, approved, plus a remote fixture-review commit), then merged with
+the branch after Copilot merged `main` into it (`8898269`, which renumbered AIL-1A's migration 0185 → 0210). Branch:
 `claude/relaxed-carson-qfcopf`. Migration: `0214`. **SEC-OUTBOUND-1 remains open.**
 
 This builds on AIL-1A (scopes, proposal tenancy), AIL-1A.1 (user-private conversations, context
@@ -71,7 +72,7 @@ authority) and TEN-EXC-1 (operational isolation).
   `own_document`, and not superseded. A licensed third-party passage, another organization's
   passage, or a superseded one is "not found".
 - **Verified correction:** a committed record (`assistantCommitReceipts`) whose proposal's proved
-  owner (0185) is this organization. The record's sealed field manifest must hold the named field
+  owner (0210, formerly 0185) is this organization. The record's sealed field manifest must hold the named field
   with status `corrected`, which means a person changed it. A field that was merely confirmed does
   not count, and neither does another form, another organization's record or a legacy proposal.
 - **Person's statement:** the proposer is recorded. A statement carries no source reference, so

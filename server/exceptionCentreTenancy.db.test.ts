@@ -68,7 +68,10 @@ const KEYS: { [K in keyof ExceptionSources]?: (s: ExceptionSources) => string[] 
   roadsideOpen: s => s.roadsideOpen.map(x => x.eventRef),
   vendorBills: s => s.vendorBills.map(x => x.billRef),
   purchaseRequests: s => s.purchaseRequests.map(x => x.authorizationRef),
-  credentials: s => s.credentials.map(x => `${x.id}`),
+  // SPINE item 2 (from main) split credentials in two: rows awaiting verification, by id, and the
+  // canonical verdict per owner and document type. Both carry the same ownership rule.
+  credentialsAwaitingVerification: s => s.credentialsAwaitingVerification.map(x => `${x.id}`),
+  credentialVerdicts: s => s.credentialVerdicts.map(x => `${x.ownerType}:${x.ownerId}:${x.docType}`),
   aiProposals: s => s.aiProposals.map(x => x.proposalId),
   aiQuestions: s => s.aiQuestions.map(x => `${x.askedToUserId}`),
   syncConflicts: s => s.syncConflicts.map(x => x.conflictRef),
@@ -91,6 +94,7 @@ type Case = { a: string; b: string; nobody: string[] };
 let A: string, B: string, a1: number, a2: number, b1: number, multi: number;
 const cases = {} as Record<Source, Case>;
 let extraCreds: { credUserA: string; credTrailerA: string; credJobB: string };
+const verdictKey = new Map<string, string>();
 const ref = (p: string) => `${p}-${rnd()}`;
 
 /** One fixture per source per owner. Returns the reference the source reports it under. */
@@ -105,7 +109,11 @@ const make = {
   async purchase(entityId: number, requester: number, o: { vendorId?: number; unitId?: number; jobId?: number } = {}) {
     const r = ref("PA"); await pool.execute("INSERT INTO purchaseAuthorizations (authorizationRef, financialEntityId, vendorId, unitId, jobId, category, reason, estimatedAmount, requestedByUserId, requestedAt, status) VALUES (?,?,?,?,?,'parts','fixture',250,?,NOW(),'requested')", [r, entityId, o.vendorId ?? null, o.unitId ?? null, o.jobId ?? null, requester]); return r;
   },
-  async credential(ownerType: string, ownerId: number) { return `${await ins("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, verificationStatus) VALUES (?,?,'h2s_alive',?,NOW(),'needs_review')", [ownerType, ownerId, `H2S ${rnd()}`])}`; },
+  async credential(ownerType: string, ownerId: number) {
+    const id = `${await ins("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, verificationStatus) VALUES (?,?,'h2s_alive',?,NOW(),'needs_review')", [ownerType, ownerId, `H2S ${rnd()}`])}`;
+    verdictKey.set(id, `${ownerType}:${ownerId}:h2s_alive`);
+    return id;
+  },
   /** Grouped by addressee, so each question is addressed to its own fresh person. */
   async question(proposalId: string) {
     const to = seq++; await pool.execute("INSERT INTO assistantQuestions (questionRef, proposalId, fieldKey, question, reason, askedToUserId, status) VALUES (?,?,'odometer','What was the odometer?','missing_required',?,'pending')", [ref("Q"), proposalId, to]); return `${to}`;
@@ -158,10 +166,12 @@ d("TEN-EXC-1: every Exception Centre source is its organization's", () => {
     cases.roadsideOpen = { a: await make.roadside(uA), b: await make.roadside(uB), nobody: [await make.roadside(uA, { jobId: jB }), await make.roadside(uA, { tripId: tB }), await make.roadside(uA, { operatorId: opB }), await make.roadside(MISSING)] };
     cases.vendorBills = { a: await make.bill(eA, vA), b: await make.bill(eB, vB), nobody: [await make.bill(eA, vB), await make.bill(eA, vA, { unitId: uB }), await make.bill(eA, vA, { jobId: jB }), await make.bill(MISSING, vA)] };
     cases.purchaseRequests = { a: await make.purchase(eA, a2), b: await make.purchase(eB, b1), nobody: [await make.purchase(eA, a2, { jobId: jB }), await make.purchase(eA, a2, { vendorId: vB }), await make.purchase(eA, a2, { unitId: uB }), await make.purchase(MISSING, a2)] };
-    cases.credentials = {
+    cases.credentialsAwaitingVerification = {
       a: await make.credential("operator", opA), b: await make.credential("operator", opB),
       nobody: [await make.credential("unit", MISSING), await make.credential("carrier", 1), await make.credential("user", multi), await make.credential("user", MISSING), await make.credential("operator", MISSING)],
     };
+    const cw = cases.credentialsAwaitingVerification, vk = (id: string) => verdictKey.get(id)!;
+    cases.credentialVerdicts = { a: vk(cw.a), b: vk(cw.b), nobody: cw.nobody.map(vk) };
     extraCreds = { credUserA: await make.credential("user", a2), credTrailerA: await make.credential("trailer", uA), credJobB: await make.credential("job", jB) };
     cases.aiProposals = { a: await proposalOf(A), b: await proposalOf(B), nobody: [await proposalOf(null)] };
     cases.aiQuestions = { a: await make.question(await proposalOf(A)), b: await make.question(await proposalOf(B)), nobody: [await make.question(await proposalOf(null)), await make.question(`PRP-MISSING-${rnd()}`)] };
@@ -216,7 +226,7 @@ d("TEN-EXC-1: every Exception Centre source is its organization's", () => {
 
   it("credentials: a person's own credential is their organization's; a trailer is its unit's; a job's is the job's", async () => {
     const { credUserA, credTrailerA, credJobB } = extraCreds;
-    const [ka, kb] = await Promise.all([sourcesFor(a1), sourcesFor(b1)]).then(xs => xs.map(s => s.credentials.map(c => `${c.id}`)));
+    const [ka, kb] = await Promise.all([sourcesFor(a1), sourcesFor(b1)]).then(xs => xs.map(s => s.credentialsAwaitingVerification.map(c => `${c.id}`)));
     expect(ka).toEqual(expect.arrayContaining([credUserA, credTrailerA]));
     expect(kb).not.toContain(credUserA);
     expect(kb).not.toContain(credTrailerA);
@@ -265,8 +275,8 @@ d("TEN-EXC-1: the combined surfaces and the adversarial cases", () => {
   });
 
   it("gives a person in two organizations nothing until which one they act for is established", async () => {
-    await expect(callerFor(multi).surfaces.exceptions({ limit: 50 })).rejects.toThrow(/organizations/);
-    await expect(callerFor(multi).surfaces.myDay()).rejects.toThrow(/organizations/);
+    await expect(callerFor(multi).surfaces.exceptions({ limit: 50 })).rejects.toThrow(/organization/);
+    await expect(callerFor(multi).surfaces.myDay()).rejects.toThrow(/organization/);
   });
 
   it("does not let A resolve B's sync conflict, or anyone resolve one whose device proves no organization", async () => {

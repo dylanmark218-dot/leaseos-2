@@ -759,7 +759,7 @@ describe("GAP C — AI proposal, alias and learning tenancy", () => {
 
   it("CURRENT GUARANTEE (AIL-1A): an AI proposal names its organization, and says how that was established", () => {
     expect(Object.keys(columns(assistantProposals))).toContain("tenantId");
-    // Nullable only together with `legacy_unresolved` (a CHECK in 0185): a legacy row nobody proved the
+    // Nullable only together with `legacy_unresolved` (a CHECK in 0210): a legacy row nobody proved the
     // owner of, which every read's strict equality leaves visible to nobody.
     expect(columns(assistantProposals).tenantId?.notNull).toBe(false);
     expect(columns(assistantProposals).tenantDerivedFrom?.notNull).toBe(true);

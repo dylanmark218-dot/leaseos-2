@@ -1,0 +1,58 @@
+Daily Safety Report
+Summarize the shift’s safety conditions, observations, events and follow-up actions.
+Company: __________________________________  Home base: _______________________
+Record no. __________________  Record revision: ______  Date / time: _________________
+Site / lease / project: __________________________  Job / dispatch: __________________
+Location / LSD / address: ______________________________________________________
+Task / scope: ________________________________________________________________
+Supervisor / assessor: __________________________  Crew / contractor: _______________
+Units / equipment: __________________________  Related permits / procedures: __________
+Area type: [ ] Construction  [ ] Oilfield  [ ] Trucking yard / base  [ ] Other: ______________
+Shift overview
+Shift / start and end: _____________________  Workers / contractors on site: ____________
+Weather / ground / visibility: ______________________________________________________
+Main activities / simultaneous operations: ____________________________________________
+Safety activity summary
+Observations and events
+Record what was observed and actions taken. Link detailed incident reports separately; avoid unnecessary personal or medical information.
+Incidents / near misses: [ ] None reported this shift  [ ] See linked report(s)  [ ] Not confirmed
+Good practices / crew concerns: ____________________________________________________
+Changes affecting the next shift: ___________________________________________________
+Daily Safety Report Follow Up
+Record no. _____________________  Date: ______________  Site: _____________________
+Corrective actions and accountability
+Link each action to a finding, checklist item or observation. Record interim controls and verify completion before closing the action.
+Exceptions and outstanding conditions
+NA reasons / unverified items / areas requiring further assessment:
+________________________________________________________________________________________
+________________________________________________________________________________________
+Work / area status: [ ] No unresolved items identified within scope  [ ] Restrictions remain
+[ ] Affected work on hold  [ ] Further assessment required
+Restrictions / interim controls: _____________________________________________________
+Person notified / date / time: _______________________________________________________
+Review and handover
+Prepared / inspected by: ________________________  Role: ___________________________
+Signature: ____________________________________  Date / time: _____________________
+Supervisor / reviewer: __________________________  Signature: ______________________
+Review date / time: _____________________  Follow-up inspection / review due: ____________
+Handover to / acknowledgement: ___________________________________________________
+Attachments / photo / incident / work order references: __________________________________
+Closure verification
+[ ] Actions remain open  [ ] Actions verified closed  [ ] See individual action records
+Verified by: __________________________  Signature: _________________________________
+Date / time: _____________________  Verification evidence: _____________________________
+Use site and company procedures to assess findings and release restricted work. A completed form records the stated scope and observations; it is not a blanket authorization for all site activities. Preserve original signed records and link later corrections or closure evidence.
+Activity | Count or reference | Notes / outstanding items
+Briefings / toolbox talks |  | 
+JSA / hazard assessments reviewed |  | 
+Inspections / equipment checks |  | 
+Permits / isolations reviewed |  | 
+Time / area | Observation or event and reference | Immediate response / person notified
+ |  | 
+ |  | 
+ |  | 
+Item / finding and required action | Owner | Due / priority | Verification and closure reference
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 

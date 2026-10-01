@@ -210,7 +210,7 @@ d("assistant proposals are their organization's alone (invariants 1, 2, 13)", ()
   });
 
   it("re-checks every anchor at commit, so a row never checked at draft cannot write into another organization", async () => {
-    // A row stamped A but naming B's trip — what a pre-0185 backfilled row could look like. The owner check
+    // A row stamped A but naming B's trip — what a pre-0210 backfilled row could look like. The owner check
     // passes (it is A's), so only the commit-side anchor re-check stands between it and B's trip.
     const A = await org(), B = await org();
     const a1 = await person([A]);
@@ -289,9 +289,9 @@ d("a draft is owned by the session's organization, and names only that organizat
   });
 });
 
-d("the 0185 backfill assigns nobody by guesswork", () => {
+d("the 0210 backfill assigns nobody by guesswork", () => {
   it("stamps 'default' only when no membership has ever existed, and leaves everything else unresolved", () => {
-    const sql = readFileSync("drizzle/0185_assistant_proposal_tenancy.sql", "utf8").replace(/^--.*$/gm, "");
+    const sql = readFileSync("drizzle/0210_assistant_proposal_tenancy.sql", "utf8").replace(/^--.*$/gm, "");
     const updates = sql.match(/UPDATE[\s\S]*?;/g) ?? [];
     expect(updates).toHaveLength(1);
     expect(updates[0]).toContain("SET `tenantId` = 'default', `tenantDerivedFrom` = 'backfill_single_tenant_deployment'");

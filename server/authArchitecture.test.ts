@@ -8,6 +8,14 @@
  * those would fail a unit test — each would work — and the damage only shows up
  * later, when the two copies disagree.
  *
+ * Reconciled with the auth workspace (#64), which the owner ruled governs the
+ * client: the chooser and the portal-entry model this checkpoint added were
+ * retired in favour of `SessionGate`, which renders a workspace the SERVER has
+ * already resolved (`resolveSessionContext`). The guards that read the retired
+ * files now read their replacements and hold them to the same promises: the
+ * chooser keeps no list of its own, the gate model grants nothing, and the
+ * shell never picks a portal by default.
+ *
  * So these read the source. They are structural on purpose, and they strip
  * comments first, because several of the files below discuss the very thing
  * being searched for and a guard that cannot tell a citation from a call fails
@@ -117,7 +125,7 @@ describe("one portal composition system", () => {
 
   it("builds the chooser's options from the server contract, not a local list", () => {
     // A hand-kept array here would be a second definition of what a portal is.
-    const chooser = code("client/src/portal/PortalChooser.tsx");
+    const chooser = code("client/src/session/WorkspaceChooserView.tsx");
     for (const key of ["field_workforce", "dispatch_operations", "executive"]) {
       expect(chooser, `${key} is hard-coded in the chooser`).not.toContain(key);
     }
@@ -213,24 +221,26 @@ describe("one canonical permission system", () => {
 });
 
 describe("the client does not decide access", () => {
-  it("keeps the entry model free of any grant of its own", () => {
-    const entry = code("client/src/portal/entryModel.ts");
-    // It may read `held`; it may never add to it. Every path that returns a
-    // portal has to have found it in `held` first.
-    expect(entry).not.toMatch(/\bheld\s*\.\s*(push|concat|unshift)\b/);
+  it("keeps the gate model free of any grant of its own", () => {
+    // The screen decision (`gateScreen`) replaced the entry model. It may read
+    // the workspaces the server said are open; it may never add to them.
+    const gate = code("client/src/session/sessionModel.ts");
+    expect(gate).not.toMatch(/\b(open|availableWorkspaces)\s*\.\s*(push|concat|unshift|add)\b/);
     // It reaches no network and no storage: a decision that fetched something
     // would be a second, quieter source of truth about access.
-    expect(entry).not.toMatch(/\bfetch\s*\(|\btrpc\b|localStorage|sessionStorage/);
-    // Every `enter` is guarded by a membership check.
-    const enters = [...entry.matchAll(/kind:\s*"enter"/g)].length;
-    expect(enters).toBeGreaterThan(0);
-    expect([...entry.matchAll(/isHeldPortal\s*\(|held\.length === 1|held\[0\]/g)].length)
-      .toBeGreaterThanOrEqual(enters);
+    expect(gate).not.toMatch(/\bfetch\s*\(|\btrpc\b|localStorage|sessionStorage/);
+    // It enters exactly one way, and what it enters is the server's answer or
+    // a route the server's own list was checked for first.
+    const enters = [...gate.matchAll(/return\s*\{\s*kind:\s*"ready"/g)].length;
+    expect(enters).toBe(1);
+    expect(gate).toMatch(/workspace:\s*args\.requestedWorkspace\s*\?\?\s*c\.activeWorkspace/);
+    expect(gate).toMatch(/args\.requestedWorkspace\s*&&\s*!open\.has\(args\.requestedWorkspace\)/);
   });
 
-  it("routes the portal shell through the entry model rather than a bare default", () => {
+  it("routes the portal shell through the session gate rather than a bare default", () => {
     const shell = code("client/src/portal/PortalShell.tsx");
-    expect(shell).toContain("resolvePortalEntry");
+    // The workspace arrives from SessionGate, which has it from the server.
+    expect(shell).toContain("<SessionGate");
     // defaultPortal picked a portal with no reference to what was requested or
     // saved, which is what made the :portal segment decorative.
     expect(shell).not.toMatch(/\bdefaultPortal\s*\(/);

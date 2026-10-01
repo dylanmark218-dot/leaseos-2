@@ -15,7 +15,7 @@
  *   **`organizationMemberships.defaultWorkspace`**, which has never been read.
  *   It is a `varchar(60)` nobody validates on write, so it travels as an
  *   unvalidated string and is checked against the held set at the point of use
- *   (`entryModel.resolvePortalEntry`). Calling it a preference is the whole
+ *   (`resolveSessionContext` in workspaceAccess.ts). Calling it a preference is the whole
  *   design: a stale or hostile value must never open a portal.
  */
 import { describe, expect, it } from "vitest";

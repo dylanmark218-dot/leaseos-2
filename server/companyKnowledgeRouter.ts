@@ -62,7 +62,7 @@ async function provenanceRefusal(d: Db, scope: { tenantId: string }, e: { source
     return p ? null : "Company document not found";
   }
   if (e.sourceKind === "verified_correction") {
-    // The receipt's proposal must be this organization's by its proved owner (0185), and the sealed
+    // The receipt's proposal must be this organization's by its proved owner (0210), and the sealed
     // manifest must hold the named field as corrected by a person.
     const r = (await d.select({ formKey: assistantCommitReceipts.formKey, manifest: assistantCommitReceipts.fieldManifest })
       .from(assistantCommitReceipts).innerJoin(assistantProposals, eq(assistantProposals.proposalId, assistantCommitReceipts.proposalId))

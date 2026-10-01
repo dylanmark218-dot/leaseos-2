@@ -123,7 +123,7 @@ trust-governance D5 is open). So:
 
 ### 4.1 Assistant proposals: fixed
 
-**Migration `0185_assistant_proposal_tenancy.sql`.** A migration is required: a proposal with no
+**Migration `0210_assistant_proposal_tenancy.sql`.** A migration is required: a proposal with no
 job, trip or unit (an expense receipt, say) has no other durable fact to derive its organization
 from.
 
@@ -232,7 +232,7 @@ database suite failed every time:
    Three test fixtures named such ids (a random trip id, job `4242`, trip `8844`). They now create real
    records; the assertions were not loosened.
 5. **Pending lists, the Exception Centre's AI proposals and the inbox are tenant-filtered.**
-6. **After 0185, on a deployment that already has memberships, pre-existing proposals are
+6. **After 0210, on a deployment that already has memberships, pre-existing proposals are
    unresolved.** They are hidden until a person resolves them. On a deployment with none they stay
    the single tenant's.
 7. **`perimeter.promote()` requires a platform authority** that nothing in production can supply.
@@ -289,7 +289,7 @@ clean database:
 |---|---|
 | 0 Reserved migration slots | pass |
 | 1 Clean database | pass |
-| 2 Migrations, including `0185` | pass |
+| 2 Migrations, including `0210` | pass |
 | 3 Table parity | pass |
 | 4 Typecheck, and the test-file ratchet | pass, 0 test-file errors (ceiling 0) |
 | 5 Bare `protectedProcedure` | pass |

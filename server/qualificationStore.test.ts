@@ -22,16 +22,25 @@ const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 const STARTS = new Date("2026-11-10T06:00:00Z");
 const ENDS = new Date("2026-11-10T18:00:00Z");
 
+/** On the single tenant's roster — an active crew membership — which the open-shift rule requires (SPINE item 2). */
+async function onRoster(userId: number) {
+  const crewRef = `CR-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+  await pool.execute("INSERT INTO crews (crewRef, tenantId, name, createdByUserId) VALUES (?, 'default', ?, 1)", [crewRef, crewRef]);
+  await pool.execute("INSERT INTO crewMembers (crewRef, userId, crewRole, joinedAt) VALUES (?, ?, 'driver', NOW())", [crewRef, userId]);
+}
 async function operatorWithLicence(userId: number) {
-  await pool.execute("INSERT INTO operators (id, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,NOW())",
-    [userId, `Op ${rnd()}`, "1", new Date("2028-01-01T00:00:00Z")]);
+  await pool.execute("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())",
+    [userId, userId, `Op ${rnd()}`, "1", new Date("2028-01-01T00:00:00Z")]);
+  await onRoster(userId);
 }
 async function holding(userId: number, code: string, o: { state?: string; expiresAt?: Date | null; recordedAt?: Date } = {}) {
   const holdingRef = `WQ-${rnd()}${rnd()}`;
   await pool.execute(
-    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt)
-     VALUES (?,?,?,?,?,?,?,?)`,
-    [holdingRef, "default", userId, code, o.state ?? "verified", o.expiresAt === undefined ? new Date("2027-06-01T00:00:00Z") : o.expiresAt, 1, o.recordedAt ?? new Date("2026-01-01T00:00:00Z")]);
+    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt, verifiedByUserId, verifiedAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    // C1b-3: a legacy holding counts as verified only with a recorded verifier.
+    [holdingRef, "default", userId, code, o.state ?? "verified", o.expiresAt === undefined ? new Date("2027-06-01T00:00:00Z") : o.expiresAt, 1, o.recordedAt ?? new Date("2026-01-01T00:00:00Z"),
+     (o.state ?? "verified") === "verified" ? 1 : null, (o.state ?? "verified") === "verified" ? new Date("2026-01-02T00:00:00Z") : null]);
   return holdingRef;
 }
 const postDG = async (dispatcher: number) =>

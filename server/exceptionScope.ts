@@ -59,7 +59,7 @@ export const ownerOf = {
   certificate: (id: Ref, now: Date): Owner => ownerOf.user(sql`(SELECT c.userId FROM academyCertificates c WHERE c.id = ${id})`, now),
   /** A dispatch eligibility check (0174): the organization that took it, NULL = the single tenant (`checkInScope`). */
   eligibilityCheck: (id: Ref): Owner => sql<string | null>`(SELECT COALESCE(c.orgRef, ${D}) FROM dispatchEligibilityChecks c WHERE c.id = ${id})`,
-  /** An AI proposal: its proved owner (0185). A legacy_unresolved proposal has none → NULL. */
+  /** An AI proposal: its proved owner (0210). A legacy_unresolved proposal has none → NULL. */
   proposal: (proposalId: Ref): Owner => sql<string | null>`(SELECT p.tenantId FROM assistantProposals p WHERE p.proposalId = ${proposalId})`,
 };
 
