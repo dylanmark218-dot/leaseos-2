@@ -218,10 +218,12 @@ d("B1 — a subscription is only ever touched for its own tenant's events", () =
     expect(resolvedRefs()).not.toContain(orphan.ref);
   });
 
-  it("W8. in a mixed-tenant batch, tenant B's damaged subscription stops neither tenant A nor B's healthy ones", async () => {
+  it("W8. in a mixed-tenant batch, tenant B's damaged subscriptions stop neither tenant A nor B's healthy one", async () => {
     const [A, B] = [tenant(), tenant()];
     const a = await subscription(A);
     const bad = await subscription(B, { eventTypesJson: "{not json" });
+    // Parses, but is not a list of event types: `subscribed()` would throw on it just the same.
+    const misshapen = await subscription(B, { eventTypesJson: '"*"' });
     const good = await subscription(B);
     const evA = await event(A);
     const evB = await event(B);
@@ -232,10 +234,14 @@ d("B1 — a subscription is only ever touched for its own tenant's events", () =
 
     expect(sent.map(s => `${s.ref}>${s.eventId}`).sort()).toEqual([`${a.ref}>${evA}`, `${good.ref}>${evB}`].sort());
     expect(resolvedRefs()).not.toContain(bad.ref);
-    // B's damaged row is in scope (B has an event here), so it is read — and reported, by name, without its configuration.
-    const w = warned([bad.ref]);
-    expect(w).toHaveLength(1);
-    expect(w[0]).not.toContain("{not json");
-    expect(w[0]).not.toContain(bad.url);
+    expect(resolvedRefs()).not.toContain(misshapen.ref);
+    // B's damaged rows are in scope (B has an event here), so they are read — and each is reported, by name, without its configuration.
+    const w = warned([bad.ref, misshapen.ref]);
+    expect(w).toHaveLength(2);
+    for (const line of w) {
+      expect(line).not.toContain("{not json");
+      expect(line).not.toContain(bad.url);
+      expect(line).not.toContain(misshapen.url);
+    }
   });
 });

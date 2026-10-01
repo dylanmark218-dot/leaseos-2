@@ -176,14 +176,36 @@ export async function dispatchWebhooks(args: DispatchArgs = {}): Promise<Dispatc
   const now = args.now ?? new Date();
   const leaseNow = args.leaseNow ?? new Date();
   const workerId = args.workerId ?? DEFAULT_WORKER_ID;
-  const subs = args.orgRef
-    ? await db.select().from(webhookSubscriptions).where(and(eq(webhookSubscriptions.status, "active"), eq(webhookSubscriptions.orgRef, args.orgRef)))
-    : await db.select().from(webhookSubscriptions).where(eq(webhookSubscriptions.status, "active"));
-  if (!subs.length) return { attempted: 0, results: [], skipped: null };
+  /*
+   * Tenant first (B1). Events are loaded before subscriptions because they carry the tenancy that
+   * decides which subscriptions may be read at all: only the organizations these events belong to,
+   * narrowed — never widened — by an explicit `orgRef`. A batch may legitimately span organizations
+   * (the retry sweep collects every due delivery), so the scope is the SET of the events' tenants.
+   * Another organization's row is never selected, so nothing in it — its secret, its event-type
+   * list — can be read, resolved, or fail on behalf of this dispatch. A NULL-`orgRef` subscription
+   * is excluded by the same `inArray`.
+   */
   const events = args.eventIds?.length ? await db.select().from(domainEventOutbox).where(inArray(domainEventOutbox.eventId, args.eventIds)) : await db.select().from(domainEventOutbox).orderBy(desc(domainEventOutbox.id)).limit(args.maxEvents ?? 100);
+  const tenants = Array.from(new Set(events.map(e => e.tenantId))).filter(t => !args.orgRef || t === args.orgRef);
+  if (!tenants.length) return { attempted: 0, results: [], skipped: null };
+  const subs = await db.select().from(webhookSubscriptions).where(and(eq(webhookSubscriptions.status, "active"), inArray(webhookSubscriptions.orgRef, tenants)));
+  if (!subs.length) return { attempted: 0, results: [], skipped: null };
   const results: DispatchResult["results"] = [];
   for (const s of subs) {
-    const types = JSON.parse(s.eventTypesJson) as string[];
+    /*
+     * A damaged event-type list is this subscription's problem alone, exactly as an unreadable
+     * secret is below: skipped and named, never thrown through the loop. The batch may hold other
+     * tenants' events, and one row must not decide whether their deliveries go out. The warning
+     * carries the reference only — not the list, not the url.
+     */
+    let types: string[];
+    try {
+      types = JSON.parse(s.eventTypesJson) as string[];
+      if (!Array.isArray(types) || !types.every(t => typeof t === "string")) throw new Error("not a list of event types");
+    } catch {
+      console.warn(`[webhooks] ${s.subscriptionRef}: event-type list unreadable; skipped`);
+      continue;
+    }
     /*
      * Resolved on first use, not up front: a subscription whose secret cannot be read is skipped on
      * its own instead of aborting dispatch for every other subscription (SEC-004).
