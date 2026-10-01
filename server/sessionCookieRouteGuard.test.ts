@@ -112,13 +112,23 @@ describe("3. the server mounts the router at that identifier, in one place", () 
     expect(mounted).toBe(true);
     expect(stringLiterals(sf)).not.toContain(TRPC_MOUNT_PATH);
   });
-  it("server/_core/index.ts registers the API and mounts nothing itself", () => {
-    const sf = parse("server/_core/index.ts");
+  it("the startup registers the API and mounts nothing itself; neither entrypoint mounts anything", () => {
+    // P0-C moved the startup body into server/_core/startup.ts, shared by the production and the
+    // development entrypoints; the mount still happens once, in api.ts, at the identifier.
+    const sf = parse("server/_core/startup.ts");
     const calls: string[] = [];
     walk(sf, n => { if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) calls.push(n.expression.text); });
     expect(calls).toContain("registerApi");
     expect(calls).not.toContain("createExpressMiddleware");
     expect(stringLiterals(sf)).not.toContain(TRPC_MOUNT_PATH);
+    for (const entry of ["server/_core/index.ts", "server/_core/dev.ts"]) {
+      const e = parse(entry);
+      const entryCalls: string[] = [];
+      walk(e, n => { if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) entryCalls.push(n.expression.text); });
+      expect(entryCalls, entry).toContain("startServer");
+      expect(entryCalls, entry).not.toContain("createExpressMiddleware");
+      expect(stringLiterals(e), entry).not.toContain(TRPC_MOUNT_PATH);
+    }
   });
 });
 
