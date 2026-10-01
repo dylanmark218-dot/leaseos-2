@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 const REMOVED = [
   {
     question: "is this resource already booked for an overlapping window?",
-    removed: ["detectBookingConflicts", "BookingConflict"],
+    removed: ["detectBookingConflicts", "Booking", "BookingConflict"],
     from: "server/_core/dispatchMatching.ts",
     survivor: { file: "server/_core/dispatchAward.ts", name: "decideAward" },
   },

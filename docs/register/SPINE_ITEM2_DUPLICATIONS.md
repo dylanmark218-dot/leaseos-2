@@ -24,9 +24,9 @@ not duplicated, and item 2 does not delete it.
 | `fieldTicket` | signature status | `recordSignature` writes it | **held: outcomes differ in billing; owner decision needed** |
 | `fieldTicket` | scope validation, job reconciliation | none | not a duplicate; stays unwired |
 | `openShifts` | shift eligibility, interest | `openShiftsRouter.ts` inline | **held: the two refuse different people; owner decision needed** |
-| `complianceDocumentValidity` | document validity | `readinessComposer` / `dispatchReadiness` / tile | **owned by `claude/item2-compliance-validity`** (rulings B and C) |
+| `complianceDocumentValidity` | document validity | `readinessComposer` / `dispatchReadiness` / tile and other readers | **resolved by #52** (rulings B and C); every reader now takes the canonical verdict |
 
-Item 2 is therefore **not complete**. Two pairs need a ruling, and one is in progress on another branch.
+Item 2 is therefore **not complete**. Two pairs still need a ruling: `openShifts` eligibility and `fieldTicket` signature status.
 
 ---
 
@@ -149,21 +149,23 @@ Two further facts bear on the ruling:
   - `shifts.eligibility` reads the licence from `operators` where `operators.id == userId`. The person link is `operators.userId`.
   - `shifts.eligibility` accepts any `userId`, and reads `leaveRequests` / `workerQualifications` without a tenant filter.
 
-## 4. `complianceDocumentValidity`: owned elsewhere
+## 4. `complianceDocumentValidity`: resolved by #52
 
-`claude/item2-compliance-validity` is working this pair one step at a time, under the owner's rulings B and
-C (`docs/register/SPINE_ITEM2_COMPLIANCE_VALIDITY.md` on that branch):
+This pair was resolved on its own branch, `claude/item2-compliance-validity`, merged as #52 under the
+owner's rulings B and C. Its record is `docs/register/SPINE_ITEM2_COMPLIANCE_VALIDITY.md`. Every reader of
+"is this compliance document in force?" now takes the canonical verdict (`validityOf`, through
+`complianceDocumentValidity`):
 
-- the dispatch composer and gate now use `validityOf`;
-- the `documentExpiry` board tile (`server/widgetSources.ts`) is its recorded next step.
+- the dispatch composer and gate;
+- the `documentExpiry` board tile (`server/widgetSources.ts` now imports `documentExpiry` from the adapter, and its inline `expiryState` is gone);
+- insurance proof, medical fitness, the exception centre, the passport, customer-required documents and foreign TDG recognition.
 
-`claude/leaseos-compliance-survey-5faxe8` (C1b-3) also touches the same files. It is not repeated here.
+`complianceDocumentValidity` is no longer declared unwired.
 
-The survey's findings for that branch:
+The survey's two findings on the adapter and the tile were addressed there as well:
 
-- The tile's inline `expiryState` differs from the canonical answer in display only (per-row against per-type, vocabulary, window rounding).
-- The adapter `documentExpiry` takes `documentId` and `title` from the newest captured row, which may not be the row whose state it reports.
-- The tile reads a document list capped at 100 rows, org-wide, then filters it in memory to the caller's own documents. An operator in a large organization can lose rows.
+- the verdict now names the row behind the version it reports (`documentId`), not the newest captured row;
+- the tile reads the operator's own history through `documents.list`'s owner filter rather than an org-wide list capped at 100 rows, and a history at the cap reads `unknown`.
 
 ## Defect found in passing (outside item 2)
 
@@ -200,11 +202,11 @@ duplicates at all but unwired concepts with nothing to consolidate against. The 
 duplications are the ones that change refusals or billing, and those wait for a ruling:
 
 - `openShifts` eligibility;
-- `fieldTicket` signature status;
-- `complianceDocumentValidity`, on its own branch.
+- `fieldTicket` signature status.
+
+(`complianceDocumentValidity` was the third, and #52 has resolved it.)
 
 **Item 2 is not complete.** It completes when:
 
 - the openShifts ruling is made and applied;
-- the signature-status ruling is made and applied;
-- `claude/item2-compliance-validity` lands, including the `documentExpiry` tile.
+- the signature-status ruling is made and applied.
