@@ -21,9 +21,15 @@
  * the only place a backend is contacted. It unwraps every key, validates all of it, and returns an
  * immutable provider whose `getActiveKey`/`getDecryptKey` are plain map lookups. A provider never
  * reports `"managed"` before every unwrap has succeeded; a backend that is unavailable, denies
- * authentication, returns the wrong number of bytes, or is asked for a key it does not have, fails
- * the bootstrap and the process never becomes ready. There is no fallback to environment-held keys
- * — see `secretKeys.ts`.
+ * authentication, returns the wrong number of bytes, is asked for a key it does not have, or does
+ * not answer within the deadline, fails the bootstrap and the process never becomes ready. There
+ * is no fallback to environment-held keys — see `secretKeys.ts`.
+ *
+ * WHAT A BACKEND MAY SAY. Nothing free-form. A backend reports failure with a
+ * `ManagedKeyBackendError` carrying one of a closed set of codes, and that code — never the
+ * backend's message, never a class name it chose — is what reaches the bootstrap error and the
+ * startup log. A backend-controlled string is the one channel through which key bytes could reach
+ * a log, in any encoding a regex did not anticipate, so no such string is propagated at all.
  *
  * VENDOR-NEUTRAL BY NECESSITY. The hosting survey for this checkpoint found no evidence of the
  * production platform, so no vendor adapter exists. `ManagedKeyBackend` is the seam one will plug
@@ -35,6 +41,9 @@ import { inspect } from "node:util";
 import { SECRET_PURPOSES, isValidKeyId, type KeyDescriptor, type SecretKeyProvider, type SecretPurpose } from "./secretCrypto";
 
 const DEK_BYTES = 32;
+
+/** How long one backend operation (the probe, or one unwrap) may take before the bootstrap fails. */
+export const DEFAULT_BACKEND_TIMEOUT_MS = 10_000;
 
 /** A wrapped DEK as configuration carries it: references and ciphertext, never material. */
 export type WrappedKeyRef = {
@@ -59,14 +68,40 @@ export type ManagedKeyConfig = {
 };
 
 /**
+ * The closed set of things a backend may report. An adapter maps its vendor's failures onto these;
+ * anything it cannot classify is `internal`. Codes are the only backend-originated text the
+ * bootstrap ever repeats.
+ */
+export const MANAGED_KEY_BACKEND_ERROR_CODES = [
+  "unavailable", //        unreachable, or the workload could not authenticate
+  "denied", //             authenticated, but not permitted to use this key
+  "unknown_key", //        the backend key reference names nothing
+  "invalid_ciphertext", // the wrapped value is not something this backend produced
+  "internal", //           anything else
+] as const;
+export type ManagedKeyBackendErrorCode = (typeof MANAGED_KEY_BACKEND_ERROR_CODES)[number];
+
+export class ManagedKeyBackendError extends Error {
+  readonly code: ManagedKeyBackendErrorCode;
+  constructor(code: ManagedKeyBackendErrorCode) {
+    super(`managed key backend: ${code}`);
+    this.name = "ManagedKeyBackendError";
+    this.code = code;
+  }
+}
+
+/**
  * What a managed backend must do. Deliberately two operations and a name:
  *
- *   probe   — can the backend be reached and is this workload allowed to use it? Throws when not.
- *   unwrap  — return the plaintext bytes of one wrapped DEK under the named backend key. Throws
- *             when the backend refuses, the reference is unknown, or the ciphertext is invalid.
+ *   probe   — can the backend be reached and is this workload allowed to use it? Rejects with a
+ *             `ManagedKeyBackendError` when not.
+ *   unwrap  — return the plaintext bytes of one wrapped DEK under the named backend key. Rejects
+ *             with a `ManagedKeyBackendError` when the backend refuses, the reference is unknown,
+ *             or the ciphertext is invalid.
  *
- * Authentication is the adapter's business and is expected to use the platform's workload
- * identity; nothing here accepts a credential.
+ * Both are bounded by the bootstrap's deadline; an adapter that never settles is treated as
+ * unavailable. Authentication is the adapter's business and is expected to use the platform's
+ * workload identity; nothing here accepts a credential.
  */
 export interface ManagedKeyBackend {
   readonly name: string;
@@ -117,37 +152,77 @@ export function assertNoRawKeyMaterial(value: unknown, path = "config"): void {
   }
 }
 
+/** Only a code is ever repeated. A backend's message, and even its error class name, are not. */
+const backendFailure = (e: unknown): string => {
+  if (e instanceof ManagedKeyBackendError && (MANAGED_KEY_BACKEND_ERROR_CODES as readonly string[]).includes(e.code)) {
+    return `backend reported ${e.code}`;
+  }
+  return "backend failed without a recognised code";
+};
+
+const shape = (message: string) => new ManagedKeyBootstrapError(message, "config_shape");
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const exactKeys = (obj: Record<string, unknown>, allowed: readonly string[], path: string) => {
+  for (const k of Object.keys(obj)) {
+    if (!allowed.includes(k)) throw shape(`${path} carries an unexpected field ${JSON.stringify(k)}; managed configuration holds references only`);
+  }
+};
+const nonEmptyString = (v: unknown, path: string): string => {
+  if (typeof v !== "string" || v.length === 0) throw shape(`${path} must be a non-empty string`);
+  return v;
+};
+
 /**
- * Strip anything that could be material from a message before it reaches an error or a log:
- * long base64/hex-looking runs become `[redacted]`. Backends are not trusted to be careful.
+ * A strict runtime schema for what `LEASEOS_MANAGED_KEYS` may contain. Every field is named, every
+ * extra field is refused, every value is typed, before anything is cast and long before a backend
+ * is named. `null`, an array, a stray `credential` field or a missing reference each produce a
+ * coded `config_shape` refusal rather than a `TypeError` somewhere later.
  */
-export function sanitizeBackendMessage(message: string): string {
-  return message.replace(/[A-Za-z0-9+/=_:-]{32,}/g, "[redacted]").slice(0, 300);
-}
+export function validateManagedKeyConfig(value: unknown): ManagedKeyConfig {
+  if (!isPlainObject(value)) throw shape("configuration is not an object");
+  exactKeys(value, ["backend", "keys"], "config");
+  const backend = nonEmptyString(value.backend, "config.backend");
+  if (!isPlainObject(value.keys)) throw shape("config.keys must be an object of purposes");
+  assertNoRawKeyMaterial(value);
 
-const errorText = (e: unknown) => (e instanceof Error ? `${e.name}: ${sanitizeBackendMessage(e.message)}` : "unknown error");
-
-function validateConfig(config: ManagedKeyConfig): void {
-  if (!config || typeof config !== "object") throw new ManagedKeyBootstrapError("configuration is not an object", "config_shape");
-  if (typeof config.backend !== "string" || !config.backend) throw new ManagedKeyBootstrapError("no backend named", "config_shape");
-  if (!config.keys || typeof config.keys !== "object") throw new ManagedKeyBootstrapError("no keys section", "config_shape");
-  assertNoRawKeyMaterial(config);
-
-  for (const purpose of Object.keys(config.keys)) {
-    if (!(SECRET_PURPOSES as readonly string[]).includes(purpose)) {
-      throw new ManagedKeyBootstrapError(`unknown purpose ${JSON.stringify(purpose)}`, "config_shape");
+  const keys: Partial<Record<SecretPurpose, ManagedPurposeConfig>> = {};
+  for (const [purpose, entry] of Object.entries(value.keys)) {
+    if (!(SECRET_PURPOSES as readonly string[]).includes(purpose)) throw shape(`unknown purpose ${JSON.stringify(purpose)}`);
+    if (!isPlainObject(entry)) throw shape(`config.keys.${purpose} must be an object`);
+    exactKeys(entry, ["active", "retired"], `config.keys.${purpose}`);
+    if (!("active" in entry)) throw new ManagedKeyBootstrapError(`${purpose} has retired keys but no active key`, "no_active_key");
+    const refs: WrappedKeyRef[] = [];
+    const retiredRaw = entry.retired === undefined ? [] : entry.retired;
+    if (!Array.isArray(retiredRaw)) throw shape(`config.keys.${purpose}.retired must be an array`);
+    for (const [label, raw] of [["active", entry.active], ...retiredRaw.map((r, i) => [`retired[${i}]`, r] as const)] as const) {
+      const path = `config.keys.${purpose}.${label}`;
+      if (!isPlainObject(raw)) throw shape(`${path} must be an object`);
+      exactKeys(raw, ["keyId", "wrapped", "backendKeyRef"], path);
+      const keyId = nonEmptyString(raw.keyId, `${path}.keyId`);
+      if (!isValidKeyId(keyId)) throw new ManagedKeyBootstrapError(`${purpose}: ${JSON.stringify(keyId)} is not a valid key id`, "key_id");
+      refs.push({ keyId, wrapped: nonEmptyString(raw.wrapped, `${path}.wrapped`), backendKeyRef: nonEmptyString(raw.backendKeyRef, `${path}.backendKeyRef`) });
     }
-    const entry = config.keys[purpose as SecretPurpose]!;
-    if (!entry.active) throw new ManagedKeyBootstrapError(`${purpose} has retired keys but no active key`, "no_active_key");
-    const refs = [entry.active, ...(entry.retired ?? [])];
     const seen = new Set<string>();
     for (const ref of refs) {
-      if (!isValidKeyId(ref.keyId)) throw new ManagedKeyBootstrapError(`${purpose}: ${JSON.stringify(ref.keyId)} is not a valid key id`, "key_id");
-      if (typeof ref.wrapped !== "string" || !ref.wrapped) throw new ManagedKeyBootstrapError(`${purpose}/${ref.keyId}: no wrapped material reference`, "config_shape");
-      if (typeof ref.backendKeyRef !== "string" || !ref.backendKeyRef) throw new ManagedKeyBootstrapError(`${purpose}/${ref.keyId}: no backend key reference`, "config_shape");
       if (seen.has(ref.keyId)) throw new ManagedKeyBootstrapError(`${purpose}: duplicate key id ${ref.keyId}`, "duplicate_key_id");
       seen.add(ref.keyId);
     }
+    const [active, ...retired] = refs as [WrappedKeyRef, ...WrappedKeyRef[]];
+    keys[purpose as SecretPurpose] = retired.length ? { active, retired } : { active };
+  }
+  return { backend, keys };
+}
+
+/** Bound one backend operation. A backend that never settles must not hold startup forever. */
+async function withDeadline<T>(operation: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const expiry = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ManagedKeyBootstrapError(`${what} did not complete within ${ms} ms`, "backend_timeout")), ms);
+  });
+  try {
+    return await Promise.race([operation, expiry]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -160,9 +235,11 @@ export async function loadManagedSecretKeyProvider(args: {
   config: ManagedKeyConfig;
   backend: ManagedKeyBackend;
   require?: SecretPurpose[];
+  timeoutMs?: number;
 }): Promise<ManagedSecretKeyProvider> {
-  const { config, backend } = args;
-  validateConfig(config);
+  const config = validateManagedKeyConfig(args.config);
+  const { backend } = args;
+  const timeoutMs = args.timeoutMs ?? DEFAULT_BACKEND_TIMEOUT_MS;
   if (backend.name !== config.backend) {
     throw new ManagedKeyBootstrapError(`configuration names backend ${JSON.stringify(config.backend)} but ${JSON.stringify(backend.name)} was supplied`, "backend_mismatch");
   }
@@ -171,9 +248,10 @@ export async function loadManagedSecretKeyProvider(args: {
   }
 
   try {
-    await backend.probe();
+    await withDeadline(backend.probe(), timeoutMs, `backend ${backend.name} probe`);
   } catch (e) {
-    throw new ManagedKeyBootstrapError(`backend ${backend.name} unavailable — ${errorText(e)}`, "backend_unavailable");
+    if (e instanceof ManagedKeyBootstrapError) throw e;
+    throw new ManagedKeyBootstrapError(`backend ${backend.name} unavailable — ${backendFailure(e)}`, "backend_unavailable");
   }
 
   /*
@@ -191,9 +269,14 @@ export async function loadManagedSecretKeyProvider(args: {
     for (const ref of [entry.active, ...(entry.retired ?? [])]) {
       let bytes: Buffer;
       try {
-        bytes = await backend.unwrap({ purpose, keyId: ref.keyId, wrapped: ref.wrapped, backendKeyRef: ref.backendKeyRef });
+        bytes = await withDeadline(
+          backend.unwrap({ purpose, keyId: ref.keyId, wrapped: ref.wrapped, backendKeyRef: ref.backendKeyRef }),
+          timeoutMs,
+          `${purpose}/${ref.keyId} unwrap`
+        );
       } catch (e) {
-        throw new ManagedKeyBootstrapError(`${purpose}/${ref.keyId} could not be unwrapped — ${errorText(e)}`, "unwrap_failed");
+        if (e instanceof ManagedKeyBootstrapError) throw e;
+        throw new ManagedKeyBootstrapError(`${purpose}/${ref.keyId} could not be unwrapped — ${backendFailure(e)}`, "unwrap_failed");
       }
       if (!Buffer.isBuffer(bytes)) throw new ManagedKeyBootstrapError(`${purpose}/${ref.keyId}: backend returned non-binary material`, "malformed_material");
       // The length, never the bytes. This is the one place material is inspected at all.

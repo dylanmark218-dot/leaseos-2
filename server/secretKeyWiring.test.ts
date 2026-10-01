@@ -106,7 +106,11 @@ describe("configuration and leakage", () => {
   it("the bootstrap module logs nothing and exposes no key bytes through its public surface", () => {
     const managed = code("server/_core/managedSecretKeys.ts");
     expect(managed).not.toMatch(/console\./);
-    expect(managed).not.toMatch(/JSON\.stringify\(\s*(?:bytes|dek|key|material)/);
+    // `JSON.stringify(keyId)` and `JSON.stringify(purpose)` name identifiers; the pattern targets material.
+    expect(managed).not.toMatch(/JSON\.stringify\(\s*(?:bytes|dek|key|material)\b/);
+    // Backend text never reaches an error: only a code from the closed set is repeated.
+    expect(managed).not.toMatch(/e\.message|\.message\)/);
+    expect(managed).toMatch(/backend reported \$\{e\.code\}/);
     // `${bytes.length}` is the one permitted reference: the length, never the bytes.
     expect(managed, "errors never interpolate unwrapped bytes").not.toMatch(/\$\{bytes(?!\.length)|\$\{dek|toString\("hex"\)|toString\("base64/);
     expect(managed, "serialization answers with the description only").toMatch(/toJSON: describe/);

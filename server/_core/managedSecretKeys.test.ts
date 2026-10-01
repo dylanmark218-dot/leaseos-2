@@ -15,7 +15,7 @@ import {
   ManagedKeyBootstrapError,
   assertNoRawKeyMaterial,
   loadManagedSecretKeyProvider,
-  sanitizeBackendMessage,
+  validateManagedKeyConfig,
   type ManagedKeyConfig,
 } from "./managedSecretKeys";
 import { fakeManagedKeyBackend, type FakeBackendBehaviour } from "./managedKeyBackend.fake";
@@ -138,14 +138,34 @@ describe("KMS-T8..T11 — every failure stops the bootstrap", () => {
     const err = await loadManagedSecretKeyProvider({ config, backend: fake.backend }).catch(e => e);
     expect(err).toBeInstanceOf(ManagedKeyBootstrapError);
     expect(err.code).toBe("backend_unavailable");
-    expect(err.message).toMatch(/backend test-fake unavailable/);
+    expect(err.message).toMatch(/backend test-fake unavailable — backend reported unavailable/);
+  });
+
+  it("a backend that never settles fails the bootstrap at the deadline instead of holding startup forever", async () => {
+    const { fake, config } = fixture({ hang: true });
+    const started = Date.now();
+    const err = await loadManagedSecretKeyProvider({ config, backend: fake.backend, timeoutMs: 60 }).catch(e => e);
+    expect(err).toBeInstanceOf(ManagedKeyBootstrapError);
+    expect(err.code).toBe("backend_timeout");
+    expect(err.message).toMatch(/probe did not complete within 60 ms/);
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 
   it("access denied on one key fails the whole bootstrap", async () => {
     const { fake, config } = fixture({ denyKeyIds: ["webhook-v1"] });
     const err = await loadManagedSecretKeyProvider({ config, backend: fake.backend }).catch(e => e);
     expect(err.code).toBe("unwrap_failed");
-    expect(err.message).toMatch(/WEBHOOK_SECRET\/webhook-v1 could not be unwrapped/);
+    expect(err.message).toMatch(/WEBHOOK_SECRET\/webhook-v1 could not be unwrapped — backend reported denied/);
+  });
+
+  it("a backend that fails without a recognised code is reported as exactly that, and its text is not repeated", async () => {
+    const { fake, config } = fixture({ unavailable: true, leakyErrors: `token ${hexKey("c")} and <Buffer aa bb cc dd ee ff 00 11>` });
+    const err = await loadManagedSecretKeyProvider({ config, backend: fake.backend }).catch(e => e);
+    expect(err.code).toBe("backend_unavailable");
+    expect(err.message).toMatch(/backend failed without a recognised code/);
+    expect(err.message).not.toContain(hexKey("c"));
+    expect(err.message).not.toContain("Buffer");
+    expect(err.message).not.toContain("token");
   });
 
   it("KMS-T9. material of the wrong length fails the bootstrap — for the active and for a retired key", async () => {
@@ -224,6 +244,35 @@ describe("KMS-T13 — no environment fallback, ever", () => {
     expect(() => managedKeyConfigFromEnv({ LEASEOS_SECRET_KEYS_SOURCE: "managed" })).toThrow(/LEASEOS_MANAGED_KEYS is not set/);
     expect(() => managedKeyConfigFromEnv({ LEASEOS_MANAGED_KEYS: "{not json" })).toThrow(/not valid JSON/);
   });
+
+  it("the configuration schema is strict: null, arrays, unknown fields and untyped values are coded refusals, before any backend lookup", async () => {
+    const code = (raw: string) => {
+      try {
+        managedKeyConfigFromEnv({ LEASEOS_MANAGED_KEYS: raw });
+        return "accepted";
+      } catch (e) {
+        return `${(e as ManagedKeyBootstrapError).code}: ${(e as Error).message}`;
+      }
+    };
+    expect(code("null")).toMatch(/^config_shape: .*not an object/);
+    expect(code("[]")).toMatch(/^config_shape:/);
+    expect(code(JSON.stringify({ backend: "b" }))).toMatch(/^config_shape: .*config\.keys must be an object/);
+    expect(code(JSON.stringify({ backend: "b", keys: {}, credential: "AKIA..." }))).toMatch(/^config_shape: .*unexpected field "credential"/);
+    expect(code(JSON.stringify({ backend: "", keys: {} }))).toMatch(/^config_shape: .*config\.backend must be a non-empty string/);
+    const ref = { keyId: "webhook-v1", wrapped: "fake1.a.b.c", backendKeyRef: "kek" };
+    expect(code(JSON.stringify({ backend: "b", keys: { WEBHOOK_SECRET: { active: { ...ref, apiKey: "x" } } } }))).toMatch(/unexpected field "apiKey"/);
+    expect(code(JSON.stringify({ backend: "b", keys: { WEBHOOK_SECRET: { active: { keyId: "webhook-v1", wrapped: 42, backendKeyRef: "kek" } } } }))).toMatch(/wrapped must be a non-empty string/);
+    expect(code(JSON.stringify({ backend: "b", keys: { WEBHOOK_SECRET: { active: ref, retired: "no" } } }))).toMatch(/retired must be an array/);
+    expect(code(JSON.stringify({ backend: "b", keys: { WEBHOOK_SECRET: { retired: [ref] } } }))).toMatch(/^no_active_key:/);
+    expect(code(JSON.stringify({ backend: "b", keys: { SESSION: { active: ref } } }))).toMatch(/unknown purpose "SESSION"/);
+    // The same refusal reaches the resolver as a code, not a TypeError.
+    const err = await resolveSecretKeyProvider({ LEASEOS_SECRET_KEYS_SOURCE: "managed", LEASEOS_MANAGED_KEYS: "null" }).catch(e => e);
+    expect(err).toBeInstanceOf(ManagedKeyBootstrapError);
+    expect(err.code).toBe("config_shape");
+    // And a valid document comes back normalised, with nothing added.
+    const ok = validateManagedKeyConfig({ backend: "b", keys: { WEBHOOK_SECRET: { active: ref } } });
+    expect(ok).toEqual({ backend: "b", keys: { WEBHOOK_SECRET: { active: ref } } });
+  });
 });
 
 describe("KMS-T14 and the raw-key guard — nothing carries material", () => {
@@ -260,11 +309,21 @@ describe("KMS-T14 and the raw-key guard — nothing carries material", () => {
     }
   });
 
-  it("backend messages are sanitized before they reach an error", () => {
-    const leaky = `decrypt failed for ${randomBytes(32).toString("base64")} under ${hexKey("b")}`;
-    const clean = sanitizeBackendMessage(leaky);
-    expect(clean).not.toContain(hexKey("b"));
-    expect(clean).toMatch(/\[redacted\]/);
-    expect(sanitizeBackendMessage("short message")).toBe("short message");
+  it("no backend-controlled text reaches an error: only a code from the closed set, whatever the encoding", async () => {
+    /*
+     * A sanitizer was the first answer and the review was right to reject it: `<Buffer aa bb …>`,
+     * spaced hex, and an error class name chosen by the adapter all slipped past a regex for long
+     * tokens. So nothing the backend writes is repeated — not its message, not its name — only one
+     * of the codes the contract defines.
+     */
+    const leaks = [`${randomBytes(32).toString("base64")}`, `<Buffer ${randomBytes(8).toString("hex").match(/../g)!.join(" ")}>`, `${hexKey("d").match(/../g)!.join(" ")}`];
+    for (const leak of leaks) {
+      const { fake, config } = fixture({ denyKeyIds: ["webhook-v2"], leakyErrors: leak });
+      const err = await loadManagedSecretKeyProvider({ config, backend: fake.backend }).catch(e => e);
+      expect(err.message).toMatch(/could not be unwrapped — backend failed without a recognised code/);
+      expect(err.message).not.toContain(leak);
+      expect(err.message).not.toContain(leak.slice(0, 12));
+      expect(inspect(err)).not.toContain(leak);
+    }
   });
 });

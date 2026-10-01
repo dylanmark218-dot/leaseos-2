@@ -170,11 +170,22 @@ designed here.
 
 ## 10. Leakage controls
 
-The bootstrap module logs nothing; errors carry purpose, key id and a sanitized backend message
-(runs of 32+ base64/hex-like characters become `[redacted]`); the provider serializes and inspects
-to metadata; the raw-material guard refuses key-shaped configuration; the only startup log line is
-the source and backend name. Pinned by `managedSecretKeys.test.ts` (KMS-T14) and
-`secretKeyWiring.test.ts`.
+The bootstrap module logs nothing. A backend reports failure only as a `ManagedKeyBackendError`
+with one of a closed set of codes (`unavailable`, `denied`, `unknown_key`, `invalid_ciphertext`,
+`internal`); the bootstrap repeats the code and nothing else — never the backend's message, never
+its error class name — so no encoding of key bytes a sanitizer did not anticipate (`<Buffer aa …>`,
+spaced hex, base64) can reach a log through an adapter. The provider serializes and inspects to
+metadata; the raw-material guard refuses key-shaped configuration; the only startup log line is
+the source and backend name. Pinned by `managedSecretKeys.test.ts` (KMS-T14 and the leak cases)
+and `secretKeyWiring.test.ts`.
+
+Two further controls from review: every backend operation (the probe, each unwrap) runs under a
+deadline (`timeoutMs`, default 10 s) and a backend that never settles fails the bootstrap with
+`backend_timeout` rather than holding startup — a process that neither binds nor exits would stall
+a deployment indefinitely; and `LEASEOS_MANAGED_KEYS` is validated against a strict runtime schema
+(`validateManagedKeyConfig`: exact fields at every level, typed values, unknown fields such as a
+stray `credential` refused) before any backend is named, so `null` or an array is a coded
+`config_shape` refusal rather than a `TypeError`.
 
 ## 11. Preflight integration
 

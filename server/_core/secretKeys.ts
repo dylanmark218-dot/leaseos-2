@@ -27,6 +27,7 @@ import {
   ManagedKeyBootstrapError,
   assertNoRawKeyMaterial,
   loadManagedSecretKeyProvider,
+  validateManagedKeyConfig,
   type ManagedKeyBackend,
   type ManagedKeyConfig,
   type ManagedSecretKeyProvider,
@@ -113,7 +114,9 @@ export function managedKeyConfigFromEnv(env: NodeJS.ProcessEnv = process.env): M
     throw new ManagedKeyBootstrapError("LEASEOS_MANAGED_KEYS is not valid JSON", "config_shape");
   }
   assertNoRawKeyMaterial(parsed, "LEASEOS_MANAGED_KEYS");
-  return parsed as ManagedKeyConfig;
+  // The strict schema: every field named, every extra field refused, before anything is cast and
+  // before a backend is looked up. `null` or `[]` here is a coded refusal, not a TypeError later.
+  return validateManagedKeyConfig(parsed);
 }
 
 /**
