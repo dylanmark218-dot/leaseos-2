@@ -10,8 +10,20 @@ import {
   AUTONOMOUS_ORIGINS, PERIMETER_DOMAINS, classifyRequest, promote, routeLearning,
   type LearningIntake,
 } from "./_core/knowledge/perimeter";
+import { LearningScopeRefused, organizationScopeFrom, type PlatformAuthority } from "./_core/learningScope";
+import type { ActingScope } from "./_core/actingScope";
 
 const NOW = new Date("2026-09-13T12:00:00Z");
+
+/** AIL-1A — every intake has an owner, built the way production builds it: from an acting scope. */
+const ACTING: ActingScope = { tenantId: "ORG-A", derivedFrom: "membership", membershipRef: "M-1", branchRefs: [], global: true };
+const OWNER = organizationScopeFrom(ACTING);
+/**
+ * Forged for this file only, to exercise promote()'s own validation. Production code cannot make a
+ * PlatformAuthority (learningScope exports no constructor, and learningScope.test.ts pins that no
+ * production module casts one), so promotion into the authoritative store is closed there.
+ */
+const FORGED_PLATFORM_AUTHORITY = { basis: "test-only forgery" } as unknown as PlatformAuthority;
 
 describe("the request perimeter refuses off-domain work", () => {
   it("declines software development, which is the likeliest misuse", () => {
@@ -96,8 +108,18 @@ describe("the perimeter admits real operational language", () => {
 
 describe("learning is wide; promotion is not", () => {
   const intake = (o: Partial<LearningIntake>): LearningIntake => ({
-    origin: "web_discovery", domain: "hours_of_service", claim: "a rule changed",
+    owner: OWNER, origin: "web_discovery", domain: "hours_of_service", claim: "a rule changed",
     observedAt: NOW, reportedBy: "assistant", ...o,
+  });
+
+  it("keeps the intake's owner on the decision, whatever the origin", () => {
+    for (const origin of ["web_discovery", "regulator_feed", "user_statement", "field_observation", "job_outcome", "vendor_document"] as const) {
+      expect(routeLearning(intake({ origin })).owner).toBe(OWNER);
+    }
+  });
+
+  it("refuses an intake with no owner rather than routing it as nobody's", () => {
+    expect(() => routeLearning(intake({ owner: undefined as never }))).toThrow(LearningScopeRefused);
   });
 
   it("lets the assistant learn from the internet, into a queue", () => {
@@ -141,27 +163,33 @@ describe("learning is wide; promotion is not", () => {
 describe("promotion needs a person and a source", () => {
   const base = { reviewerUserId: 42, reviewedAt: NOW, authorityLevel: "law" as const,
     sourceTitle: "Hours of Service Regulations", jurisdiction: "CA-FEDERAL", contentHash: "abcdef123456789" };
-  const intake: LearningIntake = { origin: "regulator_feed", domain: "hours_of_service",
+  const intake: LearningIntake = { owner: OWNER, origin: "regulator_feed", domain: "hours_of_service",
     claim: "cycle changed", observedAt: NOW, reportedBy: "feed" };
 
+  it("refuses promotion into the authoritative (GLOBAL) store without platform authority", () => {
+    const r = promote(intake, base, undefined as never);
+    expect(r.promoted).toBe(false);
+    if (!r.promoted) expect(r.reason).toContain("needs platform authority");
+  });
+
   it("refuses promotion with no named reviewer", () => {
-    expect(promote(intake, { ...base, reviewerUserId: 0 })).toMatchObject({ promoted: false });
-    const r = promote(intake, { ...base, reviewerUserId: 0 });
+    expect(promote(intake, { ...base, reviewerUserId: 0 }, FORGED_PLATFORM_AUTHORITY)).toMatchObject({ promoted: false });
+    const r = promote(intake, { ...base, reviewerUserId: 0 }, FORGED_PLATFORM_AUTHORITY);
     if (!r.promoted) expect(r.reason).toContain("automated promotion is not available");
   });
 
   it("refuses promotion without a source title or jurisdiction", () => {
-    expect(promote(intake, { ...base, sourceTitle: "  " })).toMatchObject({ promoted: false });
-    expect(promote(intake, { ...base, jurisdiction: "" })).toMatchObject({ promoted: false });
+    expect(promote(intake, { ...base, sourceTitle: "  " }, FORGED_PLATFORM_AUTHORITY)).toMatchObject({ promoted: false });
+    expect(promote(intake, { ...base, jurisdiction: "" }, FORGED_PLATFORM_AUTHORITY)).toMatchObject({ promoted: false });
   });
 
   it("refuses to promote something as unverified", () => {
-    const r = promote(intake, { ...base, authorityLevel: "unverified" });
+    const r = promote(intake, { ...base, authorityLevel: "unverified" }, FORGED_PLATFORM_AUTHORITY);
     expect(r.promoted).toBe(false);
   });
 
   it("promotes with a reviewer, and records who and when", () => {
-    const r = promote(intake, base);
+    const r = promote(intake, base, FORGED_PLATFORM_AUTHORITY);
     expect(r.promoted).toBe(true);
     if (!r.promoted) return;
     expect(r.authority.confidence).toBe("human_verified");
@@ -170,7 +198,7 @@ describe("promotion needs a person and a source", () => {
   });
 
   it("does not grant a licence by promoting authority", () => {
-    const r = promote(intake, base);
+    const r = promote(intake, base, FORGED_PLATFORM_AUTHORITY);
     if (!r.promoted) throw new Error("expected promotion");
     // Establishing that something is law says nothing about whether its text
     // may be stored or quoted. Two assessments, two gates.

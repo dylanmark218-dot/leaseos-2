@@ -11,7 +11,7 @@
 import { toCents } from "./money";
 import type { Tx } from "./dbTypes";
 import { createHash } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
   assistantCommitReceipts,
   assistantProposals,
@@ -40,8 +40,9 @@ import {
   type Fingerprint,
   type PriorCapture,
 } from "./documentFingerprint";
-import { getDb } from "../db";
-import { resolveActingScope } from "./actingScope";
+import { getDb, proposalAnchorRefusal } from "../db";
+import { AmbiguousOrganization, resolveActingScope } from "./actingScope";
+import { rowInTenant } from "./learningScope";
 import { FORMS, commitProposal, type CommittedField } from "./aiProposal";
 import { rehydrateProposal } from "./assistantPersistence";
 import {
@@ -131,6 +132,20 @@ export async function executeAssistantCommit(args: {
     const row = proposals[0];
     if (!row) return { committed: false as const, refusals: ["Proposal not found"] };
 
+    // AIL-1A — the service checks the owner itself, so no caller (router, worker or test) can commit
+    // another organization's proposal by reaching past the procedure's guard. A legacy row whose owner
+    // was never proved has no tenant and belongs to nobody. Answered as "not found" either way.
+    let actingTenant: string;
+    try {
+      actingTenant = (await resolveActingScope(tx, args.actorUserId)).tenantId;
+    } catch (e) {
+      if (e instanceof AmbiguousOrganization) return { committed: false as const, refusals: ["Proposal not found"] };
+      throw e;
+    }
+    if (!rowInTenant(row, { tenantId: actingTenant })) {
+      return { committed: false as const, refusals: ["Proposal not found"] };
+    }
+
     const existingReceipt = await tx
       .select()
       .from(assistantCommitReceipts)
@@ -147,6 +162,16 @@ export async function executeAssistantCommit(args: {
         ],
       };
     }
+
+    // AIL-1A — the records the proposal names are re-checked against its owner at the moment of
+    // writing, with the same rule the draft used, on this transaction's own connection. A proposal
+    // backfilled from before 0185 was never checked at draft; this is where it is.
+    const anchorRefusal = await proposalAnchorRefusal(
+      tx,
+      { formKey: row.formKey, jobId: row.jobId, tripId: row.tripId, unitId: row.unitId, targetRecordId: row.targetRecordId },
+      { tenantId: actingTenant },
+    );
+    if (anchorRefusal) return { committed: false as const, refusals: [anchorRefusal] };
 
     const storedFields = await tx
       .select()
@@ -257,13 +282,21 @@ export async function executeAssistantCommit(args: {
         .limit(1);
       contentSha256 = extraction[0]?.contentSha256 ?? null;
 
+      // AIL-1A.1 — a prior is matched only if it was captured by this organization: its proposal's
+      // proved owner (0185) is the committing tenant. Another organization's document must not
+      // refuse this one, reveal that it exists, or lend it its metadata. A fingerprint whose proposal
+      // has no proved owner (legacy_unresolved) matches nobody — a missing owner is not global.
+      const ownPriors = inArray(
+        documentFingerprints.proposalId,
+        tx.select({ proposalId: assistantProposals.proposalId }).from(assistantProposals).where(eq(assistantProposals.tenantId, actingTenant)),
+      );
       const priorRows = await tx
         .select()
         .from(documentFingerprints)
-        .where(eq(documentFingerprints.structuredKeyHash, fingerprint.structuredKeyHash))
+        .where(and(eq(documentFingerprints.structuredKeyHash, fingerprint.structuredKeyHash), ownPriors))
         .for("update");
       const byContent = contentSha256
-        ? await tx.select().from(documentFingerprints).where(eq(documentFingerprints.contentSha256, contentSha256))
+        ? await tx.select().from(documentFingerprints).where(and(eq(documentFingerprints.contentSha256, contentSha256), ownPriors))
         : [];
       const priors: PriorCapture[] = [...priorRows, ...byContent]
         .filter((r, i, all) => all.findIndex(x => x.id === r.id) === i)

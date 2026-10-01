@@ -141,11 +141,14 @@ async function commitUnload(stopId: number, tripId: number, fields: ProposedRow[
   await grantUserRole({ userId: actor, role: "office", scopeType: "global", grantedByUserId: 1, grantedAt: new Date() });
   const proposalId = `PROP-BC-${rnd()}`;
   await pool.execute(
+    // AIL-1A: a proposal carries the organization it was drafted in, as a production draft stamps it. The
+    // actor here has no membership, so it is the single tenant's; an unstamped (legacy) proposal is
+    // committable by nobody.
     `INSERT INTO assistantProposals
-     (proposalId, formKey, formVersion, title, targetRef, targetRecordId,
+     (proposalId, tenantId, tenantDerivedFrom, formKey, formVersion, title, targetRef, targetRecordId,
       eventDateLocal, utcOffsetMinutes, tripId, createdByUserId,
       readBack, readBackAcknowledged, commitState)
-     VALUES (?, 'unload_stop', 1, 'Unload stop', ?, ?, '2026-09-01', 0,
+     VALUES (?, '${SINGLE_TENANT_ID}', 'single_tenant_fallback', 'unload_stop', 1, 'Unload stop', ?, ?, '2026-09-01', 0,
              ?, ?, 'read back', 1, 'awaiting_readback')`,
     [proposalId, `TRIP-${tripId} unload stop`, stopId, tripId, actor],
   );

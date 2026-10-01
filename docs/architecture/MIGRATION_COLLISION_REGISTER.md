@@ -42,7 +42,12 @@ communications-marketplace). `scripts/verify-migration-0170.sh` became `verify-m
 open, not touched here: `0202`/`0203` are claimed twice — driver-portfolio (#16) and
 `claude/live-assist-architecture-qg4jgp` (no PR). Next free number at that time: `0209` (since taken by main for P0-A2.1; see the 2026-10-01 section below — next free is `0210`).
 
-**Next free number for new work: `0210`** (re-check with the scan before committing). The 2026-09-24 table below
+**2026-10-01, AIL-1B (`claude/relaxed-carson-qfcopf`): claims `0214` (`0214_organization_knowledge_entries.sql`).**
+`0210` is now this branch's renumbered AIL-1A migration (`0210_assistant_proposal_tenancy.sql`). A fetch of every
+remote compared file names: `0180`–`0213` are held, except `0190` and `0204`, which are gaps inside another branch's
+own run (`0189`→`0191`, `0203`→`0205`) and are treated as held. `0214` is the first number past every claim.
+
+**Next free number for new work: `0215`** (re-check with the scan before committing). The 2026-09-24 table below
 is kept for history; several of its claims have since merged or been renumbered by their authors.
 
 ## Earlier state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
@@ -70,7 +75,7 @@ branches. Every number from `0175` to `0188` is claimed by at least one open bra
 | 0182 | `0182_board_membership.sql`, `0182_customer_account_profile.sql`, `0182_document_control_intake.sql`, `0182_integration_hub_connectors.sql`, `0182_safety_program_builder.sql` | communications-marketplace, customer-contract-rates, document-control, integration-hub, safety-program-builder | open branches | five-way | first to merge keeps it |
 | 0183 | `0183_customer_contracts_rate_sheets.sql`, `0183_document_control_disposal.sql`, `0183_integration_hub_delivery_and_sync.sql`, `0183_open_work_offers_availability.sql` | customer-contract-rates, document-control, integration-hub, communications-marketplace | open branches | four-way | first to merge keeps it |
 | 0184 | `0184_integration_hub_dead_letters_conflicts.sql`, `0184_job_commercial_context.sql` | integration-hub, customer-contract-rates | open branches | two-way | first to merge keeps it |
-| 0185 | `0185_assistant_proposal_tenancy.sql`, `0185_webhook_delivery_claim.sql` | `claude/relaxed-carson-qfcopf`, `claude/sec-004-webhook-delivery-integrity` | open branches | two-way | first to merge keeps it |
+| 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | merged | collided with AIL-1A's later claim | SEC-004 keeps 0185; AIL-1A renumbered to 0210 at merge |
 | 0186 | `0186_external_source_categories.sql` | `claude/canadian-govt-apis-leaseos-q33l42` | open branch | none | — |
 | 0187 | `0187_training_compliance_operations.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none (was 0174, collided with main) | — |
 | 0188 | `0188_source_review_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | open branch | none | — |
@@ -171,7 +176,7 @@ the 0181–0190 range is held entirely by open branches.
 
 | Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|
-| 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | #20 | reconciled onto `main`; integrating | **`claude/relaxed-carson-qfcopf` also claims `0185`** (`0185_assistant_proposal_tenancy.sql`) | **SEC-004 keeps `0185`**: it claimed the number at 2026-09-24 07:52 when it was free on `main` and every branch; the other claim followed 77 minutes later and did not meet the "free everywhere" standard. That branch renumbers at its own integration, as the academy branch's `0174` does |
+| 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | #20 | merged | **AIL-1A also claimed `0185`** (`0185_assistant_proposal_tenancy.sql`) | **SEC-004 keeps `0185`**: it claimed the number at 2026-09-24 07:52 when it was free on `main` and every branch; AIL-1A's migration moved to `0210` at merge |
 | 0191 | `0191_encrypted_secrets.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
 | 0192 | `0192_provider_credentials.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
 | 0193 | `0193_mfa_secret_ref.sql` | `feature/mfa-secret-migration` | #47 | **merged** | none | recorded late — see change log |
@@ -185,7 +190,7 @@ claiming, not taken from this line.
   being entered here** — a bookkeeping defect in S2-A/B/C and S2-D, not a numbering one: all three
   numbers were verified free across every branch before use, and none collided. The register is the
   repository's record of that verification, and three merges' worth of it was missing. Also recorded
-  the `0185` double-claim, resolved in SEC-004's favour on claim order. No migration file renamed.
+  the `0185` double-claim, resolved in SEC-004's favour on claim order. AIL-1A moved its migration to `0210`.
 ## State at Document Control adoption (2026-09-24, `main` = `1680e94`)
 
 The owner adopted `claude/document-control-architecture-jlffzk` as the Document Control implementation
@@ -239,9 +244,21 @@ number free everywhere.
 |---|---|---|---|---|---|---|
 | 0209 | `0209_operating_zone_scope.sql` | `security/operating-zone-tenant-model` | P0-A2.1 | claiming | none | keeps 0209 |
 
-**Next free number for new work: `0210`** (re-check with the scan before committing).
+**Next free number for new work: `0210`** at that time (since taken by AIL-1A's renumber; see the top of this file for the current number).
 
 ## Change log (continued)
 
 * **2026-10-01 (P0-A2.1)**: claimed `0209` (`operatingZones.orgRef`, nullable; NULL = the historical single
   tenant, as 0132 and 0148), recorded in the commit that creates the migration.
+
+## AIL-1A tenancy migration after merge with `main` (2026-10-01)
+
+`0185` remains assigned to SEC-004's webhook-delivery claim. AIL-1A's
+`assistantProposals` tenancy migration was renumbered from `0185` to `0210`,
+the first number after `main`'s `0209_operating_zone_scope.sql`. Its SQL
+contents are unchanged.
+
+## AIL-1B claim (2026-10-01)
+
+`0214_organization_knowledge_entries.sql` (`organizationKnowledgeEntries`). It was claimed before this
+branch took main, and it remains free after the merge: no ref holds `0214`. Its header records the scan.

@@ -256,6 +256,8 @@ d("one company's morning, through the five surfaces", () => {
     await pool.execute("INSERT INTO maintenanceDefects (unitId, title, severity, status, reportedAt, reportedBy) VALUES (?, 'Steer tire failure', 'critical', 'open', NOW(), ?)", [unitId, driver]);
     const [ven] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (name, category) VALUES (?, 'tires')", [key("ABC Tire").slice(0, 60)]);
     const billRef = key("BILL").slice(0, 40);
+    // AIL-1A.1: search reads a bill through its financial entity's owner, so the bill needs a real entity
+    // (unowned: the single tenant's, like these users) rather than whatever row happens to have id 1.
     // P0-A3: search is scoped to the caller's books. This company's people hold no membership, so they are the
     // historical single tenant and see the books that carry no organization — the bill goes into one of those.
     const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Surfaces fixture books', 'corporation', 'CA-AB')", [key("FE").slice(0, 40)]);
@@ -263,7 +265,7 @@ d("one company's morning, through the five surfaces", () => {
     const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, 'J. Smith')", [driver]);
     await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'tdg_certificate', 'TDG', NOW(), DATE_ADD(NOW(), INTERVAL 10 DAY), 'verified')", [Number(op.insertId)]);
     const proposalId = key("PROP");
-    await pool.execute("INSERT INTO assistantProposals (proposalId, formKey, formVersion, title, targetRef, createdByUserId, readBack, readBackAcknowledged, commitState) VALUES (?, 'defect_report', 1, 'Hydraulic leak', 'U', ?, 'rb', 0, 'awaiting_readback')", [proposalId, driver]);
+    await pool.execute("INSERT INTO assistantProposals (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, createdByUserId, readBack, readBackAcknowledged, commitState) VALUES ('default', 'single_tenant_fallback', ?, 'defect_report', 1, 'Hydraulic leak', 'U', ?, 'rb', 0, 'awaiting_readback')", [proposalId, driver]);
     await pool.execute(
       "INSERT INTO operationalTasks (taskNumber, taskType, title, status, priority, tenantId, subjectType, subjectId, assignedRole, assignedUserId, dedupeKey, requiresEvidence, escalationStep, createdAt) VALUES (?, 'follow_up', 'Call ABC Tire about invoice', 'open', 'normal', 'default', 'vendorBill', ?, 'office', ?, ?, 0, 0, NOW())",
       [key("TASK").slice(0, 40), billRef, office, key("dedupe").slice(0, 100)]

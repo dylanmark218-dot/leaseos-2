@@ -62,12 +62,16 @@ const may = (userId: number, grants: RoleGrant[]) => {
 };
 
 export const surfacesRouter = router({
-  /** Needs attention — derived from state, filtered to what the caller may act on. */
+  /**
+   * Needs attention — derived from state, filtered to what the caller may act on.
+   * TEN-EXC-1: the organization comes from the session only; an input that names one (or any other
+   * unknown field) is refused, not silently dropped.
+   */
   exceptions: roleProcedure("surfaces.exceptions")
-    .input(z.object({ category: z.string().max(40).optional(), limit: z.number().int().positive().max(500).default(200) }).optional())
+    .input(z.object({ category: z.string().max(40).optional(), limit: z.number().int().positive().max(500).default(200) }).strict().optional())
     .query(async ({ ctx, input }) => {
       const { grants } = await grantsFor(ctx.user.id);
-      const all = deriveExceptions(await loadExceptionSources());
+      const all = deriveExceptions(await loadExceptionSources(new Date(), await scopeFor(ctx.user.id)));
       let mine = visibleTo({ exceptions: all, userId: ctx.user.id, grants });
       if (input?.category) mine = mine.filter(x => x.category === input.category);
       return { summary: summarize(mine), items: mine.slice(0, input?.limit ?? 200) };
@@ -89,7 +93,7 @@ export const surfacesRouter = router({
     const can = may(ctx.user.id, grants);
     const [inbox, exceptions] = await Promise.all([
       loadInbox({ userId: ctx.user.id, roles, canApprovePurchases: can("purchasing.approve"), canResolveConflicts: can("sync.resolve_conflict"), canReviewAssistant: can("assistant.review") }),
-      (async () => visibleTo({ exceptions: deriveExceptions(await loadExceptionSources()), userId: ctx.user.id, grants }))(),
+      (async () => visibleTo({ exceptions: deriveExceptions(await loadExceptionSources(new Date(), await scopeFor(ctx.user.id))), userId: ctx.user.id, grants }))(),
     ]);
     const session = composeSession(roles as never);
     const waitingFor = inbox.filter(i => i.kind === "my_request" || i.kind === "ai_proposal");

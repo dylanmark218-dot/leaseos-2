@@ -52,9 +52,13 @@ describe("the real tree", () => {
     // lineages (dispatch_role_types and driver_portfolio_events took it too).
     // head+1 on this branch would have collided three times over.
     expect(files).toContain("0208_organization_invitations.sql");   // renumbered from 0175 on merging main, which took 0175
-    // Main has since taken 0209 (0209_operating_zone_scope, P0-A2.1), above this checkpoint's two; the
-    // ledger applies by name, so 0207/0208 still run on a database that already has 0209.
-    expect(headSlot(files)).toBe("0209");
+    // Main has since taken 0209 (0209_operating_zone_scope, P0-A2.1); this branch's assistant tenancy
+    // migration was assigned the next slot at merge. The ledger applies by name, so prior migrations
+    // still run on a database that already has either.
+    // AIL-1B then took 0214, past every slot the remote branches held on 2026-10-01 (0211-0213 included;
+    // see MIGRATION_COLLISION_REGISTER.md).
+    expect(files).toContain("0214_organization_knowledge_entries.sql");
+    expect(headSlot(files)).toBe("0214");
   });
 
   it("keeps the reserved slots empty", () => {
@@ -105,8 +109,8 @@ describe("the guard catches what it exists to catch", () => {
   });
 
   it("accepts a correctly allocated next migration", () => {
-    expect(auditMigrationSlots([...files, "0210_the_next_one.sql"])).toEqual([]);
-    expect(headSlot([...files, "0210_the_next_one.sql"])).toBe("0210");
+    expect(auditMigrationSlots([...files, "0215_the_next_one.sql"])).toEqual([]);
+    expect(headSlot([...files, "0215_the_next_one.sql"])).toBe("0215");
   });
 
   it("gives every tolerated duplicate a reason that says something", () => {

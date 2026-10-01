@@ -9,7 +9,7 @@ import mysql from "mysql2/promise";
 import { destinationAcceptanceForJob } from "./_core/destinationAcceptance";
 import { evaluateDispatchReadiness, type ReadinessInput } from "./_core/dispatchReadiness";
 import { deriveExceptions } from "./_core/exceptionCentre";
-import { getDb } from "./db";
+import { actingScopeFor, getDb } from "./db";
 import { loadExceptionSources } from "./surfacesService";
 import { appRouter } from "./routers";
 
@@ -70,7 +70,7 @@ d("destination acceptance from the loads' latest assessments", () => {
     expect(ok.assessments.every(a => !a.blocking)).toBe(true);
     // Exception Centre: the Virden conflict and the regulator-evidence and duplicate rows surface with their permissions.
     await callerFor(safety).facilityDirectory.seedBrief();
-    const sources = await loadExceptionSources();
+    const sources = await loadExceptionSources(new Date(), await actingScopeFor(safety));
     expect(sources.facilityDirectory?.conflicting.some(c => c.facilityKey === "virden-facility-conflicting")).toBe(true);
     const xs = deriveExceptions(sources);
     expect(xs.find(x => x.key === "facility-conflict:virden-facility-conflicting")).toMatchObject({ category: "dispatch", severity: "high", requiredPermission: "facility.directory.review" });

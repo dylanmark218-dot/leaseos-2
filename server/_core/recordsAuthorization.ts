@@ -278,6 +278,8 @@ export type Permission =
   | "readiness.read"
   // v22.20 — the read-only assistant. Asking and loading differ.
   | "assistant.ask" | "assistant.curate"
+  // AIL-1B — company intelligence. Proposing what the company means, deciding it, and reading it differ.
+  | "company_knowledge.read" | "company_knowledge.propose" | "company_knowledge.review"
   // v22.20 — the board. Creating a channel is not the same as posting in one.
   | "board.read" | "board.post" | "board.manage"
   // v22.20 — the agent. Asking it to work, acting, and approving differ.
@@ -369,6 +371,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "facility.directory.report",
     "facility.directory.read",
     "assistant.ask",
+    "company_knowledge.read",
+    "company_knowledge.propose",
     "board.read",
     "board.post",
     "readiness.read",
@@ -461,6 +465,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "facility.directory.read",
     "academy.direct_supervision.manage",
     "assistant.ask",
+    "company_knowledge.read",
+    "company_knowledge.propose",
     "agent.use",
     "agent.act",
     "agent.read",
@@ -567,6 +573,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "document.read",
     "document.intake",
     "assistant.ask",
+    "company_knowledge.read",
+    "company_knowledge.propose",
     "board.read",
     "board.post",
     "readiness.read",
@@ -639,6 +647,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "facility.directory.read",
     "academy.evaluate",
     "assistant.ask",
+    "company_knowledge.read",
+    "company_knowledge.propose",
     "agent.read",
     "board.read",
     "board.post",
@@ -748,7 +758,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "academy.requirement.manage",
     "academy.direct_supervision.manage",
     "assistant.ask",
+    "company_knowledge.read",
+    "company_knowledge.propose",
     "assistant.curate",
+    "company_knowledge.review",
     "agent.read",
     "agent.approve",
     "board.read",
@@ -869,6 +882,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "commercial.read",
     "commercial.write",
     "assistant.ask",
+    "company_knowledge.read",
+    "company_knowledge.propose",
     "agent.use",
     "agent.act",
     "agent.read",
@@ -1064,7 +1079,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "academy.requirement.manage",
     "academy.direct_supervision.manage",
     "assistant.ask",
+    "company_knowledge.read",
+    "company_knowledge.propose",
     "assistant.curate",
+    "company_knowledge.review",
     "agent.use",
     "agent.act",
     "agent.read",
@@ -1865,6 +1883,7 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "board.manage",
   // What is loaded decides what every later answer can cite.
   "assistant.curate",
+  "company_knowledge.review",
   // Approving an agent action is authorising a machine to affect the company.
   "agent.approve",
   // Signing a mechanic release is an accountability act attributed to a person.
@@ -3002,6 +3021,12 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "assistant.addProbeFromAsk": "assistant.curate",
   "assistant.passageList": "assistant.curate",
   "assistant.measureRetrieval": "assistant.ask",
+  // AIL-1B — company intelligence.
+  "companyKnowledge.propose": "company_knowledge.propose",
+  "companyKnowledge.review": "company_knowledge.review",
+  "companyKnowledge.retire": "company_knowledge.review",
+  "companyKnowledge.list": "company_knowledge.read",
+  "companyKnowledge.lookup": "company_knowledge.read",
   "board.createChannel": "board.manage",
   "board.post": "board.post",
   "board.read": "board.read",

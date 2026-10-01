@@ -24,10 +24,13 @@ afterAll(async () => { await pool?.end(); });
 const callerFor = (userId: number) =>
   appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 
-async function person(role: string) {
-  const orgRef = `ORG-${rnd()}`;
+const orgOf = new Map<number, string>();
+/** A person in a new organization, or (TEN-EXC-1) in `sameOrgAs`'s organization when given. */
+async function person(role: string, sameOrgAs?: number) {
+  const orgRef = sameOrgAs != null ? orgOf.get(sameOrgAs)! : `ORG-${rnd()}`;
   const userId = seq++;
-  await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [orgRef, `o ${orgRef}`]);
+  orgOf.set(userId, orgRef);
+  if (sameOrgAs == null) await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [orgRef, `o ${orgRef}`]);
   await pool.execute(
     "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01',1)",
     [`MEM-${rnd()}`, orgRef, userId]);
@@ -253,7 +256,10 @@ d("the inspector clock reaches the exception centre", () => {
   it("surfaces an open request from five days out, critical once overdue, with a deep link", async () => {
     const office = await person("safety");
     const f = await fixtureCourse();
-    const learner = await person("driver");
+    // TEN-EXC-1: the request is the learner's organization's, so the learner works where the office
+    // does, and is a real user — an inspector request about nobody resolves to nobody.
+    const learner = await person("driver", office);
+    await pool.execute("INSERT INTO users (id, openId, name) VALUES (?,?,?)", [learner, `t-${learner}-${rnd()}`, "Learner"]);
     const certificateRef = `ACAD-CERT-${rnd()}`;
     await pool.execute(
       `INSERT INTO academyCertificates (certificateRef, userId, courseId, courseVersionId, assignmentId, qualificationCode, credentialBoundary, issuedByUserId, issuedAt, sourceSnapshotRef, policySnapshotHash, certificateHash, retentionUntil)
@@ -265,7 +271,8 @@ d("the inspector clock reaches the exception centre", () => {
     const late = await callerFor(office).academy.inspectorRequestCreate({ certificateRef, issuingAuthority: "Transport Canada", requestDatedAt: new Date(Date.now() - 20 * 86_400_000) });
     const { deriveExceptions } = await import("./_core/exceptionCentre");
     const { loadExceptionSources } = await import("./surfacesService");
-    const all = deriveExceptions(await loadExceptionSources());
+    const { actingScopeFor } = await import("./db");
+    const all = deriveExceptions(await loadExceptionSources(new Date(), await actingScopeFor(office)));
     const a = all.find(x => x.key === `inspector:${soon.requestRef}`);
     const b = all.find(x => x.key === `inspector:${late.requestRef}`);
     expect(a?.severity).toBe("high");

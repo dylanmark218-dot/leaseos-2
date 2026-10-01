@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import { handleSyncRefusal, type SyncRefusalCode, DEVICE_SIGNATURE_MAX_SKEW_MS, canonicalDevicePackage, fingerprintP256Spki, signatureFreshness, verifyP256PackageSignature } from "./_core/deviceSignature";
 import { resolveActingScope } from "./_core/actingScope";
 import { storageRead } from "./storage";
+import { syncConflictInScope } from "./surfacesService";
 import {
   admitPackage, detectConflict, verifyPackageItems, type FieldDeviceRecord, type KeyEvent,
 } from "./_core/fieldDevice";
@@ -413,7 +414,10 @@ export const syncRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const rows = await db.select().from(syncConflicts).where(eq(syncConflicts.conflictRef, input.conflictRef)).limit(1);
+      // TEN-EXC-1: the Exception Centre links here, so the same ownership rule applies — another
+      // organization's conflict (or one whose device proves no organization) is "not found".
+      const scope = { tenantId: (await resolveActingScope(db, ctx.user.id)).tenantId };
+      const rows = await db.select().from(syncConflicts).where(and(eq(syncConflicts.conflictRef, input.conflictRef), syncConflictInScope(scope))).limit(1);
       const c = rows[0];
       if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "Conflict not found" });
       if (c.status !== "unresolved") throw new TRPCError({ code: "CONFLICT", message: `Conflict is already ${c.status}` });

@@ -55,7 +55,8 @@ d("a lost tablet with personal information on it", () => {
     // The exception centre sees it.
     const { deriveExceptions } = await import("./_core/exceptionCentre");
     const { loadExceptionSources } = await import("./surfacesService");
-    const all = deriveExceptions(await loadExceptionSources());
+    const { actingScopeFor } = await import("./db");
+    const all = deriveExceptions(await loadExceptionSources(new Date(), await actingScopeFor(safety)));
     expect(all.find(x => x.key === `security-notify:${opened.incidentRef}:commissioner`)?.severity).toBe("high");   // due in two days on a high incident; critical once overdue
     // Sent with evidence: closable.
     await callerFor(safety).securityIncidents.obligationSent({ incidentRef: opened.incidentRef, obligationId: ob.obligationId, sentAt: new Date(), evidenceRecordId: await evidence("OIPC notice PDF") });
@@ -74,7 +75,8 @@ d("a lost tablet with personal information on it", () => {
     const opened = await callerFor(safety).securityIncidents.open({ incidentType: "data_exposure", title: "Shared link exposed a field ticket", discoveredAt: new Date(), personalInformationSuspected: true });
     const { deriveExceptions } = await import("./_core/exceptionCentre");
     const { loadExceptionSources } = await import("./surfacesService");
-    const all = deriveExceptions(await loadExceptionSources());
+    const { actingScopeFor } = await import("./db");
+    const all = deriveExceptions(await loadExceptionSources(new Date(), await actingScopeFor(safety)));
     expect(all.find(x => x.key === `security-assess:${opened.incidentRef}`)?.action).toMatch(/uncertain is an answer; pending is not/);
     await expect(callerFor(outsider).securityIncidents.view({ incidentRef: opened.incidentRef })).rejects.toThrow(/not found/);
     expect((await callerFor(outsider).securityIncidents.list()).some(i => i.incidentRef === opened.incidentRef)).toBe(false);

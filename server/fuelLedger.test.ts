@@ -357,14 +357,18 @@ async function fixtures(actor: number) {
     "INSERT INTO fleetFuelCards (cardRef, financialEntityId, provider, lastFour, assignedUnitId, status) VALUES (?, ?, 'Petro-Canada', '3812', ?, 'active')",
     [key("CARD").slice(0, 40), entityId, Number(unit.insertId)]
   );
-  return { entityId, unitId: Number(unit.insertId), unitNumber: String(unitRow[0].unitNumber), cardId: Number(card.insertId), actor };
+  // AIL-1A: a proposal's trip is checked against its organization at commit, so it has to be a real trip.
+  const [trip] = await pool.execute<mysql.ResultSetHeader>(
+    "INSERT INTO trips (tripNumber, tripType, status) VALUES (?, 'one_way', 'planned')", [key("TRP").slice(0, 30)]
+  );
+  return { entityId, unitId: Number(unit.insertId), unitNumber: String(unitRow[0].unitNumber), cardId: Number(card.insertId), tripId: Number(trip.insertId), actor };
 }
 async function fuelProposal(f: Awaited<ReturnType<typeof fixtures>>, over: { fleetCardId?: number | null; unitId?: number | null; last4?: string; unitHint?: string; vendor?: string } = {}) {
   const proposalId = key("PROP-FUEL");
   await pool.execute(
-    `INSERT INTO assistantProposals (proposalId, formKey, formVersion, title, targetRef, targetRecordId, unitId, tripId, fleetCardId, utcOffsetMinutes, createdByUserId, readBack, readBackAcknowledged, commitState)
-     VALUES (?, 'fuel_receipt', 1, 'Fuel', ?, ?, ?, 8844, ?, -360, ?, 'ok', 1, 'awaiting_readback')`,
-    [proposalId, `ENT-${f.entityId}`, f.entityId, over.unitId === undefined ? f.unitId : over.unitId, over.fleetCardId === undefined ? f.cardId : over.fleetCardId, f.actor]
+    `INSERT INTO assistantProposals (tenantId, tenantDerivedFrom, proposalId, formKey, formVersion, title, targetRef, targetRecordId, unitId, tripId, fleetCardId, utcOffsetMinutes, createdByUserId, readBack, readBackAcknowledged, commitState)
+     VALUES ('default', 'single_tenant_fallback', ?, 'fuel_receipt', 1, 'Fuel', ?, ?, ?, ?, ?, -360, ?, 'ok', 1, 'awaiting_readback')`,
+    [proposalId, `ENT-${f.entityId}`, f.entityId, over.unitId === undefined ? f.unitId : over.unitId, f.tripId, over.fleetCardId === undefined ? f.cardId : over.fleetCardId, f.actor]
   );
   const fields: Array<[string, string | number]> = [
     ["vendorName", over.vendor ?? key("Petro-Canada Cardlock")], ["transactionDate", "2026-09-10"], ["transactionTime", "08:15"],

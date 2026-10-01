@@ -179,7 +179,9 @@ d("the exception centre raises expiry from the verdict, over the owner's whole h
     const [lapsed] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name) VALUES (?)", [`Op ${rnd()}`]);
     await file("operator", lapsed.insertId, "driver_licence", [{ status: "verified", expires: -20, captured: -400 }]);
 
-    const xs = deriveExceptions(await loadExceptionSources(new Date()));
+    // TEN-EXC-1: the Exception Centre is always read in a scope. These operators have no owner row, so they are
+    // the historical single tenant's.
+    const xs = deriveExceptions(await loadExceptionSources(new Date(), { tenantId: SINGLE_TENANT_ID }));
     const about = (id: number) => xs.filter(x => x.subjectType === "operator" && x.subjectId === id && x.key.startsWith("cred:")).map(x => x.key.split(":").pop());
     expect(about(w.operatorId)).toEqual([]);
     expect(about(lapsed.insertId)).toEqual(["expired"]);

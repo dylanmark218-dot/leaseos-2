@@ -69,6 +69,7 @@ const hosRouter = readFileSync("server/hosRouter.ts", "utf8");
 const closeoutRouter = readFileSync("server/closeoutRouter.ts", "utf8");
 const insuranceRouter = readFileSync("server/insuranceRouter.ts", "utf8");
 const assistantAskRouter = readFileSync("server/assistantAskRouter.ts", "utf8");
+const companyKnowledgeRouter = readFileSync("server/companyKnowledgeRouter.ts", "utf8");   // AIL-1B
 // v22.21: post-recovery routers the census did not scan. Both carry declared
 // procedures; a router the tripwire cannot see is a router it cannot defend.
 const contractorOperationsRouter = readFileSync("server/contractorOperationsRouter.ts", "utf8");
@@ -86,7 +87,7 @@ const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
  * payrollRouter.ts both draw from it. Checking only one would let a declared
  * permission go unwired without anyone noticing.
  */
-const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter].join("\n");
+const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + companyKnowledgeRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter].join("\n");
 
 const countBuilders = (src: string, builder: string) =>
   (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
@@ -174,7 +175,7 @@ describe("migrated operational procedures", () => {
     // 40-procedure payroll/finance surface, all gated from the start.
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
     // The merged surface includes 8 Live Assist, 2 paperwork, 23 Document Control, and 10 auth-workspace procedures.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(683);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(688);   // AIL-1B: +5 companyKnowledge.*;   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import type { MySqlColumn } from "drizzle-orm/mysql-core";
 import { SINGLE_TENANT_ID, resolveActingScope } from "./_core/actingScope";
 import type { OperatorResolution } from "./_core/operatorIdentity";
@@ -79,8 +79,11 @@ import {
   users,
   externalIdentities,
   integrationClients,
-  coreRecordOwnership, organizationInvitationRoles, organizationInvitations, organizationMemberships, organizations, fieldTickets, incidentReports, loads } from "../drizzle/schema";
+  coreRecordOwnership, organizationInvitationRoles, organizationInvitations, organizationMemberships, organizations, fieldTickets, incidentReports, loads, agentRuns, financialEntities } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { entityScopeWhere } from "./_core/entityScope";
+import { rowInTenant, type SessionJobSubject } from "./_core/learningScope";
+import type { DbOrTx } from "./_core/dbTypes";
 import { membershipIsLive, type MembershipFact } from "./_core/workspaceAccess";
 import { grantsInOrganization, type RoleGrant } from "./_core/recordsAuthorization";
 
@@ -862,6 +865,35 @@ export async function tripInScope(tripId: number, scope: TenantScope): Promise<{
   if (!db) return null;
   return (await db.select({ id: trips.id, jobId: trips.jobId }).from(trips).where(and(eq(trips.id, tripId), orgScopeWhere(trips, scope))).limit(1))[0] ?? null;
 }
+/**
+ * AIL-1A.1 — a row owned through the records it names, for surfaces that read many kinds of record
+ * at once (search, timeline, chain). In scope only when EVERY anchor the row carries is the scope's:
+ * a job (jobs.orgRef), a trip (trips.orgRef), a unit (coreRecordOwnership), a load (through its job)
+ * or a financial entity (financialEntities.orgRef). A row naming none of them is the historical single
+ * tenant's and nobody else's — a missing owner is never global. Checking every anchor, not the first
+ * one set, is what stops a row that names one organization's job and another's unit from being read
+ * through the first.
+ */
+export function anchoredScope(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>> | DbOrTx,
+  scope: TenantScope,
+  anchors: { job?: MySqlColumn; trip?: MySqlColumn; unit?: MySqlColumn; load?: MySqlColumn; entity?: MySqlColumn },
+) {
+  const conditions = [];
+  if (anchors.job) conditions.push(or(isNull(anchors.job), inArray(anchors.job, db.select({ id: jobs.id }).from(jobs).where(orgScopeWhere(jobs, scope)))));
+  if (anchors.trip) conditions.push(or(isNull(anchors.trip), inArray(anchors.trip, db.select({ id: trips.id }).from(trips).where(orgScopeWhere(trips, scope)))));
+  if (anchors.unit) conditions.push(or(isNull(anchors.unit), ownershipScopeWhere("unit", anchors.unit, scope)));
+  if (anchors.load) {
+    const inScopeLoads = db.select({ id: loads.id }).from(loads)
+      .where(inArray(loads.jobId, db.select({ id: jobs.id }).from(jobs).where(orgScopeWhere(jobs, scope))));
+    conditions.push(or(isNull(anchors.load), inArray(anchors.load, inScopeLoads)));
+  }
+  if (anchors.entity) conditions.push(or(isNull(anchors.entity), inArray(anchors.entity, db.select({ id: financialEntities.id }).from(financialEntities).where(entityScopeWhere(scope)))));
+  const present = Object.values(anchors).filter((c): c is MySqlColumn => c != null);
+  if (scope.tenantId !== SINGLE_TENANT_ID) conditions.push(or(...present.map(c => isNotNull(c))));
+  return and(...conditions);
+}
+
 /** Rows keyed to a job: the job in scope, or (no job) only for the single tenant. */
 function jobKeyedScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, jobIdColumn: MySqlColumn, scope: TenantScope) {
   const inScope = inArray(jobIdColumn, jobScopeSubquery(db, scope));
@@ -888,16 +920,86 @@ function tripRefScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, refCol
   return or(inScope, and(notInArray(refColumn, anyNumber), notInArray(asNumber, anyId)));
 }
 
-/** An assistant proposal the scope may see, or null: through its job, else its trip, else its unit, else the single tenant only. */
+/**
+ * AIL-1A — an assistant proposal the scope may see: one whose own `tenantId` (0210, stamped at draft
+ * from the acting scope) is the caller's organization. Strict equality — a legacy row whose owner was
+ * never proved (`tenantId` NULL, `legacy_unresolved`) belongs to nobody, and a missing row is "not
+ * found" like any other. The owner used to be inferred from whichever of jobId, tripId or unitId was
+ * set first, which a draft could point at another organization's records.
+ */
 export async function proposalInScope(proposalId: string, scope: TenantScope): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  const p = (await db.select({ jobId: assistantProposals.jobId, tripId: assistantProposals.tripId, unitId: assistantProposals.unitId }).from(assistantProposals).where(eq(assistantProposals.proposalId, proposalId)).limit(1))[0];
-  if (!p) return true;   // nothing to hide; the procedure answers its own not-found
-  if (p.jobId != null) return !!(await jobInScope(p.jobId, scope));
-  if (p.tripId != null) return !!(await tripInScope(p.tripId, scope));
-  if (p.unitId != null) return !!(await unitInScope(p.unitId, scope));
-  return scope.tenantId === SINGLE_TENANT_ID;
+  const p = (await db.select({ tenantId: assistantProposals.tenantId }).from(assistantProposals).where(eq(assistantProposals.proposalId, proposalId)).limit(1))[0];
+  return rowInTenant(p, scope);
+}
+
+/**
+ * AIL-1A — every record a draft names must be the caller's organization's, checked before the model
+ * is called and again at commit. Returns the refusal, or null when all anchors are in scope. "Not
+ * found" for every miss, so a caller cannot probe for another organization's ids.
+ *
+ * Every lookup runs on `executor`: the draft passes the ordinary connection, and the commit passes its
+ * own transaction, so the re-check reads on the connection that holds the proposal's row lock rather
+ * than asking the pool for a second one while holding it.
+ *
+ * targetRecordId means different things per form: a trip stop for `unload_stop` (it must also sit on
+ * the proposal's trip), a financial entity for `expense_receipt` and `fuel_receipt`, and nothing the
+ * commit adapters read for any other form.
+ */
+export async function proposalAnchorRefusal(
+  executor: DbOrTx,
+  anchors: { formKey: string; jobId?: number | null; tripId?: number | null; unitId?: number | null; targetRecordId?: number | null },
+  scope: TenantScope,
+): Promise<string | null> {
+  const one = async (q: Promise<unknown[]>) => (await q).length > 0;
+  if (anchors.jobId != null
+    && !(await one(executor.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.id, anchors.jobId), orgScopeWhere(jobs, scope))).limit(1)))) {
+    return `Job ${anchors.jobId} not found`;
+  }
+  if (anchors.tripId != null
+    && !(await one(executor.select({ id: trips.id }).from(trips).where(and(eq(trips.id, anchors.tripId), orgScopeWhere(trips, scope))).limit(1)))) {
+    return `Trip ${anchors.tripId} not found`;
+  }
+  if (anchors.unitId != null
+    && !(await one(executor.select({ id: units.id }).from(units).where(and(eq(units.id, anchors.unitId), ownershipScopeWhere("unit", units.id, scope))).limit(1)))) {
+    return `Unit ${anchors.unitId} not found`;
+  }
+  if (anchors.targetRecordId != null) {
+    if (anchors.formKey === "unload_stop") {
+      const stop = (await executor.select({ tripId: tripStops.tripId }).from(tripStops).where(eq(tripStops.id, anchors.targetRecordId)).limit(1))[0];
+      const stopTripInScope = stop != null
+        && await one(executor.select({ id: trips.id }).from(trips).where(and(eq(trips.id, stop.tripId), orgScopeWhere(trips, scope))).limit(1));
+      if (!stop || !stopTripInScope) return `Trip stop ${anchors.targetRecordId} not found`;
+      if (anchors.tripId != null && stop.tripId !== anchors.tripId) return `Trip stop ${anchors.targetRecordId} not found`;
+    } else if (anchors.formKey === "expense_receipt" || anchors.formKey === "fuel_receipt") {
+      if (!(await one(executor.select({ id: financialEntities.id }).from(financialEntities)
+        .where(and(eq(financialEntities.id, anchors.targetRecordId), entityScopeWhere(scope))).limit(1)))) {
+        return `Financial entity ${anchors.targetRecordId} not found`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * AIL-1A — the database check behind a SESSION_JOB learning scope: does this job, trip or agent run
+ * belong to the organization? False for "no such thing" and "someone else's" alike.
+ */
+export async function sessionJobSubjectInScope(subject: SessionJobSubject, orgRef: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const scope = { tenantId: orgRef };
+  if (subject.kind === "job" || subject.kind === "trip") {
+    if (!/^[1-9][0-9]{0,9}$/.test(subject.ref)) return false;
+    const id = Number(subject.ref);
+    return subject.kind === "job" ? !!(await jobInScope(id, scope)) : !!(await tripInScope(id, scope));
+  }
+  if (subject.kind === "agent_run") {
+    const run = (await db.select({ tenantId: agentRuns.tenantId }).from(agentRuns).where(eq(agentRuns.runRef, subject.ref)).limit(1))[0];
+    return rowInTenant(run, scope);
+  }
+  return false;
 }
 
 /** A billing rate card the scope may see, or null. */
@@ -1128,25 +1230,22 @@ export async function getAssistantProposal(proposalId: string) {
     .limit(1);
   return rows[0];
 }
-/** Everything still waiting on a person. This is the review queue. */
-export async function listPendingProposals(tripId?: number) {
+/**
+ * Everything still waiting on a person, in the caller's organization. This is the review queue.
+ * AIL-1A: filtered on the proposal's own tenant in both branches — without a trip it used to return
+ * every organization's pending proposals.
+ */
+export async function listPendingProposals(scope: TenantScope, tripId?: number) {
   const db = await getDb();
   if (!db) return [];
-  const q = db
+  const pending = sql`${assistantProposals.commitState} in ('drafting','awaiting_answers','awaiting_readback')`;
+  const mine = eq(assistantProposals.tenantId, scope.tenantId);
+  return db
     .select()
     .from(assistantProposals)
+    .where(tripId ? and(mine, eq(assistantProposals.tripId, tripId), pending) : and(mine, pending))
     .orderBy(desc(assistantProposals.createdAt))
     .limit(100);
-  return tripId
-    ? q.where(
-        and(
-          eq(assistantProposals.tripId, tripId),
-          sql`${assistantProposals.commitState} in ('drafting','awaiting_answers','awaiting_readback')`
-        )
-      )
-    : q.where(
-        sql`${assistantProposals.commitState} in ('drafting','awaiting_answers','awaiting_readback')`
-      );
 }
 export async function replaceProposalFields(
   proposalId: string,

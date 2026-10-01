@@ -2234,6 +2234,22 @@ export const assistantProposals = mysqlTable("assistantProposals", {
   duplicateOverrideReason: varchar("duplicateOverrideReason", { length: 400 }),
   operatorId: int("operatorId"),
   createdByUserId: int("createdByUserId"),
+  /**
+   * AIL-1A (0210) — the organization this proposal belongs to, stamped at draft time from the
+   * server's acting scope and never from input. NULL only together with `legacy_unresolved` (a CHECK
+   * enforces it): a legacy row nobody could prove the owner of, visible to nobody. NULL never means
+   * global; there is no global proposal.
+   */
+  tenantId: varchar("tenantId", { length: 40 }),
+  /** How `tenantId` was established. The default is the fail-closed marker, not a tenant. */
+  tenantDerivedFrom: mysqlEnum("tenantDerivedFrom", [
+    "membership",
+    "single_tenant_fallback",
+    "backfill_single_tenant_deployment",
+    "legacy_unresolved",
+  ])
+    .default("legacy_unresolved")
+    .notNull(),
   transcript: text("transcript"),
   notes: text("notes"),
   readBack: text("readBack"),
@@ -7448,6 +7464,43 @@ export const retrievalMeasurements = mysqlTable("retrievalMeasurements", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type RetrievalMeasurementRow = typeof retrievalMeasurements.$inferSelect;
+
+/**
+ * 0214 — AIL-1B: company intelligence as governed organization records (R-1, R-2). One organization
+ * per row (never NULL, never GLOBAL); proposed by a person, effective only once a different person
+ * approves; provenance from a person's statement, a correction made on a committed record, or the
+ * organization's own company document — never a raw assistant conversation. Superseded or retired,
+ * never deleted. The CHECKs are in the migration.
+ */
+export const organizationKnowledgeEntries = mysqlTable("organizationKnowledgeEntries", {
+  id: int("id").autoincrement().primaryKey(),
+  entryRef: varchar("entryRef", { length: 64 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 40 }).notNull(),
+  tenantDerivedFrom: mysqlEnum("tenantDerivedFrom", ["membership", "single_tenant_fallback"]).notNull(),
+  kind: mysqlEnum("kind", ["terminology", "alias", "sop", "facility_convention", "customer_convention", "preference", "knowledge_gap", "verified_correction"]).notNull(),
+  term: varchar("term", { length: 220 }).notNull(),
+  termKey: varchar("termKey", { length: 220 }).notNull(),
+  meaning: text("meaning").notNull(),
+  subjectType: mysqlEnum("subjectType", ["none", "facility", "customer", "form_field"]).default("none").notNull(),
+  subjectRef: varchar("subjectRef", { length: 160 }),
+  sourceKind: mysqlEnum("sourceKind", ["person_statement", "verified_correction", "company_document"]).notNull(),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  state: mysqlEnum("state", ["proposed", "approved", "rejected", "superseded", "retired"]).default("proposed").notNull(),
+  proposedByUserId: int("proposedByUserId").notNull(),
+  proposedAt: timestamp("proposedAt").notNull(),
+  reviewedByUserId: int("reviewedByUserId"),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewNote: varchar("reviewNote", { length: 500 }),
+  supersededByEntryRef: varchar("supersededByEntryRef", { length: 64 }),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+  retireReason: varchar("retireReason", { length: 500 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  lookupIdx: index("organizationKnowledgeEntries_lookup_idx").on(t.tenantId, t.termKey, t.state),
+  reviewIdx: index("organizationKnowledgeEntries_review_idx").on(t.tenantId, t.state, t.proposedAt),
+}));
+export type OrganizationKnowledgeEntryRow = typeof organizationKnowledgeEntries.$inferSelect;
 
 /* ==================================================================
  * v22.21 — Training Academy

@@ -31,15 +31,17 @@ function tablesWithTenant(): { table: string; notNull: boolean }[] {
 }
 
 describe("the tenant surface is known", () => {
-  it("is nineteen tables, and the nullability split is deliberate", () => {
+  it("is twenty-one tables, and the nullability split is deliberate", () => {
     const scoped = tablesWithTenant();
     // The organization is carried only where something consults it. This count
     // moving is a new scoped concept and has to be changed on purpose — which
-    // is what happened when leaveRequests arrived and this test failed first.
-    expect(scoped).toHaveLength(19);
+    // is what happened when leaveRequests arrived and this test failed first,
+    // and again when AIL-1A (0210) gave assistantProposals an owner, and when AIL-1B (0214) added
+    // organizationKnowledgeEntries, which is born with one.
+    expect(scoped).toHaveLength(21);
     expect(scoped.map(t => t.table).sort()).toEqual([
-      "agentRuns", "assistantQueries", "billingAuthorityBands", "crews", "domainEventOutbox", "enforcementEvents",
-      "knowledgePassages", "leaveRequests", "messageChannels", "oosReleasePolicies", "operationalTasks", "outOfServiceOrders",
+      "agentRuns", "assistantProposals", "assistantQueries", "billingAuthorityBands", "crews", "domainEventOutbox", "enforcementEvents",
+      "knowledgePassages", "leaveRequests", "messageChannels", "oosReleasePolicies", "operationalTasks", "organizationKnowledgeEntries", "outOfServiceOrders",
       "retrievalMeasurements", "retrievalProbes", "shiftPosts", "workerQualifications", "workflowInstances", "workflowNotifications",
       "workflowRules",
     ]);
@@ -52,10 +54,12 @@ describe("the tenant surface is known", () => {
     // column would be a second place for the answer to disagree.
     expect(scoped.map(t => t.table)).not.toContain("shiftInterests");
     expect(scoped.filter(t => t.notNull).map(t => t.table).sort()).toEqual([
-      "domainEventOutbox", "operationalTasks", "workflowInstances", "workflowNotifications",
+      "domainEventOutbox", "operationalTasks", "organizationKnowledgeEntries", "workflowInstances", "workflowNotifications",
     ]);
+    // assistantProposals is nullable only together with `legacy_unresolved` (0210's CHECK): a legacy
+    // row whose owner was never proved, which strict equality leaves visible to nobody.
     expect(scoped.filter(t => !t.notNull).map(t => t.table).sort()).toEqual([
-      "agentRuns", "assistantQueries", "billingAuthorityBands", "crews", "enforcementEvents",
+      "agentRuns", "assistantProposals", "assistantQueries", "billingAuthorityBands", "crews", "enforcementEvents",
       "knowledgePassages", "leaveRequests",
       "messageChannels", "oosReleasePolicies", "outOfServiceOrders", "retrievalMeasurements", "retrievalProbes", "shiftPosts",
       "workerQualifications",

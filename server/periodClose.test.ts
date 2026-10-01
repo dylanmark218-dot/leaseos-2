@@ -121,7 +121,8 @@ d("August, closed", () => {
     const bookkeeper = await withRole("bookkeeper");
     const controller = await withRole("controller");
     const shopLead = await withRole("shop_lead");
-    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
+    // TEN-EXC-1: the Exception Centre reads a period through its financial entity, so the entity must exist.
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'August Books Ltd', 'corporation', 'CA-AB')", [key("FE").slice(0, 60)]))[0].insertId);
     const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'truck', 'ABC', 'clear')", [key("142").slice(0, 30)]);
     const unitId = Number(u.insertId);
     const [acct] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO fuelAccounts (accountRef, financialEntityId, name, fuelType, kind, status) VALUES (?, ?, 'Cardlock', 'diesel', 'fleet', 'active')", [key("ACCT").slice(0, 40), entityId]);
