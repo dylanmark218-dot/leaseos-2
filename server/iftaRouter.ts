@@ -13,7 +13,9 @@ import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, lt } from "drizzle-orm";
-import { roleProcedure, router } from "./_core/trpc";
+import { moneyScoped, roleProcedure, router } from "./_core/trpc";
+import { requireOwnedEntity } from "./_core/entityScope";
+import { distanceRecordInScope, fuelTransactionInScope, iftaReturnInScope, requireEvidence, requireTrip } from "./financeScope";
 import { getDb } from "./db";
 import { fuelTransactions, iftaReturns, jurisdictionDistanceRecords, operators, trips } from "../drizzle/schema";
 import { buildIftaQuarter, finalizeDecision, quarterBounds, splitTripDistance, type DistanceRecord, type FuelRecord } from "./_core/iftaEngine";
@@ -51,7 +53,7 @@ async function loadQuarter(financialEntityId: number, quarter: string) {
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 export const iftaRouter = router({
-  distanceRecord: roleProcedure("ifta.distanceRecord")
+  distanceRecord: moneyScoped(roleProcedure("ifta.distanceRecord"))
     .input(z.object({
       financialEntityId: z.number().int().positive(), unitId: z.number().int().positive(), tripId: z.number().int().positive().nullable().optional(),
       jurisdiction: JUR, distanceKm: z.number().positive(), periodStart: z.coerce.date(), periodEnd: z.coerce.date(),
@@ -62,6 +64,9 @@ export const iftaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (input.periodEnd <= input.periodStart) throw new TRPCError({ code: "BAD_REQUEST", message: "periodEnd must be after periodStart" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      await requireTrip(ctx.money, input.tripId);
+      await requireEvidence(ctx.money, input.evidenceRecordId);
       await assertPeriodOpen(input.financialEntityId, input.periodStart, "Distance record");
       const distanceRef = ref("DIST");
       await db.insert(jurisdictionDistanceRecords).values({ distanceRef, financialEntityId: input.financialEntityId, unitId: input.unitId, tripId: input.tripId ?? null, jurisdiction: input.jurisdiction, distanceKm: input.distanceKm, periodStart: input.periodStart, periodEnd: input.periodEnd, source: input.source, recordedByUserId: ctx.user.id, evidenceRecordId: input.evidenceRecordId ?? null, notes: input.notes ?? null });
@@ -69,11 +74,13 @@ export const iftaRouter = router({
     }),
 
   /** Split a trip's odometer distance by the operator's statement of jurisdictions. Refused if the fractions do not sum to one. */
-  tripSplit: roleProcedure("ifta.tripSplit")
+  tripSplit: moneyScoped(roleProcedure("ifta.tripSplit"))
     .input(z.object({ financialEntityId: z.number().int().positive(), tripId: z.number().int().positive(), splits: z.array(z.object({ jurisdiction: JUR, fraction: z.number().min(0).max(1) })).min(1) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      await requireTrip(ctx.money, input.tripId);
       const trip = (await db.select().from(trips).where(eq(trips.id, input.tripId)).limit(1))[0];
       if (!trip) throw new TRPCError({ code: "NOT_FOUND", message: "Trip not found" });
       if (trip.unitId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Trip has no unit" });
@@ -94,25 +101,23 @@ export const iftaRouter = router({
       return { tripId: trip.id, distanceKm, distanceSource: odo != null ? "odometer" : "operator_stated", parts: split.parts, distanceRefs: refs };
     }),
 
-  distanceVerify: roleProcedure("ifta.distanceVerify")
+  distanceVerify: moneyScoped(roleProcedure("ifta.distanceVerify"))
     .input(z.object({ distanceRef: z.string().min(1).max(64), outcome: z.enum(["verified", "rejected"]) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const row = (await db.select().from(jurisdictionDistanceRecords).where(eq(jurisdictionDistanceRecords.distanceRef, input.distanceRef)).limit(1))[0];
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Distance record not found" });
+      const row = await distanceRecordInScope(db, ctx.money, input.distanceRef);
       if (row.recordedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The person who recorded a distance may not verify it" });
       await db.update(jurisdictionDistanceRecords).set({ verificationStatus: input.outcome, verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(eq(jurisdictionDistanceRecords.id, row.id));
       return { distanceRef: input.distanceRef, verificationStatus: input.outcome };
     }),
 
-  fuelJurisdictionSet: roleProcedure("ifta.fuelJurisdictionSet")
+  fuelJurisdictionSet: moneyScoped(roleProcedure("ifta.fuelJurisdictionSet"))
     .input(z.object({ fuelRef: z.string().min(1).max(64), jurisdiction: JUR, source: z.enum(["receipt", "vendor_location", "operator_stated", "fleet_card_statement"]) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const row = (await db.select({ id: fuelTransactions.id, jurisdiction: fuelTransactions.jurisdiction, jurisdictionSource: fuelTransactions.jurisdictionSource }).from(fuelTransactions).where(eq(fuelTransactions.fuelRef, input.fuelRef)).limit(1))[0];
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Fuel transaction not found" });
+      const row = await fuelTransactionInScope(db, ctx.money, input.fuelRef);
       // A receipt beats a statement beats a person's recollection; a weaker source does not overwrite a stronger one.
       const rank: Record<string, number> = { receipt: 3, fleet_card_statement: 2, vendor_location: 2, gps: 3, operator_stated: 1, unknown: 0 };
       if (row.jurisdiction && row.jurisdictionSource && rank[row.jurisdictionSource] > rank[input.source] && row.jurisdiction !== input.jurisdiction) {
@@ -122,15 +127,19 @@ export const iftaRouter = router({
       return { fuelRef: input.fuelRef, jurisdiction: input.jurisdiction, source: input.source };
     }),
 
-  quarter: roleProcedure("ifta.quarter")
+  quarter: moneyScoped(roleProcedure("ifta.quarter"))
     .input(z.object({ financialEntityId: z.number().int().positive(), quarter: QUARTER }))
-    .query(async ({ input }) => loadQuarter(input.financialEntityId, input.quarter)),
+    .query(async ({ ctx, input }) => {
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      return loadQuarter(input.financialEntityId, input.quarter);
+    }),
 
-  quarterPrepare: roleProcedure("ifta.quarterPrepare")
+  quarterPrepare: moneyScoped(roleProcedure("ifta.quarterPrepare"))
     .input(z.object({ financialEntityId: z.number().int().positive(), quarter: QUARTER }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
       const q = await loadQuarter(input.financialEntityId, input.quarter);
       const summaryJson = JSON.stringify(q);
       const returnRef = ref("IFTA");
@@ -143,13 +152,12 @@ export const iftaRouter = router({
       return { returnRef, determination: q.determination, taxDue: q.totals.taxDue, exceptions: q.exceptions.length, supersedes: prior && (prior.status === "finalized" || prior.status === "filed") ? prior.id : null };
     }),
 
-  quarterFinalize: roleProcedure("ifta.quarterFinalize")
+  quarterFinalize: moneyScoped(roleProcedure("ifta.quarterFinalize"))
     .input(z.object({ returnRef: z.string().min(1).max(64) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const row = (await db.select().from(iftaReturns).where(eq(iftaReturns.returnRef, input.returnRef)).limit(1))[0];
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Return not found" });
+      const row = await iftaReturnInScope(db, ctx.money, input.returnRef);
       if (row.status !== "prepared") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Return is ${row.status}` });
       if (row.preparedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The preparer may not finalize their own return" });
       // The snapshot must still be what the ledger says. If the ledger moved, prepare again.

@@ -10,7 +10,9 @@ import { TRPCError } from "@trpc/server";
 import { decide as ledgerDecide } from "./_core/commercialApprovalService";
 import { z } from "zod";
 import { and, desc, eq, gte, isNull, or } from "drizzle-orm";
-import { roleProcedure, router } from "./_core/trpc";
+import { moneyScoped, roleProcedure, router } from "./_core/trpc";
+import { ownsEntity, requireOwnedEntity } from "./_core/entityScope";
+import { customerAccountInScope, purchaseAuthorizationInScope, requireEvidence, requireJob, requireTrip, roadsideEventInScope, vendorBillInScope, vendorInScope } from "./financeScope";
 import { assertPeriodOpen } from "./periodCloseService";
 import { fromCents, toCents } from "./_core/money";
 import { normaliseUnit, priceLineAndRecord } from "./_core/linePricing";
@@ -39,7 +41,7 @@ async function limitsFor(entityId: number): Promise<SpendingLimit[]> {
 const YES_NO_UNKNOWN = z.enum(["yes", "no", "unknown"]);
 
 export const roadsideRouter = router({
-  open: roleProcedure("roadside.open")
+  open: moneyScoped(roleProcedure("roadside.open"))
     .input(z.object({
       eventType: z.enum(["flat_tire","tire_blowout","engine_failure","electrical_failure","air_system","brake_issue","coolant_leak","hydraulic_leak","fuel_issue","def_issue","frozen_airline","tow","boost","lockout","collision_recovery","stuck_recovery","trailer_failure","other"]),
       unitId: z.number().int().positive(),
@@ -62,6 +64,9 @@ export const roadsideRouter = router({
       await requireCallerUnits(ctx.user.id, { unitId: input.unitId });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // F1 — a roadside event is the unit's; the unit, and any job or trip it names, must be the caller's.
+      await requireJob(ctx.money, input.jobId);
+      await requireTrip(ctx.money, input.tripId);
 
       const consequence = roadsideConsequences(input);
       const now = new Date();
@@ -96,23 +101,23 @@ export const roadsideRouter = router({
       return { eventRef, defectId, ...consequence };
     }),
 
-  assignVendor: roleProcedure("roadside.assignVendor")
+  assignVendor: moneyScoped(roleProcedure("roadside.assignVendor"))
     .input(z.object({ eventRef: z.string().min(1).max(64), vendorId: z.number().int().positive(), estimatedDelayMinutes: z.number().int().nonnegative().nullable().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const v = await db.select({ id: vendors.id, status: vendors.status, emergency24h: vendors.emergency24h }).from(vendors).where(eq(vendors.id, input.vendorId)).limit(1);
-      if (!v[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Vendor not found" });
-      if (v[0].status === "blocked") throw new TRPCError({ code: "CONFLICT", message: "Vendor is blocked" });
+      const ev = await roadsideEventInScope(db, ctx.money, input.eventRef);
+      const v = await vendorInScope(db, ctx.money, input.vendorId);
+      if (v.status === "blocked") throw new TRPCError({ code: "CONFLICT", message: "Vendor is blocked" });
       await db.update(roadsideServiceEvents)
         .set({ assignedVendorId: input.vendorId, estimatedDelayMinutes: input.estimatedDelayMinutes ?? null, status: "vendor_assigned" })
-        .where(eq(roadsideServiceEvents.eventRef, input.eventRef));
-      return { eventRef: input.eventRef, vendorId: input.vendorId, emergency24h: v[0].emergency24h };
+        .where(eq(roadsideServiceEvents.id, ev.id));
+      return { eventRef: input.eventRef, vendorId: input.vendorId, emergency24h: v.emergency24h };
     }),
 });
 
 export const purchasingRouter = router({
-  request: roleProcedure("purchasing.request")
+  request: moneyScoped(roleProcedure("purchasing.request"))
     .input(z.object({
       financialEntityId: z.number().int().positive(),
       vendorId: z.number().int().positive().nullable().optional(),
@@ -130,13 +135,12 @@ export const purchasingRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (!input.vendorId && !input.vendorNameIfNew) throw new TRPCError({ code: "BAD_REQUEST", message: "Name a vendor or a new vendor" });
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      if (input.vendorId) await vendorInScope(db, ctx.money, input.vendorId);
+      await requireJob(ctx.money, input.jobId);
 
       let roadsideEventId: number | null = null;
-      if (input.roadsideEventRef) {
-        const ev = await db.select({ id: roadsideServiceEvents.id }).from(roadsideServiceEvents).where(eq(roadsideServiceEvents.eventRef, input.roadsideEventRef)).limit(1);
-        if (!ev[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Roadside event not found" });
-        roadsideEventId = ev[0].id;
-      }
+      if (input.roadsideEventRef) roadsideEventId = (await roadsideEventInScope(db, ctx.money, input.roadsideEventRef)).id;
 
       const roles = await listActiveUserRoleNames(ctx.user.id);
       const limits = await limitsFor(input.financialEntityId);
@@ -164,14 +168,12 @@ export const purchasingRouter = router({
       return { authorizationRef, ...routing };
     }),
 
-  approve: roleProcedure("purchasing.approve")
+  approve: moneyScoped(roleProcedure("purchasing.approve"))
     .input(z.object({ authorizationRef: z.string().min(1).max(64), authorizedMaximum: z.number().positive(), decisionReason: z.string().max(400).optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const rows = await db.select().from(purchaseAuthorizations).where(eq(purchaseAuthorizations.authorizationRef, input.authorizationRef)).limit(1);
-      const pa = rows[0];
-      if (!pa) throw new TRPCError({ code: "NOT_FOUND", message: "Authorization not found" });
+      const pa = await purchaseAuthorizationInScope(db, ctx.money, input.authorizationRef);
       if (pa.status !== "requested") throw new TRPCError({ code: "CONFLICT", message: `Authorization is ${pa.status}` });
 
       const roles = await listActiveUserRoleNames(ctx.user.id);
@@ -202,7 +204,7 @@ const LINE = z.object({
 });
 
 export const vendorRouter = router({
-  billRecord: roleProcedure("vendor.billRecord")
+  billRecord: moneyScoped(roleProcedure("vendor.billRecord"))
     .input(z.object({
       financialEntityId: z.number().int().positive(),
       vendorId: z.number().int().positive(),
@@ -223,6 +225,10 @@ export const vendorRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      await vendorInScope(db, ctx.money, input.vendorId);
+      await requireJob(ctx.money, input.jobId);
+      await requireEvidence(ctx.money, input.evidenceRecordId);
       const recon = reconcileBillLines({ lines: input.lines, statedSubtotal: input.subtotal, statedTax: input.taxAmount, statedTotal: input.total });
       if (!recon.ok) throw new TRPCError({ code: "BAD_REQUEST", message: `Bill lines do not reconcile: ${recon.refusals.join("; ")}` });
 
@@ -232,13 +238,13 @@ export const vendorRouter = router({
 
       let paId: number | null = null;
       if (input.purchaseAuthorizationRef) {
-        const pa = await db.select({ id: purchaseAuthorizations.id }).from(purchaseAuthorizations).where(eq(purchaseAuthorizations.authorizationRef, input.purchaseAuthorizationRef)).limit(1);
-        paId = pa[0]?.id ?? null;
+        // As before, a reference that names nothing links nothing — and F1: one in another book names nothing.
+        const pa = await db.select({ id: purchaseAuthorizations.id, financialEntityId: purchaseAuthorizations.financialEntityId }).from(purchaseAuthorizations).where(eq(purchaseAuthorizations.authorizationRef, input.purchaseAuthorizationRef)).limit(1);
+        paId = pa[0] && pa[0].financialEntityId === input.financialEntityId ? pa[0].id : null;
       }
       let rsId: number | null = null;
       if (input.roadsideEventRef) {
-        const rs = await db.select({ id: roadsideServiceEvents.id }).from(roadsideServiceEvents).where(eq(roadsideServiceEvents.eventRef, input.roadsideEventRef)).limit(1);
-        rsId = rs[0]?.id ?? null;
+        rsId = await roadsideEventInScope(db, ctx.money, input.roadsideEventRef).then(e => e.id, () => null);
       }
 
       const accrual = assessAccrual({ serviceDate: input.serviceDate ?? null, invoiceDate: input.invoiceDate });
@@ -261,7 +267,7 @@ export const vendorRouter = router({
         coreStatus: l.lineType === "core_charge" ? ("open" as const) : ("not_applicable" as const),
       })));
       // v22.8 — price each service-named line against the vendor's agreed payable in this customer/job context, and record the variance per unit.
-      const customerAccountIdForBill = input.customerAccountRef ? (await db.select({ id: customerAccounts.id }).from(customerAccounts).where(eq(customerAccounts.accountRef, input.customerAccountRef)).limit(1))[0]?.id ?? null : null;
+      const customerAccountIdForBill = input.customerAccountRef ? await customerAccountInScope(db, ctx.money, input.customerAccountRef).then(a => a.id, () => null) : null;
       const rateVariances: { lineNo: number; serviceCode: string; billedUnitPriceCents: number; agreedRateCents: number | null; varianceCents: number | null; outcome: string; decisionRef: string }[] = [];
       for (const l of input.lines) {
         if (!l.serviceCode) continue;
@@ -278,14 +284,12 @@ export const vendorRouter = router({
       return { billRef, billId, accrual, openCoreCharges: recon.openCoreCharges.length, rateVariances };
     }),
 
-  billMatch: roleProcedure("vendor.billMatch")
+  billMatch: moneyScoped(roleProcedure("vendor.billMatch"))
     .input(z.object({ billRef: z.string().min(1).max(64), confirmedQuantities: z.record(z.string(), z.number()).optional(), billedQuantities: z.record(z.string(), z.number()).optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const rows = await db.select().from(vendorBills).where(eq(vendorBills.billRef, input.billRef)).limit(1);
-      const bill = rows[0];
-      if (!bill) throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
+      const bill = await vendorBillInScope(db, ctx.money, input.billRef);
 
       const pa = bill.purchaseAuthorizationId ? (await db.select().from(purchaseAuthorizations).where(eq(purchaseAuthorizations.id, bill.purchaseAuthorizationId)).limit(1))[0] : null;
       const rs = bill.roadsideEventId ? (await db.select().from(roadsideServiceEvents).where(eq(roadsideServiceEvents.id, bill.roadsideEventId)).limit(1))[0] : null;
@@ -303,14 +307,12 @@ export const vendorRouter = router({
       return { billRef: bill.billRef, ...match, status };
     }),
 
-  billApprove: roleProcedure("vendor.billApprove")
+  billApprove: moneyScoped(roleProcedure("vendor.billApprove"))
     .input(z.object({ billRef: z.string().min(1).max(64), codingCategory: z.string().min(2).max(80) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const rows = await db.select().from(vendorBills).where(eq(vendorBills.billRef, input.billRef)).limit(1);
-      const bill = rows[0];
-      if (!bill) throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
+      const bill = await vendorBillInScope(db, ctx.money, input.billRef);
       // A mismatched bill is an exception, not an approval candidate.
       if (bill.matchOutcome === "mismatch") throw new TRPCError({ code: "CONFLICT", message: "Bill has unresolved match variances — resolve them before approval" });
       if (bill.matchOutcome === "unmatched") throw new TRPCError({ code: "CONFLICT", message: "Bill has not been matched" });
@@ -329,14 +331,12 @@ export const vendorRouter = router({
       return { billRef: bill.billRef, status: "ready_to_pay" as const, unitReleased: false as const, ledger };
     }),
 
-  paymentRelease: roleProcedure("vendor.paymentRelease")
+  paymentRelease: moneyScoped(roleProcedure("vendor.paymentRelease"))
     .input(z.object({ billRef: z.string().min(1).max(64) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const rows = await db.select().from(vendorBills).where(eq(vendorBills.billRef, input.billRef)).limit(1);
-      const bill = rows[0];
-      if (!bill) throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
+      const bill = await vendorBillInScope(db, ctx.money, input.billRef);
       if (bill.status !== "ready_to_pay") throw new TRPCError({ code: "CONFLICT", message: `Bill is ${bill.status}, not ready to pay` });
       // The person who approved coding does not release payment.
       if (bill.approvedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The person who approved the bill does not release its payment" });
@@ -350,18 +350,17 @@ export const vendorRouter = router({
 });
 
 export const recoveryRouter = router({
-  propose: roleProcedure("recovery.propose")
+  propose: moneyScoped(roleProcedure("recovery.propose"))
     .input(z.object({
       billRef: z.string().min(1).max(64), jobId: z.number().int().positive(), customerRef: z.string().max(220).nullable().optional(),
       contract: z.object({ passThroughAllowed: z.boolean(), markupPercent: z.number().min(0).max(100).nullable().optional(), recoverableCategories: z.array(z.string()).optional() }).nullable(),
       category: z.string().min(2).max(80), causedByCustomer: z.boolean().default(false),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const rows = await db.select().from(vendorBills).where(eq(vendorBills.billRef, input.billRef)).limit(1);
-      const bill = rows[0];
-      if (!bill) throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
+      const bill = await vendorBillInScope(db, ctx.money, input.billRef);
+      await requireJob(ctx.money, input.jobId);
       const r = proposeCustomerRecovery({ companyCost: fromCents(bill.totalCents)!, contract: input.contract, category: input.category, causedByCustomer: input.causedByCustomer });
       if (r.status === "not_recoverable") return r;
       const proposalRef = ref("REC");
