@@ -6,12 +6,12 @@
  * `crewCoverage` owns rotation. This file re-decides none of them; it reads the records each rule
  * needs and hands them over, which is what the SPINE plan calls a resolver.
  *
- * **The board reads no credential store.** Whether a person holds H2S is answered by the two
- * canonical authorities D-05 named — `academyQualifications` (a grant) and `complianceDocuments`
- * (a verified document) — and by nothing else. A code neither holds is `unknown`, and unknown is
- * not satisfied. The inline read of `workerQualifications` this replaces was reading a table
- * nothing in production writes, which made every ticket-requiring post permanently unknown while
- * looking like a check.
+ * **The board reads no credential store of its own.** Whether a person holds H2S is answered by
+ * the D-05 qualification read adapter (`qualificationReads.effectiveQualifications`, C1b-3): the
+ * Academy grant decides, the compliance document it rests on is read as its evidence, and a legacy
+ * holding is only a marked fallback where no grant exists — all of that inside the adapter. A code nothing holds
+ * is `unknown`, and unknown is not satisfied. This is the same read readiness, crews and the
+ * calendar use; reconciling with main retired the board's own version of it.
  *
  * **Readiness is a preview here.** `composeReadiness` is called for the post's start instant and
  * its verdict is shown with its blocker codes; nothing is stored, and nothing here is an award.
@@ -20,7 +20,7 @@
  */
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import {
-  academyQualifications, complianceDocuments, crewMembers, crews, leaveRequests, operators, shiftInterests, shiftOffers,
+  crewMembers, crews, leaveRequests, operators, shiftInterests, shiftOffers,
   shiftPostEvents, shiftPosts, workerAvailability,
 } from "../drizzle/schema";
 import type { DbOrTx } from "./_core/dbTypes";
@@ -32,7 +32,7 @@ import {
   type AvailabilityDeclaration, type AvailabilityPreferences, type AvailabilityState, type Candidate, type Ineligibility, type PostStatus, type ShiftPost,
 } from "./_core/openShifts";
 import { composeReadiness } from "./readinessComposer";
-import { missingFrom, type NotHeldCode, type QualificationHolding } from "./_core/qualificationValidity";
+import { effectiveQualifications } from "./qualificationReads";
 import { listActiveUserRoleNames, operatorInScope, orgScopeWhere } from "./db";
 
 export type ShiftPostRow = typeof shiftPosts.$inferSelect;
@@ -99,57 +99,6 @@ export async function declarersCovering(d: DbOrTx, scope: { tenantId: string }, 
 }
 
 /* ------------------------------------------------------------------ */
-/* Qualifications — the canonical pair, and nothing else               */
-/* ------------------------------------------------------------------ */
-
-export type QualificationVerdict = { code: string; held: boolean; why: NotHeldCode | null; reason: string };
-
-/**
- * An Academy grant presented to the shared rule as the holding it is: a `current` grant is a
- * verified holding, `pending` is an extraction nobody has asserted, `revoked`/`rejected` are
- * rejected. `validFrom`/`expiresAt` are what they say; `createdAt` orders competing grants.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const grantAsHolding = (g: any): QualificationHolding => ({
-  holdingRef: g.qualificationRef, code: g.qualificationCode,
-  verificationState: g.status === "current" || g.status === "expired" ? "verified" : g.status === "pending" ? "extracted" : "rejected",
-  issuedAt: g.validFrom ?? null, expiresAt: g.expiresAt ?? null, recordedAt: g.createdAt,
-});
-
-/** A compliance document presented the same way: `needs_review` is unverified, `capturedAt` orders versions. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const documentAsHolding = (x: any, code: string): QualificationHolding => ({
-  holdingRef: `CD-${x.id}`, code,
-  verificationState: x.verificationStatus === "verified" ? "verified" : x.verificationStatus === "rejected" ? "rejected" : "unverified",
-  issuedAt: null, expiresAt: x.expiresAt ?? null, recordedAt: x.capturedAt ?? x.createdAt,
-});
-
-/**
- * Whether a person holds each required code at an instant, from the two canonical authorities
- * (D-05), decided by the one shared rule — `qualificationValidity.missingFrom`, the same adapter
- * the readiness and crew routers reach — never by reading columns here. Classified by the rule's
- * returned code, never by its prose.
- */
-export async function qualificationVerdicts(d: DbOrTx, args: { userId: number; operatorId: number | null; codes: readonly string[]; at: Date }): Promise<QualificationVerdict[]> {
-  if (!args.codes.length) return [];
-  const grants = await d.select().from(academyQualifications).where(eq(academyQualifications.userId, args.userId)).limit(200);
-  const docs = args.operatorId
-    ? await d.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, args.operatorId))).limit(200)
-    : [];
-  const holdings: QualificationHolding[] = [];
-  for (const code of args.codes) {
-    const key = code.toLowerCase();
-    for (const g of grants) if (g.qualificationCode.toLowerCase() === key) holdings.push({ ...grantAsHolding(g), code });
-    for (const x of docs) if (x.docType.toLowerCase() === key || x.docType.toLowerCase() === `${key}_certificate`) holdings.push(documentAsHolding(x, code));
-  }
-  const gaps = missingFrom(holdings, args.codes, args.at);
-  return args.codes.map(code => {
-    const gap = gaps.find(g => g.code === code);
-    return gap ? { code, held: false, why: gap.why, reason: gap.reason } : { code, held: true, why: null, reason: `${code}: verified and current` };
-  });
-}
-
-/* ------------------------------------------------------------------ */
 /* The preview                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -211,12 +160,15 @@ export async function previewFor(d: DbOrTx, args: { post: ShiftPostRow; userId: 
     reasons.push(r);
   }
 
-  for (const gap of await qualificationVerdicts(d, { userId: args.userId, operatorId: operatorInScopeRow ? op!.id : null, codes: post.requiredQualifications, at: post.startsAt })) {
-    if (gap.held) continue;
+  // D-05, through the one read adapter, in the caller's organization.
+  const required = post.requiredQualifications;
+  const effective = required.length ? await effectiveQualifications(d, { tenantId: args.scope.tenantId, userId: args.userId, at: post.startsAt, codes: required }) : [];
+  for (const q of effective) {
+    if (q.held) continue;
     // From the structured verdict, not by reading its prose.
     reasons.push({
-      code: gap.why === "expired" ? "qualification_expired" : gap.why === "unverified" ? "qualification_unverified" : "qualification_unknown",
-      detail: gap.reason,
+      code: q.notHeld === "expired" ? "qualification_expired" : q.notHeld === "unverified" ? "qualification_unverified" : "qualification_unknown",
+      detail: q.reason,
     });
   }
 

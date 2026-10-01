@@ -202,12 +202,18 @@ describe("one rule, shared", () => {
   it("is reached through the adapter by the routers that need it", () => {
     const adapter = readFileSync("server/_core/qualificationValidity.ts", "utf8");
     expect(adapter).toContain('from "./documentValidity"');
-    expect(readFileSync("server/readinessRouter.ts", "utf8")).toContain("_core/qualificationValidity");
-    // 0206 — open work no longer reads `workerQualifications` at all (D-05: the canonical pair is
-    // academyQualifications and complianceDocuments). Its reader is the service, and it reaches
-    // the same rule directly: the engine decides, the service presents rows as versions.
-    expect(readFileSync("server/openShiftsService.ts", "utf8")).toContain("_core/qualificationValidity");
+    // C1b-3: the four qualification readers go through the D-05 read adapter, which decides through
+    // qualificationValidity / documentValidity — not through their own reading of a store.
+    const reads = readFileSync("server/qualificationReads.ts", "utf8");
+    expect(reads).toContain('from "./_core/qualificationValidity"');
+    expect(reads).toContain('from "./_core/documentValidity"');
+    // 0206 moved open work's eligibility read out of its router into openShiftsService, so that is
+    // the open-shift reader this holds to the adapter; the router reads no qualification store at all.
     expect(readFileSync("server/openShiftsRouter.ts", "utf8")).not.toContain("workerQualifications");
+    for (const f of ["openShiftsService", "readinessRouter", "crewRouter", "calendarRouter"]) {
+      const src = readFileSync(`server/${f}.ts`, "utf8");
+      expect(src, f).toContain('from "./qualificationReads"');
+    }
   });
 
   it("leaves no router deciding a verification state by hand", () => {
@@ -222,7 +228,9 @@ describe("one rule, shared", () => {
 
   it("classifies by a returned code rather than by matching prose", () => {
     const src = readFileSync("server/openShiftsService.ts", "utf8");
-    expect(src).toContain("gap.why ===");
+    // The adapter's structured code (`EffectiveQualification.notHeld`), not its `reason` text.
+    expect(src).toMatch(/\.notHeld === "expired"/);
+    expect(src).not.toMatch(/\.reason\.(includes|startsWith|match)\(/);
     // Matching on wording reclassified every unverified ticket the moment the
     // wording improved.
     expect(src).not.toContain('gap.reason.includes("verified it")');

@@ -7,7 +7,7 @@
  * The checks:
  *
  *   LICENCE          from `operators`, the one credential stored inline
- *   QUALIFICATIONS   from `workerQualifications`, verified and unexpired only
+ *   QUALIFICATIONS   from the qualification read adapter (C1b-3), verified and unexpired only
  *   LEAVE            from `leaveRequests`, approved or recorded
  *   CREW             from `crewMembers`, whether they are on a crew at all
  *
@@ -20,17 +20,18 @@
  * **An empty checklist is not ready.** If nothing was evaluated, the honest
  * answer is that nothing was evaluated.
  */
+import { readExpiry } from "./_core/documentValidity";
+import { effectiveQualifications } from "./qualificationReads";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { crewMembers, crews, leaveRequests, operators, shiftPosts, workerQualifications } from "../drizzle/schema";
+import { crewMembers, crews, leaveRequests, operators, shiftPosts } from "../drizzle/schema";
 import { resolveActingScope } from "./_core/actingScope";
 import type { DbOrTx } from "./_core/dbTypes";
 import { readyForShift, type ReadinessCheck } from "./_core/shiftReadiness";
 import { routeByOwner, type Owner } from "./_core/readinessRouting";
-import { countsAsHeld } from "./_core/qualificationValidity";
 
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
 
@@ -41,7 +42,7 @@ const OWNER_OF: Record<string, Owner> = {
 const ownerOf = (check: ReadinessCheck): Owner =>
   OWNER_OF[check.key.split(":")[0]] ?? (check.key.startsWith("qualification") ? "safety" : "office");
 
-async function checksFor(d: DbOrTx, args: { userId: number; startsAt: Date; requiredQualifications: readonly string[] }): Promise<ReadinessCheck[]> {
+async function checksFor(d: DbOrTx, args: { tenantId: string; userId: number; startsAt: Date; requiredQualifications: readonly string[] }): Promise<ReadinessCheck[]> {
   const checks: ReadinessCheck[] = [];
 
   /* Licence — the one credential operators store inline. */
@@ -50,18 +51,19 @@ async function checksFor(d: DbOrTx, args: { userId: number; startsAt: Date; requ
     checks.push({ key: "licence", label: "Driver record", state: "unknown", blocksShift: true, reason: "No operator record for this person — nothing about them can be established" });
   } else if (!person.licenseExpiresAt) {
     checks.push({ key: "licence", label: "Licence", state: "unknown", blocksShift: true, reason: "No licence expiry on record" });
-  } else if (person.licenseExpiresAt.getTime() < args.startsAt.getTime()) {
+  } else if (readExpiry(person.licenseExpiresAt, args.startsAt, 0).expiry === "expired") {
     checks.push({ key: "licence", label: "Licence", state: "failed", blocksShift: true, reason: `Expires ${person.licenseExpiresAt.toISOString().slice(0, 10)}, before this shift` });
   } else {
     checks.push({ key: "licence", label: "Licence", state: "satisfied", blocksShift: true, reason: null });
   }
 
   /* Qualifications the shift asks for. */
-  const held = await d.select().from(workerQualifications).where(eq(workerQualifications.userId, args.userId)).limit(200);
-  // The same shared rule the eligibility read uses, rather than a second
-  // reading of the same columns that agrees only by coincidence.
-  for (const code of args.requiredQualifications) {
-    const verdict = countsAsHeld(held, code, args.startsAt);
+  // C1b-3: through the qualification read adapter — Academy first, legacy holdings only as a marked
+  // fallback, in the caller's organization — rather than from the legacy store directly.
+  const effective = await effectiveQualifications(d, { tenantId: args.tenantId, userId: args.userId, at: args.startsAt, codes: args.requiredQualifications });
+  for (const e of effective) {
+    const code = e.code;
+    const verdict = { held: e.held, code: e.notHeld, reason: e.reason };
     checks.push(verdict.held
       ? { key: `qualification:${code}`, label: code, state: "satisfied", blocksShift: true, reason: null }
       : {
@@ -111,7 +113,7 @@ export const readinessRouter = router({
       if (!post || post.tenantId !== acting.tenantId) throw new TRPCError({ code: "NOT_FOUND", message: "No such shift post" });
 
       const required = JSON.parse(post.requiredQualificationsJson) as string[];
-      const checks = await checksFor(d, { userId, startsAt: post.startsAt, requiredQualifications: required });
+      const checks = await checksFor(d, { tenantId: acting.tenantId, userId, startsAt: post.startsAt, requiredQualifications: required });
       const readiness = readyForShift({ shiftStartsAt: post.startsAt, checks });
       const routed = routeByOwner(readiness, ownerOf);
 
@@ -141,9 +143,9 @@ export const readinessRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const d = await db();
-      await resolveActingScope(d, ctx.user.id);
+      const acting = await resolveActingScope(d, ctx.user.id);
       const userId = input.userId ?? ctx.user.id;
-      const checks = await checksFor(d, { userId, startsAt: input.startsAt, requiredQualifications: input.requiredQualifications });
+      const checks = await checksFor(d, { tenantId: acting.tenantId, userId, startsAt: input.startsAt, requiredQualifications: input.requiredQualifications });
       const readiness = readyForShift({ shiftStartsAt: input.startsAt, checks });
       const routed = routeByOwner(readiness, ownerOf);
       return {
