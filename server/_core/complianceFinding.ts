@@ -161,6 +161,10 @@ export const CLASSIFICATION: readonly Rule[] = [
   r("route.unknown", /^(route_not_evaluated|route_approval_missing|route_data_unverified)$/, "route", "statute_regulation", ...UNKNOWN_BLOCKS),
   r("route.approval_not_current", /^route_approval_(stale|revoked|superseded)$/, "route", "statute_regulation", ...UNKNOWN_BLOCKS),
   r("route.review", /^route_review$/, "route", "statute_regulation", ...WARN_ACK),
+  // T2 (P5) — one finding per evaluated check, naming the constraint (routeLegality.routeCheckBlockers).
+  r("route.check_failed", /^route_check_failed_[a-z_]+$/, "route", "statute_regulation", ...HARD),
+  r("route.check_unknown", /^route_check_unknown_[a-z_]+$/, "route", "statute_regulation", ...UNKNOWN_BLOCKS),
+  r("route.check_review", /^route_check_review_[a-z_]+$/, "route", "statute_regulation", ...WARN_ACK),
 
   /* communications — the company's own policy, except radio licensing, which is law */
   r("comms.radio_unlicensed", /^radio_not_authorized$/, "communications", "statute_regulation", ...HARD),

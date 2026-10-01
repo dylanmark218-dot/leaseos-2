@@ -232,7 +232,9 @@ export async function recheckRouteApproval(db: Db, a: RouteApprovalRow, at: Date
   if (a.status === "revoked" || a.status === "superseded") {
     return { approvalRef: a.approvalRef, status: a.status, stale: true, changed: [], reasons: [`This approval is ${a.status}`], becameStale: false, notRechecked };
   }
-  const current = await routeDependencies(db, { unitId: a.unitId, segmentIds: JSON.parse(a.segmentIdsJson) as string[], load: approved.loadProfile, permitRefs: [], requiredChecks: [], at, buildRef: a.buildRef, tripId: a.tripId, jobId: a.jobId, carryOver: approved });
+  // An approval recorded with fewer dependencies (or none) is compared only on what it carried; a
+  // missing load hash is never dereferenced as a load.
+  const current = await routeDependencies(db, { unitId: a.unitId, segmentIds: JSON.parse(a.segmentIdsJson) as string[], load: approved.loadProfile ?? hashPart({ notRecorded: true }), permitRefs: [], requiredChecks: [], at, buildRef: a.buildRef, tripId: a.tripId, jobId: a.jobId, carryOver: approved });
   const s = stalenessAgainst(approved, current);
   const becameStale = s.stale && a.status === "approved";
   if (becameStale) await db.update(routeApprovals).set({ status: "stale", staleReasonsJson: JSON.stringify(s.reasons), stalenessDetectedAt: new Date() }).where(eq(routeApprovals.id, a.id));

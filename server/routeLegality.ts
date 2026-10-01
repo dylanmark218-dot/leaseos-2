@@ -193,3 +193,47 @@ export async function evaluateSegments(db: Db, input: {
   const verdict = evaluateRoute(input.requiredChecks, segments, vehicle);
   return { profile: p, vehicle, weight, segments, verdict, roadBans, segmentProvinces, dateNotes, structureNotes };
 }
+
+/**
+ * T2 (P5) — a route evaluation's per-check results, as readiness blockers.
+ *
+ * One blocker per (outcome, check), naming the segment, the actual constraint and where it came
+ * from, so "route blocked" is never the whole answer. Codes are registered in `complianceFinding`:
+ *   FAIL                          → `route_check_failed_<check>`   blocking, never overridable;
+ *   UNKNOWN on a legal/feasible   → `route_check_unknown_<check>`  unknown (not clean eligible);
+ *   REVIEW, or UNKNOWN preference → `route_check_review_<check>`   review.
+ * A pass contributes nothing. Several segments failing one check fold into one blocker that names
+ * the first and counts the rest, with every source kept as an evidence reference.
+ */
+export type RouteCheckBlocker = {
+  code: string; label: string; severity: "blocking" | "unknown" | "review"; subject: "route";
+  overridable: boolean; overrideAuthority?: "manager"; evidenceRefs: string[];
+};
+export function routeCheckBlockers(evidence: readonly RouteVerdict["evidence"][number][], evaluationRef: string | null): RouteCheckBlocker[] {
+  const groups = new Map<string, { kind: "failed" | "unknown" | "review"; rows: RouteVerdict["evidence"][number][] }>();
+  for (const e of evidence) {
+    const kind = e.result === "fail" ? "failed" : e.result === "review" ? "review" : e.result === "unknown" ? (e.axis === "preferred" ? "review" : "unknown") : null;
+    if (!kind) continue;
+    const key = `route_check_${kind}_${e.check}`;
+    const g = groups.get(key) ?? { kind, rows: [] };
+    g.rows.push(e);
+    groups.set(key, g);
+  }
+  const out: RouteCheckBlocker[] = [];
+  for (const [code, { kind, rows }] of Array.from(groups)) {
+    const first = rows[0]!;
+    const src = first.source ? ` [${first.source}${first.sourceVersion ? ` @ ${first.sourceVersion}` : ""}]` : " [no source recorded]";
+    const more = rows.length > 1 ? ` (and ${rows.length - 1} more segment${rows.length > 2 ? "s" : ""})` : "";
+    const verb = kind === "failed" ? "FAILS" : kind === "unknown" ? "is UNKNOWN" : "needs review";
+    const refs = new Set<string>();
+    if (evaluationRef) refs.add(`evaluation:${evaluationRef}`);
+    for (const r of rows) { refs.add(`segment:${r.segmentId}`); if (r.source) refs.add(r.source.slice(0, 200)); }
+    out.push({
+      code, label: `Route ${first.check.replace(/_/g, " ")} ${verb} on ${first.segmentLabel}: ${first.reason}${src}${more}`,
+      severity: kind === "failed" ? "blocking" : kind, subject: "route",
+      overridable: kind !== "failed", ...(kind !== "failed" ? { overrideAuthority: "manager" as const } : {}),
+      evidenceRefs: Array.from(refs).sort(),
+    });
+  }
+  return out;
+}

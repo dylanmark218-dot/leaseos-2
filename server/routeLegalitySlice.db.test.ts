@@ -375,3 +375,126 @@ d("P4 — stale on material change, and only on material change", () => {
     expect((await recheck(c, a.approvalRef)).stale).toBe(false);
   }, 60_000);
 });
+
+/* ------------------------------------------------------------------ */
+/* P5 — per-check results reach the existing readiness                  */
+/* ------------------------------------------------------------------ */
+
+type RB = { code: string; label: string; severity: string; subject: string; overridable: boolean; overrideClass?: string; evidenceRefs?: string[] };
+async function operatorRow() {
+  const [r] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Op ${key("O")}`]);
+  return Number(r.insertId);
+}
+/** Evaluate, then approve from that evaluation — the path a dispatcher takes. */
+async function evaluatedApproval(c: Cast, unitId: number, segmentIds: string[], checks: Check[]) {
+  const ev = await evaluate(c, unitId, segmentIds, checks);
+  const a = await callerFor(c.dispatcher).spatial.routeApprove({ unitId, originRef: "YARD", destinationRef: "LEASE", segmentIds, dispatchStatus: "clear", explanation: "fixture approval", requiredChecks: checks, load: { grossWeightKg: 20_000, dangerousGoods: false }, evaluationRef: ev.evaluationRef });
+  return { ev, approvalRef: a.approvalRef as string };
+}
+async function routeBlockers(unitId: number, routeApprovalRef: string, at = new Date()) {
+  const { composeReadiness } = await import("./readinessComposer");
+  const r = await composeReadiness({ operatorId: await operatorRow(), unitId, trailerId: null, jobId: null, routeApprovalRef }, at);
+  // Route legality only: the communication plan also reports on the route subject, and is not this slice.
+  return { verdict: r.eligibility.verdict, route: (r.eligibility.blockers as RB[]).filter(b => b.subject === "route" && b.code.startsWith("route_")), all: r };
+}
+
+d("P5 — route evaluation flows into readiness, naming the constraint and its evidence", () => {
+  it("a current valid evaluation with a current approval adds no route blocker — readiness moves on to its other checks", async () => {
+    const c = await cast();
+    const unitId = await newUnit();
+    await profile(c, unitId);
+    const seg = key("SEG").slice(0, 60);
+    await restriction(c, seg, "road_weight_restriction", 30_000, "kg");
+    const { ev, approvalRef } = await evaluatedApproval(c, unitId, [seg], ["road_weight_restriction"]);
+    expect(ev.dispatchStatus).toBe("clear");
+    const r = await routeBlockers(unitId, approvalRef);
+    expect(r.route.map(b => `${b.code}: ${b.label}`)).toEqual([]);
+    expect(r.all.contributions.some(x => x.engine === "routing" && x.finding.includes("re-evaluated") && x.finding.includes(": clear"))).toBe(true);
+  }, 60_000);
+
+  it("a current FAIL is blocked, never overridable, and the blocker names the constraint, the segment and the evidence", async () => {
+    const c = await cast();
+    const unitId = await newUnit();
+    await profile(c, unitId);
+    const seg = key("SEG").slice(0, 60);
+    const ref = await restriction(c, seg, "road_weight_restriction", 30_000, "kg");
+    const { ev, approvalRef } = await evaluatedApproval(c, unitId, [seg], ["road_weight_restriction"]);
+    // after the approval, a certified scale weighs the loaded unit at 50,000 kg
+    await reading(unitId, { source: "certified_scale", grossKg: 50_000, legal: true, groups: [{ key: "steer", kg: 7_000 }, { key: "drive", kg: 43_000 }] });
+    const r = await routeBlockers(unitId, approvalRef);
+    expect(r.verdict).toBe("blocked");
+    const fail = r.route.find(b => b.code === "route_check_failed_road_weight_restriction")!;
+    expect(fail).toBeDefined();
+    expect(fail.severity).toBe("blocking");
+    expect(fail.overridable).toBe(false);
+    expect(fail.overrideClass).toBe("NEVER_OVERRIDABLE");
+    expect(fail.label).toContain("Fixture Rd");
+    expect(fail.label).toContain("50000");
+    expect(fail.label).toContain("30000");
+    expect(fail.label).toContain(`restriction ${ref}`);
+    expect(fail.evidenceRefs).toEqual(expect.arrayContaining([`evaluation:${ev.evaluationRef}`, `segment:${seg}`]));
+    // and the approval itself is stale, saying why
+    const stale = r.route.find(b => b.code === "route_approval_stale")!;
+    expect(stale.label).toContain("the authoritative vehicle weight changed");
+  }, 60_000);
+
+  it("a material UNKNOWN is not clean eligible: the ban's missing base rule is named, not estimated", async () => {
+    const c = await cast();
+    const unitId = await newUnit();
+    await profile(c, unitId);
+    const seg = key("SEG").slice(0, 60);
+    const j = freshJurisdiction();                 // no verified axle rule exists for it
+    await banAt(c, seg, 75, j);
+    const { ev, approvalRef } = await evaluatedApproval(c, unitId, [seg], ["road_ban_level"]);
+    expect(ev.dispatchStatus).not.toBe("clear");
+    const r = await routeBlockers(unitId, approvalRef);
+    expect(["eligible", "eligible_review"]).not.toContain(r.verdict);
+    const unknown = r.route.find(b => b.code === "route_check_unknown_road_ban_level")!;
+    expect(unknown.severity).toBe("unknown");
+    expect(unknown.label).toContain("no verified legal axle-load rule");
+    expect(unknown.label).toContain(j);
+  }, 60_000);
+
+  it("a stale approval is not eligible even when every check still passes, and the approval is recorded stale", async () => {
+    const c = await cast();
+    const unitId = await newUnit();
+    await profile(c, unitId);
+    const seg = key("SEG").slice(0, 60);
+    await restriction(c, seg, "road_weight_restriction", 30_000, "kg");
+    const { approvalRef } = await evaluatedApproval(c, unitId, [seg], ["road_weight_restriction"]);
+    // A tighter limit the unit still meets: what governs changed (30,000 → 25,000 kg), the answer did not.
+    // (A second, LOOSER limit would not stale it: the most restrictive limit still governs.)
+    await restriction(c, seg, "road_weight_restriction", 25_000, "kg");
+    const r = await routeBlockers(unitId, approvalRef);
+    expect(r.route.map(b => `${b.code}: ${b.label}`).filter(x => x.startsWith("route_check_"))).toEqual([]);
+    expect(r.route.map(b => b.code)).toContain("route_approval_stale");
+    const stale = r.route.find(b => b.code === "route_approval_stale")!;
+    expect(stale.severity).toBe("blocking");
+    expect(stale.label).toContain("the restrictions in force changed");
+    expect(r.verdict).toBe("blocked");
+    const [[row]] = await pool.query<mysql.RowDataPacket[]>("SELECT status FROM routeApprovals WHERE approvalRef = ?", [approvalRef]) as unknown as [mysql.RowDataPacket[]];
+    expect(row!.status).toBe("stale");
+  }, 60_000);
+
+  it("never shows one unit's — or one tenant's — route through another's readiness", async () => {
+    const orgRef = async () => { const o = key("ORG"); await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [o, `o ${o}`]); return o; };
+    const A = await orgRef(), B = await orgRef();
+    const c = await cast();
+    for (const u of [c.dispatcher, c.safety, c.shop, c.shop2]) await pool.execute("INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01',1)", [key("MEM"), A, u]);
+    const unitA = await newUnit(), unitB = await newUnit();
+    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,'unit',?,1), (?,'unit',?,1)", [A, unitA, B, unitB]);
+    await profile(c, unitA);
+    const seg = key("SECRET").slice(0, 60);
+    await restriction(c, seg, "road_weight_restriction", 30_000, "kg");
+    const { approvalRef } = await evaluatedApproval(c, unitA, [seg], ["road_weight_restriction"]);
+    await reading(unitA, { source: "certified_scale", grossKg: 50_000, legal: true, groups: [{ key: "drive", kg: 50_000 }] });
+    const r = await routeBlockers(unitB, approvalRef);
+    expect(r.route.map(b => b.code).sort()).toEqual(["route_approval_missing", "route_not_evaluated"]);   // B's readiness: no route on record for B's unit
+    const text = JSON.stringify(r.all.eligibility) + JSON.stringify(r.all.contributions);
+    expect(text).not.toContain(seg);
+    expect(text).not.toContain("fixture posting");
+    expect(text).not.toContain("50000");
+    // and A's own readiness still sees its failure
+    expect((await routeBlockers(unitA, approvalRef)).route.map(b => b.code)).toContain("route_check_failed_road_weight_restriction");
+  }, 60_000);
+});
