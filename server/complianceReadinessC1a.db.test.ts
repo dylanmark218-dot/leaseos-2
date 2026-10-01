@@ -437,3 +437,63 @@ d("18. tenant-crossing attempts are refused, and the caller cannot supply a tena
       .rejects.toThrow(/Eligibility check not found/);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* SPINE item 2 — the award's resource-conflict refusal is the only one */
+/* ------------------------------------------------------------------ */
+
+/*
+ * `dispatchMatching.detectBookingConflicts` was a second, unwired answer to "is this resource already
+ * booked?" (docs/register/SPINE_ITEM2_DUPLICATIONS.md). The live answer is `awardAssignment`'s own
+ * overlap query feeding `decideAward`: keyed by resource type and ref, only tentative or confirmed
+ * bookings count, and bookings on the same posting are skipped. These pin it through the real
+ * `dispatch.award` before the unwired copy is deleted. "Another organization cannot award" is pinned
+ * above, in the tenant-scope block.
+ */
+d("SPINE item 2 — a resource booked on another posting refuses the award", () => {
+  async function secondPosting(s: Subject) {
+    const [p] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO dispatchPostings (postingNumber, jobId, distribution, planningState, planningBlocker, priority, crewSize, rateVisible, createdByUserId) VALUES (?, ?, 'direct_assignment', 'direct', 'none', 'normal', 1, 0, ?)", [key("POST").slice(0, 40), s.jobId, s.dispatcher]);
+    return Number(p.insertId);
+  }
+  async function awardOn(s: Subject, postingId: number, at: { startsAt: Date; endsAt: Date }) {
+    const c = await caller(s.dispatcher).dispatch.evaluate({ ...s.subject, postingId });
+    await acknowledgeWarnings(s, c.checkId, c.blockers as Finding[]);
+    return caller(s.dispatcher).dispatch.award({ checkId: c.checkId, ...at }) as Promise<{ ok: boolean; refusals?: string[] }>;
+  }
+  const bookingsOn = async (postingId: number) => {
+    const [r] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM resourceBookings WHERE postingId = ?", [postingId]);
+    return Number(r[0].n);
+  };
+
+  it("refuses an overlapping award of the same unit and operator on a second posting — even of the same job", async () => {
+    const s = await establishedSubject();
+    const w = window();
+    const first = await awardOn(s, s.postingId, w);
+    expect(first.ok, first.refusals?.join(" | ")).toBe(true);
+    const p2 = await secondPosting(s);
+    const second = await awardOn(s, p2, { startsAt: new Date(w.startsAt.getTime() + 600_000), endsAt: new Date(w.endsAt.getTime() + 600_000) });
+    expect(second.ok).toBe(false);
+    expect(second.refusals?.some(r => /^Resource conflict — unit /.test(r))).toBe(true);
+    expect(second.refusals?.some(r => /^Resource conflict — operator /.test(r))).toBe(true);
+    expect(await bookingsOn(p2)).toBe(0);
+  });
+
+  it("allows back-to-back bookings: the intervals are half-open", async () => {
+    const s = await establishedSubject();
+    const w = window();
+    expect((await awardOn(s, s.postingId, w)).ok).toBe(true);
+    const p2 = await secondPosting(s);
+    const next = await awardOn(s, p2, { startsAt: w.endsAt, endsAt: new Date(w.endsAt.getTime() + 3_600_000) });
+    expect(next.ok, next.refusals?.join(" | ")).toBe(true);
+  });
+
+  it("does not count a released booking", async () => {
+    const s = await establishedSubject();
+    const w = window();
+    expect((await awardOn(s, s.postingId, w)).ok).toBe(true);
+    await pool.execute("UPDATE resourceBookings SET bookingState = 'released' WHERE postingId = ?", [s.postingId]);
+    const p2 = await secondPosting(s);
+    const again = await awardOn(s, p2, w);
+    expect(again.ok, again.refusals?.join(" | ")).toBe(true);
+  });
+});
