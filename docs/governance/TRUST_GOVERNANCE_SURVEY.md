@@ -1,6 +1,6 @@
 # LeaseOS Trust & Governance — repository survey and architecture proposal
 
-**Status: survey only. No production code, schema or behaviour was changed.**
+**Status: survey (§1–§18, taken at `6f52b57`) plus a re-verification and the G1 kernel (§19, at `b35bac4`). No production behaviour has changed: G1 is pure and reached by nothing.**
 Surveyed against `6f52b57` (this branch's HEAD, equal to `origin/main` at survey time, 2026-09-24).
 Every file, table, procedure and migration named below was read in the tree at that commit; where a
 root `LEASEOS_*.md` or `docs/register/*` document disagrees with the code, the code is reported and the
@@ -848,3 +848,74 @@ imports `AuthorityClass`; the existing ladder is unchanged).
 Exit criteria: `pnpm check` clean; `pnpm test` green including the new suites; the CI gate's
 reachability check passes with the declared entry; `LEASEOS_CURRENT_STATE.md` regenerated
 (test-count rows change, nothing else).
+
+---
+
+## 19. Re-verification at `b35bac4` (2026-10-01) and checkpoint G1
+
+Main moved 333 commits after the survey. Everything in §1–§18 describes `6f52b57` and is left as that
+record. This section says what changed underneath it, then what G1 delivered.
+
+### 19.1 Findings that changed on main
+
+| Finding | Status at `b35bac4` | Evidence |
+|---|---|---|
+| I1 — lapsed membership falls back to the single tenant | **Largely fixed.** The resolver throws `MembershipRevoked` for an ended membership; `resolveActingScopeStrict` refuses any revived fallback. Callers adopt the strict variant one checkpoint at a time (HOS first) | `actingScope.ts:205-240` |
+| I2 — one-year JWT, no revocation, empty secret | **Largely fixed.** Sessions are rows (`0175_session_families`), revocable, with a short access-token TTL; boot refuses a missing or short `JWT_SECRET`. `SameSite=None` remains | `sdk.ts:199`, `env.ts:153-159`, `cookies.ts:45` |
+| I3 — organization status not consulted | **Fixed in the resolver**: a suspended or closed organization is not a live membership | `actingScope.ts:30,131` |
+| G9 — no organization-scoped roles | **Landed**: `userRoleAssignments.scopeType` is `global \| organization \| branch \| unscoped_legacy` | `0207_organization_scoped_role_grants.sql`, `schema.ts:3113` |
+| I19 — trip stops record no actor | **Fixed**: `recordedByUserId` | `0179_trip_stop_provenance.sql:32` |
+| I14 / D5 — platform authority | **Defined**: `platformAuthorityProven()` reads `users.role = "admin"` from the row at the moment of the change and fails closed; no second hierarchy | `server/platformAuthority.ts` |
+| Rule ledger | `hosRuleLimitHistory` became the one rule ledger, with `authorityTier` holding `AuthorityClass` values | `0189_rule_ledger_generalization.sql` |
+
+Still as reported: I4 (prose denials), I5 (`authorizationDecisions` has no `orgRef`), I6
+(`APPROVED_OVERRIDE_POLICIES` empty constant), I7 (no `actorSource: "ai"` writer), I9 (monitoring
+notices unrouted), I10 (no portal terms), I11 (`insuranceRequirements` hard delete), I18 (client MIME
+trusted), I20 (`DSP-AI-` numbering), I23 (`payroll.export` stub). Each was re-checked by grep on
+`b35bac4`.
+
+### 19.2 Migration numbers
+
+Main ends at **`0219`**. Open branches claim up to **`0216`** (`0210`–`0216`: assistant proposal
+tenancy, driver portfolio, runtime instances, organization knowledge, Sign & Attest). **The first
+number no branch holds is `0220`.** G1 takes none. §14's `0182`–`0184` are superseded; G2 claims its
+numbers in `docs/architecture/MIGRATION_COLLISION_REGISTER.md` at its own rebase, from a fresh scan.
+
+### 19.3 What G1 delivered
+
+All pure, all declared unwired in `server/engineReachability.test.ts`, so production behaviour is
+unchanged.
+
+| File | What it is |
+|---|---|
+| `shared/_core/reasonCodes.ts` | The catalog: every code with the sentence a person reads and what they can do. Permission codes are `authorizationDecisions.outcome`'s own spelling |
+| `server/_core/governance/decision.ts` | `PolicyAuthority` (= `AuthorityClass` + four LeaseOS levels), `PRECEDENCE`, `ORGANIZATION_AUTHORABLE`, request and decision types. Reuses `ComplianceVerdict` and `NotEvaluatedReason` rather than copying them |
+| `server/_core/governance/rules.ts` | Ten rules: well-formed request, permission established, tenant boundary, never-overridable control, never-autonomous safeguard, human-only acts, compliance authoritative, legal hold, issued immutable, acceptance required. `RULESET_VERSION` and the hashed manifest (rules plus every word list they match on) |
+| `server/_core/governance/evaluate.ts` | `evaluate()`: every rule runs, then the organization's rows (refuse or review only; a row claiming a higher authority is ignored and named); worst outcome reported, everything in the trace |
+| `server/_core/governance/adapters.ts` | From `authorize()`, from `DispatchBlocker` via `complianceFinding.asFinding`, from the action gateway's decision; onto `CapabilityResult` without rounding `NOT_EVALUATED` up |
+| `server/_core/governance/governance.test.ts` | Rule-by-rule and precedence cases |
+| `server/governanceConformance.test.ts` | The standing invariants of §13 that need no database, enumerated from source: the ladder against `AuthorityClass`, every catalog code, every procedure in the five permission maps whose verb is a human act, every `NEVER_AUTONOMOUS` entry, tenancy, consent, precedence, the pinned rule-set hash, and purity |
+
+Decisions taken in G1 that differ from §7, each a simplification:
+
+- **No `organization_policy` level.** An organization writes at the existing `company_policy`,
+  `work_site`, `operational_preference` or `best_practice`. A new name for the same thing would have
+  been a second word for it.
+- **An acceptance requirement lists the versions that still count** instead of comparing version
+  strings. A material change is a short list; anything older reads as stale.
+- **Two procedures are exempt from the human-only rule, by name and with a reason**
+  (`comms.signQueue`, a road-sign queue read; `device.verifySeal`, a cryptographic recomputation). The
+  suite fails if an exemption stops naming a real procedure or stops matching the word list. 82 other
+  procedures across the five maps are refused to every automated actor.
+
+Owner decisions still open and now visible in code: **D2** is the position of `client_contract`
+above `leaseos_terms` in `PRECEDENCE`, marked in the source as open; **D3** is the content of
+`RULES`, all ten of which are `NEVER_OVERRIDABLE`.
+
+### 19.4 Next checkpoint: G2
+
+Wire the kernel through one procedure, write receipts, and give the client codes instead of prose:
+`0220` (or the next free number at the time) for `governanceReceipts` plus `orgRef`/`reasonCode` on
+`authorizationDecisions`; a `governedProcedure` builder in `trpc.ts`; the reason code carried on the
+tRPC error and rendered by the client; one pilot procedure. The `governance/*` entries leave
+`DECLARED_UNWIRED` in the same change.

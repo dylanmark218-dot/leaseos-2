@@ -48,6 +48,13 @@ const DECLARED_UNWIRED: Record<string, string> = {
   "ai/llm/mockProvider": "deterministic fixtures; the only provider the test suite constructs, which is what keeps CI off the network",
   "ai/llm/openAiCompatibleProvider": "llama.cpp / Ollama / vLLM over chat-completions. Unwired: nothing may call a model until the spine is wired",
   "ai/prompts/index": "versioned prompt loader and the run fingerprint (model, prompt version, prompt hash, input hash)",
+  // G1 Trust & Governance kernel (docs/governance/TRUST_GOVERNANCE_SURVEY.md §18): pure, and unreached on
+  // purpose. It is wired at G2 through a governed procedure builder; until then nothing in production
+  // asks it anything, so it changes no behaviour. Pinned by server/governanceConformance.test.ts.
+  "governance/decision": "the governance decision contract — PolicyAuthority extends complianceFinding.AuthorityClass. Unwired until G2",
+  "governance/rules": "the LeaseOS mandatory rules (tenant, permission, signatures, safeguards, record integrity, acceptance). Unwired until G2",
+  "governance/evaluate": "evaluate(): one decision per request, worst outcome first, with the trace and the rule-set hash. Unwired until G2",
+  "governance/adapters": "translation from authorize(), DispatchBlocker and the action gateway, and onto the inter-engine contract. Unwired until G2",
   "ai/extraction/contract": "ExtractedField — value, status, evidenceQuote, evidenceRef. A wire contract, not a second stored shape",
   "ai/extraction/formSchema": "FORMS -> zod -> JSON Schema. Derived twice from one source so no hand-written parallel schema exists",
   "ai/extraction/runExtraction": "perimeter -> fence -> prompt -> provider -> parse -> scan -> validate. Calls a model, so it stays unwired under the moratorium",
@@ -329,13 +336,18 @@ describe("every engine is reached, or says why not", () => {
       "ai/tools/registry",
       "ai/validate/normalizers",
       "ai/validate/validator",
+      // The G1 governance kernel's internal cluster: evaluate imports rules and decision,
+      // adapters imports decision. They leave this list together at G2, when a governed
+      // procedure builder imports evaluate and the whole kernel is reached from a router.
+      "governance/decision",
+      "governance/rules",
     ].sort());
   });
 
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(73);   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
+    expect(unwired).toHaveLength(77);   // G1 governance kernel: +4 — governance/{decision,rules,evaluate,adapters}, declared above, wired at G2;   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });
