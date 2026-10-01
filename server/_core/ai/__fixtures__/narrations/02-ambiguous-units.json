@@ -1,0 +1,36 @@
+{
+  "id": "02-ambiguous-units",
+  "note": "\"Dumped sixteen\" — a number with no unit. The model records 16 and marks it, code asks.",
+  "transcript": "Got to the disposal site, dumped sixteen, then headed out. Started at 09:05 and finished 09:40. Arrived 08:55, left 09:50. Gauge reading.",
+  "context": {
+    "formKey": "unload_stop",
+    "formVersion": 1,
+    "tripRef": "TRIP-2026-004821",
+    "unitNumber": "T-118",
+    "unitTankCapacityLitres": 16000,
+    "vehicleMoving": false
+  },
+  "modelResponse": {
+    "fields": {
+      "arrivedAt": { "value": "08:55", "status": "stated", "evidenceQuote": "Arrived 08:55", "evidenceRef": null },
+      "waitMinutes": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "delayReason": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "operationStartedAt": { "value": "09:05", "status": "stated", "evidenceQuote": "Started at 09:05", "evidenceRef": null },
+      "operationCompletedAt": { "value": "09:40", "status": "stated", "evidenceQuote": "finished 09:40", "evidenceRef": null },
+      "quantity": { "value": 16, "status": "stated", "evidenceQuote": "dumped sixteen", "evidenceRef": null },
+      "measurementMethod": { "value": "Gauge", "status": "stated", "evidenceQuote": "Gauge reading", "evidenceRef": null },
+      "departedAt": { "value": "09:50", "status": "stated", "evidenceQuote": "left 09:50", "evidenceRef": null }
+    },
+    "notes": null,
+    "outOfScope": false,
+    "injectionSuspected": false
+  },
+  "expect": {
+    "verdicts": { "quantity": "REVIEW", "arrivedAt": "PASS" },
+    "reasonCodes": { "quantity": ["volume_unit_missing"] },
+    "question": "You said 16. Was that cubic metres or barrels?",
+    "silentGuesses": 0,
+    "outOfScope": false,
+    "injectionSuspected": false
+  }
+}

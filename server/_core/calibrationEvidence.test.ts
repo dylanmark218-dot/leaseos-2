@@ -129,7 +129,7 @@ describe("what a failure finding calls into question", () => {
  * The engine's full source shape, taken verbatim from the fuel-line suite rather than hand-rolled.
  * A partial fixture would satisfy these tests and prove nothing about the engine callers use.
  */
-const EMPTY = (NOW: Date): ExceptionSources => ({ openCalibrationSweeps: [], inspectorRequests: [], now: NOW, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [], syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [] });
+const EMPTY = (NOW: Date): ExceptionSources => ({ openCalibrationSweeps: [], inspectorRequests: [], now: NOW, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentialsAwaitingVerification: [], credentialVerdicts: [], aiProposals: [], aiQuestions: [], syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [] });
 
 describe("one parent case, not one per finding", () => {
   it("raises exactly one exception for a sweep however many readings it names", () => {

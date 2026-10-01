@@ -1,0 +1,1530 @@
+{
+  "schemaVersion": 1,
+  "status": "PROPOSED_SEED_ONLY_REQUIRES_REPO_SURVEY_AND_OWNER_REVIEW",
+  "coreInvariant": "Template is optional. Scanned/imported external documents must enter the same Document Control engine.",
+  "definitions": [
+    {
+      "document_definition_key": "equipment_rental_contract_and_inventory_log",
+      "display_name": "Equipment Rental Contract and Inventory Log",
+      "category": "assets_niche",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS_Niche_Forms_PDF_Templates",
+          "files": [
+            "canonical_templates/assets_niche/equipment_rental_contract_and_inventory_log/leaseos_niche_forms_pdf_templates__LeaseOS_Equipment_Rental_Contract_and_Inventory_Log.pdf"
+          ],
+          "template_code_or_doc_ref": "FRM-COM-RNT-001",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "4e85e53446ce90bb3c0177427f5064a1f08a80e157d6a82989492b60b9196fdf"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "hazard_communication_sds_acknowledgment",
+      "display_name": "Hazard Communication / SDS Acknowledgment",
+      "category": "assets_niche",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS_Niche_Forms_PDF_Templates",
+          "files": [
+            "canonical_templates/assets_niche/hazard_communication_sds_acknowledgment/leaseos_niche_forms_pdf_templates__LeaseOS_HazCom_SDS_Acknowledgment.pdf"
+          ],
+          "template_code_or_doc_ref": "FRM-SFT-HC-001",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "b55dcd15c24449525d8787541ffe4ff2ac3a6e07587d5bb1fc6035ffa5a31e94"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "lumber_hotshot_delivery_ticket",
+      "display_name": "Lumber / Hotshot Delivery Ticket",
+      "category": "assets_niche",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_WITH_EXTERNAL_REFERENCES",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS_Niche_Forms_PDF_Templates",
+          "files": [
+            "canonical_templates/assets_niche/lumber_hotshot_delivery_ticket/leaseos_niche_forms_pdf_templates__LeaseOS_Hotshot_Delivery_Ticket.pdf"
+          ],
+          "template_code_or_doc_ref": "FRM-DSP-HTS-001",
+          "revision_detected": "1.0",
+          "pages": 1,
+          "sha256_pdf": "345a831888df391ff3b8c3d8cfa5b6a6a5c2f56320a704e3744ef9909125d178"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "returnable_asset_tracking_rental_receipt",
+      "display_name": "Returnable Asset Tracking / Rental Receipt",
+      "category": "assets_niche",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS_Niche_Forms_PDF_Templates",
+          "files": [
+            "canonical_templates/assets_niche/returnable_asset_tracking_rental_receipt/leaseos_niche_forms_pdf_templates__LeaseOS_Returnable_Asset_Tracking_and_Rental_Receipt.pdf"
+          ],
+          "template_code_or_doc_ref": "FRM-AST-RET-001",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "2bce6e32b42145baefac3efa328abb9c699d71afd375d68e7d9d41a806925f2a"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "boc_3_process_agent_record",
+      "display_name": "BOC-3 / Process Agent Record",
+      "category": "carrier_compliance_permits",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/carrier_compliance_permits/boc_3_process_agent_record/leaseos_compliance_all_paperwork_templates__04_BOC3_Process_Agent_Record.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 1,
+          "sha256_pdf": "e11525b0748e24e6c3fcc863927f482f9c9b4b6a4ad1ac99753562d3f09af16c"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "carrier_credential_and_permit_checklist",
+      "display_name": "Carrier Credential & Permit Checklist",
+      "category": "carrier_compliance_permits",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/carrier_compliance_permits/carrier_credential_and_permit_checklist/leaseos_compliance_all_paperwork_templates__02_Carrier_Credential_Checklist.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 1,
+          "sha256_pdf": "3f14f5fb7762e8fb365679a8fb3b7d2fc54771896a7ca0376c9d79728982bb00"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "carrier_insurance_evidence_record",
+      "display_name": "Carrier Insurance Evidence Record",
+      "category": "carrier_compliance_permits",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/carrier_compliance_permits/carrier_insurance_evidence_record/leaseos_compliance_all_paperwork_templates__03_Carrier_Insurance_Evidence_Record.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 1,
+          "sha256_pdf": "37e3586e2c46d63083a474582ad4cc12f607ae026e45a643fdf6b7699785e2cb"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "dot_fmcsa_registration_and_authority_record",
+      "display_name": "DOT / FMCSA Registration & Authority Record",
+      "category": "carrier_compliance_permits",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/carrier_compliance_permits/dot_fmcsa_registration_and_authority_record/leaseos_compliance_all_paperwork_templates__01_DOT_FMCSA_Registration_Authority_Record.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "db27a47e4f6ec28b1b90d0e4ff4b4c18a345986940d4b332e55afdf399831a67"
+        },
+        {
+          "variant": 2,
+          "source_collection": "leaseos_compliance_pdf_templates",
+          "files": [
+            "canonical_templates/carrier_compliance_permits/dot_fmcsa_registration_and_authority_record/leaseos_compliance_pdf_templates__01_DOT_FMCSA_Registration_Authority_Record.pdf"
+          ],
+          "template_code_or_doc_ref": "FOR",
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "99f2f5baf60ab16d9e5730888c3941cbf0482ad866651c8ade325ee5870d4a08"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "dot_roadside_inspection_compliance_record",
+      "display_name": "DOT / Roadside Inspection Compliance Record",
+      "category": "carrier_compliance_permits",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/carrier_compliance_permits/dot_roadside_inspection_compliance_record/leaseos_compliance_all_paperwork_templates__05_DOT_Inspection_Compliance_Record.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "bae7a3c197aee429729d8a1d39532614ef65a0abb6789a6597ab40b6a1d2ffea"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "environmental_spill_incident_report",
+      "display_name": "Environmental / Spill Incident Report",
+      "category": "environmental_compliance",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/environmental_compliance/environmental_spill_incident_report/leaseos_compliance_all_paperwork_templates__14_Environmental_Spill_Incident_Report.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "74dc6b3b743749e93afb62314316051d58221701961299c2cd342242cea39137"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "environmental_compliance_spill_reporting_form",
+      "display_name": "Environmental Compliance / Spill Reporting Form",
+      "category": "environmental_compliance",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": {
+        "source_key": "environmental_spill_report",
+        "version": 1,
+        "field_count": 39,
+        "family": "compliance_permits",
+        "packKey": "oilfield_environmental",
+        "ownerType": "job"
+      },
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_pdf_templates",
+          "files": [
+            "canonical_templates/environmental_compliance/environmental_compliance_spill_reporting_form/leaseos_compliance_pdf_templates__04_Environmental_Compliance_Spill_Report.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "79ef4c85696473e0b0d089c489459952c27c15e39cdaa10bd3c99dafd5fc9266"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "environmental_corrective_action_and_closeout_record",
+      "display_name": "Environmental Corrective Action & Closeout Record",
+      "category": "environmental_compliance",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/environmental_compliance/environmental_corrective_action_and_closeout_record/leaseos_compliance_all_paperwork_templates__17_Environmental_Corrective_Action_Record.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 1,
+          "sha256_pdf": "baeb493f5703b22d8dc0ec765bc5f832f2c1d2426c2355de83a05bb3deaa5988"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "environmental_release_notification_log",
+      "display_name": "Environmental Release Notification Log",
+      "category": "environmental_compliance",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/environmental_compliance/environmental_release_notification_log/leaseos_compliance_all_paperwork_templates__15_Environmental_Release_Notification_Log.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 1,
+          "sha256_pdf": "8ba4286f0433b2c7ebb4a4ab26df550ff653a534ffa802f9ca8c726cb2a74645"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "spill_response_and_site_inspection_checklist",
+      "display_name": "Spill Response & Site Inspection Checklist",
+      "category": "environmental_compliance",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/environmental_compliance/spill_response_and_site_inspection_checklist/leaseos_compliance_all_paperwork_templates__16_Spill_Response_Inspection_Checklist.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "3a520e7480fdde5ea3abd3b4ba708f218b74746effb2e824b1f6204cdf476ff5"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "bill_of_lading",
+      "display_name": "Bill Of Lading",
+      "category": "freight_transportation",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_WITH_EXTERNAL_REFERENCES",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Freight-and-Transportation-Templates",
+          "files": [
+            "canonical_templates/freight_transportation/bill_of_lading/leaseos_freight_and_transportation_templates__Bill-of-Lading.pdf",
+            "canonical_templates/freight_transportation/bill_of_lading/leaseos_freight_and_transportation_templates__Bill-of-Lading.docx"
+          ],
+          "template_code_or_doc_ref": "BOL",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "0020eaea29470ab0cf1e8cc88f8df01f18aa0c048556093700c6ce618cc7fe8b"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "commercial_invoice",
+      "display_name": "Commercial Invoice",
+      "category": "freight_transportation",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_WITH_EXTERNAL_REFERENCES",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Freight-and-Transportation-Templates",
+          "files": [
+            "canonical_templates/freight_transportation/commercial_invoice/leaseos_freight_and_transportation_templates__Commercial-Invoice.pdf",
+            "canonical_templates/freight_transportation/commercial_invoice/leaseos_freight_and_transportation_templates__Commercial-Invoice.docx"
+          ],
+          "template_code_or_doc_ref": "INV",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "85664f88a987d3fce9a6ff20a0d31c1c85b0a0844f0458b0bc1941407ee454dd"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "freight_and_oilfield_manifest",
+      "display_name": "Freight And Oilfield Manifest",
+      "category": "freight_transportation",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_WITH_EXTERNAL_REFERENCES",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Freight-and-Transportation-Templates",
+          "files": [
+            "canonical_templates/freight_transportation/freight_and_oilfield_manifest/leaseos_freight_and_transportation_templates__Freight-and-Oilfield-Manifest.pdf",
+            "canonical_templates/freight_transportation/freight_and_oilfield_manifest/leaseos_freight_and_transportation_templates__Freight-and-Oilfield-Manifest.docx"
+          ],
+          "template_code_or_doc_ref": "MAN",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "2954f61ef79aacfbd41e189cc12ffc6cc9036ab6af9413fa4b384ea8b0be9e2e"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "proof_of_delivery",
+      "display_name": "Proof Of Delivery",
+      "category": "freight_transportation",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_WITH_EXTERNAL_REFERENCES",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Freight-and-Transportation-Templates",
+          "files": [
+            "canonical_templates/freight_transportation/proof_of_delivery/leaseos_freight_and_transportation_templates__Proof-of-Delivery.pdf",
+            "canonical_templates/freight_transportation/proof_of_delivery/leaseos_freight_and_transportation_templates__Proof-of-Delivery.docx"
+          ],
+          "template_code_or_doc_ref": "POD",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "45d2149cf16f602d20d5a10378f450315399eeee8c3c17ac28603c09b52cf31a"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "rate_and_load_confirmation",
+      "display_name": "Rate And Load Confirmation",
+      "category": "freight_transportation",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_WITH_EXTERNAL_REFERENCES",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Freight-and-Transportation-Templates",
+          "files": [
+            "canonical_templates/freight_transportation/rate_and_load_confirmation/leaseos_freight_and_transportation_templates__Rate-and-Load-Confirmation.pdf",
+            "canonical_templates/freight_transportation/rate_and_load_confirmation/leaseos_freight_and_transportation_templates__Rate-and-Load-Confirmation.docx"
+          ],
+          "template_code_or_doc_ref": "RATE",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "8fe98601e7b28258b71eab172d1d5ee55e289d7af32b7ea948da2bf4b8cae4ed"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "weighing_and_inspection_report",
+      "display_name": "Weighing And Inspection Report",
+      "category": "freight_transportation",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Freight-and-Transportation-Templates",
+          "files": [
+            "canonical_templates/freight_transportation/weighing_and_inspection_report/leaseos_freight_and_transportation_templates__Weighing-and-Inspection-Report.pdf",
+            "canonical_templates/freight_transportation/weighing_and_inspection_report/leaseos_freight_and_transportation_templates__Weighing-and-Inspection-Report.docx"
+          ],
+          "template_code_or_doc_ref": "WEIGH",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "eb6eff31b9b138f472ac964969dfd037e69822945b84693bc3afdb31a305c07f"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "accident_investigation_report",
+      "display_name": "Accident Investigation Report",
+      "category": "incident_evidence",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Incident-Injury-NearMiss-Templates",
+          "files": [
+            "canonical_templates/incident_evidence/accident_investigation_report/leaseos_incident_injury_nearmiss_templates__Accident-Investigation-Report.pdf",
+            "canonical_templates/incident_evidence/accident_investigation_report/leaseos_incident_injury_nearmiss_templates__Accident-Investigation-Report.docx"
+          ],
+          "template_code_or_doc_ref": "AI",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "6b7bf742650a9bb0296dac78b972d1481aa64d573634a49a5c04c637f6863c8a"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "incident_report",
+      "display_name": "Incident Report",
+      "category": "incident_evidence",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Incident-Injury-NearMiss-Templates",
+          "files": [
+            "canonical_templates/incident_evidence/incident_report/leaseos_incident_injury_nearmiss_templates__Incident-Report.pdf",
+            "canonical_templates/incident_evidence/incident_report/leaseos_incident_injury_nearmiss_templates__Incident-Report.docx"
+          ],
+          "template_code_or_doc_ref": "IR",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "0db733ed835504b409101485acd4f0f5af6bea9b90a1c7e0231b1799268f2ec9"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "injury_report",
+      "display_name": "Injury Report",
+      "category": "incident_evidence",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Incident-Injury-NearMiss-Templates",
+          "files": [
+            "canonical_templates/incident_evidence/injury_report/leaseos_incident_injury_nearmiss_templates__Injury-Report.pdf",
+            "canonical_templates/incident_evidence/injury_report/leaseos_incident_injury_nearmiss_templates__Injury-Report.docx"
+          ],
+          "template_code_or_doc_ref": "INJ",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "aca7614d8723e2904b205283e4124ba0c4473c73dbff92565eef6f4bea0bb0a9"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "near_miss_report",
+      "display_name": "Near Miss Report",
+      "category": "incident_evidence",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Incident-Injury-NearMiss-Templates",
+          "files": [
+            "canonical_templates/incident_evidence/near_miss_report/leaseos_incident_injury_nearmiss_templates__Near-Miss-Report.pdf",
+            "canonical_templates/incident_evidence/near_miss_report/leaseos_incident_injury_nearmiss_templates__Near-Miss-Report.docx"
+          ],
+          "template_code_or_doc_ref": "NM",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "bbf8c8762d9f5a3f95e551b792154dfb8fc6ad69316a26772385352c40fd5e93"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "norm_equipment_survey_release_record",
+      "display_name": "NORM Equipment Survey / Release Record",
+      "category": "norm_radiological",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/norm_radiological/norm_equipment_survey_release_record/leaseos_compliance_all_paperwork_templates__13_NORM_Equipment_Release_Record.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "ff1f61910ff9ca91a08185bd74d288582412a708bb522cb23335984354f7d033"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "norm_material_classification_and_disposition_record",
+      "display_name": "NORM Material Classification & Disposition Record",
+      "category": "norm_radiological",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/norm_radiological/norm_material_classification_and_disposition_record/leaseos_compliance_all_paperwork_templates__11_NORM_Material_Classification_Record.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "53e77c23f64f96135c4e504fd0e12243cb08c463032ed50ec1b1df33469b70b5"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "norm_material_transfer_chain_of_custody",
+      "display_name": "NORM Material Transfer / Chain of Custody",
+      "category": "norm_radiological",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/norm_radiological/norm_material_transfer_chain_of_custody/leaseos_compliance_all_paperwork_templates__12_NORM_Transfer_Chain_of_Custody.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "f93c6953024345ae34da713f5074d9fd7048161aaa6239df869a471898230791"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "norm_survey_and_handling_record",
+      "display_name": "NORM Survey & Handling Record",
+      "category": "norm_radiological",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": {
+        "source_key": "norm_survey_handling",
+        "version": 1,
+        "field_count": 38,
+        "family": "compliance_permits",
+        "packKey": "oilfield_norm",
+        "ownerType": "job"
+      },
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_pdf_templates",
+          "files": [
+            "canonical_templates/norm_radiological/norm_survey_and_handling_record/leaseos_compliance_pdf_templates__03_NORM_Survey_Handling_Record.pdf"
+          ],
+          "template_code_or_doc_ref": "FOR",
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "d21c76112c3688d97f45a542a207020424eb195beab810e8ec6bf1511603fecd"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "norm_survey_field_sheet",
+      "display_name": "NORM Survey Field Sheet",
+      "category": "norm_radiological",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "ARCHIVAL_OR_EXTERNAL_REFERENCE_REVIEW_REQUIRED",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/norm_radiological/norm_survey_field_sheet/leaseos_compliance_all_paperwork_templates__10_NORM_Survey_Field_Sheet.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "39bbabf60894e2a398eaf75903443f9af2c69145d97d716639e0b7618e3b1a34"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "disposal_ticket_waste_disposal_receipt",
+      "display_name": "Disposal Ticket / Waste Disposal Receipt",
+      "category": "oilfield_waste",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_WITH_EXTERNAL_REFERENCES",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_oilfield_specific_forms",
+          "files": [
+            "canonical_templates/oilfield_waste/disposal_ticket_waste_disposal_receipt/leaseos_oilfield_specific_forms__02_Disposal_Ticket_Waste_Disposal_Receipt.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "d696c9cb3e5f3cab4469342592911cb35be924892bad09fe21b3ea3137168167"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "hazardous_waste_manifest_e_manifest_tracking_log",
+      "display_name": "Hazardous Waste Manifest / e-Manifest Tracking Log",
+      "category": "oilfield_waste",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_WITH_EXTERNAL_REFERENCES",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/oilfield_waste/hazardous_waste_manifest_e_manifest_tracking_log/leaseos_compliance_all_paperwork_templates__08_Waste_Manifest_Tracking_Log.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "c0e1dded646225bd3434825f331844c4163f0c8eff7d87ec4a04dfa2a339a3f5"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "oilfield_load_ticket_load_record",
+      "display_name": "Oilfield Load Ticket / Load Record",
+      "category": "oilfield_waste",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_WITH_EXTERNAL_REFERENCES",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_oilfield_specific_forms",
+          "files": [
+            "canonical_templates/oilfield_waste/oilfield_load_ticket_load_record/leaseos_oilfield_specific_forms__03_Oilfield_Load_Ticket_Load_Record.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "19271d587038e79735244b7dbf110f4c538f704d27d80250ee6db94b46cc1f05"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "oilfield_waste_profile_and_characterization_record",
+      "display_name": "Oilfield Waste Profile & Characterization Record",
+      "category": "oilfield_waste",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/oilfield_waste/oilfield_waste_profile_and_characterization_record/leaseos_compliance_all_paperwork_templates__06_Oilfield_Waste_Profile_Record.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "219ae61c41db06a8f2a01a274cc9d1982a49416a0057018adcad25743d43267b"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "oilfield_waste_tracking_generator_compliance_form",
+      "display_name": "Oilfield Waste Tracking / Generator Compliance Form",
+      "category": "oilfield_waste",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": {
+        "source_key": "oilfield_waste_tracking_generator",
+        "version": 1,
+        "field_count": 44,
+        "family": "compliance_permits",
+        "packKey": "oilfield_environmental",
+        "ownerType": "job"
+      },
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_pdf_templates",
+          "files": [
+            "canonical_templates/oilfield_waste/oilfield_waste_tracking_generator_compliance_form/leaseos_compliance_pdf_templates__02_Oilfield_Waste_Tracking_Generator_Compliance.pdf"
+          ],
+          "template_code_or_doc_ref": "FOR",
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "61016f19d3960357195e6c24f5a4aba201c3678fcd76ec653dffeb2d020480f5"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "waste_load_and_container_inspection_checklist",
+      "display_name": "Waste Load & Container Inspection Checklist",
+      "category": "oilfield_waste",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/oilfield_waste/waste_load_and_container_inspection_checklist/leaseos_compliance_all_paperwork_templates__09_Waste_Load_Inspection_Checklist.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 1,
+          "sha256_pdf": "0a434b1419c17851569feb8b595576353eeae86d827593179e76fdf033bb85e9"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "waste_manifest_hazardous_waste_manifest_internal_record",
+      "display_name": "Waste Manifest / Hazardous Waste Manifest - Internal Record",
+      "category": "oilfield_waste",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "INTERNAL_CONTROL_NUMBER_PLUS_OFFICIAL_EXTERNAL_REFERENCE_WHEN_APPLICABLE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_oilfield_specific_forms",
+          "files": [
+            "canonical_templates/oilfield_waste/waste_manifest_hazardous_waste_manifest_internal_record/leaseos_oilfield_specific_forms__01_Waste_Manifest_Internal_Record.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "b890bbf6a27e4bc030396ab655d711f09e6ccfa7cd12f6966bdbaf10ce429a88"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "waste_pickup_transfer_ticket",
+      "display_name": "Waste Pickup / Transfer Ticket",
+      "category": "oilfield_waste",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_WITH_EXTERNAL_REFERENCES",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "leaseos_compliance_all_paperwork_templates",
+          "files": [
+            "canonical_templates/oilfield_waste/waste_pickup_transfer_ticket/leaseos_compliance_all_paperwork_templates__07_Waste_Pickup_Transfer_Ticket.pdf"
+          ],
+          "template_code_or_doc_ref": null,
+          "revision_detected": null,
+          "pages": 2,
+          "sha256_pdf": "2298a21ee6e4d42f2d86f77ed0e52c3ace1b568052ce02fc0764b1eb83e5b5e5"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "daily_safety_report",
+      "display_name": "Daily Safety Report",
+      "category": "safety_daily_operations",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Daily-Safety-and-Site-Inspection-Templates",
+          "files": [
+            "canonical_templates/safety_daily_operations/daily_safety_report/leaseos_daily_safety_and_site_inspection_templates__Daily-Safety-Report.pdf",
+            "canonical_templates/safety_daily_operations/daily_safety_report/leaseos_daily_safety_and_site_inspection_templates__Daily-Safety-Report.docx"
+          ],
+          "template_code_or_doc_ref": "DSR",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "4b156853221d66c7ebab4bfa3d2972694fd7356c291e93778e5e635e107d7c37"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "hazard_assessment",
+      "display_name": "Hazard Assessment",
+      "category": "safety_daily_operations",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-JSA-Hazard-PreJob-Templates",
+          "files": [
+            "canonical_templates/safety_daily_operations/hazard_assessment/leaseos_jsa_hazard_prejob_templates__Hazard-Assessment.pdf",
+            "canonical_templates/safety_daily_operations/hazard_assessment/leaseos_jsa_hazard_prejob_templates__Hazard-Assessment.docx"
+          ],
+          "template_code_or_doc_ref": "HA",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "3f8fff27d5252c04ab6076011b90c3cd3dc09f1a41d37d465d1879d74ad07154"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "job_safety_analysis",
+      "display_name": "Job Safety Analysis",
+      "category": "safety_daily_operations",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-JSA-Hazard-PreJob-Templates",
+          "files": [
+            "canonical_templates/safety_daily_operations/job_safety_analysis/leaseos_jsa_hazard_prejob_templates__Job-Safety-Analysis.pdf",
+            "canonical_templates/safety_daily_operations/job_safety_analysis/leaseos_jsa_hazard_prejob_templates__Job-Safety-Analysis.docx"
+          ],
+          "template_code_or_doc_ref": "JSA",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "27e85e2b7e6e5ee1050f0de393b73f4d9771c4b29b9afe6df86e1165fc9325ec"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "pre_job_safety_checklist",
+      "display_name": "Pre Job Safety Checklist",
+      "category": "safety_daily_operations",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-JSA-Hazard-PreJob-Templates",
+          "files": [
+            "canonical_templates/safety_daily_operations/pre_job_safety_checklist/leaseos_jsa_hazard_prejob_templates__Pre-Job-Safety-Checklist.pdf",
+            "canonical_templates/safety_daily_operations/pre_job_safety_checklist/leaseos_jsa_hazard_prejob_templates__Pre-Job-Safety-Checklist.docx"
+          ],
+          "template_code_or_doc_ref": "PJ",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "aaf6c055a39a4676741897f6f10ff5495221d7a406a5969961a02223b9230a74"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "safety_meeting_minutes",
+      "display_name": "Safety Meeting Minutes",
+      "category": "safety_daily_operations",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Safety-Templates",
+          "files": [
+            "canonical_templates/safety_daily_operations/safety_meeting_minutes/leaseos_safety_templates__Safety-Meeting-Minutes.pdf",
+            "canonical_templates/safety_daily_operations/safety_meeting_minutes/leaseos_safety_templates__Safety-Meeting-Minutes.docx"
+          ],
+          "template_code_or_doc_ref": "SM",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "e6bcaf5058f3cf70b959430f0d3472cb16f7d7f1483388474c5b68d986b0c366"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "site_safety_checklist",
+      "display_name": "Site Safety Checklist",
+      "category": "safety_daily_operations",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Daily-Safety-and-Site-Inspection-Templates",
+          "files": [
+            "canonical_templates/safety_daily_operations/site_safety_checklist/leaseos_daily_safety_and_site_inspection_templates__Site-Safety-Checklist.pdf",
+            "canonical_templates/safety_daily_operations/site_safety_checklist/leaseos_daily_safety_and_site_inspection_templates__Site-Safety-Checklist.docx"
+          ],
+          "template_code_or_doc_ref": "SSC",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "d9da0a6815d13021b23eb37bc7c9a14c3d33d7afff6ed4199f14515219a21250"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "tailgate_meeting_log",
+      "display_name": "Tailgate Meeting Log",
+      "category": "safety_daily_operations",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Safety-Templates",
+          "files": [
+            "canonical_templates/safety_daily_operations/tailgate_meeting_log/leaseos_safety_templates__Tailgate-Meeting-Log.pdf",
+            "canonical_templates/safety_daily_operations/tailgate_meeting_log/leaseos_safety_templates__Tailgate-Meeting-Log.docx"
+          ],
+          "template_code_or_doc_ref": "TG",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "c08a3ef74c3298bc97e52d8ccfbcee6b083a214dbb08e7ebb3ef7c6c7f0f0323"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "toolbox_talk",
+      "display_name": "Toolbox Talk",
+      "category": "safety_daily_operations",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Safety-Templates",
+          "files": [
+            "canonical_templates/safety_daily_operations/toolbox_talk/leaseos_safety_templates__Toolbox-Talk.pdf",
+            "canonical_templates/safety_daily_operations/toolbox_talk/leaseos_safety_templates__Toolbox-Talk.docx"
+          ],
+          "template_code_or_doc_ref": "TT",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "f3fffd283b23c0d08ab8e8287487a9042f0ec2fe725122fe134c28aa254b5b44"
+        }
+      ]
+    },
+    {
+      "document_definition_key": "worksite_inspection_report",
+      "display_name": "Worksite Inspection Report",
+      "category": "safety_daily_operations",
+      "template_available": true,
+      "template_required_for_document_control": false,
+      "scan_import_allowed": true,
+      "supported_origins": [
+        "leaseos_generated",
+        "organization_template",
+        "customer_or_external_template",
+        "external_scan",
+        "external_digital_import"
+      ],
+      "numbering_policy_candidate": "CONTROLLED_SEQUENCE_CANDIDATE",
+      "jurisdiction_policy": "CONFIGURABLE_VERIFY_BY_JURISDICTION",
+      "regulatory_authority": "NOT_INFERRED_FROM_TEMPLATE",
+      "structured_definition_seed": null,
+      "variants": [
+        {
+          "variant": 1,
+          "source_collection": "LeaseOS-Daily-Safety-and-Site-Inspection-Templates",
+          "files": [
+            "canonical_templates/safety_daily_operations/worksite_inspection_report/leaseos_daily_safety_and_site_inspection_templates__Worksite-Inspection-Report.pdf",
+            "canonical_templates/safety_daily_operations/worksite_inspection_report/leaseos_daily_safety_and_site_inspection_templates__Worksite-Inspection-Report.docx"
+          ],
+          "template_code_or_doc_ref": "WIR",
+          "revision_detected": "1.0",
+          "pages": 2,
+          "sha256_pdf": "dc88fff03ef33f4f8353c1a901c5fdfc27d3c825a811cf863386bd0615ac53e7"
+        }
+      ]
+    }
+  ]
+}

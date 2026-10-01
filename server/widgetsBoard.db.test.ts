@@ -84,14 +84,18 @@ d("scoped tiles read their subject through the governing procedure", () => {
     const jobCode = `JOB-${rnd()}`;
     const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, orgRef) VALUES (?,?,?,?,'dispatched',?)", [jobCode, "Hydrovac", "Fixture Energy", "LSD 04-12-045-08W4", orgRef]);
     const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [`U-${rnd()}`, "hydrovac"]);
+    // This person's operator record, linked through operators.userId. Its id is its own — the
+    // fixture used to file everything under the user id, which only worked while nothing checked.
+    const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?,?)", [userId, `Operator ${rnd()}`]);
+    const operatorId = op.insertId;
     const tripNumber = `TRP-${rnd()}`;
-    await pool.execute("INSERT INTO trips (tripNumber, jobId, unitId, operatorId, tripType, status, orgRef) VALUES (?,?,?,?,'one_way','planned',?)", [tripNumber, j.insertId, u.insertId, userId, orgRef]);
-    // The documents are filed against this person as an operator; since router 3 a document belongs to
+    await pool.execute("INSERT INTO trips (tripNumber, jobId, unitId, operatorId, tripType, status, orgRef) VALUES (?,?,?,?,'one_way','planned',?)", [tripNumber, j.insertId, u.insertId, operatorId, orgRef]);
+    // The documents are filed against this person's operator record; since router 3 a document belongs to
     // whoever owns the record it is about, so the organization owns the operator record.
-    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,?,?,1)", [orgRef, "operator", userId]);
+    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,?,?,1)", [orgRef, "operator", operatorId]);
     const soon = new Date(Date.now() + 10 * 86_400_000), later = new Date(Date.now() + 200 * 86_400_000);
-    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator',?,?,?,NOW(),?,'verified')", [userId, "licence", "Class 1", soon]);
-    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator',?,?,?,NOW(),?,'needs_review')", [userId, "h2s", "H2S Alive", later]);
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator',?,?,?,NOW(),?,'verified')", [operatorId, "licence", "Class 1", soon]);
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator',?,?,?,NOW(),?,'needs_review')", [operatorId, "h2s", "H2S Alive", later]);
     return { jobCode, tripNumber, unitId: u.insertId, jobId: j.insertId };
   }
 
@@ -149,16 +153,20 @@ d("scoped tiles read their subject through the governing procedure", () => {
       items: [{ instanceRef: "r1", widgetKey: "dispatchReadiness", variant: "status", position: 0, subjectRef: f.jobCode }],
     });
     const board = await callerFor(userId).widgets.boardResolve({ deviceClass: "desktop", connected: true, subjects: {} });
+    /*
+     * Strict now. This used to accept "failed" and guard the checks with `if (ok)`: the trip carried
+     * the user id as its operator id, the composer found no such operator, and the checks below —
+     * which read a `verdict` field the composer does not return — never ran.
+     */
     const p = board.tiles[0]!.payload;
-    expect(["ok", "failed"]).toContain(p.state);
-    if (p.state === "ok") {
-      const v = p.value as { jobCode: string; tripNumber: string; readiness: { verdict: string } };
-      expect(v.jobCode).toBe(f.jobCode);
-      expect(v.tripNumber).toBe(f.tripNumber);
-      // A fixture operator with no licence on file is not READY — the composer names why, it never rounds up.
-      expect(["BLOCKED", "REVIEW", "UNKNOWN", "READY"]).toContain(v.readiness.verdict);
-      expect(v.readiness.verdict).not.toBe("READY");
-    }
+    expect(p.state).toBe("ok");
+    if (p.state !== "ok") throw new Error("unreachable");
+    const v = p.value as { jobCode: string; tripNumber: string; readiness: { eligibility: { verdict: string } } };
+    expect(v.jobCode).toBe(f.jobCode);
+    expect(v.tripNumber).toBe(f.tripNumber);
+    // A fixture operator with no licence on file is not eligible — the composer names why, it never rounds up.
+    expect(["eligible", "eligible_review", "blocked", "unknown"]).toContain(v.readiness.eligibility.verdict);
+    expect(v.readiness.eligibility.verdict).not.toBe("eligible");
   }, 20_000);
 
   it("search and trackingLookup are on-demand tiles, not silent empties", async () => {

@@ -1,0 +1,241 @@
+{
+ "migrations:`pnpm db:push` runs drizzle-kit against": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "migrations:Register 'Current state' is one merge be": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "migrations:No gate detects a second same-prefix mig": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "gates:CI has not executed the gate since 2026-": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "gates:Gate 6 skipped-db check cannot match in": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "gates:Gate 6 skipped-suite check covers only 6": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "gates:Gates 7b/7c claim 'the count is pinned'": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "gates:Gate 5's ROUTERS glob omits server/_core": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "gates:Gate 0a does not check @types/node again": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "gates:Gate 4 test-file ratchet discards tsc's": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "gates:Gate 8 generator claims to count what th": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  },
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ],
+ "wiring:hos.status / hos.tripFeasibility read an": [
+  {
+   "refuted": null,
+   "sev": null,
+   "reason": ""
+  }
+ ]
+}

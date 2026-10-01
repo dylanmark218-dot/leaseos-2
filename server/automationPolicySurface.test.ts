@@ -17,7 +17,7 @@ import type { DomainRole } from "./_core/recordsAuthorization";
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let nextId = 920_000 + Math.floor(Math.random() * 60_000);   // a fresh base per run: the gate rebuilds the database, but a developer running this twice should not collide
+let nextId = 410_000_000 + Math.floor(Math.random() * 60_000);   // a fresh base per run: the gate rebuilds the database, but a developer running this twice should not collide
 const nextUser = () => ++nextId;
 const rnd = () => Math.random().toString(36).slice(2, 8);
 
