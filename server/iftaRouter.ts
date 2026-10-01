@@ -9,12 +9,13 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, lt } from "drizzle-orm";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
 import { requireOwnedEntity } from "./_core/entityScope";
-import { distanceRecordInScope, fuelTransactionInScope, iftaReturnInScope, requireEvidence, requireTrip, requireUnit } from "./financeScope";
+import { distanceRecordInScope, fuelTransactionInScope, iftaReturnInScope, requireEvidence, requireTrip } from "./financeScope";
 import { getDb } from "./db";
 import { fuelTransactions, iftaReturns, jurisdictionDistanceRecords, operators, trips } from "../drizzle/schema";
 import { buildIftaQuarter, finalizeDecision, quarterBounds, splitTripDistance, type DistanceRecord, type FuelRecord } from "./_core/iftaEngine";
@@ -59,11 +60,11 @@ export const iftaRouter = router({
       source: z.enum(["operator_stated", "imported"]), notes: z.string().max(400).optional(), evidenceRecordId: z.number().int().positive().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (input.periodEnd <= input.periodStart) throw new TRPCError({ code: "BAD_REQUEST", message: "periodEnd must be after periodStart" });
       requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
-      await requireUnit(ctx.money, input.unitId);
       await requireTrip(ctx.money, input.tripId);
       await requireEvidence(ctx.money, input.evidenceRecordId);
       await assertPeriodOpen(input.financialEntityId, input.periodStart, "Distance record");

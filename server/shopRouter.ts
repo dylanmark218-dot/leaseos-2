@@ -6,7 +6,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { evaluateMechanicRelease } from "./_core/mechanicRelease";
-import { appendWorkOrderRelease } from "./recordsService";
+import { appendRelease, unfinishedTasks } from "./defectLifecycleService";
 import { actingScopeFor, getDb, unitInScope, workOrderInScope } from "./db";
 import { requireProvableOwnership } from "./ownershipDomain";
 
@@ -71,7 +71,7 @@ export const shopRouter = router({
       const p = await partByNumber(input.partNumber);
       const wo = (await db.select({ id: workOrders.id, unitId: workOrders.unitId, status: workOrders.status }).from(workOrders).where(eq(workOrders.workOrderNumber, input.workOrderNumber)).limit(1))[0];
       if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: "Work order not found" });
-      if (wo.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Work order is closed" });
+      if (wo.status === "closed" || wo.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Work order is ${wo.status}` });
       const pos = (await positionsFor(p.id)).find(x => x.bin === input.bin) ?? { onHandQty: 0, avgUnitCostCents: null };
       const d = issueDecision({ onHandQty: pos.onHandQty, qty: input.qty, partNumber: p.partNumber });
       if (!d.permitted) throw new TRPCError({ code: "PRECONDITION_FAILED", message: d.refusal! });
@@ -328,8 +328,20 @@ export const shopRouter = router({
       // back to in_progress from waiting_parts is forward in the real sense.
       const sideways = wo.status === "waiting_parts" && input.to === "in_progress";
       if (wo.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A closed work order is not reopened by changing a status — raise a new one" });
+      if (wo.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A cancelled work order is not reopened by changing a status — raise a new one" });
       if (to <= from && !sideways) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `A work order does not move from ${wo.status} back to ${input.to}` });
-      await db.update(workOrders).set({ status: input.to }).where(eq(workOrders.id, input.workOrderId));
+      /*
+       * 0199 — the move leaves a trace. `startedAt` is set the first time work starts and `completedAt`
+       * the first time it reaches ready-for-service or closed; neither is ever moved. The note was
+       * accepted and thrown away; it is now appended to the findings with who and when, until the
+       * defect history table (maintenance checkpoint 2) carries it as its own row.
+       */
+      const now = new Date();
+      const set: Partial<typeof workOrders.$inferInsert> = { status: input.to };
+      if (input.to === "in_progress" && !wo.startedAt) set.startedAt = now;
+      if ((input.to === "ready_for_service" || input.to === "closed") && !wo.completedAt) set.completedAt = now;
+      if (input.note?.trim()) set.findings = `${wo.findings ? `${wo.findings}\n` : ""}[${now.toISOString()} ${wo.status} → ${input.to}, user ${ctx.user.id}] ${input.note.trim()}`;
+      await db.update(workOrders).set(set).where(eq(workOrders.id, input.workOrderId));
       return { workOrderId: input.workOrderId, from: wo.status, to: input.to };
     }),
 
@@ -379,6 +391,10 @@ export const shopRouter = router({
         : null;
       const defectSeverity = (defect?.severity ?? "advisory") as "advisory" | "inspection_required" | "critical";
 
+      // 0221 — a release is the repair's evidence, and the repair is its tasks: none may still be open.
+      const unfinished = await unfinishedTasks(db, wo.id);
+      if (unfinished.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Unfinished tasks on ${wo.workOrderNumber}: ${unfinished.map(t => `${t.taskRef} (${t.status})`).join(", ")} — finish, mark not required, or defer them with a reason first` });
+
       const decision = evaluateMechanicRelease({
         workOrderStatus: wo.status,
         defectSeverity,
@@ -395,7 +411,9 @@ export const shopRouter = router({
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: decision.blockers.map(b => b.label).join(" · ") });
       }
 
-      const releaseId = await appendWorkOrderRelease({
+      // 0221 — the one door that appends a release (records.maintenance.recordRelease is retired), and the
+      // release and a `released` event on every defect it names are written together.
+      const releaseId = await appendRelease(db, {
         workOrderId: input.workOrderId, unitId: wo.unitId, releaseType: input.releaseType,
         restrictionDetail: input.restrictionDetail ?? null,
         repairSummary: input.repairSummary, testProcedure: input.testProcedure ?? null,
@@ -404,7 +422,7 @@ export const shopRouter = router({
         technicianUserId: ctx.user.id, technicianIdentifier: `TECH-${ctx.user.id}`,
         technicianCertificationRef: input.technicianCertificationRef ?? null,
         releasedAt: input.releasedAt, resolvedDefectIds: JSON.stringify(input.resolvedDefectIds),
-      });
+      }, { namedDefectIds: input.resolvedDefectIds, actor: { userId: ctx.user.id, role: ctx.roles.find(r => r === "mechanic" || r === "shop_lead") ?? ctx.roles[0] ?? "unknown" }, at: new Date() });
 
       return {
         releaseId: releaseId ?? null, workOrderId: input.workOrderId, unitId: wo.unitId,

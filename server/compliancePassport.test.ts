@@ -247,6 +247,11 @@ beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, co
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 async function withRole(role: DomainRole) { const id = nextUser(); await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
 
+// Both credentials below are judged against the real clock, so their expiry moves with it (CI-0.2). Both
+// were fixed at 2028-04-21: the licence would have read REVIEW (expiring, 30-day window) instead of READY
+// from 2028-03-22 — nine days before the calendar tripwire could warn — and the medical report "no"
+// instead of "unknown" from the 21st.
+const CREDENTIAL_EXPIRES = new Date(Date.now() + 2 * 365 * 86_400_000);
 d("a driver, a unit and a carrier, through the registry", () => {
   it("stays UNKNOWN on seeds, becomes READY only when a proposed requirement is verified by two other people and evidence is verified", async () => {
     const office = await withRole("office");
@@ -259,7 +264,7 @@ d("a driver, a unit and a carrier, through the registry", () => {
     const operatorId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES ('Passport Fixture', NOW())"))[0].insertId);
 
     // Office records a licence. It enters needs_review.
-    const rec = await callerFor(office).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: "driver_licence", requirementKey: "ab.driver.licence.class1", title: "Class 1 licence", identifier: "•••1234", expiresAt: new Date("2028-04-21T00:00:00Z"), jurisdiction: "CA-AB" });
+    const rec = await callerFor(office).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: "driver_licence", requirementKey: "ab.driver.licence.class1", title: "Class 1 licence", identifier: "•••1234", expiresAt: CREDENTIAL_EXPIRES, jurisdiction: "CA-AB" });
     expect(rec.verificationStatus).toBe("needs_review");
 
     // Passport against the seeds: unknown, because the requirement is unverified.
@@ -305,7 +310,7 @@ d("a driver, a unit and a carrier, through the registry", () => {
     expect(weak.note).toContain("never by the proposer's own flag");
 
     // Medical: HR records it private; dispatch sees only eligibility.
-    await callerFor(hr).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: "medical_fitness", title: "Medical report — see HR", expiresAt: new Date("2028-04-21T00:00:00Z"), privateDetail: true });
+    await callerFor(hr).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: "medical_fitness", title: "Medical report — see HR", expiresAt: CREDENTIAL_EXPIRES, privateDetail: true });
     const med = await callerFor(dispatcher).compliance.medicalEligibility({ operatorId });
     expect(med.eligible).toBe("unknown"); // needs_review until HR verifies
     expect(med).not.toHaveProperty("title");

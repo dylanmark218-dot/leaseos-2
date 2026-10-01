@@ -9,6 +9,9 @@
 
 import { and, desc, eq, ne } from "drizzle-orm";
 import { getDb } from "./db";
+import { placeHold, releaseHold } from "./fleetPortfolioService";
+import { defectEvent } from "./defectLifecycleService";
+import type { DbOrTx } from "./_core/dbTypes";
 import {
   evidenceAccessEvents,
   evidenceRecords,
@@ -24,6 +27,7 @@ import {
   recordRetentionState,
   syncPackageItems,
   syncPackages,
+  unitHolds,
   workOrderReleases,
   workOrders,
 } from "../drizzle/schema";
@@ -411,21 +415,79 @@ export async function loadIncident(incidentNumber: string) {
   return rows[0] ?? null;
 }
 
+/**
+ * CP1.5 — the role a hold records when an incident's escalation plan places it. The capturer is the
+ * person who placed it (and so may never release it); the authority is the plan, not their role.
+ */
+export const INCIDENT_HOLD_ROLE = "incident_escalation";
+
+/**
+ * CP1.5 — an incident and, when its escalation plan holds the unit, that hold: one transaction, so
+ * there is never an incident that says the unit is held with no hold, or a hold with no incident.
+ *
+ * The hold is the portfolio's own `unitHolds` row — there is no second incident-hold representation.
+ * Type `safety`, so it is out of service and never overridable at dispatch (the portfolio design's
+ * `incident_unit_held`, NEVER_OVERRIDABLE); source `incident`, so `fleet.holdRelease` refuses it and
+ * only this incident's safety review lifts it. `incidentReports.unitHeld` remains the incident's own
+ * record of what its plan decided; readiness reads the hold, never the flag.
+ *
+ * The caller has already proved the unit and the job are its organization's (`records.incident.capture`,
+ * `records.nearMiss.report`); `orgRef` is that organization, so the hold and the incident agree.
+ */
+export async function insertIncidentHoldingUnit(values: typeof incidentReports.$inferInsert, placer: { orgRef: string | null; byUserId: number }): Promise<{ id: number; holdRef: string | null } | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  return db.transaction(async tx => {
+    const r = await tx.insert(incidentReports).values(values);
+    const id = Number(r[0]?.insertId ?? 0);
+    if (!values.unitHeld || values.unitId == null) return { id, holdRef: null };
+    const holdRef = await placeHold(tx as unknown as DbOrTx, {
+      unitId: values.unitId, orgRef: placer.orgRef, holdType: "safety", effect: "out_of_service",
+      reason: `Incident ${values.incidentNumber} (${String(values.incidentType).replace(/_/g, " ")}): unit held pending safety review`,
+      sourceKind: "incident", sourceRef: values.incidentNumber, byUserId: placer.byUserId, byRole: INCIDENT_HOLD_ROLE,
+    });
+    return { id, holdRef };
+  });
+}
+
+/** The holds this incident placed that still stand. */
+export async function activeIncidentHolds(incidentNumber: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(unitHolds).where(and(eq(unitHolds.sourceKind, "incident"), eq(unitHolds.sourceRef, incidentNumber), eq(unitHolds.status, "active")));
+}
+
+/**
+ * The safety review, and — in the same transaction — the release of the holds the incident placed
+ * (design B.4: an incident's hold is lifted when its safety review is recorded). The router has
+ * already decided the reviewer may release them; the release is conditional on `status = 'active'`,
+ * so a concurrent review releases each hold once.
+ */
 export async function markIncidentReviewed(args: {
   incidentNumber: string;
   userId: number;
-}) {
+  /** The holds to release, and the role the reviewer releases them in. Empty when there are none. */
+  releasing?: { holds: (typeof unitHolds.$inferSelect)[]; byRole: string };
+}): Promise<{ releasedHoldRefs: string[] }> {
   const db = await getDb();
-  if (!db) return;
-  await db
-    .update(incidentReports)
-    .set({
-      safetyReviewedAt: new Date(),
-      safetyReviewedByUserId: args.userId,
-      status: "under_review",
-      escalationState: "under_review",
-    })
-    .where(eq(incidentReports.incidentNumber, args.incidentNumber));
+  if (!db) return { releasedHoldRefs: [] };
+  return db.transaction(async tx => {
+    await tx
+      .update(incidentReports)
+      .set({
+        safetyReviewedAt: new Date(),
+        safetyReviewedByUserId: args.userId,
+        status: "under_review",
+        escalationState: "under_review",
+      })
+      .where(eq(incidentReports.incidentNumber, args.incidentNumber));
+    const releasedHoldRefs: string[] = [];
+    for (const hold of args.releasing?.holds ?? []) {
+      const ok = await releaseHold(tx as unknown as DbOrTx, { hold, byUserId: args.userId, byRole: args.releasing!.byRole, reason: `Safety review of incident ${args.incidentNumber}` });
+      if (ok) releasedHoldRefs.push(hold.holdRef);
+    }
+    return { releasedHoldRefs };
+  });
 }
 
 export async function insertNearMiss(values: typeof nearMissReports.$inferInsert) {
@@ -461,7 +523,7 @@ export type WorkOrderSubject = {
   unitId: number;
   status:
     | "draft" | "open" | "in_progress" | "waiting_parts"
-    | "ready_for_service" | "closed";
+    | "ready_for_service" | "closed" | "cancelled";
   defectSeverity: "advisory" | "inspection_required" | "critical";
 };
 
@@ -567,20 +629,33 @@ export async function resolveMaintenanceDefect(args: {
   resolvedByReleaseId: number | null;
   note: string;
   at: Date;
+  /** 0221 — who resolved it, and the role they acted in, for the defect's history. */
+  actorRole?: string;
 }): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  const r = await db
-    .update(maintenanceDefects)
-    .set({
-      status: "resolved",
-      resolvedAt: args.at,
-      resolvedByUserId: args.resolvedByUserId,
-      resolvedByReleaseId: args.resolvedByReleaseId,
-      resolutionNote: args.note.slice(0, 400),
-    })
-    .where(and(eq(maintenanceDefects.id, args.defectId), ne(maintenanceDefects.status, "resolved")));
-  return (r[0]?.affectedRows ?? 0) > 0;
+  // 0221 — the resolution and its `resolved` event, together.
+  return db.transaction(async tx => {
+    const before = (await tx.select({ unitId: maintenanceDefects.unitId, status: maintenanceDefects.status }).from(maintenanceDefects).where(eq(maintenanceDefects.id, args.defectId)).limit(1))[0];
+    const r = await tx
+      .update(maintenanceDefects)
+      .set({
+        status: "resolved",
+        resolvedAt: args.at,
+        resolvedByUserId: args.resolvedByUserId,
+        resolvedByReleaseId: args.resolvedByReleaseId,
+        resolutionNote: args.note.slice(0, 400),
+      })
+      .where(and(eq(maintenanceDefects.id, args.defectId), ne(maintenanceDefects.status, "resolved")));
+    const changed = (r[0]?.affectedRows ?? 0) > 0;
+    if (changed && before) {
+      await defectEvent(tx as unknown as DbOrTx, {
+        defectId: args.defectId, unitId: before.unitId, eventType: "resolved", fromValue: before.status, toValue: "resolved",
+        releaseId: args.resolvedByReleaseId, reason: args.note, actor: { userId: args.resolvedByUserId, role: args.actorRole ?? "unknown" }, at: args.at,
+      });
+    }
+    return changed;
+  });
 }
 
 export async function latestRelease(unitId: number) {
