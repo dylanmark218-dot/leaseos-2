@@ -1,10 +1,11 @@
 # AI Business Development / Sales Automation — repository survey
 
-**Design checkpoint, no code.** Written against `main` = `6f52b57` (release `v23.25`, 410 tables,
-169 migration files, 652 `roleProcedure(` sites) on branch
-`claude/leaseos-ai-sales-architecture-xx19rj`. Every path, symbol and line number below was read
-from that tree during this session. Where a document and the code disagree, the code is cited and
-the disagreement is marked **NOTE**.
+**Design checkpoint, no code.** Sections 1–3 were written against `main` = `6f52b57` (release
+`v23.25`, 410 tables, 169 migration files, 652 `roleProcedure(` sites). **Revision 2** re-checked
+them against `main` = `b35bac4` (release `v23.31`, 439 tables, 189 migration files, 743
+`roleProcedure(` sites) and records every fact that changed in §0 below; §1 line numbers are those of
+`6f52b57` unless §0 says otherwise. Branch: `claude/leaseos-ai-sales-architecture-xx19rj`. Where a
+document and the code disagree, the code is cited and the disagreement is marked **NOTE**.
 
 The companion document, `docs/register/AI_BUSINESS_DEVELOPMENT_DESIGN.md`, carries sections 4–15 of
 the requested output (architecture, entities, contracts, state machine, autonomy, handoff, threat
@@ -17,6 +18,35 @@ stands: no new engines until this path is wired." Thirteen spine engines remain 
 checkpoint in the design is a new engine or a new router and therefore needs either the spine wired
 or an explicit owner carve-out. This checkpoint commits design artifacts only, which the moratorium
 permits.
+
+---
+
+## 0. Revision 2 — survey facts that changed (6f52b57 → b35bac4)
+
+Each row was verified on `b35bac4`. Rows not listed still hold, re-checked: `resourceBookings` schema,
+single writer and posting-only lock; `composeReadiness` HOS/availability behaviour; `jobs` table
+columns and `jobs.create`; no travel time; no outbound email or SMS transport anywhere ("There is no
+email delivery because LeaseOS has no mail infrastructure", `server/peopleRouter.ts:312-314`);
+`agentActions.outcome` never advanced; `agentRuns.maxSteps` never read; `invokeLLM` in
+`assistant.draft` the only live model call (now `server/routers.ts:859`); quotes priced from legacy
+`customerRateCards`; `rateCardCreate` self-approving; `rate_override` uncalled; no quote
+declined/expired writer; no `sales` `DomainRole`; no region/yard/base entity; `complianceDocuments`
+owner types unchanged.
+
+| Survey § | Then | Now on `b35bac4` |
+|---|---|---|
+| 1.1, 1.2 customers and contacts | `customerAccounts` had no contact or type columns; no contact entity. | `customerAccounts` (`schema.ts:4892`) gained `customerNumber`, `legalName`, `tradeName`, `customerType ∈ {producer_operator, oilfield_service, prime_contractor, consultant, disposal_company, municipality, construction, trucking, other}`, addresses, `taxStatus`, `rowVersion`, archive columns (0217). New **`customerContacts`** (`:9613`: `displayName, title, company, phone, mobile, email, preferredChannel ∈ {phone, sms, email, portal}, externalIdentityId, signatoryAuthorityId, status`) and `customerContactRoles` (`:9639`). Status enum still `active, on_hold, inactive` — **no prospect**. General contact directory still not built ("vendor and facility contacts stay as columns"). |
+| 1.1 tenancy | Roles global or branch only; multi-membership refused. | `userRoleAssignments.scopeType ∈ {global, organization, branch, unscoped_legacy}` with a CHECK on shape (0207); organization selector cookie `leaseos_org` (`server/_core/organizationSelection.ts:40`); `resolveActingScope(db, userId, { at?, preferredOrgRef? })` honours a valid selection and still throws `AmbiguousOrganization` without one. Invitations (0208) return a token; no email. `people.*` procedures (B23.2). |
+| 1.4 jobs | Customer only as text / `customerOrgRef`. | `jobs` unchanged, but side tables `jobCommercialContexts` (`:9767`, unique `jobId`, customer, bill-to, contract, rate sheet + pinned version, PO, waiver), `jobCommercialParties`, `jobCommercialReferences`, `jobCommercialSnapshots` (0219), set through `customerCommercial.jobContextSet` / `jobSnapshotCapture`. Still no requested start, service code or location FK. |
+| 1.4 matching | `dispatchMatching.detectBookingConflicts` existed (unwired). | **Deleted** by SPINE item 2; `awardAssignment → decideAward` is the single booking-conflict rule (`server/spineItem2Duplicates.test.ts:22-23` refuses its return). The cross-posting race is recorded as a "Known limit" (`docs/register/SPINE_ITEM2_DUPLICATIONS.md:70`). `openShifts.shiftEligibility` is wired and refuses `overlaps_existing` on **tentative or confirmed** operator bookings (`server/openShiftsRouter.ts:75`). |
+| 1.9 rates | `chargeDefinitions` proposed one by one. | **Rate sheets** (0218): `rateSheets` → `rateSheetVersions` (`draft → pending_approval → approved`, `contentHash`) → `chargeDefinitions.rateSheetVersionId` ("A rate line IS a charge definition"); `customerContracts` (`msa, rate_agreement, …`, approve/suspend/terminate); `customerCommercial.jobRateResolve` (requires `jobId`); `commercialAuditEvents` (`:9655`). |
+| 1.12 rules | Rule rows per domain (`hosRuleLimits`). | Generalized rule ledger: `hosRuleLimitHistory` + `ruleFamily`, `promoteRule` (`server/_core/knowledge/promotionLedger.ts:610`), lifecycle `candidate → reviewed → verified → active` (0189); requirement verification events (0198). |
+| 1.13 AI | `server/_core/ai/` only on PR #7. | **Merged.** `ToolDefinition` (`server/_core/ai/tools/registry.ts:54-74`, no `version`/`capability`), `SECRETARY_TOOLS`, `TaskAllowlist`, `FORBIDDEN_CATEGORIES` (incl. `outbound_email`, `outbound_web`), `LlmProvider` (env `LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY`, unwired), `scanForInjection`, eval harness. All 21 modules declared unwired (pin 73). New registers: `AI_AGENT_RUNTIME_ARCHITECTURE.md` (owner decisions 2026-09-25), `SECRETARY_AGENT_ROSTER.md` (rows #7 Sales/quote `quote.propose`, #9 Customer service, #10 Email intake `mail.classify`), `AI_AGENT_LOOP_INVENTORY.md`, `SECRETARY_DEFERRED_REVIEW.md` (S1–S8), `SECRETARY_SPINE_MORATORIUM.md`. Live Assist LA-1a (sessions, no model call) and the LA-1b proposal for shared `aiInferenceAttempts` / `aiSpendBudgets`. |
+| 1.10 transport | No credential store. | `encryptedSecrets` (0191), `providerCredentials` (0192) with `resolveForOutbound` (`server/providerCredentialService.ts:299`); webhook delivery claim (0185, claim-first on a unique key, 5-minute lease). Production key custody blocked (`docs/product/MANAGED_KEY_ARCHITECTURE.md`). |
+| 1.16 documents | `commercialDocuments` registry. | Document control (0178, 0195–0196): `documentDefinitions`, controlled numbering, `commercialDocuments.controlNumber/originKind`; no template table on `main`. |
+| 1.7 routing | Advisories feed unwired. | Canadian provider runtime ingests road advisories into `roadAdvisories` and stales route approvals (`liveAdvisories`); not scheduled in production. Still no travel time. `operatingZones.orgRef` added (0209). |
+| 1.17 migrations | Head `0174` on `main`; highest claim `0180`. | Head **`0219`**; `0210–0216` claimed by open branches; `LEASEOS_MIGRATION_POLICY.md`; `server/migrationSlots.test.ts` fails CI on any duplicate number except 0157. |
+| Moratorium | Fully in force; no carve-outs. | Still in force (`SPINE_WIRING_PLAN.md:3` unchanged, hash-pinned). Item 2 resolved; items 3–4 not started; 11 of 13 spine engines still declared unwired. Owner carve-outs exist for Document Control CP1/CP2/CP6, Live Assist LA-1a and Customer/Contract/Rates; **none covers AI wiring**. |
 
 ---
 
@@ -378,7 +408,7 @@ log plus per-domain event tables:
   category ∈ read|propose|human_step, procedure: ProcedureName, formKey?, requiresIdempotencyKey }`,
   `SECRETARY_TOOLS`, `resolveTool(allowlist, key)`, `TaskAllowlist { taskKey, toolKeys, stepBudget }`,
   `invokeTool({ ctx, state, invocation, createCaller })` in `server/_core/ai/tools/`. **NOTE: that
-  directory does not exist on `main`**; it lives in open PR #7 (`claude/secretary-model-dialogue-yzszcv`,
+  directory did not exist on `main` at `6f52b57`** (merged since; see §0); it lived in open PR #7 (`claude/secretary-model-dialogue-yzszcv`,
   head `929f721`), declared unwired under the moratorium. `docs/register/SECRETARY_SPINE_MORATORIUM.md`
   is likewise cited but present only on that branch.
 - **Context.** `admitSource({resolvers, sourceKind, sourceRef, acting, at, blockRef})`
@@ -469,7 +499,7 @@ employeeRecord, clientContract).
   | 0179 | `claude/eld-compliance-intelligence-ramlrd` |
   | 0179 | `claude/migration-0169-reconciliation` (PR #17, `0179_trip_stop_provenance.sql`) |
 
-  **The highest number claimed anywhere is 0180.** The register on `main` is stale (it predates the
+  **The highest number claimed anywhere was 0180** (at `6f52b57`; see §0 for `b35bac4`). The register on `main` is stale (it predates the
   0174 collision and the three 0179 claims). Per the register's rule, this design assigns **no**
   migration numbers; each implementation branch takes the next number free on `main` and on all open
   branches at its own rebase and records it in the register.
@@ -506,7 +536,7 @@ employeeRecord, clientContract).
 | Context | `admitSource` resolvers, `assembleContext` with `AUTHORITY_OF` (external messages are `external_content`), `detectForbiddenEcho`, knowledge tier F rule | Inbound customer email is admitted as `external_message` and can never instruct. |
 | Pricing | `resolveRate` + `priceQuantity` over `chargeDefinitions`; `pricingDecisions.subjectKind = "quote_line"` (present, unused); `simulateMargin` + `commercialSetupProfiles.discountAuthorityJson`; `commercialApprovalService.decide` with the seeded, unused `rate_override` category; `quotes`/`quoteLines`/`quoteIssue` snapshot hash; `portal.quoteAccept` | The Quote Agent is a projection onto the resolver the roadmap already wants quotes on (step 5); discount authority and two-person approval exist and are unused. |
 | Credit / terms facts | `commercialBillingCheck`, `aging`, `customerAccounts` columns | Authoritative answers to "can we take this work on account". |
-| Availability and eligibility | `composeReadiness` (via `dispatch.readiness` preview), `DispatchEligibility`, `computeEligibilityFingerprint`, `assessEligibilityValidity(maxAgeMinutes)`, `detectBookingConflicts`, `resourceBookings.bookingState = 'tentative'`, `awardAssignment` | The booking hold is a `tentative` booking carrying the readiness fingerprint; conversion is the existing award path. |
+| Availability and eligibility | `composeReadiness` (via `dispatch.readiness` preview), `DispatchEligibility`, `computeEligibilityFingerprint`, `assessEligibilityValidity(maxAgeMinutes)`, the award's overlap predicate (`detectBookingConflicts` was deleted, §0), `resourceBookings.bookingState = 'tentative'`, `awardAssignment` | The booking hold is a `tentative` **unit** booking carrying the readiness fingerprint; conversion is the existing award path. |
 | Location and route | `parseLsd`, `geo.lsdLocate`, `locationIdentities`, `geo.routeCompute` (distance), `spatial.routeEvaluateSegments`, `routeApprovals` staleness | The conversation agent's "map the LSD, check the road" is three existing procedures; travel time stays UNKNOWN until a routing source exists. |
 | Signals and provenance | `externalDataSources` + `evaluateSourceUsage` + `assessFreshness` + `geo.sourceReview`; `ingestFeed` / `externalFeedRuns` / `roadAdvisories` row shape; `knowledgeSources` + `checkSourceGate`; `inboundRouter.ingest` (idempotent, hashed, becomes a proposal) | Regional activity signals are advisories with a source key, run ref, content hash and supersession; external activity feeds stay blocked until licence review. |
 | Opportunity ranking | `fundingIntelligence.matchProgram` shape: `strength ∈ {strong, possible, more_information_required, excluded}`, `reasons[]`, `missingInformation[]`, verification caveat, status ladder, "unverified can never be strong" | Ranking by explainable strength, not an opaque score. |
@@ -521,24 +551,26 @@ employeeRecord, clientContract).
 
 ## 3. Gaps requiring new development
 
+**Revision 2 status** is given after each gap in bold: CLOSED, NARROWED or OPEN on `b35bac4`.
+
 Ordered by how much the rest depends on them.
 
 | # | Gap | Evidence | Depends on |
 |---|---|---|---|
-| G1 | **No contact entity.** No `people`/`contact_methods`; no consent or suppression state anywhere; no field to record where a contact came from. | §1.2; grep for `casl`, `opt-out`, `suppress`, `consent` finds only `complianceConsents` (worker privacy) and escalation opt-out | Contact Directory build plan (product not built) |
-| G2 | **No prospect / relationship / opportunity record.** `customerAccounts` requires a financial entity and has no `prospect` status; no lead, opportunity, vendor-application or activity-signal table. | §1.1, §1.8; `fundingOpportunities` is the only opportunity-shaped table and is program-specific | G1 for contacts; organization master for identity |
-| G3 | **No outbound transport of any kind** (email, SMS) and no inbound message intake. `commercialDocumentDeliveries` and `workflowNotifications.channel` are records, not senders. No `INBOUND_FEEDS` kind for a message. | §1.10 | Outbox handler pattern; a transport port with no provider chosen |
-| G4 | **No deterministic outreach policy.** Nothing decides whether a communication may be sent; jurisdiction, sender identification, contact source and suppression are unmodelled. | §1.2, §1.10 | G1 |
-| G5 | **No sales role, sales permissions or `sales.*` procedures.** `DomainRole` has no `sales`; `portalComposition` composes the slot from office/management. | §1.14 | Authorization recipe |
-| G6 | **No sales capabilities in the gateway and no sales tools.** `CAPABILITIES` has six entries, none sales; PR #7's tool registry is unmerged; no worker handler runs a model. | §1.12, §1.13 | PR #7 or equivalent; moratorium |
-| G7 | **Quotes do not use the deterministic resolver;** explicit lines bypass every check; `rate_override` approval is unused; no quote expiry; no internal acceptance path; no `quote` document kind. | §1.9 | Roadmap step 5 |
-| G8 | **Booking holds.** `tentative` is never written; `resourceBookings` lacks `orgRef`, expiry, actor, source, and any lock finer than the posting (two postings booking the same unit are not serialised). No expiry sweep. | §1.4 | Dispatch award transaction |
-| G9 | **Availability is not computed.** `operatorAvailability` is schema-only; readiness answers `availability_not_declared` and `hos_unknown` for everyone; HOS clocks are never consulted by the composer. | §1.5 | SPINE dispatch gate; P9 verified HOS |
-| G10 | **No job intake state.** `jobs.status` starts at `dispatched`; no requested start, LSD FK, service code FK or customer FK; `jobs.customer` is text. | §1.4 | Additive columns or a separate intake record |
-| G11 | **No region/yard/base entity, no proximity query over anything but facilities, no travel time.** | §1.7 | Spatial foundation; routing source decision (P2.1) |
-| G12 | **No regional signal ingestion; activity sources are licence-blocked;** no per-customer history metrics. | §1.8 | `geo.sourceReview`, feed family (off-spine, unwired) |
-| G13 | **Model-call provenance and telemetry** (provider, model, prompt version/hash, input/output hash, usage) have no columns; tool results are not persisted; run budgets are not enforced. | §1.13, terminology §19 | Door 2 wiring (SPINE-blocked) |
-| G14 | **Vendor-application documents.** No owner type for organizations on `complianceDocuments`; no record of a customer's requirements or our submitted package. | §1.16 | `commercialDocuments` document types |
-| G15 | **Web chat for prospects.** `externalProcedure` requires an account-bound identity; prospects have none. | §1.2 | Deferred; email first |
+| G1 | **No contact entity.** No `people`/`contact_methods`; no consent or suppression state anywhere; no field to record where a contact came from. | §1.2; grep for `casl`, `opt-out`, `suppress`, `consent` finds only `complianceConsents` (worker privacy) and escalation opt-out | Contact Directory build plan (product not built) · Revision 2: **NARROWED** — `customerContacts` covers customer and prospect contacts; consent, suppression and the general directory remain open |
+| G2 | **No prospect / relationship / opportunity record.** `customerAccounts` requires a financial entity and has no `prospect` status; no lead, opportunity, vendor-application or activity-signal table. | §1.1, §1.8; `fundingOpportunities` is the only opportunity-shaped table and is program-specific | G1 for contacts; organization master for identity · Revision 2: **NARROWED** — `customerAccounts.customerType` exists; prospect status, relationship, opportunity and signal records remain open |
+| G3 | **No outbound transport of any kind** (email, SMS) and no inbound message intake. `commercialDocumentDeliveries` and `workflowNotifications.channel` are records, not senders. No `INBOUND_FEEDS` kind for a message. | §1.10 | Outbox handler pattern; a transport port with no provider chosen · Revision 2: **OPEN** — a credential store and a claim-before-send pattern now exist to build on; production key custody is blocked |
+| G4 | **No deterministic outreach policy.** Nothing decides whether a communication may be sent; jurisdiction, sender identification, contact source and suppression are unmodelled. | §1.2, §1.10 | G1 · Revision 2: **OPEN** — the generalized rule ledger is the home for law-derived rules |
+| G5 | **No sales role, sales permissions or `sales.*` procedures.** `DomainRole` has no `sales`; `portalComposition` composes the slot from office/management. | §1.14 | Authorization recipe · Revision 2: **OPEN** — organization-scoped grants now make a per-organization `sales` role possible |
+| G6 | **No sales capabilities in the gateway and no sales tools.** `CAPABILITIES` has six entries, none sales; PR #7's tool registry is unmerged; no worker handler runs a model. | §1.12, §1.13 | PR #7 or equivalent; moratorium · Revision 2: **NARROWED** — the tool registry is merged; still no sales capabilities, no handler runs a model |
+| G7 | **Quotes do not use the deterministic resolver;** explicit lines bypass every check; `rate_override` approval is unused; no quote expiry; no internal acceptance path; no `quote` document kind. | §1.9 | Roadmap step 5 · Revision 2: **NARROWED** — rate sheets exist as approved charge definitions; quotes still use legacy cards |
+| G8 | **Booking holds.** `tentative` is never written; `resourceBookings` lacks `orgRef`, expiry, actor, source, and any lock finer than the posting (two postings booking the same unit are not serialised). No expiry sweep. | §1.4 | Dispatch award transaction · Revision 2: **OPEN** — unchanged; also holds must avoid operators because open shifts read tentative bookings |
+| G9 | **Availability is not computed.** `operatorAvailability` is schema-only; readiness answers `availability_not_declared` and `hos_unknown` for everyone; HOS clocks are never consulted by the composer. | §1.5 | SPINE dispatch gate; P9 verified HOS · Revision 2: **OPEN** |
+| G10 | **No job intake state.** `jobs.status` starts at `dispatched`; no requested start, LSD FK, service code FK or customer FK; `jobs.customer` is text. | §1.4 | Additive columns or a separate intake record · Revision 2: **NARROWED** — job commercial context exists; requested start, service code and location remain open |
+| G11 | **No region/yard/base entity, no proximity query over anything but facilities, no travel time.** | §1.7 | Spatial foundation; routing source decision (P2.1) · Revision 2: **OPEN** |
+| G12 | **No regional signal ingestion; activity sources are licence-blocked;** no per-customer history metrics. | §1.8 | `geo.sourceReview`, feed family (off-spine, unwired) · Revision 2: **OPEN** |
+| G13 | **Model-call provenance and telemetry** (provider, model, prompt version/hash, input/output hash, usage) have no columns; tool results are not persisted; run budgets are not enforced. | §1.13, terminology §19 | Door 2 wiring (SPINE-blocked) · Revision 2: **OPEN** — the LA-1b proposal defines shared tables to adopt |
+| G14 | **Vendor-application documents.** No owner type for organizations on `complianceDocuments`; no record of a customer's requirements or our submitted package. | §1.16 | `commercialDocuments` document types · Revision 2: **NARROWED** — document-control definitions are the home for vendor-application packages |
+| G15 | **Web chat for prospects.** `externalProcedure` requires an account-bound identity; prospects have none. | §1.2 | Deferred; email first · Revision 2: **OPEN** |
 
 Each gap maps to a checkpoint in `docs/register/AI_BUSINESS_DEVELOPMENT_DESIGN.md` §15.
