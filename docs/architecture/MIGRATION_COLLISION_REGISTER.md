@@ -246,28 +246,33 @@ number free everywhere.
 * **2026-10-01 (P0-A2.1)**: claimed `0209` (`operatingZones.orgRef`, nullable; NULL = the historical single
   tenant, as 0132 and 0148), recorded in the commit that creates the migration.
 
-## State at the Sign & Attest SA1 claim (2026-10-01, `main` = `c3f088b`, after PR #89 and #90)
+## Claim: 0217–0219 (Customer, Contract and Rate Management, 2026-10-01)
 
-`main` migration head: **`0209_operating_zone_scope.sql`**. Scan with the command above over every
-remote branch sharing history with `main` (branches with no merge base report nothing and are listed
-in the 2026-09-24 section): open claims `0182`–`0188` (customer-contract-rates, document-control
-intake/disposal, integration-hub, safety-program-builder, copilot `0185`, canadian-govt-apis,
-ELD `0187`, training-academy `0187`/`0188`), `0197` (intelligence-engine), `0199`–`0201`
-(mechanic-portal), `0205`–`0206` (communications-marketplace), `0210` (relaxed-carson **and**
-driver-portfolio, a two-way collision), `0211`–`0212` (driver-portfolio), `0213` (s2-fleet-runtime-identity).
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0217 | `0217_customer_account_profile.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0217 |
+| 0218 | `0218_customer_contracts_rate_sheets.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0218 |
+| 0219 | `0219_job_commercial_context.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0219 |
 
-| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
-|---|---|---|---|---|---|---|
-| **0214** | `0214_sign_attest_foundation.sql` | `claude/leaseos-sign-attest-design-5993ar` | SA1 | this branch | none at scan | keeps 0214 unless a PR lands first |
-| **0215** | `0215_sign_attest_events.sql` | same | SA1 | this branch | none | keeps 0215 |
-| **0216** | `0216_sign_attest_guards.sql` | same | SA1 | this branch | none | keeps 0216 |
+Written as `0182`–`0184` on 2026-09-24, when they were the first numbers free everywhere. By the merge of
+`main` (`c3f088b`) three other open branches held `0182`–`0184` (`document-control-architecture`,
+`integration-hub-subsystem`, `safety-compliance-program-builder`) and the highest claim on any remote ref
+was `0216`: `claude/relaxed-carson-qfcopf` took `0214` and `claude/leaseos-sign-attest-design-5993ar`
+took `0215`–`0216` while this merge was being gated, the second of them minutes before this branch
+pushed `0215`–`0217`. As the later, unmerged claimant this branch moved again, to the first
+three numbers free on `main` and on every open branch. No other branch was renumbered.
 
-The design document's earlier provisional claim (`0182`–`0184`, written against `6f52b57`) is withdrawn;
-those numbers are now held by four other branches.
 
-**Next free number for new work after this claim: `0217`** (re-check with the scan before committing).
+## State at the Sign & Attest SA1 merge (2026-10-01, `main` = `ce27fec`, after PR #98, #59 and #102)
+
+`main` migration head: **`0219_job_commercial_context.sql`** (v23.31 took `0217`–`0219`, renumbered around
+Sign & Attest's claim; `0205`/`0206` landed with #59). This branch (PR #104) holds **`0214`–`0216`**
+(`0214_sign_attest_foundation`, `0215_sign_attest_events`, `0216_sign_attest_guards`): below main's head,
+colliding with nothing on main, applied by name. The earlier provisional claim of `0182`–`0184` in the
+design document is withdrawn (those numbers were taken by other branches).
+
+**Next free number for new work after this merge: `0220`** (re-check with the scan before committing).
 
 ## Change log (continued)
 
-* **2026-10-01 (SA1)**: Sign & Attest claims `0214`–`0216`; `0210` noted as a two-way collision
-  (relaxed-carson vs driver-portfolio); `0182`–`0184` provisional claim withdrawn.
+* **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.

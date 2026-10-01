@@ -6,17 +6,17 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **v23.30** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **436** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **189** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **717** | `roleProcedure(` call sites across all routers |
+| Release | **v23.31** | `LEASEOS_RELEASE` (or explicit argument 1) |
+| Tables | **451** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **194** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **778** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **40** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **382** | the `Permission` union |
-| Sensitive (fail-closed) permissions | **148** | `SENSITIVE_PERMISSIONS` |
-| Universal (self-scoped) permissions | **15** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **443 / 6105** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Permissions | **396** | the `Permission` union |
+| Sensitive (fail-closed) permissions | **153** | `SENSITIVE_PERMISSIONS` |
+| Universal (self-scoped) permissions | **16** | `UNIVERSAL_PERMISSIONS` |
+| Test files / cases | **461 / 6276** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -50,6 +50,11 @@ surfaces (exceptions, inbox, my day, search, timeline) · dispatch gate with
 enforcement setting · IFTA · GST/HST · period close · bank reconciliation ·
 accounts receivable, credits, collections, write-offs · customer identity ·
 commercial core (terms, POs and AFEs, customer rate cards, billing check) ·
+customer, contract and rate management (the customer profile with its
+contacts and roles, contracts with a lifecycle and supersession, rate sheets
+as versioned groups of charge definitions approved as a unit, conditioned
+rate lines, the job's frozen commercial snapshot, the billable commercial
+context the next Billing checkpoint consumes) ·
 external identities and the customer / vendor / facility portal · the site
 sign-off chain (clocks, frozen revisions, signature authority, post-site
 supplement, delay and road-hazard evidence, three closes) · portal
@@ -201,8 +206,7 @@ readiness — every step the server's answer.
 
 Native shell (Capacitor), encrypted SQLite, hardware keystore, native file
 vault, camera, GPS, biometric signing, local notifications. Browser/mobile
-end-to-end tests. LoadSense authenticated gateway ingestion/native BLE service and hardware deployment (the recovered protocol, calibration/stability/material-movement engines and persistence model are present; the production machine-authenticated device edge is not yet wired). Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). Contracts and MSAs as
-records; WBS below cost code; earned-value schedules. AI extraction of rate sheets from
+end-to-end tests. LoadSense authenticated gateway ingestion/native BLE service and hardware deployment (the recovered protocol, calibration/stability/material-movement engines and persistence model are present; the production machine-authenticated device edge is not yet wired). Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). WBS below cost code; earned-value schedules. AI extraction of rate sheets from
 uploaded documents (a proposal path exists; the document reader that fills
 it does not); formula pricing is recorded, not evaluated. inbound
 vendor bills and facility tickets by machine (portal only). GPS on the

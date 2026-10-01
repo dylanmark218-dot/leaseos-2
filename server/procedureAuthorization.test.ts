@@ -50,6 +50,7 @@ const telematicsRouter = readFileSync("server/telematicsRouter.ts", "utf8");
 const workforceRouter = readFileSync("server/workforceRouter.ts", "utf8");
 const auditRouter = readFileSync("server/auditRouter.ts", "utf8");
 const spatialRouter = readFileSync("server/spatialRouter.ts", "utf8");
+const customerCommercialRouter = readFileSync("server/customerCommercialRouter.ts", "utf8");
 const commercialSetupRouter = readFileSync("server/commercialSetupRouter.ts", "utf8");
 const invoicingRouter = readFileSync("server/invoicingRouter.ts", "utf8");
 const geoRouter = readFileSync("server/geoRouter.ts", "utf8");
@@ -87,7 +88,7 @@ const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
  * payrollRouter.ts both draw from it. Checking only one would let a declared
  * permission go unwired without anyone noticing.
  */
-const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + attestRouter].join("\n");
+const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + attestRouter].join("\n");
 
 const countBuilders = (src: string, builder: string) =>
   (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
@@ -175,7 +176,7 @@ describe("migrated operational procedures", () => {
     // 40-procedure payroll/finance surface, all gated from the start.
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
     // The merged surface includes 8 Live Assist, 2 paperwork, 23 Document Control, and 10 auth-workspace procedures.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(697);   // SA1: +14 attest.* (server/attestRouter.ts)   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(758);   // SA1: +14 attest.* (server/attestRouter.ts);   // merge of main (b35bac4) into #59: main 723 + #59's 21 (7 board.*, 14 shifts.*);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 
@@ -245,7 +246,7 @@ describe("migrated operational procedures", () => {
     expect(countBuilders(workforceRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(auditRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(spatialRouter, "protectedProcedure")).toBe(0);
-    expect(countBuilders(commercialSetupRouter + invoicingRouter + geoRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter, "protectedProcedure")).toBe(0);
     // the inbound router mounts only the machine gate
     const inbound = integrationRouter.slice(integrationRouter.indexOf("export const inboundRouter"));
     expect(countBuilders(inbound, "roleProcedure")).toBe(0);

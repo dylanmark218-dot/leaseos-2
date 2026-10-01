@@ -245,6 +245,10 @@ export type Permission =
   | "commercial.terms.manage" | "commercial.po.record" | "commercial.ratecard.manage" | "commercial.read"
   // v22.7 — Commercial Setup & Rate Resolution: a rate is proposed by one person and approved by another; a margin is management's to see.
   | "commercial.rates.propose" | "commercial.rates.approve" | "commercial.rates.read" | "commercial.pricing.decide" | "commercial.margin.view" | "commercial.setup.write"
+  // v23.31 — Customer, Contract & Rate Management: the customer is a record, a contract has a lifecycle, a rate sheet is approved as a versioned unit, and a job freezes its commercial basis.
+  | "commercial.customer.read" | "commercial.customer.write" | "commercial.customer.archive"
+  | "commercial.contract.read" | "commercial.contract.write" | "commercial.contract.approve" | "commercial.contract.status"
+  | "commercial.job.assign" | "commercial.job.snapshot" | "commercial.job.summary" | "commercial.billing.context"
   // v22.9 — an invoice is drafted by the office from a ticket's decisions and finalized by a second permission into a frozen snapshot.
   | "invoicing.draft" | "invoicing.finalize" | "invoicing.read" | "invoicing.render" | "invoicing.send" | "invoicing.void" | "invoicing.dispute.resolve"
   // v22.13 — the mapping foundation: importing open geospatial data, reading it, and verifying a coordinate from the imported grid.
@@ -270,6 +274,8 @@ export type Permission =
   | "timeOff.request" | "timeOff.decide" | "timeOff.schedulingRead"
   // v22.20 — open shifts. Posting work and wanting it are different acts.
   | "shifts.post" | "shifts.read" | "shifts.interest"
+  // 0206 — declaring your own availability is a statement about yourself and nobody else.
+  | "shifts.availability_own"
   // v22.20 — crews. Reading a forecast and changing who is on a crew differ.
   | "crews.read" | "crews.manage"
   // v22.20 — calendar. Your own is not the same act as somebody else's.
@@ -280,6 +286,9 @@ export type Permission =
   | "assistant.ask" | "assistant.curate"
   // v22.20 — the board. Creating a channel is not the same as posting in one.
   | "board.read" | "board.post" | "board.manage"
+  // 0205 — publishing company-wide or emergency is not posting; reading a private conversation as
+  // a moderator is neither reading nor managing, and every use of it is an event.
+  | "board.publish" | "board.moderate"
   // v22.20 — the agent. Asking it to work, acting, and approving differ.
   | "agent.use" | "agent.act" | "agent.approve" | "agent.read"
   // LA-1a — Live Assist, the session spine only.
@@ -374,6 +383,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "attest.document.open",
     "attest.field.place",
     "attest.witness",
+    "commercial.job.summary",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -465,6 +475,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "attest.document.open",
     "attest.field.place",
     "attest.signer.assign",
+    "board.publish",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -553,6 +564,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "ifta.read",
     "fuel.review",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.contract.read",
+    "commercial.job.assign",
+    "commercial.job.snapshot",
+    "commercial.job.summary",
     "commercial.rates.propose",
     "commercial.rates.read",
     "closeout.ticket.write",
@@ -747,6 +763,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "attest.signer.assign",
     "attest.witness",
     "attest.finalize",
+    "board.publish",
+    "board.moderate",
     "live_assist.review",
     "document.read",
     "document.intake",
@@ -901,6 +919,14 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "facility.directory.write",
     "facility.directory.read",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.customer.write",
+    "commercial.contract.read",
+    "commercial.contract.write",
+    "commercial.job.assign",
+    "commercial.job.snapshot",
+    "commercial.job.summary",
+    "commercial.billing.context",
     "commercial.write",
     "assistant.ask",
     "agent.use",
@@ -1065,6 +1091,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "attest.void",
     "attest.supersede",
     "attest.export",
+    "board.publish",
+    "board.moderate",
     "live_assist.use",
     "live_assist.administer",
     "live_assist.review",
@@ -1098,6 +1126,17 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "ar.writeoff.decide",
     "payment.release",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.customer.write",
+    "commercial.customer.archive",
+    "commercial.contract.read",
+    "commercial.contract.write",
+    "commercial.contract.approve",
+    "commercial.contract.status",
+    "commercial.job.assign",
+    "commercial.job.snapshot",
+    "commercial.job.summary",
+    "commercial.billing.context",
     "commercial.write",
     "commercial.policy",
     "academy.assign",
@@ -1370,6 +1409,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "audit.package.read",
   ],
   legal: [
+    "commercial.customer.read",
+    "commercial.contract.read",
+    "commercial.contract.write",
+    "commercial.contract.approve",
     "document.read",
     /* C1b-2b — requirement verification */
     "compliance.requirement.propose",
@@ -1445,6 +1488,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "bank.read",
     "ar.read",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.contract.read",
+    "commercial.job.summary",
     "commercial.rates.read",
     "invoicing.read",
     "closeout.read",
@@ -1465,6 +1511,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "document.intake",
     "facility.directory.read",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.customer.write",
+    "commercial.contract.read",
+    "commercial.job.summary",
+    "commercial.billing.context",
     "commercial.write",
     "tax.read_business",
     "tax.expense.create",
@@ -1688,6 +1739,17 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "commercial.po.record",
     "commercial.ratecard.manage",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.customer.write",
+    "commercial.customer.archive",
+    "commercial.contract.read",
+    "commercial.contract.write",
+    "commercial.contract.approve",
+    "commercial.contract.status",
+    "commercial.job.assign",
+    "commercial.job.snapshot",
+    "commercial.job.summary",
+    "commercial.billing.context",
     "commercial.rates.propose",
     "commercial.rates.approve",
     "commercial.rates.read",
@@ -1764,6 +1826,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "bank.read",
     "ar.read",
     "commercial.read",
+    "commercial.customer.read",
     "closeout.read",
     "asset.read",
     "asset.cca.classify",
@@ -1816,6 +1879,8 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   // `ctx.user.id` and refuses anything else (WRONG_SIGNER). Nobody signs for somebody else.
   "attest.sign_own",
   "attest.decline_own",
+  // 0206 — a person's own availability reads and writes `ctx.user.id` and nothing the request could name.
+  "shifts.availability_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -1914,6 +1979,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "crews.manage",
   // A channel decides who may read a conversation.
   "board.manage",
+  // An emergency or company-wide bulletin demands acknowledgement from everyone it reaches.
+  "board.publish",
+  // Reading a private conversation as a moderator is an access nobody in it agreed to.
+  "board.moderate",
   // What is loaded decides what every later answer can cite.
   "assistant.curate",
   // Approving an agent action is authorising a machine to affect the company.
@@ -1972,6 +2041,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "commercial.rates.approve",
   "commercial.margin.view",
   "commercial.setup.write",
+  // v23.31 — archiving a customer, approving a contract, suspending or terminating one: governance acts, recorded or refused.
+  "commercial.customer.archive",
+  "commercial.contract.approve",
+  "commercial.contract.status",
   "invoicing.finalize",
   // v21.9.1 — nine actions that were role-authorized but never entered the
   // fail-closed set. Awarding dispatch, granting an override, changing
@@ -2980,6 +3053,47 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "commercialSetup.goLiveReadiness": "commercial.rates.read",
   "commercialSetup.ticketPricing": "commercial.rates.read",
   "commercialSetup.vendorRateVariances": "commercial.rates.read",
+  // v23.31 — Customer, Contract & Rate Management (customerCommercialRouter).
+  "customerCommercial.customerCreate": "commercial.customer.write",
+  "customerCommercial.customerUpdate": "commercial.customer.write",
+  "customerCommercial.customerHoldSet": "commercial.customer.write",
+  "customerCommercial.customerArchive": "commercial.customer.archive",
+  "customerCommercial.customerReactivate": "commercial.customer.archive",
+  "customerCommercial.customersList": "commercial.customer.read",
+  "customerCommercial.customerGet": "commercial.customer.read",
+  "customerCommercial.customerHistory": "commercial.customer.read",
+  "customerCommercial.contactCreate": "commercial.customer.write",
+  "customerCommercial.contactUpdate": "commercial.customer.write",
+  "customerCommercial.contactRoleSet": "commercial.customer.write",
+  "customerCommercial.contactRoleEnd": "commercial.customer.write",
+  "customerCommercial.contractCreate": "commercial.contract.write",
+  "customerCommercial.contractUpdate": "commercial.contract.write",
+  "customerCommercial.contractSubmit": "commercial.contract.write",
+  "customerCommercial.contractApprove": "commercial.contract.approve",
+  "customerCommercial.contractStatusSet": "commercial.contract.status",
+  "customerCommercial.contractSupersede": "commercial.contract.write",
+  "customerCommercial.contractsList": "commercial.contract.read",
+  "customerCommercial.contractGet": "commercial.contract.read",
+  "customerCommercial.rateSheetCreate": "commercial.rates.propose",
+  "customerCommercial.rateSheetVersionCreate": "commercial.rates.propose",
+  "customerCommercial.rateLineAdd": "commercial.rates.propose",
+  "customerCommercial.rateLineUpdate": "commercial.rates.propose",
+  "customerCommercial.rateLineRemove": "commercial.rates.propose",
+  "customerCommercial.rateSheetVersionSubmit": "commercial.rates.propose",
+  "customerCommercial.rateSheetVersionDecide": "commercial.rates.approve",
+  "customerCommercial.rateSheetsList": "commercial.rates.read",
+  "customerCommercial.rateSheetGet": "commercial.rates.read",
+  "customerCommercial.jobContextSet": "commercial.job.assign",
+  "customerCommercial.jobReferenceAdd": "commercial.job.assign",
+  "customerCommercial.jobReferenceEnd": "commercial.job.assign",
+  "customerCommercial.jobPartySet": "commercial.job.assign",
+  "customerCommercial.jobReferenceWaive": "commercial.job.snapshot",
+  "customerCommercial.jobSnapshotCapture": "commercial.job.snapshot",
+  "customerCommercial.jobCommercialGet": "commercial.contract.read",
+  "customerCommercial.jobFieldSummary": "commercial.job.summary",
+  "customerCommercial.billableContext": "commercial.billing.context",
+  "customerCommercial.jobRateResolve": "commercial.rates.read",
+  "customerCommercial.expirySweep": "commercial.contract.status",
   /* ---- v22.9: the invoice path ---- */
   "invoicing.draftFromTicket": "invoicing.draft",
   "invoicing.get": "invoicing.read",
@@ -3045,9 +3159,25 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "timeOff.schedulingRead": "timeOff.schedulingRead",
   "shifts.post": "shifts.post",
   "shifts.list": "shifts.read",
+  "shifts.get": "shifts.read",
   "shifts.eligibility": "shifts.read",
+  "shifts.candidates": "shifts.read",
   "shifts.expressInterest": "shifts.interest",
+  "shifts.respond": "shifts.interest",
+  "shifts.offerRespond": "shifts.interest",
   "shifts.interests": "shifts.read",
+  // 0206 — the post's lifecycle and its offers are the poster's acts; linking a post to a slot is
+  // an assignment act and carries the binding's own permission.
+  "shifts.publish": "shifts.post",
+  "shifts.close": "shifts.post",
+  "shifts.cancel": "shifts.post",
+  "shifts.offer": "shifts.post",
+  "shifts.offerWithdraw": "shifts.post",
+  "shifts.link": "dispatch.assign",
+  "shifts.award": "dispatch.assign",
+  "shifts.availabilitySet": "shifts.availability_own",
+  "shifts.availabilityMine": "shifts.availability_own",
+  "shifts.availabilityFor": "shifts.read",
   "crews.create": "crews.manage",
   "crews.addMember": "crews.manage",
   "crews.removeMember": "crews.manage",
@@ -3066,6 +3196,16 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "assistant.passageList": "assistant.curate",
   "assistant.measureRetrieval": "assistant.ask",
   "board.createChannel": "board.manage",
+  "board.direct": "board.post",
+  // Membership of a channel is changed by `board.manage`, or by a moderator or manager OF THAT
+  // CHANNEL — a channel role, decided inside the procedure. The gate is the posting permission so a
+  // group's own moderator can reach it; the procedure refuses anybody who is neither.
+  "board.memberAdd": "board.post",
+  "board.memberRemove": "board.post",
+  "board.members": "board.read",
+  "board.mine": "board.read",
+  "board.moderateRead": "board.moderate",
+  "board.moderateWithdraw": "board.moderate",
   "board.post": "board.post",
   "board.read": "board.read",
   "board.open": "board.read",

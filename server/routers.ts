@@ -113,6 +113,7 @@ import { gstRouter } from "./gstRouter";
 import { arRouter, bankRouter } from "./cashRouter";
 import { commercialRouter, portalAdminRouter } from "./commercialRouter";
 import { commercialSetupRouter } from "./commercialSetupRouter";
+import { customerCommercialRouter } from "./customerCommercialRouter";
 import { invoicingRouter } from "./invoicingRouter";
 import { geoRouter } from "./geoRouter";
 import { commsRouter } from "./commsRouter";
@@ -396,6 +397,7 @@ export const appRouter = router({
   ar: arRouter,
   commercial: commercialRouter,
   commercialSetup: commercialSetupRouter,
+  customerCommercial: customerCommercialRouter,
   invoicing: invoicingRouter,
   geo: geoRouter,
   closeout: closeoutRouter,
