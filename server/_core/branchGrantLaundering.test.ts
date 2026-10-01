@@ -19,6 +19,7 @@
  * pin the projection, and the db-backed one fails without it.
  */
 import { describe, expect, it } from "vitest";
+import { SINGLE_TENANT_ID } from "./actingScope";
 import { authorize, permissionsFor } from "./recordsAuthorization";
 import type { RoleGrant } from "./recordsAuthorization";
 import { grantUserRole, listActiveUserRoleNames, listRoleNamesAnyScope } from "../db";
@@ -57,7 +58,9 @@ d("the projection does not launder a confined grant", () => {
     const userId = newUserId();
     const now = new Date();
     await grantUserRole({
-      userId, role: "safety", scopeType: "branch", scopeRef: "YEG",
+      // B23.1A (0170): a branch grant names its organization — branch ids are
+      // bare strings with no owner, so the constraint requires both.
+      userId, role: "safety", scopeType: "branch", orgRef: SINGLE_TENANT_ID, scopeRef: "YEG",
       grantedByUserId: 1, grantedAt: now,
     });
 

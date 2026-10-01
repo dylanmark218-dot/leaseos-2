@@ -317,8 +317,8 @@ export function composeSession(roles: readonly DomainRole[]): ComposedSession {
  *
  * `defaultWorkspace` travels with it, and travels **unvalidated**. It is a
  * `varchar(60)` that nothing checks on write, so it is a preference and never a
- * grant: `entryModel.resolvePortalEntry` checks it against the portals the
- * session actually holds, and a stale or hostile value opens nothing.
+ * grant: `resolveSessionContext` (workspaceAccess.ts) checks it against the
+ * workspaces the session actually holds, and a stale or hostile value opens nothing.
  *
  * Nothing here names a portal or a permission. The moment this carries either,
  * it has started deciding access, and access is the permission engine's.

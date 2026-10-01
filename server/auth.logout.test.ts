@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import { COOKIE_NAME, REFRESH_COOKIE_NAME } from "../shared/const";
+import { ORG_SELECTION_COOKIE } from "./_core/organizationSelection";
 import { LEGACY_REFRESH_COOKIE_PATHS, REFRESH_COOKIE_PATH } from "./_core/cookies";
 import type { TrpcContext } from "./_core/context";
 
@@ -46,7 +47,7 @@ function createAuthContext(): {
 }
 
 describe("auth.logout", () => {
-  it("clears the session cookie and reports success", async () => {
+  it("clears every cookie the session owns, and reports success", async () => {
     const { ctx, clearedCookies } = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
@@ -68,6 +69,9 @@ describe("auth.logout", () => {
       [COOKIE_NAME, "/"],
       [REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH],
       ...LEGACY_REFRESH_COOKIE_PATHS.map(p => [REFRESH_COOKIE_NAME, p]),
+      // v23.26 (#64) — and the organization selection, which is part of the session and ends with
+      // it: leaving it behind would hand the next person to use a shared shop tablet a tenant.
+      [ORG_SELECTION_COOKIE, "/"],
     ]);
     for (const c of clearedCookies) expect(c.options).toMatchObject(secureAttrs);
     expect(REFRESH_COOKIE_PATH).not.toBe("/");

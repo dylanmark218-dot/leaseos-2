@@ -3104,7 +3104,15 @@ export const userRoleAssignments = mysqlTable("userRoleAssignments", {
     "bookkeeper", "payroll_admin", "tax_preparer", "controller",
     "external_accountant",
   ]).notNull(),
-  scopeType: mysqlEnum("scopeType", ["global", "branch"]).default("global").notNull(),
+  // B23.1 (0170) — how far the grant reaches. `global` is deliberate
+  // platform-wide authority and is held by nobody after the backfill;
+  // `organization` is the ordinary case; `branch` names its organization too,
+  // because branch identifiers are bare strings with no owner;
+  // `unscoped_legacy` is a pre-B23.1 grant whose organization could not be
+  // inferred without guessing, and authorizes nothing until re-granted.
+  scopeType: mysqlEnum("scopeType", ["global", "organization", "branch", "unscoped_legacy"]).default("global").notNull(),
+  /** The organization that issued this grant. NULL only for platform-global and quarantined rows. */
+  orgRef: varchar("orgRef", { length: 40 }),
   scopeRef: varchar("scopeRef", { length: 64 }),
   grantedByUserId: int("grantedByUserId").notNull(),
   grantedAt: timestamp("grantedAt").notNull(),
@@ -3113,7 +3121,9 @@ export const userRoleAssignments = mysqlTable("userRoleAssignments", {
   revokeReason: text("revokeReason"),
   // Persistent generated column: NULL for revoked rows, collision key for
   // active ones. Never written by the application — the database derives it.
-  activeGrantKey: varchar("activeGrantKey", { length: 180 }),
+  // B23.1 (0170) widened it to include orgRef: without that, `driver @ ABC`
+  // and `driver @ XYZ` collide and the second grant cannot be written at all.
+  activeGrantKey: varchar("activeGrantKey", { length: 220 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -6980,6 +6990,56 @@ export const organizationMemberships = mysqlTable("organizationMemberships", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
+
+/* ---- B23.2 (0175): how a person becomes a member of an organization ---- */
+
+/**
+ * An invitation is claimed by the TOKEN plus an authenticated openId, never by
+ * matching an email address: the OAuth provider returns `email` with no
+ * verification flag, so LeaseOS cannot tell a proved address from a typed one.
+ * `emailHint` exists so an administrator can see who they meant and send the
+ * link somewhere. It decides nothing.
+ *
+ * Only the SHA-256 of the token is stored. The raw value is returned once, to
+ * the administrator who created it.
+ */
+export const organizationInvitations = mysqlTable("organizationInvitations", {
+  id: int("id").autoincrement().primaryKey(),
+  invitationRef: varchar("invitationRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull(),
+  emailHint: varchar("emailHint", { length: 320 }),
+  displayNameHint: varchar("displayNameHint", { length: 180 }),
+  tokenDigest: varchar("tokenDigest", { length: 64 }).notNull().unique(),
+  /** `expired` is derived from `expiresAt`, never stored — see 0175. */
+  status: mysqlEnum("status", ["pending", "accepted", "cancelled"]).default("pending").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  invitedByUserId: int("invitedByUserId").notNull(),
+  invitedAt: timestamp("invitedAt").notNull(),
+  acceptedAt: timestamp("acceptedAt"),
+  acceptedByUserId: int("acceptedByUserId"),
+  cancelledAt: timestamp("cancelledAt"),
+  cancelledByUserId: int("cancelledByUserId"),
+  cancelReason: varchar("cancelReason", { length: 300 }),
+  defaultWorkspace: varchar("defaultWorkspace", { length: 60 }),
+  /**
+   * Persistent generated column: NULL unless the row is pending, so accepted
+   * and cancelled rows drop out of the unique index and remain as history.
+   * MariaDB has no partial index; this is the same trick as `activeGrantKey`.
+   * Never written by the application.
+   */
+  pendingKey: varchar("pendingKey", { length: 380 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type OrganizationInvitationRow = typeof organizationInvitations.$inferSelect;
+
+/** The roles an invitation confers on acceptance. A child table, not a blob. */
+export const organizationInvitationRoles = mysqlTable("organizationInvitationRoles", {
+  id: int("id").autoincrement().primaryKey(),
+  invitationId: int("invitationId").notNull(),
+  role: varchar("role", { length: 40 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
 
 /* ---- v22.20 (0087): what a device reports it is holding ---- */
 

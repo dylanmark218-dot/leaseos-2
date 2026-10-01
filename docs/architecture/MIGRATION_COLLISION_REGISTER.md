@@ -33,6 +33,15 @@ not collide with a main migration:
 | 0202 | `0202_live_assist_sessions.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0202 |
 | 0203 | `0203_live_assist_events_append_only.sql` | `claude/live-assist-architecture-qg4jgp` (LA-1a) | this branch | none | keeps 0203 |
 
+**2026-09-25 (later), on merging main into `claude/leaseos-auth-workspace-system-t008ad` (#64):** its
+`0170_organization_scoped_role_grants.sql` and `0175_organization_invitations.sql` collided with main's
+`0170_dispatch_role_types` (#9) and `0175_session_families` (#30). Per the rule of thumb they were renumbered
+to **`0207`** and **`0208`**, the first slots free on main and on every open branch (the scan then showed
+`0199`–`0206` claimed: `0199`–`0201` mechanic-portal, `0202`–`0204` driver-portfolio, `0205`–`0206`
+communications-marketplace). `scripts/verify-migration-0170.sh` became `verify-migration-0207.sh`. Still
+open, not touched here: `0202`/`0203` are claimed twice — driver-portfolio (#16) and
+`claude/live-assist-architecture-qg4jgp` (no PR). Next free number at that time: `0209` (since taken by main for P0-A2.1; see the 2026-10-01 section below — next free is `0210`).
+
 **Next free number for new work: `0210`** (re-check with the scan before committing). The 2026-09-24 table below
 is kept for history; several of its claims have since merged or been renumbered by their authors.
 

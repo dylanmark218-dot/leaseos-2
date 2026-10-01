@@ -21,7 +21,7 @@ import { matchFacilityStatementLine, type DisposalTicketLite } from "./_core/fac
 import { aging, type ArInvoice } from "./_core/accountsReceivable";
 import { derivability, empty, finish, type Dimension, type Figures } from "./_core/profitability";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { getDb, listActiveUserRoleNames } from "./db";
 
 async function bookFor(userId: number) {
   const db = await getDb();
@@ -218,7 +218,11 @@ export const commercialOfficeRouter = router({
         const { db, bookOrgRef } = await bookFor(ctx.user.id);
         const rows = (await db.select().from(commercialApprovalPolicies).where(bookWhere(commercialApprovalPolicies, bookOrgRef))) as ApprovalPolicyRow[];
         const requirement = approvalRequirementFor(rows.map(r => ({ ...r, maxAmountCents: r.maxAmountCents === null ? null : Number(r.maxAmountCents) })), { bookOrgRef, category: input.category, amountCents: input.amountCents });
-        const roles = (await db.select({ role: userRoleAssignments.role }).from(userRoleAssignments).where(and(eq(userRoleAssignments.userId, ctx.user.id), isNull(userRoleAssignments.revokedAt)))).map(r => r.role as string);   // F1 — grants in force only
+        // B23.1 — the acting organization's live grants, not every row this
+        // account has ever held anywhere. This read filtered neither revocation
+        // nor organization before; "could I approve this?" must be answered
+        // with the same roles `decide()` will actually use.
+        const roles = (await listActiveUserRoleNames(ctx.user.id));
         return { requirement, couldApprove: approvalDecision(requirement, { userId: ctx.user.id, roles }, input.preparedByUserId) };
       }),
   }),

@@ -17,6 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The required status check is `CI / test`. Renaming this job renames that
+  # check, so branch protection has to be updated in the same change.
   test:
     runs-on: ubuntu-latest
 
@@ -92,6 +94,30 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq mariadb-client
 
       - run: pnpm install --frozen-lockfile
+
+      # B23.1B — say plainly that the database is reachable before running a
+      # seven-minute gate against it.
+      #
+      # The service's own health check already gates the job starting, so this
+      # is not a wait and there is no sleep: it is the difference between "gate
+      # 1 failed" and "the database never came up". Those want different first
+      # questions, and the gate's later failures are only meaningful if this
+      # passed. The version is printed because 0021 declares a PERSISTENT
+      # generated column, which is MariaDB's spelling and which MySQL rejects —
+      # so a silently swapped image is worth seeing at the top of the log.
+      - name: Database reachable
+        run: |
+          if ! out=$(mysql -h 127.0.0.1 -P 3306 -u root -N -B -e "SELECT VERSION();" 2>&1); then
+            echo "FAIL: the MariaDB service is not answering on 127.0.0.1:3306."
+            echo "The gate needs a database; it will not fall back to running without one."
+            echo "$out"
+            exit 1
+          fi
+          echo "MariaDB $out"
+          case "$out" in
+            10.11*) ;;
+            *) echo "WARNING: expected MariaDB 10.11, the version this gate is verified against." ;;
+          esac
 
       # The whole gate, not a hand-rolled subset of it. The previous inline
       # steps skipped gates 0, 5, 7b, 7c and 8.
