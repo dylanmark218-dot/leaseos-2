@@ -80,7 +80,6 @@ import {
   externalIdentities,
   integrationClients,
   coreRecordOwnership, organizationInvitationRoles, organizationInvitations, organizationMemberships, organizations, fieldTickets, incidentReports, loads, financialEntities } from "../drizzle/schema";
-import { entityScopeWhere } from "./_core/entityScope";
 import { projectComplianceDocument } from "./_core/complianceProjection";
 import { ENV } from "./_core/env";
 import { membershipIsLive, type MembershipFact } from "./_core/workspaceAccess";
@@ -945,7 +944,8 @@ export async function assistantTargetsInScope(
     const stop = (await db.select({ tripId: tripStops.tripId }).from(tripStops).where(eq(tripStops.id, t.targetRecordId)).limit(1))[0];
     return !!stop && !!(await tripInScope(stop.tripId, scope));
   }
-  const book = (await db.select({ id: financialEntities.id }).from(financialEntities).where(and(eq(financialEntities.id, t.targetRecordId), entityScopeWhere(scope))).limit(1))[0];
+  // The books predicate — entityScopeWhere is this exact clause; importing it from entityScope would put @trpc/server in the worker graph.
+  const book = (await db.select({ id: financialEntities.id }).from(financialEntities).where(and(eq(financialEntities.id, t.targetRecordId), orgScopeWhere(financialEntities, scope))).limit(1))[0];
   return !!book;
 }
 
