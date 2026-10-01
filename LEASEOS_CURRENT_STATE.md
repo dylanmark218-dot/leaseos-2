@@ -9,14 +9,14 @@ here can be added rather than read.
 | Release | **v23.25** | `LEASEOS_RELEASE` (or explicit argument 1) |
 | Tables | **419** | `mysqlTable(` declarations in `drizzle/schema.ts` |
 | Migrations | **167** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **680** | `roleProcedure(` call sites across all routers |
+| Role-authorized procedures | **681** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
 | Permissions | **360** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **127** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **311 / 4216** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **313 / 4231** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -921,6 +921,18 @@ scheduler has no field for a title. An HOS clock projects the end of its window
 as PROJECTED and says on its face that the HOS engine, not the arithmetic,
 decides. Recurrence is arithmetic on a wall clock in a zone, so 05:30 stays
 05:30 on the Monday after the clocks change.
+
+Scheduling Intelligence (B23.2) composes those engines into one answer for
+dispatch and cites each line: the scheduler's availability read, the HOS
+determination the HOS screen shows, dispatch's bookings and the readiness
+composer's verdict for the named unit — "available from 06:00, but the
+remaining hours of service mean the projected job cannot finish before the duty
+window ends." It decides none of them again. A taken span narrows the window and
+blocks only when the job does not fit what is left; an unverified rule, a
+missing determination or an unrostered person reads UNKNOWN, which never rounds
+to feasible; the duty window's end is labelled as a projection from a clock read
+at a moment; and the answer is advice — nothing is booked by asking, and the
+readiness gate still runs at award.
 
 An inspector can now be handed one: a time-limited grant is issued against a
 unit, the code carries its reference rather than any authority, and opening it

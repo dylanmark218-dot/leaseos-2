@@ -37,6 +37,10 @@ import {
 } from "./_core/reminders";
 import { planReminder, type ReminderCommand } from "./_core/reminderCommands";
 import { fromDispatchBooking } from "./_core/workProjections";
+import { assessSchedule, rankAssessments, type ScheduleAssessment } from "./_core/schedulingIntelligence";
+import { CONTEXT as HOS_CONTEXT, determinationFor } from "./hosRouter";
+import { composeReadiness } from "./readinessComposer";
+import { units } from "../drizzle/schema";
 import {
   applyDeviceActions, applyReminderOutcome, audit, auditTrail, completeRemindersFor, emitWorkEvent, insertRule, isParticipant, loadEvent, loadEventsFor,
   loadReminder, loadRule, loadTask, openChecklistCount, openDependencies, orgRefFor, orgWhere, persistedEvent, queueNotification, recordReminderAction,
@@ -625,6 +629,66 @@ export const workRouter = router({
       const c = await caller(d, ctx);
       const rows = (await auditTrail(d, input.subjectKind, input.subjectRef, c.acting)).filter(r => r.visibility === "operational");
       return { subjectKind: input.subjectKind, subjectRef: input.subjectRef, events: rows.map(r => ({ action: r.action, actorUserId: r.actorUserId, actorSource: r.actorSource, detail: r.detailJson ? JSON.parse(r.detailJson) : null, occurredAt: r.occurredAt })), note: "Private subjects are not listed here; their trail holds no content and belongs to their owner." };
+    }),
+
+  /**
+   * B23.2 — Scheduling Intelligence: one answer for dispatch, composed from the engines that already
+   * decided and cited line by line.
+   *
+   * For each candidate: the availability read (as a scheduler sees it — private entries as windows,
+   * never words), the HOS determination `hos.status` would show, dispatch bookings, and the
+   * readiness composer for the named unit. The engine puts them side by side; it decides none of
+   * them again. UNKNOWN never rounds to feasible, and a FEASIBLE answer is advice: dispatch assigns,
+   * and the readiness gate runs at award.
+   */
+  scheduleAssess: roleProcedure("work.scheduleAssess")
+    .input(z.object({
+      userIds: z.array(z.number().int().positive()).min(1).max(20),
+      from: z.coerce.date(), to: z.coerce.date(),
+      estimatedDurationMinutes: z.number().int().min(1).max(7 * 24 * 60),
+      estimatedDriveMinutes: z.number().int().min(0).max(10_000).optional(),
+      unitId: z.number().int().positive().optional(),
+      jobId: z.number().int().positive().optional(),
+      hos: HOS_CONTEXT.omit({ at: true }).optional(),
+      now: AT,
+    }))
+    .query(async ({ ctx, input }) => {
+      const d = await db();
+      const c = await caller(d, ctx);
+      if (input.to.getTime() <= input.from.getTime() || input.to.getTime() - input.from.getTime() > 14 * DAY) throw new TRPCError({ code: "BAD_REQUEST", message: "The window must be ahead of its start and at most 14 days" });
+      const unit = input.unitId ? (await d.select({ id: units.id, unitNumber: units.unitNumber }).from(units).where(eq(units.id, input.unitId)).limit(1))[0] ?? null : null;
+      if (input.unitId && !unit) throw new TRPCError({ code: "NOT_FOUND", message: "No such unit" });
+      const assessments: ScheduleAssessment[] = [];
+      for (const userId of Array.from(new Set(input.userIds))) {
+        const { entries } = await calendarFor(d, { forUserId: userId, acting: c.acting, from: input.from, to: input.to, audience: { kind: "operational", userId: c.userId }, now: input.now });
+        const availability = availabilityFor({ userId, from: input.from, to: input.to, entries: entries as VisibleEvent[], rotationOn: await rotationOnFor(d, userId, input.from) });
+        const op = (await d.select({ id: operators.id, name: operators.name }).from(operators).where(eq(operators.userId, userId)).limit(1))[0] ?? null;
+        // HOS: the determination the HOS screen shows, read as of the window's start; nothing is computed here.
+        let hos: Parameters<typeof assessSchedule>[0]["hos"] = null;
+        if (op) {
+          const r = await determinationFor(d, { ...(input.hos ?? {}), at: input.from, operatorId: op.id });
+          hos = { determination: r.determination, asOf: input.from, ref: `hos.status:${op.id}@${input.from.toISOString()}` };
+        }
+        // Readiness: the composer's own verdict for this person on this unit, never re-derived.
+        let readiness: Parameters<typeof assessSchedule>[0]["readiness"] = null;
+        if (op && unit) {
+          try {
+            const r = await composeReadiness({ operatorId: op.id, unitId: unit.id, trailerId: null, jobId: input.jobId ?? null }, input.now);
+            readiness = { verdict: r.eligibility.verdict, blockers: r.eligibility.blockers.map(b => ({ code: b.code, label: b.label, severity: b.severity })), ref: `dispatch.readiness:${op.id}/${unit.id}` };
+          } catch (e) {
+            readiness = { verdict: "unknown", blockers: [{ code: "readiness_unavailable", label: e instanceof Error ? e.message : "readiness could not be composed", severity: "unknown" }], ref: `dispatch.readiness:${op.id}/${unit.id}` };
+          }
+        }
+        assessments.push(assessSchedule({
+          candidate: { userId, label: op?.name ?? `user ${userId}` },
+          unit: unit ? { unitId: unit.id, label: `Unit ${unit.unitNumber}` } : null,
+          window: { from: input.from, to: input.to },
+          estimatedDurationMinutes: input.estimatedDurationMinutes, estimatedDriveMinutes: input.estimatedDriveMinutes ?? null,
+          availability, hos: op ? hos : null, readiness, now: input.now,
+        }));
+        if (!op) assessments[assessments.length - 1]!.findings.unshift({ engine: "hos", state: "unknown", line: "No operator record for this person; hours of service and readiness were not read.", ref: null });
+      }
+      return { from: input.from, to: input.to, ranked: rankAssessments(assessments), note: "Advice composed from engines that already decided, each line citing its engine. UNKNOWN is not feasible. Dispatch assigns; the readiness gate runs at award." };
     }),
 
   /** What the worker runs each heartbeat, on demand. Idempotent: run it twice and the second pass changes nothing. */

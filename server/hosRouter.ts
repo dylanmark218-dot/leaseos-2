@@ -13,6 +13,7 @@ import { storageKeyInput } from "./_core/storageKey";
 import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
+import type { DbOrTx } from "./_core/dbTypes";
 import { complianceDocuments, dutyRecords, hosAttestations, hosRuleLimits, hosRuleProfiles } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { ALL_HOS_PROFILE_SEEDS, HOS_SEED_CAVEAT, HOS_SEED_RETRIEVAL_DATE } from "./_core/hosRuleSeeds";
@@ -26,7 +27,7 @@ import {
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
 
 /** Rows read back as the engine's types. The limits travel with their profile, never apart from it. */
-async function loadProfiles(d: Awaited<ReturnType<typeof db>>): Promise<HosRuleProfile[]> {
+export async function loadProfiles(d: DbOrTx): Promise<HosRuleProfile[]> {
   const profiles = await d.select().from(hosRuleProfiles);
   const limits = profiles.length ? await d.select().from(hosRuleLimits).where(inArray(hosRuleLimits.profileKey, profiles.map(p => p.profileKey))) : [];
   return profiles.map(p => ({
@@ -39,7 +40,7 @@ async function loadProfiles(d: Awaited<ReturnType<typeof db>>): Promise<HosRuleP
   }));
 }
 
-const CONTEXT = z.object({
+export const CONTEXT = z.object({
   carrierAuthority: z.enum(["federal", "provincial", "territorial"]).nullish(),
   jurisdiction: z.string().max(8).nullish(),
   crossedBoundary: z.boolean().nullish(),
@@ -48,6 +49,21 @@ const CONTEXT = z.object({
   latitude: z.number().min(-90).max(90).nullish(),
   at: z.coerce.date().default(() => new Date()),
 });
+
+/**
+ * B23.2 — the determination for one operator at one moment, as `hos.status` computes it. Shared so
+ * Scheduling Intelligence reads the same answer the HOS screen shows rather than a second one.
+ */
+export async function determinationFor(d: DbOrTx, input: z.infer<typeof CONTEXT> & { operatorId: number; lookbackDays?: number }) {
+  const since = new Date(input.at.getTime() - (input.lookbackDays ?? 16) * 24 * 60 * 60_000);
+  const rows = await d.select().from(dutyRecords).where(and(eq(dutyRecords.operatorId, input.operatorId), gte(dutyRecords.startedAt, since)));
+  const entries: DutyEntry[] = rows.map(r => ({ dutyStatus: r.dutyStatus, startedAt: r.startedAt, endedAt: r.endedAt }));
+  const selection = selectProfile({ ...input, at: input.at }, await loadProfiles(d));
+  const profile = selection.outcome === "selected" ? selection.profile : null;
+  const core = profile?.limits.find(l => l.limitKey === "core_rest_minutes" && l.verificationStatus === "verified")?.value;
+  const clocks = computeClocks(entries, input.at, { shiftResetMinutes: core });
+  return { dutyRecordsRead: rows.length, selection, clocks, determination: determine(clocks, profile), core };
+}
 
 export const hosRouter = router({
 
@@ -375,16 +391,10 @@ export const hosRouter = router({
     .input(CONTEXT.extend({ operatorId: z.number().int().positive(), lookbackDays: z.number().int().min(1).max(30).default(16) }))
     .query(async ({ input }) => {
       const d = await db();
-      const since = new Date(input.at.getTime() - input.lookbackDays * 24 * 60 * 60_000);
-      const rows = await d.select().from(dutyRecords).where(and(eq(dutyRecords.operatorId, input.operatorId), gte(dutyRecords.startedAt, since)));
-      const entries: DutyEntry[] = rows.map(r => ({ dutyStatus: r.dutyStatus, startedAt: r.startedAt, endedAt: r.endedAt }));
-      const selection = selectProfile({ ...input, at: input.at }, await loadProfiles(d));
-      const profile = selection.outcome === "selected" ? selection.profile : null;
-      const core = profile?.limits.find(l => l.limitKey === "core_rest_minutes" && l.verificationStatus === "verified")?.value;
-      const clocks = computeClocks(entries, input.at, { shiftResetMinutes: core });
+      const { dutyRecordsRead, selection, clocks, determination, core } = await determinationFor(d, input);
       return {
-        operatorId: input.operatorId, dutyRecordsRead: rows.length,
-        selection, clocks, determination: determine(clocks, profile),
+        operatorId: input.operatorId, dutyRecordsRead,
+        selection, clocks, determination,
         shiftBasis: core ? `work shift taken to begin after a verified ${core} min core rest` : "work shift taken to begin after 8 h of rest — a default, because no verified core-rest figure applies",
       };
     }),

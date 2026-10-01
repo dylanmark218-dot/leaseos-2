@@ -972,6 +972,18 @@ as PROJECTED and says on its face that the HOS engine, not the arithmetic,
 decides. Recurrence is arithmetic on a wall clock in a zone, so 05:30 stays
 05:30 on the Monday after the clocks change.
 
+Scheduling Intelligence (B23.2) composes those engines into one answer for
+dispatch and cites each line: the scheduler's availability read, the HOS
+determination the HOS screen shows, dispatch's bookings and the readiness
+composer's verdict for the named unit — "available from 06:00, but the
+remaining hours of service mean the projected job cannot finish before the duty
+window ends." It decides none of them again. A taken span narrows the window and
+blocks only when the job does not fit what is left; an unverified rule, a
+missing determination or an unrostered person reads UNKNOWN, which never rounds
+to feasible; the duty window's end is labelled as a projection from a clock read
+at a moment; and the answer is advice — nothing is booked by asking, and the
+readiness gate still runs at award.
+
 An inspector can now be handed one: a time-limited grant is issued against a
 unit, the code carries its reference rather than any authority, and opening it
 requires a grant that is live, unrevoked and for the unit being presented — so a

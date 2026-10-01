@@ -3023,6 +3023,8 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "work.deviceSchedule": "work.own",
   "work.deviceActionsApply": "work.own",
   "work.audit": "work.scheduling",
+  /* B23.2 — Scheduling Intelligence: the composed answer for dispatch, read under the scheduling permission. */
+  "work.scheduleAssess": "work.scheduling",
   "work.sweep": "work.sweep",
 } as const satisfies Record<string, Permission>;
 

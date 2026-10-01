@@ -45,6 +45,10 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   "server/fieldroute.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "the document is created with expiresAt; only its creation is asserted" },
   "server/gst.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "period-bound arithmetic (2026-Q3 ends 1 October); no comparison with now" },
   "server/ifta.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "quarter-bound arithmetic; no comparison with now" },
+  // Reviewed 2026-10-01 as the date entered the three-week band: `asOf` is a fixed fiscal-year instant compared
+  // with a fixed acquisition date (2026-03-01) and a fixed year end (10-31); the file's real clock reads mint keys,
+  // date role grants, and date two registrations that are refused before any date is compared.
+  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "the schedule is computed as of a fixed instant against a fixed acquisition date and a fixed fiscal year end, and the disposal is dated against the same fixed year; the real clock only mints keys, grants roles and dates registrations the test expects refused" },
   "server/qualificationStore.test.ts": { dates: ["2026-10-01", "2026-11-10"], verdict: "clock_independent", reason: "the expired holding is evaluated against the shift's explicit STARTS, not now" },
 };
 
