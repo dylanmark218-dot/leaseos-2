@@ -101,10 +101,21 @@ d("mechanic release cannot override an active enforcement order", () => {
     expect(unknown.label).toContain("Unknown is not a pass");
   });
 
-  it("says nothing about enforcement when no subjects were supplied, so every existing caller is unchanged", async () => {
+  /*
+   * This case used to assert the opposite: that a composition with no `enforcement` object said
+   * nothing about enforcement at all, "so every existing caller is unchanged". That was true, and
+   * it was the defect — no production caller ever supplied the object, so the one capability this
+   * system will not let anyone override was never evaluated, and its silence read as a pass.
+   * The composer now reads `outOfServiceOrders` itself, so a caller supplying nothing gets a real
+   * answer rather than no answer.
+   */
+  it("evaluates enforcement from the canonical table when the caller supplies nothing", async () => {
     const { unitId, operatorId } = await unitAndOperator();
     const r = await composeReadiness({ operatorId, unitId, trailerId: null, jobId: null });
-    expect(r.contributions.some(c => c.engine === "enforcement")).toBe(false);
+    expect(r.contributions.some(c => c.engine === "enforcement")).toBe(true);
+    const capability = r.capabilities.find(c => c.capability === "enforcement orders");
+    expect(capability?.status).toBe("PASS");
+    expect(r.eligibility.blockers.some(b => b.code.startsWith("oos."))).toBe(false);
   });
 });
 

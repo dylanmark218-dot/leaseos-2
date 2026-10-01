@@ -4,12 +4,13 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server/_core/index.ts",
+    "dev": "NODE_ENV=development tsx watch server/_core/dev.ts",
     "build": "vite build && esbuild server/_core/index.ts server/_core/worker.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
+    "eval:secretary": "tsx server/_core/ai/eval/runEval.ts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "worker": "NODE_ENV=production node dist/worker.js"
   },
@@ -86,7 +87,7 @@
     "@testing-library/user-event": "14",
     "@types/express": "4.17.21",
     "@types/google.maps": "^3.58.1",
-    "@types/node": "^24.7.0",
+    "@types/node": "^22",
     "@types/react": "^19.2.1",
     "@types/react-dom": "^19.2.1",
     "@vitejs/plugin-react": "^5.0.4",
@@ -96,7 +97,7 @@
     "drizzle-kit": "^0.31.4",
     "esbuild": "^0.25.0",
     "jsdom": "25",
-    "pnpm": "^10.15.1",
+    "tough-cookie": "5.1.2",
     "postcss": "^8.4.47",
     "prettier": "^3.6.2",
     "tailwindcss": "^4.1.14",
@@ -108,6 +109,10 @@
     "vitest": "^2.1.4"
   },
   "packageManager": "pnpm@10.4.1+sha512.c753b6c3ad7afa13af388fa6d808035a008e30ea9993f58c6663e2bc5ff21679aa834db094987129aa4d488b86df57f7b634981b2f827cdcacc698cc0cfb88af",
+  "engines": {
+    "node": ">=22 <23",
+    "pnpm": "10.4.1"
+  },
   "pnpm": {
     "patchedDependencies": {
       "wouter@3.7.1": "patches/wouter@3.7.1.patch"

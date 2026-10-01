@@ -65,7 +65,16 @@ const tasksFor = async (subjectType: string, subjectId: string) => {
   return rows;
 };
 
+/**
+ * Drain until every event that existed when the drain started has been processed (or dead-lettered,
+ * or deferred to a later retry), not for a fixed 300 ms. The worker claims the whole outbox in id
+ * order, and other suites running at the same time enqueue their own events ahead of this one — so
+ * under CI load a fixed window sometimes ended before this test's event was reached. A ceiling keeps
+ * a genuinely stuck worker from hanging the suite; the assertions after it still decide the test.
+ */
 async function drainAll(workerId = "b20-worker") {
+  const [maxRows] = await pool.execute<mysql.RowDataPacket[]>("SELECT COALESCE(MAX(id), 0) AS maxId FROM domainEventOutbox");
+  const maxId = Number(maxRows[0].maxId);
   const ports = createWorkerPorts(pool);
   const w = startDrainWorker(ports, {
     workerId,
@@ -74,6 +83,17 @@ async function drainAll(workerId = "b20-worker") {
     batchSize: 10,
   });
   await new Promise(r => setTimeout(r, 300));
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const [pending] = await pool.execute<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM domainEventOutbox
+       WHERE id <= ? AND processedAt IS NULL AND deadLetteredAt IS NULL
+         AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW())`,
+      [maxId]
+    );
+    if (Number(pending[0].n) === 0 || Date.now() > deadline) break;
+    await new Promise(r => setTimeout(r, 50));
+  }
   w.stop();
   return w.done;
 }

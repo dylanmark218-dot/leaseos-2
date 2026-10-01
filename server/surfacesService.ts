@@ -8,8 +8,10 @@
  */
 
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
-import { resolveActingScope } from "./_core/actingScope";
-import { getDb } from "./db";
+import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
+import { getDb, jobInScope, orgScopeWhere, ownershipScopeWhere, tripInScope, unitInScope } from "./db";
+import { bookOrgWhere, ownedEntityWhere, type FinanceScope } from "./_core/entityScope";
+import { jobKeyedWhere, unitKeyedWhere } from "./financeScope";
 import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
   billingBooks, calibrationSweeps, complianceDocuments, disposalTickets, fieldTickets, manifests, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
@@ -17,6 +19,7 @@ import {
   syncConflicts, syncPackages, trips, units, vendorBills, vendors, workflowNotifications, workOrderReleases, workOrders, academyInspectorRequests, securityIncidents, privacyBreachAssessments, incidentNotificationObligations, facilities, facilityEvidence, facilitySourceLicences } from "../drizzle/schema";
 import { calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import type { ExceptionSources } from "./_core/exceptionCentre";
+import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
 import { loadUngatedAssignments } from "./dispatchEnforcementService";
 import { loadFuelLineFindings } from "./periodCloseService";
 
@@ -48,7 +51,7 @@ async function loadFacilityDirectoryExceptions(db: Awaited<ReturnType<typeof get
 export async function loadExceptionSources(now = new Date()): Promise<ExceptionSources> {
   const db = await getDb();
   const empty: ExceptionSources = {
-    now, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [],
+    now, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentialsAwaitingVerification: [], credentialVerdicts: [], aiProposals: [], aiQuestions: [],
     syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], openCalibrationSweeps: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], inspectorRequests: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [],
   };
   if (!db) return empty;
@@ -65,7 +68,7 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
       .from(vendorBills).leftJoin(vendors, eq(vendors.id, vendorBills.vendorId))
       .where(inArray(vendorBills.status, ["needs_coding", "needs_approval", "missing_receipt", "mismatch", "duplicate_suspected"])).limit(500),
     db.select().from(purchaseAuthorizations).where(eq(purchaseAuthorizations.status, "requested")).limit(500),
-    db.select({ id: complianceDocuments.id, ownerType: complianceDocuments.ownerType, ownerId: complianceDocuments.ownerId, docType: complianceDocuments.docType, title: complianceDocuments.title, expiresAt: complianceDocuments.expiresAt, verificationStatus: complianceDocuments.verificationStatus })
+    db.select({ id: complianceDocuments.id, ownerType: complianceDocuments.ownerType, ownerId: complianceDocuments.ownerId, docType: complianceDocuments.docType, title: complianceDocuments.title, expiresAt: complianceDocuments.expiresAt, pendingReview: sql<boolean>`${complianceDocuments.verificationStatus} = 'needs_review'`.mapWith(Boolean) })
       .from(complianceDocuments)
       .where(or(eq(complianceDocuments.verificationStatus, "needs_review"), and(lte(complianceDocuments.expiresAt, horizon), eq(complianceDocuments.verificationStatus, "verified")))).limit(2000),
     db.select({ proposalId: assistantProposals.proposalId, formKey: assistantProposals.formKey, title: assistantProposals.title, createdAt: assistantProposals.createdAt, commitState: assistantProposals.commitState })
@@ -91,6 +94,30 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   const unitIds = Array.from(new Set(creds.filter(c => c.ownerType === "unit").map(c => c.ownerId)));
   const unitRows = unitIds.length ? await db.select({ id: units.id, unitNumber: units.unitNumber }).from(units).where(inArray(units.id, unitIds)) : [];
   const unitNo = new Map(unitRows.map(u => [u.id, u.unitNumber]));
+
+  const ownerLabel = (ownerType: string, ownerId: number) =>
+    ownerType === "operator" ? opName.get(ownerId) ?? null : ownerType === "unit" ? (unitNo.get(ownerId) ? `Unit ${unitNo.get(ownerId)}` : null) : null;
+
+  /*
+   * SPINE item 2 — the query above only finds which owners and types are worth a look. Whether one
+   * has expired is the canonical verdict's call, over EVERY row of that type the owner holds: a
+   * licence that expired last year beside the renewal now in force is not an exception.
+   */
+  const awaiting = creds.filter(c => c.pendingReview);
+  const flagged = new Map<string, { ownerType: string; ownerId: number; docType: string }>();
+  for (const c of creds) flagged.set(`${c.ownerType}\u0000${c.ownerId}\u0000${c.docType}`, { ownerType: c.ownerType, ownerId: c.ownerId, docType: c.docType });
+  const owners = Array.from(new Map(Array.from(flagged.values()).map(f => [`${f.ownerType}\u0000${f.ownerId}`, f])).values());
+  const history: (typeof complianceDocuments.$inferSelect)[] = [];
+  for (let i = 0; i < owners.length; i += 200) {
+    const chunk = owners.slice(i, i + 200);
+    history.push(...await db.select().from(complianceDocuments).where(or(...chunk.map(o => and(eq(complianceDocuments.ownerType, o.ownerType as never), eq(complianceDocuments.ownerId, o.ownerId))))));
+  }
+  const credentialVerdicts = Array.from(flagged.values()).map(f => {
+    const rows = history.filter(h => h.ownerType === f.ownerType && h.ownerId === f.ownerId && h.docType === f.docType);
+    const verdict = complianceRequirementValidity(rows, [f.docType], now);
+    const named = rows.find(r => r.id === verdict.documentId) ?? rows[0];
+    return { ownerType: f.ownerType, ownerId: f.ownerId, ownerLabel: ownerLabel(f.ownerType, f.ownerId), docType: f.docType, title: named?.title ?? f.docType, verdict };
+  });
 
   // Calibration state per device from its events.
   const deviceIds = devices.map(d => d.id);
@@ -123,7 +150,8 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
     roadsideOpen: roadside.map(r => ({ id: r.id, eventRef: r.eventRef, unitNumber: r.unitNumber ?? null, eventType: r.eventType, occurredAt: r.occurredAt, vendorAssigned: r.assignedVendorId != null })),
     vendorBills: bills.map(b => ({ id: b.id, billRef: b.billRef, vendorName: b.vendorName ?? null, total: b.totalCents / 100, status: b.status, matchOutcome: b.matchOutcome, receivedAt: b.receivedAt, dueAt: b.dueAt })),
     purchaseRequests: pas.map(p => ({ id: p.id, authorizationRef: p.authorizationRef, estimatedAmount: p.estimatedAmount, emergency: p.emergency, requestedAt: p.requestedAt, expiresAt: p.expiresAt, status: p.status })),
-    credentials: creds.map(c => ({ id: c.id, ownerType: c.ownerType, ownerId: c.ownerId, ownerLabel: c.ownerType === "operator" ? opName.get(c.ownerId) ?? null : c.ownerType === "unit" ? (unitNo.get(c.ownerId) ? `Unit ${unitNo.get(c.ownerId)}` : null) : null, docType: c.docType, title: c.title, expiresAt: c.expiresAt, verificationStatus: c.verificationStatus })),
+    credentialsAwaitingVerification: awaiting.map(c => ({ id: c.id, ownerType: c.ownerType, ownerId: c.ownerId, ownerLabel: ownerLabel(c.ownerType, c.ownerId), docType: c.docType, title: c.title, expiresAt: c.expiresAt })),
+    credentialVerdicts,
     aiProposals: proposals,
     aiQuestions: questions.map(q => ({ count: Number(q.count), oldest: q.oldest ? new Date(q.oldest) : null, askedToUserId: q.askedToUserId })),
     syncConflicts: conflicts,
@@ -202,8 +230,14 @@ export async function loadInbox(args: { userId: number; roles: readonly string[]
 
 export type SearchHit = { entityType: string; entityId: number | string; label: string; status: string | null; deepLink: { portal: string; route: string }; readPermission: string };
 
-/** Resolve a tracking number or free text across entities. Permission filtering is the router's job. */
-export async function searchEverything(q: string): Promise<SearchHit[]> {
+/**
+ * Resolve a tracking number or free text across entities. Permission filtering is the router's job;
+ * tenancy is this function's (P0-A3): every query carries the caller's organization or books, through
+ * the chain each table already has — a unit's owner, a job's or trip's `orgRef`, a load's or disposal
+ * ticket's job, a money record's book, a field device's organization — and the per-kind limit of 10
+ * applies after that predicate. A foreign record is not a hit, so a search cannot confirm it exists.
+ */
+export async function searchEverything(q: string, scope: FinanceScope): Promise<SearchHit[]> {
   const db = await getDb();
   if (!db) return [];
   const term = q.trim();
@@ -211,20 +245,20 @@ export async function searchEverything(q: string): Promise<SearchHit[]> {
   const pat = `%${term}%`;
   const hits: SearchHit[] = [];
   const [u, j, t, l, d, i, wo, pa, vb, rs, fd, md, ip, fx] = await Promise.all([
-    db.select({ id: units.id, unitNumber: units.unitNumber, maintenanceStatus: units.maintenanceStatus }).from(units).where(like(units.unitNumber, pat)).limit(10),
-    db.select({ id: jobs.id, jobNumber: jobs.jobCode, status: jobs.status, customer: jobs.customer }).from(jobs).where(or(like(jobs.jobCode, pat), like(jobs.customer, pat))).limit(10),
-    db.select({ id: trips.id, tripNumber: trips.tripNumber, status: trips.status }).from(trips).where(like(trips.tripNumber, pat)).limit(10),
-    db.select({ id: loads.id, loadNumber: loads.loadNumber, chainState: loads.chainState }).from(loads).where(like(loads.loadNumber, pat)).limit(10),
-    db.select({ id: disposalTickets.id, ticketNumber: disposalTickets.ticketNumber, facilityTicketNumber: disposalTickets.facilityTicketNumber, verificationStatus: disposalTickets.verificationStatus }).from(disposalTickets).where(or(like(disposalTickets.ticketNumber, pat), like(disposalTickets.facilityTicketNumber, pat))).limit(10),
-    db.select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber, status: invoices.status }).from(invoices).where(like(invoices.invoiceNumber, pat)).limit(10),
-    db.select({ id: workOrders.id, workOrderNumber: workOrders.workOrderNumber, status: workOrders.status }).from(workOrders).where(like(workOrders.workOrderNumber, pat)).limit(10),
-    db.select({ id: purchaseAuthorizations.id, authorizationRef: purchaseAuthorizations.authorizationRef, status: purchaseAuthorizations.status }).from(purchaseAuthorizations).where(like(purchaseAuthorizations.authorizationRef, pat)).limit(10),
-    db.select({ id: vendorBills.id, billRef: vendorBills.billRef, vendorInvoiceNumber: vendorBills.vendorInvoiceNumber, status: vendorBills.status }).from(vendorBills).where(or(like(vendorBills.billRef, pat), like(vendorBills.vendorInvoiceNumber, pat))).limit(10),
-    db.select({ id: roadsideServiceEvents.id, eventRef: roadsideServiceEvents.eventRef, status: roadsideServiceEvents.status }).from(roadsideServiceEvents).where(like(roadsideServiceEvents.eventRef, pat)).limit(10),
-    db.select({ deviceRef: fieldDevices.deviceRef, status: fieldDevices.status }).from(fieldDevices).where(like(fieldDevices.deviceRef, pat)).limit(10),
-    db.select({ deviceRef: measurementDevices.deviceRef, status: measurementDevices.status, deviceType: measurementDevices.deviceType }).from(measurementDevices).where(like(measurementDevices.deviceRef, pat)).limit(10),
-    db.select({ policyRef: insurancePolicies.policyRef, policyNumber: insurancePolicies.policyNumber, status: insurancePolicies.status }).from(insurancePolicies).where(or(like(insurancePolicies.policyRef, pat), like(insurancePolicies.policyNumber, pat))).limit(10),
-    db.select({ id: fuelTransactions.id, fuelRef: fuelTransactions.fuelRef, status: fuelTransactions.status }).from(fuelTransactions).where(like(fuelTransactions.fuelRef, pat)).limit(10),
+    db.select({ id: units.id, unitNumber: units.unitNumber, maintenanceStatus: units.maintenanceStatus }).from(units).where(and(like(units.unitNumber, pat), ownershipScopeWhere("unit", units.id, scope))).limit(10),
+    db.select({ id: jobs.id, jobNumber: jobs.jobCode, status: jobs.status, customer: jobs.customer }).from(jobs).where(and(or(like(jobs.jobCode, pat), like(jobs.customer, pat)), orgScopeWhere(jobs, scope))).limit(10),
+    db.select({ id: trips.id, tripNumber: trips.tripNumber, status: trips.status }).from(trips).where(and(like(trips.tripNumber, pat), orgScopeWhere(trips, scope))).limit(10),
+    db.select({ id: loads.id, loadNumber: loads.loadNumber, chainState: loads.chainState }).from(loads).where(and(like(loads.loadNumber, pat), jobKeyedWhere(db, loads.jobId, scope))).limit(10),
+    db.select({ id: disposalTickets.id, ticketNumber: disposalTickets.ticketNumber, facilityTicketNumber: disposalTickets.facilityTicketNumber, verificationStatus: disposalTickets.verificationStatus }).from(disposalTickets).where(and(or(like(disposalTickets.ticketNumber, pat), like(disposalTickets.facilityTicketNumber, pat)), jobKeyedWhere(db, disposalTickets.jobId, scope))).limit(10),
+    db.select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber, status: invoices.status }).from(invoices).where(and(like(invoices.invoiceNumber, pat), ownedEntityWhere(invoices.financialEntityId, scope))).limit(10),
+    db.select({ id: workOrders.id, workOrderNumber: workOrders.workOrderNumber, status: workOrders.status }).from(workOrders).where(and(like(workOrders.workOrderNumber, pat), unitKeyedWhere(workOrders.unitId, scope))).limit(10),
+    db.select({ id: purchaseAuthorizations.id, authorizationRef: purchaseAuthorizations.authorizationRef, status: purchaseAuthorizations.status }).from(purchaseAuthorizations).where(and(like(purchaseAuthorizations.authorizationRef, pat), ownedEntityWhere(purchaseAuthorizations.financialEntityId, scope))).limit(10),
+    db.select({ id: vendorBills.id, billRef: vendorBills.billRef, vendorInvoiceNumber: vendorBills.vendorInvoiceNumber, status: vendorBills.status }).from(vendorBills).where(and(or(like(vendorBills.billRef, pat), like(vendorBills.vendorInvoiceNumber, pat)), ownedEntityWhere(vendorBills.financialEntityId, scope))).limit(10),
+    db.select({ id: roadsideServiceEvents.id, eventRef: roadsideServiceEvents.eventRef, status: roadsideServiceEvents.status }).from(roadsideServiceEvents).where(and(like(roadsideServiceEvents.eventRef, pat), unitKeyedWhere(roadsideServiceEvents.unitId, scope))).limit(10),
+    db.select({ deviceRef: fieldDevices.deviceRef, status: fieldDevices.status }).from(fieldDevices).where(and(like(fieldDevices.deviceRef, pat), bookOrgWhere(fieldDevices.orgRef, scope))).limit(10),
+    db.select({ deviceRef: measurementDevices.deviceRef, status: measurementDevices.status, deviceType: measurementDevices.deviceType }).from(measurementDevices).where(and(like(measurementDevices.deviceRef, pat), ownedEntityWhere(measurementDevices.financialEntityId, scope))).limit(10),
+    db.select({ policyRef: insurancePolicies.policyRef, policyNumber: insurancePolicies.policyNumber, status: insurancePolicies.status }).from(insurancePolicies).where(and(or(like(insurancePolicies.policyRef, pat), like(insurancePolicies.policyNumber, pat)), ownedEntityWhere(insurancePolicies.financialEntityId, scope))).limit(10),
+    db.select({ id: fuelTransactions.id, fuelRef: fuelTransactions.fuelRef, status: fuelTransactions.status }).from(fuelTransactions).where(and(like(fuelTransactions.fuelRef, pat), ownedEntityWhere(fuelTransactions.financialEntityId, scope))).limit(10),
   ]);
   for (const x of u) hits.push({ entityType: "unit", entityId: x.id, label: `Unit ${x.unitNumber}`, status: x.maintenanceStatus ?? null, deepLink: { portal: "fleet_maintenance", route: `/units/${x.id}` }, readPermission: "roadside.report" }); // every operational role may name a unit; deeper detail is gated on the unit's own routes
   for (const x of j) hits.push({ entityType: "job", entityId: x.id, label: `${x.jobNumber}${x.customer ? ` — ${x.customer}` : ""}`, status: x.status, deepLink: { portal: "dispatch_operations", route: `/jobs/${x.id}` }, readPermission: "job.read" });
@@ -252,12 +286,28 @@ export type TimelineEvent = {
   actor: string | null; ref: string | null; readPermission: string;
 };
 
-/** An entity's history from the records that mention it. occurredAt is the event; recordedAt is when LeaseOS learned of it. */
-export async function loadTimeline(args: { entityType: "unit" | "job" | "trip" | "load"; entityId: number; limit?: number }): Promise<TimelineEvent[]> {
+/** A load is in scope through its job; a load with no job belongs to the single tenant only (the 0132 rule). */
+async function loadInScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, loadId: number, scope: FinanceScope): Promise<boolean> {
+  const l = (await db.select({ jobId: loads.jobId }).from(loads).where(eq(loads.id, loadId)).limit(1))[0];
+  if (!l) return false;
+  return l.jobId != null ? !!(await jobInScope(l.jobId, scope)) : scope.tenantId === SINGLE_TENANT_ID;
+}
+
+/**
+ * An entity's history from the records that mention it. occurredAt is the event; recordedAt is when LeaseOS learned of it.
+ * P0-A3: the entity itself must be the caller's organization's (its owner, its orgRef, its job); otherwise the history
+ * is empty — exactly what an id that names nothing gets. Every row read below is keyed to that proven entity.
+ */
+export async function loadTimeline(args: { entityType: "unit" | "job" | "trip" | "load"; entityId: number; limit?: number }, scope: FinanceScope): Promise<TimelineEvent[]> {
   const db = await getDb();
   if (!db) return [];
   const ev: TimelineEvent[] = [];
   const id = args.entityId;
+  const inScope = args.entityType === "unit" ? !!(await unitInScope(id, scope))
+    : args.entityType === "job" ? !!(await jobInScope(id, scope))
+    : args.entityType === "trip" ? !!(await tripInScope(id, scope))
+    : await loadInScope(db, id, scope);
+  if (!inScope) return [];
 
   if (args.entityType === "unit") {
     const [defects, releases, roadside, fuel, tickets, cal] = await Promise.all([
@@ -340,6 +390,7 @@ export const CHAIN_READ_PERMISSION: Record<string, string> = {
 export async function resolveChainAround(
   anchor: { kind: string; id: number },
   can: (permission: string) => boolean,
+  scope: FinanceScope,
 ): Promise<{ found: Record<string, { ref: string; id: number | null; status?: string | null }>; unreadable: string[] }> {
   const db = await getDb();
   const found: Record<string, { ref: string; id: number | null; status?: string | null }> = {};
@@ -353,6 +404,9 @@ export async function resolveChainAround(
     const [d] = await db.select({ l: disposalTickets.loadId }).from(disposalTickets).where(eq(disposalTickets.id, anchor.id)).limit(1);
     loadId = d?.l ?? null;
   }
+  // P0-A3: the chain hangs from the load, and the load is its job's. A load outside the caller's organization
+  // — or a disposal ticket whose load is — resolves to nothing, exactly as an id that names nothing does.
+  if (loadId != null && !(await loadInScope(db, loadId, scope))) return { found, unreadable };
 
   if (loadId != null && allowed("load")) {
     const [l] = await db.select().from(loads).where(eq(loads.id, loadId)).limit(1);

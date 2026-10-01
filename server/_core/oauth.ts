@@ -1,13 +1,11 @@
 import {
-  COOKIE_NAME,
-  ONE_YEAR_MS,
   OAUTH_STATE_COOKIE,
   decodeOAuthState,
 } from "@shared/const";
 import { parse as parseCookieHeader } from "cookie";
 import type { Express, Request, Response } from "express";
 import * as db from "../db";
-import { getSessionCookieOptions } from "./cookies";
+import { issueBrowserSession } from "./browserSession";
 import { sdk } from "./sdk";
 
 function getQueryParam(req: Request, key: string): string | undefined {
@@ -59,16 +57,11 @@ export function registerOAuthRoutes(app: Express) {
         lastSignedIn: new Date(),
       });
 
-      const sessionToken = await sdk.createSessionToken(userInfo.openId, {
-        name: userInfo.name || "",
-        expiresInMs: ONE_YEAR_MS,
-      });
-
-      const cookieOptions = getSessionCookieOptions(req);
-      res.cookie(COOKIE_NAME, sessionToken, {
-        ...cookieOptions,
-        maxAge: ONE_YEAR_MS,
-      });
+      /*
+       * S1-B / S1-F / P0-B — the short access credential and the session family it refreshes
+       * against, issued by the one function every browser session comes from (./browserSession).
+       */
+      await issueBrowserSession(req, res, { openId: userInfo.openId, name: userInfo.name || "" });
 
       res.redirect(302, "/");
     } catch (error) {

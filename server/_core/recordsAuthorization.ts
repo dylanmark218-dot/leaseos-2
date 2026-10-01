@@ -182,6 +182,12 @@ export type Permission =
   | "compliance.passport.read" | "compliance.credential.record" | "compliance.credential.verify"
   | "compliance.private.read" | "compliance.consent.record" | "compliance.requirement.manage"
   | "compliance.program.publish" | "compliance.profile.review"
+  // C1b-2b — requirement verification through the ledger. Proposing, verifying, second approval of a
+  // dispatch-blocking rule, withdrawal and verification governance are separate acts, held separately.
+  // Separation of duties is additionally enforced by person (proposer ≠ verifier ≠ second verifier),
+  // so holding several of these does not let one person carry a requirement alone.
+  | "compliance.requirement.propose" | "compliance.requirement.verify" | "compliance.requirement.second_approve"
+  | "compliance.requirement.retire" | "compliance.verification.govern"
   // v20.22 — packs, work authorization, equipment authorization, calibration.
   | "compliance.pack.manage" | "compliance.work.evaluate"
   | "equipment.authorize" | "calibration.record" | "calibration.impact"
@@ -287,6 +293,12 @@ export type Permission =
   | "hos.attest"
   /* P8.3 — putting a scanned log page on file. Retention, not a dispatch answer. */
   | "hos.recordScannedLog"
+  // DC-A (0178) — Document Control. Reading the register, taking a document in, confirming
+  // what a scan says, issuing a numbered record, voiding a number, and managing the catalog, the
+  // series and the templates are each their own act: intake creates a row, confirmation creates a
+  // fact, issue consumes a number, void explains a gap.
+  | "document.read" | "document.intake" | "document.confirm" | "document.issue" | "document.void"
+  | "document.catalog.manage" | "document.series.manage" | "document.template.manage"
   /* P8.5 — the vault. `restricted.read` is the permission the break-glass prompt sits behind; it is
      NOT implied by an administration role, which is the point of the whole subsystem. */
   | "vault.matter.manage" | "restricted.read" | "restricted.audit.read"
@@ -348,6 +360,8 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    "document.read",
+    "document.intake",
     "automation.override.operational",
     "facility.directory.report",
     "facility.directory.read",
@@ -431,6 +445,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    "document.read",
+    "document.intake",
+    "document.confirm",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -542,6 +559,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
+    "document.read",
+    "document.intake",
     "assistant.ask",
     "board.read",
     "board.post",
@@ -608,6 +627,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
+    "document.read",
+    "document.intake",
+    "document.confirm",
     "facility.directory.read",
     "academy.evaluate",
     "assistant.ask",
@@ -695,6 +717,13 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -816,6 +845,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
+    "document.void",
+    "document.template.manage",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -978,6 +1013,19 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
+    "document.void",
+    "document.catalog.manage",
+    "document.series.manage",
+    "document.template.manage",
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.requirement.retire",
+    "compliance.verification.govern",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1230,6 +1278,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.graph.build",
   ],
   hr: [
+    "document.read",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1266,6 +1315,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "audit.package.read",
   ],
   legal: [
+    "document.read",
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.verification.govern",
     "evidence.read_legal",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
@@ -1293,6 +1348,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    "document.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.read_safety_summary",
@@ -1347,6 +1403,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   /* ---- B20.5 finance and payroll functions ---- */
 
   bookkeeper: [
+    "document.read",
+    "document.intake",
     "facility.directory.read",
     "commercial.read",
     "commercial.write",
@@ -1469,6 +1527,14 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    "document.read",
+    "document.confirm",
+    "document.issue",
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.requirement.retire",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1735,6 +1801,15 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  // DC-A (0178) — Document Control. Each of these creates operational truth (a controlled record, a
+  // confirmed extraction, a consumed number) or changes what every later record is judged by.
+  "document.intake",
+  "document.confirm",
+  "document.issue",
+  "document.void",
+  "document.catalog.manage",
+  "document.series.manage",
+  "document.template.manage",
   "academy.source.review",
   "academy.certificate.issue",
   "academy.certificate.sign_own",
@@ -1855,6 +1930,11 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // v20.22
   "compliance.pack.manage",
   "equipment.authorize",
+  // C1b-2b — each makes a regulatory requirement authoritative, retires one, or changes how it may be verified.
+  "compliance.requirement.verify",
+  "compliance.requirement.second_approve",
+  "compliance.requirement.retire",
+  "compliance.verification.govern",
   // v20.21
   "compliance.credential.verify",
   "compliance.private.read",
@@ -2163,6 +2243,7 @@ export const RECORDS_PROCEDURE_PERMISSIONS = {
   "records.incident.review": "incident.review",
   "records.nearMiss.report": "incident.create",
   "records.maintenance.recordRelease": "maintenance.record_release",
+  "records.maintenance.resolveDefect": "maintenance.record_release",
   "records.maintenance.revokeRelease": "maintenance.revoke_release",
   "records.legalHold.place": "legal_hold.place",
   "records.legalHold.release": "legal_hold.release",
@@ -2287,6 +2368,32 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "commercialOffice.documentDeliveryUpdate": "commercial.write",
   "commercialOffice.documentGet": "commercial.read",
   "commercialOffice.documentsList": "commercial.read",
+  // DC-A (0178) — Document Control, Checkpoint A: the definition registry and the catalog.
+  "documentControl.definitionsList": "document.read",
+  "documentControl.definitionGet": "document.read",
+  "documentControl.catalogSeed": "document.catalog.manage",
+  "documentControl.definitionOverlay": "document.catalog.manage",
+  "documentControl.definitionCreate": "document.catalog.manage",
+  "documentControl.definitionRetire": "document.catalog.manage",
+  "documentControl.sourceArtifactsList": "document.read",
+  // DC-B (0195) — the register: intake creates a row, confirmation creates a fact, issue consumes a number.
+  "documentControl.documentIntake": "document.intake",
+  "documentControl.documentRegisterRendered": "document.issue",
+  "documentControl.documentConfirm": "document.confirm",
+  "documentControl.documentIssue": "document.issue",
+  "documentControl.documentVoid": "document.void",
+  "documentControl.documentSupersede": "document.issue",
+  "documentControl.documentWithdraw": "document.void",
+  "documentControl.documentAmend": "document.confirm",
+  "documentControl.documentGet": "document.read",
+  "documentControl.documentsList": "document.read",
+  // DC-C (0196) — the series ledger. Reading what was handed out is a read; cutting blocks and voiding numbers is series management.
+  "documentControl.seriesList": "document.read",
+  "documentControl.seriesGapReport": "document.read",
+  "documentControl.seriesBlocks": "document.read",
+  "documentControl.seriesAllocateDeviceBlock": "document.series.manage",
+  "documentControl.seriesRetireDeviceBlock": "document.series.manage",
+  "documentControl.seriesVoidNumber": "document.series.manage",
   "commercialOffice.glAccountSet": "commercial.policy",
   "commercialOffice.glMappingSet": "commercial.policy",
   "commercialOffice.glList": "commercial.read",
@@ -2483,7 +2590,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "compliance.credentialRecord": "compliance.credential.record",
   "compliance.credentialVerify": "compliance.credential.verify",
   "compliance.consentRecord": "compliance.consent.record",
-  "compliance.requirementLoad": "compliance.requirement.manage",
+  // C1b-2b: requirementLoad creates a proposal and nothing more.
+  "compliance.requirementLoad": "compliance.requirement.propose",
+  "compliance.requirementVerify": "compliance.requirement.verify",
+  "compliance.requirementSecondApprove": "compliance.requirement.second_approve",
+  "compliance.requirementWithdraw": "compliance.requirement.retire",
+  "compliance.verificationPolicySet": "compliance.verification.govern",
+  "compliance.requirementProvenance": "compliance.passport.read",
   "compliance.programPublish": "compliance.program.publish",
   "compliance.profileReviewRecord": "compliance.profile.review",
   "compliance.knowledgeCatalog": "compliance.passport.read",
@@ -2554,6 +2667,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "dispatch.overrideGrant": "dispatch.override.grant",
   "dispatch.whatAmIMissing": "dispatch.readiness_own",
   "dispatch.readiness": "dispatch.read",
+  // The canonical slot model's door. Creating a posting or a slot is planning, so it sits under the
+  // permission that already means "decide who works this job" — never under dispatch.award.
+  "dispatch.createPosting": "dispatch.assign",
+  "dispatch.addRole": "dispatch.assign",
+  "dispatch.listRoles": "dispatch.read",
+  // Binding a slot is assignment, never award. dispatch.award stays a separate permission so the
+  // two can be separated by grant later without touching this code.
+  "dispatch.setRoleAssignment": "dispatch.assign",
+  "dispatch.clearRoleAssignment": "dispatch.assign",
   /* ---- v21.2: enforcement ---- */
   "dispatch.enforcementSet": "dispatch.enforcement.manage",
   "dispatch.enforcementGet": "dispatch.read",

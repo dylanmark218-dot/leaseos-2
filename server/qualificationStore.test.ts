@@ -29,9 +29,11 @@ async function operatorWithLicence(userId: number) {
 async function holding(userId: number, code: string, o: { state?: string; expiresAt?: Date | null; recordedAt?: Date } = {}) {
   const holdingRef = `WQ-${rnd()}${rnd()}`;
   await pool.execute(
-    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt)
-     VALUES (?,?,?,?,?,?,?,?)`,
-    [holdingRef, "default", userId, code, o.state ?? "verified", o.expiresAt === undefined ? new Date("2027-06-01T00:00:00Z") : o.expiresAt, 1, o.recordedAt ?? new Date("2026-01-01T00:00:00Z")]);
+    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt, verifiedByUserId, verifiedAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    // C1b-3: a legacy holding counts as verified only with a recorded verifier.
+    [holdingRef, "default", userId, code, o.state ?? "verified", o.expiresAt === undefined ? new Date("2027-06-01T00:00:00Z") : o.expiresAt, 1, o.recordedAt ?? new Date("2026-01-01T00:00:00Z"),
+     (o.state ?? "verified") === "verified" ? 1 : null, (o.state ?? "verified") === "verified" ? new Date("2026-01-02T00:00:00Z") : null]);
   return holdingRef;
 }
 const postDG = async (dispatcher: number) =>

@@ -1,0 +1,52 @@
+Proof of Delivery
+Confirm what was delivered, what was accepted and any exceptions at the receiving location.
+Company / issuer: __________________________  Home base: _____________________
+Record no. __________________  Revision: ______  Issue date / time: _______________
+Job / load no. __________________  Customer PO / AFE: _________________________
+Delivery details
+Customer / consignee: ________________________  Contact / phone: __________________
+Delivery address / lease / LSD: __________________________________________________
+Carrier / driver: ______________________________  Unit / trailer: ____________________
+BOL / manifest ref.: _________________________  External facility ticket ref.: ____________
+Arrival: __________________  Unloading start / end: ________________  Departure: _______
+Items and acceptance
+Result: [ ] Full acceptance  [ ] Partial acceptance  [ ] Refused  [ ] Pending verification
+Quantity basis / scale or meter ticket: ______________________________________________
+Seal / compartment IDs and condition: _____________________________________________
+Delivery condition
+[ ] No visible damage noted  [ ] Damage  [ ] Shortage  [ ] Overage  [ ] Wrong item
+[ ] Access issue  [ ] Unloading issue  [ ] Other: _____________________________________
+Comments / exception summary:
+_________________________________________________________________________________________
+_________________________________________________________________________________________
+Proof of Delivery exceptions
+Record no. __________________  Job / load no. ______________  Date: ______________
+Exception and disposition register
+Rejected goods destination / return authorization: ___________________________________
+Unresolved items and follow-up due: ______________________________________________
+Evidence and references
+Photos / scan filenames or IDs: __________________________________________________
+Scale / disposal receipt issuer and number: _________________________________________
+Witness / contact: _____________________________________________________________
+Receipt acknowledgment
+The receiver acknowledges the quantities and condition recorded on this form, including exceptions. Items marked pending remain unverified. Receipt alone does not certify hidden condition or regulatory compliance.
+Receiver printed name: __________________________  Role: _________________________
+Receiving organization: ________________________________________________________
+Receiver signature: __________________________  Date / time / zone: _________________
+Driver printed name: __________________________  Signature: _______________________
+Unable to obtain signature - reason / evidence: _____________________________________
+Office follow-up
+Reviewed by: ______________________  Date: __________  Claim / action ref.: ___________
+Resolution / customer confirmation: _______________________________________________
+Closed by: ________________________  Date: __________  Related invoice: _____________
+Item / product / ID | Sent qty / unit | Received qty / unit | Accepted qty / unit | Exception ref.
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+Item / exception | Affected qty / unit | Evidence reference | Agreed disposition / owner
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 

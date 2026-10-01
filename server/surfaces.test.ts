@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
 import mysql from "mysql2/promise";
 import { readFileSync } from "node:fs";
 import { deriveExceptions, summarize, visibleTo, type ExceptionSources } from "./_core/exceptionCentre";
@@ -10,13 +11,23 @@ const NOW = new Date("2026-09-10T12:00:00Z");
 const days = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
 
 const empty = (): ExceptionSources => ({ openCalibrationSweeps: [], inspectorRequests: [],
-  now: NOW, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentials: [], aiProposals: [], aiQuestions: [],
+  now: NOW, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentialsAwaitingVerification: [], credentialVerdicts: [], aiProposals: [], aiQuestions: [],
   syncConflicts: [], revokedDevicesWithQueue: [], measurementDevices: [], insurancePolicies: [], carrierProfileReviews: [], ungatedAssignments: [], statementsWithFindings: [], tanksOutOfTolerance: [], periodsSoftClosed: [],
 });
 
 /* ------------------------------------------------------------------ */
 /* Derivation                                                           */
 /* ------------------------------------------------------------------ */
+
+/** A verdict built the way the service builds it: the canonical evaluator over the owner's rows of one type. */
+function judged(ownerType: string, ownerId: number, ownerLabel: string | null, docType: string, title: string,
+  specs: { id: number; status: "needs_review" | "verified" | "rejected"; expires: number | null; issued?: number; captured?: number }[]) {
+  const rows = specs.map(r => ({
+    id: r.id, docType, title, issuedAt: r.issued == null ? null : days(r.issued), expiresAt: r.expires == null ? null : days(r.expires),
+    verificationStatus: r.status, capturedAt: days(r.captured ?? -40),
+  }));
+  return { ownerType, ownerId, ownerLabel, docType, title, verdict: complianceRequirementValidity(rows, [docType], NOW) };
+}
 
 describe("exceptions are derived from state, never stored", () => {
   it("is empty when nothing needs attention, and says so", () => {
@@ -37,10 +48,10 @@ describe("exceptions are derived from state, never stored", () => {
   });
 
   it("distinguishes a credential expiring from one expired, and a worker's from a unit's", () => {
-    const xs = deriveExceptions({ ...empty(), credentials: [
-      { id: 1, ownerType: "operator", ownerId: 9, ownerLabel: "J. Smith", docType: "tdg_certificate", title: "TDG", expiresAt: days(14), verificationStatus: "verified" },
-      { id: 2, ownerType: "unit", ownerId: 142, ownerLabel: "Unit 142", docType: "cvip_certificate", title: "CVIP", expiresAt: days(-3), verificationStatus: "verified" },
-      { id: 3, ownerType: "operator", ownerId: 9, ownerLabel: "J. Smith", docType: "driver_licence", title: "Licence", expiresAt: days(200), verificationStatus: "verified" },
+    const xs = deriveExceptions({ ...empty(), credentialVerdicts: [
+      judged("operator", 9, "J. Smith", "tdg_certificate", "TDG", [{ id: 1, status: "verified", expires: 14 }]),
+      judged("unit", 142, "Unit 142", "cvip_certificate", "CVIP", [{ id: 2, status: "verified", expires: -3 }]),
+      judged("operator", 9, "J. Smith", "driver_licence", "Licence", [{ id: 3, status: "verified", expires: 200 }]),
     ]});
     expect(xs.map(x => x.key)).toEqual(["cred:2:expired", "cred:1:expiring"]); // expired (high) sorts before expiring (medium)
     expect(xs[0].category).toBe("fleet");
@@ -48,6 +59,42 @@ describe("exceptions are derived from state, never stored", () => {
     expect(xs[1].title).toBe("J. Smith: TDG expires in 14 day(s)");
     // Gated on verify, not on the broad passport-read every driver holds.
     expect(xs.every(x => x.requiredPermission === "compliance.credential.verify")).toBe(true);
+  });
+
+  /*
+   * SPINE item 2 — expiry exceptions come from the canonical verdict per owner and type, not per row.
+   * Each of these is a record set the per-row reading got wrong.
+   */
+  it("a superseded licence that expired beside its renewal in force raises nothing", () => {
+    expect(deriveExceptions({ ...empty(), credentialVerdicts: [
+      judged("operator", 9, "J. Smith", "driver_licence", "Licence", [
+        { id: 1, status: "verified", expires: -30, captured: -400 },
+        { id: 2, status: "verified", expires: 300, captured: -35 },
+      ]),
+    ]})).toEqual([]);
+  });
+
+  it("names what the per-row reading never raised: no expiry recorded, and not yet in force", () => {
+    const xs = deriveExceptions({ ...empty(), credentialVerdicts: [
+      judged("operator", 9, null, "driver_licence", "Licence", [{ id: 5, status: "verified", expires: null }]),
+      judged("unit", 4, null, "cvip_certificate", "CVIP", [{ id: 6, status: "verified", expires: 300, issued: 10 }]),
+    ]});
+    expect(xs.map(x => x.key).sort()).toEqual(["cred:5:incomplete", "cred:6:not_yet_effective"]);
+    expect(xs.every(x => x.severity === "medium")).toBe(true);
+  });
+
+  it("an unverified document whose own date passed is expired; one with a future date is only in the review queue", () => {
+    const xs = deriveExceptions({ ...empty(),
+      credentialsAwaitingVerification: [
+        { id: 7, ownerType: "operator", ownerId: 9, ownerLabel: null, docType: "h2s", title: "H2S", expiresAt: days(-2) },
+        { id: 8, ownerType: "operator", ownerId: 9, ownerLabel: null, docType: "first_aid", title: "First aid", expiresAt: days(200) },
+      ],
+      credentialVerdicts: [
+        judged("operator", 9, null, "h2s", "H2S", [{ id: 7, status: "needs_review", expires: -2 }]),
+        judged("operator", 9, null, "first_aid", "First aid", [{ id: 8, status: "needs_review", expires: 200 }]),
+      ],
+    });
+    expect(xs.map(x => x.key).sort()).toEqual(["cred:7:expired", "cred:7:review", "cred:8:review"]);
   });
 
   it("raises a bill past due to high, and names the office action per status", () => {
@@ -113,7 +160,7 @@ describe("exceptions are derived from state, never stored", () => {
     const xs = deriveExceptions({ ...empty(),
       purchaseRequests: [{ id: 1, authorizationRef: "PA", estimatedAmount: 1, emergency: false, requestedAt: days(0), expiresAt: days(3), status: "requested" }],
       criticalDefects: [{ id: 1, unitId: 1, unitNumber: null, title: "x", reportedAt: days(0), status: "open" }],
-      credentials: [{ id: 1, ownerType: "operator", ownerId: 1, ownerLabel: null, docType: "d", title: "Doc", expiresAt: days(1), verificationStatus: "verified" }],
+      credentialVerdicts: [judged("operator", 1, null, "d", "Doc", [{ id: 1, status: "verified", expires: 1 }])],
     });
     expect(xs.map(x => x.severity)).toEqual(["critical", "high", "medium"]);
     expect(new Set(xs.map(x => x.key)).size).toBe(xs.length);
@@ -209,7 +256,10 @@ d("one company's morning, through the five surfaces", () => {
     await pool.execute("INSERT INTO maintenanceDefects (unitId, title, severity, status, reportedAt, reportedBy) VALUES (?, 'Steer tire failure', 'critical', 'open', NOW(), ?)", [unitId, driver]);
     const [ven] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (name, category) VALUES (?, 'tires')", [key("ABC Tire").slice(0, 60)]);
     const billRef = key("BILL").slice(0, 40);
-    await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, vendorInvoiceNumber, invoiceDate, receivedAt, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?, 1, ?, ?, NOW(), NOW(), 205000, 10250, 215250, 'mismatch', 'mismatch')", [billRef, Number(ven.insertId), key("INV").slice(0, 40)]);
+    // P0-A3: search is scoped to the caller's books. This company's people hold no membership, so they are the
+    // historical single tenant and see the books that carry no organization — the bill goes into one of those.
+    const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Surfaces fixture books', 'corporation', 'CA-AB')", [key("FE").slice(0, 40)]);
+    await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, vendorInvoiceNumber, invoiceDate, receivedAt, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?, ?, ?, ?, NOW(), NOW(), 205000, 10250, 215250, 'mismatch', 'mismatch')", [billRef, Number(book.insertId), Number(ven.insertId), key("INV").slice(0, 40)]);
     const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, 'J. Smith')", [driver]);
     await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'tdg_certificate', 'TDG', NOW(), DATE_ADD(NOW(), INTERVAL 10 DAY), 'verified')", [Number(op.insertId)]);
     const proposalId = key("PROP");

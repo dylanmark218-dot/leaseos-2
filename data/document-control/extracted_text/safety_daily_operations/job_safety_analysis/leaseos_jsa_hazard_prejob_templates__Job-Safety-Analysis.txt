@@ -1,0 +1,52 @@
+Job Safety Analysis
+Break the job into steps, identify potential harm, and agree controls with the crew before work.
+Company: __________________________________  Home base: _______________________
+Record no. __________________  Record revision: ______  Date / time: _________________
+Site / lease / project: __________________________  Job / dispatch: __________________
+Location / LSD / address: ______________________________________________________
+Task / scope: ________________________________________________________________
+Supervisor / assessor: __________________________  Crew / contractor: _______________
+Units / equipment: __________________________  Related permits / procedures: __________
+Job steps hazards and controls
+Use the approved company risk method. Record initial and residual ratings where required. Select controls in order: eliminate, substitute, engineering, administrative, then PPE.
+Risk method / matrix and revision: _________________________________________________
+Required preparations
+Required PPE / special equipment: __________________________________________________
+Isolation / permits / testing references: ______________________________________________
+Emergency plan / rescue arrangements: ______________________________________________
+Work boundaries / nearby crews / traffic controls: _____________________________________
+Continuation sheets / attachments: __________________________________________________
+Job Safety Analysis Review
+Record no. _____________________  Date: ______________  Site: _____________________
+Outstanding actions and verification
+Emergency contact / number: ___________________  Radio / communication: ______________
+Muster / emergency access location: __________________________________________________
+Work status and review
+[ ] Ready under verified controls   [ ] Hold affected work   [ ] Not yet assessed
+Limits / remaining restrictions: _____________________________________________________
+Supervisor / authorized reviewer: __________________  Signature: _____________________
+Review date / time: __________________  Next review / trigger: _________________________
+Stop affected work and reassess if scope, equipment, crew, conditions or controls change, or a new hazard is identified. Resolve required actions before releasing affected work.
+Crew acknowledgement
+I have reviewed the task, hazards and controls, and had the opportunity to raise concerns. My signature records this review; it does not replace permits or competency verification.
+Late arrivals / changes briefed by and time: ___________________________________________
+Use the company’s approved procedures and risk criteria. Enter N/A where appropriate and identify all continuation pages by record number. Preserve signed originals when revising.
+Step and task | Hazard and potential harm | Initial risk | Controls and responsible person | Residual risk
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+Issue or required action | Owner | Due / hold point | Verified by and time
+ |  |  | 
+ |  |  | 
+ |  |  | 
+Printed name | Company / role | Signature | Date / time
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 

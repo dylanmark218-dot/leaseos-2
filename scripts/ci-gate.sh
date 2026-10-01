@@ -18,6 +18,21 @@ host="${hostport%%:*}"; port="${hostport#*:}"; [ "$port" = "$host" ] && port=330
 gate() { printf '\n== %s ==\n' "$1"; }
 mysqlc() { mysql -h "$host" -P "$port" -u "$user" ${pass:+-p"$pass"} "$@"; }
 
+# Process-unique scratch files. These used to be fixed names under /tmp, which meant two
+# gates running at once — a second checkout, a re-run started before the first finished —
+# read each other's output. The current-state snapshot was the dangerous one: gate 8
+# compares the committed document against a copy taken before regeneration, so a colliding
+# run could have it compare against the *other* branch's document and either pass a stale
+# file or fail a current one. Neither failure looks like a temp-file collision.
+VITEST_GATE_OUT="$(mktemp "${TMPDIR:-/tmp}/leaseos-vitest-gate.XXXXXX")"
+VITEST_JSON="$(mktemp "${TMPDIR:-/tmp}/leaseos-vitest-json.XXXXXX")"
+CURRENT_STATE_BEFORE="$(mktemp "${TMPDIR:-/tmp}/leaseos-current-state.XXXXXX")"
+cleanup() { rm -f "$VITEST_GATE_OUT" "$VITEST_JSON" "$CURRENT_STATE_BEFORE"; }
+trap cleanup EXIT
+
+gate "0a. Runtime version truth"
+node scripts/check-version-truth.mjs
+
 gate "0. Reserved migration slots untouched"
 if ls drizzle/0016_*.sql drizzle/0017_*.sql >/dev/null 2>&1; then
   echo "FAIL: migration slot 0016 or 0017 is occupied. These are reserved for the Spatial and LoadSense branches."
@@ -60,51 +75,54 @@ pnpm exec tsc --noEmit
 # count is pinned instead: new test code is type-checked in effect, because anything
 # that adds an error fails here. The pin is a debt to pay down, not a setting to keep:
 # 85 at v23.00, 37 now. It only ever goes down.
-TEST_TS_PIN=0
-TEST_TS_NOW=$(pnpm exec tsc --noEmit -p tsconfig.tests.json 2>&1 | grep -cE "\.test\.tsx?\(" || true)
-echo "test-file type errors: $TEST_TS_NOW (pinned ceiling $TEST_TS_PIN)"
-if [ "$TEST_TS_NOW" -gt "$TEST_TS_PIN" ]; then
-  echo "test-file type errors rose from $TEST_TS_PIN to $TEST_TS_NOW:"
-  pnpm exec tsc --noEmit -p tsconfig.tests.json 2>&1 | grep -E "\.test\.tsx?\(" | head -20
-  exit 1
-fi
-echo "clean"
+#
+# The compiler's exit status is kept (scripts/test-file-ratchet.sh). The one-line version
+# piped tsc into `grep -c … || true`, which reported "clean" when tsc could not run at all —
+# reproduced 2026-09-30 with a missing tsconfig: tsc exit 1, count 0, gate clean.
+bash scripts/test-file-ratchet.sh tsconfig.tests.json 0
 
-gate "5. Bare protectedProcedure"
-ROUTERS=$(ls server/*Router*.ts server/routers.ts server/recordsRouter.ts 2>/dev/null | sort -u)
-count=$(cat $ROUTERS | grep -cE '\w+:\s*protectedProcedure\b' || true)
-if [ "$count" != "0" ]; then echo "FAIL: $count bare protectedProcedure"; exit 1; fi
-echo "0"
+gate "5. Procedure census: no bare protectedProcedure, every ungated procedure pinned"
+# From the syntax tree, over all of server/, not a grep over a filename glob. The glob
+# could not see server/_core/systemRouter.ts (mounted on the app router), and the grep knew
+# only `protectedProcedure`, so a `publicProcedure` anywhere passed. scripts/procedure-census.ts
+# resolves the import bindings, so a comment, a string, a type or a data field named
+# `testProcedure` is not a site. The pin is server/_core/procedureCensus.pin.json.
+pnpm exec tsx scripts/procedure-census.ts --enforce
 
 gate "6. Test suite (includes column-level parity and reserved-word audit)"
-LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run --reporter=basic 2>&1 | tee /tmp/vitest-gate.out
+LEASEOS_PORTAL_MFA_KEY="${LEASEOS_PORTAL_MFA_KEY:-}" pnpm exec vitest run --reporter=basic --reporter=json --outputFile.json="$VITEST_JSON" 2>&1 | tee "$VITEST_GATE_OUT"
 # pipefail is on, so a failing vitest still fails the gate through the pipe.
 
-# A suite that needs a database and skips anyway reports as "↓", which is
-# indistinguishable from one correctly standing down because no database is
-# configured. Here one is, so a skipped .db.test.ts is a suite that is not
-# running and looks like it chose not to.
+# A suite that needs a database and skips anyway is a suite that is not running and looks
+# like it chose not to. Here a database is configured, so a skipped .db.test.ts is a defect.
 #
 # This is why the check exists: widgetPersistence.db.test.ts (24 cases) and
 # widgetConflict.db.test.ts (10 cases) gate on WIDGET_DB_URL, nothing set it,
 # and they had never run — in CI or anywhere. The first of them exists to guard
 # a cross-tenant board overwrite, and it reported "skipped" the whole time.
-skipped_db=$(grep -E '^ *↓ .*\.db\.test\.ts' /tmp/vitest-gate.out || true)
-if [ -n "$skipped_db" ]; then
-  echo "FAIL: a .db.test.ts suite skipped while a database is configured:"
-  echo "$skipped_db"
-  echo "Either its guard reads an environment variable this gate does not set, or the gate stopped setting one."
-  exit 1
-fi
-echo "no database-backed suite skipped"
+#
+# Read from the JSON report, not the coloured text. The grep for `↓` that stood here matched
+# nothing under CI=true — GitHub Actions' environment — because vitest colours the glyph even
+# through a pipe; reproduced 2026-09-30 (1 match locally, 0 under CI). The JSON has no colour
+# and no terminal mode, and scripts/skipped-db-suites.ts refuses to pass on an empty or
+# unreadable report rather than reading it as "nothing skipped".
+pnpm exec tsx scripts/skipped-db-suites.ts "$VITEST_JSON"
 
 gate "7. Production build"
 pnpm build
 
+# P0-C — the artifact just built must boot where only `dependencies` are installed. Reuses this
+# gate's build: the smoke builds nothing, it copies dist/ into a runtime directory outside the
+# checkout, installs production dependencies there, and runs dist/index.js and dist/worker.js.
+gate "7a. Production-only runtime boot: dist/ with production dependencies alone, outside the checkout"
+bash scripts/prod-runtime-smoke.sh
+
 gate "Summary"
 echo "tables: $(mysqlc -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$db';")"
 echo "migrations: $(ls drizzle/*.sql | wc -l)"
-echo "role-authorized procedures: $(cat $ROUTERS | grep -c 'roleProcedure(' || true)"
+# From the census, not a token grep: the grep counted `roleProcedure(` wherever the text
+# occurred, comments included (753); the census counts sites in the tree (680).
+echo "role-authorized procedures: $(pnpm exec tsx scripts/procedure-census.ts --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).byKind.roleProcedure ?? 0))')"
 
 echo "== 7b. External gate: portal mounts only externalProcedure, and the count is pinned =="
 EXT=$(grep -c 'externalProcedure(' server/portalRouter.ts || true); ROLE_IN_PORTAL=$(grep -c 'roleProcedure(' server/portalRouter.ts || true)
@@ -116,7 +134,7 @@ echo "integration-gated procedures: $INB"
 if [ "$ROLE_IN_INBOUND" != "0" ] || [ "$EXT_IN_INBOUND" != "0" ]; then echo "FAIL: inboundRouter mounts a role or external procedure"; exit 1; fi
 if [ "$INB" = "0" ]; then echo "FAIL: no integrationProcedure in integrationRouter"; exit 1; fi
 echo "== 8. Current-state document is generated, not claimed =="
-cp LEASEOS_CURRENT_STATE.md /tmp/current-state.before
+cp LEASEOS_CURRENT_STATE.md "$CURRENT_STATE_BEFORE"
 # No argument, so the release comes from LEASEOS_RELEASE — the file the document
 # names as where its Release row is read from. This used to scrape the release
 # out of the document and hand it straight back to the generator, which meant
@@ -124,6 +142,6 @@ cp LEASEOS_CURRENT_STATE.md /tmp/current-state.before
 # It went unnoticed for exactly that reason: the document said v22.21 while
 # LEASEOS_RELEASE still said v22.20, and every gate run passed.
 bash scripts/current-state.sh >/dev/null
-if ! diff -q /tmp/current-state.before LEASEOS_CURRENT_STATE.md >/dev/null; then echo "LEASEOS_CURRENT_STATE.md is stale — regenerate with scripts/current-state.sh"; diff /tmp/current-state.before LEASEOS_CURRENT_STATE.md | head -20; exit 1; fi
+if ! diff -q "$CURRENT_STATE_BEFORE" LEASEOS_CURRENT_STATE.md >/dev/null; then echo "LEASEOS_CURRENT_STATE.md is stale — regenerate with scripts/current-state.sh"; diff "$CURRENT_STATE_BEFORE" LEASEOS_CURRENT_STATE.md | head -20; exit 1; fi
 echo "current"
 echo "== PASS =="
