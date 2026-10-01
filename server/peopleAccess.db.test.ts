@@ -59,13 +59,21 @@ async function org(name = `Fixture ${rnd()}`) {
  * caller context supplies the id directly — which is also what makes these
  * tests a direct-API attack rather than a UI walkthrough.
  */
+/**
+ * The suite's own id window, declared so `testIdBands.test.ts` can see it. Users used to come from
+ * AUTO_INCREMENT, which lands one above the highest id another suite inserted explicitly — an id that
+ * suite may already have granted a role to without creating the users row, so the "new" user here
+ * would arrive holding someone else's grant.
+ */
+let seq = 298_000_000 + Math.floor(Math.random() * 50_000);
 async function user(name = `Person ${rnd()}`) {
   const openId = `oid-${rnd()}-${rnd()}`;
-  const [r] = await pool.execute<mysql.ResultSetHeader>(
-    "INSERT INTO users (openId, name, email, loginMethod) VALUES (?,?,?,'test')",
-    [openId, name, `${openId}@example.test`]
+  const id = seq++;
+  await pool.execute(
+    "INSERT INTO users (id, openId, name, email, loginMethod) VALUES (?,?,?,?,'test')",
+    [id, openId, name, `${openId}@example.test`]
   );
-  return r.insertId;
+  return id;
 }
 
 async function membership(userId: number, orgRef: string, status: "active" | "ended" = "active") {

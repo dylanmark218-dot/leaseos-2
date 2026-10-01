@@ -38,6 +38,14 @@ let FIXTURE_OPERATOR_ID = 1;
  * Same rule as B23.1B applied to units and operators: create it, keep the id.
  */
 let TEST_USER_ID = 0;
+/**
+ * The suite's own id window, declared so `testIdBands.test.ts` can see it. Both identities this suite
+ * creates come from it. TEST_USER_ID used to be AUTO_INCREMENT, which lands one above the highest id
+ * any earlier suite inserted explicitly — and a suite that inserts id M and then grants a role to M + 1
+ * without a users row hands that role to whoever is auto-incremented next. On 2026-10-01 that was this
+ * suite's caller, which arrived holding `driver` and was refused `personnel.write`.
+ */
+let seq = 297_000_000 + Math.floor(Math.random() * 50_000);
 
 beforeAll(async () => {
   if (!process.env.DATABASE_URL) return;
@@ -46,10 +54,11 @@ beforeAll(async () => {
     const tag = Math.random().toString(36).slice(2, 8).toUpperCase();
     // The caller's own identity, with an openId of its own so the OAuth upsert
     // could never collide with it.
-    TEST_USER_ID = (await db.insert(users).values({
-      openId: `fieldroute-test-${tag}`, name: "FieldRoute Test",
+    TEST_USER_ID = seq++;
+    await db.insert(users).values({
+      id: TEST_USER_ID, openId: `fieldroute-test-${tag}`, name: "FieldRoute Test",
       email: `fieldroute-${tag}@example.test`, loginMethod: "test",
-    } as never))[0].insertId;
+    } as never);
     FIXTURE_JOB_ID = (await db.insert(jobs).values({ jobCode: `JOB-FR-${tag}`, type: "Hydrovac", customer: "Fixture Energy", location: "Somewhere", status: "dispatched" } as never))[0].insertId;
     FIXTURE_UNIT_ID = (await db.insert(units).values({ unitNumber: `U-FR-${tag}`, vehicleType: "hydrovac" } as never))[0].insertId;
     FIXTURE_OPERATOR_ID = (await db.insert(operators).values({ name: `Fixture Operator ${tag}`, licenseNumber: `LIC-FR-${tag}` } as never))[0].insertId;
@@ -87,7 +96,7 @@ beforeAll(async () => {
   // with role "admin", holding the domain permission too) sets it; the suite's own user is not one.
   if (db) {
     // An explicit id from the suite's own window: auto-increment lands wherever other suites' explicit ids pushed it.
-    const adminId = 297_000_000 + Math.floor(Math.random() * 50_000);
+    const adminId = seq++;
     await db.insert(users).values({ id: adminId, openId: `fieldroute-admin-${adminId}`, role: "admin" } as never);
     await grantUserRole({ userId: adminId, role: "management", scopeType: "global", grantedByUserId: TEST_USER_ID, grantedAt: new Date() });
     await appRouter.createCaller({ ...createContext(), user: { ...createContext().user!, id: adminId, role: "admin" } }).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
