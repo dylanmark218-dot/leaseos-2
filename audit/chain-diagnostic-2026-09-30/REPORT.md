@@ -13,7 +13,24 @@ with the direct evidence. The earlier, unfrozen draft of this report (`f26cc8c`)
 
 ---
 
-## 0. GitHub Actions — CONFIRMED outage; cause UNRESOLVED and outside the repository
+## Closure — 2026-10-01: verification-floor incident CLOSED
+
+The findings below stay frozen as written; this note records how the incident ended.
+
+| | |
+|---|---|
+| Actions cause | **RESOLVED, outside the repository**: the account's Actions spending limit. Reset by the owner on 2026-09-30; the next re-run was assigned a runner. Ten attempts before the reset had failed in 2–13 s with `runner_id: 0`; none after it did. |
+| First real-execution run | run 513 attempt 8 on `eb684f8` (job 110147989149, runner `GitHub Actions 1000002187`): checkout, service, install, **CI gate 8 m 10 s**, success. |
+| #68 (this report) | merged `a413123`; its run 511 attempt 4 green (runner 1000002188, gate 8 m 3 s). |
+| #69 (verification floor) | merged `a89607f`; run 513 attempt 8 green as above. |
+| Integrated `main` | `a89607f`, run 515 (job 110151236092, runner 1000002191, gate 7 m 26 s): **success**. Gates 4, 5, 6, 8 and the #46 harness query are on `main`. |
+| Merge authorisation | **Restored.** A green remote run with a real runner is again the condition, and it is again met. |
+
+Next: §3 items 3–6, beginning with P0-A1 (HOS tenant isolation), each its own PR.
+
+---
+
+## 0. GitHub Actions — CONFIRMED outage; cause RESOLVED (see Closure above) and outside the repository
 
 | Evidence | Value |
 |---|---|
