@@ -24,6 +24,8 @@ import {
   decryptSecret,
   encryptSecret,
   parseEnvelope,
+  type KeyDescriptor,
+  type SecretKeyProvider,
   type SecretPurpose,
 } from "./secretCrypto";
 
@@ -33,14 +35,33 @@ const hexKey = (seed: string) => seed.repeat(64).slice(0, 64);
 /** A provider with one active key per purpose, and an optional retired predecessor. */
 function providerWith(
   opts: { retired?: boolean; kind?: "environment" | "managed" } = {}
-) {
+): SecretKeyProvider {
   const keys: Record<string, { active: { keyId: string; hex: string }; retired?: { keyId: string; hex: string }[] }> = {
     MFA_SECRET: { active: { keyId: "mfa-v2", hex: hexKey("a") }, retired: opts.retired ? [{ keyId: "mfa-v1", hex: hexKey("b") }] : [] },
     WEBHOOK_SECRET: { active: { keyId: "webhook-v1", hex: hexKey("c") } },
     PROVIDER_CREDENTIAL: { active: { keyId: "provider-v1", hex: hexKey("d") } },
     INTEGRATION_SECRET: { active: { keyId: "integration-v1", hex: hexKey("e") } },
   };
-  return createEnvironmentKeyProvider(keys, { kind: opts.kind ?? "environment" });
+  const environment = createEnvironmentKeyProvider(keys);
+  if ((opts.kind ?? "environment") === "environment") return environment;
+  /*
+   * A managed-shaped provider for the production-write tests. Deliberately NOT the environment
+   * provider relabelled — `createEnvironmentKeyProvider` no longer accepts a kind, so the only way
+   * to be `"managed"` is to be a separate implementation of the interface. This one keeps its
+   * material in its own table, the way a KMS-backed implementation would hold handles.
+   */
+  const held = new Map<string, KeyDescriptor>();
+  for (const purpose of SECRET_PURPOSES) {
+    const active = environment.getActiveKey(purpose);
+    if (active) held.set(`${purpose}:${active.keyId}`, active);
+    const retired = keys[purpose]?.retired ?? [];
+    for (const r of retired) held.set(`${purpose}:${r.keyId}`, { keyId: r.keyId, key: Buffer.from(r.hex, "hex") });
+  }
+  return {
+    kind: "managed",
+    getActiveKey: purpose => environment.getActiveKey(purpose),
+    getDecryptKey: (purpose, keyId) => held.get(`${purpose}:${keyId}`) ?? null,
+  };
 }
 
 const ctx = (secretRef = "sec_test_0001") => ({ secretRef });
