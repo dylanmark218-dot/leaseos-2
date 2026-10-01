@@ -14,6 +14,7 @@ import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
 import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries, evidenceRecords, fieldTicketDocuments, retentionPolicies, documentDefinitions } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
+import { financeScopeFor, requireOwnedEntity } from "./_core/entityScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { matchFacilityStatementLine, type DisposalTicketLite } from "./_core/facilityStatements";
@@ -27,6 +28,19 @@ async function bookFor(userId: number) {
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   const scope = await resolveActingScope(db, userId);
   return { db, bookOrgRef: scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId };
+}
+/**
+ * P0-A3 — a procedure that names a book (`financialEntityId`) must own it. Until now the aging,
+ * export-readiness and profitability reads resolved the caller's organization and then read
+ * whatever book the input named: another organization's receivables, by id. The book is proved
+ * through the strict money boundary (F1), and a foreign book gets the answer a missing one gets.
+ */
+async function ownedBook(userId: number, financialEntityId: number) {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  const fs = await financeScopeFor(db, userId);
+  requireOwnedEntity(fs, financialEntityId, `Financial entity ${financialEntityId}`);
+  return { db, bookOrgRef: fs.tenantId === SINGLE_TENANT_ID ? null : fs.tenantId };
 }
 const bookWhere = <T extends { bookOrgRef: any }>(t: T, bookOrgRef: string | null) => bookOrgRef ? or(isNull(t.bookOrgRef), eq(t.bookOrgRef, bookOrgRef)) : isNull(t.bookOrgRef);
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -423,7 +437,7 @@ export const commercialOfficeRouter = router({
     agingByOrganization: roleProcedure("commercialOffice.arAgingByOrganization")
       .input(z.object({ financialEntityId: z.number().int().positive(), asOf: z.coerce.date().optional() }))
       .query(async ({ ctx, input }) => {
-        const { db } = await bookFor(ctx.user.id);
+        const { db } = await ownedBook(ctx.user.id, input.financialEntityId);
         const inv = await db.select({ i: invoices, accountOrgRef: customerAccounts.orgRef, accountRef: customerAccounts.accountRef }).from(invoices).leftJoin(customerAccounts, eq(customerAccounts.id, invoices.customerAccountId)).where(eq(invoices.financialEntityId, input.financialEntityId));
         const ids = inv.map(r => r.i.id);
         const [allocs, creds] = await Promise.all([
@@ -464,7 +478,7 @@ export const commercialOfficeRouter = router({
     agingByOrganization: roleProcedure("commercialOffice.apAgingByOrganization")
       .input(z.object({ financialEntityId: z.number().int().positive(), asOf: z.coerce.date().optional() }))
       .query(async ({ ctx, input }) => {
-        const { db } = await bookFor(ctx.user.id);
+        const { db } = await ownedBook(ctx.user.id, input.financialEntityId);
         const asOf = input.asOf ?? new Date();
         const rows = await db.select({ b: vendorBills, vendorName: vendors.name, vendorOrgRef: vendors.orgRef }).from(vendorBills).innerJoin(vendors, eq(vendors.id, vendorBills.vendorId))
           .where(and(eq(vendorBills.financialEntityId, input.financialEntityId), notInArray(vendorBills.status, ["paid", "cancelled"])));
@@ -521,7 +535,7 @@ export const commercialOfficeRouter = router({
     exportReadiness: roleProcedure("commercialOffice.glExportReadiness")
       .input(z.object({ financialEntityId: z.number().int().positive(), from: z.coerce.date(), to: z.coerce.date() }))
       .query(async ({ ctx, input }) => {
-        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const { db, bookOrgRef } = await ownedBook(ctx.user.id, input.financialEntityId);
         const mappings = await db.select().from(commercialGlMappings).where(bookWhere(commercialGlMappings, bookOrgRef));
         const mapped = (kind: string, key: string) => mappings.find(m => m.mappingKind === kind && m.mappingKey === key && m.bookOrgRef === bookOrgRef) ?? mappings.find(m => m.mappingKind === kind && m.mappingKey === key && m.bookOrgRef === null) ?? null;
         const inv = await db.select({ serviceCode: invoiceLines.serviceCode, gst: invoices.gstTreatment, n: sql<number>`COUNT(*)` }).from(invoiceLines).innerJoin(invoices, eq(invoices.id, invoiceLines.invoiceId))
@@ -692,7 +706,7 @@ export const commercialOfficeRouter = router({
     byDimension: roleProcedure("commercialOffice.profitabilityByDimension")
       .input(z.object({ financialEntityId: z.number().int().positive(), dimension: z.enum(["client", "job", "load", "unit", "driver", "branch", "contractor"]), from: z.coerce.date(), to: z.coerce.date() }))
       .query(async ({ ctx, input }) => {
-        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        const { db, bookOrgRef } = await ownedBook(ctx.user.id, input.financialEntityId);
         const dims = await db.select().from(commercialCategoryTypes).where(and(eq(commercialCategoryTypes.kind, "profitability_dimension"), bookWhere(commercialCategoryTypes, bookOrgRef)));
         const active = layerFor(dims.map(d => ({ ...d, category: d.categoryKey })), bookOrgRef, input.dimension).rows[0];
         if (!active) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — dimension "${input.dimension}" is not active in this business's book` });

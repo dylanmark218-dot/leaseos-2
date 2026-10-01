@@ -266,6 +266,9 @@ importers:
       tailwindcss:
         specifier: ^4.1.14
         version: 4.1.14
+      tough-cookie:
+        specifier: 5.1.2
+        version: 5.1.2
       tsx:
         specifier: ^4.19.1
         version: 4.20.6

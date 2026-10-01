@@ -33,16 +33,26 @@ type ZodLike = { shape?: Record<string, unknown>; _def?: { innerType?: ZodLike; 
 type Proc = { _def: { meta?: { moneyScoped?: true; platformGoverned?: "global_target"; bootstrap?: "zero_organizations" }; inputs?: ZodLike[]; resolver?: unknown } };
 const procs = (appRouter as unknown as { _def: { procedures: Record<string, Proc> } })._def.procedures;
 
-/** The ten F1 routers as mounted (CCA lives under `asset`), plus insurance (F1.1). */
-const MONEY_NAMESPACES = ["bank", "ar", "period", "gst", "roadside", "purchasing", "vendor", "recovery", "invoicing", "asset", "fuel", "ifta", "commercial", "portalAdmin", "audit", "insurance"];
+/** The ten F1 routers as mounted (CCA lives under `asset`), plus insurance (F1.1), plus projects (P0-A3). */
+const MONEY_NAMESPACES = ["bank", "ar", "period", "gst", "roadside", "purchasing", "vendor", "recovery", "invoicing", "asset", "fuel", "ifta", "commercial", "portalAdmin", "audit", "insurance", "project"];
 /**
  * Keys that name a money record wherever they appear. Generic names that other domains reuse for
  * something else (`deviceRef` is also a field device, `policyRef` a comms policy, `claimRef` a funding
  * claim) are not here; the procedures that use them for money are asserted by name below.
+ *
+ * P0-A3 added the commercial-project and closeout keys: a quote, budget, change order, RFI, contract
+ * terms, client adjustment or customer account named by reference is a money record. (`jobId` and
+ * `ticketNumber` are operational keys scoped by P4.1 — `jobInScope` / `fieldTicketInScope` — and are
+ * accepted as self-scoping below; `ticketNumber` also appears as free text on trip stops.)
  */
-const MONEY_KEYS = ["financialEntityId", "invoiceNumber", "billRef", "paymentRef", "creditRef", "assetRef", "tankRef", "fuelRef", "distanceRef", "caseNumber", "expenseRef", "opportunityRef"];
-/** A handler that proves the book itself: the payroll / commercial-setup / commercial-office convention, or the F1.1 generic helper. */
-const SELF_SCOPED = /assertEntityInScope|entityIdsInScope|assertPeriodInScope|bookFor\(|assertCallerOwnsEntity|deviceOwnedByCaller|financeScopeFor|requireOwnExpense|assertEnforcementScope/;
+const MONEY_KEYS = ["financialEntityId", "invoiceNumber", "billRef", "paymentRef", "creditRef", "assetRef", "tankRef", "fuelRef", "distanceRef", "caseNumber", "expenseRef", "opportunityRef", "accountRef", "customerAccountRef", "quoteRef", "budgetRef", "changeOrderRef", "rfiRef", "termsRef", "adjustmentRef"];
+/**
+ * A handler that proves the book itself: the payroll / commercial-setup / commercial-office convention, the F1.1
+ * generic helper, or (P0-A3) the strict money boundary resolved in-handler and the P4.1 ticket-through-job proof.
+ * `bookFor(` alone is NOT proof: it resolves the caller's organization without checking the book the input
+ * names — the four commercial-office aggregates that relied on it now call `ownedBook(`.
+ */
+const SELF_SCOPED = /assertEntityInScope|entityIdsInScope|assertPeriodInScope|assertProfileInScope|assertAdjustmentInScope|assertRunInScope|assertDisputeInScope|assertSettlementInScope|ownedBook\(|assertCallerOwnsEntity|deviceOwnedByCaller|financeScopeFor|requireOwnExpense|assertEnforcementScope|actingScopeFor\(|fieldTicketInScope\(/;
 const USES_BOUNDARY = /ctx\.money|caller\.money|requireProvableOwnership/;
 
 /** Not gaps: the customer portal is `externalProcedure`, scoped by the portal identity's own account binding (B21.12). */
@@ -50,6 +60,9 @@ const EXTERNALLY_SCOPED: Record<string, string> = {
   "portal.invoiceView": "externalProcedure — scoped by the portal identity's account",
   "portal.invoiceAccept": "externalProcedure — scoped by the portal identity's account",
   "portal.invoiceDispute": "externalProcedure — scoped by the portal identity's account",
+  "portal.quoteAccept": "externalProcedure — the quote must be on the identity's own account (P0-A3 FIN-T17)",
+  "portal.changeOrderAuthorize": "externalProcedure — the change order must be on the identity's own account",
+  "portal.rfiAnswer": "externalProcedure — the RFI must be on the identity's own account",
 };
 
 /**
@@ -100,9 +113,10 @@ const source = (p: Proc) => String(p._def.resolver);
 describe("F1 / F1.1 — every money procedure is money-scoped, structurally", () => {
   const money = Object.entries(procs).filter(([k]) => MONEY_NAMESPACES.includes(k.split(".")[0]!));
 
-  it("finds the procedures it is guarding: 72 in the ten F1 routers and 12 in insurance", () => {
+  it("finds the procedures it is guarding: 72 in the ten F1 routers, 12 in insurance and 9 in projects", () => {
     expect(money.filter(([k]) => k.startsWith("insurance.")).length).toBe(12);
-    expect(money.length).toBe(84);
+    expect(money.filter(([k]) => k.startsWith("project.")).length).toBe(9);
+    expect(money.length).toBe(93);
   });
 
   it("marks every one of them moneyScoped", () => {
