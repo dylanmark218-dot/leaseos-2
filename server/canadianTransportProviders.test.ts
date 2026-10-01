@@ -261,7 +261,11 @@ describe("DriveBC Open511", () => {
     expect(a.sourceUpdatedAt).toEqual(new Date("2026-01-26T18:10:05Z"));
     // Bare dates are Pacific midnight, not UTC midnight and not the server's.
     expect(a.effectiveFrom).toEqual(new Date("2025-09-29T07:00:00Z"));
-    expect(a.effectiveTo).toEqual(new Date("2026-11-08T08:00:00Z"));
+    // 2026-11-08 midnight in British Columbia is 07:00Z, not 08:00Z: BC adopted permanent
+    // UTC−7 in 2026 and does not fall back on 2026-11-01. The tz database carries that from
+    // 2026c, and the pinned Node build (.nvmrc) carries 2026c. The full contract, with the
+    // transitions that still happen elsewhere, is server/transportDateContract.test.ts.
+    expect(a.effectiveTo).toEqual(new Date("2026-11-08T07:00:00Z"));
     expect(a.radiusMetres).toBeGreaterThanOrEqual(DEFAULT_ADVISORY_RADIUS_METRES);
   });
 
