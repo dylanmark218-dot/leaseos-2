@@ -282,9 +282,7 @@ export type Permission =
   | "board.read" | "board.post" | "board.manage"
   // v22.20 — the agent. Asking it to work, acting, and approving differ.
   | "agent.use" | "agent.act" | "agent.approve" | "agent.read"
-  // LA-1a — Live Assist, the session spine only (docs/live-assist/LA1A_OWNER_RULING.md). Using a
-  // session, setting the organization's policy, and reviewing the lifecycle record are three acts.
-  // None of them grants evidence creation, credential verification or any other domain write.
+  // LA-1a — Live Assist, the session spine only.
   | "live_assist.use" | "live_assist.administer" | "live_assist.review"
   // v22.20 — clearing a government data source for operational use.
   | "geo.source.review"
@@ -297,6 +295,12 @@ export type Permission =
   | "hos.attest"
   /* P8.3 — putting a scanned log page on file. Retention, not a dispatch answer. */
   | "hos.recordScannedLog"
+  // DC-A (0178) — Document Control. Reading the register, taking a document in, confirming
+  // what a scan says, issuing a numbered record, voiding a number, and managing the catalog, the
+  // series and the templates are each their own act: intake creates a row, confirmation creates a
+  // fact, issue consumes a number, void explains a gap.
+  | "document.read" | "document.intake" | "document.confirm" | "document.issue" | "document.void"
+  | "document.catalog.manage" | "document.series.manage" | "document.template.manage"
   /* P8.5 — the vault. `restricted.read` is the permission the break-glass prompt sits behind; it is
      NOT implied by an administration role, which is the point of the whole subsystem. */
   | "vault.matter.manage" | "restricted.read" | "restricted.audit.read"
@@ -358,7 +362,9 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
-    "live_assist.use", // LA-1a: the session spine only
+    "live_assist.use",
+    "document.read",
+    "document.intake",
     "automation.override.operational",
     "facility.directory.report",
     "facility.directory.read",
@@ -442,7 +448,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
-    "live_assist.use", // LA-1a: the session spine only
+    "live_assist.use",
+    "document.read",
+    "document.intake",
+    "document.confirm",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -554,7 +563,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
-    "live_assist.use", // LA-1a: the session spine only
+    "live_assist.use",
+    "document.read",
+    "document.intake",
     "assistant.ask",
     "board.read",
     "board.post",
@@ -621,7 +632,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.manage",
   ],
   shop_lead: [
-    "live_assist.use", // LA-1a: the session spine only
+    "live_assist.use",
+    "document.read",
+    "document.intake",
+    "document.confirm",
     "facility.directory.read",
     "academy.evaluate",
     "assistant.ask",
@@ -709,7 +723,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
-    "live_assist.review", // LA-1a: the lifecycle record, never session content
+    "live_assist.review",
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
     /* C1b-2b — requirement verification */
     "compliance.requirement.propose",
     "compliance.requirement.verify",
@@ -834,7 +852,13 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
-    "live_assist.use", // LA-1a: the session spine only
+    "live_assist.use",
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
+    "document.void",
+    "document.template.manage",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -997,7 +1021,17 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
-    "live_assist.use", "live_assist.administer", "live_assist.review", // LA-1a
+    "live_assist.use",
+    "live_assist.administer",
+    "live_assist.review",
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
+    "document.void",
+    "document.catalog.manage",
+    "document.series.manage",
+    "document.template.manage",
     /* C1b-2b — requirement verification */
     "compliance.requirement.verify",
     "compliance.requirement.second_approve",
@@ -1255,6 +1289,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "geo.graph.build",
   ],
   hr: [
+    "document.read",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1291,6 +1326,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "audit.package.read",
   ],
   legal: [
+    "document.read",
     /* C1b-2b — requirement verification */
     "compliance.requirement.propose",
     "compliance.requirement.verify",
@@ -1323,6 +1359,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    "document.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.read_safety_summary",
@@ -1377,6 +1414,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   /* ---- B20.5 finance and payroll functions ---- */
 
   bookkeeper: [
+    "document.read",
+    "document.intake",
     "facility.directory.read",
     "commercial.read",
     "commercial.write",
@@ -1499,6 +1538,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    "document.read",
+    "document.confirm",
+    "document.issue",
     /* C1b-2b — requirement verification */
     "compliance.requirement.propose",
     "compliance.requirement.verify",
@@ -1770,10 +1812,18 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
-  // LA-1a — a Live Assist decision that cannot be recorded is refused.
   "live_assist.use",
   "live_assist.administer",
   "live_assist.review",
+  // DC-A (0178) — Document Control. Each of these creates operational truth (a controlled record, a
+  // confirmed extraction, a consumed number) or changes what every later record is judged by.
+  "document.intake",
+  "document.confirm",
+  "document.issue",
+  "document.void",
+  "document.catalog.manage",
+  "document.series.manage",
+  "document.template.manage",
   "academy.source.review",
   "academy.certificate.issue",
   "academy.certificate.sign_own",
@@ -2332,6 +2382,32 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "commercialOffice.documentDeliveryUpdate": "commercial.write",
   "commercialOffice.documentGet": "commercial.read",
   "commercialOffice.documentsList": "commercial.read",
+  // DC-A (0178) — Document Control, Checkpoint A: the definition registry and the catalog.
+  "documentControl.definitionsList": "document.read",
+  "documentControl.definitionGet": "document.read",
+  "documentControl.catalogSeed": "document.catalog.manage",
+  "documentControl.definitionOverlay": "document.catalog.manage",
+  "documentControl.definitionCreate": "document.catalog.manage",
+  "documentControl.definitionRetire": "document.catalog.manage",
+  "documentControl.sourceArtifactsList": "document.read",
+  // DC-B (0195) — the register: intake creates a row, confirmation creates a fact, issue consumes a number.
+  "documentControl.documentIntake": "document.intake",
+  "documentControl.documentRegisterRendered": "document.issue",
+  "documentControl.documentConfirm": "document.confirm",
+  "documentControl.documentIssue": "document.issue",
+  "documentControl.documentVoid": "document.void",
+  "documentControl.documentSupersede": "document.issue",
+  "documentControl.documentWithdraw": "document.void",
+  "documentControl.documentAmend": "document.confirm",
+  "documentControl.documentGet": "document.read",
+  "documentControl.documentsList": "document.read",
+  // DC-C (0196) — the series ledger. Reading what was handed out is a read; cutting blocks and voiding numbers is series management.
+  "documentControl.seriesList": "document.read",
+  "documentControl.seriesGapReport": "document.read",
+  "documentControl.seriesBlocks": "document.read",
+  "documentControl.seriesAllocateDeviceBlock": "document.series.manage",
+  "documentControl.seriesRetireDeviceBlock": "document.series.manage",
+  "documentControl.seriesVoidNumber": "document.series.manage",
   "commercialOffice.glAccountSet": "commercial.policy",
   "commercialOffice.glMappingSet": "commercial.policy",
   "commercialOffice.glList": "commercial.read",
@@ -2793,7 +2869,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "agent.decideApproval": "agent.approve",
   "agent.awaitEvent": "agent.act",
   "agent.get": "agent.read",
-  // LA-1a — Live Assist session spine (docs/live-assist/LA1A_OWNER_RULING.md).
+  // LA-1a — Live Assist session spine.
   "liveAssist.start": "live_assist.use",
   "liveAssist.heartbeat": "live_assist.use",
   "liveAssist.pause": "live_assist.use",
@@ -2995,6 +3071,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsRecord": "closeout.terms.record",
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
+
+  /* ---- the page scanner: guidance and review, both read-only ----
+   * Both answer "what does this paperwork need"; neither writes, links or
+   * confirms anything, so both sit on the ordinary compliance read rather
+   * than on a permission of their own. A worker who may not read the
+   * company's compliance material may not read its paperwork guidance
+   * either — that is the same question, and it already has an answer. */
+  "paperwork.guidance": "compliance.read",
+  "paperwork.reviewScan": "compliance.read",
 } as const satisfies Record<string, Permission>;
 
 /**

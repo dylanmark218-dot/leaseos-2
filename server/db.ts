@@ -37,7 +37,6 @@ import {
   InsertRouteDecision,
   InsertTrip,
   InsertTripStop,
-  InsertOperatingZone,
   InsertDutyRecord,
   InsertWorkOrder,
   InsertTripBreadcrumb,
@@ -52,7 +51,6 @@ import {
   routeDecisions,
   trips,
   tripStops,
-  operatingZones,
   dutyRecords,
   workOrders,
   jobChargeLines,
@@ -302,30 +300,9 @@ export async function updateTripStop(
   await db.update(tripStops).set(input).where(eq(tripStops.id, id));
   return true;
 }
-export async function listOperatingZones() {
-  const db = await getDb();
-  if (!db) return [];
-  return db
-    .select()
-    .from(operatingZones)
-    .orderBy(desc(operatingZones.createdAt))
-    .limit(200);
-}
-export async function createOperatingZone(input: InsertOperatingZone) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.insert(operatingZones).values(input);
-  return result[0]?.insertId;
-}
-export async function listActiveOperatingZones() {
-  const db = await getDb();
-  if (!db) return [];
-  return db
-    .select()
-    .from(operatingZones)
-    .where(eq(operatingZones.active, 1))
-    .limit(500);
-}
+// P0-A2.1 — `listOperatingZones`, `createOperatingZone` and `listActiveOperatingZones` (every
+// organization's zones, and the engine's "all active zones") are retired; the scoped forms are in
+// server/operatingZoneScope.ts.
 
 export async function createTripBreadcrumb(input: InsertTripBreadcrumb) {
   const db = await getDb();
@@ -359,25 +336,8 @@ export async function updateZoneEvent(
   await db.update(zoneEvents).set(input).where(eq(zoneEvents.id, id));
   return true;
 }
-export async function listZoneEvents(
-  tripId?: number,
-  status?: "pending" | "confirmed" | "rejected" | "expired"
-) {
-  const db = await getDb();
-  if (!db) return [];
-  const conditions = [
-    tripId ? eq(zoneEvents.tripId, tripId) : undefined,
-    status ? eq(zoneEvents.status, status) : undefined,
-  ].filter(Boolean);
-  const query = db
-    .select()
-    .from(zoneEvents)
-    .orderBy(desc(zoneEvents.detectedAt))
-    .limit(200);
-  return conditions.length
-    ? query.where(and(...(conditions as Parameters<typeof and>)))
-    : query;
-}
+// P0-A2 — `listZoneEvents` (every organization's proposals when no trip was named) is retired;
+// the scoped list is `listZoneEventsInScope` in server/telematicsScope.ts.
 
 /**
  * Derive each zone's current inside/outside state for a trip from its
@@ -404,16 +364,9 @@ export async function getRecentZoneStateForTrip(
   }
   return state;
 }
-export async function listDutyRecords(operatorId?: number) {
-  const db = await getDb();
-  if (!db) return [];
-  return db
-    .select()
-    .from(dutyRecords)
-    .where(operatorId ? eq(dutyRecords.operatorId, operatorId) : undefined)
-    .orderBy(desc(dutyRecords.startedAt))
-    .limit(500);
-}
+// P0-A1 — `listDutyRecords(operatorId?)` used to live here: every company's duty records when no
+// operator was named. It is gone rather than guarded, so the unscoped form cannot be called back
+// into use; the list is `listDutyRecordsInScope` in server/hosScope.ts.
 export async function createDutyRecord(input: InsertDutyRecord) {
   const db = await getDb();
   if (!db) return undefined;
@@ -717,15 +670,19 @@ const documentOwnerOrg = sql<string | null>`(
     ELSE NULL
   END)`;
 
-export async function listComplianceDocuments(scope: TenantScope) {
+/** An organization's list is its newest hundred; one owner's is up to this many, and a caller that receives this many must not assume it has them all. */
+export const OWNER_DOCUMENT_LIST_CAP = 500;
+
+export async function listComplianceDocuments(scope: TenantScope, owner?: { ownerType: InsertComplianceDocument["ownerType"]; ownerId: number }) {
   const db = await getDb();
   if (!db) return [];
+  const inScope = scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId);
   return db
     .select()
     .from(complianceDocuments)
-    .where(scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId))
+    .where(owner ? and(inScope, eq(complianceDocuments.ownerType, owner.ownerType), eq(complianceDocuments.ownerId, owner.ownerId)) : inScope)
     .orderBy(desc(complianceDocuments.createdAt))
-    .limit(100);
+    .limit(owner ? OWNER_DOCUMENT_LIST_CAP : 100);
 }
 
 /** The organization that owns a document's subject record, or null when nobody does. */
@@ -1012,14 +969,10 @@ export async function transferTrackingNumber(id: number): Promise<string | null>
   return (await db.select({ trackingNumber: transferAcknowledgements.trackingNumber }).from(transferAcknowledgements).where(eq(transferAcknowledgements.id, id)).limit(1))[0]?.trackingNumber ?? null;
 }
 
-/** Parent lookups for the monolith's by-id updates: the trip behind a stop or a zone event, the unit behind a safety plan. */
+/** Parent lookups for the monolith's by-id updates: the trip behind a stop, the unit behind a safety plan. (P0-A2: the zone-event lookup moved into server/telematicsScope.ts as `requireZoneEventInScope`.) */
 export async function tripStopTripId(id: number): Promise<number | null> {
   const db = await getDb(); if (!db) return null;
   return (await db.select({ tripId: tripStops.tripId }).from(tripStops).where(eq(tripStops.id, id)).limit(1))[0]?.tripId ?? null;
-}
-export async function zoneEventTripId(id: number): Promise<number | null> {
-  const db = await getDb(); if (!db) return null;
-  return (await db.select({ tripId: zoneEvents.tripId }).from(zoneEvents).where(eq(zoneEvents.id, id)).limit(1))[0]?.tripId ?? null;
 }
 export async function unitSafetyPlanUnitId(id: number): Promise<number | null> {
   const db = await getDb(); if (!db) return null;

@@ -1,0 +1,76 @@
+DOT / FMCSA Registration & Authority Record
+LeaseOS template for recording carrier registration, operating authority, insurance, permits, and verification evidence. Not a substitute for an
+FMCSA filing.
+Carrier / Business Identification
+Legal business name
+________________________________________________________________
+DBA / trade name
+________________________________________________________________
+Business address
+________________________________________________________________
+EIN / business identifier
+________________________________________________________________
+Primary compliance contact
+________________________________________________________________
+Phone / email
+________________________________________________________________
+FMCSA Registration
+USDOT Number
+________________________________________________________________
+MC / FF / MX Number(s), if applicable
+________________________________________________________________
+Carrier operation type
+________________________________________________________________
+Interstate / intrastate status
+________________________________________________________________
+Hazardous materials carrier?
+________________________________________________________________
+Cargo Tank / HM Safety Permit status, if
+applicable
+________________________________________________________________
+Authority & Insurance
+Authority type(s)
+________________________________________________________________
+Authority effective / granted date
+________________________________________________________________
+BOC-3 status / date
+________________________________________________________________
+Insurance filing status
+________________________________________________________________
+Insurance policy / filing reference
+________________________________________________________________
+Coverage expiration / renewal date
+________________________________________________________________
+State / Local Credentials
+States of operation
+________________________________________________________________
+State carrier registrations
+________________________________________________________________
+
+Oversize / overweight permits, if
+applicable
+________________________________________________________________
+Other required permits / registrations
+________________________________________________________________
+Evidence & Verification
+Source document(s) attached
+________________________________________________________________
+FMCSA portal / record checked by
+________________________________________________________________
+Date checked
+________________________________________________________________
+Verification result
+________________________________________________________________
+Next review / renewal date
+________________________________________________________________
+Exceptions / corrective actions
+________________________________________________________________
+Approval / Sign-off
+Prepared by / date
+________________________________________________________________
+Reviewed by / date
+________________________________________________________________
+Authorized representative / date
+________________________________________________________________
+Template note: requirements vary by operation. FMCSA states that USDOT registration and operating authority requirements depend on factors including operation
+type, cargo, and interstate activity. Verify current requirements and official records before treating this form as proof of authority.
