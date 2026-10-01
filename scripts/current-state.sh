@@ -4,6 +4,30 @@
 # gate regenerates it and fails if the committed copy differs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# The test universe is whatever the runner says it is. This used to be
+# `find server -name '*.test.ts'`, and the comment on that line already knew
+# the failure mode: a suite the runner enumerates and the counter does not.
+# On 2026-09-30 it was the 16 jsdom suites under client/src/**/*.dom.test.tsx —
+# in vitest's include since they were written, run by every gate, and absent
+# from this document, which said 378 while the gate ran 394. Asking vitest
+# itself means the two cannot drift, because there is one list.
+#
+# Fail closed: an empty answer is the runner or its config having broken, and
+# writing 0 into the document would be the exact false claim gate 8 exists
+# to catch. LEASEOS_VITEST_LIST_CMD exists so the test can prove that.
+list_tests() {
+  local cmd="${LEASEOS_VITEST_LIST_CMD:-pnpm exec vitest list --filesOnly}"
+  local list
+  list=$($cmd 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -E '\.(test|spec)\.tsx?$' | sort || true)
+  if [ -z "$list" ]; then
+    echo "current-state: the runner listed no test files (\`$cmd\`); refusing to write a count of 0" >&2
+    return 1
+  fi
+  printf '%s\n' "$list"
+}
+if [ "${1:-}" = "--list-tests" ]; then list_tests; exit $?; fi
+
 # Captured before line 23's `set -- $PERMS`, which overwrites the positional
 # parameters to unpack a count triple. Reading $2 after that point returns a
 # permission count, which is how this script briefly tried to write the
@@ -34,13 +58,8 @@ const sensN=arr("SENSITIVE_PERMISSIONS"), uniN=arr("UNIVERSAL_PERMISSIONS");
 console.log(perms.size+" "+sensN+" "+uniN);')
 # This clobbers $1/$2; OUT and RELEASE are captured at the top for that reason.
 set -- $PERMS; PERM_COUNT=$1; SENS_COUNT=$2; UNI_COUNT=$3
-# `find`, not a two-level glob. vitest's include is `server/**/*.test.ts`, and
-# the glob here was `server/*.test.ts server/_core/*.test.ts` — one level deep
-# each. The first suite to live in a deeper directory (server/ai) would have run
-# in CI and been absent from the document's count, which is the exact shape of
-# false claim gate 8 exists to catch. The counter now enumerates what the runner
-# enumerates.
-TEST_FILE_LIST=$(find server -name '*.test.ts' -not -path '*/node_modules/*' | sort)
+# The runner's own list — see list_tests above for why not a find or a glob.
+TEST_FILE_LIST=$(list_tests)
 TEST_FILES=$(printf '%s\n' "$TEST_FILE_LIST" | grep -c . || true)
 TEST_CASES=$(printf '%s\n' "$TEST_FILE_LIST" | xargs cat | grep -cE '^\s*it\(' || true)
 NATIVE=$(grep -o 'NotOnDeviceError(' client/src/runtime/adapters/capacitor.ts | wc -l | tr -d ' ')

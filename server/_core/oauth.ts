@@ -1,18 +1,13 @@
 import {
-  COOKIE_NAME,
   OAUTH_STATE_COOKIE,
-  REFRESH_COOKIE_NAME,
   decodeOAuthState,
 } from "@shared/const";
 import { safeRedirectPath } from "@shared/_core/redirect";
 import { parse as parseCookieHeader } from "cookie";
 import type { Express, Request, Response } from "express";
 import * as db from "../db";
-import { getSessionCookieOptions } from "./cookies";
+import { issueBrowserSession } from "./browserSession";
 import { sdk } from "./sdk";
-import { ACCESS_TOKEN_TTL_MS, REFRESH_ABSOLUTE_TTL_MS } from "./sessionFamily";
-import { createSessionFamily } from "../sessionFamilyService";
-import { ENV } from "./env";
 
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
@@ -80,47 +75,10 @@ export function registerOAuthRoutes(app: Express) {
       });
 
       /*
-       * S1-B — a login issues a short access credential, not a year-long bearer token.
-       *
-       * The expiry is left to `createSessionToken`'s default rather than named here, so this call
-       * site cannot drift away from the one place the access lifetime is defined.
+       * S1-B / S1-F / P0-B — the short access credential and the session family it refreshes
+       * against, issued by the one function every browser session comes from (./browserSession).
        */
-      const sessionToken = await sdk.createSessionToken(userInfo.openId, {
-        name: userInfo.name || "",
-      });
-
-      const cookieOptions = getSessionCookieOptions(req);
-      res.cookie(COOKIE_NAME, sessionToken, {
-        ...cookieOptions,
-        maxAge: ACCESS_TOKEN_TTL_MS,
-      });
-
-      /*
-       * S1-F — the login also opens a session family.
-       *
-       * Without this the access token would simply expire after fifteen minutes and the user would
-       * be sent back to the provider, which is not hardening but an outage. The family is what the
-       * short credential refreshes against, and what logout and revoke-all act on.
-       *
-       * `appId` is carried so the family belongs to the surface it was minted for: `verifySession`
-       * has refused a mismatched `appId` since the shared-secret finding, and a refresh able to
-       * cross surfaces would reopen that hole one layer down.
-       *
-       * A failure here must not strand the user mid-login. They keep a working access token; the
-       * consequence is one re-login in fifteen minutes, not a blank page now.
-       */
-      try {
-        const family = await createSessionFamily({
-          openId: userInfo.openId,
-          appId: ENV.appId || null,
-        });
-        res.cookie(REFRESH_COOKIE_NAME, `${family.familyRef}.${family.verifier}`, {
-          ...getSessionCookieOptions(req, { refresh: true }),
-          maxAge: REFRESH_ABSOLUTE_TTL_MS,
-        });
-      } catch (error) {
-        console.error("[OAuth] Could not open a session family", error);
-      }
+      await issueBrowserSession(req, res, { openId: userInfo.openId, name: userInfo.name || "" });
 
       // v23.26 — back to where they were going, or to the shell.
       //

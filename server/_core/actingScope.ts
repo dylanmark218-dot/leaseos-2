@@ -207,6 +207,43 @@ export class AmbiguousOrganization extends Error {}
  */
 export class MembershipRevoked extends Error {}
 
+/**
+ * P0-A1 — the fallback is for a deployment that predates memberships, not for a person whose
+ * membership ended.
+ *
+ * `resolveActingScope` answers `single_tenant_fallback` for anyone with no LIVE membership. That
+ * is right for a user the membership table has never heard of: the system has always operated as
+ * one tenant for them. It is wrong for a user whose membership existed and was ended, suspended,
+ * or ran out: their organization revoked them, and letting them back in as "the historical single
+ * tenant" is a revival, not a fallback. Historical role grants do not change this — roles say what
+ * kind of action a person may take, never which company they may take it in.
+ *
+ * Added beside the resolver rather than inside it so every existing caller keeps its behaviour
+ * until its own checkpoint adopts this; the HOS boundary is the first.
+ *
+ * Reconciled with #64 (v23.26): the resolver itself now refuses an ended membership, throwing
+ * `MembershipRevoked`, so that case no longer reaches the fallback. The strict variant reports it
+ * as the refusal its callers already handle; the post-check below stays for any path that does.
+ */
+export class RevivedFallbackRefused extends Error {}
+
+export async function resolveActingScopeStrict(db: DbOrTx, userId: number, at?: Date): Promise<ActingScope> {
+  let acting: ActingScope;
+  try {
+    acting = await resolveActingScope(db, userId, { at });
+  } catch (e) {
+    if (e instanceof MembershipRevoked) throw new RevivedFallbackRefused(e.message);
+    throw e;
+  }
+  if (acting.derivedFrom !== "single_tenant_fallback") return acting;
+  const ever = await db.select({ id: organizationMemberships.id }).from(organizationMemberships)
+    .where(eq(organizationMemberships.userId, userId)).limit(1);
+  if (ever.length) {
+    throw new RevivedFallbackRefused("No active organization membership — a membership that has ended is not replaced by the single-tenant fallback");
+  }
+  return acting;
+}
+
 export type ScopeDecision = { allowed: true; scopeRef: string | null } | { allowed: false; reason: string };
 
 /**

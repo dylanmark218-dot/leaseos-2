@@ -41,7 +41,7 @@ to **`0207`** and **`0208`**, the first slots free on main and on every open bra
 `0199`–`0206` claimed: `0199`–`0201` mechanic-portal, `0202`–`0204` driver-portfolio, `0205`–`0206`
 communications-marketplace). `scripts/verify-migration-0170.sh` became `verify-migration-0207.sh`. Still
 open, not touched here: `0202`/`0203` are claimed twice — driver-portfolio (#16) and
-`claude/live-assist-architecture-qg4jgp` (no PR). **Next free number for new work: `0209`.**
+`claude/live-assist-architecture-qg4jgp` (no PR). Next free number at that time: `0209` (since taken by main for P0-A2.1; see the 2026-10-01 section below — next free is `0210`).
 
 **Next free number for new work: `0199`** (re-check with the scan before committing). The 2026-09-24 table below
 is kept for history; several of its claims have since merged or been renumbered by their authors.
@@ -227,3 +227,22 @@ anywhere is `0193`, so `0194` is the first free everywhere.
   migration**, rather than afterwards. That ordering is the correction for the `0191`–`0193`
   omission recorded above: those numbers were each verified free before use, but the verification
   went unrecorded, and this register is the only place that verification survives.
+
+## State at the P0-A2.1 claim (2026-10-01, `main` = `64f784d`, after PR #73)
+
+`main` migration head: **`0198_requirement_verification.sql`**, 181 migrations (0197 unused). Re-scanned
+across `main` and every remote branch (a superset of every open-PR head) at the moment of claiming:
+numbers held somewhere beyond `main` are `0199`–`0208` (`claude/driver-portfolio-credential-wallet-ya8928`
+0202–0204, `claude/leaseos-auth-workspace-system-t008ad` 0207–0208, and others), so `0209` is the first
+number free everywhere.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0209 | `0209_operating_zone_scope.sql` | `security/operating-zone-tenant-model` | P0-A2.1 | claiming | none | keeps 0209 |
+
+**Next free number for new work: `0210`** (re-check with the scan before committing).
+
+## Change log (continued)
+
+* **2026-10-01 (P0-A2.1)**: claimed `0209` (`operatingZones.orgRef`, nullable; NULL = the historical single
+  tenant, as 0132 and 0148), recorded in the commit that creates the migration.

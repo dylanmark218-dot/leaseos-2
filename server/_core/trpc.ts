@@ -224,11 +224,13 @@ function organizationRefusal(error: unknown): TRPCError | null {
     });
   }
   // A membership that ended is a refusal, and it is the caller's own status
-  // rather than a fault — FORBIDDEN, named, not a 500.
+  // rather than a fault — FORBIDDEN, named, not a 500. The same words the
+  // HOS, telematics, zone and finance boundaries use for the same refusal
+  // (`RevivedFallbackRefused`), so one condition reads one way wherever it is met.
   if (error instanceof MembershipRevoked) {
     return new TRPCError({
       code: "FORBIDDEN",
-      message: "Your LeaseOS membership is not active.",
+      message: "No active organization membership",
     });
   }
   return null;

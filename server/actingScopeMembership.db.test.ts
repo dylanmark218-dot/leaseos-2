@@ -20,13 +20,13 @@
  * organization. On main before the auth-workspace checkpoint (#64) the caller
  * then fell through to the single-tenant fallback, still holding every role
  * grant — the finding this file first recorded. #64 closes it: a person whose
- * memberships are all excluded is refused ("membership is not active"), and two
+ * memberships are all excluded is refused ("No active organization membership"), and two
  * live memberships are refused until one is chosen, rather than reported and
  * left for the client. A user who never had a membership still gets the
  * single-tenant fallback, which exists for deployments that predate
  * organizations.
  */
-const INACTIVE = /membership is not active/;
+const INACTIVE = /No active organization membership/;
 const CHOOSE = /Choose which organization/;
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";

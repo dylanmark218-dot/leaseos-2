@@ -256,7 +256,10 @@ d("one company's morning, through the five surfaces", () => {
     await pool.execute("INSERT INTO maintenanceDefects (unitId, title, severity, status, reportedAt, reportedBy) VALUES (?, 'Steer tire failure', 'critical', 'open', NOW(), ?)", [unitId, driver]);
     const [ven] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (name, category) VALUES (?, 'tires')", [key("ABC Tire").slice(0, 60)]);
     const billRef = key("BILL").slice(0, 40);
-    await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, vendorInvoiceNumber, invoiceDate, receivedAt, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?, 1, ?, ?, NOW(), NOW(), 205000, 10250, 215250, 'mismatch', 'mismatch')", [billRef, Number(ven.insertId), key("INV").slice(0, 40)]);
+    // P0-A3: search is scoped to the caller's books. This company's people hold no membership, so they are the
+    // historical single tenant and see the books that carry no organization — the bill goes into one of those.
+    const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Surfaces fixture books', 'corporation', 'CA-AB')", [key("FE").slice(0, 40)]);
+    await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, vendorInvoiceNumber, invoiceDate, receivedAt, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?, ?, ?, ?, NOW(), NOW(), 205000, 10250, 215250, 'mismatch', 'mismatch')", [billRef, Number(book.insertId), Number(ven.insertId), key("INV").slice(0, 40)]);
     const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, 'J. Smith')", [driver]);
     await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'tdg_certificate', 'TDG', NOW(), DATE_ADD(NOW(), INTERVAL 10 DAY), 'verified')", [Number(op.insertId)]);
     const proposalId = key("PROP");

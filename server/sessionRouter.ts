@@ -35,15 +35,13 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, sessionProcedure } from "./_core/trpc";
-import { getSessionCookieOptions } from "./_core/cookies";
-import { ONE_YEAR_MS } from "@shared/const";
 import { safeRedirectPath } from "@shared/_core/redirect";
 import { acceptInvitationTransactionally } from "./db";
 import { digestToken } from "./_core/peopleAccess";
 import { listMembershipFacts, rememberDefaultWorkspace } from "./db";
 import type { RoleGrant } from "./_core/recordsAuthorization";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
-import { ORG_SELECTION_COOKIE } from "./_core/organizationSelection";
+import { issueOrganizationSelectionCookie } from "./_core/organizationSelectionCookie";
 import {
   decideWorkspaceSelection,
   resolveSessionContext,
@@ -164,10 +162,7 @@ export const sessionRouter = router({
         });
       }
 
-      ctx.res.cookie(ORG_SELECTION_COOKIE, input.organization, {
-        ...getSessionCookieOptions(ctx.req),
-        maxAge: ONE_YEAR_MS,
-      });
+      issueOrganizationSelectionCookie(ctx.req, ctx.res, input.organization);
       return context;
     }),
 

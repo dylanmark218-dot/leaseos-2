@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import { COOKIE_NAME, REFRESH_COOKIE_NAME } from "../shared/const";
 import { ORG_SELECTION_COOKIE } from "./_core/organizationSelection";
+import { LEGACY_REFRESH_COOKIE_PATHS, REFRESH_COOKIE_PATH } from "./_core/cookies";
 import type { TrpcContext } from "./_core/context";
 
 type CookieCall = {
@@ -58,21 +59,21 @@ describe("auth.logout", () => {
      * at its own narrow path, so clearing the access cookie alone would leave the browser holding
      * a credential that could mint a fresh one.
      *
-     * v23.26 — and the organization selection, which is part of the session and ends with it:
-     * leaving it behind would hand the next person to use a shared shop tablet a pre-selected tenant.
+     * P0-B — and it clears the refresh cookie at the path it is issued under AND at every path it
+     * was ever issued under. A browser deletes a cookie only when name, domain and path all match,
+     * so a logout that named the wrong path would leave the credential resident. The attributes
+     * are the issuing attributes (httpOnly, secure, sameSite none), not a looser copy.
      */
-    expect(clearedCookies.map(c => c.name)).toEqual([COOKIE_NAME, REFRESH_COOKIE_NAME, ORG_SELECTION_COOKIE]);
-    expect(clearedCookies[1]?.options).toMatchObject({ maxAge: -1, path: "/api/auth" });
-    for (const cookie of [clearedCookies[0]!, clearedCookies[2]!]) {
-      // Cleared with the attributes they were set with — a mismatched path or domain clears
-      // nothing and leaves the cookie in the browser.
-      expect(cookie.options, cookie.name).toMatchObject({
-        maxAge: -1,
-        secure: true,
-        sameSite: "none",
-        httpOnly: true,
-        path: "/",
-      });
-    }
+    const secureAttrs = { secure: true, sameSite: "none", httpOnly: true };
+    expect(clearedCookies.map(c => [c.name, c.options.path])).toEqual([
+      [COOKIE_NAME, "/"],
+      [REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH],
+      ...LEGACY_REFRESH_COOKIE_PATHS.map(p => [REFRESH_COOKIE_NAME, p]),
+      // v23.26 (#64) — and the organization selection, which is part of the session and ends with
+      // it: leaving it behind would hand the next person to use a shared shop tablet a tenant.
+      [ORG_SELECTION_COOKIE, "/"],
+    ]);
+    for (const c of clearedCookies) expect(c.options).toMatchObject(secureAttrs);
+    expect(REFRESH_COOKIE_PATH).not.toBe("/");
   });
 });
