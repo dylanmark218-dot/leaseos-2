@@ -41,6 +41,12 @@ const REMOVED = [
     from: "server/_core/fieldTicket.ts",
     survivor: { file: "server/closeoutRouter.ts", name: "recordSignature" },
   },
+  {
+    question: "may this person take this posted shift?",
+    removed: ["EligibilityReason"],
+    from: "server/openShiftsRouter.ts",
+    survivor: { file: "server/_core/openShifts.ts", name: "shiftEligibility" },
+  },
 ] as const;
 
 const walk = (dir: string): string[] =>
@@ -87,4 +93,57 @@ describe("SPINE item 2 — each question has one answer", () => {
       expect(declared.get(row.survivor.file)?.has(row.survivor.name), `${row.survivor.file} no longer declares ${row.survivor.name}`).toBe(true);
     });
   }
+});
+
+/**
+ * openShifts: the router reads records and enforces the engine's verdict; it judges nothing. Both
+ * the view and the work-taking action go through `shiftEligibility`, so they cannot disagree, and
+ * none of the judging helpers or refusal codes appear in the router to start a second rule.
+ */
+describe("SPINE item 2 — the open-shift router enforces the one rule and holds none of its own", () => {
+  const ROUTER = "server/openShiftsRouter.ts";
+  const sf = ts.createSourceFile(ROUTER, readFileSync(ROUTER, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+  /** The procedure name passed to roleProcedure("…") at the root of the chain a node sits in. */
+  const procedureOf = (node: ts.Node): string | null => {
+    for (let n: ts.Node | undefined = node.parent; n; n = n.parent) {
+      if (!ts.isCallExpression(n)) continue;
+      let e: ts.Expression = n.expression;
+      while (ts.isPropertyAccessExpression(e) || ts.isCallExpression(e)) {
+        if (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "roleProcedure") {
+          const a = e.arguments[0];
+          return a && ts.isStringLiteralLike(a) ? a.text : null;
+        }
+        e = ts.isPropertyAccessExpression(e) ? e.expression : e.expression;
+      }
+    }
+    return null;
+  };
+  const calls: { callee: string; procedure: string | null }[] = [];
+  const strings: string[] = [];
+  const imported: string[] = [];
+  const visit = (n: ts.Node): void => {
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) calls.push({ callee: n.expression.text, procedure: procedureOf(n) });
+    if (ts.isStringLiteralLike(n)) strings.push(n.text);
+    if (ts.isImportSpecifier(n)) imported.push((n.propertyName ?? n.name).text);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+
+  it("both the view (shifts.eligibility) and the action (shifts.expressInterest) ask shiftEligibility", () => {
+    const asking = calls.filter(c => c.callee === "shiftEligibility").map(c => c.procedure).sort();
+    expect(asking).toEqual(["shifts.eligibility", "shifts.expressInterest"]);
+    expect(calls.some(c => c.callee === "expressInterest" && c.procedure === "shifts.expressInterest")).toBe(true);
+  });
+
+  it("imports none of the judging helpers the rule is made of", () => {
+    for (const helper of ["readExpiry", "isAbsent", "isOnShift", "isAvailable", "missingFrom", "qualificationValidity", "candidatesFor"]) {
+      expect(imported, `${ROUTER} imports ${helper} — eligibility is judged in _core/openShifts.ts`).not.toContain(helper);
+    }
+  });
+
+  it("names none of the rule's refusal codes", () => {
+    const CODES = ["not_in_organization", "wrong_role", "not_rostered", "on_approved_leave", "overlaps_existing", "no_licence_recorded", "licence_expired", "qualification_unknown", "qualification_unverified", "qualification_expired"];
+    expect(strings.filter(x => CODES.includes(x))).toEqual([]);
+  });
 });
