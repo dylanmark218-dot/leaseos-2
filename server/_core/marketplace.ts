@@ -499,3 +499,57 @@ export function makeRef(prefix: string, random: () => number = Math.random): str
   for (let i = 0; i < 10; i++) out += REF_ALPHABET[Math.floor(random() * REF_ALPHABET.length)];
   return `${prefix}-${out}`;
 }
+
+/* ===================== the social layer (0191) ===================== */
+
+const norm = (s: string | null | undefined) => (s ?? "").trim().toUpperCase();
+
+export type FollowRule = { orgRef: string; workType: string | null; operatingArea: string | null };
+
+/** The uniqueness key for a follow: `<workType|*>|<operatingArea|*>`, normalized. */
+export function followMatchKey(f: Pick<FollowRule, "workType" | "operatingArea">): string {
+  return `${norm(f.workType) || "*"}|${norm(f.operatingArea) || "*"}`;
+}
+
+/**
+ * Does this follow want to hear about this posting? Both stated facets must match (a null facet
+ * matches anything); an organization never hears about its own posting; and only a PUBLIC posting
+ * is matched — an invite-only tender reaches its invitees by invitation and nobody by following.
+ */
+export function followMatches(
+  follow: FollowRule,
+  posting: { clientOrgRef: string; workType: string; operatingArea: string | null; distribution: PostingDistribution },
+): boolean {
+  if (follow.orgRef === posting.clientOrgRef) return false;
+  if (posting.distribution !== "public") return false;
+  if (follow.workType && norm(follow.workType) !== norm(posting.workType)) return false;
+  if (follow.operatingArea && norm(follow.operatingArea) !== norm(posting.operatingArea)) return false;
+  return true;
+}
+
+export type ClarificationView = {
+  askerOrgRef: string;
+  visibility: "private" | "public";
+};
+
+/**
+ * Who reads a clarification. The client reads every one. The asker reads its own. Everyone who
+ * can see the posting reads a PUBLISHED one — with the asker withheld unless the viewer is the
+ * client or the asker, because a published clarification is for all bidders equally and names
+ * nobody.
+ */
+export function clarificationVisibility(
+  c: ClarificationView,
+  viewer: { viewerOrgRef: string; clientOrgRef: string },
+): { visible: false } | { visible: true; revealAsker: boolean } {
+  const isClient = viewer.viewerOrgRef === viewer.clientOrgRef;
+  const isAsker = viewer.viewerOrgRef === c.askerOrgRef;
+  if (isClient || isAsker) return { visible: true, revealAsker: true };
+  if (c.visibility === "public") return { visible: true, revealAsker: false };
+  return { visible: false };
+}
+
+/** States in which questions may be asked and clarifications issued: while the tender is live. */
+export function postingAcceptsQuestions(state: PostingState): boolean {
+  return state === "published" || state === "bidding";
+}

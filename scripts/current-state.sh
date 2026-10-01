@@ -213,7 +213,10 @@ the clock, readiness declared-only and saying so, every transition locked,
 versioned and on the trail; the award bridged to the canonical dispatch: the
 client issues a contract that creates the contractor-owned job and its commercial
 chain, and the contractor dispatches it through the one dispatch posting door,
-idempotently — no UI yet).
+idempotently; and the social layer — the tender discussion private until the client
+publishes it with the asker withheld, following that matches public work as it opens,
+company profiles declared beside what is recorded, preferred lists invited in one
+act, every notification a row the universal inbox already reads — no UI yet).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 

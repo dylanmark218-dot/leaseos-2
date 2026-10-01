@@ -150,6 +150,67 @@ export const marketplaceRouter = router({
     return svc.contractsMine(db, actor);
   }),
 
+  /* ---- the social layer (0191): tender discussion ---- */
+  questionAsk: roleProcedure("marketplace.questionAsk").input(z.object({ postingRef: ref, question: z.string().min(5).max(2000) })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.askQuestion(db, actor, input);
+  }),
+  questionAnswer: roleProcedure("marketplace.questionAnswer").input(z.object({ clarificationRef: ref, answer: z.string().min(1).max(4000) })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.answerQuestion(db, actor, input);
+  }),
+  /** Publishing an answered question makes it one clarification for every bidder, asker withheld. */
+  clarificationPublish: roleProcedure("marketplace.clarificationPublish").input(z.object({ clarificationRef: ref })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.publishClarification(db, actor, input);
+  }),
+  noticeIssue: roleProcedure("marketplace.noticeIssue").input(z.object({ postingRef: ref, notice: z.string().min(5).max(2000) })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.issueNotice(db, actor, input);
+  }),
+  clarifications: roleProcedure("marketplace.clarifications").input(z.object({ postingRef: ref })).query(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.listClarifications(db, actor, input);
+  }),
+
+  /* ---- the social layer (0191): following, profiles, preferred contractors ---- */
+  followSet: roleProcedure("marketplace.followSet").input(z.object({ workType: code.nullable().optional(), operatingArea: z.string().max(120).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.followSet(db, actor, input);
+  }),
+  followRemove: roleProcedure("marketplace.followRemove").input(z.object({ followRef: ref })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.followRemove(db, actor, input);
+  }),
+  followsMine: roleProcedure("marketplace.followsMine").query(async ({ ctx }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.followsMine(db, actor);
+  }),
+  profileUpsert: roleProcedure("marketplace.profileUpsert").input(z.object({ displayName: z.string().min(1).max(220), description: z.string().max(4000).nullable().optional(), workTypes: z.array(code).max(40).default([]), operatingAreas: z.array(z.string().min(1).max(120)).max(40).default([]), equipmentTypes: z.array(code).max(40).default([]) })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.profileUpsert(db, actor, input);
+  }),
+  profileGet: roleProcedure("marketplace.profileGet").input(z.object({ orgRef: z.string().min(1).max(40) })).query(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.profileGet(db, actor, input);
+  }),
+  preferredAdd: roleProcedure("marketplace.preferredAdd").input(z.object({ contractorOrgRef: z.string().min(1).max(40), note: z.string().max(500).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.preferredAdd(db, actor, input);
+  }),
+  preferredRemove: roleProcedure("marketplace.preferredRemove").input(z.object({ contractorOrgRef: z.string().min(1).max(40) })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.preferredRemove(db, actor, input);
+  }),
+  preferredList: roleProcedure("marketplace.preferredList").query(async ({ ctx }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.preferredList(db, actor);
+  }),
+  postingInvitePreferred: roleProcedure("marketplace.postingInvitePreferred").input(z.object({ postingRef: ref })).mutation(async ({ ctx, input }) => {
+    const { db, actor } = await actorFor(ctx.user.id);
+    return svc.invitePreferred(db, actor, input);
+  }),
+
   /* ---- reading ---- */
   postingGet: roleProcedure("marketplace.postingGet").input(z.object({ postingRef: ref })).query(async ({ ctx, input }) => {
     const { db, actor } = await actorFor(ctx.user.id);

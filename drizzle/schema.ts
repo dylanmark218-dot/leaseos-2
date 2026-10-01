@@ -9089,3 +9089,77 @@ export const marketplaceContracts = mysqlTable("marketplaceContracts", {
   clientIdx: index("marketplaceContracts_client_idx").on(t.clientOrgRef, t.state),
 }));
 export type MarketplaceContractRow = typeof marketplaceContracts.$inferSelect;
+
+/* ---- 0191: marketplace social layer — tender discussion, following, profiles, preferred contractors ---- */
+
+/**
+ * The tender discussion. A bidder's question is private to the asker and the client until the
+ * client PUBLISHES it, at which point question and answer become one clarification every bidder
+ * reads, with the asker's identity withheld — so no bidder is quietly handed information the
+ * others were not. A `notice` is the client's own clarification with no question behind it.
+ * Answers are write-once; a correction is a new notice, never an edit.
+ */
+export const marketplaceClarifications = mysqlTable("marketplaceClarifications", {
+  id: int("id").autoincrement().primaryKey(),
+  clarificationRef: varchar("clarificationRef", { length: 64 }).notNull().unique(),
+  postingId: int("postingId").notNull(),
+  kind: mysqlEnum("kind", ["question", "notice"]).default("question").notNull(),
+  askerOrgRef: varchar("askerOrgRef", { length: 40 }).notNull(),
+  askedByUserId: int("askedByUserId").notNull(),
+  question: varchar("question", { length: 2000 }).notNull(),
+  askedAt: timestamp("askedAt").notNull(),
+  answer: varchar("answer", { length: 4000 }),
+  answeredByUserId: int("answeredByUserId"),
+  answeredAt: timestamp("answeredAt"),
+  visibility: mysqlEnum("visibility", ["private", "public"]).default("private").notNull(),
+  publishedAt: timestamp("publishedAt"),
+  publishedByUserId: int("publishedByUserId"),
+  status: mysqlEnum("status", ["open", "answered", "published"]).default("open").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  postingIdx: index("marketplaceClarifications_posting_idx").on(t.postingId, t.status),
+}));
+
+/** What an organization wants to hear about: a work type, an operating area, either, or everything. */
+export const marketplaceFollows = mysqlTable("marketplaceFollows", {
+  id: int("id").autoincrement().primaryKey(),
+  followRef: varchar("followRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull(),
+  workType: varchar("workType", { length: 60 }),
+  operatingArea: varchar("operatingArea", { length: 120 }),
+  /** `<workType|*>|<operatingArea|*>` — the uniqueness key, since a unique index over NULLs is no index. */
+  matchKey: varchar("matchKey", { length: 200 }).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  orgKey: uniqueIndex("marketplaceFollows_org_key_unique").on(t.orgRef, t.matchKey),
+  workTypeIdx: index("marketplaceFollows_work_type_idx").on(t.workType),
+}));
+
+/** The public face of a company on the board. Declared by the company; verification stays in the registry. */
+export const marketplaceCompanyProfiles = mysqlTable("marketplaceCompanyProfiles", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 40 }).notNull().unique(),
+  displayName: varchar("displayName", { length: 220 }).notNull(),
+  description: text("description"),
+  workTypesJson: text("workTypesJson").notNull(),
+  operatingAreasJson: text("operatingAreasJson").notNull(),
+  equipmentTypesJson: text("equipmentTypesJson").notNull(),
+  updatedByUserId: int("updatedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** A client's preferred-contractor list; what an invite-only tender invites in one act. */
+export const marketplacePreferredContractors = mysqlTable("marketplacePreferredContractors", {
+  id: int("id").autoincrement().primaryKey(),
+  clientOrgRef: varchar("clientOrgRef", { length: 40 }).notNull(),
+  contractorOrgRef: varchar("contractorOrgRef", { length: 40 }).notNull(),
+  note: varchar("note", { length: 500 }),
+  addedByUserId: int("addedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  pair: uniqueIndex("marketplacePreferredContractors_pair_unique").on(t.clientOrgRef, t.contractorOrgRef),
+}));
+export type MarketplaceClarificationRow = typeof marketplaceClarifications.$inferSelect;
+export type MarketplaceFollowRow = typeof marketplaceFollows.$inferSelect;

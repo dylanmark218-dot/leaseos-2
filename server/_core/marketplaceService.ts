@@ -23,14 +23,20 @@ import {
   domainEventOutbox,
   jobs,
   marketplaceAwards,
-  marketplaceContracts,
   marketplaceBidRevisions,
   marketplaceBids,
+  marketplaceClarifications,
+  marketplaceCompanyProfiles,
+  marketplaceContracts,
   marketplaceEvents,
+  marketplaceFollows,
+  marketplacePreferredContractors,
   marketplaceInvitations,
   marketplacePostings,
   organizations,
+  workflowNotifications,
   type MarketplaceAwardRow,
+  type MarketplaceClarificationRow,
   type MarketplaceContractRow,
   type MarketplaceBidRevisionRow,
   type MarketplaceBidRow,
@@ -46,11 +52,15 @@ import {
   bidContentHash,
   bidIsLive,
   biddingWindow,
+  clarificationVisibility,
+  followMatchKey,
+  followMatches,
   comparableTotalCents,
   makeRef,
   mayViewBidPricing,
   openBidRange,
   postingAcceptsInvitations,
+  postingAcceptsQuestions,
   postingIsEditable,
   transitionBid,
   transitionPosting,
@@ -127,6 +137,43 @@ async function record(tx: Tx, actor: MarketplaceActor, input: AuditInput, now: D
       now,
     ),
   );
+}
+
+/* ===================== notifications: the existing inbox, not a new engine ===================== */
+
+/** The roles that hold `marketplace.read`; a notification to an organization is a row for each. */
+const MARKETPLACE_INBOX_ROLES = ["dispatcher", "office", "management"] as const;
+
+/**
+ * Tells an organization something through `workflowNotifications`, which the
+ * universal inbox already reads by tenant and role. Idempotent on `key`, so a
+ * retried transaction cannot tell a company twice. Same transaction as the
+ * domain write: a notification about a state that rolled back never exists.
+ */
+async function notifyOrganization(tx: Tx, n: { orgRef: string; key: string; title: string; body: string; deepLink: string }, now: Date): Promise<void> {
+  for (const role of MARKETPLACE_INBOX_ROLES) {
+    const notificationKey = `${n.key}:${role}`.slice(0, 200);
+    await tx.insert(workflowNotifications).values({
+      notificationKey,
+      tenantId: n.orgRef,
+      recipientRole: role,
+      title: n.title.slice(0, 220),
+      body: n.body,
+      deepLink: n.deepLink.slice(0, 300),
+      channel: "in_app",
+      status: "queued",
+      queuedAt: now,
+    }).onDuplicateKeyUpdate({ set: { notificationKey } });
+  }
+}
+
+const postingLink = (postingRef: string) => `/marketplace/postings/${postingRef}`;
+
+/** Every organization with a stake in a posting's clarifications: anyone who has started a bid, and every invitee. */
+async function interestedOrganizations(tx: Tx, postingId: number, except: string): Promise<string[]> {
+  const bidders = await tx.select({ orgRef: marketplaceBids.bidderOrgRef }).from(marketplaceBids).where(eq(marketplaceBids.postingId, postingId));
+  const invitees = await tx.select({ orgRef: marketplaceInvitations.invitedOrgRef }).from(marketplaceInvitations).where(and(eq(marketplaceInvitations.postingId, postingId), eq(marketplaceInvitations.status, "sent")));
+  return Array.from(new Set([...bidders, ...invitees].map(x => x.orgRef))).filter(o => o !== except);
 }
 
 /* ===================== helpers ===================== */
@@ -316,8 +363,27 @@ const transitionResult = (r: { posting: MarketplacePostingRow; to: PostingState 
 export const publishPosting = (db: Db, actor: MarketplaceActor, args: PostingTransitionArgs, now = new Date()) =>
   db.transaction(async tx => transitionResult(await transitionLocked(tx, actor, args, "publish", { publishedAt: now }, () => null, now)));
 
+/**
+ * Opening bidding is the moment the opportunity feed fires: every organization
+ * whose follow matches a PUBLIC posting is told, once, in the same transaction.
+ */
 export const openBidding = (db: Db, actor: MarketplaceActor, args: PostingTransitionArgs, now = new Date()) =>
-  db.transaction(async tx => transitionResult(await transitionLocked(tx, actor, args, "open_bidding", { biddingOpenedAt: now }, () => null, now)));
+  db.transaction(async tx => {
+    const r = await transitionLocked(tx, actor, args, "open_bidding", { biddingOpenedAt: now }, () => null, now);
+    const p = r.posting;
+    const follows = p.distribution === "public" ? await tx.select().from(marketplaceFollows) : [];
+    const matched = Array.from(new Set(follows.filter(f => followMatches(f, p)).map(f => f.orgRef)));
+    for (const orgRef of matched) {
+      await notifyOrganization(tx, {
+        orgRef, key: `MKT:${p.postingRef}:open:${orgRef}`,
+        title: `Work matching what you follow: ${p.title}`,
+        body: `${p.workType}${p.operatingArea ? ` · ${p.operatingArea}` : ""}${p.biddingClosesAt ? ` · bids close ${p.biddingClosesAt.toISOString()}` : ""}`,
+        deepLink: postingLink(p.postingRef),
+      }, now);
+    }
+    if (matched.length) await record(tx, actor, { postingId: p.id, eventType: "followers_notified", detail: { organizations: matched.length } }, now);
+    return { ...transitionResult(r), notifiedOrganizations: matched.length };
+  });
 
 /**
  * Closing before the deadline is allowed — it is the client's tender — but it is
@@ -364,6 +430,7 @@ export async function invite(db: Db, actor: MarketplaceActor, args: { postingRef
     const invitationRef = makeRef("INV");
     await tx.insert(marketplaceInvitations).values({ invitationRef, postingId: posting.id, invitedOrgRef: args.invitedOrgRef, invitedByUserId: actor.userId });
     await record(tx, actor, { postingId: posting.id, eventType: "invitation_sent", detail: { invitedOrgRef: args.invitedOrgRef } }, now);
+    await notifyOrganization(tx, { orgRef: args.invitedOrgRef, key: `MKT:${posting.postingRef}:invite:${args.invitedOrgRef}`, title: `Invited to tender: ${posting.title}`, body: `${posting.clientOrgRef} invited your organization to bid.${posting.biddingClosesAt ? ` Bids close ${posting.biddingClosesAt.toISOString()}.` : ""}`, deepLink: postingLink(posting.postingRef) }, now);
     return { invitationRef, status: "sent" as const, alreadyInvited: false as const };
   });
 }
@@ -552,6 +619,11 @@ export async function awardPosting(db: Db, actor: MarketplaceActor, args: { post
       await record(tx, actor, { postingId: posting.id, bidId: other.id, bidRevisionId: other.currentRevisionId, eventType: "bid_rejected", previousState: other.state, newState: otherTo, detail: { because: "another_bid_awarded" } }, now);
     }
 
+    await notifyOrganization(tx, { orgRef: head.bidderOrgRef, key: `MKT:${posting.postingRef}:award:${head.bidderOrgRef}`, title: `Awarded: ${posting.title}`, body: `Your bid (revision ${rev.revisionNumber}) was awarded by ${posting.clientOrgRef}. A contract follows.`, deepLink: postingLink(posting.postingRef) }, now);
+    for (const other of others) {
+      if (other.id === head.id) continue;
+      await notifyOrganization(tx, { orgRef: other.bidderOrgRef, key: `MKT:${posting.postingRef}:award:${other.bidderOrgRef}`, title: `Not awarded: ${posting.title}`, body: "The client awarded this work to another bidder.", deepLink: postingLink(posting.postingRef) }, now);
+    }
     await tx.update(marketplacePostings).set({ state: to, awardedAt: now, version: posting.version + 1 }).where(eq(marketplacePostings.id, posting.id));
     await record(tx, actor, { postingId: posting.id, awardId: award!.id, bidId: head.id, bidRevisionId: rev.id, eventType: "posting_awarded", previousState: posting.state, newState: to, detail: { contractorOrgRef: head.bidderOrgRef, contentHash: rev.contentHash, rejectedBids: others.length - 1 } }, now);
     return { awardRef, postingRef: posting.postingRef, bidRef: head.bidRef, contractorOrgRef: head.bidderOrgRef, contentHash: rev.contentHash, state: to, version: posting.version + 1 };
@@ -863,4 +935,185 @@ export async function getContract(db: Db, actor: MarketplaceActor, args: { contr
 export async function contractsMine(db: Db, actor: MarketplaceActor) {
   const rows = await db.select().from(marketplaceContracts).where(or(eq(marketplaceContracts.clientOrgRef, actor.orgRef), eq(marketplaceContracts.contractorOrgRef, actor.orgRef))).orderBy(desc(marketplaceContracts.createdAt));
   return rows.map(c => presentContract(c, actor.orgRef));
+}
+
+/* ===================== the social layer (0191) ===================== */
+
+/* ---- tender discussion ---- */
+
+/** A bidder's question. Private to the asker and the client until published. */
+export async function askQuestion(db: Db, actor: MarketplaceActor, args: { postingRef: string; question: string }, now = new Date()) {
+  return db.transaction(async tx => {
+    const posting = await lockPosting(tx, args.postingRef);
+    if (!(await postingVisibleTo(tx, posting, actor.orgRef))) throw notFound("Posting");
+    if (posting.clientOrgRef === actor.orgRef) throw refused("The client issues notices; it does not ask itself questions. Use noticeIssue.");
+    if (!postingAcceptsQuestions(posting.state)) throw refused(`Questions are taken while the tender is live (posting is "${posting.state}").`);
+    const clarificationRef = makeRef("CLQ");
+    await tx.insert(marketplaceClarifications).values({ clarificationRef, postingId: posting.id, kind: "question", askerOrgRef: actor.orgRef, askedByUserId: actor.userId, question: args.question.trim(), askedAt: now });
+    await record(tx, actor, { postingId: posting.id, eventType: "question_asked", detail: { clarificationRef, askerOrgRef: actor.orgRef } }, now);
+    await notifyOrganization(tx, { orgRef: posting.clientOrgRef, key: `MKT:${posting.postingRef}:q:${clarificationRef}`, title: `Bidder question on ${posting.title}`, body: args.question.trim().slice(0, 500), deepLink: postingLink(posting.postingRef) }, now);
+    return { clarificationRef, status: "open" as const };
+  });
+}
+
+async function lockClarification(tx: Tx, clarificationRef: string): Promise<{ c: MarketplaceClarificationRow; posting: MarketplacePostingRow }> {
+  const [peek] = await tx.select({ postingId: marketplaceClarifications.postingId }).from(marketplaceClarifications).where(eq(marketplaceClarifications.clarificationRef, clarificationRef)).limit(1);
+  if (!peek) throw notFound("Clarification");
+  const [posting] = await tx.select().from(marketplacePostings).where(eq(marketplacePostings.id, peek.postingId)).for("update").limit(1);
+  if (!posting) throw notFound("Posting");
+  const [c] = await tx.select().from(marketplaceClarifications).where(eq(marketplaceClarifications.clarificationRef, clarificationRef)).for("update").limit(1);
+  if (!c) throw notFound("Clarification");
+  return { c, posting };
+}
+
+/** The client's answer — write-once, private until published. */
+export async function answerQuestion(db: Db, actor: MarketplaceActor, args: { clarificationRef: string; answer: string }, now = new Date()) {
+  return db.transaction(async tx => {
+    const { c, posting } = await lockClarification(tx, args.clarificationRef);
+    assertClient(posting, actor);
+    if (c.status !== "open") throw refused(`This question is ${c.status}; an answer is written once. Issue a notice to add to it.`);
+    await tx.update(marketplaceClarifications).set({ answer: args.answer.trim(), answeredByUserId: actor.userId, answeredAt: now, status: "answered" }).where(eq(marketplaceClarifications.id, c.id));
+    await record(tx, actor, { postingId: posting.id, eventType: "question_answered", detail: { clarificationRef: c.clarificationRef, askerOrgRef: c.askerOrgRef } }, now);
+    await notifyOrganization(tx, { orgRef: c.askerOrgRef, key: `MKT:${posting.postingRef}:a:${c.clarificationRef}`, title: `Your question on ${posting.title} was answered`, body: args.answer.trim().slice(0, 500), deepLink: postingLink(posting.postingRef) }, now);
+    return { clarificationRef: c.clarificationRef, status: "answered" as const };
+  });
+}
+
+/**
+ * Publishing makes the question and its answer one clarification for every
+ * bidder, asker withheld, and tells every interested organization. This is
+ * the tender's fairness mechanism: nobody is quietly told more than the rest.
+ */
+export async function publishClarification(db: Db, actor: MarketplaceActor, args: { clarificationRef: string }, now = new Date()) {
+  return db.transaction(async tx => {
+    const { c, posting } = await lockClarification(tx, args.clarificationRef);
+    assertClient(posting, actor);
+    if (c.status !== "answered") throw refused(c.status === "published" ? "Already published." : "Answer the question before publishing it.");
+    await tx.update(marketplaceClarifications).set({ visibility: "public", status: "published", publishedAt: now, publishedByUserId: actor.userId }).where(eq(marketplaceClarifications.id, c.id));
+    const orgs = await interestedOrganizations(tx, posting.id, posting.clientOrgRef);
+    for (const orgRef of orgs) {
+      await notifyOrganization(tx, { orgRef, key: `MKT:${posting.postingRef}:pub:${c.clarificationRef}:${orgRef}`, title: `Clarification on ${posting.title}`, body: `Q: ${c.question.slice(0, 240)}\nA: ${(c.answer ?? "").slice(0, 240)}`, deepLink: postingLink(posting.postingRef) }, now);
+    }
+    await record(tx, actor, { postingId: posting.id, eventType: "clarification_published", detail: { clarificationRef: c.clarificationRef, notifiedOrganizations: orgs.length } }, now);
+    return { clarificationRef: c.clarificationRef, status: "published" as const, notifiedOrganizations: orgs.length };
+  });
+}
+
+/** A client's clarification with no question behind it: a correction, a road-ban update, a changed detail. Public from birth. */
+export async function issueNotice(db: Db, actor: MarketplaceActor, args: { postingRef: string; notice: string }, now = new Date()) {
+  return db.transaction(async tx => {
+    const posting = await lockPosting(tx, args.postingRef);
+    assertClient(posting, actor);
+    if (!postingAcceptsQuestions(posting.state)) throw refused(`Notices are issued while the tender is live (posting is "${posting.state}").`);
+    const clarificationRef = makeRef("CLN");
+    await tx.insert(marketplaceClarifications).values({ clarificationRef, postingId: posting.id, kind: "notice", askerOrgRef: posting.clientOrgRef, askedByUserId: actor.userId, question: args.notice.trim(), askedAt: now, visibility: "public", status: "published", publishedAt: now, publishedByUserId: actor.userId });
+    const orgs = await interestedOrganizations(tx, posting.id, posting.clientOrgRef);
+    for (const orgRef of orgs) {
+      await notifyOrganization(tx, { orgRef, key: `MKT:${posting.postingRef}:pub:${clarificationRef}:${orgRef}`, title: `Notice on ${posting.title}`, body: args.notice.trim().slice(0, 500), deepLink: postingLink(posting.postingRef) }, now);
+    }
+    await record(tx, actor, { postingId: posting.id, eventType: "notice_issued", detail: { clarificationRef, notifiedOrganizations: orgs.length } }, now);
+    return { clarificationRef, status: "published" as const, notifiedOrganizations: orgs.length };
+  });
+}
+
+/** The discussion as the viewer may read it: the client all of it, a bidder its own and the published, asker withheld on the published. */
+export async function listClarifications(db: Db, actor: MarketplaceActor, args: { postingRef: string }) {
+  const posting = await visiblePosting(db, args.postingRef, actor.orgRef);
+  const rows = await db.select().from(marketplaceClarifications).where(eq(marketplaceClarifications.postingId, posting.id)).orderBy(asc(marketplaceClarifications.askedAt), asc(marketplaceClarifications.id));
+  const out = [];
+  for (const c of rows) {
+    const v = clarificationVisibility(c, { viewerOrgRef: actor.orgRef, clientOrgRef: posting.clientOrgRef });
+    if (!v.visible) continue;
+    out.push({
+      clarificationRef: c.clarificationRef, kind: c.kind, status: c.status, visibility: c.visibility,
+      askerOrgRef: v.revealAsker ? c.askerOrgRef : null,
+      question: c.question, askedAt: c.askedAt, answer: c.answer, answeredAt: c.answeredAt, publishedAt: c.publishedAt,
+      mine: c.askerOrgRef === actor.orgRef,
+    });
+  }
+  return out;
+}
+
+/* ---- following: the opportunity feed ---- */
+
+export async function followSet(db: Db, actor: MarketplaceActor, args: { workType?: string | null; operatingArea?: string | null }) {
+  const workType = args.workType?.trim() || null;
+  const operatingArea = args.operatingArea?.trim() || null;
+  const matchKey = followMatchKey({ workType, operatingArea });
+  const [existing] = await db.select().from(marketplaceFollows).where(and(eq(marketplaceFollows.orgRef, actor.orgRef), eq(marketplaceFollows.matchKey, matchKey))).limit(1);
+  if (existing) return { followRef: existing.followRef, workType: existing.workType, operatingArea: existing.operatingArea, created: false as const };
+  const followRef = makeRef("FLW");
+  await db.insert(marketplaceFollows).values({ followRef, orgRef: actor.orgRef, workType, operatingArea, matchKey, createdByUserId: actor.userId });
+  return { followRef, workType, operatingArea, created: true as const };
+}
+
+export async function followRemove(db: Db, actor: MarketplaceActor, args: { followRef: string }) {
+  const [f] = await db.select().from(marketplaceFollows).where(eq(marketplaceFollows.followRef, args.followRef)).limit(1);
+  if (!f || f.orgRef !== actor.orgRef) throw notFound("Follow");
+  await db.delete(marketplaceFollows).where(eq(marketplaceFollows.id, f.id));
+  return { removed: true as const };
+}
+
+export async function followsMine(db: Db, actor: MarketplaceActor) {
+  return db.select({ followRef: marketplaceFollows.followRef, workType: marketplaceFollows.workType, operatingArea: marketplaceFollows.operatingArea, createdAt: marketplaceFollows.createdAt }).from(marketplaceFollows).where(eq(marketplaceFollows.orgRef, actor.orgRef)).orderBy(asc(marketplaceFollows.createdAt));
+}
+
+/* ---- company profiles ---- */
+
+export type ProfileDraft = { displayName: string; description?: string | null; workTypes: string[]; operatingAreas: string[]; equipmentTypes: string[] };
+
+export async function profileUpsert(db: Db, actor: MarketplaceActor, draft: ProfileDraft) {
+  const values = { displayName: draft.displayName.trim(), description: draft.description?.trim() || null, workTypesJson: JSON.stringify(draft.workTypes), operatingAreasJson: JSON.stringify(draft.operatingAreas), equipmentTypesJson: JSON.stringify(draft.equipmentTypes), updatedByUserId: actor.userId };
+  await db.insert(marketplaceCompanyProfiles).values({ orgRef: actor.orgRef, ...values }).onDuplicateKeyUpdate({ set: values });
+  return { orgRef: actor.orgRef };
+}
+
+/** A company's public face, with what the system itself can say beside what the company declares. */
+export async function profileGet(db: Db, _actor: MarketplaceActor, args: { orgRef: string }) {
+  const [org] = await db.select({ name: organizations.name, status: organizations.status }).from(organizations).where(eq(organizations.orgRef, args.orgRef)).limit(1);
+  if (!org) throw notFound("Organization");
+  const [p] = await db.select().from(marketplaceCompanyProfiles).where(eq(marketplaceCompanyProfiles.orgRef, args.orgRef)).limit(1);
+  const [profile] = await db.select({ status: contractorBusinessProfiles.status, operatingMode: contractorBusinessProfiles.operatingMode }).from(contractorBusinessProfiles).where(eq(contractorBusinessProfiles.orgRef, args.orgRef)).limit(1);
+  const awards = await db.select({ state: marketplaceAwards.state }).from(marketplaceAwards).where(eq(marketplaceAwards.contractorOrgRef, args.orgRef));
+  return {
+    orgRef: args.orgRef,
+    organization: org,
+    declared: p ? { displayName: p.displayName, description: p.description, workTypes: JSON.parse(p.workTypesJson) as string[], operatingAreas: JSON.parse(p.operatingAreasJson) as string[], equipmentTypes: JSON.parse(p.equipmentTypesJson) as string[], updatedAt: p.updatedAt } : null,
+    // What LeaseOS can state itself: these are records, not the company's description of itself.
+    recorded: {
+      contractorProfile: profile ?? null,
+      marketplaceAwards: awards.length,
+      marketplaceAwardsContracted: awards.filter(a => a.state === "contracted").length,
+      // Ratings need completed work and a client's signed-off closeout; neither exists here yet, and
+      // an empty number would read as a bad one.
+      rating: "not_available" as const,
+    },
+  };
+}
+
+/* ---- preferred contractors ---- */
+
+export async function preferredAdd(db: Db, actor: MarketplaceActor, args: { contractorOrgRef: string; note?: string | null }) {
+  if (args.contractorOrgRef === actor.orgRef) throw refused("An organization cannot prefer itself.");
+  const [org] = await db.select({ orgRef: organizations.orgRef }).from(organizations).where(eq(organizations.orgRef, args.contractorOrgRef)).limit(1);
+  if (!org) throw notFound("Contractor organization");
+  await db.insert(marketplacePreferredContractors).values({ clientOrgRef: actor.orgRef, contractorOrgRef: args.contractorOrgRef, note: args.note?.trim() || null, addedByUserId: actor.userId }).onDuplicateKeyUpdate({ set: { note: args.note?.trim() || null } });
+  return { contractorOrgRef: args.contractorOrgRef };
+}
+
+export async function preferredRemove(db: Db, actor: MarketplaceActor, args: { contractorOrgRef: string }) {
+  await db.delete(marketplacePreferredContractors).where(and(eq(marketplacePreferredContractors.clientOrgRef, actor.orgRef), eq(marketplacePreferredContractors.contractorOrgRef, args.contractorOrgRef)));
+  return { removed: true as const };
+}
+
+export async function preferredList(db: Db, actor: MarketplaceActor) {
+  return db.select({ contractorOrgRef: marketplacePreferredContractors.contractorOrgRef, note: marketplacePreferredContractors.note, createdAt: marketplacePreferredContractors.createdAt }).from(marketplacePreferredContractors).where(eq(marketplacePreferredContractors.clientOrgRef, actor.orgRef)).orderBy(asc(marketplacePreferredContractors.createdAt));
+}
+
+/** Invites the whole preferred list to a tender in one act; each invitation is its own row, event and notification. */
+export async function invitePreferred(db: Db, actor: MarketplaceActor, args: { postingRef: string }, now = new Date()) {
+  const preferred = await preferredList(db, actor);
+  const results = [];
+  for (const p of preferred) results.push({ contractorOrgRef: p.contractorOrgRef, ...(await invite(db, actor, { postingRef: args.postingRef, invitedOrgRef: p.contractorOrgRef }, now)) });
+  return { invited: results.filter(r => !r.alreadyInvited).length, alreadyInvited: results.filter(r => r.alreadyInvited).length, results };
 }

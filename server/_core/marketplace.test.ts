@@ -14,6 +14,10 @@ import {
   assessBidReadiness,
   bidContentHash,
   biddingWindow,
+  clarificationVisibility,
+  followMatchKey,
+  followMatches,
+  postingAcceptsQuestions,
   comparableTotalCents,
   makeRef,
   mayViewBidPricing,
@@ -352,5 +356,46 @@ describe("references", () => {
     i = 0;
     expect(makeRef("MKT", seq)).toBe(a);
     expect(makeRef("BID")).not.toBe(makeRef("BID"));
+  });
+});
+
+describe("the social layer: following and clarification visibility", () => {
+  const posting = { clientOrgRef: "ORG-CLIENT", workType: "FLUID_HAULING", operatingArea: "Fox Creek", distribution: "public" as const };
+
+  it("builds one match key per (work type, area) pair, case- and space-insensitive", () => {
+    expect(followMatchKey({ workType: null, operatingArea: null })).toBe("*|*");
+    expect(followMatchKey({ workType: " fluid_hauling ", operatingArea: "fox creek" })).toBe("FLUID_HAULING|FOX CREEK");
+    expect(followMatchKey({ workType: "FLUID_HAULING", operatingArea: null })).toBe("FLUID_HAULING|*");
+  });
+
+  it("matches a follow on both stated facets, a null facet matching anything", () => {
+    expect(followMatches({ orgRef: "ORG-A", workType: null, operatingArea: null }, posting)).toBe(true);
+    expect(followMatches({ orgRef: "ORG-A", workType: "fluid_hauling", operatingArea: null }, posting)).toBe(true);
+    expect(followMatches({ orgRef: "ORG-A", workType: "FLUID_HAULING", operatingArea: "FOX CREEK" }, posting)).toBe(true);
+    expect(followMatches({ orgRef: "ORG-A", workType: "HYDROVAC", operatingArea: null }, posting)).toBe(false);
+    expect(followMatches({ orgRef: "ORG-A", workType: null, operatingArea: "Grande Prairie" }, posting)).toBe(false);
+    expect(followMatches({ orgRef: "ORG-A", workType: null, operatingArea: "Fox Creek" }, { ...posting, operatingArea: null })).toBe(false);
+  });
+
+  it("never matches the client's own posting, and never an invite-only tender", () => {
+    expect(followMatches({ orgRef: "ORG-CLIENT", workType: null, operatingArea: null }, posting)).toBe(false);
+    expect(followMatches({ orgRef: "ORG-A", workType: null, operatingArea: null }, { ...posting, distribution: "invite_only" })).toBe(false);
+  });
+
+  it("shows a private clarification to the client and the asker only, and a published one to everyone with the asker withheld", () => {
+    const viewer = (viewerOrgRef: string) => ({ viewerOrgRef, clientOrgRef: "ORG-CLIENT" });
+    const priv = { askerOrgRef: "ORG-A", visibility: "private" as const };
+    expect(clarificationVisibility(priv, viewer("ORG-CLIENT"))).toEqual({ visible: true, revealAsker: true });
+    expect(clarificationVisibility(priv, viewer("ORG-A"))).toEqual({ visible: true, revealAsker: true });
+    expect(clarificationVisibility(priv, viewer("ORG-B"))).toEqual({ visible: false });
+    const pub = { ...priv, visibility: "public" as const };
+    expect(clarificationVisibility(pub, viewer("ORG-B"))).toEqual({ visible: true, revealAsker: false });
+    expect(clarificationVisibility(pub, viewer("ORG-A"))).toEqual({ visible: true, revealAsker: true });
+  });
+
+  it("takes questions and notices only while the tender is live", () => {
+    expect(postingAcceptsQuestions("published")).toBe(true);
+    expect(postingAcceptsQuestions("bidding")).toBe(true);
+    for (const s of ["draft", "bidding_closed", "awarded", "cancelled"] as const) expect(postingAcceptsQuestions(s), s).toBe(false);
   });
 });

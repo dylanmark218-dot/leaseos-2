@@ -2629,6 +2629,21 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "marketplace.contractDispatch": "dispatch.assign",
   "marketplace.contractGet": "marketplace.read",
   "marketplace.contractsMine": "marketplace.read",
+  /* ---- 0191: the social layer — tender discussion, following, profiles, preferred contractors ---- */
+  "marketplace.questionAsk": "marketplace.bid.manage",
+  "marketplace.questionAnswer": "marketplace.posting.manage",
+  "marketplace.clarificationPublish": "marketplace.posting.manage",
+  "marketplace.noticeIssue": "marketplace.posting.manage",
+  "marketplace.clarifications": "marketplace.read",
+  "marketplace.followSet": "marketplace.bid.manage",
+  "marketplace.followRemove": "marketplace.bid.manage",
+  "marketplace.followsMine": "marketplace.read",
+  "marketplace.profileUpsert": "marketplace.bid.manage",
+  "marketplace.profileGet": "marketplace.read",
+  "marketplace.preferredAdd": "marketplace.posting.manage",
+  "marketplace.preferredRemove": "marketplace.posting.manage",
+  "marketplace.preferredList": "marketplace.read",
+  "marketplace.postingInvitePreferred": "marketplace.posting.manage",
 
   /* ---- v21.3: IFTA ---- */
   "ifta.distanceRecord": "ifta.distance.record",

@@ -6,17 +6,17 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **v23.27** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **417** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **171** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **674** | `roleProcedure(` call sites across all routers |
+| Release | **v23.28** | `LEASEOS_RELEASE` (or explicit argument 1) |
+| Tables | **421** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **172** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **688** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
 | Permissions | **359** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **127** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **322 / 4388** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **323 / 4398** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -163,7 +163,10 @@ the clock, readiness declared-only and saying so, every transition locked,
 versioned and on the trail; the award bridged to the canonical dispatch: the
 client issues a contract that creates the contractor-owned job and its commercial
 chain, and the contractor dispatches it through the one dispatch posting door,
-idempotently — no UI yet).
+idempotently; and the social layer — the tender discussion private until the client
+publishes it with the asker withheld, following that matches public work as it opens,
+company profiles declared beside what is recorded, preferred lists invited in one
+act, every notification a row the universal inbox already reads — no UI yet).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 
