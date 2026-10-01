@@ -22,6 +22,7 @@ import type { ExceptionSources } from "./_core/exceptionCentre";
 import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
 import { loadUngatedAssignments } from "./dispatchEnforcementService";
 import { loadFuelLineFindings } from "./periodCloseService";
+import { loadIntegrationHubExceptions } from "./integrationHubService";
 
 const DAY = 86_400_000;
 
@@ -146,6 +147,7 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
     inspectorRequests: inspector.map(r => ({ requestRef: r.requestRef, issuingAuthority: r.issuingAuthority, dueAt: r.dueAt, state: r.state, irrecoverable: !!r.irrecoverable })),
     securityIncidents: await loadOpenSecurityIncidents(db),
     facilityDirectory: await loadFacilityDirectoryExceptions(db),
+    integrationHub: await loadIntegrationHubExceptions(db, { now }),
     criticalDefects: defects.map(d => ({ id: d.id, unitId: d.unitId, unitNumber: d.unitNumber ?? null, title: d.title, reportedAt: d.reportedAt, status: d.status })),
     roadsideOpen: roadside.map(r => ({ id: r.id, eventRef: r.eventRef, unitNumber: r.unitNumber ?? null, eventType: r.eventType, occurredAt: r.occurredAt, vendorAssigned: r.assignedVendorId != null })),
     vendorBills: bills.map(b => ({ id: b.id, billRef: b.billRef, vendorName: b.vendorName ?? null, total: b.totalCents / 100, status: b.status, matchOutcome: b.matchOutcome, receivedAt: b.receivedAt, dueAt: b.dueAt })),
