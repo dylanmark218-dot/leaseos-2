@@ -23,6 +23,7 @@ import {
 import { fundingRouter, portalsRouter } from "./portalFundingRouter";
 import { purchasingRouter, recoveryRouter, roadsideRouter, vendorRouter } from "./purchasingRouter";
 import { deviceRouter, syncRouter } from "./deviceRouter";
+import { companyKnowledgeRouter } from "./companyKnowledgeRouter";
 import { complianceRouter } from "./complianceRouter";
 import { calibrationRouter, requirementRouter } from "./requirementRouter";
 import { surfacesRouter } from "./surfacesRouter";
@@ -352,6 +353,7 @@ export const appRouter = router({
   recovery: recoveryRouter,
   device: deviceRouter,
   sync: syncRouter,
+  companyKnowledge: companyKnowledgeRouter,
   compliance: complianceRouter,
   requirement: requirementRouter,
   calibration: calibrationRouter,

@@ -40,6 +40,7 @@ and `0157` is historically used twice. None of those is reused.
 | 0173 | `0173_wallet_history_guards.sql` | `claude/training-academy-workforce-q3mdse` | none | `0060690` | open branch, no PR | none | keeps 0173 |
 | 0174 | `0174_dispatch_override_provenance.sql` | `feat/compliance-c1a-readiness-contract` | C1a PR | `6b01a0e` | rebased; gated | none | **moved from 0172 → 0174** at integration: the first number no branch held |
 | 0185 | `0185_assistant_proposal_tenancy.sql` | `claude/relaxed-carson-qfcopf` | none yet | `6f52b57` | AIL-1A checkpoint | none | 0170–0184 are each claimed by main or an open branch (fetch of 2026-09-24, comparing file names on all 56 remotes, including the two branches with no merge base); 0185 is the first free number |
+| 0214 | `0214_organization_knowledge_entries.sql` | `claude/relaxed-carson-qfcopf` | none yet | `6f52b57` | AIL-1B checkpoint | none | a fetch of 2026-10-01 compared file names on every remote: 0180–0213 are held except 0190 and 0204, which are gaps inside another branch's own run (0189→0191, 0203→0205) and treated as held; 0214 is the first number past every claim |
 
 ## Change log
 
@@ -50,3 +51,5 @@ and `0157` is historically used twice. None of those is reused.
   `feature/tenant-scope-foundation` and `claude/mobile-hardware-scanner-mzp1e1-v2327`, which share no
   history with main (they claim 0168–0173 and 0168–0169 by file name). The rows above for 0175–0184 are
   not yet recorded here; they were confirmed as claimed by file name, not reconciled branch by branch.
+* **2026-10-01**: AIL-1B claims `0214`. 0186–0213 are now claimed by file name on open branches
+  (agent-terminal-run-guard, the audit chain diagnostic and others); this branch's own 0185 is unchanged.

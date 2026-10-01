@@ -52,7 +52,7 @@ import { ceilingFor, SAFETY_CEILINGS } from "./_core/automationPolicyStore";
 import { CAPABILITY } from "./_core/readinessCapabilities";
 import { permissionsFor, type DomainRole } from "./_core/recordsAuthorization";
 import { AGENT_CAPABILITIES } from "./agentRouter";
-import { agentRuns, assistantProposals, facilityAliases, knowledgePassages, proposalFields } from "../drizzle/schema";
+import { agentRuns, assistantProposals, facilityAliases, knowledgePassages, organizationKnowledgeEntries, proposalFields } from "../drizzle/schema";
 
 /* ------------------------------------------------------------------ */
 /* Fixtures                                                            */
@@ -785,7 +785,24 @@ describe("GAP C — AI proposal, alias and learning tenancy", () => {
     const d = routeLearning({ owner: INTAKE_OWNER, origin: "field_observation", domain: "oilfield_operations", claim: "gate code changed", observedAt: new Date(0), reportedBy: "driver" });
     expect(d.owner).toBe(INTAKE_OWNER);
   });
-  it.todo("DESIRED (AIL-1B): organization terminology is its own ORGANIZATION-scoped record, written only through a proposal");
+  it("CURRENT GUARANTEE (AIL-1B): organization terminology is its own ORGANIZATION-scoped record, never null and never global", () => {
+    expect(columns(organizationKnowledgeEntries).tenantId?.notNull).toBe(true);
+    expect(columns(organizationKnowledgeEntries).proposedByUserId?.notNull).toBe(true);
+    expect(columns(organizationKnowledgeEntries).reviewedByUserId?.notNull).toBe(false);   // NULL exactly while proposed (0214 CHECK)
+  });
+  it("CURRENT GUARANTEE (AIL-1B): company knowledge is written by one router, and only its review step approves", () => {
+    expect(productionFilesMentioning(/\.(insert|update)\(organizationKnowledgeEntries\)/)).toEqual(["server/companyKnowledgeRouter.ts"]);
+    // Exactly one place sets a state from a decision, and it is the review procedure; nothing sets "approved" directly.
+    const router = readFileSync("server/companyKnowledgeRouter.ts", "utf8");
+    expect(router).not.toMatch(/state:\s*"approved"/);
+    expect(router.match(/set\(\{ state: to,/g)).toHaveLength(1);
+    expect(router.slice(router.indexOf("review: roleProcedure"), router.indexOf("retire: roleProcedure"))).toContain("set({ state: to,");
+  });
+  it("CURRENT GUARANTEE (AIL-1B): a raw assistant conversation is never a company-knowledge source", () => {
+    const router = readFileSync("server/companyKnowledgeRouter.ts", "utf8");
+    expect(router).not.toMatch(/assistantQueries/);
+    expect(readFileSync("server/_core/companyKnowledge.ts", "utf8")).not.toMatch(/assistantQueries|queryRef/);
+  });
   it.todo("DESIRED (trust-governance G4): agentRuns.tenantId is NOT NULL");
 });
 
