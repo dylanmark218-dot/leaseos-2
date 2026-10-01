@@ -47,8 +47,13 @@ d("what the preview says", () => {
     const opId = await operatorFor(pool, a, drv);
     await pool.execute("INSERT INTO academyQualifications (qualificationRef, userId, qualificationCode, sourceKind, status, validFrom, expiresAt) VALUES (?,?,?,?,?,?,?)",
       [`AQ-${rnd()}`, drv, "H2S", "academy_certificate", "current", new Date(Date.now() - 200 * 86_400_000), new Date(STARTS.getTime() + 400 * 86_400_000)]);
-    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus, source) VALUES ('operator', ?, 'tdg_certificate', 'TDG', NOW(), ?, 'verified', 'upload')",
+    // TDG through the adapter's evidence path (C1b-3, which governs since the reconciliation with main):
+    // an Academy grant resting on an external credential, read through its verified compliance document.
+    // A document with no grant is not a qualification there.
+    const [doc] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus, source) VALUES ('operator', ?, 'tdg_certificate', 'TDG', NOW(), ?, 'verified', 'upload')",
       [opId, new Date(STARTS.getTime() + 400 * 86_400_000)]);
+    await pool.execute("INSERT INTO academyQualifications (qualificationRef, userId, qualificationCode, sourceKind, status, complianceDocumentId, validFrom, expiresAt) VALUES (?,?,?,?,?,?,?,?)",
+      [`AQ-${rnd()}`, drv, "TDG", "external_credential", "current", doc.insertId, new Date(Date.now() - 200 * 86_400_000), new Date(STARTS.getTime() + 400 * 86_400_000)]);
     const p = await postWork(disp, { requiredQualifications: ["H2S", "TDG", "FIRST_AID"] });
     const e = await callerFor(disp).shifts.eligibility({ postRef: p.postRef, userId: drv });
     expect(e.verdict).toBe("unknown");
