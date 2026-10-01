@@ -6,6 +6,11 @@
  * Exit 0 only when `cutoverAllowed` is true. The output carries counts, categories and blockers —
  * never a secret, an envelope or a `secretRef`. Expect it to say BLOCKED until a managed key provider
  * exists and the fleet can be observed; that is the report doing its job, not failing at it.
+ *
+ * S2-KMS-A: the keys come from the same configuration and bootstrap the server and worker use
+ * (`LEASEOS_SECRET_KEYS_SOURCE`, `LEASEOS_MANAGED_KEYS`). An operator never copies a DEK into a
+ * shell to run this; under a managed source the backend unwraps it here exactly as at startup, and
+ * a failed bootstrap exits 1 rather than reporting on environment keys.
  */
 import { webhookCutoverPreflightFromEnvironment } from "../server/webhookCutoverPreflight";
 
