@@ -7,6 +7,33 @@ every claim below was checked against a real install, typecheck, test run and
 production build. The same goes for every "confirmed" in the backlog: each one
 acted on here was reproduced first.
 
+## Status after integration with `main` (2026-10-01): read this first
+
+The sections below record what was found and done on 2026-09-24. Since then, `main` independently
+landed fixes for several of the same findings, and PR #19 was merged up to `main` three times
+(`791406d`, `5b2d8a0`, `4c6a12d`). Where both existed, `main`'s implementation was kept and
+PR #19's copy removed, so there is one of each. **What PR #19 still contributes is only what
+`main` lacks:**
+
+| Finding | Now delivered by | Notes |
+|---|---|---|
+| SEC-001 dependencies | **PR #19** | Upgrades and range-scoped overrides; stray `pnpm`/`add` devDependencies removed. `pnpm audit`: 0 critical, 0 high, 3 moderate (dev tooling). The pnpm *tool* stays at 10.4.1, pinned by `main` in `packageManager` and `engines` and enforced by gate 0a; moving the tool version is `main`'s decision, not this PR's. |
+| CI high/critical audit gate | **PR #19** | `pnpm audit --audit-level high` in `ci.yml`, ahead of `main`'s database-reachable step. |
+| SEC-002/003 SSRF | **`main`** (`egressGuard.ts` / `egressHttp.ts`) | PR #19's `outboundHttp.ts` was removed. ArcGIS and webhook delivery use `main`'s guard. PR #19 adds only the **save-time** webhook URL check, via `main`'s `checkEgressUrl`. |
+| SEC-004 webhook claiming | **`main`** (PR #20) | Sends through `egressPost` with the 10 s attempt timeout, under the 5-minute claim lease. |
+| SEC-007 cross-site writes | **PR #19** | `crossSiteGuard` on `/api`, in `main`'s `registerApi`, before any parser. |
+| SEC-008 headers, rate floor, trust proxy | **PR #19** | `securityHeaders`, `x-powered-by` off and `LEASEOS_TRUST_PROXY` in `main`'s `startup.ts` (both entrypoints); `/api/oauth` rate floor in `registerApi`. |
+| SEC-009 body limits | **PR #19** | 25 MB on the tRPC mount, 1 MB elsewhere; evidence `dataBase64` capped before decoding. |
+| SEC-010 production boot without dev deps | **`main`** (P0-C, `39d849d`; gate 7a) | PR #19's `static.ts` and lazy Vite import were removed in favour of `main`'s `index.ts`/`dev.ts` split. |
+| OPS-002 health/readiness | **`main`** (`/healthz`, `/readyz`) | PR #19's `/health/live` and `/health/ready` were removed. |
+| OPS-005 production port | **`main`** (`listen.ts`) | |
+| CAL-1, FLAKE-1 test fixes | **`main`** | Landed via PR #20's port and `main`'s own fixture-isolation work (gate 6b). |
+
+Gate on the latest merge (`4c6a12d`, `main` at `b35bac4`): `scripts/ci-gate.sh`, full, MariaDB
+10.11, Node 22.23.3 (the `.nvmrc` pin), **PASS, all gates 0a–8**. That's 442 files and
+**6,783 tests passed, 3 skipped**, with the production-only boot (7a) passing. The SEC-004 suite
+(15/15), `egressGuard` (117) and `httpHardening` (11) passed inside the full concurrent run.
+
 ## How this was verified
 
 `scripts/ci-gate.sh` was run in full against a local MariaDB 10.11 (the
