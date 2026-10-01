@@ -2,11 +2,11 @@
  * Collectors: the contract every future fetcher implements, and the one
  * decision each of them must ask before touching the network.
  *
- * Pure, and deliberately without a single implementation. Checkpoint 1 fixes
- * the shape — what a collector is handed, what it must return, what it must
- * refuse — so that the first real fetcher is written against rules rather than
- * the rules being written around the first fetcher. `collectorFor` returns a
- * stub that refuses for every kind.
+ No network of its own: every collector is handed `fetch`, a clock and an
+ * identity, so each one is tested against recorded responses. Checkpoint 1
+ * fixed the shape — what a collector is handed, what it must return, what it
+ * must refuse. Checkpoint 2 built the two the seed sources need, `HtmlCrawler`
+ * and `PdfCollector`, as one careful HTTP GET; every other kind still refuses.
  *
  * The standing constraints, enforced by `decideFetch` rather than trusted to
  * each collector:
@@ -26,7 +26,7 @@
  * somebody's logs.
  */
 
-import { validateSourceUrl, type UrlRefusal } from "./provenance";
+import { sha256Hex, validateSourceUrl, type UrlRefusal } from "./provenance";
 
 /* ------------------------------------------------------------------ */
 /* Kinds                                                               */
@@ -42,7 +42,7 @@ export type CollectorKind = (typeof COLLECTOR_KINDS)[number];
 export type CollectorDescriptor = {
   name: string;
   accepts: readonly SourceKind[];
-  /** False for every kind in Checkpoint 1. */
+  /** True for html and pdf since Checkpoint 2; every other kind refuses. */
   implemented: boolean;
   note: string;
 };
@@ -50,8 +50,9 @@ export type CollectorDescriptor = {
 export const COLLECTORS: Readonly<Record<CollectorKind, CollectorDescriptor>> = {
   api: { name: "ApiIngestor", accepts: ["api", "json", "xml"], implemented: false,
     note: "structured feeds (511, open-data APIs); obeys the source's published quota — see feedCollector.planFeedFetch, which already enforces it for feeds" },
-  html: { name: "HtmlCrawler", accepts: ["html"], implemented: false, note: "server-rendered pages" },
-  pdf: { name: "PdfCollector", accepts: ["pdf"], implemented: false, note: "regulations, directives, manuals; page numbers retained for citation" },
+  html: { name: "HtmlCrawler", accepts: ["html"], implemented: true, note: "server-rendered pages; text extracted by extraction.extractHtml" },
+  pdf: { name: "PdfCollector", accepts: ["pdf"], implemented: true,
+    note: "regulations, directives, manuals; collected and hashed, so changes are detected. Text extraction needs a PDF parser, which is a dependency decision not yet taken — extraction stays pending" },
   browser: { name: "BrowserCrawler", accepts: ["html"], implemented: false,
     note: "pages that only render with JavaScript; never used to get past a login, challenge or consent wall" },
   geodata: { name: "GeoDataIngestor", accepts: ["geojson", "csv", "json"], implemented: false,
@@ -67,7 +68,12 @@ export const COLLECTORS: Readonly<Record<CollectorKind, CollectorDescriptor>> = 
 /* The collector contract                                              */
 /* ------------------------------------------------------------------ */
 
-export type CollectRequest = { sourceId: string; documentRef: string; url: string; ifNoneMatch?: string | null; ifModifiedSince?: string | null };
+export type CollectRequest = {
+  sourceId: string; documentRef: string; url: string;
+  /** From the source's crawl policy. A larger body is not retained. */
+  maxBytes: number;
+  ifNoneMatch?: string | null; ifModifiedSince?: string | null;
+};
 
 export type CollectResult = {
   url: string;
@@ -81,11 +87,17 @@ export type CollectResult = {
   declaredSha256: string | null;
   collectorKind: CollectorKind;
   collectorVersion: string;
+  /** Why a response was not retained, when it was not: a redirect, a wrong content type, an oversize body. */
+  note?: string;
 };
 
 /** Everything that touches the outside world is handed in, so a test can stand in for all of it. */
 export type CollectorEnvironment = {
-  fetch: (url: string, init: { headers: Record<string, string> }) => Promise<{
+  /**
+   * Called with `redirect: "manual"`, always. A redirect is how a crawl leaves its source's
+   * domain without anyone deciding it should, so collectors report it instead of following it.
+   */
+  fetch: (url: string, init: { headers: Record<string, string>; redirect: "manual" }) => Promise<{
     status: number; headers: { get(name: string): string | null }; arrayBuffer(): Promise<ArrayBuffer>;
   }>;
   now: () => Date;
@@ -106,8 +118,77 @@ export class CollectorNotImplemented extends Error {
   }
 }
 
-/** The collector for a kind. Every one refuses until it is built and reviewed. */
+/** The content types each HTTP collector accepts. Anything else is not what the source said it publishes. */
+const ACCEPTS_CONTENT: Partial<Record<CollectorKind, { accept: string; types: readonly string[] }>> = {
+  html: { accept: "text/html,application/xhtml+xml;q=0.9", types: ["text/html", "application/xhtml+xml"] },
+  pdf: { accept: "application/pdf", types: ["application/pdf"] },
+};
+
+export const HTTP_COLLECTOR_VERSION = "http-1";
+
+/**
+ * One plain HTTP GET, done carefully. `HtmlCrawler` and `PdfCollector` are this with a
+ * different content type; nothing about fetching a PDF differs from fetching a page.
+ *
+ * Called only after `decideFetch` allowed the URL. It still refuses, by not retaining a body:
+ *
+ *   - a redirect (reported with its target, never followed);
+ *   - an access-control or back-off answer (`accessSignal`);
+ *   - a content type the collector does not handle — a login page served as `text/html`
+ *     where a PDF was expected is exactly the soft paywall this catches;
+ *   - a body over the source's byte ceiling, judged from Content-Length first and the
+ *     bytes second, so a lying header cannot get past it.
+ *
+ * A network failure is a result (`httpStatus: null`), not a throw: it becomes an
+ * `unavailable` snapshot, which is the audit record that the source was tried.
+ */
+function httpCollector(kind: CollectorKind): Collector {
+  const spec = ACCEPTS_CONTENT[kind]!;
+  return {
+    kind, version: HTTP_COLLECTOR_VERSION,
+    async collect(req, env) {
+      const base = { url: req.url, collectorKind: kind, collectorVersion: HTTP_COLLECTOR_VERSION, declaredSha256: null };
+      const headers: Record<string, string> = { "User-Agent": env.identity.userAgent, Accept: spec.accept };
+      if (req.ifNoneMatch) headers["If-None-Match"] = req.ifNoneMatch;
+      if (req.ifModifiedSince) headers["If-Modified-Since"] = req.ifModifiedSince;
+
+      let res: Awaited<ReturnType<CollectorEnvironment["fetch"]>>;
+      try {
+        res = await env.fetch(req.url, { headers, redirect: "manual" });
+      } catch (e) {
+        return { ...base, httpStatus: null, contentType: null, etag: null, lastModified: null,
+          note: `network failure: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) };
+      }
+      const meta = {
+        ...base, httpStatus: res.status,
+        contentType: res.headers.get("content-type"), etag: res.headers.get("etag"), lastModified: res.headers.get("last-modified"),
+      };
+      if (res.status >= 300 && res.status < 400 && res.status !== 304) {
+        return { ...meta, note: `redirect to ${res.headers.get("location") ?? "(no location)"} not followed; if it is the publisher, update the source` };
+      }
+      const signal = accessSignal(res.status);
+      if (signal !== "ok" || res.status === 304) return { ...meta, ...(signal !== "ok" ? { note: signal } : {}) };
+
+      const type = (meta.contentType ?? "").split(";")[0]!.trim().toLowerCase();
+      if (!spec.types.includes(type)) {
+        return { ...meta, note: `content type "${type || "(none)"}" is not ${spec.types.join(" or ")}; not retained` };
+      }
+      const declared = Number(res.headers.get("content-length"));
+      if (Number.isFinite(declared) && declared > req.maxBytes) {
+        return { ...meta, note: `Content-Length ${declared} exceeds the ${req.maxBytes}-byte ceiling; not downloaded` };
+      }
+      const body = new Uint8Array(await res.arrayBuffer());
+      if (body.byteLength > req.maxBytes) {
+        return { ...meta, note: `body of ${body.byteLength} bytes exceeds the ${req.maxBytes}-byte ceiling; not retained` };
+      }
+      return { ...meta, body, declaredSha256: sha256Hex(body) };
+    },
+  };
+}
+
+/** The collector for a kind. HTML and PDF are built; every other kind refuses until it is built and reviewed. */
 export function collectorFor(kind: CollectorKind): Collector {
+  if (ACCEPTS_CONTENT[kind]) return httpCollector(kind);
   return {
     kind, version: "0",
     collect: async () => { throw new CollectorNotImplemented(kind); },
@@ -178,7 +259,23 @@ export function parseRobots(text: string): RobotsFile {
   return { groups };
 }
 
-const patternMatches = (pattern: string, path: string): boolean => {
+/**
+ * One spelling for a path, so a rule and a URL that mean the same octets compare equal
+ * (RFC 9309 §2.2.2). Non-ASCII is UTF-8 percent-encoded, an encoded unreserved character is
+ * decoded (`%7E` is `~`), and every other escape is upper-cased (`%2f` is `%2F`). An escape
+ * that is not two hex digits is left alone rather than guessed at.
+ */
+export function normalizeRobotsPath(p: string): string {
+  let out = "";
+  for (const ch of p) out += ch.charCodeAt(0) > 0x7e || ch === " " ? encodeURIComponent(ch) : ch;
+  return out.replace(/%([0-9a-fA-F]{2})/g, (_m, hex: string) => {
+    const c = String.fromCharCode(parseInt(hex, 16));
+    return /[A-Za-z0-9\-._~]/.test(c) ? c : `%${hex.toUpperCase()}`;
+  });
+}
+
+const patternMatches = (rawPattern: string, rawPath: string): boolean => {
+  const pattern = normalizeRobotsPath(rawPattern), path = normalizeRobotsPath(rawPath);
   const anchored = pattern.endsWith("$");
   const body = anchored ? pattern.slice(0, -1) : pattern;
   const re = body.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
@@ -223,6 +320,44 @@ export type RobotsState =
 
 /** RFC 9309 §2.4: a cached robots.txt should not be used for more than 24 hours. */
 export const ROBOTS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Fetch and read a host's robots.txt, as RFC 9309 says to.
+ *
+ * 2xx is parsed; 4xx means no restrictions (`absent`); 5xx, no answer, or anything
+ * unexpected means `unreachable`, which `decideFetch` treats as disallow-all. Redirects
+ * are followed up to five times (§2.3.1.2) but only to https hosts the source itself
+ * declares — a robots.txt that redirects somewhere else is not this publisher's, and is
+ * treated as unreachable rather than obeyed or ignored.
+ */
+export async function fetchRobots(
+  host: string, domains: readonly string[], env: Pick<CollectorEnvironment, "fetch" | "now" | "identity">,
+): Promise<RobotsState> {
+  let url = `https://${host}/robots.txt`;
+  for (let hop = 0; hop <= 5; hop++) {
+    const target = validateSourceUrl(url, domains);
+    if (!target.ok) return { status: "unreachable", fetchedAt: env.now() };
+    let res: Awaited<ReturnType<CollectorEnvironment["fetch"]>>;
+    try {
+      res = await env.fetch(target.url, { headers: { "User-Agent": env.identity.userAgent, Accept: "text/plain" }, redirect: "manual" });
+    } catch {
+      return { status: "unreachable", fetchedAt: env.now() };
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const next = res.headers.get("location");
+      if (!next) return { status: "unreachable", fetchedAt: env.now() };
+      url = new URL(next, target.url).toString();
+      continue;
+    }
+    if (res.status >= 200 && res.status < 300) {
+      const text = new TextDecoder("utf-8").decode(await res.arrayBuffer());
+      return { status: "fetched", fetchedAt: env.now(), file: parseRobots(text) };
+    }
+    if (res.status >= 400 && res.status < 500) return { status: "absent", fetchedAt: env.now() };
+    return { status: "unreachable", fetchedAt: env.now() };
+  }
+  return { status: "unreachable", fetchedAt: env.now() };
+}
 
 /* ------------------------------------------------------------------ */
 /* The fetch decision                                                  */

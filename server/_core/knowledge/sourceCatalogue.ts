@@ -173,7 +173,9 @@ export const SEED_CATALOGUE: readonly CatalogueEntry[] = [
     jurisdiction: "CA-AB",
     homeUrl: "https://www.aer.ca/regulating-development/rules-and-directives/directives/directive-047",
     domains: ["www.aer.ca", "static.aer.ca"],
-    sourceKind: "pdf",
+    // The home URL is the directive's HTML landing page (title, release and effective dates,
+    // a link to the PDF). The PDF itself is the instrument and is a separate document to add.
+    sourceKind: "html",
     authorityLevel: "law",
     topics: ["disposal_facilities", "disposal_tickets", "aer_petrinex", "waste_classification"],
     refreshIntervalHours: 168,
@@ -190,7 +192,9 @@ export const SEED_CATALOGUE: readonly CatalogueEntry[] = [
     jurisdiction: "CA-AB",
     homeUrl: "https://www.aer.ca/regulating-development/rules-and-directives/directives/directive-058",
     domains: ["www.aer.ca", "static.aer.ca"],
-    sourceKind: "pdf",
+    // The home URL is the directive's HTML landing page (title, release and effective dates,
+    // a link to the PDF). The PDF itself is the instrument and is a separate document to add.
+    sourceKind: "html",
     authorityLevel: "law",
     topics: ["waste_classification", "disposal_facilities", "environmental_compliance"],
     refreshIntervalHours: 168,

@@ -15,7 +15,7 @@ import {
 } from "./_core/knowledge/industryTaxonomy";
 import { AUTHORITY_LEVELS, outranks } from "./_core/knowledge/admission";
 import {
-  COLLECTOR_KINDS, COLLECTORS, CollectorNotImplemented, DEFAULT_CRAWL_POLICY, accessSignal, collectorFor,
+  COLLECTOR_KINDS, COLLECTORS, DEFAULT_CRAWL_POLICY, accessSignal,
   crawlerIdentity, decideFetch, parseRobots, robotsAllows, type FetchSubject, type RobotsState,
 } from "./_core/knowledge/collectors";
 import { SEED_CATALOGUE, validateCatalogueEntry, type CatalogueEntry } from "./_core/knowledge/sourceCatalogue";
@@ -496,19 +496,13 @@ describe("the fetch decision fails closed", () => {
   });
 });
 
-describe("collectors are declared, not implemented", () => {
-  it("names all eight, and every one refuses", async () => {
+describe("collectors are declared by name", () => {
+  // Which of them are built, and that the rest refuse, is knowledgeIngestion.test.ts's job since Checkpoint 2.
+  it("names all eight", () => {
     expect(COLLECTOR_KINDS.map((k) => COLLECTORS[k].name)).toEqual([
       "ApiIngestor", "HtmlCrawler", "PdfCollector", "BrowserCrawler",
       "GeoDataIngestor", "SitemapCrawler", "RssWatcher", "CommonCrawlImporter",
     ]);
-    for (const k of COLLECTOR_KINDS) {
-      expect(COLLECTORS[k].implemented).toBe(false);
-      await expect(collectorFor(k).collect(
-        { sourceId: "s", documentRef: "d", url: "https://laws-lois.justice.gc.ca/" },
-        { fetch: async () => { throw new Error("must not be called"); }, now: () => now, identity: identity! },
-      )).rejects.toBeInstanceOf(CollectorNotImplemented);
-    }
   });
 });
 

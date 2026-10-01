@@ -8280,7 +8280,7 @@ export const knowledgeSnapshots = mysqlTable("knowledgeSnapshots", {
   retrievedAt: timestamp("retrievedAt").notNull(),
   collectorKind: mysqlEnum("collectorKind", ["api", "html", "pdf", "browser", "geodata", "sitemap", "rss", "common_crawl"]).notNull(),
   collectorVersion: varchar("collectorVersion", { length: 40 }).notNull(),
-  outcome: mysqlEnum("outcome", ["first_seen", "unchanged", "changed", "unavailable", "hash_mismatch"]).notNull(),
+  outcome: mysqlEnum("outcome", ["first_seen", "unchanged", "changed", "unavailable", "hash_mismatch", "unparseable"]).notNull(),
   outcomeReason: varchar("outcomeReason", { length: 500 }),
   httpStatus: int("httpStatus"),
   contentType: varchar("contentType", { length: 120 }),

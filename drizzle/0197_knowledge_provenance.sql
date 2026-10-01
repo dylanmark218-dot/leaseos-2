@@ -52,6 +52,12 @@ ALTER TABLE `knowledgeChunks`
 -- claim. It is NULL when there were no trustworthy bytes (`unavailable`, `hash_mismatch`).
 -- `rawObjectKey` points at the retained original in object storage and is set only where
 -- the source's licence permits retaining text (see repository.recordSnapshot).
+--
+-- Versions are NOT compared on `contentSha256`. When a parser ran before the retrieval was
+-- recorded, the version's `contentHash` is the hash of the extracted text, so footer dates and
+-- session tokens do not make a regulation look amended; `provenanceJson.fingerprintBasis` says
+-- which. `unparseable` is a retrieval whose bytes are real but yielded no text: kept as
+-- evidence, no version, the current one untouched.
 CREATE TABLE `knowledgeSnapshots` (
   `id` int AUTO_INCREMENT NOT NULL,
   `snapshotRef` varchar(64) NOT NULL,
@@ -61,7 +67,7 @@ CREATE TABLE `knowledgeSnapshots` (
   `retrievedAt` timestamp NOT NULL,
   `collectorKind` enum('api','html','pdf','browser','geodata','sitemap','rss','common_crawl') NOT NULL,
   `collectorVersion` varchar(40) NOT NULL,
-  `outcome` enum('first_seen','unchanged','changed','unavailable','hash_mismatch') NOT NULL,
+  `outcome` enum('first_seen','unchanged','changed','unavailable','hash_mismatch','unparseable') NOT NULL,
   `outcomeReason` varchar(500),
   `httpStatus` int,
   `contentType` varchar(120),

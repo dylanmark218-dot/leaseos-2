@@ -15,24 +15,16 @@
  * The application enforces both. The database defaults back them up rather than
  * replacing them, because a default cannot know what an assessment says.
  *
- * ## Nothing calls this yet
+ * ## Who calls this
  *
- * No production module imports this file — only its test does. An earlier version
- * of this note said that made `knowledgeWritePaths.test.ts` vacuous. It does not:
- * that guard asserts the corpus writer list EQUALS this file, so the writes below
- * have to exist for it to pass, and it scans every file under `server`, `scripts`,
- * `drizzle` and `client/src` for a second writer. The rule is enforced and the
- * writer is real.
- *
- * What is true is narrower and still worth knowing: the path is correct and not
- * reached. `engineReachability.test.ts` declares `knowledge/repository` unwired,
- * which is where that belongs — and the census could not say it until
- * `coreEngines` learned to recurse, because this whole directory sat outside it,
- * neither reached nor declared. Delete this note when a router calls in.
+ * Since Intelligence Engine Checkpoint 2, `ingestion.ts` does, and an operator runs that from
+ * `scripts/knowledge-ingest.ts`. No router reaches either, deliberately: a crawl started by a web
+ * request is not something to expose. `engineReachability.test.ts` records that position, and
+ * `knowledgeWritePaths.test.ts` still holds that nothing else writes the corpus.
  */
 
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
 import {
   knowledgeChunks, knowledgeDocuments, knowledgeSnapshots, knowledgeSources, knowledgeVersions,
 } from "../../../drizzle/schema";
@@ -383,6 +375,14 @@ export type SnapshotRequest = {
   effectiveUntil?: Date | null;
   recordedByUserId?: number | null;
   provenance?: Record<string, unknown>;
+  /**
+   * What the parser made of the bytes, when it ran before recording. Given, versions are
+   * compared on the extracted text and the extraction outcome is recorded with the snapshot;
+   * absent, the raw bytes are compared and extraction stays `pending`.
+   */
+  extraction?:
+    | { status: "extracted"; parserVersion: string; fingerprint: string }
+    | { status: "failed"; parserVersion: string; error: string };
 };
 
 export type SnapshotRefusal =
@@ -415,12 +415,18 @@ const newRef = (prefix: string) => `${prefix}-${randomUUID()}`;
  * hash did not match — because "we checked and could not read it" is part of
  * the audit trail. What differs is whether a version results:
  *
- *   first_seen / changed   a new `knowledgeVersions` row, pointing back at the
- *                          one it supersedes; the old one is marked, not edited
+ *   first_seen / changed   a new `candidate` version, pointing back at the one it
+ *                          supersedes; the old one is marked `superseded`, which
+ *                          is what puts its rules in front of a person
  *   unchanged              the existing version is confirmed; nothing new
  *   unavailable            no version; the previous one is untouched — a page
  *                          being down is not a rule being repealed
  *   hash_mismatch          no version, and no raw object reference either
+ *   unparseable            bytes kept as evidence, no version: without text there
+ *                          is no basis for saying the rule changed
+ *
+ * "Changed" means the extracted text changed when a parser ran first
+ * (`req.extraction`), and the bytes changed otherwise.
  *
  * The document row is locked for the duration, so two collectors finishing at
  * once cannot both decide they saw the first version.
@@ -463,26 +469,41 @@ export async function recordSnapshot(req: SnapshotRequest): Promise<SnapshotResu
     const [lastGood] = await tx.select().from(knowledgeSnapshots)
       .where(and(eq(knowledgeSnapshots.documentRef, req.documentRef), isNotNull(knowledgeSnapshots.versionRef)))
       .orderBy(desc(knowledgeSnapshots.retrievedAt), desc(knowledgeSnapshots.id)).limit(1);
+    // Compare against the current version's fingerprint, not the last snapshot's raw bytes.
+    const [current] = lastGood?.versionRef
+      ? await tx.select({ contentHash: knowledgeVersions.contentHash }).from(knowledgeVersions)
+          .where(eq(knowledgeVersions.versionRef, lastGood.versionRef)).limit(1)
+      : [];
 
-    const cls = classifyRetrieval(lastGood?.contentSha256 ?? null, {
+    const cls = classifyRetrieval(current?.contentHash ?? null, {
       httpStatus: req.result.httpStatus, body: req.result.body, declaredSha256: req.result.declaredSha256,
-    });
+    }, req.extraction ? (req.extraction.status === "extracted"
+      ? { status: "extracted", fingerprint: req.extraction.fingerprint } : { status: "failed" }) : undefined);
 
     let versionRef: string | null = null;
     let change: ChangeSignal | null = null;
     const snapshotRef = newRef("KS");
 
-    if (cls.newVersion && cls.sha256) {
+    if (cls.newVersion && cls.fingerprint) {
       versionRef = newRef("KV");
       const supersedes = lastGood?.versionRef ?? null;
       await tx.insert(knowledgeVersions).values({
-        versionRef, documentRef: req.documentRef, contentHash: cls.sha256,
+        versionRef, documentRef: req.documentRef, contentHash: cls.fingerprint,
         effectiveFrom: req.effectiveFrom ?? null, effectiveUntil: req.effectiveUntil ?? null,
         publishedAt: req.publishedAt ?? null, supersedesVersionRef: supersedes,
+        retrievedAt: req.retrievedAt,
+        // 0189: a revision fetched by a machine is a candidate. Only a named person makes it
+        // `verified` (promotionLedger.verifySourceRevision), and only `verified` backs a rule.
+        status: "candidate",
       });
       if (supersedes) {
+        // Marking the old revision superseded is what routes the change to a person: every rule
+        // promoted from it now appears in promotionLedger.rulesOnStaleSources, and no new rule can
+        // be promoted from it. The rule itself is not touched. A withdrawn revision stays withdrawn.
         await tx.update(knowledgeVersions).set({ supersededByVersionRef: versionRef })
           .where(eq(knowledgeVersions.versionRef, supersedes));
+        await tx.update(knowledgeVersions).set({ status: "superseded" })
+          .where(and(eq(knowledgeVersions.versionRef, supersedes), ne(knowledgeVersions.status, "withdrawn")));
         change = {
           kind: "REGULATORY_CHANGE_DETECTED", sourceId: req.sourceId, documentRef: req.documentRef, snapshotRef,
           fromVersionRef: supersedes, toVersionRef: versionRef, authorityLevel: source.authorityLevel,
@@ -512,11 +533,14 @@ export async function recordSnapshot(req: SnapshotRequest): Promise<SnapshotResu
       publishedAt: cls.newVersion ? (req.publishedAt ?? null) : null,
       effectiveFrom: cls.newVersion ? (req.effectiveFrom ?? null) : null,
       effectiveUntil: cls.newVersion ? (req.effectiveUntil ?? null) : null,
-      // Only a new version has anything to extract.
-      extractionStatus: cls.newVersion ? "pending" : "not_applicable",
+      // A parse that ran is recorded with the snapshot; otherwise only a new version has anything to extract.
+      extractionStatus: req.extraction && cls.sha256 ? req.extraction.status : cls.newVersion ? "pending" : "not_applicable",
+      parserVersion: req.extraction && cls.sha256 ? req.extraction.parserVersion.slice(0, 40) : null,
+      extractionError: req.extraction?.status === "failed" && cls.sha256 ? req.extraction.error.slice(0, 500) : null,
       provenanceJson: {
         ...(req.provenance ?? {}),
         licenceAssessmentId: licence.assessment_id,
+        fingerprintBasis: cls.fingerprintBasis,
         ...(req.rawObjectKey && !trustworthy ? { rawObjectKeyDiscarded: true } : {}),
       },
       recordedByUserId: req.recordedByUserId ?? null,
@@ -561,4 +585,47 @@ export async function versionHistory(documentRef: string) {
     supersedesVersionRef: knowledgeVersions.supersedesVersionRef,
     supersededByVersionRef: knowledgeVersions.supersededByVersionRef,
   }).from(knowledgeVersions).where(eq(knowledgeVersions.documentRef, documentRef)).orderBy(knowledgeVersions.id);
+}
+
+/* ------------------------------------------------------------------ */
+/* What an ingestion run reads (Checkpoint 2)                          */
+/* ------------------------------------------------------------------ */
+
+/** The catalogue row an ingestion run works from, or null when the source is not catalogued. */
+export async function sourceForIngestion(sourceId: string) {
+  const db = await dbOrThrow();
+  const [row] = await db.select().from(knowledgeSources).where(eq(knowledgeSources.sourceId, sourceId)).limit(1);
+  return row ?? null;
+}
+
+/**
+ * Record what robots.txt said for a source's host. Written on every check, so the row
+ * always says when the crawler last asked — the answer RFC 9309 lets it trust for 24 hours.
+ */
+export async function recordRobotsCheck(
+  sourceId: string, status: "fetched" | "absent" | "unreachable", checkedAt: Date,
+): Promise<void> {
+  const db = await dbOrThrow();
+  await db.update(knowledgeSources).set({ robotsStatus: status, robotsCheckedAt: checkedAt })
+    .where(eq(knowledgeSources.sourceId, sourceId));
+}
+
+/**
+ * The document already tracking this URL for this source, if any, with what its latest
+ * retrieval said — the validators a conditional request sends, and when it was taken.
+ * One document per URL is what makes "changed content under the same URL" a version
+ * rather than a second document.
+ */
+export async function documentForUrl(sourceId: string, url: string) {
+  const db = await dbOrThrow();
+  const [doc] = await db.select({ documentRef: knowledgeDocuments.documentRef, state: knowledgeDocuments.state })
+    .from(knowledgeDocuments)
+    .where(and(eq(knowledgeDocuments.sourceId, sourceId), eq(knowledgeDocuments.url, url)))
+    .orderBy(knowledgeDocuments.id).limit(1);
+  if (!doc) return null;
+  const [last] = await db.select({
+    retrievedAt: knowledgeSnapshots.retrievedAt, etag: knowledgeSnapshots.etag, lastModified: knowledgeSnapshots.lastModified,
+  }).from(knowledgeSnapshots).where(eq(knowledgeSnapshots.documentRef, doc.documentRef))
+    .orderBy(desc(knowledgeSnapshots.retrievedAt), desc(knowledgeSnapshots.id)).limit(1);
+  return { ...doc, last: last ?? null };
 }

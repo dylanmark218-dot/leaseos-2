@@ -119,7 +119,7 @@ export function validateSourceUrl(raw: string, allowedDomains: readonly string[]
 /* Retrievals                                                          */
 /* ------------------------------------------------------------------ */
 
-export const RETRIEVAL_OUTCOMES = ["first_seen", "unchanged", "changed", "unavailable", "hash_mismatch"] as const;
+export const RETRIEVAL_OUTCOMES = ["first_seen", "unchanged", "changed", "unavailable", "hash_mismatch", "unparseable"] as const;
 export type RetrievalOutcome = (typeof RETRIEVAL_OUTCOMES)[number];
 
 export type RetrievalObservation = {
@@ -130,10 +130,28 @@ export type RetrievalObservation = {
   declaredSha256?: string | null;
 };
 
+/**
+ * What a parser made of the bytes, when one ran before the retrieval was recorded.
+ *
+ * `fingerprint` is the hash of the extracted, normalised text. Versions are
+ * compared on it rather than on the raw bytes, because a government page's
+ * bytes change with every footer date, session token and analytics tag, and
+ * a version is a statement that *the rule's text* changed — one that marks the
+ * previous source revision superseded and sends every rule cut from it back to
+ * a person (`promotionLedger.rulesOnStaleSources`). Raw-byte churn must not do
+ * that.
+ */
+export type ExtractionObservation =
+  | { status: "extracted"; fingerprint: string }
+  | { status: "failed" };
+
 export type RetrievalClass = {
   outcome: RetrievalOutcome;
   /** The hash of the bytes actually held, recomputed here. Null when there are none or they cannot be trusted. */
   sha256: string | null;
+  /** What versions are compared on: the extracted-text hash, or the raw hash when nothing was extracted. */
+  fingerprint: string | null;
+  fingerprintBasis: "extracted_text" | "raw_bytes" | null;
   /** True when this retrieval should become a new version. */
   newVersion: boolean;
   reason: string;
@@ -149,33 +167,53 @@ export type RetrievalClass = {
  *
  * A failed fetch (`unavailable`) records that the source was checked and could
  * not be read. It never removes or supersedes what was read before: a page
- * that is down today is not a rule that was repealed today.
+ * that is down today is not a rule that was repealed today. A failed parse
+ * (`unparseable`) is the same: the bytes are real and are kept as evidence, but
+ * with no text to compare there is no basis for saying the rule changed.
+ *
+ * `previousFingerprint` is the current version's `contentHash`.
  */
-export function classifyRetrieval(previousSha256: string | null, obs: RetrievalObservation): RetrievalClass {
+export function classifyRetrieval(
+  previousFingerprint: string | null, obs: RetrievalObservation, extraction?: ExtractionObservation,
+): RetrievalClass {
+  const none = { sha256: null, fingerprint: null, fingerprintBasis: null, newVersion: false } as const;
   const s = obs.httpStatus;
-  if (s === 304 && previousSha256) {
-    return { outcome: "unchanged", sha256: previousSha256, newVersion: false, reason: "the publisher reports the document unmodified (304)" };
+  if (s === 304 && previousFingerprint) {
+    // No bytes came back, so there is nothing to hash; the version stands as it was.
+    return { ...none, outcome: "unchanged", fingerprint: previousFingerprint, reason: "the publisher reports the document unmodified (304)" };
   }
   if (s === null || s < 200 || s > 299) {
-    return { outcome: "unavailable", sha256: null, newVersion: false,
-      reason: s === null ? "no response was received" : `the publisher answered ${s}` };
+    return { ...none, outcome: "unavailable", reason: s === null ? "no response was received" : `the publisher answered ${s}` };
   }
   if (obs.body === undefined) {
-    return { outcome: "unavailable", sha256: null, newVersion: false, reason: `a ${s} response with no body retained` };
+    return { ...none, outcome: "unavailable", reason: `a ${s} response with no body retained` };
   }
 
   const computed = sha256Hex(obs.body);
   if (obs.declaredSha256 != null) {
     const declared = obs.declaredSha256.toLowerCase();
     if (!isSha256Hex(declared) || declared !== computed) {
-      return { outcome: "hash_mismatch", sha256: null, newVersion: false,
+      return { ...none, outcome: "hash_mismatch",
         reason: `the collector declared ${obs.declaredSha256.slice(0, 16)}… but the bytes hash to ${computed.slice(0, 16)}…` };
     }
   }
 
-  if (previousSha256 === null) return { outcome: "first_seen", sha256: computed, newVersion: true, reason: "no earlier retrieval of this document" };
-  if (previousSha256 === computed) return { outcome: "unchanged", sha256: computed, newVersion: false, reason: "identical to the last retrieval" };
-  return { outcome: "changed", sha256: computed, newVersion: true, reason: "the content differs from the last retrieval" };
+  if (extraction?.status === "failed") {
+    return { ...none, sha256: computed, outcome: "unparseable", reason: "the bytes were retrieved but no text could be extracted; the current version stands" };
+  }
+  if (extraction?.status === "extracted" && !isSha256Hex(extraction.fingerprint)) {
+    return { ...none, sha256: computed, outcome: "unparseable", reason: "the parser returned a malformed fingerprint; refusing to compare on it" };
+  }
+
+  const fingerprint = extraction?.status === "extracted" ? extraction.fingerprint : computed;
+  const fingerprintBasis = extraction?.status === "extracted" ? "extracted_text" as const : "raw_bytes" as const;
+  const base = { sha256: computed, fingerprint, fingerprintBasis };
+  if (previousFingerprint === null) return { ...base, outcome: "first_seen", newVersion: true, reason: "no earlier retrieval of this document" };
+  if (previousFingerprint === fingerprint) {
+    return { ...base, outcome: "unchanged", newVersion: false,
+      reason: fingerprintBasis === "extracted_text" ? "the extracted text is identical to the current version" : "identical to the last retrieval" };
+  }
+  return { ...base, outcome: "changed", newVersion: true, reason: "the content differs from the current version" };
 }
 
 /* ------------------------------------------------------------------ */
