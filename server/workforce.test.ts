@@ -11,6 +11,10 @@ import { appRouter } from "./routers";
 // real clock, so a start date fixed on the calendar goes overdue the day the
 // calendar passes it (which is how this was found, at 01:25 UTC on the 17th).
 const START = new Date(Math.floor(Date.now() / 86_400_000) * 86_400_000 + 7 * 86_400_000);
+// The probation extension must land after START + 90 days, so it moves with START. It was fixed at
+// 2027-01-15, which stopped being later than START + 90 on 2026-10-10 and would have been refused as
+// "An extension ends after the current probation end" — correctly (CI-0.2).
+const EXTENDED_TO = new Date(START.getTime() + 120 * 86_400_000);
 import { grantUserRole } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { authorize, type DomainRole } from "./_core/recordsAuthorization";
@@ -152,9 +156,9 @@ d("a person, hired to offboarded", () => {
     // Probation: recommended by the supervisor, decided by HR — who may differ; the supervisor cannot decide; the recommender is named on the difference.
     const rec = await callerFor(supervisor).workforce.probationRecommend({ planRef: hire.planRef!, recommendation: "confirm", note: "Reliable, safe, learns fast" });
     await expect(callerFor(supervisor).workforce.probationDecide({ reviewId: rec.reviewId, decision: "confirm", note: "agree" })).rejects.toBeTruthy();
-    const dec = await callerFor(hr).workforce.probationDecide({ reviewId: rec.reviewId, decision: "extend", note: "TDG practical not yet observed", extendedTo: new Date("2027-01-15T00:00:00Z") });
+    const dec = await callerFor(hr).workforce.probationDecide({ reviewId: rec.reviewId, decision: "extend", note: "TDG practical not yet observed", extendedTo: EXTENDED_TO });
     expect(dec).toMatchObject({ decision: "extend", differsFromRecommendation: true });
-    expect((await callerFor(hr).workforce.onboardingStatus({ planRef: hire.planRef! })).probationEndsAt?.toISOString().slice(0, 10)).toBe("2027-01-15");
+    expect((await callerFor(hr).workforce.onboardingStatus({ planRef: hire.planRef! })).probationEndsAt?.toISOString()).toBe(EXTENDED_TO.toISOString());
 
     // Offboarding: opened; the driver still holds a role, a device and a tool; close is refused with each door named; access revoked as one act; the tool returned; then closed.
     await grantUserRole({ userId: newUser, role: "driver", scopeType: "organization", orgRef: SINGLE_TENANT_ID, grantedByUserId: hr, grantedAt: new Date() });

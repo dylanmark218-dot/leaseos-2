@@ -20,12 +20,14 @@
  */
 
 import { TRPCError } from "@trpc/server";
-import { actingScopeFor, evidenceInScope, incidentInScope, unitInScope, userInScope, workOrderInScope } from "./db";
+import { actingScopeFor, evidenceInScope, incidentInScope, jobInScope, unitInScope, userInScope, workOrderInScope, type TenantScope } from "./db";
+import { requireCallerUnits } from "./unitScope";
+import { orgRefOf } from "./fleetPortfolioService";
+import { actingRoleFor, mayReleaseHold } from "./_core/fleetPortfolio";
 import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
 import { adminProcedure, roleProcedure, router } from "./_core/trpc";
 import {
-  authorizeMechanicRelease,
   authorizeRecordScope,
 } from "./_core/recordsAuthorization";
 import {
@@ -50,7 +52,7 @@ import {
   planEscalation,
   ROADSIDE_INSPECTION_SCOPE,
 } from "./_core/incidentReport";
-import { currentReleaseEvidenceFor, evaluateMechanicRelease } from "./_core/mechanicRelease";
+import { currentReleaseEvidenceFor } from "./_core/mechanicRelease";
 import * as svc from "./recordsService";
 import {
   bootstrapManagementRole,
@@ -103,6 +105,11 @@ const relationshipInput = z.object({
   entityRef: z.string().max(64).optional(),
   role: z.string().max(60).optional(),
 });
+
+/** CP1.5 — a job the caller's organization may not see is not found, in the same words as a job that does not exist. */
+async function requireJobInScope(jobId: number | null | undefined, scope: TenantScope): Promise<void> {
+  if (jobId != null && !(await jobInScope(jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${jobId} not found` });
+}
 
 export const recordsRouter = router({
   evidence: router({
@@ -517,6 +524,11 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        // CP1.5 (sweep #19) — an incident's organization is its job's, else its unit's. Both must be the
+        // caller's organization's, proved before anything is written: otherwise one organization could
+        // file an incident that moves to another, or that holds another organization's truck.
+        const scope = await requireCallerUnits(ctx.user.id, { unitId: input.unitId });
+        await requireJobInScope(input.jobId, scope);
         const me = await svc.resolveOperatorForUser(ctx.user.id);
         const facts = {
           incidentType: input.incidentType,
@@ -535,7 +547,7 @@ export const recordsRouter = router({
         const severity = deriveSeverity(facts);
         const plan = planEscalation(facts);
 
-        const id = await svc.insertIncident({
+        const written = await svc.insertIncidentHoldingUnit({
           incidentNumber: input.incidentNumber,
           incidentType: input.incidentType,
           severity,
@@ -557,13 +569,15 @@ export const recordsRouter = router({
           workStopped: input.workStopped,
           unitHeld: plan.holdUnit,
           escalationState: "captured",
-        });
+        }, { orgRef: orgRefOf(scope.tenantId), byUserId: ctx.user.id });
 
         return {
-          incidentId: id ? Number(id) : null,
+          incidentId: written?.id || null,
           incidentNumber: input.incidentNumber,
           severity,
           holdUnit: plan.holdUnit,
+          // The portfolio hold the plan placed on the unit — lifted by this incident's safety review.
+          holdRef: written?.holdRef ?? null,
           notifying: plan.targets,
           legalHoldRecommended: plan.legalHoldRecommended,
         };
@@ -610,11 +624,20 @@ export const recordsRouter = router({
       .mutation(async ({ ctx, input }) => {
       // P4.1: the incident must be in the caller's scope (through its job, unit or operator); otherwise it does not exist here.
       if (!(await incidentInScope(input.incidentNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "No such incident" });
-        await svc.markIncidentReviewed({
+        // CP1.5 — the safety review lifts the hold the incident placed. It is a hold release, so the
+        // hold's rules apply: a second person (never whoever captured the incident and so placed it),
+        // in a role that releases a hold of its type. Refused before anything is recorded.
+        const holds = await svc.activeIncidentHolds(input.incidentNumber);
+        for (const h of holds) {
+          const may = mayReleaseHold({ roles: ctx.roles, holdType: h.holdType, placedByUserId: h.placedByUserId, userId: ctx.user.id, status: h.status });
+          if (!may.allowed) throw new TRPCError({ code: "FORBIDDEN", message: `${may.reason}. Incident ${input.incidentNumber} is reviewed by someone else.` });
+        }
+        const { releasedHoldRefs } = await svc.markIncidentReviewed({
           incidentNumber: input.incidentNumber,
           userId: ctx.user.id,
+          releasing: holds.length ? { holds, byRole: actingRoleFor(ctx.roles, holds[0]!.holdType, "release")! } : undefined,
         });
-        return { reviewed: true };
+        return { reviewed: true, releasedHoldRefs };
       }),
   }),
 
@@ -637,7 +660,9 @@ export const recordsRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
       // P4.1: a near miss on a unit names a unit the caller may see.
-      if (input.unitId != null && !(await unitInScope(input.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+      // CP1.5 — and its job: an escalated near miss becomes an incident, whose organization is its job's.
+      const scope = await requireCallerUnits(ctx.user.id, { unitId: input.unitId });
+      await requireJobInScope(input.jobId, scope);
         const me = await svc.resolveOperatorForUser(ctx.user.id);
         const outcome = evaluateNearMiss({
           originalStatement: input.statement,
@@ -678,7 +703,7 @@ export const recordsRouter = router({
           dangerousGoodsInvolved: false,
           workStopped: input.workStopped,
         };
-        const incidentId = await svc.insertIncident({
+        const written = await svc.insertIncidentHoldingUnit({
           incidentNumber,
           incidentType: "injury",
           severity: deriveSeverity(facts),
@@ -694,12 +719,12 @@ export const recordsRouter = router({
           workStopped: input.workStopped,
           unitHeld: planEscalation(facts).holdUnit,
           escalationState: "captured",
-        });
+        }, { orgRef: orgRefOf(scope.tenantId), byUserId: ctx.user.id });
 
-        if (incidentId) {
+        if (written?.id) {
           await svc.linkNearMissToIncident({
             nearMissNumber: input.nearMissNumber,
-            incidentId: Number(incidentId),
+            incidentId: written.id,
           });
         }
 
@@ -726,62 +751,14 @@ export const recordsRouter = router({
       .mutation(async ({ ctx, input }) => {
       // P4.1: the work order's unit must be in the caller's scope.
       if (!(await workOrderInScope(input.workOrderId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderId} not found` });
-        const grants = await listActiveUserRoles(ctx.user.id);
-
-        // The signature must be the caller's own.
-        const auth = authorizeMechanicRelease({
-          userId: ctx.user.id,
-          grants,
-          organization: ctx.organization,   // B23.1A — see records.evidence.seal
-          technicianUserId: ctx.user.id,
+        // 0221 — retired (design S-1): there is one door that appends a release, `shop.workOrderRelease`.
+        // This one wrote no `resolvedDefectIds`, so a release made here never counted as evidence for the
+        // defect it repaired, and it could not see the work order's tasks. The scope check above stays, so
+        // another organization's work order is still "not found" rather than learning it exists.
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `records.maintenance.recordRelease is closed. Use shop.workOrderRelease for work order ${input.workOrderId} — it names the defects the release repaired, refuses while tasks are open, and is the one door a release comes through.`,
         });
-        if (!auth.allowed) throw forbidden(auth.detail ?? "Cannot record a release");
-
-        const wo = await svc.loadWorkOrderSubject(input.workOrderId);
-        if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: "No such work order" });
-
-        const decision = evaluateMechanicRelease({
-          workOrderStatus: wo.status,
-          // Read from the defect, never from the request.
-          defectSeverity: wo.defectSeverity,
-          releaseType: input.releaseType,
-          restrictionDetail: input.restrictionDetail,
-          repairSummary: input.repairSummary,
-          testProcedure: input.testProcedure,
-          testResult: input.testResult,
-          roadTestPerformed: input.roadTestPerformed,
-          technicianUserId: ctx.user.id,
-          technicianIdentifier: input.technicianIdentifier,
-        });
-
-        if (!decision.valid) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: decision.blockers.map(b => b.label).join("; "),
-          });
-        }
-
-        await svc.appendWorkOrderRelease({
-          workOrderId: wo.id,
-          unitId: wo.unitId,
-          releaseType: input.releaseType,
-          restrictionDetail: input.restrictionDetail ?? null,
-          repairSummary: input.repairSummary,
-          testProcedure: input.testProcedure ?? null,
-          testResult: input.testResult ?? null,
-          roadTestPerformed: input.roadTestPerformed,
-          roadTestNotes: input.roadTestNotes ?? null,
-          technicianUserId: ctx.user.id,
-          technicianIdentifier: input.technicianIdentifier,
-          releasedAt: new Date(),
-        });
-
-        return {
-          released: true,
-          restricted: decision.restricted,
-          unitId: wo.unitId,
-          dispatchRecalculationRequired: true,
-        };
       }),
 
     /**
@@ -855,6 +832,7 @@ export const recordsRouter = router({
         const changed = await svc.resolveMaintenanceDefect({
           defectId: defect.id, resolvedByUserId: ctx.user.id,
           resolvedByReleaseId: evidenceId, note: input.note, at: new Date(),
+          actorRole: ctx.roles.find(r => r === "mechanic" || r === "shop_lead") ?? ctx.roles[0] ?? "unknown",
         });
         if (!changed) {
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Defect ${defect.id} is already resolved` });
