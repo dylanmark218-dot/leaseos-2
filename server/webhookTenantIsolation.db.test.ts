@@ -101,7 +101,7 @@ function wire() {
 }
 
 /** Which subscriptions the signing-secret resolver was asked about. */
-const resolvedRefs = () => vi.mocked(resolveWebhookSigningSecret).mock.calls.map(([row]) => (row as { subscriptionRef: string }).subscriptionRef);
+const resolvedRefs = () => vi.mocked(resolveWebhookSigningSecret).mock.calls.map(([row]) => (row as unknown as { subscriptionRef: string }).subscriptionRef);
 
 /** Which of the given subscriptions the dispatcher named in a warning. */
 function warnings() {
