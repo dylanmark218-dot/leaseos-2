@@ -4,6 +4,9 @@
 "recommended ruling" below is a recommendation for the owner. None becomes architecture until the owner
 rules on it explicitly, in the way `docs/live-assist/LA1A_OWNER_RULING.md` recorded LA-1a.
 
+The architecture and the sixteen proposed rulings built on these prerequisites are in
+`docs/live-assist/LA1B_RULING_PROPOSAL.md`. That document is also a proposal, and nothing in it is approved.
+
 | | |
 |---|---|
 | Written against | `main` = `2a76920` (LA-1a merged by PR #81 at `3dfcb3e`) |
