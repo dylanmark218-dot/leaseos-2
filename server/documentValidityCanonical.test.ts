@@ -100,9 +100,14 @@ describe("census", () => {
       const visit = (n: ts.Node): void => {
         if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier)) {
           const from = n.moduleSpecifier.text;
-          expect(ENGINES, `${f} imports the validity engine ${from}`).not.toContain(from);
           const names = n.importClause?.namedBindings && ts.isNamedImports(n.importClause.namedBindings)
             ? n.importClause.namedBindings.elements.map(e => (e.propertyName ?? e.name).text) : [];
+          // The one exception, and it is not a qualification: the open-shift rule (SPINE item 2,
+          // `shiftEligibility`) judges the driver's licence date with the existing `readExpiry` rather
+          // than a second copy of "is this date past". Exactly that file, exactly that one name.
+          const licenceDate = f === "_core/openShifts.ts" && from === "./documentValidity" && !n.importClause?.name
+            && names.length === 1 && names[0] === "readExpiry";
+          if (!licenceDate) expect(ENGINES, `${f} imports the validity engine ${from}`).not.toContain(from);
           if (from.endsWith("drizzle/schema")) {
             for (const t of STORES) expect(names, `${f} reads ${t} directly`).not.toContain(t);
           }
