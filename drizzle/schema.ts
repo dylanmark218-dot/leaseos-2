@@ -4907,7 +4907,7 @@ export const customerAccounts = mysqlTable("customerAccounts", {
   postSiteBillingRuleJson: text("postSiteBillingRuleJson"),
   status: mysqlEnum("status", ["active", "on_hold", "inactive"]).default("active").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  // 0215 — the account profile: the canonical commercial party. Additive; NULL/defaulted for every prior row.
+  // 0217 — the account profile: the canonical commercial party. Additive; NULL/defaulted for every prior row.
   customerNumber: varchar("customerNumber", { length: 40 }),
   legalName: varchar("legalName", { length: 220 }),
   tradeName: varchar("tradeName", { length: 220 }),
@@ -6128,7 +6128,7 @@ export const chargeDefinitions = mysqlTable("chargeDefinitions", {
   rejectionReason: varchar("rejectionReason", { length: 400 }),
   notes: varchar("notes", { length: 600 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  // 0216 — a rate line is a charge definition on a rate sheet version; the kind and the conditions the resolver reads.
+  // 0218 — a rate line is a charge definition on a rate sheet version; the kind and the conditions the resolver reads.
   rateSheetVersionId: int("rateSheetVersionId"),
   lineNo: int("lineNo"),
   lineKind: varchar("lineKind", { length: 40 }),
@@ -9609,7 +9609,7 @@ export const liveAssistPolicies = mysqlTable("liveAssistPolicies", {
   currentUnique: uniqueIndex("liveAssistPolicies_current_unique").on(t.orgRef, t.currentMarker),
 }));
 export type LiveAssistPolicyRow = typeof liveAssistPolicies.$inferSelect;
-/** 0215 — a person at the customer, keyed to the account; roles are rows (customerContactRoles). */
+/** 0217 — a person at the customer, keyed to the account; roles are rows (customerContactRoles). */
 export const customerContacts = mysqlTable("customerContacts", {
   id: int("id").autoincrement().primaryKey(),
   contactRef: varchar("contactRef", { length: 40 }).notNull().unique(),
@@ -9635,7 +9635,7 @@ export const customerContacts = mysqlTable("customerContacts", {
   rowVersion: int("rowVersion").default(1).notNull(),
 });
 
-/** 0215 — one role a contact holds for the account, effective-dated; ended, never deleted. */
+/** 0217 — one role a contact holds for the account, effective-dated; ended, never deleted. */
 export const customerContactRoles = mysqlTable("customerContactRoles", {
   id: int("id").autoincrement().primaryKey(),
   contactId: int("contactId").notNull(),
@@ -9651,7 +9651,7 @@ export const customerContactRoles = mysqlTable("customerContactRoles", {
   endedAt: timestamp("endedAt"),
 });
 
-/** 0215 — the commercial change ledger: append-only, written in the change's own transaction. */
+/** 0217 — the commercial change ledger: append-only, written in the change's own transaction. */
 export const commercialAuditEvents = mysqlTable("commercialAuditEvents", {
   id: int("id").autoincrement().primaryKey(),
   eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
@@ -9672,7 +9672,7 @@ export const commercialAuditEvents = mysqlTable("commercialAuditEvents", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-/** 0216 — a contract with a lifecycle; its billability rules live in customerContractTerms (termsId). */
+/** 0218 — a contract with a lifecycle; its billability rules live in customerContractTerms (termsId). */
 export const customerContracts = mysqlTable("customerContracts", {
   id: int("id").autoincrement().primaryKey(),
   contractRef: varchar("contractRef", { length: 40 }).notNull().unique(),
@@ -9717,7 +9717,7 @@ export const customerContracts = mysqlTable("customerContracts", {
   rowVersion: int("rowVersion").default(1).notNull(),
 });
 
-/** 0216 — a customer's rate sheet: the document whose versions group charge definitions. */
+/** 0218 — a customer's rate sheet: the document whose versions group charge definitions. */
 export const rateSheets = mysqlTable("rateSheets", {
   id: int("id").autoincrement().primaryKey(),
   rateSheetRef: varchar("rateSheetRef", { length: 40 }).notNull().unique(),
@@ -9736,7 +9736,7 @@ export const rateSheets = mysqlTable("rateSheets", {
   rowVersion: int("rowVersion").default(1).notNull(),
 });
 
-/** 0216 — one approved-as-a-unit revision of a sheet; its lines are chargeDefinitions rows. */
+/** 0218 — one approved-as-a-unit revision of a sheet; its lines are chargeDefinitions rows. */
 export const rateSheetVersions = mysqlTable("rateSheetVersions", {
   id: int("id").autoincrement().primaryKey(),
   versionRef: varchar("versionRef", { length: 40 }).notNull().unique(),
@@ -9763,7 +9763,7 @@ export const rateSheetVersions = mysqlTable("rateSheetVersions", {
   rowVersion: int("rowVersion").default(1).notNull(),
 });
 
-/** 0217 — the job's live commercial assignment: customer, bill-to, contract, sheet, PO. */
+/** 0219 — the job's live commercial assignment: customer, bill-to, contract, sheet, PO. */
 export const jobCommercialContexts = mysqlTable("jobCommercialContexts", {
   id: int("id").autoincrement().primaryKey(),
   jobId: int("jobId").notNull().unique(),
@@ -9786,7 +9786,7 @@ export const jobCommercialContexts = mysqlTable("jobCommercialContexts", {
   rowVersion: int("rowVersion").default(1).notNull(),
 });
 
-/** 0217 — the other companies and people on a job, as references. */
+/** 0219 — the other companies and people on a job, as references. */
 export const jobCommercialParties = mysqlTable("jobCommercialParties", {
   id: int("id").autoincrement().primaryKey(),
   jobId: int("jobId").notNull(),
@@ -9803,7 +9803,7 @@ export const jobCommercialParties = mysqlTable("jobCommercialParties", {
   endedAt: timestamp("endedAt"),
 });
 
-/** 0217 — PO, work order, AFE, cost centre and the customer's other references, one row per kind. */
+/** 0219 — PO, work order, AFE, cost centre and the customer's other references, one row per kind. */
 export const jobCommercialReferences = mysqlTable("jobCommercialReferences", {
   id: int("id").autoincrement().primaryKey(),
   jobId: int("jobId").notNull(),
@@ -9819,7 +9819,7 @@ export const jobCommercialReferences = mysqlTable("jobCommercialReferences", {
   endedAt: timestamp("endedAt"),
 });
 
-/** 0217 — the immutable commercial basis of a job; billing reads this and never the live sheet. */
+/** 0219 — the immutable commercial basis of a job; billing reads this and never the live sheet. */
 export const jobCommercialSnapshots = mysqlTable("jobCommercialSnapshots", {
   id: int("id").autoincrement().primaryKey(),
   snapshotRef: varchar("snapshotRef", { length: 40 }).notNull().unique(),

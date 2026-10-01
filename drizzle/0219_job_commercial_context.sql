@@ -1,4 +1,4 @@
--- v23.31 — 0217: the job's commercial context, and the snapshot that outlives it.
+-- v23.31 — 0219: the job's commercial context, and the snapshot that outlives it.
 --
 -- `jobs.customer` is free text and `jobs.customerOrgRef` a link a person makes in the
 -- commercial office; neither says which account, contract, rate sheet or purchase order a job

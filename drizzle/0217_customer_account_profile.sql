@@ -1,4 +1,4 @@
--- v23.31 — 0215: the customer account becomes the canonical commercial party.
+-- v23.31 — 0217: the customer account becomes the canonical commercial party.
 --
 -- `customerAccounts` (v21.10) carried terms, credit and the PO/AFE flags and nothing else: no
 -- legal name, no address, no tax status, no customer number, no record of who created or
@@ -16,9 +16,9 @@
 --   * `rowVersion` is an optimistic concurrency token: a write names the version it read and
 --     is refused (CONFLICT) if another write got there first. Last-write-wins is not a policy.
 --
--- Numbered 0182–0184 when written (2026-09-24); renumbered to 0215–0217 at the merge of main on
--- 2026-10-01, when three other open branches also held 0182–0184 and the highest claim anywhere was
--- 0214 (docs/architecture/MIGRATION_COLLISION_REGISTER.md).
+-- Numbered 0182–0184 when written (2026-09-24); renumbered to 0217–0219 at the merge of main on
+-- 2026-10-01, when three other open branches also held 0182–0184 and, by the time it was pushed, the
+-- highest claim anywhere was 0216 (docs/architecture/MIGRATION_COLLISION_REGISTER.md).
 
 ALTER TABLE `customerAccounts`
   ADD COLUMN `customerNumber` varchar(40) NULL,

@@ -1,4 +1,4 @@
--- v23.31 — 0216: contracts with a lifecycle, and rate sheets as versioned groups of charge
+-- v23.31 — 0218: contracts with a lifecycle, and rate sheets as versioned groups of charge
 -- definitions.
 --
 -- WHAT ALREADY EXISTED, AND WHY THIS DOES NOT DUPLICATE IT.
