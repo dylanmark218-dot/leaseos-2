@@ -1,5 +1,7 @@
 # Live Assist LA-1a — owner ruling and its limits
 
+**Recorded 2026-09-25. LA-1a merged to `main` on 2026-10-01 by PR #81 (head `3dfcb3e`, merge `bdec6a5`).** LA-1b is not built; its prerequisites are in `docs/live-assist/LA1B_READINESS.md`.
+
 **Recorded 2026-09-25.** This is the owner's ruling on the three decisions put to them after the LA-1
 implementation plan (`docs/live-assist/LIVE_ASSIST_LA1_IMPLEMENTATION_PLAN.md`). It is the only authority for
 the Live Assist code on `main`. Read it before extending that code.
