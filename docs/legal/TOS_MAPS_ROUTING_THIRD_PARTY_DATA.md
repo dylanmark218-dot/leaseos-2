@@ -11,9 +11,17 @@ to show (`collectAttributions()` builds it from the registry; see `DATA_SOURCES.
 LeaseOS's own position toward its users.
 
 **Dependency:** the text below refers to a "Data Sources and Attributions page". That page does not
-exist yet. The data behind it does: the registry rows, `collectAttributions()`, and
-`providerReadiness()` in `server/_core/transport/providerRegistry.ts`. Build the page before this
-section is published. Until then, the reference points at nothing.
+exist yet. The data behind it does: `attributionProjection()` in `server/transportFeedRuntime.ts`,
+served today to administrators by `geo.transportFeeds`. Each entry carries the provider,
+jurisdiction, dataset, licence and URL, required attribution text, source page, and rights status
+and date. It never carries a credential, a review note or an internal note. Build the page, and
+decide who may read the projection (today it requires `geo.source.review`), before this section is
+published. Until then, the reference points at nothing.
+
+**Ontario logo:** no provider logo is used. Ontario's developer page calls the 511 logo mandatory,
+while OGL – Ontario excludes logos from its grant. The question is tracked in
+`docs/P6_DATA_PERMISSION_REQUESTS.md` §7. The projection carries `logoPermitted: false` until a
+written answer is recorded.
 
 ---
 
@@ -72,4 +80,6 @@ organization.
 | Third-party information is decision support, not a verdict | `RoadAdvisory.advisoryOnly: true` is structural; `feedSourceFor` sets `advisoryOnly` on every provincial feed |
 | Unknown rather than compliant | `evaluateSourceUsage` refuses on `unknown`; a stale feed resolves to `unknown`, never PASS (`externalDataRegistry.ts`) |
 | Subject to each provider's licence | The collector's CLEARED gate refuses any source without a recorded licence review, and records the refusal as a run |
-| No implied endorsement | OGL – Ontario and OGL – BC both exclude official marks. No government logo is shown until the permission to show it is recorded (`SOURCE_CAVEATS.on511`) |
+| No implied endorsement | OGL – Ontario and OGL – BC both exclude official marks. No government logo is shown until the permission to show it is recorded (`SOURCE_CAVEATS.on511`, `logoPermitted: false`) |
+| Information may be delayed, unavailable or superseded | A provider outage, a page that may be cut short, or an empty listing never withdraws a held advisory. The health screen names the failure (`docs/transport/CANADIAN_PROVIDER_RUNTIME.md`) |
+| A displayed route is not a guarantee | A closure reported on an approved route makes the approval stale, and dispatch readiness stops reporting it as eligible until a person re-approves it. A reported condition never makes a route legal, and never clears a verified restriction |

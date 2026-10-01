@@ -125,6 +125,8 @@ export const commercialSetupRouter = router({
       const def = (await d.select().from(chargeDefinitions).where(eq(chargeDefinitions.definitionRef, input.definitionRef)).limit(1))[0];
       if (!def) throw new TRPCError({ code: "NOT_FOUND", message: "No such definition" });
       if (def.approvalStatus !== "proposed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Definition is ${def.approvalStatus}, not proposed` });
+      // v23.31 — a rate line on a sheet version is approved with its version, as a unit, never one line at a time.
+      if (def.rateSheetVersionId != null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This definition is a line on a rate sheet version; approve the version (customerCommercial.rateSheets.versionDecide)" });
       if (def.proposedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The person who proposed a rate does not approve it — a second person does" });
       let version = 1;
       if (input.supersedesDefinitionRef) {
@@ -143,6 +145,7 @@ export const commercialSetupRouter = router({
       const d = await db();
       const def = (await d.select().from(chargeDefinitions).where(eq(chargeDefinitions.definitionRef, input.definitionRef)).limit(1))[0];
       if (!def || def.approvalStatus !== "proposed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Only a proposal is rejected" });
+      if (def.rateSheetVersionId != null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This definition is a line on a rate sheet version; reject the version (customerCommercial.rateSheets.versionDecide)" });
       await d.update(chargeDefinitions).set({ approvalStatus: "rejected", rejectionReason: input.reason, approvedByUserId: ctx.user.id, approvedAt: new Date() }).where(eq(chargeDefinitions.id, def.id));
       return { definitionRef: def.definitionRef, approvalStatus: "rejected" as const };
     }),

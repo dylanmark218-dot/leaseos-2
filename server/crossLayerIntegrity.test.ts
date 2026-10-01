@@ -36,7 +36,7 @@ describe("client ↔ server parity", () => {
     expect(missing, `client references procedures the server does not mount: ${missing.join(", ")}`).toEqual([]);
   });
   it("the router mounts a stable, large surface", () => {
-    expect(serverPaths.size).toBe(752);
+    expect(serverPaths.size).toBe(832);   // SA1 Sign & Attest: +14 attest.*, +4 portal.attest*;   // merge of main (b35bac4) into #59: main 793 + #59's 21 board.*/shifts.* paths;   // v23.31: +40 customerCommercial.{customers,contacts,contracts,rateSheets,jobs}.* and expirySweep;   // Canadian provider runtime: +1 geo.transportFeeds
     expect(serverPaths.has("facilityDirectory.driverView")).toBe(true);
     expect(serverPaths.has("commercialOffice.approvals.requirement")).toBe(true);
     // The session surface is mounted where the client expects it, and is the

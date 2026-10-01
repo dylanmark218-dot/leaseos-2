@@ -46,6 +46,30 @@ export const SECRET_KEY_ENV_VARS = {
 } as const;
 
 /**
+ * Provincial road-information feeds — NAMES ONLY, for the same reason as above.
+ *
+ * The keys are read by exactly one function, `httpFeedFetcher` in `_core/feedHttp.ts`, at the
+ * moment it builds a request, from the environment object the server passes it. They are never on
+ * `ENV`, never in a client bundle, never in a response, and never in a recorded error (the fetcher
+ * redacts the raw and URL-encoded forms). A key held is access to a publisher's API; whether its
+ * answers may be used is the `externalDataSources` row, and a key never overrides that.
+ *
+ * `enabled` is the owner's switch: a comma-separated list of source keys the runtime may schedule.
+ * Unset means none. Turning a feed on is a production decision, not a deploy side effect.
+ */
+export const TRANSPORT_FEED_ENV_VARS = {
+  enabled: "LEASEOS_TRANSPORT_FEEDS_ENABLED",
+  keys: {
+    ab511: "AB_511_API_KEY",
+    on511: "ON_511_API_KEY",
+    mb511: "MB_511_API_KEY",
+    nb511: "NB_511_API_KEY",
+    yt511: "YT_511_API_KEY",
+    nl511: "NL_511_API_KEY",
+  },
+} as const;
+
+/**
  * DEPLOYMENT PREREQUISITE, from 0193.
  *
  * `LEASEOS_KEY_MFA_V1` must be provisioned before this code reaches an environment where portal

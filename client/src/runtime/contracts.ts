@@ -32,7 +32,19 @@ export type CaptureKind =
   // A document put through the page scanner whose type nobody has established.
   // A scan the classifier DID place is saved under that kind instead, so a
   // scanned disposal ticket syncs at ticket priority rather than at this one.
-  | "scanned_document";
+  | "scanned_document"
+  // 0205/0206 — a board message, an acknowledgement of one, a response to open work.
+  | "board_message" | "board_acknowledgement" | "shift_response";
+
+/**
+ * 0205/0206 — captures sent DIRECTLY to their own tRPC procedure with the capture's `localId` as
+ * the client mutation id, never packaged for `sync.receivePackage`. A chat message is not evidence:
+ * sealing one would make a conversation an evidence record, and the package protocol would upload
+ * it as a file. They share the outbox, the six states and the store; they do not share the channel.
+ * Each relates to a channel, a message or a post rather than to a job or a unit.
+ */
+export const DIRECT_CAPTURE_KINDS: readonly CaptureKind[] = ["board_message", "board_acknowledgement", "shift_response"];
+export const isDirectCapture = (kind: CaptureKind): boolean => DIRECT_CAPTURE_KINDS.includes(kind);
 
 export type GpsFix = { latitude: number; longitude: number; accuracyM: number | null; fixedAt: string; source: "device_gps" | "network" | "manual" };
 
@@ -70,7 +82,19 @@ export type LocalCapture = {
   packagedIn: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Checkpoint 5 — whose it is: the organization and the signed-in person it was written under. Set
+   * on direct captures (board messages, acknowledgements, open-work responses), which are sent as
+   * that person into that organization; absent on evidence captures, which the vault and the
+   * device's enrolment already scope. A capture is listed and sent only under the scope that wrote it.
+   */
+  scope?: CaptureScope | null;
 };
+
+/** The organization key (`orgRef`, or `default` for the historical single tenant) and the person. */
+export type CaptureScope = { orgKey: string; userId: number };
+export const sameScope = (a: CaptureScope | null | undefined, b: CaptureScope | null | undefined): boolean =>
+  !!a && !!b && a.orgKey === b.orgKey && a.userId === b.userId;
 
 export type LocalPackage = { packageRef: string; captureIds: string[]; queuedAt: string; state: "queued" | "sent" | "accepted" | "rejected" | "partial"; receipt: unknown; attempts: number };
 

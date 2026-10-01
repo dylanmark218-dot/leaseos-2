@@ -71,7 +71,21 @@ async function drainAll(workerId = "test-worker") {
     idleIntervalMs: 5,
     batchSize: 10,
   });
+  // Run until nothing is claimable, not for a fixed window. The outbox is shared by every
+  // database suite in the run, and since Open Work (0206) writes board events into it too, a
+  // fixed 300 ms could end before this test's event was reached. Bounded, so a stream of other
+  // suites' events cannot hold the test open.
+  const deadline = Date.now() + 15_000;
   await new Promise(r => setTimeout(r, 300));
+  while (Date.now() < deadline) {
+    const [rows] = await pool.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM domainEventOutbox
+        WHERE processedAt IS NULL AND deadLetteredAt IS NULL
+          AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW()) AND claimedAt IS NULL`
+    );
+    if (Number(rows[0]!.n) === 0) break;
+    await new Promise(r => setTimeout(r, 50));
+  }
   w.stop();
   return w.done;
 }

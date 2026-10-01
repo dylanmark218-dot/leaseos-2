@@ -21,12 +21,12 @@ not duplicated, and item 2 does not delete it.
 | `dispatchMatching` | suitability match, posting visibility | none | not a duplicate; stays unwired |
 | `fieldTicket` | line disposition split | `draftFromTicket` (`_core/invoiceDraft.ts`) | **engine copy deleted** (live one stricter) |
 | `fieldTicket` | signed scope statement text | `recordSignature` (`closeoutRouter.ts`) | **engine copy deleted** (display/evidence only) |
-| `fieldTicket` | signature status | `recordSignature` writes it | **held: outcomes differ in billing; owner decision needed** |
+| `fieldTicket` | signature status | `recordSignature` writes it | **engine copy deleted** (owner's ruling: a signature is the state recorded at signing) |
 | `fieldTicket` | scope validation, job reconciliation | none | not a duplicate; stays unwired |
-| `openShifts` | shift eligibility, interest | `openShiftsRouter.ts` inline | **held: the two refuse different people; owner decision needed** |
+| `openShifts` | shift eligibility, interest | `openShiftsRouter.ts` inline | **router copy deleted**; the engine's `shiftEligibility` is the one rule (owner's ruling: the union of both), and the router enforces it |
 | `complianceDocumentValidity` | document validity | `readinessComposer` / `dispatchReadiness` / tile and other readers | **resolved by #52** (rulings B and C); every reader now takes the canonical verdict |
 
-Item 2 is therefore **not complete**. Two pairs still need a ruling: `openShifts` eligibility and `fieldTicket` signature status.
+**All four pairs are resolved** (2026-10-01). Each has one implementation; the last two were settled by the owner's rulings and applied on `claude/spine-item2-openshifts-fieldticket` (§2, §3 and "Item 2 — completion" below). Item 2 is recorded **COMPLETE** only once that branch is merged and CI on the resulting `main` commit is green; that record follows the merge.
 
 ---
 
@@ -104,16 +104,14 @@ The engine is `server/_core/fieldTicket.ts`. It has no production importer; only
 - B survives because it records the authority actually exercised, which A cannot know. A's extra fields (who, where, when, lines) are an enhancement B could adopt later, not a behaviour anything relies on.
 - No migration. Existing rows are unaffected.
 
-**Signature status: held for a ruling.** The two derive it from different inputs, and the outcomes differ in billing.
+**Signature status: resolved by the owner's ruling — the signature is historical.**
 
-- A's `deriveSignatureStatus` reads the line dispositions:
-  - all disputed → `refused`
-  - some disputed and some accepted → `partially_accepted`
-- B writes `result` / `signatureStatus` at signing time, before any line is decided:
-  - `partially_accepted` when a requested authority was refused, otherwise `accepted`
-  - it never writes `refused` or `no_representative`, and never re-derives after `decideLine`
-- So a ticket whose every line was later disputed still reads `accepted`, and `invoicingRouter` counts it as signed. B's per-line blockers in `draftFromTicket` still stop the invoice.
-- Choosing A means recomputing the stored status in `decideLine`, which changes the invoicing "signed" gate and the portal counts. Choosing B means deleting A. Either choice changes what billing sees, so it is not made in this checkpoint.
+- **The two answers.** A's `deriveSignatureStatus` recomputed the status from the line dispositions (all disputed → `refused`, mixed → `partially_accepted`). B, `recordSignature`, writes `result` / `signatureStatus` once, at signing (`partially_accepted` when a requested authority was refused, otherwise `accepted`), and nothing re-derives it after `decideLine`.
+- **Ruling.** Keep B. A signature is the historical state created at signing; line decisions are a separate fact per line and never rewrite it. Invoice readiness is a different question: valid signature **and** required line decisions resolved **and** the existing billing requirements, answered by the existing `draftFromTicket`. A signature alone is never sufficient.
+- **Survivor:** `recordSignature` (`closeoutRouter.ts`) for the signature; `draftFromTicket` (`_core/invoiceDraft.ts`, through `invoicing.draftFromTicket`) for readiness. **Removed:** `deriveSignatureStatus` and its 5 unit tests. **Callers migrated:** none (it had no production caller).
+- **Behaviour retained.** `draftFromTicket` already refused an undecided line (`not_presented` blocks), a disputed line unless the contract allows partial invoices, an unsigned ticket and a ticket amended after signature. `invoicingRouter`'s "signed" input was never treated as sufficient, so no invoicing logic changed; the ruling is pinned rather than implemented.
+- **Tests** (`server/fieldTicketSignatureSemantics.db.test.ts`, through the real `closeout.siteSign` / `closeout.lineDecide` / `invoicing.draftFromTicket`): signed stays signed — signer, time, payload hash, statement and ticket status byte-for-byte — after every line is disputed and after the decisions are corrected; an unsigned ticket's lines cannot be decided and lines accepted underneath it manufacture no signature; undecided lines block readiness; a disputed line blocks where the contract refuses partial invoices while the signature still reads `accepted`; all lines accepted and priced → ready, and drafting leaves the signature unchanged. Mutation: recomputing `signatureStatus` in `decideLine`, or dropping the `not_presented` blocker, fails 3 of the 5.
+- **Guard:** `deriveSignatureStatus` is a removed name in `server/spineItem2Duplicates.test.ts`. `_core/billing.ts` and `LEASEOS_BILLING_RECORDS_CHAIN.md` no longer describe a roll-up.
 
 **Scope validation and job reconciliation: not duplicated.**
 
@@ -121,33 +119,62 @@ The engine is `server/_core/fieldTicket.ts`. It has no production importer; only
 - `reconcileJob` has no live counterpart. `closeoutState` is per ticket, and `evidenceChainWalk` names hops without judging them.
 - Both stay unwired, for job close (SPINE item 4 and later).
 
-## 3. `openShifts`: held for a ruling
+## 3. `openShifts`: resolved by the owner's ruling — one rule, enforced by the router
 
-- **A:** `server/_core/openShifts.ts`, pure, imported only by `server/openShifts.test.ts`.
-- **B:** `server/openShiftsRouter.ts`, mounted as `shifts` and called by nothing in `client/`.
+**Characterized before the change.**
 
-They answer "may this person take this posted shift?" with **different refusals in both directions**:
+- **A:** `server/_core/openShifts.ts`, pure, imported only by its test. It refused `wrong_role`, `missing_qualification` (from a pre-filtered list), `on_approved_leave`, `not_rostered` (off-hitch), `overlaps_existing`, and an interest from an ineligible person.
+- **B:** `server/openShiftsRouter.ts`, mounted as `shifts`. `shifts.eligibility` refused approved leave, a missing/expired licence and unknown/unverified/expired qualifications (through the C1b-3 read adapter). `shifts.expressInterest` checked **no** eligibility despite its comment, and the licence was read where `operators.id == userId` instead of the person link `operators.userId`.
+- RED on `main` (`server/openShiftsEligibility.db.test.ts`): the original 12 cases all fail. A 13th, added later, pins the licence linkage: a stranger's operator row whose id equals the user's id must not be read as theirs, and reading `operators.id == userId` fails it.
 
-- **Only A refuses:**
-  - `wrong_role`
-  - `not_rostered` (hitch / away)
-  - `overlaps_existing`
-  - an interest from an ineligible person (`NotEligible`)
-- **Only B refuses:**
-  - expired or missing licence
-  - store-backed qualification verification and expiry, through `qualificationValidity.missingFrom`
-  - a post that is not `status = open`
-- **Only B has:** authorization (`shifts.post`, `shifts.read`, `shifts.interest`) and the post's tenant check.
+**Ruling.** One canonical implementation preserving every restriction from both. The router calls it and enforces its result. Viewing (`shifts.read`), expressing interest (`shifts.interest`) and posting (`shifts.post`) stay distinct. The work-taking action fails closed.
 
-Deleting either side weakens a refusal path, so no survivor is chosen here.
+**Survivor:** `shiftEligibility(post, PersonFacts)` in `_core/openShifts.ts`. Its refusals, all collected:
 
-Two further facts bear on the ruling:
+- `not_in_organization`, which short-circuits: nothing else is read or said;
+- `wrong_role`;
+- `not_rostered`: no active crew membership in the organization, or off-hitch on the day;
+- `on_approved_leave`;
+- `overlaps_existing`: tentative or confirmed operator bookings;
+- `no_licence_recorded`: no operator record, two records, or a blank expiry;
+- `licence_expired`;
+- `qualification_unknown` / `_unverified` / `_expired`, taken from the adapter's structured verdict.
 
-- **Another branch is changing both sides.** `claude/leaseos-communications-marketplace-p8ptqw` modifies `_core/openShifts.ts` and `openShiftsRouter.ts` and adds `openShiftsService.ts`. `claude/leaseos-compliance-survey-5faxe8` and `claude/training-academy-workforce-q3mdse` also touch the router.
-- **Defects in B, recorded and not fixed here** (they are fixes, not consolidation):
-  - `shifts.expressInterest` does not check eligibility, although its comment says "Refused unless eligible".
-  - `shifts.eligibility` reads the licence from `operators` where `operators.id == userId`. The person link is `operators.userId`.
-  - `shifts.eligibility` accepts any `userId`, and reads `leaveRequests` / `workerQualifications` without a tenant filter.
+`candidatesFor` maps the same rule over many people. `expressInterest` also refuses an assigned post or one that is no longer open.
+
+**Moved out of the router:**
+
+- the licence-expiry judgement (`readExpiry`);
+- the leave judgement (`isAbsent`);
+- the qualification-code classification (`notHeld` → code);
+- the post-kind and post-status refusals of `expressInterest`;
+- the `EligibilityReason` type.
+
+**Callers migrated:**
+
+- `shifts.eligibility` and `shifts.expressInterest` both build `PersonFacts` with `personFacts()`, which reads records only: grants in the post's organization, the organization's crew roster, approved leave, `operatorForUserInScope`, operator bookings and `effectiveQualifications`. Both then call `shiftEligibility`.
+- `expressInterest` throws `PRECONDITION_FAILED` on `NotEligible` and writes no row.
+
+**Behaviour now enforced:**
+
+- the eligible case passes;
+- wrong role, not rostered, off-hitch, overlap, no licence, expired licence and missing qualification are each refused in the view and at the interest;
+- an ambiguous operator record fails closed;
+- input that claims roles, qualifications, a user or an organization gains nothing;
+- another organization's worker gets `NOT_FOUND` on the post and reads `not_in_organization`;
+- an ineligible worker can list the post but cannot take it, a dispatcher cannot express interest, and a worker cannot post.
+
+**Guard** (`server/spineItem2Duplicates.test.ts`):
+
+- `EligibilityReason` may not be declared again;
+- both procedures must call `shiftEligibility`;
+- the router may not import the judging helpers or name any refusal code.
+
+A mutation that bypasses `shiftEligibility` in `expressInterest` fails the guard and 10 of the original 12 DB tests.
+
+**Fixtures** in four older suites now give workers a roster and a linked operator record, which the stricter rule requires. `engineReachability`: `openShifts` is wired, and the unwired pin goes 86 → 85.
+
+**Not resolved here.** dylanmark218-dot/leaseos-2#59 (open, design checkpoint) rewrites `openShiftsRouter.ts`, and it must rebase onto this one rule rather than reintroduce inline eligibility. The guard will refuse the latter.
 
 ## 4. `complianceDocumentValidity`: resolved by #52
 
@@ -167,13 +194,9 @@ The survey's two findings on the adapter and the tile were addressed there as we
 - the verdict now names the row behind the version it reports (`documentId`), not the newest captured row;
 - the tile reads the operator's own history through `documents.list`'s owner filter rather than an org-wide list capped at 100 rows, and a history at the cap reads `unknown`.
 
-## Defect found in passing (outside item 2)
+## Defect found in passing (outside item 2): fixed
 
-`closeout.lineDecide` (`server/closeoutRouter.ts`, internal) never calls `fieldTicketInScope`. Every sibling
-ticket procedure in that router does, and it passes `customerAccountIdMustMatch: null`. So a caller holding
-`closeout.line.decide` in one organization can change the disposition of another organization's ticket
-line, given its ticket number. That is a tenant-scope write gap. It should be fixed on its own branch, as
-a narrow integrity fix, and not inside a consolidation.
+`closeout.lineDecide` did not scope the ticket to the caller's organization. On `main` this was fixed in 9af505a (P0-A3, `requireTicket(actingScopeFor(caller))`). It is pinned by regression tests in dylanmark218-dot/leaseos-2#85, where removing the check fails 3 of 5. The sibling repository had the same defect, which is fixed in dylanmark218-dot/leaseos#9 (RED 3 of 5 on its `main`, GREEN 5 of 5).
 
 ## Net effect of this checkpoint
 
@@ -206,7 +229,27 @@ duplications are the ones that change refusals or billing, and those wait for a 
 
 (`complianceDocumentValidity` was the third, and #52 has resolved it.)
 
-**Item 2 is not complete.** It completes when:
+## Item 2 — completion
 
-- the openShifts ruling is made and applied;
-- the signature-status ruling is made and applied.
+| Pair | Survivor | Removed | Callers migrated | Guard |
+|---|---|---|---|---|
+| `dispatchMatching` booking conflicts | `awardAssignment` → `decideAward` | `detectBookingConflicts`, `Booking`, `BookingConflict` | none (no callers) | removed names |
+| `fieldTicket` disposition split | `draftFromTicket` | `splitByDisposition` | none | removed name |
+| `fieldTicket` signed scope statement | `recordSignature` | `buildSignedScopeStatement`, `SignedScopeInput`, `hhmm` | none | removed names |
+| `fieldTicket` signature status | `recordSignature` (signature) + `draftFromTicket` (readiness) | `deriveSignatureStatus` | none | removed name + `fieldTicketSignatureSemantics.db.test.ts` |
+| `openShifts` eligibility / interest | `shiftEligibility` (`_core/openShifts.ts`) | the router's inline rule and `EligibilityReason` | `shifts.eligibility`, `shifts.expressInterest` | removed name + router-holds-no-rule guard |
+| `complianceDocumentValidity` | `validityOf` via `complianceDocumentValidity` | the readers' inline expiry (#52) | every reader (#52) | #52's own |
+
+**Net, the two rulings** (production code, `git diff --numstat`):
+
+- `fieldTicket`: −20 / +5 in `_core/fieldTicket.ts`, and 2 / 2 comment lines in `_core/billing.ts`. One export is removed.
+- `openShifts`: +98 / −43 in the engine and +83 / −65 in the router. That is **net +73 lines**. The router lost its judging code but gained a record reader (`personFacts`). The engine gained the licence, qualification and organization rules it previously lacked. One exported type (`EligibilityReason`) is removed.
+- The reduction across item 2 is therefore in **answers, not lines**:
+  - before, there were two answers each to five questions;
+  - now each question has one answer;
+  - six exports in total were removed by the first checkpoint, and two more by these rulings.
+- **Tests:**
+  - removed: 35 lines (the deleted roll-up's unit tests);
+  - added: two DB suites (5 + 13 tests);
+  - extended: the structural guard;
+  - migrated: the engine unit tests (20).

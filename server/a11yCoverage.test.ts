@@ -30,6 +30,11 @@ const NOT_A_SURFACE: Record<string, string> = {
   "client/src/session/SessionGate.tsx": "a live tRPC caller; the three screens it renders — SignInView, WorkspaceChooserView, AccessDeniedView — are each surfaces in the suite",
   "client/src/dispatch/DispatchReadiness.tsx": "the readiness panel's container: a live tRPC caller that resolves the job's assignment and queries the gate; the panel it renders, DispatchReadinessView, is a surface in the suite",
   "client/src/dispatch/DispatchJobDetail.tsx": "the detail screen's container: a live tRPC caller that reads the job, its crew slots and the name lists, writes slot assignments, and composes the readiness panel; the screen it renders, DispatchJobDetailView, is a surface in the suite",
+  "client/src/pages/Customers.tsx": "the customers screen's container: a live tRPC caller for the list, the profile, its history and documents; CustomersView is the surface, in eleven states",
+  "client/src/pages/Contract.tsx": "the contract screen's container: a live tRPC caller that reads one contract and drives its transitions; ContractView is the surface",
+  "client/src/pages/RateSheet.tsx": "the rate sheet screen's container: a live tRPC caller that reads one sheet with every version and drives drafting and approval; RateSheetView is the surface",
+  "client/src/commercial/shared.tsx": "a vocabulary of small parts (StatusBadge, StateBlock, HistoryList, TabBar) rendered only inside the three commercial views, which are surfaces",
+  "client/src/portal/panels/BoardPanel.tsx": "the Board's container: a live tRPC caller that reads conversations and open work and writes through the device's board queue; the panel it renders, BoardPanelView, is a surface in the suite in two states",
 };
 
 describe("the accessibility suite keeps up with the screens", () => {

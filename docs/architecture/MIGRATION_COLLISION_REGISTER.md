@@ -261,9 +261,40 @@ and would have collided, so `0213` is the first number free everywhere.
 | 0210–0212 | `0210_driver_portfolio.sql`, `0211_driver_portfolio_events_append_only.sql`, `0212_driver_portfolio_api.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | #16 | open branch | none | keeps 0210–0212 |
 | 0213 | `0213_runtime_instances.sql` | `security/s2-fleet-runtime-identity` | S2-FLEET-A | claiming | none | keeps 0213 |
 
-**Next free number for new work: `0214`** (re-check with the scan before committing; a branch may have
-renumbered since, as driver-portfolio did between the P0-A2.1 and S2-FLEET-A scans).
+**Next free number for new work was `0214`** at that scan — superseded: `0214`–`0219` landed on `main` while
+S2-FLEET-A was gated (Sign & Attest, Customer/Contract/Rate); `0213` stays below the head and applies by
+name. See the SA1 section below for the current next-free number.
 
 * **2026-10-01 (S2-FLEET-A)**: claimed `0213` (`runtimeInstances`: tenant-neutral runtime registry — per-process
   build identity, capabilities, heartbeat and stop timestamps), recorded in the commit that creates the
   migration. No branch renumbered.
+## Claim: 0217–0219 (Customer, Contract and Rate Management, 2026-10-01)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0217 | `0217_customer_account_profile.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0217 |
+| 0218 | `0218_customer_contracts_rate_sheets.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0218 |
+| 0219 | `0219_job_commercial_context.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0219 |
+
+Written as `0182`–`0184` on 2026-09-24, when they were the first numbers free everywhere. By the merge of
+`main` (`c3f088b`) three other open branches held `0182`–`0184` (`document-control-architecture`,
+`integration-hub-subsystem`, `safety-compliance-program-builder`) and the highest claim on any remote ref
+was `0216`: `claude/relaxed-carson-qfcopf` took `0214` and `claude/leaseos-sign-attest-design-5993ar`
+took `0215`–`0216` while this merge was being gated, the second of them minutes before this branch
+pushed `0215`–`0217`. As the later, unmerged claimant this branch moved again, to the first
+three numbers free on `main` and on every open branch. No other branch was renumbered.
+
+
+## State at the Sign & Attest SA1 merge (2026-10-01, `main` = `ce27fec`, after PR #98, #59 and #102)
+
+`main` migration head: **`0219_job_commercial_context.sql`** (v23.31 took `0217`–`0219`, renumbered around
+Sign & Attest's claim; `0205`/`0206` landed with #59). This branch (PR #104) holds **`0214`–`0216`**
+(`0214_sign_attest_foundation`, `0215_sign_attest_events`, `0216_sign_attest_guards`): below main's head,
+colliding with nothing on main, applied by name. The earlier provisional claim of `0182`–`0184` in the
+design document is withdrawn (those numbers were taken by other branches).
+
+**Next free number for new work after this merge: `0220`** (re-check with the scan before committing).
+
+## Change log (continued)
+
+* **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.

@@ -23,7 +23,7 @@ const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 
 let pool: mysql.Pool;
-let nextUserId = 900000 + Math.floor(Math.random() * 90000);
+let nextUserId = 408_000_000 + Math.floor(Math.random() * 90000);
 const newUserId = () => nextUserId++;
 
 beforeAll(async () => {

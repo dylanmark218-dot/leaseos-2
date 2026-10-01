@@ -102,38 +102,18 @@ required attribution** rather than skipping it.
 
 ## Canadian road-information providers
 
-Read from each publisher's developer page on 2026-09-24. The adapters are in
-`server/_core/transport/`: the collector, fetcher and ingester they plug into
-already existed. **Needs a key** is about access. **Licence** is about what may
-be done with the answer. They are separate questions, and only the second one
-opens the gate.
+The per-province matrix is in
+[`docs/transport/CANADIAN_PROVIDER_MATRIX.md`](docs/transport/CANADIAN_PROVIDER_MATRIX.md): what
+each publisher offers, whether it needs a key, its licence, and LeaseOS's status. It covers every
+province and territory, including Nova Scotia, PEI, the Northwest Territories and Nunavut, which
+are surveyed there and not registered here. How a collected event reaches an approved route is in
+[`docs/transport/CANADIAN_PROVIDER_RUNTIME.md`](docs/transport/CANADIAN_PROVIDER_RUNTIME.md).
 
-| Province | Key | Needs a key | Licence | Gate | Adapter |
-|---|---|---|---|---|---|
-| Alberta | `ab511` | yes — `AB_511_API_KEY` | none published | **rights review** | 511 platform |
-| British Columbia | `drivebc_open511` | no | OGL – BC | open | Open511 |
-| Saskatchewan | `sk_highway_hotline` | — | none published | **no API** | none |
-| Manitoba | `mb511` | yes — `MB_511_API_KEY` | none published | **rights review** | 511 platform |
-| Ontario | `on511` | **yes** — `ON_511_API_KEY` | OGL – Ontario | open once the key is set | 511 platform |
-| Québec | `qc_mtmd_roadworks` | no | CC BY 4.0 | open | MTMD WFS |
-| New Brunswick | `nb511` | yes — `NB_511_API_KEY` | none published | **rights review** | 511 platform |
-| Newfoundland and Labrador | `nl511` | yes — `NL_511_API_KEY` | none published | **rights review** | 511 platform |
-| Yukon | `yt511` | yes — `YT_511_API_KEY` | none published | **rights review** | 511 platform |
-
-- **Ontario needs a key.** Its developer page says "Requires a developer key"
-  and "Ten calls every 60 seconds". Its Developer Resources page puts the data
-  under OGL – Ontario and names commercial vendors, which is why it clears
-  where Alberta does not. Ontario calls its 511 logo "mandatory", but OGL –
-  Ontario excludes logos from the grant, so no logo is shown until Ontario says
-  in writing where it may appear. The licence attribution line is shown instead.
-- **Six provinces, one platform.** AB, ON, MB, NB, YT and NL all document
-  `GET /api/v2/get/event` with the same fields, so they share one parser.
-- **DriveBC caps a page at 500.** It does not say when it has cut a listing
-  short, so a response that fills the page is refused rather than treated as
-  the whole listing. Treating it as whole would withdraw live events.
-- **Québec's roadworks carry clearances** ("Hauteur libre : 4,3 mètres"). These
-  are shown in the headline and typed as restrictions. They stay advisory.
-- Nova Scotia, PEI, the Northwest Territories and Nunavut have not been surveyed yet.
+This file stays the licence record per source key, and the tables above are the authority for each
+key's licence and verification. In short: `drivebc_open511`, `qc_mtmd_roadworks` and `on511` are
+cleared. Ontario still needs a developer key on the server. The other five 511s are blocked for
+rights, and Saskatchewan publishes no feed. Clearing a source is not the same as collecting from it:
+no feed is enabled in production.
 
 ## Software components — a separate registry
 
@@ -161,3 +141,7 @@ All eight are usable in a closed-source commercial product.
 No dataset has been imported. No PostGIS, Valhalla, Martin or MapLibre component
 has been deployed. This tranche made the verification machine-enforced; the
 import itself is P5 and remains gated on the reserved Spatial branch.
+
+No provincial road feed is collected in production either. The collection runtime is built and
+tested against a real database (`server/transportFeedRuntime.ts`), and nothing schedules it. Where
+the recurring tick runs is an owner decision, set out in `docs/transport/CANADIAN_PROVIDER_RUNTIME.md`.
