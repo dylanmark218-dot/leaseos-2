@@ -27,7 +27,7 @@ describe("Live Assist purge — preconditions", () => {
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
 let db: DbOrTx;
-let seq = 915_000_000 + Math.floor(Math.random() * 50_000);
+let seq = 916_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 const T = (iso: string) => new Date(`${iso}Z`);
 const SNAP = JSON.stringify({ idleSeconds: 120, maxSessionMinutes: 20, retentionHours: 24, maxFramesPerSession: 60, maxInferenceCallsPerSession: 40 });
