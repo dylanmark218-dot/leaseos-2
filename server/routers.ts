@@ -95,6 +95,7 @@ import {
   unitInScope,
   workOrderInScope,
   proposalInScope,
+  assistantTargetsInScope,
   rateCardInScope,
   trackingSubjectInScope,
   transferTrackingNumber,
@@ -833,6 +834,12 @@ export const appRouter = router({
           })
         )
         .mutation(async ({ ctx, input }) => {
+          // SEC-1: every id the draft will store is authority at commit, so each must be in the
+          // caller's organization — refused here, before the model is called, with the same
+          // not-found a missing record gets.
+          if (!(await assistantTargetsInScope(input, await scopeFor(ctx.user.id)))) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Record not found" });
+          }
           if (input.idempotencyKey) {
             const existing = await getAssistantProposal(input.idempotencyKey);
             if (existing) {
