@@ -17,6 +17,8 @@ import brief from "../data/canada-disposal-facilities-brief-2026-09-17.json";
 import { approximateFromLegalLocation } from "./_core/legalLocation";
 import { parseLsd } from "./_core/dls";
 import { checkMapping, featureToCandidate, lifecycleFromStatus, SK_FACILITIES, type ArcgisFeature, type FieldMapping } from "./_core/arcgisImport";
+import { checkEgressUrl, EgressRefused, type EgressLimits } from "./_core/egressGuard";
+import { egressGet } from "./_core/egressHttp";
 import { readFileSync } from "node:fs";
 import { HYDROVAC_LIST, hydrovacFacilityKey, parseHydrovacList } from "./_core/hydrovacList";
 import { facilities, facilityAliases, facilityCallAheads, facilityCapabilities, facilityEvidence, facilityOperatingHours, facilitySourceLicences, facilityWaitReports, loadFacilityAssessments, loads, wasteStreamVocabulary, facilityImportRuns, atsLegalSubdivisions } from "../drizzle/schema";
@@ -33,6 +35,21 @@ async function dbOrThrow() {
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   return db;
+}
+/**
+ * A regulator layer is fetched through the egress guard: https only, public addresses only
+ * (after DNS and at every redirect), no cookies or credentials. Every importable layer this
+ * directory names answers over https (gis.saskatchewan.ca, geoweb-ags.bc-er.ca; checked 2026-09-24,
+ * and Saskatchewan's http:// URL 301s to https), so https-only loses no source. A
+ * 2000-feature query page measured 1.5 MB (SK) and 1.0 MB (BC) in about a second; the
+ * limits leave ten times that. `?f=pjson` answers text/plain, `/query?f=json` JSON.
+ */
+const ARCGIS_EGRESS: EgressLimits = { timeoutMs: 30_000, maxBytes: 16 * 1024 * 1024, maxRedirects: 3, accept: "application/json", contentTypes: ["application/json", "text/plain"] };
+const egressError = (e: unknown) => !(e instanceof EgressRefused) ? e
+  : e.destination ? new TRPCError({ code: "BAD_REQUEST", message: `Refused: ${e.message}` })
+  : new TRPCError({ code: "BAD_GATEWAY", message: `Layer fetch failed: ${e.message}` });
+async function arcgisGet(url: string) {
+  try { return await egressGet(url, ARCGIS_EGRESS); } catch (e) { throw egressError(e); }
 }
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const jsonArray = <T,>(v: unknown): T[] => (typeof v === "string" ? (JSON.parse(v) as T[]) : Array.isArray(v) ? (v as T[]) : []);
@@ -349,9 +366,9 @@ export const facilityDirectoryRouter = router({
     inspect: roleProcedure("facilityDirectory.arcgisInspect")
       .input(z.object({ layerUrl: z.string().url().max(1024) }))
       .mutation(async ({ input }) => {
-        const res = await fetch(`${input.layerUrl.replace(/\/$/, "")}?f=pjson`);
+        const res = await arcgisGet(`${input.layerUrl.replace(/\/$/, "")}?f=pjson`);
         if (!res.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Layer returned ${res.status}` });
-        const meta = (await res.json()) as { name?: string; geometryType?: string; extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string; type: string; alias?: string }[]; copyrightText?: string; maxRecordCount?: number };
+        const meta = res.json() as { name?: string; geometryType?: string; extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string; type: string; alias?: string }[]; copyrightText?: string; maxRecordCount?: number };
         return { name: meta.name ?? null, geometryType: meta.geometryType ?? null, wkid: meta.extent?.spatialReference?.latestWkid ?? meta.extent?.spatialReference?.wkid ?? null, fields: (meta.fields ?? []).map(f => ({ name: f.name, type: f.type, alias: f.alias ?? null })), copyrightText: meta.copyrightText ?? null, maxRecordCount: meta.maxRecordCount ?? null, note: "Map these fields to ours and record the licence before importing; an empty copyrightText is not a licence." };
       }),
     importFeatures: roleProcedure("facilityDirectory.arcgisImportFeatures")
@@ -361,18 +378,18 @@ export const facilityDirectoryRouter = router({
       .input(z.object({ source: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), layerUrl: z.string().url().max(1024), licenceKey: z.string().min(1).max(40), mapping: z.object({ id: z.string().min(1), name: z.string().optional(), facilityName: z.string().optional(), operator: z.string().optional(), licenceNumber: z.string().optional(), facilityType: z.string().optional(), status: z.string().optional(), legalLocation: z.string().optional() }), where: z.string().max(500).default("1=1"), maxFeatures: z.number().int().min(1).max(20000).default(5000), note: z.string().max(500).optional() }))
       .mutation(async ({ ctx, input }) => {
         const base = input.layerUrl.replace(/\/$/, "");
-        const metaRes = await fetch(`${base}?f=pjson`);
+        const metaRes = await arcgisGet(`${base}?f=pjson`);
         if (!metaRes.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Layer returned ${metaRes.status}` });
-        const meta = (await metaRes.json()) as { extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string }[]; maxRecordCount?: number };
+        const meta = metaRes.json() as { extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string }[]; maxRecordCount?: number };
         const wkid = meta.extent?.spatialReference?.latestWkid ?? meta.extent?.spatialReference?.wkid;
         if (!wkid) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The layer states no spatial reference; refusing to guess one" });
         const page = Math.min(meta.maxRecordCount ?? 1000, 2000);
         const features: { attributes: Record<string, unknown>; geometry?: { x?: number; y?: number; rings?: number[][][] } | null }[] = [];
         for (let offset = 0; features.length < input.maxFeatures; offset += page) {
           const q = new URLSearchParams({ where: input.where, outFields: "*", returnGeometry: "true", f: "json", resultOffset: String(offset), resultRecordCount: String(Math.min(page, input.maxFeatures - features.length)) });
-          const res = await fetch(`${base}/query?${q}`);
+          const res = await arcgisGet(`${base}/query?${q}`);
           if (!res.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Query returned ${res.status} at offset ${offset}` });
-          const data = (await res.json()) as { features?: typeof features; exceededTransferLimit?: boolean };
+          const data = res.json() as { features?: typeof features; exceededTransferLimit?: boolean };
           features.push(...(data.features ?? []));
           if (!data.exceededTransferLimit || !(data.features?.length)) break;
         }
@@ -482,6 +499,8 @@ async function nearbyFacilities(db: Db, latitude: number, longitude: number, rad
 
 /** One ArcGIS import run: check the mapping against the layer's fields, map, upsert, record evidence, write the run. */
 async function importArcgis(userId: number, input: { source: string; layerUrl: string; licenceKey: string; wkid: number; layerFields: string[]; mapping: FieldMapping; features: ArcgisFeature[]; note?: string }) {
+  // importFeatures fetches nothing, but the URL becomes the evidence's source link: a URL the server would refuse to fetch is not recorded as a regulator's.
+  try { checkEgressUrl(input.layerUrl); } catch (e) { throw egressError(e); }
   const db = await dbOrThrow();
   const lic = (await db.select().from(facilitySourceLicences).where(eq(facilitySourceLicences.licenceKey, input.licenceKey)).limit(1))[0];
   if (!lic) throw new TRPCError({ code: "BAD_REQUEST", message: `Unknown licence ${input.licenceKey}; register it first` });

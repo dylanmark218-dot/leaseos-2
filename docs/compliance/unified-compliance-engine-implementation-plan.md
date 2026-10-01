@@ -86,39 +86,100 @@ deferred. Tenant scoping of the dispatch path and the D-02 classification were a
 
 **Out of scope:** new contributors, UI, requirement registry changes.
 
-### C1b — Requirement registry reconciliation *(next; not started)*
+### C1b — Requirement registry reconciliation *(authorized after C1a merged; C1b-1 implemented, see `checkpoints/C1B_1_RULE_LEDGER.md`)*
 
-*Added by owner decision:* the credential read adapter from `credential-store-reconciliation.md` (D-05),
-non-destructive, after the owner answers its questions.
+*Updated 2026-09-23 against the real merged state (`main` = `42c454f`, migration head `0174`).*
+*Engine?* No. It is consolidation: seven verification ladders become one ledger, and SPINE item 2's
+`complianceDocumentValidity` duplication is resolved. **Out of scope:** the driver, fleet, TDG, route and
+OHS systems. C1b builds the regulatory authority that they will consume later.
 
-*Engine?* No. It is a resolver, plus SPINE item 2.
+**What exists to build on (verified on `main`)**
 
-**Scope**
+| Piece | Where | Relevance to C1b |
+|---|---|---|
+| Immutable, two-person, point-in-time promotion ledger | `hosRuleLimitHistory` (0120/0124). Columns: `promotionRef, profileKey, limitKey, value, unit, jurisdiction, authorityType, instrumentTitle, issuingAuthority, sourceSection, citationUrl, instrumentVersion, consolidationDate, verificationMethod, establishedByVersionRef, verifiedByUserId, verifiedAt, effectiveFrom, effectiveUntil, recordedAt, status (FUTURE/CURRENT/EXPIRED/REVOKED/SUPERSEDED), changeReason, correctsPromotionRef, previousPromotionRef`. Code: `knowledge/promotionLedger.ts` (`validateEvidence`, `promote`, `believedOn`, `divergences`) and `hos.limitPromote` (separation of duties) | **The pattern and the table to generalize.** Its history must survive unchanged |
+| Source documents with hashes and effective windows | `knowledgeDocuments` (`state`, `authorityLevel`, `contentHash`, `url`) and `knowledgeVersions` (`contentHash`, `effectiveFrom/Until`, supersedes chain, `verifiedBy`) | The **source** half of the ledger |
+| Requirement registry | `complianceRequirements` (`requirementKey`, `version`, `family`, `packKey`, `subjectType`, `jurisdiction`, `appliesWhenJson`, `satisfiedByDocTypes`, `missingSeverity`, `source*`, `effectiveFrom/Until`, `verificationStatus`, `verifiedBy`). `requirementLoad` mutates the prior row and is single-person | The **rule** half, to be put under the ledger |
+| Other ladders | `externalDataSources` (dataset licences), `roadRestrictions`/`structures`, `regulatoryThresholds`, `taxRules` | Mapped onto the ledger's vocabulary; **migrated later**, not in C1b |
+| Readiness provenance | `dispatchEligibilityChecks.ruleSetHash` (C1a); `ComplianceFinding.ruleRef` = classification rule | C1b adds the **requirement revision** each finding used |
+| Duplicated expiry logic (SPINE item 2) | `documentValidity.validityOf` (canonical, unused by dispatch); `complianceDocumentValidity` (adapter, **no production caller**); inline copies in `widgetSources.expiryState` (documentExpiry tile), `compliancePassport.evaluateRequirement`, `readinessComposer.credentialState` + `dispatchReadiness.credentialBlocker` | Reconciled onto the canonical path, with equivalence tests first |
 
-* `complianceRequirements`: `authorityTier`, `orgRef` (NULL = platform law), `contentHash`. Rows become
-  immutable per version.
-* The rule promotion ledger is generalized (D-03): `ruleFamily`/`ruleRef` on `hosRuleLimitHistory`, plus
-  `sourceRevisionHash` and `secondVerifierUserId`.
-* `requirementLoad` and `sourceReview` go through `promote()` with separation of duties (D-04).
-* The loader reads the table, not the seeds: `workAuthorization`, `packActivate` and `packKey`/version.
-  The `SUBJECT` zod enum is completed.
-* The applicability grammar is unified and returns `missingInputs[]`.
-* `compliancePassport.evaluateRequirement` uses `documentValidity.validityOf`, which resolves the
-  `complianceDocumentValidity` duplication.
-* Knowledge registry: status `proposed`, `section`, `publicationDate`, `repealedAt`.
-* DB triggers make sealed evidence versions immutable.
-* `regulatoryDataDiscipline` guard extended to the compliance evaluators.
+**Design**
 
-**Migration:** one or two, additive.
+1. **One ledger, generalized in place** (D-03). `hosRuleLimitHistory` gains `ruleFamily` (`hos_limit` for
+   every existing row), `ruleRef`, `domain`, `authorityTier` (the §4 ladder), `sourceRevisionRef`
+   (→ `knowledgeVersions.versionRef`), `sourceHash`, `secondVerifierUserId`, `lifecycle`, and `payloadJson`
+   for non-numeric rules. `profileKey`/`limitKey`/`value` become nullable for non-HOS families.
+   * **Additive only.** No existing row is rewritten except to backfill `ruleFamily = 'hos_limit'`, and
+     `believedOn` keeps returning byte-identical answers for HOS (an equivalence test is written first).
+   * The table keeps its name; a follow-up may add a view with a neutral name. Renaming a table
+     that holds legal history is not worth the risk (owner question C1b-Q1).
+2. **Lifecycle:** `candidate → reviewed → verified → active → superseded | withdrawn`, mapped onto the
+   existing statuses without rewriting history. `candidate`/`reviewed` are pre-ledger states held on the
+   proposal. `verified` and `active` correspond to FUTURE and CURRENT, split by the effective date.
+   `EXPIRED`, `REVOKED` and `SUPERSEDED` are kept. Nothing becomes `active` except by date after
+   verification. A scraper or an AI can produce at most a `candidate`.
+3. **Sources:**
+   * `knowledgeVersions` gains `citation`, `section`, `publicationDate`, `retrievedAt`, `repealedAt` and a
+     source `status`.
+   * The knowledge `authorityLevel` maps to the authority tier by table, not by rewrite.
+   * A rule revision cannot be verified without a `verified` source revision whose hash it records.
+4. **Rules:**
+   * `complianceRequirements` rows become immutable revisions: `requirementLoad` inserts and never
+     updates, and supersession is read from the ledger.
+   * Requirements gain `authorityTier`, `dispatchEffect` (explicit, replacing the implicit
+     `missingSeverity` mapping), `evidenceRequirementsJson`, `exemptionRefsJson`, `retentionRef`, and
+     `orgRef` (NULL = platform law).
+   * `requirementLoad` and `geo.sourceReview` go through `promote()`.
+   * Dispatch-blocking rules at the statute or regulator-order tier require two distinct verifiers,
+     the HOS model.
+5. **Historical evaluation:** every finding produced from a requirement carries
+   `requirementRef = { key, revision, promotionRef }`. `dispatchEligibilityChecks` stores the list, so
+   "which exact verified rule revision did this decision use?" is a row read. Point-in-time uses
+   `believedOn(rule, at)` for every family. Today's rules are never applied to yesterday's check.
+6. **Loader defects fixed** (found in the Checkpoint 0 survey):
+   * `workAuthorization` reads the table, not the seed constants.
+   * `packActivate` validates against `compliancePacks`.
+   * `loadRequirements` honours `packKey` and version.
+   * The `SUBJECT` zod enum is completed.
+7. **SPINE item 2, `complianceDocumentValidity`:** the four inline expiry decisions above route through
+   `documentValidity.validityOf` via the adapter. Equivalence tests are written **before** any inline
+   code is removed. `complianceDocumentValidity` then leaves `DECLARED_UNWIRED`.
 
-**Tests:** the §49 *Versioning* matrix:
+**Proposed slices** (one additive migration each, numbers from the register at PR time, next free `0175`):
 
-* Rule before, after and on its effective date.
-* Superseded, future and overlapping-verified rules; no verified rule.
-* Two-person refusal.
-* Point-in-time `believedOn` for requirements.
-* Historical source revision retained.
-* Hash mismatch.
+| Slice | Content | Migration |
+|---|---|---|
+| C1b-1 | ledger generalization + source fields + lifecycle; HOS equivalence tests; `promote()` generalized. **Implemented** (`0189`; the next free number was re-scanned, see the register) | one |
+| C1b-2 | requirements under the ledger; immutable revisions; two-person for dispatch-blocking statute; loader fixes; `requirementRef` on findings and checks; point-in-time query. **Split:** C1b-2a (immutable revisions, one registry reader for passport, work authorization and packs, the loader and subject/pack fixes, `requirementRef` on passport items) is **implemented** (`checkpoints/C1B_2A_REQUIREMENT_REGISTRY.md`). C1b-2b (verification through the ledger) needs an owner decision on sources, recorded in that document | 2a none; 2b one |
+| C1b-2b | verification levels (UNVERIFIED / CITATION_VERIFIED / SOURCE_DOCUMENT_VERIFIED / SUPERSEDED / WITHDRAWN) read from append-only events; citation and source-document routes through the ledger; two independent verifiers for dispatch-blocking; `CITATION_ALLOWED` / `SOURCE_DOCUMENT_REQUIRED` governance policy; one-step self-verification removed. **Implemented** (`checkpoints/C1B_2B_REQUIREMENT_VERIFICATION.md`) | `0198` |
+| C1b-3 | SPINE item 2 `complianceDocumentValidity` reconciliation (equivalence first); D-05 credential read adapter, non-destructive, with equivalence tests for the four `workerQualifications` readers. **Implemented** (`checkpoints/C1B_3_DOCUMENT_VALIDITY_AND_QUALIFICATION_READS.md`): four rules routed through `documentValidity.readExpiry` / `complianceDocumentValidity`; `server/qualificationReads.ts` read-only, organization-scoped; dispatch output unchanged | none |
+
+**SPINE items this advances**
+
+* **Item 2** (the four duplications): C1b-3 resolves `complianceDocumentValidity` (**done**; removed from `DECLARED_UNWIRED`, 83 remain after merging `main`). Remaining: `dispatchMatching`, `openShifts`, `fieldTicket`; deferred to C2: `medicalFitnessForDispatch` `<=` and composer Academy acceptance. The D-05 adapter moves
+  `openShiftsRouter`'s qualification reads onto the canonical projection, which is a step towards the
+  `openShifts` duplication but **does not resolve it**: the eligibility decision itself stays inline.
+  `dispatchMatching` and `fieldTicket` are untouched.
+* **Not advanced:**
+  * Item 1 (per-boundary confirmation on `tripStops`; resolver on open PR #10, reader blocked on a schema gap).
+  * Item 3 (`offlineCapability` → HS1).
+  * Item 4 (the rest of the spine in path order).
+* None of the thirteen engines is expected to leave `DECLARED_UNWIRED` except `complianceDocumentValidity`.
+  The moratorium stays in force.
+
+**Owner questions before C1b code.** *C1b-Q2 was answered on 2026-09-25: **B** (see the design's decision register, §23).* *The owner said "Continue" without answering these. C1b-1 proceeds
+on the recommended answer to each, and records them in `checkpoints/C1B_1_RULE_LEDGER.md` so they can be
+reversed. None of them changes dispatch behaviour in C1b-1.*
+
+* **C1b-Q1:** generalize `hosRuleLimitHistory` in place (recommended: additive, history untouched),
+  or create a new ledger and copy HOS history into it (two sources of truth during the transition)?
+* **C1b-Q2:** who may verify a regulatory source or rule revision (D-12)? Recommended: a named
+  `compliance.source.verify` holder, never the proposer, never AI.
+* **C1b-Q3:** which families need two verifiers? Recommended: any rule at the statute or
+  regulator-order tier whose dispatch effect is BLOCK.
+* **C1b-Q4:** may existing unverified seeds be loaded as `candidate` rows, or must they stay outside the
+  ledger until a human proposes them? Recommended: as candidates, clearly labelled.
 
 ### C2 — Driver compliance projection and HOS
 

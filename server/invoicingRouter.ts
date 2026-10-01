@@ -12,9 +12,12 @@ import { billingBookEntries, billingBooks, billingSnapshots, customerAccounts, c
 import { renderPdf, sha256Hex } from "./_core/ticketPdf";
 import { storagePut } from "./storage";
 import { queueCustomerAlert } from "./customerAlertService";
-import { getDb } from "./db";
+import { fieldTicketInScope, getDb } from "./db";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
-import { roleProcedure, router } from "./_core/trpc";
+import { moneyScoped, roleProcedure, router } from "./_core/trpc";
+import { ownsEntity, type FinanceScope } from "./_core/entityScope";
+import { disputeCaseInScope, invoiceInScope } from "./financeScope";
+import { assertPeriodOpen } from "./periodCloseService";
 import { disputeResolution, draftFromTicket, finalizeCheck, snapshotHash, voidCheck, type TicketLineForInvoice } from "./_core/invoiceDraft";
 import { determine } from "./_core/taxRuleEngine";
 import { GST_RATE_RULE_TYPE, GST_RATE_SEEDS } from "./_core/gstSeeds";
@@ -23,7 +26,9 @@ import { loadTaxRules } from "./payrollService";
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
 
-async function ticketForInvoice(d: Awaited<ReturnType<typeof db>>, ticketNumber: string) {
+/** F1 — the ticket must be the caller's (through its job), and so must the book its customer account keys to. */
+async function ticketForInvoice(d: Awaited<ReturnType<typeof db>>, fs: FinanceScope, ticketNumber: string) {
+  if (!(await fieldTicketInScope(ticketNumber, fs))) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket" });
   const t = (await d.select().from(fieldTickets).where(eq(fieldTickets.ticketNumber, ticketNumber)).limit(1))[0];
   if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket" });
   const [sigs, lines, job, account] = await Promise.all([
@@ -32,6 +37,7 @@ async function ticketForInvoice(d: Awaited<ReturnType<typeof db>>, ticketNumber:
     d.select().from(jobs).where(eq(jobs.id, t.jobId)).limit(1).then(r => r[0] ?? null),
     t.customerAccountId != null ? d.select().from(customerAccounts).where(eq(customerAccounts.id, t.customerAccountId)).limit(1).then(r => r[0] ?? null) : Promise.resolve(null),
   ]);
+  if (account && !ownsEntity(fs, account.financialEntityId)) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket" });
   const refs = lines.map(l => l.pricingDecisionRef).filter((r): r is string => !!r);
   const decisions = refs.length ? await d.select().from(pricingDecisions).where(inArray(pricingDecisions.decisionRef, refs)) : [];
   const byRef = new Map(decisions.map(x => [x.decisionRef, x]));
@@ -55,10 +61,9 @@ export function invoiceDocumentLines(inv: { invoiceNumber: string; customer: str
 
 export const invoicingRouter = router({
   /** Render the invoice's document from its frozen snapshot — deterministic, idempotent, stored beside the ticket's documents. */
-  render: roleProcedure("invoicing.render").input(z.object({ invoiceNumber: z.string().min(1).max(64) })).mutation(async ({ ctx, input }) => {
+  render: moneyScoped(roleProcedure("invoicing.render")).input(z.object({ invoiceNumber: z.string().min(1).max(64) })).mutation(async ({ ctx, input }) => {
     const d = await db();
-    const inv = (await d.select().from(invoices).where(eq(invoices.invoiceNumber, input.invoiceNumber)).limit(1))[0];
-    if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "No such invoice" });
+    const inv = await invoiceInScope(d, ctx.money, input.invoiceNumber, "No such invoice");
     if (inv.status === "draft" || inv.status === "void") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invoice is ${inv.status} — a document is rendered from a finalized invoice's snapshot` });
     const existing = (await d.select().from(fieldTicketDocuments).where(and(eq(fieldTicketDocuments.invoiceId, inv.id), eq(fieldTicketDocuments.kind, "invoice"))).limit(1))[0];
     if (existing) return { documentRef: existing.documentRef, contentHash: existing.contentHash, byteLength: existing.byteLength, alreadyRendered: true as const };
@@ -77,14 +82,17 @@ export const invoicingRouter = router({
   }),
 
   /** Void: recorded on the invoice, never by deleting it. Refused where money is applied — that is a credit. The book's entries are released. */
-  void: roleProcedure("invoicing.void").input(z.object({ invoiceNumber: z.string().min(1).max(64), reason: z.string().min(5).max(400) })).mutation(async ({ ctx, input }) => {
+  void: moneyScoped(roleProcedure("invoicing.void")).input(z.object({ invoiceNumber: z.string().min(1).max(64), reason: z.string().min(5).max(400) })).mutation(async ({ ctx, input }) => {
     const d = await db();
-    const inv = (await d.select().from(invoices).where(eq(invoices.invoiceNumber, input.invoiceNumber)).limit(1))[0];
-    if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "No such invoice" });
+    const inv = await invoiceInScope(d, ctx.money, input.invoiceNumber, "No such invoice");
     const allocated = (await d.select({ amountCents: paymentAllocations.amountCents }).from(paymentAllocations).where(eq(paymentAllocations.invoiceId, inv.id))).reduce((a, r) => a + r.amountCents, 0);
     const credited = (await d.select({ amountCents: customerCredits.amountCents, status: customerCredits.status }).from(customerCredits).where(eq(customerCredits.invoiceId, inv.id))).filter(c => c.status === "approved").reduce((a, r) => a + r.amountCents, 0);
     const check = voidCheck({ status: inv.status, allocatedCents: allocated, approvedCreditCents: credited });
     if (!check.permitted) return { voided: false as const, refusals: check.refusals };
+    // F1 — a void changes the period the invoice was issued in. Like every other dated finance write, it is
+    // refused when that period is not open (soft-closed or closed): the correction is a credit dated in an
+    // open period, or a controller reopening the period with a reason — never a silent rewrite.
+    await assertPeriodOpen(inv.financialEntityId!, inv.issuedAt ?? inv.createdAt, `Void of invoice ${inv.invoiceNumber}`);
     await d.update(invoices).set({ status: "void", voidedAt: new Date(), voidedByUserId: ctx.user.id, voidReason: input.reason }).where(eq(invoices.id, inv.id));
     const lineIds = (await d.select({ fieldTicketLineId: invoiceLines.fieldTicketLineId }).from(invoiceLines).where(eq(invoiceLines.invoiceId, inv.id))).map(l => l.fieldTicketLineId).filter((x): x is number => x != null);
     if (lineIds.length) await d.update(billingBookEntries).set({ billingStatus: "ready", holdReason: `Released: invoice ${inv.invoiceNumber} voided — ${input.reason}`.slice(0, 300) }).where(and(eq(billingBookEntries.billingBookId, inv.billingBookId), inArray(billingBookEntries.fieldTicketLineId, lineIds)));
@@ -93,13 +101,10 @@ export const invoicingRouter = router({
   }),
 
   /** Resolve a dispute: upheld, credited or partial. A credit is requested here and approved by a second person in AR; the invoice returns to its delivery state. */
-  disputeResolve: roleProcedure("invoicing.disputeResolve").input(z.object({ caseNumber: z.string().min(1).max(64), outcome: z.enum(["upheld", "credited", "partial"]), creditAmountCents: z.number().int().positive().optional(), narrative: z.string().min(10).max(2000) })).mutation(async ({ ctx, input }) => {
+  disputeResolve: moneyScoped(roleProcedure("invoicing.disputeResolve")).input(z.object({ caseNumber: z.string().min(1).max(64), outcome: z.enum(["upheld", "credited", "partial"]), creditAmountCents: z.number().int().positive().optional(), narrative: z.string().min(10).max(2000) })).mutation(async ({ ctx, input }) => {
     const d = await db();
-    const c = (await d.select().from(disputeCases).where(eq(disputeCases.caseNumber, input.caseNumber)).limit(1))[0];
-    if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "No such dispute case" });
-    if (!c.invoiceNumber) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The case names no invoice" });
-    const inv = (await d.select().from(invoices).where(eq(invoices.invoiceNumber, c.invoiceNumber)).limit(1))[0];
-    if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "The case names no invoice on file" });
+    const c = await disputeCaseInScope(d, ctx.money, input.caseNumber);
+    const inv = await invoiceInScope(d, ctx.money, c.invoiceNumber!, "The case names no invoice on file");
     const res = disputeResolution({ caseStatus: c.status, outcome: input.outcome, disputedAmountCents: c.disputedAmountCents ?? 0, creditAmountCents: input.creditAmountCents ?? null });
     if (!res.permitted) return { resolved: false as const, refusals: res.refusals };
     let creditRef: string | null = null;
@@ -116,10 +121,9 @@ export const invoicingRouter = router({
   }),
 
   /** Send: a finalized, rendered invoice goes to the customer's portal with its due date from the account's terms; the customer is alerted. */
-  send: roleProcedure("invoicing.send").input(z.object({ invoiceNumber: z.string().min(1).max(64) })).mutation(async ({ input }) => {
+  send: moneyScoped(roleProcedure("invoicing.send")).input(z.object({ invoiceNumber: z.string().min(1).max(64) })).mutation(async ({ ctx, input }) => {
     const d = await db();
-    const inv = (await d.select().from(invoices).where(eq(invoices.invoiceNumber, input.invoiceNumber)).limit(1))[0];
-    if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "No such invoice" });
+    const inv = await invoiceInScope(d, ctx.money, input.invoiceNumber, "No such invoice");
     if (inv.status !== "approved") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invoice is ${inv.status} — only a finalized, unsent invoice is sent` });
     const doc = (await d.select().from(fieldTicketDocuments).where(and(eq(fieldTicketDocuments.invoiceId, inv.id), eq(fieldTicketDocuments.kind, "invoice"))).limit(1))[0];
     if (!doc) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Render the invoice document before sending" });
@@ -134,11 +138,11 @@ export const invoicingRouter = router({
   }),
 
   /** Draft an invoice from a signed ticket: accepted, priced lines enter; the rest are excluded with a reason or block the draft. */
-  draftFromTicket: roleProcedure("invoicing.draftFromTicket")
+  draftFromTicket: moneyScoped(roleProcedure("invoicing.draftFromTicket"))
     .input(z.object({ ticketNumber: z.string().min(1).max(64), purchaseOrder: z.string().max(80).optional(), afeNumber: z.string().max(80).optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const d = await db();
-      const x = await ticketForInvoice(d, input.ticketNumber);
+      const x = await ticketForInvoice(d, ctx.money, input.ticketNumber);
       if (!x.account) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Ticket has no customer account — an invoice is addressed to an account" });
       // v22.11 — lines already on a live (non-void) invoice are excluded; what remains is a supplemental draft, or nothing new
       const onLines = x.lines.length ? await d.select({ fieldTicketLineId: invoiceLines.fieldTicketLineId, invoiceId: invoiceLines.invoiceId }).from(invoiceLines).where(inArray(invoiceLines.fieldTicketLineId, x.lines.map(l => l.id))) : [];
@@ -175,22 +179,20 @@ export const invoicingRouter = router({
       return { drafted: true as const, invoiceNumber, bookNumber: book.bookNumber, subtotalCents: draft.subtotalCents, lines: draft.lines.length, excluded: draft.excluded, gstTreatment: "unknown" as const, next: "Set the GST/HST treatment (gst.treatmentSet), then finalize." };
     }),
 
-  get: roleProcedure("invoicing.get").input(z.object({ invoiceNumber: z.string().min(1).max(64) })).query(async ({ input }) => {
+  get: moneyScoped(roleProcedure("invoicing.get")).input(z.object({ invoiceNumber: z.string().min(1).max(64) })).query(async ({ ctx, input }) => {
     const d = await db();
-    const inv = (await d.select().from(invoices).where(eq(invoices.invoiceNumber, input.invoiceNumber)).limit(1))[0];
-    if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "No such invoice" });
+    const inv = await invoiceInScope(d, ctx.money, input.invoiceNumber, "No such invoice");
     const lines = await d.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, inv.id));
     const snap = (await d.select({ payloadHash: billingSnapshots.payloadHash, capturedAt: billingSnapshots.capturedAt }).from(billingSnapshots).where(eq(billingSnapshots.invoiceId, inv.id)).limit(1))[0] ?? null;
     return { ...inv, lines: lines.sort((a, b) => a.lineNo - b.lineNo), snapshot: snap };
   }),
 
   /** Finalize: a second permission freezes the snapshot. A taxable invoice needs a verified rate; an unknown treatment is refused. */
-  finalize: roleProcedure("invoicing.finalize")
+  finalize: moneyScoped(roleProcedure("invoicing.finalize"))
     .input(z.object({ invoiceNumber: z.string().min(1).max(64), jurisdiction: z.string().min(2).max(20).default("CA-AB") }))
     .mutation(async ({ ctx, input }) => {
       const d = await db();
-      const inv = (await d.select().from(invoices).where(eq(invoices.invoiceNumber, input.invoiceNumber)).limit(1))[0];
-      if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "No such invoice" });
+      const inv = await invoiceInScope(d, ctx.money, input.invoiceNumber, "No such invoice");
       const lines = await d.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, inv.id));
       const rules = await loadTaxRules(input.jurisdiction);
       const keys = new Set(rules.map(r => r.ruleKey));

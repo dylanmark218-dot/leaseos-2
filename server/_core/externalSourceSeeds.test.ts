@@ -31,7 +31,7 @@ const byKey = (k: string) =>
   ALL_DATA_SOURCES.find(s => s.sourceKey === k)!;
 
 describe("the count is eight, not nine", () => {
-  it("has twenty-one sources, eight verified and thirteen not", () => {
+  it("has twenty-eight sources, ten verified and eighteen not", () => {
     // The research summary said "nine of eleven are clean" while separately
     // flagging three as unresolved. Eleven minus three is eight. Seeding nine
     // would have marked a blocked source usable.
@@ -41,9 +41,14 @@ describe("the count is eight, not nine", () => {
     // redistributing a channel bank to field tablets as operational data is a
     // separate permission nobody has confirmed. They seed unverified, which
     // means inspection only, and the eight stays eight.
-    expect(ALL_DATA_SOURCES).toHaveLength(21);
-    expect(VERIFIED_DATA_SOURCES).toHaveLength(8);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(13);
+    //
+    // The Canadian 511 tranche (2026-09-24) added seven. Two clear on a published open licence —
+    // Ontario 511 under OGL – Ontario, Québec's roadworks under CC BY 4.0 — so eight becomes ten.
+    // Manitoba, New Brunswick, Yukon and Newfoundland and Labrador publish no licence beside their
+    // keys, exactly like Alberta, and Saskatchewan publishes no API. Those five seed unverified.
+    expect(ALL_DATA_SOURCES).toHaveLength(28);
+    expect(VERIFIED_DATA_SOURCES).toHaveLength(10);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(18);
   });
 
   it("names exactly the ones that could not be verified", () => {
@@ -58,9 +63,14 @@ describe("the count is eight, not nine", () => {
       "ised_bc_rr",
       "ised_cb_grs",
       "ised_sms",
+      "mb511",
       "mb_petroleum",
+      "nb511",
+      "nl511",
+      "sk_highway_hotline",
       "sk_iris",
       "statcan_boundaries",
+      "yt511",
     ]);
   });
 
@@ -256,9 +266,14 @@ describe("attribution is collected, and gaps are named", () => {
       "ised_bc_rr",
       "ised_cb_grs",
       "ised_sms",
+      "mb511",
       "mb_petroleum",
+      "nb511",
+      "nl511",
+      "sk_highway_hotline",
       "sk_iris",
       "statcan_boundaries",
+      "yt511",
     ]);
   });
 });
@@ -350,13 +365,13 @@ beforeAll(async () => {
 });
 
 d("seeding into the database", () => {
-  it("inserts all twenty-one and is idempotent on a second run", async () => {
+  it("inserts all twenty-eight and is idempotent on a second run", async () => {
     const first = await seedExternalDataSources();
-    expect(first.inserted.length + first.existing.length).toBe(21);
+    expect(first.inserted.length + first.existing.length).toBe(28);
 
     const second = await seedExternalDataSources();
     expect(second.inserted).toEqual([]);
-    expect(second.existing).toHaveLength(21);
+    expect(second.existing).toHaveLength(28);
   });
 
   it("persists status, rate limit and retrieval date", async () => {

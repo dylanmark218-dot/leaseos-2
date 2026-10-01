@@ -17,7 +17,7 @@ import type { DomainRole } from "./_core/recordsAuthorization";
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let nextId = 940_000 + Math.floor(Math.random() * 50_000);
+let nextId = 411_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 8);
 beforeAll(async () => { if (URL) pool = mysql.createPool({ uri: URL, connectionLimit: 4 }); });
 

@@ -9,7 +9,9 @@ import { createHash } from "node:crypto";
 import { INVITATION_TTL_MS, newToken } from "./_core/externalIdentityPolicy";
 import { queueCustomerAlert } from "./customerAlertService";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { roleProcedure, router } from "./_core/trpc";
+import { moneyScoped, roleProcedure, router } from "./_core/trpc";
+import { requireOwnedEntity } from "./_core/entityScope";
+import { customerAccountInScope, externalIdentityInScope, invoiceInScope, portalSubmissionInScope, requireEvidence, requireLoad, vendorInScope } from "./financeScope";
 import { toCents } from "./_core/money";
 import { getDb } from "./db";
 import { customerAccounts, customerCredits, customerPurchaseOrders, customerRateCardLines, customerRateCards, disposalTickets, disputeCases, externalIdentities, facilities, invoices, paymentAllocations, portalSubmissions, vendorBills, vendorBillLines, vendors } from "../drizzle/schema";
@@ -30,38 +32,36 @@ async function poRecordFor(id: number): Promise<PurchaseOrder | null> {
 }
 
 export const commercialRouter = router({
-  termsSet: roleProcedure("commercial.termsSet")
+  termsSet: moneyScoped(roleProcedure("commercial.termsSet"))
     .input(z.object({ accountRef: z.string().min(1).max(64), paymentTermsDays: z.number().int().min(0).max(180).optional(), creditLimitCents: z.number().int().nonnegative().nullable().optional(), requiresPurchaseOrder: z.boolean().optional(), requiresAfe: z.boolean().optional(), billingFrequency: z.enum(["per_job", "weekly", "monthly"]).optional(), status: z.enum(["active", "on_hold", "inactive"]).optional(), holdReason: z.string().max(300).nullable().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const a = (await db.select().from(customerAccounts).where(eq(customerAccounts.accountRef, input.accountRef)).limit(1))[0];
-      if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
+      const a = await customerAccountInScope(db, ctx.money, input.accountRef);
       if (input.status === "on_hold" && !input.holdReason) throw new TRPCError({ code: "BAD_REQUEST", message: "A hold needs a reason" });
       const { accountRef, ...patch } = input;
       await db.update(customerAccounts).set({ ...patch, holdReason: input.status === "on_hold" ? input.holdReason ?? null : input.status ? null : input.holdReason ?? a.holdReason }).where(eq(customerAccounts.id, a.id));
       return { accountRef, status: input.status ?? a.status };
     }),
 
-  poRecord: roleProcedure("commercial.poRecord")
+  poRecord: moneyScoped(roleProcedure("commercial.poRecord"))
     .input(z.object({ accountRef: z.string().min(1).max(64), poNumber: z.string().min(1).max(80), afeNumber: z.string().max(80).nullable().optional(), authorizedCents: z.number().int().positive(), validFrom: z.coerce.date(), validTo: z.coerce.date().nullable().optional(), evidenceRecordId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const a = (await db.select().from(customerAccounts).where(eq(customerAccounts.accountRef, input.accountRef)).limit(1))[0];
-      if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
+      const a = await customerAccountInScope(db, ctx.money, input.accountRef);
+      await requireEvidence(ctx.money, input.evidenceRecordId);
       const poRef = ref("PO");
       await db.insert(customerPurchaseOrders).values({ poRef, customerAccountId: a.id, financialEntityId: a.financialEntityId, poNumber: input.poNumber, afeNumber: input.afeNumber ?? null, authorizedCents: input.authorizedCents, validFrom: input.validFrom, validTo: input.validTo ?? null, evidenceRecordId: input.evidenceRecordId ?? null, recordedByUserId: ctx.user.id });
       return { poRef, poNumber: input.poNumber };
     }),
 
-  rateCardCreate: roleProcedure("commercial.rateCardCreate")
+  rateCardCreate: moneyScoped(roleProcedure("commercial.rateCardCreate"))
     .input(z.object({ accountRef: z.string().min(1).max(64), effectiveFrom: z.coerce.date(), lines: z.array(z.object({ serviceCode: z.string().min(1).max(60), description: z.string().min(1).max(220), unit: z.enum(["hour", "day", "km", "m3", "tonne", "load", "each"]), rateCents: z.number().int().nonnegative(), minimumCents: z.number().int().nonnegative().nullable().optional() })).min(1) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const a = (await db.select().from(customerAccounts).where(eq(customerAccounts.accountRef, input.accountRef)).limit(1))[0];
-      if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
+      const a = await customerAccountInScope(db, ctx.money, input.accountRef);
       const prior = (await db.select({ id: customerRateCards.id, version: customerRateCards.version }).from(customerRateCards).where(and(eq(customerRateCards.customerAccountId, a.id), eq(customerRateCards.status, "approved"))).orderBy(desc(customerRateCards.version)).limit(1))[0];
       const version = (prior?.version ?? 0) + 1;
       const rateCardRef = ref("RC");
@@ -73,13 +73,12 @@ export const commercialRouter = router({
     }),
 
   /** May this invoice be issued to this customer? Named blockers; a due date from the terms; lines priced from the card. */
-  billingCheck: roleProcedure("commercial.billingCheck")
+  billingCheck: moneyScoped(roleProcedure("commercial.billingCheck"))
     .input(z.object({ accountRef: z.string().min(1).max(64), invoiceTotalCents: z.number().int().positive(), poNumber: z.string().max(80).nullable().optional(), afeNumber: z.string().max(80).nullable().optional(), at: z.coerce.date().optional(), serviceLines: z.array(z.object({ serviceCode: z.string().min(1).max(60), quantity: z.number().positive(), unit: z.enum(["hour", "day", "km", "m3", "tonne", "load", "each"]) })).optional() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const a = (await db.select().from(customerAccounts).where(eq(customerAccounts.accountRef, input.accountRef)).limit(1))[0];
-      if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
+      const a = await customerAccountInScope(db, ctx.money, input.accountRef);
       const at = input.at ?? new Date();
       const poRow = input.poNumber ? (await db.select({ id: customerPurchaseOrders.id }).from(customerPurchaseOrders).where(and(eq(customerPurchaseOrders.customerAccountId, a.id), eq(customerPurchaseOrders.poNumber, input.poNumber))).limit(1))[0] : undefined;
       const po = poRow ? await poRecordFor(poRow.id) : null;
@@ -104,14 +103,16 @@ export const portalAdminRouter = router({
    * once and stored only as a hash; it expires; accepting it (through the
    * external gate) issues the bearer token. Nothing is active until accepted.
    */
-  identityInvite: roleProcedure("portalAdmin.identityInvite")
+  identityInvite: moneyScoped(roleProcedure("portalAdmin.identityInvite"))
     .input(z.object({ kind: z.enum(["customer", "vendor", "facility"]), accountRef: z.string().max(64).optional(), vendorId: z.number().int().positive().optional(), facilityId: z.number().int().positive().optional(), email: z.string().email().max(220), displayName: z.string().min(1).max(180) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       let customerAccountId: number | null = null, vendorId: number | null = null, facilityId: number | null = null;
-      if (input.kind === "customer") { const a = input.accountRef ? (await db.select({ id: customerAccounts.id }).from(customerAccounts).where(eq(customerAccounts.accountRef, input.accountRef)).limit(1))[0] : undefined; if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" }); customerAccountId = a.id; }
-      if (input.kind === "vendor") { const v = input.vendorId ? (await db.select({ id: vendors.id, portalEnabled: vendors.portalEnabled }).from(vendors).where(eq(vendors.id, input.vendorId)).limit(1))[0] : undefined; if (!v) throw new TRPCError({ code: "NOT_FOUND", message: "Vendor not found" }); vendorId = v.id; if (!v.portalEnabled) await db.update(vendors).set({ portalEnabled: true }).where(eq(vendors.id, v.id)); }
+      // F1 — the account or vendor the identity is bound to must be in the caller's books. A facility is a shared
+      // directory entry; the identity is the inviting organization's (see financeScope.identityOwned).
+      if (input.kind === "customer") { if (!input.accountRef) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" }); customerAccountId = (await customerAccountInScope(db, ctx.money, input.accountRef)).id; }
+      if (input.kind === "vendor") { if (!input.vendorId) throw new TRPCError({ code: "NOT_FOUND", message: "Vendor not found" }); const v = await vendorInScope(db, ctx.money, input.vendorId); vendorId = v.id; if (!v.portalEnabled) await db.update(vendors).set({ portalEnabled: true }).where(eq(vendors.id, v.id)); }
       if (input.kind === "facility") { const f = input.facilityId ? (await db.select({ id: facilities.id }).from(facilities).where(eq(facilities.id, input.facilityId)).limit(1))[0] : undefined; if (!f) throw new TRPCError({ code: "NOT_FOUND", message: "Facility not found" }); facilityId = f.id; }
       const invitationToken = newToken();
       const now = new Date();
@@ -121,31 +122,29 @@ export const portalAdminRouter = router({
       return { identityRef, invitationToken, invitationExpiresAt: new Date(now.getTime() + INVITATION_TTL_MS), note: "The invitation token is shown once and stored only as a hash. Accepting it issues the bearer token." };
     }),
 
-  identityRevoke: roleProcedure("portalAdmin.identityRevoke")
+  identityRevoke: moneyScoped(roleProcedure("portalAdmin.identityRevoke"))
     .input(z.object({ identityRef: z.string().min(1).max(64), reason: z.string().min(5).max(300) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const row = (await db.select({ id: externalIdentities.id, status: externalIdentities.status }).from(externalIdentities).where(eq(externalIdentities.identityRef, input.identityRef)).limit(1))[0];
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Identity not found" });
+      const row = await externalIdentityInScope(db, ctx.money, input.identityRef);
       await db.update(externalIdentities).set({ status: "revoked", revokedAt: new Date(), revokedReason: input.reason, previousTokenHash: null, previousTokenExpiresAt: null }).where(eq(externalIdentities.id, row.id));
       return { identityRef: input.identityRef, status: "revoked" as const };
     }),
 
   /** A person inside accepts or rejects what came in from outside. Acceptance is what creates the LeaseOS record. */
-  submissionReview: roleProcedure("portalAdmin.submissionReview")
+  submissionReview: moneyScoped(roleProcedure("portalAdmin.submissionReview"))
     .input(z.object({ submissionRef: z.string().min(1).max(64), decision: z.enum(["accepted", "rejected"]), reason: z.string().min(3).max(400), financialEntityId: z.number().int().positive().optional(), loadId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const sub = (await db.select().from(portalSubmissions).where(eq(portalSubmissions.submissionRef, input.submissionRef)).limit(1))[0];
-      if (!sub) throw new TRPCError({ code: "NOT_FOUND", message: "Submission not found" });
+      const { submission: sub, identity } = await portalSubmissionInScope(db, ctx.money, input.submissionRef);
       if (sub.status !== "submitted") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Submission is ${sub.status}` });
-      const identity = (await db.select().from(externalIdentities).where(eq(externalIdentities.id, sub.externalIdentityId)).limit(1))[0]!;
       let resultRef: string | null = null;
       if (input.decision === "accepted") {
         if (sub.kind === "vendor_bill") {
           if (!input.financialEntityId) throw new TRPCError({ code: "BAD_REQUEST", message: "Accepting a vendor bill needs the financial entity it is billed to" });
+          requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
           const p = JSON.parse(sub.payloadJson) as VendorBillPayload & { invoiceDate: string };
           const billRef = ref("BILL");
           const ins = await db.insert(vendorBills).values({ billRef, financialEntityId: input.financialEntityId, vendorId: identity.vendorId!, vendorInvoiceNumber: p.vendorInvoiceNumber, invoiceDate: new Date(p.invoiceDate), receivedAt: sub.submittedAt, subtotalCents: toCents(p.subtotal), taxAmountCents: toCents(p.taxAmount), totalCents: toCents(p.total)!, matchOutcome: "unmatched", status: "received", purchaseAuthorizationId: null });
@@ -155,13 +154,13 @@ export const portalAdminRouter = router({
           resultRef = billRef;
         } else if (sub.kind === "disposal_ticket") {
           const p = JSON.parse(sub.payloadJson) as DisposalTicketPayload & { scaleInAt: string; confidence?: "low" | "medium" | "high" };
+          await requireLoad(db, ctx.money, input.loadId);
           const ticketNumber = (await nextTrackingNumber(db, { sequenceType: "DSP" })).trackingNumber;
           await db.insert(disposalTickets).values({ ticketNumber, loadId: input.loadId ?? null, facilityId: identity.facilityId!, facilityTicketNumber: p.facilityTicketNumber, scaleInAt: new Date(p.scaleInAt), grossKg: p.grossKg, tareKg: p.tareKg, netKg: p.netKg, quantity: p.quantity, quantityUnit: p.quantityUnit, verificationStatus: "needs_review", source: "facility_portal", confidence: p.confidence ?? "medium", evidenceRefs: p.scaleRecordHash ? JSON.stringify({ scaleRecordHash: p.scaleRecordHash }) : null });
           resultRef = ticketNumber;
         } else if (sub.kind === "invoice_dispute") {
           const p = JSON.parse(sub.payloadJson) as { invoiceNumber: string; disputedAmountCents: number; reason: string };
-          const inv = (await db.select().from(invoices).where(eq(invoices.invoiceNumber, p.invoiceNumber)).limit(1))[0];
-          if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "Invoice not found" });
+          const inv = await invoiceInScope(db, ctx.money, p.invoiceNumber);
           const caseNumber = ref("DISP");
           await db.insert(disputeCases).values({ caseNumber, invoiceNumber: inv.invoiceNumber, jobId: inv.jobId, customer: inv.customer, raisedByName: identity.displayName, raisedByCompany: inv.customer, disputedAmountCents: p.disputedAmountCents, reasonStated: p.reason, status: "raised", raisedAt: sub.submittedAt });
           await db.update(invoices).set({ status: "disputed", disputeReason: p.reason, disputedAt: sub.submittedAt }).where(eq(invoices.id, inv.id));
