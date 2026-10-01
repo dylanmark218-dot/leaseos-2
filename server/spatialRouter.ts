@@ -15,7 +15,8 @@ import { accessRoadSegments, roadGraphBuilds, roadGraphEdges, roadRadioAssignmen
 import { resolveAssignment } from "./_core/commRoute";
 import { parseLsd, parseUwi, theoreticalCentroid } from "./_core/dls";
 import { routeAgainstNetwork, routingSourceStatus } from "./_core/routingSource";
-import { evaluateRoute, type RoadSegmentInput, type SegmentAttribute } from "./_core/routeEvaluation";
+import { evaluateRoute, type RoadSegmentInput, type SegmentAttribute, type VehicleValues } from "./_core/routeEvaluation";
+import { evaluateSegments, NoVehicleProfile } from "./routeLegality";
 import type { RequiredCheck } from "./_core/routingCompiler";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -111,51 +112,20 @@ export const spatialRouter = router({
    * The evidence is persisted so the verdict can be reproduced.
    */
   routeEvaluateSegments: roleProcedure("spatial.routeEvaluateSegments")
-    .input(z.object({ unitId: z.number().int().positive(), segments: z.array(z.object({ segmentId: z.string().min(1).max(80), label: z.string().min(1).max(220), lengthKm: z.number().nonnegative() })).min(1).max(200), at: z.coerce.date().default(() => new Date()), requiredChecks: z.array(CHECK).min(1), dangerousGoods: z.boolean().default(false), requiresEscort: z.boolean().default(false), tripId: z.number().int().positive().optional(), jobId: z.number().int().positive().optional() }))
+    .input(z.object({ unitId: z.number().int().positive(), segments: z.array(z.object({ segmentId: z.string().min(1).max(80), label: z.string().min(1).max(220), lengthKm: z.number().nonnegative() })).min(1).max(200), at: z.coerce.date().default(() => new Date()), requiredChecks: z.array(CHECK).min(1), dangerousGoods: z.boolean().default(false), requiresEscort: z.boolean().default(false), tripId: z.number().int().positive().optional(), jobId: z.number().int().positive().optional(), buildRef: z.string().max(64).optional() }))
     .mutation(async ({ ctx, input }) => {
       // P4.1: the unit must be in the caller's scope (coreRecordOwnership); otherwise it does not exist here.
       if (!(await unitInScope(input.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
       const db = await dbOrThrow();
-      const p = (await db.select().from(vehicleProfiles).where(eq(vehicleProfiles.unitId, input.unitId)).limit(1))[0];
-      if (!p) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No vehicle profile for this unit — record its dimensions and axle weights first" });
-      const groups = JSON.parse(p.axleGroupsJson) as { loadedKg: number }[];
-      const vehicle = { grossWeightKg: groups.reduce((a, g) => a + g.loadedKg, 0), maxAxleGroupKg: Math.max(...groups.map(g => g.loadedKg)), heightM: p.heightM, widthM: p.widthM, lengthM: p.lengthM, dangerousGoods: input.dangerousGoods, requiresEscort: input.requiresEscort };
-      const ids = input.segments.map(s => s.segmentId);
-      const [rs, bs] = await Promise.all([db.select().from(roadRestrictions).where(inArray(roadRestrictions.segmentId, ids)), db.select().from(bridges).where(inArray(bridges.segmentId, ids))]);
-      const dateNotes: string[] = [];
-      const structureNotes: string[] = [];
-      const live = await db.select().from(structures).where(inArray(structures.segmentId, ids));
-      const segments: RoadSegmentInput[] = input.segments.map(s => {
-        const attrs: SegmentAttribute[] = [];
-        // Restrictions: the date-windowed set `applicableRestrictions` resolves (one governing row per check, verified first); superseded rows do not apply.
-        // v22.15 — a restriction applies on a date or it does not apply at all; what its window excludes is reported, never silently dropped.
-        const windowed = applicableRestrictions(rs.filter(x => x.segmentId === s.segmentId), input.at);
-        for (const { row, state } of windowed.setAside) dateNotes.push(`${s.label}: ${row.checkKey.replace(/_/g, " ")} restriction ${row.restrictionRef} is ${state.replace(/_/g, " ")} on ${input.at.toISOString().slice(0, 10)} and was not applied`);
-        const mine = windowed.applied;
-        // The recorded unit travels with the limit: a limit in a unit the check does not understand is
-        // UNKNOWN in the evaluator, never compared as if it were kilograms or metres.
-        for (const r of mine) attrs.push({ check: r.checkKey as RequiredCheck, limitValue: r.limitValue, textValue: r.textValue, unit: r.unit, jurisdiction: r.jurisdiction, source: `restriction ${r.restrictionRef}: ${r.source}`, sourceVersion: r.sourceVersion, verifiedAt: r.verifiedAt?.toISOString() ?? null, confidence: r.verificationStatus === "verified" ? "authority_confirmed" : "unverified" });
-        for (const b of bs.filter(x => x.segmentId === s.segmentId)) {
-          const conf = b.verifiedAt ? "authority_confirmed" : "unverified";
-          if (b.postedWeightKg != null) attrs.push({ check: "bridge_capacity", limitValue: b.postedWeightKg, jurisdiction: b.jurisdiction, source: b.source, sourceVersion: b.sourceVersion, verifiedAt: b.verifiedAt?.toISOString() ?? null, confidence: conf });
-          if (b.postedAxleGroupKg != null) attrs.push({ check: "bridge_axle_limit", limitValue: b.postedAxleGroupKg, jurisdiction: b.jurisdiction, source: b.source, sourceVersion: b.sourceVersion, verifiedAt: b.verifiedAt?.toISOString() ?? null, confidence: conf });
-          if (b.clearanceM != null) attrs.push({ check: "bridge_clearance", limitValue: b.clearanceM, jurisdiction: b.jurisdiction, source: b.source, sourceVersion: b.sourceVersion, verifiedAt: b.verifiedAt?.toISOString() ?? null, confidence: conf });
-        }
-        /*
-         * T2 (defect 1B) — every structure on the segment contributes its limits, including for a check a
-         * road restriction already covers. This used to skip them ("contribute what the road itself does
-         * not state"), so a 5.0 m road clearance hid a 4.2 m overpass. Which limit controls is the
-         * evaluator's decision, made over all of them; the router's job is to hand over everything that
-         * applies here, now, and nothing that does not (windowing and supersession stay upstream).
-         */
-        for (const st of live.filter(x => x.segmentId === s.segmentId)) {
-          const contributed = structureAttributes(st, input.at);
-          attrs.push(...contributed.attributes.map(a => ({ ...a, source: `structure ${st.structureRef}: ${a.source ?? st.label}` })));
-          structureNotes.push(...contributed.notes);
-        }
-        return { segmentId: s.segmentId, label: s.label, lengthKm: s.lengthKm, attributes: attrs };
-      });
-      const verdict = evaluateRoute(input.requiredChecks as RequiredCheck[], segments, vehicle);
+      // T2 — the evaluation itself lives in server/routeLegality.ts, shared with readiness.
+      let ev: Awaited<ReturnType<typeof evaluateSegments>>;
+      try {
+        ev = await evaluateSegments(db, { unitId: input.unitId, segments: input.segments, at: input.at, requiredChecks: input.requiredChecks as RequiredCheck[], dangerousGoods: input.dangerousGoods, requiresEscort: input.requiresEscort, tripId: input.tripId ?? null, jobId: input.jobId ?? null, buildRef: input.buildRef ?? null });
+      } catch (e) {
+        if (e instanceof NoVehicleProfile) throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
+        throw e;
+      }
+      const { profile: p, vehicle, weight, verdict, dateNotes, structureNotes, roadBans } = ev;
       const evaluatedAt = new Date();
       // The evidence is written against the unit's profile, as the B12 table requires: a verdict is always about a profile.
       const routeProfileId = `unit:${input.unitId}:vp${p.id}:${p.verificationStatus}`;
@@ -168,7 +138,7 @@ export const spatialRouter = router({
       const evaluationRef = `RE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
       for (const e of verdict.evidence) await db.insert(routeEvidenceEntries).values({ evaluationRef, routeDecisionId: null, routeProfileId, tripId: input.tripId ?? null, jobId: input.jobId ?? null, segmentId: e.segmentId.slice(0, 64), segmentLabel: e.segmentLabel.slice(0, 220), checkKey: e.check, axis: e.axis, result: e.result, reason: e.reason.slice(0, 400), vehicleValue: e.inputs.vehicleValue ?? null, limitValue: e.inputs.limitValue ?? null, unit: e.inputs.unit ?? null, jurisdiction: e.jurisdiction, source: e.source?.slice(0, 300) ?? null, sourceVersion: e.sourceVersion?.slice(0, 60) ?? null, verifiedAt: e.verifiedAt ? new Date(e.verifiedAt) : null, confidence: e.confidence, evaluatedAt } as never);
       // Returned so an approval can name the evaluation it was made from rather than guessing.
-      return { evaluationRef, unitId: input.unitId, profileVerified: p.verificationStatus === "verified", vehicle, legal: verdict.legal, physicallyFeasible: verdict.physicallyFeasible, operationallyPreferred: verdict.operationallyPreferred, dataConfidence: verdict.dataConfidence, dispatchStatus: verdict.dispatchStatus, explanation: verdict.explanation, counts: { failing: verdict.failingCount, unknown: verdict.unknownCount, review: verdict.reviewCount }, evidence: verdict.evidence, routingSource: routingSourceStatus().status, evaluatedAt: input.at, dateNotes, structureNotes };
+      return { evaluationRef, unitId: input.unitId, profileVerified: p.verificationStatus === "verified", vehicle, legal: verdict.legal, physicallyFeasible: verdict.physicallyFeasible, operationallyPreferred: verdict.operationallyPreferred, dataConfidence: verdict.dataConfidence, dispatchStatus: verdict.dispatchStatus, explanation: verdict.explanation, counts: { failing: verdict.failingCount, unknown: verdict.unknownCount, review: verdict.reviewCount }, evidence: verdict.evidence, routingSource: routingSourceStatus().status, evaluatedAt: input.at, dateNotes, structureNotes, roadBans, weight: { basis: weight.basis, authority: weight.authority, snapshotRef: weight.snapshotRef, note: weight.note } };
     }),
 
   /** A route against the road network. With no source loaded, the answer is UNKNOWN and the request is kept as a record of the ask. */

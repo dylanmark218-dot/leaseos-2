@@ -60,6 +60,14 @@ export type SegmentAttribute = {
   textValue?: string | null;
   /** The unit the limit was recorded in. Absent means the check's own unit (kg or m). */
   unit?: string | null;
+  /**
+   * T2 (P2) — a structured road ban, resolved: the allowance for each axle-group type, already the
+   * ban's fraction of the jurisdiction's verified legal allowance. Each axle group is compared with
+   * the allowance for its own type.
+   */
+  groupLimitsKg?: Partial<Record<AxleGroupType, number>>;
+  /** Evidence exists but could not be resolved into a comparable limit. Always UNKNOWN, with this reason. */
+  unresolvedReason?: string | null;
   jurisdiction?: string | null;
   source?: string | null;
   sourceVersion?: string | null;
@@ -109,10 +117,29 @@ export type RouteVerdict = {
   explanation: string;
 };
 
+/** Axle-group types a legal allowance is stated for. */
+export type AxleGroupType = "single" | "tandem" | "tridem";
+export const axleGroupType = (axles: number | null | undefined): AxleGroupType | null =>
+  axles === 1 ? "single" : axles === 2 ? "tandem" : axles === 3 ? "tridem" : null;
+
+/** One measured or declared axle group. */
+export type VehicleAxleGroup = { key: string; label: string; weightKg: number; axles?: number | null };
+
+/**
+ * What the weights rest on (T2, P1). `declared` is the unit's profile; `measured_legal` is a reading
+ * LoadSense determined legal when it was taken; `measured_not_legal` is a reading that was not — it
+ * may tighten a check, and a check it passes is REVIEW, never PASS.
+ */
+export type WeightBasis = "declared" | "measured_legal" | "measured_not_legal";
+
 /** The vehicle values a check compares against. */
 export type VehicleValues = {
   grossWeightKg: number;
   maxAxleGroupKg: number;
+  /** Every axle group, when known. `maxAxleGroupKg` is the heaviest of these. */
+  axleGroups?: VehicleAxleGroup[];
+  /** Absent means `declared`, which is what every caller before T2 supplied. */
+  weightBasis?: WeightBasis;
   heightM: number;
   widthM: number;
   lengthM: number;
@@ -162,6 +189,35 @@ function evaluateCheck(
     };
   }
 
+  // Evidence that exists but could not be made comparable is UNKNOWN, and says why.
+  if (attr.unresolvedReason) {
+    return { ...base, result: "unknown", reason: attr.unresolvedReason, inputs: {} };
+  }
+
+  // T2 (P2) — a resolved road ban: every axle group against the allowance for its own type.
+  if (attr.groupLimitsKg) {
+    const groups = vehicle.axleGroups ?? [];
+    if (!groups.length) {
+      return { ...base, result: "unknown", reason: `${segment.label} has a road ban, and the vehicle's axle groups are not known`, inputs: {} };
+    }
+    const judged = groups.map(g => {
+      const type = axleGroupType(g.axles);
+      const limit = type ? attr.groupLimitsKg![type] : undefined;
+      return { g, type, limit, result: (limit == null ? "unknown" : g.weightKg <= limit ? "pass" : "fail") as CheckResult };
+    });
+    const worst = judged.reduce((a, j) => (RESULT_SEVERITY[j.result] > RESULT_SEVERITY[a.result] ? j : a));
+    const notEstablished = vehicle.weightBasis === "measured_not_legal";
+    const result: CheckResult = worst.result === "pass" && (base.confidence === "unverified" || notEstablished) ? "review" : worst.result;
+    const reason = worst.result === "unknown"
+      ? worst.type
+        ? `${segment.label} road ban: the governing rule states no ${worst.type} allowance, so the ${worst.g.label} axle group's allowance is UNKNOWN`
+        : `${segment.label} road ban: the ${worst.g.label} axle group's axle count is not recorded, so its type and allowance are UNKNOWN`
+      : worst.result === "fail"
+        ? `${worst.g.label} ${worst.type} axle group ${worst.g.weightKg} kg exceeds the ${worst.limit} kg road-ban allowance on ${segment.label}`
+        : `every axle group within its road-ban allowance on ${segment.label}${notEstablished ? " (measured, not a legal determination — review)" : ""}`;
+    return { ...base, result, reason, inputs: { vehicleValue: worst.g.weightKg, limitValue: worst.limit ?? null, unit: "kg" } };
+  }
+
   const numeric = NUMERIC_CHECKS[check];
   if (numeric) {
     const vehicleValue = vehicle[numeric.field] as number;
@@ -184,18 +240,28 @@ function evaluateCheck(
       };
     }
     const passes = vehicleValue <= attr.limitValue;
+    const isWeight = numeric.field === "grossWeightKg" || numeric.field === "maxAxleGroupKg";
+    // A weight reading that is not a legal determination can tighten a check but cannot satisfy one.
+    const weightNotEstablished = isWeight && vehicle.weightBasis === "measured_not_legal";
+    // Name the axle group that governs, so "exceeds" says which one.
+    const heaviest = numeric.field === "maxAxleGroupKg" && vehicle.axleGroups?.length
+      ? vehicle.axleGroups.reduce((a, g) => (g.weightKg > a.weightKg ? g : a))
+      : null;
+    const what = heaviest ? `${heaviest.label} axle group ${vehicleValue} ${numeric.unit}` : `${vehicleValue} ${numeric.unit}`;
+    const basisNote = isWeight && vehicle.weightBasis === "measured_legal" ? " (measured, legally determined)"
+      : weightNotEstablished ? " (measured, not a legal determination — review)" : "";
     return {
       ...base,
       // An unverified limit that the vehicle satisfies is still not a clean
       // pass — a human should confirm the number before relying on it.
       result: passes
-        ? base.confidence === "unverified"
+        ? base.confidence === "unverified" || weightNotEstablished
           ? "review"
           : "pass"
         : "fail",
       reason: passes
-        ? `${vehicleValue} ${numeric.unit} within ${attr.limitValue} ${numeric.unit} on ${segment.label}`
-        : `${vehicleValue} ${numeric.unit} exceeds ${attr.limitValue} ${numeric.unit} on ${segment.label}`,
+        ? `${what} within ${attr.limitValue} ${numeric.unit} on ${segment.label}${basisNote}`
+        : `${what} exceeds ${attr.limitValue} ${numeric.unit} on ${segment.label}${basisNote}`,
       inputs: { vehicleValue, limitValue: attr.limitValue, unit: numeric.unit },
     };
   }
