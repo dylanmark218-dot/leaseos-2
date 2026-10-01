@@ -13,6 +13,7 @@
  * claim so nobody later "hardens" SameSite and believes the problem is handled.
  */
 import { describe, expect, it } from "vitest";
+import { TRPC_MOUNT_PATH } from "@shared/const";
 import { getSessionCookieOptions, REFRESH_COOKIE_PATH } from "./_core/cookies";
 
 const req = (o: Record<string, unknown> = {}) =>
@@ -50,10 +51,18 @@ describe("E2 — the refresh cookie is not sent on every request", () => {
   /*
    * The access token rides on every call; the refresh credential should not. A narrow path means a
    * leak in any other route's logging or proxying cannot pick it up.
+   *
+   * P0-B — narrow, but not narrower than the request that redeems it. The path used to be
+   * `/api/auth`, which no request ever went to; the browser never sent the cookie and every
+   * session ended with its first access token. The path is the tRPC mount, the floor for a dotted
+   * procedure name (`sessionCookiePathMatch.test.ts`), and it is derived from the mount constant
+   * rather than spelled again here.
    */
-  it("is scoped to the auth path, not the whole site", () => {
-    expect(REFRESH_COOKIE_PATH).toBe("/api/auth");
-    expect(getSessionCookieOptions(req(), { refresh: true }).path).toBe("/api/auth");
+  it("is scoped to the tRPC mount, not the whole site and not a path nothing is mounted at", () => {
+    expect(REFRESH_COOKIE_PATH).toBe(TRPC_MOUNT_PATH);
+    expect(REFRESH_COOKIE_PATH).not.toBe("/");
+    expect(REFRESH_COOKIE_PATH).not.toBe("/api/auth");
+    expect(getSessionCookieOptions(req(), { refresh: true }).path).toBe(TRPC_MOUNT_PATH);
   });
 
   it("the access cookie stays site-wide", () => {

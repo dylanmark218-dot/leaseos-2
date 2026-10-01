@@ -1,9 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { COOKIE_NAME, REFRESH_COOKIE_NAME } from "@shared/const";
+import { REFRESH_COOKIE_NAME } from "@shared/const";
 import { redeemRefresh, revokeAllForOpenId, revokeFamily } from "./sessionFamilyService";
-import { ACCESS_TOKEN_TTL_MS, REFRESH_ABSOLUTE_TTL_MS } from "./_core/sessionFamily";
 import { sdk } from "./_core/sdk";
+import { ENV } from "./_core/env";
 import { isTrustedOrigin } from "./_core/csrf";
+import { clearAccessCookie, clearRefreshCookie, issueAccessCookie, issueRefreshCookie } from "./_core/cookies";
+
+/**
+ * P0-B — the surface a refresh family must belong to.
+ *
+ * The same rule `verifySession` applies to the access token: enforced when this server knows its
+ * own identity, and not in a checkout that has none (development, the test suite), where refusing
+ * every family would turn a missing variable into an outage. Production always has one
+ * (`assertProductionSecrets`), so there a family minted for another surface — or for none — is
+ * refused the way a retired verifier is, and nothing about which families exist is disclosed.
+ */
+const expectedFamilyApp = (): { appId: string } | undefined => (ENV.appId ? { appId: ENV.appId } : undefined);
 
 /**
  * The refresh cookie carries `familyRef.verifier`. Split on the FIRST dot only: the reference is
@@ -32,7 +44,6 @@ import { storageKeyInput } from "./_core/storageKey";
  * A present value is refused, not silently dropped, so an old client learns.
  */
 const REFUSED = z.undefined({ message: "Trust-bearing value refused: this state is established by its own review, verification or transition procedure, never by a create or capture." }).optional();
-import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { recordsRouter } from "./recordsRouter";
 import {
@@ -86,6 +97,7 @@ import {
   tripStopTripId,
   unitSafetyPlanUnitId,
   tripRefInScope,
+  getUserByOpenId,
 } from "./db";
 import { dispatchGateRouter } from "./dispatchRouter";
 import { createJobUnitGated } from "./dispatchEnforcementService";
@@ -406,11 +418,10 @@ export const appRouter = router({
       const presented = readRefreshCookie(ctx.req);
       if (presented) await revokeFamily(presented.familyRef, "logout");
 
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      ctx.res.clearCookie(REFRESH_COOKIE_NAME, {
-        ...getSessionCookieOptions(ctx.req, { refresh: true }), maxAge: -1,
-      });
+      // Cleared with the attributes they were issued with (P0-B): a deletion that names another
+      // path leaves the browser holding a live credential.
+      clearAccessCookie(ctx.req, ctx.res);
+      clearRefreshCookie(ctx.req, ctx.res);
       return { success: true } as const;
     }),
 
@@ -433,22 +444,22 @@ export const appRouter = router({
       const presented = readRefreshCookie(ctx.req);
       if (!presented) throw new TRPCError({ code: "UNAUTHORIZED", message: "No refresh credential" });
 
-      const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date());
+      const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date(), expectedFamilyApp());
       if (out.kind !== "ok") {
-        ctx.res.clearCookie(REFRESH_COOKIE_NAME, {
-          ...getSessionCookieOptions(ctx.req, { refresh: true }), maxAge: -1,
-        });
+        clearRefreshCookie(ctx.req, ctx.res);
         throw new TRPCError({ code: "UNAUTHORIZED", message: "Session expired. Sign in again." });
       }
 
-      const accessToken = await sdk.createSessionToken(out.openId, { name: "" });
-      ctx.res.cookie(COOKIE_NAME, accessToken, {
-        ...getSessionCookieOptions(ctx.req), maxAge: ACCESS_TOKEN_TTL_MS,
-      });
-      ctx.res.cookie(REFRESH_COOKIE_NAME, `${presented.familyRef}.${out.verifier}`, {
-        ...getSessionCookieOptions(ctx.req, { refresh: true }),
-        maxAge: REFRESH_ABSOLUTE_TTL_MS,
-      });
+      /*
+       * P0-B — the replacement access token carries the account's name, as the login's did.
+       * `verifySession` refuses a token whose `name` is empty, so a refresh that minted one with
+       * `name: ""` handed the browser a credential the next request would reject — the session
+       * still ended fifteen minutes after login even once the cookie reached this procedure.
+       */
+      const who = await getUserByOpenId(out.openId);
+      const accessToken = await sdk.createSessionToken(out.openId, { name: who?.name || "" });
+      issueAccessCookie(ctx.req, ctx.res, accessToken);
+      issueRefreshCookie(ctx.req, ctx.res, { familyRef: presented.familyRef, verifier: out.verifier });
       return { ok: true as const };
     }),
 
@@ -459,9 +470,12 @@ export const appRouter = router({
       }
       const presented = readRefreshCookie(ctx.req);
       if (!presented) throw new TRPCError({ code: "UNAUTHORIZED", message: "No refresh credential" });
-      const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date());
+      const out = await redeemRefresh(presented.familyRef, presented.verifier, new Date(), expectedFamilyApp());
       if (out.kind !== "ok") throw new TRPCError({ code: "UNAUTHORIZED", message: "Session expired." });
       await revokeAllForOpenId(out.openId, "revoked_all");
+      // Every family is dead; the credentials this browser holds are cleared with them (P0-B).
+      clearAccessCookie(ctx.req, ctx.res);
+      clearRefreshCookie(ctx.req, ctx.res);
       return { ok: true as const };
     }),
   }),
