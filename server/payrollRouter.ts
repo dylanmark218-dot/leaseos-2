@@ -64,11 +64,11 @@ async function profileIdsInScope(db: NonNullable<Awaited<ReturnType<typeof getDb
 
 /** Resolve the caller's own profile or refuse. Never takes an id from input; the profile's entity must be in the acting scope. */
 async function ownProfileOrThrow(userId: number) {
-  const p = await svc.resolveOwnPayrollProfile(userId);
+  const { db, scope } = await moneyScope(userId);
+  const p = await svc.resolveOwnPayrollProfile(userId, scope);
   if (!p) {
     throw notFound("No payroll profile is linked to your account");
   }
-  const { db, scope } = await moneyScope(userId);
   try { await assertEntityInScope(db, p.financialEntityId, scope); } catch { throw notFound("No payroll profile is linked to your account in this organization"); }
   return p;
 }

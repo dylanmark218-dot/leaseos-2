@@ -2,14 +2,14 @@
  * Workforce lifecycle — the API.
  */
 import { TRPCError } from "@trpc/server";
-import { actingScopeFor, orgScopeWhere, userInScope, type TenantScope } from "./db";
+import { actingScopeFor, createOperator, operatorForUserInScope, orgScopeWhere, userInScope, type TenantScope } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb, revokeUserRole } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
-import { applicantScreenings, applicants, competencySignoffs, complianceDocuments, fieldDevices, offboardings, onboardingPlans, onboardingTasks, operators, probationReviews, serializedTools, toolCheckouts, trainingRecords, userRoleAssignments } from "../drizzle/schema";
+import { applicantScreenings, applicants, competencySignoffs, complianceDocuments, fieldDevices, offboardings, onboardingPlans, onboardingTasks, probationReviews, serializedTools, toolCheckouts, trainingRecords, userRoleAssignments } from "../drizzle/schema";
 import { COURSE_CREDENTIALS, competencyDecision, hireReadiness, offboardingClose, onboardingGaps, probationDecision, screeningRecordDecision, trainingVerification } from "./_core/workforce";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -44,14 +44,19 @@ async function platformWideGrantsHeldBy(db: Awaited<ReturnType<typeof dbOrThrow>
   return rows.length;
 }
 
-async function ownerFor(userId: number): Promise<{ ownerType: "operator" | "user"; ownerId: number }> {
-  const db = await dbOrThrow();
-  const op = (await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, userId)).limit(1))[0];
-  return op ? { ownerType: "operator", ownerId: op.id } : { ownerType: "user", ownerId: userId };
+/**
+ * Whose registry a verified credential is filed under: the person's operator record in the verifying
+ * organization, else the person. Another organization's operator record is never it, and two in
+ * this organization are refused rather than the first chosen.
+ */
+async function ownerFor(userId: number, scope: TenantScope): Promise<{ ownerType: "operator" | "user"; ownerId: number }> {
+  const op = await operatorForUserInScope(userId, scope);
+  if (op.kind === "ambiguous") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "More than one operator record names this person in this organization" });
+  return op.kind === "resolved" ? { ownerType: "operator", ownerId: op.operatorId } : { ownerType: "user", ownerId: userId };
 }
 async function writeCredential(args: { userId: number; docType: string; title: string; issuedAt: Date; expiresAt: Date | null; evidenceRecordId: number; source: string; verifiedByUserId: number }) {
   const db = await dbOrThrow();
-  const owner = await ownerFor(args.userId);
+  const owner = await ownerFor(args.userId, await actingScopeFor(args.verifiedByUserId));
   const ins = await db.insert(complianceDocuments).values({ ownerType: owner.ownerType, ownerId: owner.ownerId, docType: args.docType, requirementKey: null, title: args.title, identifier: null, storageKey: null, storageUrl: null, capturedAt: new Date(), issuedAt: args.issuedAt, expiresAt: args.expiresAt, jurisdiction: null, verificationStatus: "verified", verifiedByUserId: args.verifiedByUserId, verifiedAt: new Date(), privateDetail: false, evidenceRecordId: args.evidenceRecordId, source: args.source, confidence: "high" } as never);
   return Number(ins[0]?.insertId ?? 0);
 }
@@ -101,7 +106,11 @@ export const workforceRouter = router({
       const existing = (await db.select({ id: onboardingPlans.id }).from(onboardingPlans).where(eq(onboardingPlans.userId, input.userId)).limit(1))[0];
       if (existing) throw new TRPCError({ code: "CONFLICT", message: "This user already has an onboarding plan" });
       const isDriver = /driver|operator/i.test(a.roleApplied);
-      if (isDriver && !(await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, input.userId)).limit(1))[0]) await db.insert(operators).values({ userId: input.userId, name: a.fullName, licenseExpiresAt: input.licenseExpiresAt ?? null } as never);
+      // The driver's operator record belongs to the hiring organization: one there already counts, one elsewhere does not.
+      if (isDriver) {
+        const scope = await actingScopeFor(ctx.user.id);
+        if ((await operatorForUserInScope(input.userId, scope)).kind === "none") await createOperator({ userId: input.userId, name: a.fullName, licenseExpiresAt: input.licenseExpiresAt ?? null } as never, scope, ctx.user.id);
+      }
       const planRef = ref("ONB");
       const probationEndsAt = new Date(input.startDate.getTime() + input.probationDays * 86_400_000);
       const ins = await db.insert(onboardingPlans).values({ planRef, userId: input.userId, applicantId: a.id, position: a.roleApplied, startDate: input.startDate, probationEndsAt, createdByUserId: ctx.user.id });

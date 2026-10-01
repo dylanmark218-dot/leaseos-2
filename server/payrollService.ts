@@ -12,7 +12,7 @@
  */
 
 import { and, desc, eq, gte, lte, inArray } from "drizzle-orm";
-import { getDb } from "./db";
+import { getDb, operatorForUserInScope, type TenantScope } from "./db";
 import {
   contractorSettlementLines,
   contractorSettlements,
@@ -20,7 +20,6 @@ import {
   expenseAllocations,
   expenseRecords,
   financialEntities,
-  operators,
   payPeriods,
   payRates,
   payrollAdjustments,
@@ -46,7 +45,7 @@ import type { PayRate } from "./_core/payrollEngine";
  * The caller's own payroll profile, derived from the session. Returns null
  * rather than throwing so a caller with no profile simply sees nothing.
  */
-export async function resolveOwnPayrollProfile(userId: number) {
+export async function resolveOwnPayrollProfile(userId: number, scope: TenantScope) {
   const db = await getDb();
   if (!db) return null;
 
@@ -57,18 +56,15 @@ export async function resolveOwnPayrollProfile(userId: number) {
     .limit(1);
   if (direct[0]) return direct[0];
 
-  // Fall back to the operator record linked to this user.
-  const op = await db
-    .select({ id: operators.id })
-    .from(operators)
-    .where(eq(operators.userId, userId))
-    .limit(1);
-  if (!op[0]) return null;
+  // Fall back to this user's operator record in the acting organization — never another
+  // organization's, and never the first of two.
+  const op = await operatorForUserInScope(userId, scope);
+  if (op.kind !== "resolved") return null;
 
   const viaOperator = await db
     .select()
     .from(employeePayrollProfiles)
-    .where(eq(employeePayrollProfiles.operatorId, op[0].id))
+    .where(eq(employeePayrollProfiles.operatorId, op.operatorId))
     .limit(1);
   return viaOperator[0] ?? null;
 }

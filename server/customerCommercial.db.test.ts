@@ -380,7 +380,9 @@ d("a job freezes its commercial basis, and billing reads the frozen basis", () =
     expect(snaps.every(s => s.rateSheetVersionRef === sheet.versionRef)).toBe(true);
     // The field view: the customer, the references, Kyle's phone — and not one price term.
     const driverUser = await member(t.orgRef, ["driver"]);
-    await pool.execute("INSERT INTO operators (userId, name) VALUES (?, ?)", [driverUser, "Rosa Driver"]);
+    // The driver's operator record is owned by the organization, as the field view's assignment check requires.
+    const [rosa] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, ?)", [driverUser, "Rosa Driver"]);
+    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [t.orgRef, rosa.insertId]);
     const field = await callerFor(driverUser).customerCommercial.jobs.fieldSummary({ jobId: j.id });
     expect(field).toMatchObject({ jobCode: j.jobCode, customer: { name: expect.stringMatching(/^Job /) }, references: expect.arrayContaining([{ referenceKind: "po", referenceValue: "PO-4471" }]) });
     if ("contacts" in field) expect(field.contacts).toEqual([expect.objectContaining({ displayName: "Kyle", phone: "403-555-0100" })]);
@@ -388,7 +390,8 @@ d("a job freezes its commercial basis, and billing reads the frozen basis", () =
     for (const f of CONFIDENTIAL_COMMERCIAL_FIELDS) expect(text, f).not.toContain(`"${f}"`);
     expect(text).not.toContain("185"); expect(text).not.toContain("gstNumber");
     const otherDriver = await member(t.orgRef, ["driver"]);
-    await pool.execute("INSERT INTO operators (userId, name) VALUES (?, ?)", [otherDriver, "Someone Else"]);
+    const [other] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, ?)", [otherDriver, "Someone Else"]);
+    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [t.orgRef, other.insertId]);
     await expect(callerFor(otherDriver).customerCommercial.jobs.fieldSummary({ jobId: j.id })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(callerFor(driverUser).customerCommercial.jobs.get({ jobId: j.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(callerFor(driverUser).customerCommercial.rateSheets.get({ rateSheetRef: sheet.rateSheetRef })).rejects.toMatchObject({ code: "FORBIDDEN" });

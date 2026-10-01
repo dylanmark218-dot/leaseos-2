@@ -183,7 +183,7 @@ export const customerCommercialRouter = router({
       .query(async ({ ctx, input }) => {
         const s = await svc.commercialScope(ctx.user.id, financeScopeFor);
         const roles = rolesOf(ctx);
-        if (roles.length && roles.every(r => FIELD_ONLY_ROLES.has(r)) && !(await svc.callerAssignedToJob(s.db, ctx.user.id, input.jobId))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+        if (roles.length && roles.every(r => FIELD_ONLY_ROLES.has(r)) && !(await svc.callerAssignedToJob(s.db, ctx.user.id, input.jobId, s.scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
         return svc.jobCommercialFieldSummary(s, input.jobId);
       }),
     billableContext: roleProcedure("customerCommercial.billableContext")
