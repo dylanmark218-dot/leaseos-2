@@ -33,9 +33,11 @@ async function unitOwnedBy(orgRef: string | null) {
   if (orgRef) await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,'unit',?,1)", [orgRef, u.insertId]);
   return u.insertId;
 }
-async function accountRef() {
+/** A customer account in a book the organization owns (P0-A3: a ticket bills only to an account in the caller's own book). */
+async function accountRef(orgRef: string | null) {
+  const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Fixture books', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, orgRef]);
   const acctRef = `ACCT-${rnd()}`;
-  await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name, delayBillingRulesJson, postSiteBillingRuleJson) VALUES (?, ?, ?, ?, ?)", [acctRef, 1_600_000 + Math.floor(Math.random() * 90_000), `Fixture ${acctRef}`, JSON.stringify({ customer_hold: "billable" }), JSON.stringify({ rule: "not_billable" })]);
+  await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name, delayBillingRulesJson, postSiteBillingRuleJson) VALUES (?, ?, ?, ?, ?)", [acctRef, Number(book.insertId), `Fixture ${acctRef}`, JSON.stringify({ customer_hold: "billable" }), JSON.stringify({ rule: "not_billable" })]);
   return acctRef;
 }
 
@@ -45,7 +47,7 @@ d("closeout belongs to the organization that owns the job", () => {
     const driverA = await member(A, ["driver"]), driverB = await member(B, ["driver"]), legacy = await member(null, ["driver"]);
     const jobA = await jobOwnedBy(A), jobNone = await jobOwnedBy(null);
     const unitA = await unitOwnedBy(A), unitNone = await unitOwnedBy(null);
-    const acct = await accountRef();
+    const acct = await accountRef(A), acctNone = await accountRef(null);
     // Another organization's driver cannot open a ticket on A's job: not found.
     await expect(callerFor(driverB).closeout.ticketOpen({ jobId: jobA, customerAccountRef: acct, unitId: unitA, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: false } as never)).rejects.toMatchObject({ code: "NOT_FOUND", message: `Job ${jobA} not found` });
     // A's driver opens it; then reads its state; B and the single tenant do not find it.
@@ -55,7 +57,9 @@ d("closeout belongs to the organization that owns the job", () => {
     await expect(callerFor(legacy).closeout.state({ ticketNumber: t.ticketNumber })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(callerFor(driverB).closeout.lineAdd({ ticketNumber: t.ticketNumber, lineKind: "service", serviceCode: "HV-HR", description: "truck hours", quantity: 2 } as never)).rejects.toMatchObject({ code: "NOT_FOUND" });
     // An unowned job: the single tenant opens and reads; A's driver does not find it.
-    const u = await callerFor(legacy).closeout.ticketOpen({ jobId: jobNone, customerAccountRef: acct, unitId: unitNone, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: false } as never);
+    const u = await callerFor(legacy).closeout.ticketOpen({ jobId: jobNone, customerAccountRef: acctNone, unitId: unitNone, operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: false } as never);
+    // P0-A3: A's driver cannot bill A's own job to another company's (or an ownerless) customer account.
+    await expect(callerFor(driverA).closeout.ticketOpen({ jobId: jobA, customerAccountRef: acctNone, unitId: unitA, operatorId: 7, serviceDescription: "x", postSiteRequired: false } as never)).rejects.toMatchObject({ code: "NOT_FOUND", message: "Customer account not found" });
     await expect(callerFor(legacy).closeout.state({ ticketNumber: u.ticketNumber })).resolves.toBeTruthy();
     await expect(callerFor(driverA).closeout.state({ ticketNumber: u.ticketNumber })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(callerFor(driverA).closeout.ticketOpen({ jobId: jobNone, customerAccountRef: acct, unitId: unitA, operatorId: 7, serviceDescription: "x", postSiteRequired: false } as never)).rejects.toMatchObject({ code: "NOT_FOUND" });
