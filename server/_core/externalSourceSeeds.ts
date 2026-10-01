@@ -7,12 +7,11 @@
  * null or `"unknown"` and the licence gate treats it as a refusal rather than a
  * permission.
  *
- * **Ten sources are verified. Twenty-five are not.** AER ST37, AER ST102 and
- * Alberta 511 are not published under a standard open licence — they are
- * governed by their own terms of use, and neither commercial fleet use nor
- * offline redistribution to field tablets could be confirmed. They stay
- * `unverified`, which under `evaluateSourceUsage` means inspection only, as
- * does every later candidate nobody has yet reviewed.
+ * **Ten sources are verified. Twenty-five are not.** Ontario 511 and Québec's
+ * roadworks cleared on their published licences in the later transport tranche.
+ * Alberta 511 and the other unresolved providers stay `unverified`, which
+ * under `evaluateSourceUsage` means inspection only, as do every later
+ * candidate nobody has yet reviewed.
  *
  * The research summary said "nine of eleven are clean" while separately
  * flagging three as unresolved. Eleven minus three is eight. Seeding nine would
@@ -24,6 +23,16 @@ import type { ExternalDataSource } from "./externalDataRegistry";
 
 /** Every field below was checked against the publisher on this date. */
 export const SOURCE_RETRIEVAL_DATE = new Date("2026-09-09T00:00:00Z");
+
+/**
+ * The federal and provincial catalogue candidates added 2026-09-24. What is
+ * recorded for them is what the publisher's own page or catalogue entry stated
+ * on this date — licence named, rate limit, key requirement, update frequency.
+ * That is research, not a licence review, so all seven seed `unverified` and
+ * are cleared (or refused) by a person through `geo.sourceReview`, which
+ * records who and what they read.
+ */
+export const CANDIDATE_RETRIEVAL_DATE = new Date("2026-09-24T00:00:00Z");
 
 const OGL_CANADA_ATTRIBUTION =
   "Contains information licensed under the Open Government Licence – Canada";
@@ -239,6 +248,7 @@ export const VERIFIED_DATA_SOURCES: readonly ExternalDataSource[] = [
     sourceKey: "on511",
     displayName: "Ontario 511 Developer API",
     authority: "Government of Ontario — Ministry of Transportation",
+    sourceUrl: "https://511on.ca/developers/doc",
     category: "road_conditions",
     jurisdiction: "CA-ON",
     licenceName: "Open Government Licence – Ontario",
@@ -708,8 +718,8 @@ export const UNVERIFIED_DATA_SOURCES: readonly ExternalDataSource[] = [
     status: "unverified",
   },
   /*
-   * 2026-09-24 candidates. Each licence named below is the one the publisher's
-   * catalogue entry states; commercial use and redistribution stay `unknown`
+   * 2026-09-24 catalogue candidates. Each licence named below is the one the publisher's
+   * page or catalogue entry states; commercial use and redistribution stay `unknown`
    * and attribution text stays null until a person reads the terms and clears
    * the row. Both barriers hold exactly as they do for the rows above.
    */
@@ -903,7 +913,7 @@ export const SOURCE_CAVEATS: Record<string, string> = {
   ab511:
     "Throttled at ten calls per sixty seconds. Poll into a central cache; never proxy the raw API to devices.",
   on511:
-    "Throttled at ten calls per sixty seconds and requires a developer key, although the licence is open. The publisher calls the Ontario 511 logo mandatory while OGL – Ontario excludes logos and official marks from the grant, so the logo is not used until Ontario says in writing where it may appear; the licence attribution line is shown instead.",
+    "Throttled at ten calls per sixty seconds and requires a developer key, although the licence is open. Poll into a central cache; never proxy the raw API to devices. The publisher calls the Ontario 511 logo mandatory while OGL – Ontario excludes logos and official marks from the grant, so the logo is not used until Ontario says in writing where it may appear; the licence attribution line is shown instead.",
   qc_mtmd_roadworks:
     "Records are in French with an English description field. CC BY 4.0 requires that changes be indicated — the attribution says the records were normalized.",
   sk_highway_hotline:

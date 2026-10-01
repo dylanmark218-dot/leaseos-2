@@ -31,7 +31,7 @@ import { seedExternalDataSources, listExternalDataSources } from "../db";
 const byKey = (k: string) =>
   ALL_DATA_SOURCES.find(s => s.sourceKey === k)!;
 
-describe("the count is eight, not nine", () => {
+describe("the merged registry keeps one Ontario 511 and all later candidates", () => {
   it("has thirty-five sources, ten verified and twenty-five not", () => {
     // The research summary said "nine of eleven are clean" while separately
     // flagging three as unresolved. Eleven minus three is eight. Seeding nine
@@ -45,13 +45,8 @@ describe("the count is eight, not nine", () => {
     //
     // The Canadian 511 tranche (2026-09-24) added seven. Two clear on a published open licence —
     // Ontario 511 under OGL – Ontario, Québec's roadworks under CC BY 4.0 — so eight becomes ten.
-    // Manitoba, New Brunswick, Yukon and Newfoundland and Labrador publish no licence beside their
-    // keys, exactly like Alberta, and Saskatchewan publishes no API. Those five seed unverified.
-    //
-    // The federal and provincial candidates of the same date added seven more —
-    // Transport Canada recalls, the recalls-and-alerts feed, two StatCan
-    // services, two open-data catalogues and Québec's heavy-truck network.
-    // Research named their licences; nobody has reviewed one, so ten stays ten.
+    // The later catalogue candidates keep their named licences and source URLs, but no reviewer has
+    // cleared their commercial-use and attribution requirements yet, so they stay unverified.
     expect(ALL_DATA_SOURCES).toHaveLength(35);
     expect(VERIFIED_DATA_SOURCES).toHaveLength(10);
     expect(UNVERIFIED_DATA_SOURCES).toHaveLength(25);
@@ -465,10 +460,10 @@ d("seeding into the database", () => {
     expect(second.existing).toHaveLength(35);
   });
 
-  it("persists status, rate limit and retrieval date", async () => {
+  it("persists status, source URL, rate limit and retrieval date", async () => {
     await seedExternalDataSources();
     const [rows] = await pool.execute<mysql.RowDataPacket[]>(
-      "SELECT sourceKey, status, rateLimitCalls, rateLimitWindowSeconds, requiresApiKey, retrievedAt, verifiedAt FROM externalDataSources WHERE sourceKey IN ('ab511','osm','aer_st37')"
+      "SELECT sourceKey, status, sourceUrl, rateLimitCalls, rateLimitWindowSeconds, requiresApiKey, retrievedAt, verifiedAt FROM externalDataSources WHERE sourceKey IN ('ab511','on511','osm','aer_st37')"
     );
     const map = new Map(rows.map(r => [r.sourceKey, r]));
 
@@ -482,7 +477,23 @@ d("seeding into the database", () => {
     expect(map.get("osm")!.verifiedAt).not.toBeNull();
     expect(map.get("osm")!.retrievedAt).not.toBeNull();
 
+    expect(map.get("on511")!.sourceUrl).toBe("https://511on.ca/developers/doc");
+
     expect(map.get("aer_st37")!.status).toBe("unverified");
+  });
+
+  it("backfills a seeded source URL when an existing row still has NULL", async () => {
+    await seedExternalDataSources();
+    await pool.execute(
+      "UPDATE externalDataSources SET sourceUrl=NULL WHERE sourceKey='on511'"
+    );
+
+    await seedExternalDataSources();
+
+    const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+      "SELECT sourceUrl FROM externalDataSources WHERE sourceKey='on511'"
+    );
+    expect(rows[0].sourceUrl).toBe("https://511on.ca/developers/doc");
   });
 
   it("does not downgrade a row somebody has since verified", async () => {

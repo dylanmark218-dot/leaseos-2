@@ -16,8 +16,8 @@ what the runtime enforces; it is not the enforcement itself.
 > **Correction.** The research summary stated "nine of eleven are clean" while
 > separately flagging three as unresolved. Eleven minus three is eight. Seeding
 > nine would have marked a blocked source usable. `externalSourceSeeds.test.ts`
-> holds the counts — now 10 / 25 / 35 after the 511 tranche and the federal and
-> provincial candidates below.
+> holds the counts — now 10 / 25 / 35 after the transport tranche and later
+> inspection-only catalogue candidates below.
 
 ## Verified sources
 
@@ -70,10 +70,12 @@ alone — somebody has to have actually recorded what the publisher requires sho
 Test-pinned.
 
 **Required to unblock:** written confirmation from AER (Terms of Use) and from
-Alberta 511 (developer terms) covering (a) commercial fleet use and (b) offline
-redistribution to field tablets. For the seven federal and provincial
-candidates a reviewer reads the named licence and records its attribution;
-none needs a written request unless that reading leaves commercial fleet use
+Alberta, Manitoba, New Brunswick, Yukon and Newfoundland-and-Labrador 511
+(developer terms) covering (a) commercial fleet use and (b) offline
+redistribution to field tablets. Saskatchewan Highway Hotline still needs a
+published API or written permission path. For the seven 2026-09-24 catalogue
+candidates a reviewer reads the named licence and records its attribution. None
+needs a written request unless that reading leaves commercial fleet use
 unclear.
 
 ## Integration states

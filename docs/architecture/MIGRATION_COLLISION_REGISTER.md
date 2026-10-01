@@ -146,6 +146,8 @@ auth-workspace, work-calendar), `0172`–`0175` (training-academy-workforce), `0
   No other branch was renumbered.
 * **2026-09-24**: `0185` claimed by SEC-004 (`claude/sec-004-webhook-delivery-integrity`); first number free on
   `main` and every remote branch. No branch renumbered.
+* **2026-09-24**: `0186` claimed by `claude/canadian-govt-apis-leaseos-q33l42` (external source categories);
+  first number free after the `0185` claims above. No branch renumbered.
 
 ## State at the 0169 reconciliation (2026-09-23, `main` = `6f52b574`, after PR #10 and PR #13)
 
@@ -172,6 +174,7 @@ the 0181–0190 range is held entirely by open branches.
 | Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|
 | 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | #20 | reconciled onto `main`; integrating | **`claude/relaxed-carson-qfcopf` also claims `0185`** (`0185_assistant_proposal_tenancy.sql`) | **SEC-004 keeps `0185`**: it claimed the number at 2026-09-24 07:52 when it was free on `main` and every branch; the other claim followed 77 minutes later and did not meet the "free everywhere" standard. That branch renumbers at its own integration, as the academy branch's `0174` does |
+| 0186 | `0186_external_source_categories.sql` | `claude/canadian-govt-apis-leaseos-q33l42` | #26 | open branch | none seen in the S2 scan | keeps `0186` unless a later branch proves an earlier claim |
 | 0191 | `0191_encrypted_secrets.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
 | 0192 | `0192_provider_credentials.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
 | 0193 | `0193_mfa_secret_ref.sql` | `feature/mfa-secret-migration` | #47 | **merged** | none | recorded late — see change log |
@@ -245,20 +248,3 @@ number free everywhere.
 
 * **2026-10-01 (P0-A2.1)**: claimed `0209` (`operatingZones.orgRef`, nullable; NULL = the historical single
   tenant, as 0132 and 0148), recorded in the commit that creates the migration.
-
-## Claim: 0217–0219 (Customer, Contract and Rate Management, 2026-10-01)
-
-| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
-|---|---|---|---|---|---|---|---|
-| 0217 | `0217_customer_account_profile.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0217 |
-| 0218 | `0218_customer_contracts_rate_sheets.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0218 |
-| 0219 | `0219_job_commercial_context.sql` | `claude/leaseos-customer-contract-rates-jkrw1i` | none yet | `c3f088b` | gated | none | keeps 0219 |
-
-Written as `0182`–`0184` on 2026-09-24, when they were the first numbers free everywhere. By the merge of
-`main` (`c3f088b`) three other open branches held `0182`–`0184` (`document-control-architecture`,
-`integration-hub-subsystem`, `safety-compliance-program-builder`) and the highest claim on any remote ref
-was `0216`: `claude/relaxed-carson-qfcopf` took `0214` and `claude/leaseos-sign-attest-design-5993ar`
-took `0215`–`0216` while this merge was being gated, the second of them minutes before this branch
-pushed `0215`–`0217`. As the later, unmerged claimant this branch moved again, to the first
-three numbers free on `main` and on every open branch. No other branch was renumbered.
-

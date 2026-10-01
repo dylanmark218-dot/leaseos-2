@@ -97,27 +97,8 @@ here can be added rather than read.
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
 
-Records vault · roles and server-side authorization, scoped to the
-organization that granted them — with the migration that scoped them verified
-against a real MariaDB (pre-state, legacy rows of every shape, apply, assert),
-a read-only diagnostic that counts the quarantine before and after deployment,
-a bootstrap that can no longer mint cross-tenant authority, a resolution
-procedure for the grants the migration refused to guess at, a CI gate that
-now proves which suites ran from vitest's own report rather than by grepping
-coloured output, and People & Access — the first surface that creates a
-membership at all, through an invitation claimed with a one-time token and an
-authenticated identity rather than an unverified email: a role issued by one company authorizes
-nothing in another, capabilities and workspaces are computed from the acting
-organization's grants rather than filtered afterwards, branch grants name
-their organization explicitly because branch identifiers have no owner, grant
-and revoke are organization-specific, and a pre-scope grant that could not be
-attributed without guessing is quarantined rather than assigned · one identity
-across several jobs: the session surface that resolves membership,
-organization and workspace server-side, refuses a workspace the caller does
-not hold, ends access with the membership rather than with the grant, and
-verifies a named organization against the membership table before it scopes
-anything · payroll, finance, tax
-rules (unverified) · geospatial source registry (8 verified licences, 10
+Records vault · roles and server-side authorization · payroll, finance, tax
+rules (unverified) · geospatial source registry (10 verified licences, 25
 blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card
 statements, anomalies · roadside, purchasing, AP · compliance registry,
