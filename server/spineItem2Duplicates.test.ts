@@ -35,6 +35,12 @@ const REMOVED = [
     from: "server/_core/fieldTicket.ts",
     survivor: { file: "server/closeoutRouter.ts", name: "recordSignature" },
   },
+  {
+    question: "what is a field ticket's signature status?",
+    removed: ["deriveSignatureStatus"],
+    from: "server/_core/fieldTicket.ts",
+    survivor: { file: "server/closeoutRouter.ts", name: "recordSignature" },
+  },
 ] as const;
 
 const walk = (dir: string): string[] =>

@@ -81,8 +81,9 @@ signed by a different representative on a later visit, without overwriting the f
 **Partial acceptance is the common case, and it works per line.** "I'll sign the three-hour
 service but not the forty-five-minute standby" must not invalidate the accepted lines.
 `fieldTicketLines.disposition` is `not_presented | accepted | disputed`;
-`deriveSignatureStatus()` rolls those up; `splitByDisposition()` sends accepted lines to billing
-and disputed lines to review. Both statements are kept — driver says 45 minutes, company says 20 —
+the line decisions never roll up into the signature, which stays what was recorded at signing.
+`draftFromTicket()` decides invoicing: accepted, priced lines go to billing; disputed lines go to
+review or block, per the customer's contract; an undecided line blocks. Both statements are kept — driver says 45 minutes, company says 20 —
 because an erased dispute is a charge quietly written off.
 
 **The ticket records facts, not money.** No rate or amount column exists on `fieldTicketLines` by

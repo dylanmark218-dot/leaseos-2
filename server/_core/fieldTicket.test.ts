@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  deriveSignatureStatus,
   reconcileJob,
   validateFieldTicketScope,
-  type LineDisposition,
   type SignatureStatus,
 } from "./fieldTicket";
 
@@ -72,39 +70,6 @@ describe("validateFieldTicketScope", () => {
     expect(
       validateFieldTicketScope({ scope: "trip", jobId: 1842, tripId: 4821 })
     ).toEqual([]);
-  });
-});
-
-describe("deriveSignatureStatus", () => {
-  const d = (...v: LineDisposition[]) => v;
-
-  it("is accepted when every line is accepted", () => {
-    expect(deriveSignatureStatus(d("accepted", "accepted", "accepted"))).toBe(
-      "accepted"
-    );
-  });
-
-  it("is refused when every presented line is disputed", () => {
-    expect(deriveSignatureStatus(d("disputed", "disputed"))).toBe("refused");
-  });
-
-  it("is partially accepted for the real-world case — signs the service, not the standby", () => {
-    expect(deriveSignatureStatus(d("accepted", "accepted", "disputed"))).toBe(
-      "partially_accepted"
-    );
-  });
-
-  it("reports no representative regardless of line state", () => {
-    expect(deriveSignatureStatus(d("accepted", "accepted"), false)).toBe(
-      "no_representative"
-    );
-  });
-
-  it("is unsigned when nothing has been presented", () => {
-    expect(deriveSignatureStatus([])).toBe("unsigned");
-    expect(deriveSignatureStatus(d("not_presented", "not_presented"))).toBe(
-      "unsigned"
-    );
   });
 });
 
