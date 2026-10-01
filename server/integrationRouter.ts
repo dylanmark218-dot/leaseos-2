@@ -3,6 +3,7 @@
  * the inbound API for machines (`inboundRouter`, gated by integrationProcedure).
  */
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq, isNull } from "drizzle-orm";
@@ -63,12 +64,14 @@ export const integrationRouter = router({
   loadSenseBindGateway: roleProcedure("integration.loadSenseBindGateway")
     .input(z.object({ gatewayDeviceRef: z.string().min(1).max(96), measurementDeviceId: z.number().int().positive(), unitId: z.number().int().positive(), trailerId: z.number().int().positive().optional(), tareKg: z.number().nonnegative(), channelConfig: z.record(z.string(), z.object({ label: z.string().min(1).max(160), configuredLimitKg: z.number().positive().optional(), limitSource: z.string().max(300).optional() })).optional() }))
     .mutation(async ({ ctx, input }) => {
+      // CP1.5 — the unit and the trailer, by the canonical check and first: another organization's is not
+      // found, like a missing one. (The trailer was not checked at all; the unit was, but as a precondition.)
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId, trailerId: input.trailerId });
       const db = await dbOrThrow();
       const orgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
-      const unitOwned = await recordBelongsToOrganization(db, orgRef, "unit", input.unitId);
       const device = (await db.select({ id: measurementDevices.id, financialEntityId: measurementDevices.financialEntityId, status: measurementDevices.status, deviceType: measurementDevices.deviceType }).from(measurementDevices).where(eq(measurementDevices.id, input.measurementDeviceId)).limit(1))[0];
       const deviceOwned = device ? await recordBelongsToOrganization(db, orgRef, "financial_entity", device.financialEntityId) : false;
-      if (!unitOwned || !device || !deviceOwned || device.status !== "active" || !["onboard_load_sensor", "load_cell"].includes(device.deviceType)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Gateway binding requires an owned unit and an active owned LoadSense-capable measurement device" });
+      if (!device || !deviceOwned || device.status !== "active" || !["onboard_load_sensor", "load_cell"].includes(device.deviceType)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Gateway binding requires an owned unit and an active owned LoadSense-capable measurement device" });
       const existing = (await db.select({ id: loadSenseGatewayBindings.id }).from(loadSenseGatewayBindings).where(and(eq(loadSenseGatewayBindings.orgRef, orgRef), eq(loadSenseGatewayBindings.gatewayDeviceRef, input.gatewayDeviceRef))).limit(1))[0];
       const values = { measurementDeviceId: input.measurementDeviceId, unitId: input.unitId, trailerId: input.trailerId ?? null, tareKg: input.tareKg, channelConfigJson: input.channelConfig ? JSON.stringify(input.channelConfig) : null, status: "active" as const, boundByUserId: ctx.user.id };
       if (existing) await db.update(loadSenseGatewayBindings).set(values).where(eq(loadSenseGatewayBindings.id, existing.id));

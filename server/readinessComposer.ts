@@ -26,10 +26,11 @@ import { and, desc, eq, inArray, isNull, or as sqlOr } from "drizzle-orm";
 import { hosAttestations } from "../drizzle/schema";
 import { faultDispatchEffect } from "./_core/telematics";
 import { getDb } from "./db";
+import type { DbOrTx } from "./_core/dbTypes";
 import {
   complianceDocuments, dispatchPostings, fieldDevices, insuranceCoveredEntities, insurancePolicies, insurancePolicyCoverages,
   jobs, maintenanceDefects, measurementDeviceAssignments, measurementDevices, calibrationEvents, operators, roadsideServiceEvents,
-  units, workOrderReleases,
+  units, workOrderReleases, unitHolds,
   coreRecordOwnership, enforcementEvents, outOfServiceOrders,
   faultCodes,
   communicationCoverage, communicationPolicies, companyRadioAuthorizations, radioChannels,
@@ -103,6 +104,25 @@ export async function currentCommunicationPolicy(db: NonNullable<Awaited<ReturnT
 }
 
 /* ------------------------------------------------------------------ */
+/* Fleet portfolio holds (0200)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One active `unitHolds` row as a blocker, by its effect (docs/fleet/FLEET_PORTFOLIO_FOUNDATION_RECONCILIATION.md R-1):
+ *   out_of_service (a safety hold) — blocking, overridable by no one;
+ *   block — blocking, releasable only under an approved override policy (classification), of which none exist;
+ *   warn — review, a manager may acknowledge it.
+ * The way to move a held unit is to release the hold, which a second person does.
+ */
+function holdBlocker(subject: "unit" | "trailer", unitNumber: string, h: { holdRef: string; holdType: string; dispatchEffect: "warn" | "block" | "out_of_service"; reason: string }): DispatchBlocker {
+  const who = subject === "unit" ? "truck" : "trailer";
+  const label = `${subject === "unit" ? "Unit" : "Trailer"} ${unitNumber} — ${h.holdType} hold ${h.holdRef}: ${h.reason}`;
+  if (h.dispatchEffect === "out_of_service") return { code: `${subject}_hold_${h.holdType}`, label, severity: "blocking", subject: who, overridable: false };
+  if (h.dispatchEffect === "block") return { code: `${subject}_hold_${h.holdType}`, label, severity: "blocking", subject: who, overridable: true, overrideAuthority: "manager" };
+  return { code: `${subject}_hold_${h.holdType}_warning`, label, severity: "review", subject: who, overridable: true, overrideAuthority: "manager" };
+}
+
+/* ------------------------------------------------------------------ */
 /* Enforcement state, read from the canonical table                    */
 /* ------------------------------------------------------------------ */
 
@@ -128,14 +148,16 @@ const subjectRefForOperator = (id: number) => `operator:${id}`;
  *
  * One query for the events, one for their orders. No per-subject round trip.
  */
-async function loadEnforcementState(
-  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
-  ids: { unitId: number | null; trailerId: number | null; operatorId: number },
+export async function loadEnforcementState(
+  db: DbOrTx,
+  // The operator is optional so the portfolio's unit state (fleetPortfolioService) reads orders through
+  // this one loader rather than a copy of it. Readiness always passes one.
+  ids: { unitId: number | null; trailerId: number | null; operatorId: number | null },
 ): Promise<NonNullable<ReadinessSubject["enforcement"]> & { version: string }> {
   const subjects: { subjectRef: string; scope: OosScope }[] = [];
   if (ids.unitId != null) subjects.push({ subjectRef: subjectRefForUnit(ids.unitId), scope: "vehicle" });
   if (ids.trailerId != null) subjects.push({ subjectRef: subjectRefForTrailer(ids.trailerId), scope: "trailer" });
-  subjects.push({ subjectRef: subjectRefForOperator(ids.operatorId), scope: "driver" });
+  if (ids.operatorId != null) subjects.push({ subjectRef: subjectRefForOperator(ids.operatorId), scope: "driver" });
 
   // The organization this readiness belongs to, from the unit when there is one.
   let orgRef: string | null = null;
@@ -150,8 +172,9 @@ async function loadEnforcementState(
   const eventFilters = [
     ids.unitId != null ? eq(enforcementEvents.unitId, ids.unitId) : null,
     ids.trailerId != null ? eq(enforcementEvents.trailerId, ids.trailerId) : null,
-    eq(enforcementEvents.operatorId, ids.operatorId),
+    ids.operatorId != null ? eq(enforcementEvents.operatorId, ids.operatorId) : null,
   ].filter((f): f is NonNullable<typeof f> => f != null);
+  if (!eventFilters.length) return { subjects, orders: [], unresolvedInspections: [], version: "none" };
 
   const events = (await db.select().from(enforcementEvents).where(sqlOr(...eventFilters)))
     .filter(e => e.status !== "rescinded" && tenantOf(e.tenantId) === ourTenant);
@@ -161,7 +184,7 @@ async function loadEnforcementState(
   const refFor = (e: typeof events[number]): string | null =>
     ids.unitId != null && e.unitId === ids.unitId ? subjectRefForUnit(ids.unitId)
       : ids.trailerId != null && e.trailerId === ids.trailerId ? subjectRefForTrailer(ids.trailerId)
-        : e.operatorId === ids.operatorId ? subjectRefForOperator(ids.operatorId)
+        : ids.operatorId != null && e.operatorId === ids.operatorId ? subjectRefForOperator(ids.operatorId)
           : null;
 
   const byRef = new Map(events.map(e => [e.eventRef, e] as const));
@@ -554,7 +577,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   if (subject.unitId) {
     const unit = (await db.select().from(units).where(eq(units.id, subject.unitId)).limit(1))[0];
     if (!unit) throw new Error(`Unit ${subject.unitId} not found`);
-    const [uCreds, defects, releases, roadside, pols, assignments] = await Promise.all([
+    const [uCreds, defects, releases, roadside, pols, assignments, holds] = await Promise.all([
       credentialsFor("unit", unit.id),
       /*
        * Open defects, AND every critical one whatever its status. A resolved critical defect still
@@ -574,6 +597,8 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       db.select().from(roadsideServiceEvents).where(and(eq(roadsideServiceEvents.unitId, unit.id), inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"]))),
       policiesCovering("unit", unit.id, now),
       db.select().from(measurementDeviceAssignments).where(and(eq(measurementDeviceAssignments.assignedToType, "unit"), eq(measurementDeviceAssignments.assignedToId, unit.id))),
+      // 0200 — the Fleet & Equipment Portfolio's active holds on this unit (the canonical hold table).
+      db.select().from(unitHolds).where(and(eq(unitHolds.unitId, unit.id), eq(unitHolds.status, "active"))),
     ]);
     /*
      * Two conditions, kept apart — the manifest has always listed them separately ("unresolved
@@ -611,7 +636,8 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       mechanicReleaseRequired: owingEvidence.length > 0,
       mechanicReleaseGiven: owingEvidence.length > 0 && withoutEvidence.length === 0,
     };
-    unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}:${d.resolvedByReleaseId ?? "∅"}`)]);
+    unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}:${d.resolvedByReleaseId ?? "∅"}`), ...holds.map(h => `hold:${h.holdRef}:${h.dispatchEffect}`).sort()]);
+    for (const h of holds) extra.push(holdBlocker("unit", unit.unitNumber, h));
     releaseVersion = versionOf(releases.map(r => `${r.id}:${r.releaseType}:${r.testResult ?? "∅"}:${r.resolvedDefectIds ?? "∅"}`));
     unitCredentialVersion = credentialVersionOf(uCreds);
     for (const c of uCreds) governingExpiries.push({ what: `unitDoc:${c.id}`, at: c.expiresAt });
@@ -672,7 +698,11 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     // There is no trailers table: a trailer is a unit whose vehicleType says so.
     const tr = (await db.select().from(units).where(eq(units.id, subject.trailerId)).limit(1))[0];
     if (!tr) throw new Error(`Trailer ${subject.trailerId} not found`);
-    const [tCreds, pols] = await Promise.all([credentialsFor("trailer", tr.id), policiesCovering("trailer", tr.id, now)]);
+    const [tCreds, pols, tHolds] = await Promise.all([
+      credentialsFor("trailer", tr.id), policiesCovering("trailer", tr.id, now),
+      db.select().from(unitHolds).where(and(eq(unitHolds.unitId, tr.id), eq(unitHolds.status, "active"))),
+    ]);
+    for (const h of tHolds) extra.push(holdBlocker("trailer", tr.unitNumber, h));
     trailer = {
       trailerNumber: tr.unitNumber,
       inspection: credentialState(tCreds, ["cvip_certificate", "annual_inspection"], "Trailer inspection", now),
@@ -682,7 +712,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       compatibleWithTruck: null,
     };
     // C1a-6 — was [id, number of documents]: a trailer inspection replaced by an expired one read as unchanged.
-    trailerVersion = versionOf([tr.id, credentialVersionOf(tCreds)]);
+    trailerVersion = versionOf([tr.id, credentialVersionOf(tCreds), ...tHolds.map(h => `hold:${h.holdRef}:${h.dispatchEffect}`).sort()]);
     insuranceVersion = `${insuranceVersion};trailer=${insuranceVersionOf(pols)}`;
     for (const c of tCreds) governingExpiries.push({ what: `trailerDoc:${c.id}`, at: c.expiresAt });
     for (const p of pols) governingExpiries.push({ what: `trailerPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `trailerPolicyProof:${p.policyRef}`, at: proofExpiry(p.document) });

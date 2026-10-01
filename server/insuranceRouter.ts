@@ -8,11 +8,12 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { and, eq, inArray, isNull, or, gte } from "drizzle-orm";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
 import { requireOwnedEntity } from "./_core/entityScope";
-import { claimInScope, policyInScope, requireCoveredEntity, requireEvidence, requireIncidentReport, requireJob, requireRoadsideEventId, requireUnit, vendorBillIdInScope } from "./financeScope";
+import { claimInScope, policyInScope, requireCoveredEntity, requireEvidence, requireIncidentReport, requireJob, requireRoadsideEventId, vendorBillIdInScope } from "./financeScope";
 import { requireProvableOwnership } from "./ownershipDomain";
 import { getDb } from "./db";
 import {
@@ -204,12 +205,12 @@ export const insuranceRouter = router({
       claimType: z.enum(["collision","cargo","property","equipment","environmental","theft","glass","liability","other"]), estimatedLoss: z.number().nonnegative().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const p = await policyInScope(db, ctx.money, input.policyRef);
       await requireIncidentReport(db, ctx.money, input.incidentReportId);
       await requireRoadsideEventId(db, ctx.money, input.roadsideEventId);
-      await requireUnit(ctx.money, input.unitId);
       await requireJob(ctx.money, input.jobId);
       if (input.lossOccurredAt < p.effectiveAt || input.lossOccurredAt > p.expiresAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Loss date falls outside the policy period" });
       let statementPreserved: boolean | null = null;
