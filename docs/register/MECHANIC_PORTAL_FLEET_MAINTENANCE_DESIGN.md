@@ -711,6 +711,13 @@ the revision at the top. The record is `docs/register/MECHANIC_PORTAL_CP1_WORK_O
 
 ### CP2 — defect to work order
 
+> **Delivered 2026-10-01** as the safety lifecycle — record:
+> `docs/register/MECHANIC_PORTAL_CP2_DEFECT_TO_RETURN_TO_SERVICE.md`. Migrations `0221`/`0222` (not `0176`).
+> Holds are the portfolio's `unitHolds` (`sourceKind: defect`), and the hold is what makes the return to
+> service independent. Left for a CP2b, named in the record: the pre-trip typed form and `inspectionItems`,
+> S-5, `enforcementCommit` / `faultAcknowledge` events, emitter wiring, and holds for defects created by
+> the older paths. The plan as first written follows, unchanged.
+
 - Migration `0176`: `maintenanceDefectEvents`, `workOrderTasks`, `inspections` ALTER +
   `inspectionItems`, `workOrderReleases` ALTER.
 - `maintenanceRouter.ts`: `defectReport` (driver words, proposal, source), `defectTriage`,
