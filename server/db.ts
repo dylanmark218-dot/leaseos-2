@@ -375,13 +375,15 @@ export async function createDutyRecord(input: InsertDutyRecord) {
   const result = await db.insert(dutyRecords).values(input);
   return result[0]?.insertId;
 }
-export async function listWorkOrders(unitId?: number) {
+export async function listWorkOrders(unitId: number | undefined, scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
+  // 0199 — scoped through the unit, as every other unit-keyed list is.
+  const inScope = ownershipScopeWhere("unit", workOrders.unitId, scope);
   return db
     .select()
     .from(workOrders)
-    .where(unitId ? eq(workOrders.unitId, unitId) : undefined)
+    .where(unitId ? and(eq(workOrders.unitId, unitId), inScope) : inScope)
     .orderBy(desc(workOrders.updatedAt))
     .limit(200);
 }
