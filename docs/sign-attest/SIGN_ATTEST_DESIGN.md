@@ -1,6 +1,15 @@
 # LeaseOS Sign & Attest — Design (Checkpoint 0: survey and foundation design)
 
 **Against:** `main` = `6f52b57` (release `v23.25`, migration head `0174`; `0170`/`0171`/`0174` on main, `0172`/`0173` held by an open branch).
+
+> **Baseline note (2026-10-01, SA1 build).** `main` moved 328 commits to `c3f088b` (`v23.30`, migration
+> head `0209`) between this design and its first build. What changed in detail, and nothing else: the
+> migration slots are **`0214`–`0216`** (§16's `0182`–`0184` are now held by four other branches; see the
+> register); Document Control A–C are on `main` (its events table, origin-aware register and numbering
+> ledger are no longer "branch only"); `fieldTicketSignatures` carries SPINE item 2's single signed-scope
+> statement. The entity model, the offline model and the conflicts stand as written. The SA1 build and its
+> owner ruling are recorded in `docs/sign-attest/SA1_OWNER_RULING.md` and
+> `docs/sign-attest/checkpoints/SA_IMPLEMENTATION_RECORD.md`.
 **Branch:** `claude/leaseos-sign-attest-design-5993ar`. **No production code in this checkpoint.** Design and plan only.
 **Companion:** `docs/sign-attest/SIGN_ATTEST_IMPLEMENTATION_PLAN.md` (phases, migrations, tests, first checkpoint).
 

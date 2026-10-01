@@ -12,6 +12,13 @@ beautiful drawing on top of a mutable row is the failure this plan exists to avo
 
 ## Checkpoint SA1 — the drawn signature exists, is bound to a hash, and cannot be edited
 
+**Status: built 2026-10-01** on `main` `c3f088b` under the owner's SA1 ruling
+(`docs/sign-attest/SA1_OWNER_RULING.md`); migrations `0214`–`0216` (not `0182`–`0184`: the slots moved, see
+the register); record in `docs/sign-attest/checkpoints/SA_IMPLEMENTATION_RECORD.md`. Two details differ
+from the plan below as written: the receipt lives on the artifact row as canonical JSON (storage is
+unconfigured in the gate and the receipt is self-verifying by hash), and `attest.verify` is mapped to
+`attest.read` rather than a permission of its own.
+
 **Gate:** owner decision D-01 (moratorium). **Depends on nothing unmerged.**
 
 ### Migrations (re-scan the register at PR time; provisional numbers)

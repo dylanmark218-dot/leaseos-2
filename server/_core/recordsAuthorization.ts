@@ -343,7 +343,14 @@ export type Permission =
   // v22.21 — Training Academy. Learner permissions are universal but self-scoped in the router.
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
-  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage";
+  | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
+  // SA1 — Sign & Attest (docs/sign-attest/SIGN_ATTEST_DESIGN.md §13). Opening a revision fixes a hash;
+  // placing fields and assigning signers shape what is signed; signing is self-scoped; witnessing is
+  // the one act that places another person's mark and says so; finalize, void, supersede and export
+  // are evidence acts. All but the reads are SENSITIVE.
+  | "attest.read" | "attest.document.open" | "attest.field.place" | "attest.signer.assign"
+  | "attest.sign_own" | "attest.decline_own" | "attest.witness"
+  | "attest.finalize" | "attest.void" | "attest.supersede" | "attest.export";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -362,6 +369,11 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.document.open",
+    "attest.field.place",
+    "attest.witness",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -448,6 +460,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.document.open",
+    "attest.field.place",
+    "attest.signer.assign",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -723,6 +740,13 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.vehicle.verify",
   ],
   safety: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.document.open",
+    "attest.field.place",
+    "attest.signer.assign",
+    "attest.witness",
+    "attest.finalize",
     "live_assist.review",
     "document.read",
     "document.intake",
@@ -852,6 +876,16 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "loadsense.calibration.sweep",
   ],
   office: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.document.open",
+    "attest.field.place",
+    "attest.signer.assign",
+    "attest.witness",
+    "attest.finalize",
+    "attest.void",
+    "attest.supersede",
+    "attest.export",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -1021,6 +1055,16 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   management: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.document.open",
+    "attest.field.place",
+    "attest.signer.assign",
+    "attest.witness",
+    "attest.finalize",
+    "attest.void",
+    "attest.supersede",
+    "attest.export",
     "live_assist.use",
     "live_assist.administer",
     "live_assist.review",
@@ -1359,6 +1403,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    // SA1 — Sign & Attest
+    "attest.read",
+    "attest.export",
     "document.read",
     "facility.directory.read",
     "evidence.read_job_operational",
@@ -1765,6 +1812,10 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // SA1 — signing or declining your OWN assigned field: the service resolves the signer row to
+  // `ctx.user.id` and refuses anything else (WRONG_SIGNER). Nobody signs for somebody else.
+  "attest.sign_own",
+  "attest.decline_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -2011,6 +2062,18 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // self-service grant into the restricted sector with no row saying the glass was
   // broken is that category, and without this it proceeded when the audit insert failed.
   "restricted.read",
+  // SA1 — Sign & Attest: every act that creates or ends signing evidence fails closed when its
+  // authorization row cannot be written. A mark with no record of who was allowed to place it is
+  // the label this subsystem exists to end.
+  "attest.document.open",
+  "attest.field.place",
+  "attest.signer.assign",
+  "attest.sign_own",
+  "attest.witness",
+  "attest.finalize",
+  "attest.void",
+  "attest.supersede",
+  "attest.export",
 ] as const;
 
 export function isSensitivePermission(p: Permission): boolean {
@@ -3247,6 +3310,22 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
    * either — that is the same question, and it already has an answer. */
   "paperwork.guidance": "compliance.read",
   "paperwork.reviewScan": "compliance.read",
+
+  /* ---- SA1: Sign & Attest (server/attestRouter.ts) ---- */
+  "attest.open": "attest.document.open",
+  "attest.placeFields": "attest.field.place",
+  "attest.assignSigner": "attest.signer.assign",
+  "attest.sign": "attest.sign_own",
+  "attest.witness": "attest.witness",
+  "attest.decline": "attest.decline_own",
+  "attest.finalize": "attest.finalize",
+  "attest.void": "attest.void",
+  "attest.supersede": "attest.supersede",
+  "attest.view": "attest.read",
+  "attest.list": "attest.read",
+  "attest.verify": "attest.read",
+  "attest.proof": "attest.read",
+  "attest.exportReceipt": "attest.export",
 } as const satisfies Record<string, Permission>;
 
 /**
@@ -3323,10 +3402,12 @@ export type ExternalPermission =
   | "portal.customer.adjust" | "portal.customer.documents"
   | "portal.self" | "portal.customer.read" | "portal.customer.dispute" | "portal.customer.sign" | "portal.customer.decide"
   | "portal.vendor.read" | "portal.vendor.submit"
-  | "portal.facility.read" | "portal.facility.submit";
+  | "portal.facility.read" | "portal.facility.submit"
+  // SA1 — a customer identity reads the signing revisions that name it and signs its own fields.
+  | "portal.attest.read" | "portal.attest.sign";
 
 export const EXTERNAL_KIND_PERMISSIONS: Record<"customer" | "vendor" | "facility", readonly ExternalPermission[]> = {
-  customer: ["portal.customer.commit", "portal.invitation.accept", "portal.credential.manage", "portal.customer.adjust", "portal.customer.documents", "portal.self", "portal.customer.read", "portal.customer.dispute", "portal.customer.sign", "portal.customer.decide"],
+  customer: ["portal.customer.commit", "portal.invitation.accept", "portal.credential.manage", "portal.customer.adjust", "portal.customer.documents", "portal.self", "portal.customer.read", "portal.customer.dispute", "portal.customer.sign", "portal.customer.decide", "portal.attest.read", "portal.attest.sign"],
   vendor: ["portal.invitation.accept", "portal.credential.manage", "portal.self", "portal.vendor.read", "portal.vendor.submit"],
   facility: ["portal.invitation.accept", "portal.credential.manage", "portal.self", "portal.facility.read", "portal.facility.submit"],
 };
@@ -3367,6 +3448,11 @@ export const EXTERNAL_PROCEDURE_PERMISSIONS = {
   "portal.invoiceAccept": "portal.customer.decide",
   "portal.fieldTicketView": "portal.customer.read",
   "portal.fieldTicketSign": "portal.customer.sign",
+  /* ---- SA1: Sign & Attest through the portal ---- */
+  "portal.attestList": "portal.attest.read",
+  "portal.attestView": "portal.attest.read",
+  "portal.attestSign": "portal.attest.sign",
+  "portal.attestDecline": "portal.attest.sign",
   "portal.fieldTicketLineDecide": "portal.customer.decide",
   "portal.vendorStatement": "portal.vendor.read",
   "portal.vendorBillSubmit": "portal.vendor.submit",
@@ -3381,7 +3467,7 @@ export const EXTERNAL_PROCEDURE_PERMISSIONS = {
 // set: `portal.credential.manage`, which governs the lesser `tokenRotate`, was already
 // in it. Without it, a token could be issued in the one circumstance where nothing
 // recorded that it had been.
-export const EXTERNAL_SENSITIVE_PERMISSIONS: readonly ExternalPermission[] = ["portal.customer.commit", "portal.credential.manage", "portal.invitation.accept", "portal.customer.adjust", "portal.customer.documents", "portal.customer.dispute", "portal.customer.sign", "portal.customer.decide", "portal.vendor.submit", "portal.facility.submit"];
+export const EXTERNAL_SENSITIVE_PERMISSIONS: readonly ExternalPermission[] = ["portal.customer.commit", "portal.credential.manage", "portal.invitation.accept", "portal.customer.adjust", "portal.customer.documents", "portal.customer.dispute", "portal.customer.sign", "portal.customer.decide", "portal.vendor.submit", "portal.facility.submit", "portal.attest.sign"];
 
 export function externalPermissionForProcedure(name: string): ExternalPermission | null {
   return (EXTERNAL_PROCEDURE_PERMISSIONS as Record<string, ExternalPermission>)[name] ?? null;

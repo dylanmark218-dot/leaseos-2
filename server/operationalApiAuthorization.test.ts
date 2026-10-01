@@ -336,7 +336,7 @@ d("the migrated tranche is coherent", () => {
   it("declares a permission for every migrated procedure", () => {
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
     // Merged census: 662 main procedures, 10 auth-workspace, 8 Live Assist, and 2 paperwork.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(683);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(697);   // SA1: +14 attest.*   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
   });
 
   it("has a holder for every permission it uses", () => {

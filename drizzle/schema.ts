@@ -1293,6 +1293,8 @@ export const fieldTicketSignatures = mysqlTable("fieldTicketSignatures", {
   deviceKeyFingerprint: varchar("deviceKeyFingerprint", { length: 80 }),
   deviceSignatureBase64: text("deviceSignatureBase64"),
   deviceSignedAt: timestamp("deviceSignedAt"),
+  /** SA1 (0214) — the Sign & Attest session that holds this signature's mark and chain. NULL = signed before Sign & Attest. */
+  attestSessionRef: varchar("attestSessionRef", { length: 120 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -2772,6 +2774,8 @@ export const evidenceRelationships = mysqlTable("evidenceRelationships", {
     "expenseRecord", "financialEntity", "taxYear", "user",
     // v20.18
     "fuelTransaction",
+    // SA1 (0214) — a stroke file, a rendered mark or a receipt files against the signing revision and the mark.
+    "attestRevision", "attestMark",
   ]).notNull(),
   entityId: int("entityId"),
   entityRef: varchar("entityRef", { length: 64 }),
@@ -9582,3 +9586,253 @@ export const liveAssistPolicies = mysqlTable("liveAssistPolicies", {
   currentUnique: uniqueIndex("liveAssistPolicies_current_unique").on(t.orgRef, t.currentMarker),
 }));
 export type LiveAssistPolicyRow = typeof liveAssistPolicies.$inferSelect;
+
+/* ==================================================================
+ * Sign & Attest, SA1 (0214–0216) — docs/sign-attest/SIGN_ATTEST_DESIGN.md §3.
+ *
+ * A signature is of a HASH, not of a row. `attestDocumentRevisions` names a
+ * document revision and fixes its fingerprint; every field, signer, session,
+ * mark and event hangs off that row. The document itself stays where its
+ * domain keeps it (a field-ticket revision, a sealed evidence record, a
+ * register row) — nothing here copies it.
+ *
+ * `orgRef` NULL = the historical single tenant (0132). `orgScopeKey` is
+ * COALESCE(orgRef,'default'), maintained by the write path so a unique index
+ * can see the split a NULL would hide from it (the DC 0178/0179 pattern).
+ * `finalizedKey` is a persistent generated column: the instance key while
+ * `state = 'finalized'`, NULL otherwise — the database's own refusal of two
+ * finalized revisions of one instance (the 0021 `activeGrantKey` precedent).
+ * ================================================================== */
+
+export const attestDocumentRevisions = mysqlTable("attestDocumentRevisions", {
+  id: int("id").autoincrement().primaryKey(),
+  revisionRef: varchar("revisionRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  orgScopeKey: varchar("orgScopeKey", { length: 64 }).default("default").notNull(),
+  /** Stable across revisions: the ticket number, the evidence tracking number, the register root ref. */
+  instanceRef: varchar("instanceRef", { length: 120 }).notNull(),
+  revision: int("revision").notNull(),
+  subjectType: varchar("subjectType", { length: 40 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  subjectId: int("subjectId"),
+  /** The fingerprint before signing, recomputed by the server from the subject — never from input. */
+  revisionHash: varchar("revisionHash", { length: 64 }).notNull(),
+  pageCount: int("pageCount").default(1).notNull(),
+  pageGeometryJson: text("pageGeometryJson"),
+  state: mysqlEnum("state", ["open", "completed", "finalized", "voided", "superseded"]).default("open").notNull(),
+  completionRule: varchar("completionRule", { length: 40 }).default("all_required_fields").notNull(),
+  finalizedAt: timestamp("finalizedAt"),
+  finalizedByUserId: int("finalizedByUserId"),
+  artifactId: int("artifactId"),
+  receiptHash: varchar("receiptHash", { length: 64 }),
+  eventChainHead: varchar("eventChainHead", { length: 64 }),
+  /** Generated PERSISTENT by 0214; never written by the application. */
+  finalizedKey: varchar("finalizedKey", { length: 200 }),
+  supersedesRevisionId: int("supersedesRevisionId"),
+  supersededByRevisionId: int("supersededByRevisionId"),
+  voidedAt: timestamp("voidedAt"),
+  voidedByUserId: int("voidedByUserId"),
+  voidReason: varchar("voidReason", { length: 500 }),
+  /** Who opened it: a staff user, or a portal identity through a producer. One is set. */
+  openedByUserId: int("openedByUserId"),
+  openedByExternalIdentityId: int("openedByExternalIdentityId"),
+  openedAt: timestamp("openedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  instanceRevision: uniqueIndex("attestDocumentRevisions_instance_revision_uq").on(t.orgScopeKey, t.instanceRef, t.revision),
+  finalizedUnique: uniqueIndex("attestDocumentRevisions_finalized_uq").on(t.finalizedKey),
+  subject: index("attestDocumentRevisions_subject_idx").on(t.orgScopeKey, t.subjectType, t.subjectRef),
+}));
+export type AttestDocumentRevisionRow = typeof attestDocumentRevisions.$inferSelect;
+
+export const attestFields = mysqlTable("attestFields", {
+  id: int("id").autoincrement().primaryKey(),
+  fieldRef: varchar("fieldRef", { length: 64 }).notNull().unique(),
+  revisionId: int("revisionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  fieldKey: varchar("fieldKey", { length: 80 }).notNull(),
+  /** shared/attest.ts ATTEST_FIELD_TYPES; varchar so a later type is a value, not a column. */
+  fieldType: varchar("fieldType", { length: 32 }).notNull(),
+  page: int("page").default(1).notNull(),
+  /** Fractions of the unrotated page (D-03), top-left origin. */
+  xFrac: double("xFrac").notNull(),
+  yFrac: double("yFrac").notNull(),
+  widthFrac: double("widthFrac").notNull(),
+  heightFrac: double("heightFrac").notNull(),
+  signerRole: varchar("signerRole", { length: 60 }).notNull(),
+  assignedSignerId: int("assignedSignerId"),
+  required: boolean("required").default(true).notNull(),
+  signingOrder: int("signingOrder"),
+  /** The billing anchor: the domain line this initial acknowledges (a fieldTicketLines id, a load ref). */
+  subjectLineRef: varchar("subjectLineRef", { length: 120 }),
+  groupKey: varchar("groupKey", { length: 80 }),
+  layoutRef: varchar("layoutRef", { length: 64 }),
+  state: mysqlEnum("state", ["pending", "completed", "declined", "voided"]).default("pending").notNull(),
+  /** Unique: the database refuses a second completion of one field (§6.5 race 3). */
+  completedMarkId: int("completedMarkId"),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  revisionKey: uniqueIndex("attestFields_revision_key_uq").on(t.revisionId, t.fieldKey),
+  completedMark: uniqueIndex("attestFields_completed_mark_uq").on(t.completedMarkId),
+}));
+export type AttestFieldRow = typeof attestFields.$inferSelect;
+
+export const attestSigners = mysqlTable("attestSigners", {
+  id: int("id").autoincrement().primaryKey(),
+  signerRef: varchar("signerRef", { length: 64 }).notNull().unique(),
+  revisionId: int("revisionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  partyKind: mysqlEnum("partyKind", ["internal_user", "external_identity", "named_witnessed"]).notNull(),
+  userId: int("userId"),
+  externalIdentityId: int("externalIdentityId"),
+  displayName: varchar("displayName", { length: 180 }).notNull(),
+  company: varchar("company", { length: 180 }),
+  signerRole: varchar("signerRole", { length: 60 }).notNull(),
+  /** The weakest authMethod acceptable for this signer (shared/attest.ts ATTEST_AUTH_METHODS). */
+  requiredAuth: varchar("requiredAuth", { length: 40 }).default("session_login").notNull(),
+  signingOrder: int("signingOrder"),
+  state: mysqlEnum("state", ["invited", "active", "completed", "declined", "revoked"]).default("active").notNull(),
+  invitedByUserId: int("invitedByUserId"),
+  invitedAt: timestamp("invitedAt").notNull(),
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  revision: index("attestSigners_revision_idx").on(t.revisionId),
+}));
+export type AttestSignerRow = typeof attestSigners.$inferSelect;
+
+export const attestSigningSessions = mysqlTable("attestSigningSessions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Server-minted, or device-relative (`${deviceRef}:${localId}`) for an offline session (SA2). */
+  sessionRef: varchar("sessionRef", { length: 120 }).notNull().unique(),
+  revisionId: int("revisionId").notNull(),
+  signerId: int("signerId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  /** Must equal the revision's hash at submit; a stale copy is refused, never rebased (§6.5 race 1). */
+  revisionHashAtStart: varchar("revisionHashAtStart", { length: 64 }).notNull(),
+  authMethod: mysqlEnum("authMethod", ["session_login", "device_auth", "portal_link", "witnessed", "paper_scan"]).notNull(),
+  actorUserId: int("actorUserId"),
+  actorExternalIdentityId: int("actorExternalIdentityId"),
+  witnessedByUserId: int("witnessedByUserId"),
+  // 0157 shape. No biometric material, ever: the platform biometric unlocks the key on the device.
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  fieldDeviceId: int("fieldDeviceId"),
+  keyFingerprint: varchar("keyFingerprint", { length: 80 }),
+  deviceSignatureBase64: text("deviceSignatureBase64"),
+  deviceSignedAt: timestamp("deviceSignedAt"),
+  capturedOffline: boolean("capturedOffline").default(false).notNull(),
+  deviceClockAt: timestamp("deviceClockAt"),
+  clockSkewMs: int("clockSkewMs"),
+  consentVersion: varchar("consentVersion", { length: 40 }).notNull(),
+  consentTextHash: varchar("consentTextHash", { length: 64 }).notNull(),
+  capturedLatitude: double("capturedLatitude"),
+  capturedLongitude: double("capturedLongitude"),
+  state: mysqlEnum("state", ["started", "completed", "declined", "abandoned", "rejected"]).notNull(),
+  rejectionCode: varchar("rejectionCode", { length: 40 }),
+  rejectionReason: varchar("rejectionReason", { length: 500 }),
+  syncPackageId: int("syncPackageId"),
+  startedAt: timestamp("startedAt").notNull(),
+  completedAt: timestamp("completedAt"),
+  receivedAt: timestamp("receivedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  revision: index("attestSigningSessions_revision_idx").on(t.revisionId),
+  signer: index("attestSigningSessions_signer_idx").on(t.signerId),
+}));
+export type AttestSigningSessionRow = typeof attestSigningSessions.$inferSelect;
+
+export const attestMarks = mysqlTable("attestMarks", {
+  id: int("id").autoincrement().primaryKey(),
+  markRef: varchar("markRef", { length: 120 }).notNull().unique(),
+  sessionId: int("sessionId").notNull(),
+  fieldId: int("fieldId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  markKind: varchar("markKind", { length: 32 }).notNull(),
+  inputKind: varchar("inputKind", { length: 16 }).notNull(),
+  /** The canonical stroke document, sealed in the vault (recordType signature_strokes). Required when markKind = drawn. */
+  strokeEvidenceRecordId: int("strokeEvidenceRecordId"),
+  strokeHash: varchar("strokeHash", { length: 64 }),
+  /** The rendered mark (SVG) or the paper scan, sealed in the vault. */
+  renderedEvidenceRecordId: int("renderedEvidenceRecordId"),
+  renderedHash: varchar("renderedHash", { length: 64 }),
+  canvasWidthPx: int("canvasWidthPx"),
+  canvasHeightPx: int("canvasHeightPx"),
+  devicePixelRatio: double("devicePixelRatio"),
+  orientation: varchar("orientation", { length: 16 }),
+  pointCount: int("pointCount"),
+  strokeCount: int("strokeCount"),
+  durationMs: int("durationMs"),
+  pressureAvailable: boolean("pressureAvailable"),
+  valueText: varchar("valueText", { length: 500 }),
+  /** sha256 of the canonical mark payload (§8.2): the mark is bound to the revision hash whatever the method. */
+  payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
+  savedMarkId: int("savedMarkId"),
+  completedAt: timestamp("completedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  session: index("attestMarks_session_idx").on(t.sessionId),
+  field: index("attestMarks_field_idx").on(t.fieldId),
+}));
+export type AttestMarkRow = typeof attestMarks.$inferSelect;
+
+export const attestArtifacts = mysqlTable("attestArtifacts", {
+  id: int("id").autoincrement().primaryKey(),
+  artifactRef: varchar("artifactRef", { length: 64 }).notNull().unique(),
+  revisionId: int("revisionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  kind: mysqlEnum("kind", ["finalized_pdf", "audit_receipt", "page_render"]).notNull(),
+  storageKey: varchar("storageKey", { length: 512 }),
+  /** The audit receipt is canonical JSON small enough to live on the row (the fieldTicketRevisions.snapshotJson precedent). */
+  manifestJson: text("manifestJson"),
+  mimeType: varchar("mimeType", { length: 120 }).notNull(),
+  byteLength: int("byteLength").notNull(),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  sourceRevisionHash: varchar("sourceRevisionHash", { length: 64 }).notNull(),
+  eventChainHead: varchar("eventChainHead", { length: 64 }).notNull(),
+  rendererKey: varchar("rendererKey", { length: 40 }).notNull(),
+  rendererVersion: varchar("rendererVersion", { length: 20 }).notNull(),
+  evidenceRecordId: int("evidenceRecordId"),
+  registerDocumentId: int("registerDocumentId"),
+  generatedByUserId: int("generatedByUserId").notNull(),
+  generatedAt: timestamp("generatedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  revision: index("attestArtifacts_revision_idx").on(t.revisionId),
+}));
+export type AttestArtifactRow = typeof attestArtifacts.$inferSelect;
+
+/**
+ * The append-only, hash-chained trail (0215; guarded by 0216). `eventHash` is
+ * sha256(prevEventHash ∥ canonical(event)); the chain head is copied to the
+ * revision at finalization so a reader with no application code can still
+ * tell an edited history from an intact one.
+ */
+export const attestEvents = mysqlTable("attestEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  revisionId: int("revisionId").notNull(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  sequence: int("sequence").notNull(),
+  eventType: varchar("eventType", { length: 60 }).notNull(),
+  sessionId: int("sessionId"),
+  fieldId: int("fieldId"),
+  markId: int("markId"),
+  artifactId: int("artifactId"),
+  actorSource: mysqlEnum("actorSource", ["human", "system", "external", "integration"]).notNull(),
+  actorUserId: int("actorUserId"),
+  actorExternalIdentityId: int("actorExternalIdentityId"),
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  previousState: varchar("previousState", { length: 40 }),
+  newState: varchar("newState", { length: 40 }),
+  detailJson: text("detailJson"),
+  prevEventHash: varchar("prevEventHash", { length: 64 }),
+  eventHash: varchar("eventHash", { length: 64 }).notNull(),
+  clockSource: mysqlEnum("clockSource", ["server", "device"]).default("server").notNull(),
+  occurredAt: timestamp("occurredAt").notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+}, (t) => ({
+  seq: uniqueIndex("attestEvents_seq_unique").on(t.revisionId, t.sequence),
+  type: index("attestEvents_type_idx").on(t.revisionId, t.eventType),
+}));
+export type AttestEventRow = typeof attestEvents.$inferSelect;
