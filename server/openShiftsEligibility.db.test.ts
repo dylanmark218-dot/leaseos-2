@@ -105,6 +105,28 @@ d("one eligibility rule, enforced where work is taken", () => {
     }, 60_000);
   }
 
+  it("reads the licence from the person's own operator record (operators.userId), never from an operator whose id happens to equal the user id", async () => {
+    const A = await org();
+    const dispatcher = await member(A, ["dispatcher"]);
+    // Linked correctly, current licence — and a stranger's operator row whose primary key equals this
+    // user's id, with an expired licence. The old router read the stranger's row (operators.id == userId).
+    const linked = await eligibleDriver(A);
+    const [stranger] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?, NULL, 'Stranger', '1', ?, NOW())", [linked.userId, new Date("2020-01-01T00:00:00Z")]);
+    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,'operator',?,1)", [A, stranger.insertId]);
+    const p = await post(dispatcher);
+    expect(await caller(dispatcher).shifts.eligibility({ postRef: p.postRef, userId: linked.userId })).toMatchObject({ eligible: true, reasons: [] });
+
+    // The inverse: a current licence on an operator row whose id equals the user's id, but nothing
+    // linked to the person. That is no licence for this person.
+    const unlinked = await member(A, ["driver"]);
+    await roster(A, unlinked);
+    const [row] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?, NULL, 'Not them', '1', ?, NOW())", [unlinked, new Date("2027-06-01T00:00:00Z")]);
+    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,'operator',?,1)", [A, row.insertId]);
+    const both = await bothAnswers(dispatcher, p.postRef, unlinked);
+    expect(both.view.reasons.map(x => x.code)).toEqual(["no_licence_recorded"]);
+    expect(both.action).toBe("refused");
+  }, 60_000);
+
   it("fails closed when the person's operator record is ambiguous — two records, no licence chosen", async () => {
     const A = await org();
     const dispatcher = await member(A, ["dispatcher"]);

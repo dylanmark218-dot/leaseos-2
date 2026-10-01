@@ -142,6 +142,11 @@ describe("SPINE item 2 — the open-shift router enforces the one rule and holds
     }
   });
 
+  it("declares the rule in one place: shiftEligibility and candidatesFor exist only in _core/openShifts.ts", () => {
+    const where = [...declared].filter(([, names]) => names.has("shiftEligibility") || names.has("candidatesFor")).map(([f]) => f);
+    expect(where).toEqual(["server/_core/openShifts.ts"]);
+  });
+
   it("names none of the rule's refusal codes", () => {
     const CODES = ["not_in_organization", "wrong_role", "not_rostered", "on_approved_leave", "overlaps_existing", "no_licence_recorded", "licence_expired", "qualification_unknown", "qualification_unverified", "qualification_expired"];
     expect(strings.filter(x => CODES.includes(x))).toEqual([]);
