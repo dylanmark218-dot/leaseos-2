@@ -12,6 +12,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
 
+/** SEC-1: the exception loader reads one organization; tests read it as the person whose view they assert. */
+const scopeOf = async (userId: number) => (await import("./_core/entityScope")).financeScopeFor((await (await import("./db")).getDb()) as never, userId);
+
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
@@ -253,7 +256,14 @@ d("the inspector clock reaches the exception centre", () => {
   it("surfaces an open request from five days out, critical once overdue, with a deep link", async () => {
     const office = await person("safety");
     const f = await fixtureCourse();
-    const learner = await person("driver");
+    // SEC-1: the learner works for the office's organization. \`person\` gives everyone a company of
+    // their own, and this case passed only while the exception centre read across organizations.
+    const [[{ orgRef: officeOrg }]] = (await pool.query("SELECT orgRef FROM organizationMemberships WHERE userId = ? LIMIT 1", [office])) as unknown as [[{ orgRef: string }]];
+    const learner = seq++;
+    await pool.execute(
+      "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01',1)",
+      [`MEM-${rnd()}`, officeOrg, learner]);
+    await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())", [learner, "driver"]);
     const certificateRef = `ACAD-CERT-${rnd()}`;
     await pool.execute(
       `INSERT INTO academyCertificates (certificateRef, userId, courseId, courseVersionId, assignmentId, qualificationCode, credentialBoundary, issuedByUserId, issuedAt, sourceSnapshotRef, policySnapshotHash, certificateHash, retentionUntil)
@@ -265,7 +275,7 @@ d("the inspector clock reaches the exception centre", () => {
     const late = await callerFor(office).academy.inspectorRequestCreate({ certificateRef, issuingAuthority: "Transport Canada", requestDatedAt: new Date(Date.now() - 20 * 86_400_000) });
     const { deriveExceptions } = await import("./_core/exceptionCentre");
     const { loadExceptionSources } = await import("./surfacesService");
-    const all = deriveExceptions(await loadExceptionSources());
+    const all = deriveExceptions(await loadExceptionSources(await scopeOf(office)));
     const a = all.find(x => x.key === `inspector:${soon.requestRef}`);
     const b = all.find(x => x.key === `inspector:${late.requestRef}`);
     expect(a?.severity).toBe("high");

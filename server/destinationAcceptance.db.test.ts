@@ -13,6 +13,9 @@ import { getDb } from "./db";
 import { loadExceptionSources } from "./surfacesService";
 import { appRouter } from "./routers";
 
+/** SEC-1: the exception loader reads one organization; tests read it as the person whose view they assert. */
+const scopeOf = async (userId: number) => (await import("./_core/entityScope")).financeScopeFor((await (await import("./db")).getDb()) as never, userId);
+
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
@@ -70,7 +73,7 @@ d("destination acceptance from the loads' latest assessments", () => {
     expect(ok.assessments.every(a => !a.blocking)).toBe(true);
     // Exception Centre: the Virden conflict and the regulator-evidence and duplicate rows surface with their permissions.
     await callerFor(safety).facilityDirectory.seedBrief();
-    const sources = await loadExceptionSources();
+    const sources = await loadExceptionSources(await scopeOf(safety));
     expect(sources.facilityDirectory?.conflicting.some(c => c.facilityKey === "virden-facility-conflicting")).toBe(true);
     const xs = deriveExceptions(sources);
     expect(xs.find(x => x.key === "facility-conflict:virden-facility-conflicting")).toMatchObject({ category: "dispatch", severity: "high", requiredPermission: "facility.directory.review" });

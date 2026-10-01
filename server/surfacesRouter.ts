@@ -67,7 +67,7 @@ export const surfacesRouter = router({
     .input(z.object({ category: z.string().max(40).optional(), limit: z.number().int().positive().max(500).default(200) }).optional())
     .query(async ({ ctx, input }) => {
       const { grants } = await grantsFor(ctx.user.id);
-      const all = deriveExceptions(await loadExceptionSources());
+      const all = deriveExceptions(await loadExceptionSources(await scopeFor(ctx.user.id)));
       let mine = visibleTo({ exceptions: all, userId: ctx.user.id, grants });
       if (input?.category) mine = mine.filter(x => x.category === input.category);
       return { summary: summarize(mine), items: mine.slice(0, input?.limit ?? 200) };
@@ -89,7 +89,7 @@ export const surfacesRouter = router({
     const can = may(ctx.user.id, grants);
     const [inbox, exceptions] = await Promise.all([
       loadInbox({ userId: ctx.user.id, roles, canApprovePurchases: can("purchasing.approve"), canResolveConflicts: can("sync.resolve_conflict"), canReviewAssistant: can("assistant.review") }),
-      (async () => visibleTo({ exceptions: deriveExceptions(await loadExceptionSources()), userId: ctx.user.id, grants }))(),
+      (async () => visibleTo({ exceptions: deriveExceptions(await loadExceptionSources(await scopeFor(ctx.user.id))), userId: ctx.user.id, grants }))(),
     ]);
     const session = composeSession(roles as never);
     const waitingFor = inbox.filter(i => i.kind === "my_request" || i.kind === "ai_proposal");
