@@ -728,3 +728,26 @@ handler (`enforcement`); every other event falls through `withHandlers()` to the
 `workflow_rules` processor, which runs `workflowEngine.ts` rules into `operationalTasks`
 (deduplicated by rule + subject) in production. The §4 verdict stands — no `orchestrator.ts` —
 and is stronger for it: a live, durable, deterministic coordinator already exists.
+
+---
+
+## 23. Tool and Skill terms (added 2026-10-01)
+
+The full survey is `docs/register/AI_AGENT_RUNTIME_ARCHITECTURE.md` §23, which uses that
+document's six-word status set. PR #7 has merged since §22 was written, so `server/_core/ai/` is
+in this tree. It is still `DECLARED_UNWIRED` under the moratorium.
+
+**Rule: a Tool carries authority and executes; a Skill carries procedure and grants zero
+authority.**
+
+| Term | LeaseOS definition | Repository home | Status |
+|---|---|---|---|
+| **Tool** | One narrowly defined executable capability: a model-facing key bound server-side to exactly one existing `ProcedureName`. | `ToolDefinition`, `SECRETARY_TOOLS` (11), `resolveTool()`, `invokeTool()` in `server/_core/ai/tools/` | **DECLARED_UNWIRED** |
+| **Tool request / execution / result / receipt** | One requested invocation; its attempted run; the structured outcome; the durable evidence. Kept as four shapes. | `ToolInvocation`; `invokeTool()`; `ToolResult` (not persisted); `authorizationDecisions` row per call, `assistantCommitReceipts` for commits | **PARTIAL** |
+| **Skill** | A reusable, versioned operating procedure for one class of task: objective, required information, expected tools, decision rules, verification, clarification, approval checkpoints, completion criteria, escalation. **Grants no authority.** | Not a named type. Decomposed across `FORMS` (fields, `precisionSensitive`), `TaskAllowlist` (tools, budget; `taskKey` is the natural Skill key), `PromptVersion` (procedure prose), and the validator / `detectGaps()` / `checkCommit()` (verification) | **PARTIAL**, with no binding type. The minimum future shape is §8's `PromptContract` |
+| **Skill selection** | Choosing which procedure applies. Done by the server from the entry point or form key, never by the model. An unknown Skill refuses (the existing `ToolNotAllowed` / perimeter refusal), so no `SKILL_NOT_AVAILABLE` code is needed. | `runSecretaryExtractionJob()` is handed its form; `assistant.draft` takes `formKey` from a server route | **IMPLEMENTED** (deterministic) |
+| **MCP** | A transport for exposing tools. Never an authorization model; connecting a server never grants its tools. | none | **MISSING → DEFERRED** |
+| **Offline tool class** | Declared, never inferred. Reuse the existing classes; do not add a second set. | `OfflineClass` (`local_safe`, `local_capture`, `local_prepare`, `server_authoritative`) in `offlineCapability.ts`; `CapabilityDefinition.requiresOnline` | **DECLARED_UNWIRED**; `requiresOnline` **IMPLEMENTED** in `decide()` |
+
+Skill ≠ permission: a Driver who has a fully loaded "dispatch a vacuum truck" Skill is still
+refused by the dispatch `roleProcedure`, and the refusal is recorded in `authorizationDecisions`.

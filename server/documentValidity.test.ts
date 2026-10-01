@@ -207,14 +207,17 @@ describe("one rule, shared", () => {
     const reads = readFileSync("server/qualificationReads.ts", "utf8");
     expect(reads).toContain('from "./_core/qualificationValidity"');
     expect(reads).toContain('from "./_core/documentValidity"');
-    for (const f of ["openShiftsRouter", "readinessRouter", "crewRouter", "calendarRouter"]) {
+    // 0206 moved open work's eligibility read out of its router into openShiftsService, so that is
+    // the open-shift reader this holds to the adapter; the router reads no qualification store at all.
+    expect(readFileSync("server/openShiftsRouter.ts", "utf8")).not.toContain("workerQualifications");
+    for (const f of ["openShiftsService", "readinessRouter", "crewRouter", "calendarRouter"]) {
       const src = readFileSync(`server/${f}.ts`, "utf8");
       expect(src, f).toContain('from "./qualificationReads"');
     }
   });
 
   it("leaves no router deciding a verification state by hand", () => {
-    for (const f of ["openShiftsRouter", "readinessRouter"]) {
+    for (const f of ["openShiftsRouter", "openShiftsService", "readinessRouter"]) {
       const src = readFileSync(`server/${f}.ts`, "utf8");
       // Reading the column to load rows is fine; branching on its values is the
       // second implementation.
