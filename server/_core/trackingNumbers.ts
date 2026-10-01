@@ -66,14 +66,16 @@ export async function nextTrackingNumber(
   const seed: SequenceFormat = { prefix: args.sequenceType, ...DEFAULT_FORMAT, ...(args.format ?? {}) } as SequenceFormat;
   const periodKey = periodKeyFor(seed.resetPeriod, at);
 
+  // DC-C (0180): every legacy caller stays on the default scope; a business-scoped series is minted
+  // through numberSeries.ts, which writes the ledger row in the caller's own transaction.
   await db.execute(sql`
-    INSERT IGNORE INTO trackingSequences (sequenceType, branch, periodKey, nextNumber, prefix, \`separator\`, yearDigits, includeMonth, sequenceDigits, resetPeriod)
-    VALUES (${args.sequenceType}, ${branch}, ${periodKey}, 1, ${seed.prefix}, ${seed.separator}, ${seed.yearDigits}, ${seed.includeMonth}, ${seed.sequenceDigits}, ${seed.resetPeriod})`);
+    INSERT IGNORE INTO trackingSequences (scopeKey, sequenceType, branch, periodKey, nextNumber, prefix, \`separator\`, yearDigits, includeMonth, sequenceDigits, resetPeriod)
+    VALUES ('default', ${args.sequenceType}, ${branch}, ${periodKey}, 1, ${seed.prefix}, ${seed.separator}, ${seed.yearDigits}, ${seed.includeMonth}, ${seed.sequenceDigits}, ${seed.resetPeriod})`);
 
   return db.transaction(async (tx) => {
     const updated = await tx.execute(sql`
       UPDATE trackingSequences SET nextNumber = LAST_INSERT_ID(nextNumber) + 1
-      WHERE sequenceType = ${args.sequenceType} AND branch = ${branch} AND periodKey = ${periodKey}`);
+      WHERE scopeKey = 'default' AND sequenceType = ${args.sequenceType} AND branch = ${branch} AND periodKey = ${periodKey}`);
     const affected = (Array.isArray(updated) ? (updated[0] as { affectedRows?: number }) : (updated as { affectedRows?: number })).affectedRows ?? 0;
     if (affected !== 1) throw new Error(`trackingSequences: expected one counter row for ${args.sequenceType}/${branch || "-"}/${periodKey}, matched ${affected}`);
     const [seqRows] = await tx.execute(sql`SELECT LAST_INSERT_ID() AS sequence`);
@@ -81,7 +83,7 @@ export async function nextTrackingNumber(
     if (!Number.isInteger(sequence) || sequence < 1) throw new Error("trackingSequences: LAST_INSERT_ID did not carry the counter back");
     const [fmtRows] = await tx.execute(sql`
       SELECT prefix, \`separator\`, yearDigits, includeMonth, sequenceDigits, resetPeriod FROM trackingSequences
-      WHERE sequenceType = ${args.sequenceType} AND branch = ${branch} AND periodKey = ${periodKey}`);
+      WHERE scopeKey = 'default' AND sequenceType = ${args.sequenceType} AND branch = ${branch} AND periodKey = ${periodKey}`);
     const row = (fmtRows as unknown as Record<string, unknown>[])[0]!;
     const format: SequenceFormat = {
       prefix: String(row.prefix), separator: String(row.separator), yearDigits: Number(row.yearDigits) as 0 | 2 | 4,

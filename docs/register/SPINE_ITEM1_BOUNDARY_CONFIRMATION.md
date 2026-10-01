@@ -1,4 +1,4 @@
-# SPINE item 1 — per-boundary confirmation: the resolver and the chain rule, not the reader
+# SPINE item 1 — per-boundary confirmation: resolver, chain rule and reader
 
 The SPINE wiring plan (`docs/register/SPINE_WIRING_PLAN.md`, authored in the sibling repository
 `leaseos` at `df51d65a` and restored here byte-for-byte — see
@@ -15,45 +15,36 @@ and returns `confirmed | unconfirmed | unknown` for each boundary. Tests:
 GREEN) and `server/boundaryConfirmationRules.test.ts` (15 cases). Declared unwired in
 `server/engineReachability.test.ts`.
 
-`server/_core/boundaryEvidence.ts` — the chain rule, `evidenceFromReceipts`, leaseos's code
-unchanged: given a stop's last write and its receipts, it says whether the receipts still describe
-the row (`intact`, or one of six named breaks) and hands the newest commit's fields to the
-resolver. `server/boundaryEvidence.test.ts` carries leaseos's 19 cases plus three that pin what this
-repository can supply — nothing — so that with `{ updatedAt: null, updatedByUserId: null }` every
-stop is `no_write_recorded` and every phase `unknown`. Declared unwired.
+`server/_core/boundaryEvidence.ts` — the chain rule `evidenceFromReceipts` and the receipt reader
+`boundaryEvidenceForStop`, leaseos's code unchanged. The reader identifies the stop inside the
+caller's organization (`orgScopeWhere(trips, scope)`), reads that stop's `assistantCommitReceipts`
+(`targetType = 'trip_stop'` AND `targetRecordId = the stop`), hands the rows to the chain rule, and
+the chain rule hands the newest commit's fields to the resolver. It implements no verdict of its
+own. `server/boundaryEvidence.test.ts` (22 cases, pure) and `server/boundaryEvidence.db.test.ts`
+(27 cases against the gate database: the real commit path and the real `tripStops.update` router,
+record identity, tenant scope, provenance freshness, tampering, the unreachable boundary).
 
-What is proven here without a database: multiple receipts compose deterministically in any order;
-a tampered or unreadable manifest anywhere in the history refuses the whole chain; only the newest
-commit speaks for a boundary; `setupStartedAt` stays `unknown` through an intact chain; corrected
-evidence reads `confirmed`; and `siteBaseline.phaseConfirmation` consumes the resolver's result
-directly. What is **not** proven here, because it needs the reader: that receipts for stop A cannot
-confirm stop B, that a `maintenance_defect` receipt with the same number is not read as a stop's,
-that a wrong `targetRecordId` contributes nothing, and that the stop is read inside the caller's
-organization. leaseos proves those in `boundaryEvidence.db.test.ts` through `orgScopeWhere(trips)`;
-the same test cannot run here until the row carries a last write.
+The last write the reader compares against — `tripStops.updatedAt` and `updatedByUserId` — exists
+here since `0179_trip_stop_provenance.sql`, leaseos's `0169` reconciled forward without renaming
+either repository's 0169 (`docs/register/MIGRATION_0169_RECONCILIATION.md`). The three writers
+stamp it: `tripStops.create`, `tripStops.update` and the assistant commit, pinned by
+`server/tripStopProvenance.test.ts`.
 
-The precedence, per boundary: only the five boundary keys are read; `setupStartedAt` is refused;
-`rejected` is ignored; evidence that cannot be read makes that boundary `unknown`; otherwise the newest
-`committedAt` wins, `confirmed`/`corrected` read `confirmed` and `proposed` reads `unconfirmed`; an
-exact tie resolves to the weaker verdict; array order never decides anything. `unconfirmed` and
-`unknown` are never collapsed.
+## What is still not wired
 
-## What is not, and why — a schema gap, stopped and reported
+The chain is complete and nothing calls its top: the stop-timing router that would call
+`boundaryEvidenceForStop` and feed `siteBaseline` is SPINE item 4 (stop timing, in path order),
+not item 1. `boundaryConfirmation`, `boundaryEvidence` and `siteBaseline` therefore stay in
+`DECLARED_UNWIRED` with that reason, and item 1 is complete as a chain, not as a wired feature.
+The plan's second consumer, the billing path, reads the same resolver when
+`tripBillingProjection` is adapted onto `priceLineAndRecord`; that adaptation is item 4's.
 
-leaseos also carries the **receipt reader** (`boundaryEvidenceForStop` in `boundaryEvidence.ts`): it
-reads a stop's receipts inside the caller's organization and refuses them when the stop was written
-after its newest commit. That check compares `tripStops.updatedAt` and `updatedByUserId` with the
-receipt's `committedAt` and `actorUserId`.
+## The schema gap that stopped the reader, now closed
 
-**This repository's `tripStops` has no `updatedAt`.** Its migrations stop at `0168`; it never received
-the trip-stop provenance migration (`0169_trip_stop_provenance.sql` in leaseos), so it has none of
-`recordedByUserId`, `recordedSource`, `updatedByUserId`, `updatedSource`, `updatedAt`. Without a
-recorded last write, an edit made through `tripStops.update` after a commit leaves no trace, and no
-reader here could tell whether a receipt still describes the row. The only honest reader would answer
-`unknown` for every stop, which is not worth shipping.
-
-Adding that migration here is a schema change this checkpoint was told not to make, and it would land
-in a contested slot — see below. So the reader stops here, reported rather than improvised.
+Until 0179 this repository's `tripStops` had no `updatedAt` or `updatedByUserId`: its migrations
+stopped at 0168, and the 0169 slot was taken by `0169_defect_resolution.sql` (PR #4). The reader
+was held back rather than improvised, because with no last write to compare against the only honest
+answer was `unknown` for every stop. That is resolved by forward migration, not by renaming.
 
 ## `setupStartedAt` is a capture gap
 
@@ -78,10 +69,9 @@ product-specific restrictions, equipment swaps. Until then, no trustworthy capac
 `capacity_unknown` / `NOT_EVALUATED`. `units` gets no capacity column; `bulkFuelTanks.capacityLitres`
 describes a fuel depot and is not reused.
 
-**RELEASE BLOCKER — MIGRATION 0169 RECONCILIATION.** Migration 0169 is claimed twice, and since
-2026-09-23 on both `main` branches. leaseos `main` carries `0169_trip_stop_provenance.sql`; this
-repository's `main` carries `0169_defect_resolution.sql` (PR #4, merged); and this repository has
-no trip-stop provenance at all. Two migrations
-cannot both own one canonical number. Resolve it before the next migration-bearing feature in either
-repository, and do not rename an applied migration without checking each environment's migration
+**RELEASE BLOCKER — MIGRATION 0169 RECONCILIATION — resolved 2026-09-23.** Migration 0169 is
+claimed twice: leaseos `main` carries `0169_trip_stop_provenance.sql`; this repository's `main`
+carries `0169_defect_resolution.sql` (PR #4). Neither is renamed. This repository converges by
+`0179_trip_stop_provenance.sql`; leaseos owes a defect-resolution port together with PR #4's code,
+as a checkpoint of its own. Survey, hashes and decision: `docs/register/MIGRATION_0169_RECONCILIATION.md`.
 history and CI database state.

@@ -812,6 +812,10 @@ Database-backed suites follow the `*.db.test.ts` convention (gate 6 refuses skip
 | D-16 | Regulatory polling cadence | Weekly for tier-1 instruments, daily for advisories/road bans. All results are proposals. |
 | D-17 | Order of stacked PRs | **Decided:** PR #4 first. Done: merged as `38d2677`; #5 retargeted to main and #6/#9 brought up to date (see the C1a checkpoint's matrix). |
 | D-18 | Eligibility fingerprint algorithm change (FNV-1a → sha256) | Accept. Existing checks become stale once, on deploy. |
+| C1b-Q1 | Generalize `hosRuleLimitHistory` in place, or a new ledger? | **Proceeded on the recommended answer** (in place, additive; `0189`). Recorded in `checkpoints/C1B_1_RULE_LEDGER.md`. |
+| C1b-Q2 | Who may verify a regulatory source or rule revision, and against what? | **Decided (2026-09-25): B — citation verification permitted as a transitional trust level; source-document verification becomes mandatory per authority/domain as sources are admitted.** Never the proposer; a named verifier; two independent verifiers for a dispatch-blocking requirement. This is a transitional architecture, **not** a claim that LeaseOS has completed legal-source licensing assessment. Implemented in C1b-2b (`checkpoints/C1B_2B_REQUIREMENT_VERIFICATION.md`). |
+| C1b-Q3 | Which rule revisions need two verifiers? | **Decided with Q2:** every dispatch-blocking requirement (`missingSeverity = blocked`), whatever its tier; one independent verifier for an informational one. The ledger's own statute/regulator-order rule still applies on top. |
+| C1b-Q4 | Load unverified seeds as candidates? | Recommended answer assumed; nothing has been loaded. Seeds remain UNVERIFIED seed constants. |
 
 ---
 

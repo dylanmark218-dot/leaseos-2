@@ -1,0 +1,74 @@
+name: Bug report
+description: Something behaves differently from what it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report a security vulnerability here.** Use private reporting —
+        see [SECURITY.md](../blob/main/SECURITY.md).
+
+        Sanitize anything you paste: no credentials, and no driver, employee or
+        customer details.
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behaviour
+      description: What actually happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: >
+        What should have happened, and — where you know it — the rule that says so:
+        a permission, a tenant boundary, a compliance requirement, a state transition.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: >
+        The steps to trigger it, including what you need to be in a position to try:
+        a role, a tenant, a record in a particular state, being offline.
+      placeholder: |
+        1. Sign in as …
+        2. Open …
+        3. …
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit or release
+      description: The commit SHA or release marker you saw this on.
+      placeholder: "1680e94, or v23.25"
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >
+        Sanitized logs, error text, a failing test, or a screenshot. Trim logs to the
+        lines that matter and redact identifiers.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before submitting
+      options:
+        - label: This is not a security vulnerability.
+          required: true
+        - label: I removed credentials and personal or customer data from everything above.
+          required: true

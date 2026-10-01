@@ -32,12 +32,15 @@ describe("calendar ranges in a stated zone", () => {
     expect([iso(r.from), iso(r.to)]).toEqual(["2026-09-23T07:00:00.000Z", "2026-09-24T07:00:00.000Z"]);
   });
 
-  it("gives the autumn daylight-saving day 25 hours and the spring one 23", () => {
-    const fall = resolveRange({ label: "today", zone: "America/Edmonton" }, new Date("2026-11-01T18:00:00Z"));
-    expect([iso(fall.from), iso(fall.to)]).toEqual(["2026-11-01T06:00:00.000Z", "2026-11-02T07:00:00.000Z"]);
-    const spring = resolveRange({ label: "today", zone: "America/Edmonton" }, new Date("2026-03-08T18:00:00Z"));
-    expect([iso(spring.from), iso(spring.to)]).toEqual(["2026-03-08T07:00:00.000Z", "2026-03-09T06:00:00.000Z"]);
-    expect(iso(startOfLocalDay({ y: 2026, m: 3, d: 8 }, "America/Edmonton"))).toBe("2026-03-08T07:00:00.000Z");
+  it("gives a daylight-saving day its real length, from the runtime's zone data rather than a rule written here", () => {
+    // 2025, deliberately: a past transition is history and cannot be legislated away. The 2026 autumn
+    // change in Edmonton was — the pinned tz data (2026c) has Alberta staying on daylight time from
+    // November 2026, and this test asserted the old rule until the runtime corrected it.
+    const fall = resolveRange({ label: "today", zone: "America/Edmonton" }, new Date("2025-11-02T18:00:00Z"));
+    expect([iso(fall.from), iso(fall.to)]).toEqual(["2025-11-02T06:00:00.000Z", "2025-11-03T07:00:00.000Z"]);
+    const spring = resolveRange({ label: "today", zone: "America/Edmonton" }, new Date("2025-03-09T18:00:00Z"));
+    expect([iso(spring.from), iso(spring.to)]).toEqual(["2025-03-09T07:00:00.000Z", "2025-03-10T06:00:00.000Z"]);
+    expect(iso(startOfLocalDay({ y: 2025, m: 3, d: 9 }, "America/Edmonton"))).toBe("2025-03-09T07:00:00.000Z");
   });
 
   it("makes yesterday end exactly where today begins, so a record at the boundary belongs to one day", () => {

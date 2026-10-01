@@ -8,6 +8,15 @@ import { roleProcedure, router } from "./_core/trpc";
 import { evaluateMechanicRelease } from "./_core/mechanicRelease";
 import { appendWorkOrderRelease } from "./recordsService";
 import { actingScopeFor, getDb, unitInScope, workOrderInScope } from "./db";
+import { requireProvableOwnership } from "./ownershipDomain";
+
+/**
+ * F1.1 — parts, bins, stock movements, the tire registry, serialized tools and warranty records carry
+ * no organization. With organizations present no one can prove whose they are, so these procedures
+ * refuse (OWNERSHIP_UNRESOLVED) instead of reading or changing another company's stock. Units, work
+ * orders and recalls-by-unit stay available: they are scoped (P4.1). See ownershipDomain.ts.
+ */
+const INVENTORY_OWNER = "F4 gives inventory an owner (docs/finance/LEASEOS_FINANCE_F1_TENANT_ISOLATION.md, F4 note)";   // "Available again once …"
 import { partMovements, parts, recallNotices, recallUnitStatus, serializedTools, tireInstallations, tireMeasurements, tires, toolCheckouts, vendorBillLines, warrantyClaims, warrantyPolicies, workOrders, maintenanceDefects } from "../drizzle/schema";
 import { claimDecision, claimEligibility, countAdjustment, installDecision, issueDecision, reorderFindings, signedQty, stockPositions, tireRun, treadStatus, workOrderCost, type Movement } from "./_core/fleetShop";
 
@@ -29,6 +38,7 @@ export const shopRouter = router({
   partCreate: roleProcedure("shop.partCreate")
     .input(z.object({ partNumber: z.string().min(1).max(80), oemNumber: z.string().max(80).nullable().optional(), description: z.string().min(1).max(220), category: z.enum(["tire", "filter", "fluid", "belt_hose", "brake", "electrical", "hydraulic", "driveline", "body", "consumable", "other"]), uom: z.string().max(20).default("each"), isCore: z.boolean().default(false), coreChargeCents: z.number().int().nonnegative().nullable().optional(), minQty: z.number().int().nonnegative().nullable().optional(), maxQty: z.number().int().nonnegative().nullable().optional(), preferredVendorId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ input }) => {
+    await requireProvableOwnership("The parts catalog", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       const db = await dbOrThrow();
       if (input.isCore && input.coreChargeCents == null) throw new TRPCError({ code: "BAD_REQUEST", message: "A core part needs its core charge" });
       if (input.minQty != null && input.maxQty != null && input.maxQty < input.minQty) throw new TRPCError({ code: "BAD_REQUEST", message: "Maximum below minimum" });
@@ -41,6 +51,7 @@ export const shopRouter = router({
   partReceive: roleProcedure("shop.partReceive")
     .input(z.object({ partNumber: z.string().min(1).max(80), bin: z.string().max(40).default("MAIN"), qty: z.number().int().positive(), unitCostCents: z.number().int().nonnegative(), vendorBillLineId: z.number().int().positive().nullable().optional(), reason: z.string().max(300).optional() }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Receiving parts into stock", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       const p = await partByNumber(input.partNumber);
       if (input.vendorBillLineId) { const db = await dbOrThrow(); const l = (await db.select({ id: vendorBillLines.id, lineType: vendorBillLines.lineType }).from(vendorBillLines).where(eq(vendorBillLines.id, input.vendorBillLineId)).limit(1))[0]; if (!l) throw new TRPCError({ code: "NOT_FOUND", message: "Vendor bill line not found" }); if (l.lineType !== "part") throw new TRPCError({ code: "BAD_REQUEST", message: `Bill line is ${l.lineType}, not a part` }); }
       const movementRef = await move({ partId: p.id, bin: input.bin, kind: "receive", qty: input.qty, unitCostCents: input.unitCostCents, vendorBillLineId: input.vendorBillLineId ?? null, reason: input.reason ?? null, byUserId: ctx.user.id });
@@ -52,6 +63,7 @@ export const shopRouter = router({
   partIssue: roleProcedure("shop.partIssue")
     .input(z.object({ partNumber: z.string().min(1).max(80), bin: z.string().max(40).default("MAIN"), qty: z.number().int().positive(), workOrderNumber: z.string().min(1).max(64), reason: z.string().max(300).optional() }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Issuing parts from stock", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
       const scope = await actingScopeFor(ctx.user.id);
       if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
@@ -72,6 +84,7 @@ export const shopRouter = router({
   partReturn: roleProcedure("shop.partReturn")
     .input(z.object({ partNumber: z.string().min(1).max(80), bin: z.string().max(40).default("MAIN"), qty: z.number().int().positive(), workOrderNumber: z.string().max(64).optional(), reason: z.string().min(3).max(300) }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Returning parts to stock", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
       const scope = await actingScopeFor(ctx.user.id);
       if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
@@ -83,6 +96,7 @@ export const shopRouter = router({
   coreReturn: roleProcedure("shop.coreReturn")
     .input(z.object({ partNumber: z.string().min(1).max(80), bin: z.string().max(40).default("MAIN"), qty: z.number().int().positive(), vendorBillLineId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Core returns", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       const p = await partByNumber(input.partNumber);
       const pos = (await positionsFor(p.id)).find(x => x.bin === input.bin);
       if (!pos || pos.coresOutstanding < input.qty) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${pos?.coresOutstanding ?? 0} core(s) outstanding; ${input.qty} returned` });
@@ -94,6 +108,7 @@ export const shopRouter = router({
   partCount: roleProcedure("shop.partCount")
     .input(z.object({ partNumber: z.string().min(1).max(80), bin: z.string().max(40).default("MAIN"), countedQty: z.number().int().nonnegative(), reason: z.string().min(3).max(300) }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Stock counts and adjustments", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       const p = await partByNumber(input.partNumber);
       const pos = (await positionsFor(p.id)).find(x => x.bin === input.bin) ?? { onHandQty: 0 };
       const c = countAdjustment(pos.onHandQty, input.countedQty);
@@ -103,6 +118,7 @@ export const shopRouter = router({
     }),
 
   stock: roleProcedure("shop.stock").input(z.object({ partNumber: z.string().max(80).optional() })).query(async ({ input }) => {
+    await requireProvableOwnership("Stock positions", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
     const db = await dbOrThrow();
     const ps = input.partNumber ? [await partByNumber(input.partNumber)] : await db.select().from(parts).where(eq(parts.status, "active"));
     const moves = ps.length ? await db.select().from(partMovements).where(inArray(partMovements.partId, ps.map(p => p.id))) : [];
@@ -113,6 +129,7 @@ export const shopRouter = router({
   tireRegister: roleProcedure("shop.tireRegister")
     .input(z.object({ serial: z.string().min(1).max(80), brand: z.string().max(80).optional(), model: z.string().max(80).optional(), size: z.string().min(1).max(40), positionType: z.enum(["steer", "drive", "trailer", "any"]).default("any"), purchaseCostCents: z.number().int().nonnegative().nullable().optional(), purchaseVendorBillLineId: z.number().int().positive().nullable().optional(), casingOfSerial: z.string().max(80).optional() }))
     .mutation(async ({ input }) => {
+    await requireProvableOwnership("The tire registry", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       const db = await dbOrThrow();
       let casingOfTireId: number | null = null, retreadCount = 0;
       if (input.casingOfSerial) { const c = (await db.select().from(tires).where(eq(tires.serial, input.casingOfSerial)).limit(1))[0]; if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "Casing tire not found" }); casingOfTireId = c.id; retreadCount = c.retreadCount + 1; await db.update(tires).set({ status: "retread_out" }).where(eq(tires.id, c.id)); }
@@ -124,6 +141,7 @@ export const shopRouter = router({
   tireInstall: roleProcedure("shop.tireInstall")
     .input(z.object({ serial: z.string().min(1).max(80), unitId: z.number().int().positive(), axlePosition: z.string().min(2).max(8), installedAt: z.coerce.date(), installOdometerKm: z.number().int().nonnegative().nullable().optional(), installTreadMm: z.number().nonnegative().nullable().optional(), workOrderNumber: z.string().max(64).optional() }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Tire installation", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
       const scope = await actingScopeFor(ctx.user.id);
       if (!(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
@@ -144,6 +162,7 @@ export const shopRouter = router({
   tireRemove: roleProcedure("shop.tireRemove")
     .input(z.object({ serial: z.string().min(1).max(80), removedAt: z.coerce.date(), removeOdometerKm: z.number().int().nonnegative().nullable().optional(), removeTreadMm: z.number().nonnegative().nullable().optional(), removalReason: z.enum(["worn", "damage", "rotation", "retread", "warranty", "other"]), workOrderNumber: z.string().max(64).optional() }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Tire removal", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
       const scope = await actingScopeFor(ctx.user.id);
       if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
@@ -161,6 +180,7 @@ export const shopRouter = router({
   tireMeasure: roleProcedure("shop.tireMeasure")
     .input(z.object({ serial: z.string().min(1).max(80), measuredAt: z.coerce.date(), treadMm: z.number().nonnegative().nullable().optional(), pressureKpa: z.number().nonnegative().nullable().optional(), odometerKm: z.number().int().nonnegative().nullable().optional(), note: z.string().max(200).optional() }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Tire measurements", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       const db = await dbOrThrow();
       const t = (await db.select().from(tires).where(eq(tires.serial, input.serial)).limit(1))[0];
       if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Tire not found" });
@@ -170,6 +190,7 @@ export const shopRouter = router({
     }),
 
   tireHistory: roleProcedure("shop.tireHistory").input(z.object({ serial: z.string().min(1).max(80) })).query(async ({ input }) => {
+    await requireProvableOwnership("Tire history", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
     const db = await dbOrThrow();
     const t = (await db.select().from(tires).where(eq(tires.serial, input.serial)).limit(1))[0];
     if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Tire not found" });
@@ -183,6 +204,7 @@ export const shopRouter = router({
   warrantyPolicyRecord: roleProcedure("shop.warrantyPolicyRecord")
     .input(z.object({ subjectType: z.enum(["part", "tire", "unit_component"]), subjectId: z.number().int().positive(), unitId: z.number().int().positive().nullable().optional(), vendorId: z.number().int().positive().nullable().optional(), coverageUntil: z.coerce.date().nullable().optional(), coverageKm: z.number().int().positive().nullable().optional(), coverageHours: z.number().int().positive().nullable().optional(), terms: z.string().max(600).optional(), sourceDocumentEvidenceId: z.number().int().positive().nullable().optional(), verified: z.boolean().default(false) }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Warranty policies", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
       const scope = await actingScopeFor(ctx.user.id);
       if (input.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
@@ -196,6 +218,7 @@ export const shopRouter = router({
   warrantyClaimRaise: roleProcedure("shop.warrantyClaimRaise")
     .input(z.object({ policyRef: z.string().min(1).max(64), workOrderNumber: z.string().max(64).optional(), tireSerial: z.string().max(80).optional(), claimedCents: z.number().int().positive(), reason: z.string().min(10).max(600), kmSincePurchase: z.number().int().nonnegative().nullable().optional(), hoursSincePurchase: z.number().int().nonnegative().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Warranty claims", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       // P4.1: the unit (or the work order's unit) must be in the caller's scope; otherwise it does not exist here.
       const scope = await actingScopeFor(ctx.user.id);
       if (input.workOrderNumber && !(await workOrderInScope(input.workOrderNumber, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderNumber} not found` });
@@ -214,6 +237,7 @@ export const shopRouter = router({
   warrantyClaimDecide: roleProcedure("shop.warrantyClaimDecide")
     .input(z.object({ claimRef: z.string().min(1).max(64), decision: z.enum(["approved", "denied"]), reason: z.string().min(5).max(400), creditVendorBillLineId: z.number().int().positive().nullable().optional(), creditedCents: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
+    await requireProvableOwnership("Warranty claim decisions", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
       const db = await dbOrThrow();
       const c = (await db.select().from(warrantyClaims).where(eq(warrantyClaims.claimRef, input.claimRef)).limit(1))[0];
       if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "Claim not found" });
@@ -231,12 +255,14 @@ export const shopRouter = router({
     }),
 
   toolRegister: roleProcedure("shop.toolRegister").input(z.object({ serial: z.string().min(1).max(80), description: z.string().min(1).max(220), measurementDeviceId: z.number().int().positive().nullable().optional() })).mutation(async ({ input }) => {
+    await requireProvableOwnership("The serialized tool registry", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
     const db = await dbOrThrow();
     const toolRef = ref("TOOL");
     await db.insert(serializedTools).values({ toolRef, serial: input.serial, description: input.description, measurementDeviceId: input.measurementDeviceId ?? null });
     return { toolRef };
   }),
   toolCheckout: roleProcedure("shop.toolCheckout").input(z.object({ serial: z.string().min(1).max(80), workerUserId: z.number().int().positive() })).mutation(async ({ input }) => {
+    await requireProvableOwnership("Tool checkout", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
     const db = await dbOrThrow();
     const t = (await db.select().from(serializedTools).where(eq(serializedTools.serial, input.serial)).limit(1))[0];
     if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Tool not found" });
@@ -246,6 +272,7 @@ export const shopRouter = router({
     return { toolRef: t.toolRef, status: "checked_out" as const };
   }),
   toolReturn: roleProcedure("shop.toolReturn").input(z.object({ serial: z.string().min(1).max(80), condition: z.enum(["good", "damaged", "needs_calibration"]) })).mutation(async ({ input }) => {
+    await requireProvableOwnership("Tool return", INVENTORY_OWNER);   // F1.1 — unowned rows: fail closed
     const db = await dbOrThrow();
     const t = (await db.select().from(serializedTools).where(eq(serializedTools.serial, input.serial)).limit(1))[0];
     if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Tool not found" });

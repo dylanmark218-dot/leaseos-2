@@ -182,6 +182,12 @@ export type Permission =
   | "compliance.passport.read" | "compliance.credential.record" | "compliance.credential.verify"
   | "compliance.private.read" | "compliance.consent.record" | "compliance.requirement.manage"
   | "compliance.program.publish" | "compliance.profile.review"
+  // C1b-2b — requirement verification through the ledger. Proposing, verifying, second approval of a
+  // dispatch-blocking rule, withdrawal and verification governance are separate acts, held separately.
+  // Separation of duties is additionally enforced by person (proposer ≠ verifier ≠ second verifier),
+  // so holding several of these does not let one person carry a requirement alone.
+  | "compliance.requirement.propose" | "compliance.requirement.verify" | "compliance.requirement.second_approve"
+  | "compliance.requirement.retire" | "compliance.verification.govern"
   // v20.22 — packs, work authorization, equipment authorization, calibration.
   | "compliance.pack.manage" | "compliance.work.evaluate"
   | "equipment.authorize" | "calibration.record" | "calibration.impact"
@@ -239,6 +245,10 @@ export type Permission =
   | "commercial.terms.manage" | "commercial.po.record" | "commercial.ratecard.manage" | "commercial.read"
   // v22.7 — Commercial Setup & Rate Resolution: a rate is proposed by one person and approved by another; a margin is management's to see.
   | "commercial.rates.propose" | "commercial.rates.approve" | "commercial.rates.read" | "commercial.pricing.decide" | "commercial.margin.view" | "commercial.setup.write"
+  // v23.31 — Customer, Contract & Rate Management: the customer is a record, a contract has a lifecycle, a rate sheet is approved as a versioned unit, and a job freezes its commercial basis.
+  | "commercial.customer.read" | "commercial.customer.write" | "commercial.customer.archive"
+  | "commercial.contract.read" | "commercial.contract.write" | "commercial.contract.approve" | "commercial.contract.status"
+  | "commercial.job.assign" | "commercial.job.snapshot" | "commercial.job.summary" | "commercial.billing.context"
   // v22.9 — an invoice is drafted by the office from a ticket's decisions and finalized by a second permission into a frozen snapshot.
   | "invoicing.draft" | "invoicing.finalize" | "invoicing.read" | "invoicing.render" | "invoicing.send" | "invoicing.void" | "invoicing.dispute.resolve"
   // v22.13 — the mapping foundation: importing open geospatial data, reading it, and verifying a coordinate from the imported grid.
@@ -276,6 +286,8 @@ export type Permission =
   | "board.read" | "board.post" | "board.manage"
   // v22.20 — the agent. Asking it to work, acting, and approving differ.
   | "agent.use" | "agent.act" | "agent.approve" | "agent.read"
+  // LA-1a — Live Assist, the session spine only.
+  | "live_assist.use" | "live_assist.administer" | "live_assist.review"
   // v22.20 — clearing a government data source for operational use.
   | "geo.source.review"
   // v22.19 — the package a truck carries when nothing can be fetched.
@@ -287,6 +299,12 @@ export type Permission =
   | "hos.attest"
   /* P8.3 — putting a scanned log page on file. Retention, not a dispatch answer. */
   | "hos.recordScannedLog"
+  // DC-A (0178) — Document Control. Reading the register, taking a document in, confirming
+  // what a scan says, issuing a numbered record, voiding a number, and managing the catalog, the
+  // series and the templates are each their own act: intake creates a row, confirmation creates a
+  // fact, issue consumes a number, void explains a gap.
+  | "document.read" | "document.intake" | "document.confirm" | "document.issue" | "document.void"
+  | "document.catalog.manage" | "document.series.manage" | "document.template.manage"
   /* P8.5 — the vault. `restricted.read` is the permission the break-glass prompt sits behind; it is
      NOT implied by an administration role, which is the point of the whole subsystem. */
   | "vault.matter.manage" | "restricted.read" | "restricted.audit.read"
@@ -352,6 +370,10 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    "commercial.job.summary",
+    "live_assist.use",
+    "document.read",
+    "document.intake",
     "automation.override.operational",
     "facility.directory.report",
     "facility.directory.read",
@@ -437,6 +459,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   dispatcher: [
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
+    "live_assist.use",
+    "document.read",
+    "document.intake",
+    "document.confirm",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -521,6 +547,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "ifta.read",
     "fuel.review",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.contract.read",
+    "commercial.job.assign",
+    "commercial.job.snapshot",
+    "commercial.job.summary",
     "commercial.rates.propose",
     "commercial.rates.read",
     "closeout.ticket.write",
@@ -550,6 +581,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   mechanic: [
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
+    "live_assist.use",
+    "document.read",
+    "document.intake",
     "assistant.ask",
     "board.read",
     "board.post",
@@ -618,6 +652,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   shop_lead: [
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
+    "live_assist.use",
+    "document.read",
+    "document.intake",
+    "document.confirm",
     "facility.directory.read",
     "academy.evaluate",
     "assistant.ask",
@@ -707,6 +745,14 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   safety: [
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
+    "live_assist.review",
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -830,6 +876,13 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   office: [
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
+    "live_assist.use",
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
+    "document.void",
+    "document.template.manage",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -838,6 +891,14 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "facility.directory.write",
     "facility.directory.read",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.customer.write",
+    "commercial.contract.read",
+    "commercial.contract.write",
+    "commercial.job.assign",
+    "commercial.job.snapshot",
+    "commercial.job.summary",
+    "commercial.billing.context",
     "commercial.write",
     "assistant.ask",
     "agent.use",
@@ -994,6 +1055,22 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   management: [
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
+    "live_assist.use",
+    "live_assist.administer",
+    "live_assist.review",
+    "document.read",
+    "document.intake",
+    "document.confirm",
+    "document.issue",
+    "document.void",
+    "document.catalog.manage",
+    "document.series.manage",
+    "document.template.manage",
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.requirement.retire",
+    "compliance.verification.govern",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1011,6 +1088,17 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "ar.writeoff.decide",
     "payment.release",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.customer.write",
+    "commercial.customer.archive",
+    "commercial.contract.read",
+    "commercial.contract.write",
+    "commercial.contract.approve",
+    "commercial.contract.status",
+    "commercial.job.assign",
+    "commercial.job.snapshot",
+    "commercial.job.summary",
+    "commercial.billing.context",
     "commercial.write",
     "commercial.policy",
     "academy.assign",
@@ -1248,6 +1336,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   hr: [
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
+    "document.read",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1284,6 +1373,16 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "audit.package.read",
   ],
   legal: [
+    "commercial.customer.read",
+    "commercial.contract.read",
+    "commercial.contract.write",
+    "commercial.contract.approve",
+    "document.read",
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.verification.govern",
     "evidence.read_legal",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
@@ -1313,6 +1412,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   auditor: [
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
+    "document.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.read_safety_summary",
@@ -1351,6 +1451,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "bank.read",
     "ar.read",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.contract.read",
+    "commercial.job.summary",
     "commercial.rates.read",
     "invoicing.read",
     "closeout.read",
@@ -1367,8 +1470,15 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   /* ---- B20.5 finance and payroll functions ---- */
 
   bookkeeper: [
+    "document.read",
+    "document.intake",
     "facility.directory.read",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.customer.write",
+    "commercial.contract.read",
+    "commercial.job.summary",
+    "commercial.billing.context",
     "commercial.write",
     "tax.read_business",
     "tax.expense.create",
@@ -1491,6 +1601,14 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   controller: [
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
+    "document.read",
+    "document.confirm",
+    "document.issue",
+    /* C1b-2b — requirement verification */
+    "compliance.requirement.propose",
+    "compliance.requirement.verify",
+    "compliance.requirement.second_approve",
+    "compliance.requirement.retire",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1586,6 +1704,17 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "commercial.po.record",
     "commercial.ratecard.manage",
     "commercial.read",
+    "commercial.customer.read",
+    "commercial.customer.write",
+    "commercial.customer.archive",
+    "commercial.contract.read",
+    "commercial.contract.write",
+    "commercial.contract.approve",
+    "commercial.contract.status",
+    "commercial.job.assign",
+    "commercial.job.snapshot",
+    "commercial.job.summary",
+    "commercial.billing.context",
     "commercial.rates.propose",
     "commercial.rates.approve",
     "commercial.rates.read",
@@ -1662,6 +1791,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "bank.read",
     "ar.read",
     "commercial.read",
+    "commercial.customer.read",
     "closeout.read",
     "asset.read",
     "asset.cca.classify",
@@ -1760,6 +1890,18 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  "live_assist.use",
+  "live_assist.administer",
+  "live_assist.review",
+  // DC-A (0178) — Document Control. Each of these creates operational truth (a controlled record, a
+  // confirmed extraction, a consumed number) or changes what every later record is judged by.
+  "document.intake",
+  "document.confirm",
+  "document.issue",
+  "document.void",
+  "document.catalog.manage",
+  "document.series.manage",
+  "document.template.manage",
   "academy.source.review",
   "academy.certificate.issue",
   "academy.certificate.sign_own",
@@ -1857,6 +1999,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "commercial.rates.approve",
   "commercial.margin.view",
   "commercial.setup.write",
+  // v23.31 — archiving a customer, approving a contract, suspending or terminating one: governance acts, recorded or refused.
+  "commercial.customer.archive",
+  "commercial.contract.approve",
+  "commercial.contract.status",
   "invoicing.finalize",
   // v21.9.1 — nine actions that were role-authorized but never entered the
   // fail-closed set. Awarding dispatch, granting an override, changing
@@ -1880,6 +2026,11 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // v20.22
   "compliance.pack.manage",
   "equipment.authorize",
+  // C1b-2b — each makes a regulatory requirement authoritative, retires one, or changes how it may be verified.
+  "compliance.requirement.verify",
+  "compliance.requirement.second_approve",
+  "compliance.requirement.retire",
+  "compliance.verification.govern",
   // v20.21
   "compliance.credential.verify",
   "compliance.private.read",
@@ -1957,8 +2108,91 @@ export function isDomainRole(value: string): value is DomainRole {
   return Object.prototype.hasOwnProperty.call(GRANTS, value);
 }
 
-/** A grant as stored: a role, optionally confined to one branch. */
-export type RoleGrant = { role: string; scopeRef?: string | null };
+/**
+ * B23.1 — how far a grant reaches.
+ *
+ * `global` is PLATFORM-WIDE: it reaches every organization in the deployment.
+ * Before B23.1 it was the only value an ordinary business role could be
+ * written with, because there was no organization scope to write — so every
+ * driver grant ever issued claimed authority in every company. That is the
+ * bug this enum exists to end, and `global` now means what its name says and
+ * nothing else. The backfill assigns it to nobody; granting it is a deliberate
+ * act, and `organizationScopedRoles.test.ts` pins that it crosses boundaries
+ * by design rather than by accident.
+ *
+ * `organization` is the ordinary case: authority inside one company.
+ *
+ * `branch` is narrower still, and names its organization EXPLICITLY. There is
+ * no `branches` table in this schema — `branchId` is a bare varchar on eight
+ * tables with no organization ownership — so a branch cannot tell us which
+ * company it belongs to. Deriving one would be exactly the ambiguous
+ * relationship through which authority leaks, so a branch grant carries both.
+ *
+ * `unscoped_legacy` is what the backfill writes for a grant it could not
+ * safely attribute: the holder already belonged to more than one organization
+ * when organization scope arrived, so no organization can be inferred without
+ * guessing whose authority to hand over. It authorizes nothing, anywhere,
+ * until an administrator re-grants it explicitly. The row is preserved so the
+ * history stays answerable.
+ */
+export type RoleScopeType = "global" | "organization" | "branch" | "unscoped_legacy";
+
+/**
+ * A grant as stored: a role, the organization that issued it, and how far it
+ * reaches inside that organization.
+ *
+ * `scopeType` is optional in the TYPE only so the pure fixtures written before
+ * B23.1 still compile; a grant with no `scopeType` is read as platform-global,
+ * which is the honest reading of the pre-B23.1 data model. The production
+ * reader always populates it — `db.listActiveUserRoles` selects the column and
+ * `organizationScopedRoles.db.test.ts` pins that it never returns one without.
+ */
+export type RoleGrant = {
+  role: string;
+  /** The branch, when `scopeType` is `branch`. */
+  scopeRef?: string | null;
+  scopeType?: RoleScopeType;
+  /** The organization that issued this grant. Null only for platform-global. */
+  orgRef?: string | null;
+};
+
+/** Whether a grant is deliberate platform-wide authority rather than a company's. */
+export function isPlatformGlobal(grant: RoleGrant): boolean {
+  return (grant.scopeType ?? "global") === "global";
+}
+
+/**
+ * The grants that authorize inside one organization.
+ *
+ * The whole B23.1 invariant, in one function, so that capability projection,
+ * workspace composition and the procedure gate all ask the same question and
+ * cannot answer it differently.
+ *
+ * Fails closed at every branch: an organization-confined grant naming no
+ * organization reaches nothing, an unrecognized scope type reaches nothing,
+ * and a quarantined legacy grant reaches nothing. Only a platform-global grant
+ * survives without an organization match, and that is the point of it.
+ */
+export function grantsInOrganization(
+  grants: readonly RoleGrant[],
+  organization: string | null | undefined
+): RoleGrant[] {
+  return grants.filter(g => {
+    const scope = g.scopeType ?? "global";
+    if (scope === "global") return true;
+    if (scope === "organization" || scope === "branch") {
+      // A confined grant that names no organization is malformed, not broad.
+      if (!g.orgRef) return false;
+      // An unresolved organization cannot judge a confined grant, so it does
+      // not apply — the same rule the branch axis below already runs on.
+      if (!organization) return false;
+      return g.orgRef === organization;
+    }
+    // `unscoped_legacy`, and anything a future migration adds before this
+    // function learns about it.
+    return false;
+  });
+}
 
 export type AuthorizationOutcome =
   | "allowed"
@@ -1999,6 +2233,21 @@ function normalizeGrants(args: {
  * branch to cross into. Before this, both were treated as `null`, nobody
  * outside this module ever supplied a branch, and every confined grant passed
  * every generic gate. Universal (self-scoped) permissions are unaffected.
+ *
+ * B23.1 — `organization` is the OUTER scope and is checked first, because the
+ * branch axis cannot defend a boundary it knows nothing about: branch
+ * identifiers are bare strings with no owner, so "BRANCH-A1" in one company
+ * and "BRANCH-A1" in another are indistinguishable to the branch check. The
+ * organization must therefore be settled before the branch is consulted at
+ * all. It is resolved server-side from membership, exactly like the branch,
+ * and is never read from a request.
+ *
+ * `organization` follows the same `undefined` rule: a caller that did not
+ * resolve one cannot judge an organization-confined grant, so only
+ * platform-global authority passes an unresolved gate. Universal
+ * (self-scoped) permissions still ride past the SCOPE filter — your own pay
+ * and your own inbox are yours in whichever company you are standing in — but
+ * they are granted only after the denial sweep, exactly as before.
  */
 export function authorize(args: {
   userId: number | null | undefined;
@@ -2006,6 +2255,8 @@ export function authorize(args: {
   grants?: readonly RoleGrant[];
   permission: Permission;
   resourceBranch?: string | null;
+  /** The organization the request is acting for. Server-resolved, never client-supplied. */
+  organization?: string | null;
 }): AuthorizationResult {
   if (!args.userId) {
     return {
@@ -2031,9 +2282,31 @@ export function authorize(args: {
     };
   }
 
+  // B23.1 — the organization boundary, before anything else.
+  //
+  // Universal (self-scoped) permissions ride past the BRANCH filter below but
+  // NOT past this one. Holding a grant in another company does not make you
+  // somebody here, and "your own inbox, in a company that has granted you
+  // nothing" is a question with no good answer — so it is refused rather than
+  // guessed.
+  const inOrganization = grantsInOrganization(recognized, args.organization);
+  if (inOrganization.length === 0) {
+    return {
+      allowed: false,
+      outcome: "denied_scope",
+      effectiveRoles: [],
+      // Says what is wrong without naming which other company granted the
+      // role: a refusal is not a directory of a person's other employers.
+      detail:
+        args.organization == null
+          ? "Roles are confined to an organization and this operation did not resolve one — platform-wide authority is required here"
+          : "No role granted by this organization authorizes this operation",
+    };
+  }
+
   const branchUnresolved = args.resourceBranch === undefined;
   const universal = (UNIVERSAL_PERMISSIONS as readonly string[]).includes(args.permission);
-  const inScope = recognized.filter(
+  const inScope = inOrganization.filter(
     g =>
       g.scopeRef == null ||
       universal ||
@@ -2118,6 +2391,16 @@ export function authorizeRecordScope(args: {
   permission: Permission;
   subject: RecordScopeSubject;
   resourceBranch?: string | null;
+  /**
+   * B23.1A — forwarded to `authorize`, and callers must supply it.
+   *
+   * Omitting it is not "unscoped", it is "organization unresolved", which
+   * makes every organization-confined grant inapplicable — i.e. every grant
+   * 0170 leaves behind. This wrapper spreads `args` straight through, so the
+   * axis was silently dropped at all three call sites until a fixture stopped
+   * writing platform-global grants.
+   */
+  organization?: string | null;
 }): AuthorizationResult {
   const base = authorize(args);
   if (!base.allowed) return base;
@@ -2154,6 +2437,8 @@ export function authorizeMechanicRelease(args: {
   grants?: readonly RoleGrant[];
   technicianUserId: number;
   resourceBranch?: string | null;
+  /** B23.1A — see `authorizeRecordScope`. Forwarded to `authorize`. */
+  organization?: string | null;
 }): AuthorizationResult {
   const base = authorize({ ...args, permission: "maintenance.record_release" });
   if (!base.allowed) return base;
@@ -2195,6 +2480,15 @@ export const RECORDS_PROCEDURE_PERMISSIONS = {
   "records.retention.disposition": "retention.dispose",
   "records.roadside.open": "roadside.open",
   "records.roles.grant": "roles.grant",
+  // B23.1 — taking a role away is the same authority as giving one, and is
+  // held under the same permission. Before this there was no revoke procedure
+  // at all: the only path that revoked anything was offboarding, which revoked
+  // every grant the account held in every organization.
+  "records.roles.revoke": "roles.grant",
+  // B23.1A — resolving a grant 0170 quarantined is issuing one: same authority,
+  // same permission, and the organization comes from the actor's scope either
+  // way.
+  "records.roles.resolveLegacy": "roles.grant",
 } as const satisfies Record<string, Permission>;
 
 export type RecordsProcedure = keyof typeof RECORDS_PROCEDURE_PERMISSIONS;
@@ -2313,6 +2607,32 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "commercialOffice.documentDeliveryUpdate": "commercial.write",
   "commercialOffice.documentGet": "commercial.read",
   "commercialOffice.documentsList": "commercial.read",
+  // DC-A (0178) — Document Control, Checkpoint A: the definition registry and the catalog.
+  "documentControl.definitionsList": "document.read",
+  "documentControl.definitionGet": "document.read",
+  "documentControl.catalogSeed": "document.catalog.manage",
+  "documentControl.definitionOverlay": "document.catalog.manage",
+  "documentControl.definitionCreate": "document.catalog.manage",
+  "documentControl.definitionRetire": "document.catalog.manage",
+  "documentControl.sourceArtifactsList": "document.read",
+  // DC-B (0195) — the register: intake creates a row, confirmation creates a fact, issue consumes a number.
+  "documentControl.documentIntake": "document.intake",
+  "documentControl.documentRegisterRendered": "document.issue",
+  "documentControl.documentConfirm": "document.confirm",
+  "documentControl.documentIssue": "document.issue",
+  "documentControl.documentVoid": "document.void",
+  "documentControl.documentSupersede": "document.issue",
+  "documentControl.documentWithdraw": "document.void",
+  "documentControl.documentAmend": "document.confirm",
+  "documentControl.documentGet": "document.read",
+  "documentControl.documentsList": "document.read",
+  // DC-C (0196) — the series ledger. Reading what was handed out is a read; cutting blocks and voiding numbers is series management.
+  "documentControl.seriesList": "document.read",
+  "documentControl.seriesGapReport": "document.read",
+  "documentControl.seriesBlocks": "document.read",
+  "documentControl.seriesAllocateDeviceBlock": "document.series.manage",
+  "documentControl.seriesRetireDeviceBlock": "document.series.manage",
+  "documentControl.seriesVoidNumber": "document.series.manage",
   "commercialOffice.glAccountSet": "commercial.policy",
   "commercialOffice.glMappingSet": "commercial.policy",
   "commercialOffice.glList": "commercial.read",
@@ -2509,7 +2829,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "compliance.credentialRecord": "compliance.credential.record",
   "compliance.credentialVerify": "compliance.credential.verify",
   "compliance.consentRecord": "compliance.consent.record",
-  "compliance.requirementLoad": "compliance.requirement.manage",
+  // C1b-2b: requirementLoad creates a proposal and nothing more.
+  "compliance.requirementLoad": "compliance.requirement.propose",
+  "compliance.requirementVerify": "compliance.requirement.verify",
+  "compliance.requirementSecondApprove": "compliance.requirement.second_approve",
+  "compliance.requirementWithdraw": "compliance.requirement.retire",
+  "compliance.verificationPolicySet": "compliance.verification.govern",
+  "compliance.requirementProvenance": "compliance.passport.read",
   "compliance.programPublish": "compliance.program.publish",
   "compliance.profileReviewRecord": "compliance.profile.review",
   "compliance.knowledgeCatalog": "compliance.passport.read",
@@ -2680,6 +3006,47 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "commercialSetup.goLiveReadiness": "commercial.rates.read",
   "commercialSetup.ticketPricing": "commercial.rates.read",
   "commercialSetup.vendorRateVariances": "commercial.rates.read",
+  // v23.31 — Customer, Contract & Rate Management (customerCommercialRouter).
+  "customerCommercial.customerCreate": "commercial.customer.write",
+  "customerCommercial.customerUpdate": "commercial.customer.write",
+  "customerCommercial.customerHoldSet": "commercial.customer.write",
+  "customerCommercial.customerArchive": "commercial.customer.archive",
+  "customerCommercial.customerReactivate": "commercial.customer.archive",
+  "customerCommercial.customersList": "commercial.customer.read",
+  "customerCommercial.customerGet": "commercial.customer.read",
+  "customerCommercial.customerHistory": "commercial.customer.read",
+  "customerCommercial.contactCreate": "commercial.customer.write",
+  "customerCommercial.contactUpdate": "commercial.customer.write",
+  "customerCommercial.contactRoleSet": "commercial.customer.write",
+  "customerCommercial.contactRoleEnd": "commercial.customer.write",
+  "customerCommercial.contractCreate": "commercial.contract.write",
+  "customerCommercial.contractUpdate": "commercial.contract.write",
+  "customerCommercial.contractSubmit": "commercial.contract.write",
+  "customerCommercial.contractApprove": "commercial.contract.approve",
+  "customerCommercial.contractStatusSet": "commercial.contract.status",
+  "customerCommercial.contractSupersede": "commercial.contract.write",
+  "customerCommercial.contractsList": "commercial.contract.read",
+  "customerCommercial.contractGet": "commercial.contract.read",
+  "customerCommercial.rateSheetCreate": "commercial.rates.propose",
+  "customerCommercial.rateSheetVersionCreate": "commercial.rates.propose",
+  "customerCommercial.rateLineAdd": "commercial.rates.propose",
+  "customerCommercial.rateLineUpdate": "commercial.rates.propose",
+  "customerCommercial.rateLineRemove": "commercial.rates.propose",
+  "customerCommercial.rateSheetVersionSubmit": "commercial.rates.propose",
+  "customerCommercial.rateSheetVersionDecide": "commercial.rates.approve",
+  "customerCommercial.rateSheetsList": "commercial.rates.read",
+  "customerCommercial.rateSheetGet": "commercial.rates.read",
+  "customerCommercial.jobContextSet": "commercial.job.assign",
+  "customerCommercial.jobReferenceAdd": "commercial.job.assign",
+  "customerCommercial.jobReferenceEnd": "commercial.job.assign",
+  "customerCommercial.jobPartySet": "commercial.job.assign",
+  "customerCommercial.jobReferenceWaive": "commercial.job.snapshot",
+  "customerCommercial.jobSnapshotCapture": "commercial.job.snapshot",
+  "customerCommercial.jobCommercialGet": "commercial.contract.read",
+  "customerCommercial.jobFieldSummary": "commercial.job.summary",
+  "customerCommercial.billableContext": "commercial.billing.context",
+  "customerCommercial.jobRateResolve": "commercial.rates.read",
+  "customerCommercial.expirySweep": "commercial.contract.status",
   /* ---- v22.9: the invoice path ---- */
   "invoicing.draftFromTicket": "invoicing.draft",
   "invoicing.get": "invoicing.read",
@@ -2703,6 +3070,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "geo.graphBuild": "geo.graph.build",
   "geo.routeCompute": "geo.read",
   "geo.sourceReview": "geo.source.review",
+  "geo.transportFeeds": "geo.source.review",
 
   /* ---- v22.17: communications on the route ---- */
   "comms.channelSeed": "comms.channel.manage",
@@ -2775,6 +3143,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "agent.decideApproval": "agent.approve",
   "agent.awaitEvent": "agent.act",
   "agent.get": "agent.read",
+  // LA-1a — Live Assist session spine.
+  "liveAssist.start": "live_assist.use",
+  "liveAssist.heartbeat": "live_assist.use",
+  "liveAssist.pause": "live_assist.use",
+  "liveAssist.resume": "live_assist.use",
+  "liveAssist.end": "live_assist.use",
+  "liveAssist.policyGet": "live_assist.use",
+  "liveAssist.policySet": "live_assist.administer",
+  "liveAssist.lifecycleList": "live_assist.review",
   "board.history": "board.read",
   "board.edit": "board.post",
   "board.withdraw": "board.post",
@@ -2936,6 +3313,29 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "workforce.probationDecide": "hr.probation.decide",
   "workforce.offboardingOpen": "hr.offboarding.manage",
   "workforce.offboardingRevokeAccess": "hr.access.revoke",
+
+  /* B23.2 — People & Access.
+   *
+   * Every one of these maps to `roles.grant`, which `authorize()` gives to
+   * `management` alone and which is already in SENSITIVE_PERMISSIONS, so the
+   * audit row is written before the act and a failure to write it refuses.
+   *
+   * No new permission was introduced, deliberately. `personnel.read` would
+   * have been the obvious home for the read surfaces, but it reaches
+   * dispatcher, office, HR and payroll_admin — and "who holds what access" is
+   * an access-administration question rather than an HR-record one. Starting
+   * narrow leaves the decision to widen it with an owner; starting wide is not
+   * reversible in practice. */
+  "people.roleCatalogue": "roles.grant",
+  "people.list": "roles.grant",
+  "people.detail": "roles.grant",
+  "people.setRoles": "roles.grant",
+  "people.setDefaultWorkspace": "roles.grant",
+  "people.removeFromOrganization": "roles.grant",
+  "people.invitations.list": "roles.grant",
+  "people.invitations.create": "roles.grant",
+  "people.invitations.cancel": "roles.grant",
+  "people.accessResolution.list": "roles.grant",
   "workforce.offboardingStatus": "hr.offboarding.manage",
   "workforce.offboardingClose": "hr.offboarding.manage",
 
@@ -2968,6 +3368,15 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsRecord": "closeout.terms.record",
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
+
+  /* ---- the page scanner: guidance and review, both read-only ----
+   * Both answer "what does this paperwork need"; neither writes, links or
+   * confirms anything, so both sit on the ordinary compliance read rather
+   * than on a permission of their own. A worker who may not read the
+   * company's compliance material may not read its paperwork guidance
+   * either — that is the same question, and it already has an answer. */
+  "paperwork.guidance": "compliance.read",
+  "paperwork.reviewScan": "compliance.read",
 } as const satisfies Record<string, Permission>;
 
 /**
@@ -2991,6 +3400,43 @@ export function permissionForProcedure(name: string): Permission | null {
     null
   );
 }
+
+/* ==================================================================
+ * v23.26 — The session surface.
+ *
+ * Three procedures, and it is a closed list on purpose. `sessionProcedure`
+ * requires authentication but no domain role, which is the only gate in this
+ * system that a person holding nothing can pass — so the set of things it may
+ * be used for is declared here rather than left to whoever writes the next
+ * router. `procedureAuthorization.test.ts` pins it.
+ *
+ * All three carry `portal.compose_own`: the existing universal permission for
+ * "assemble MY session from MY roles". They read `ctx.user.id`, the grants the
+ * gate already loaded, and the memberships those imply. Nobody composes
+ * somebody else's session, which is what makes the permission universal in the
+ * first place.
+ * ================================================================== */
+
+export const SESSION_PROCEDURE_PERMISSIONS = {
+  "session.context": "portal.compose_own",
+  "session.selectOrganization": "portal.compose_own",
+  "session.selectWorkspace": "portal.compose_own",
+  /*
+   * B23.2 — accepting an invitation is the one People & Access act that CANNOT
+   * be a `roleProcedure`: the person accepting holds nothing in the
+   * organization they are joining, which is the entire point. That is the case
+   * `sessionProcedure` was built for in B23.0 — "the one gate an account
+   * holding nothing can pass" — so it belongs here, on a list that is closed in
+   * code and pinned by the census rather than open by default.
+   *
+   * It is not a hole: the gate still requires an authenticated identity, and
+   * the invitation token is verified against a stored digest inside the
+   * transaction that creates the membership.
+   */
+  "session.acceptInvitation": "portal.compose_own",
+} as const satisfies Record<string, Permission>;
+
+export type SessionProcedureName = keyof typeof SESSION_PROCEDURE_PERMISSIONS;
 
 /* ==================================================================
  * v21.10 — External identities

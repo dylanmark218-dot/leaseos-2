@@ -66,9 +66,18 @@ async function dbOrThrow(): Promise<Db> {
   return db;
 }
 
-async function scopeOf(db: Db, userId: number): Promise<ActingScope> {
+/**
+ * The scope, with where it came from. The gate has already decided in an organization
+ * (`ctx.organization`); this resolves the same function again only to learn `derivedFrom`, and
+ * refuses rather than answer if the two disagree — a membership that changed mid-request.
+ */
+async function scopeOf(db: Db, userId: number, gateOrganization: string | null): Promise<ActingScope> {
   try {
-    return await resolveActingScope(db, userId);
+    const scope = await resolveActingScope(db, userId);
+    if (gateOrganization !== null && scope.tenantId !== gateOrganization) {
+      throw new TRPCError({ code: "CONFLICT", message: "Your organization changed while this was being answered; ask again" });
+    }
+    return scope;
   } catch (e) {
     if (e instanceof AmbiguousOrganization) {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: "You are an active member of more than one organization; analytics will not choose one for you" });
@@ -93,8 +102,8 @@ function rangeOrThrow(req: z.infer<typeof rangeInput>, now: Date): ResolvedRange
 }
 
 /** Gate 2: the metric's source permission, checked against the roles the gate already loaded. */
-function assertMayRead(def: MetricDefinition, userId: number, roles: readonly string[]) {
-  if (!authorize({ userId, roles, permission: def.requiredPermission }).allowed) {
+function assertMayRead(def: MetricDefinition, userId: number, roles: readonly string[], organization: string | null) {
+  if (!authorize({ userId, roles, permission: def.requiredPermission, organization }).allowed) {
     throw new TRPCError({ code: "FORBIDDEN", message: `Metric ${def.id} requires ${def.requiredPermission}` });
   }
 }
@@ -188,17 +197,17 @@ export const analyticsRouter = router({
   /** Every registered metric, its formula and sources, and whether this caller may read it. No values. */
   catalog: roleProcedure("analytics.catalog").query(({ ctx }) => ({
     registryVersion: METRIC_REGISTRY_VERSION,
-    metrics: METRICS.map(def => ({ ...definitionView(def), permitted: authorize({ userId: ctx.user.id, roles: ctx.roles, permission: def.requiredPermission }).allowed })),
+    metrics: METRICS.map(def => ({ ...definitionView(def), permitted: authorize({ userId: ctx.user.id, roles: ctx.roles, permission: def.requiredPermission, organization: ctx.organization }).allowed })),
   })),
 
   /** One metric's value in the caller's organization. */
   metric: roleProcedure("analytics.metric").input(metricInput).query(async ({ ctx, input }) => {
     const def = metricOrThrow(input.metricId);
-    assertMayRead(def, ctx.user.id, ctx.roles);
+    assertMayRead(def, ctx.user.id, ctx.roles, ctx.organization);
     const now = new Date();
     const range = rangeOrThrow(input.range, now);
     const db = await dbOrThrow();
-    const scope = await scopeOf(db, ctx.user.id);
+    const scope = await scopeOf(db, ctx.user.id, ctx.organization);
     await assertFiltersInScope(def, input.filters, scope);
     return (await evaluate(db, def, scope, range, input.filters, now, false)).evaluation;
   }),
@@ -206,11 +215,11 @@ export const analyticsRouter = router({
   /** The rows behind a metric. Same resolver, same scope, same range, same filters as `metric`. */
   drilldown: roleProcedure("analytics.drilldown").input(metricInput).query(async ({ ctx, input }) => {
     const def = metricOrThrow(input.metricId);
-    assertMayRead(def, ctx.user.id, ctx.roles);
+    assertMayRead(def, ctx.user.id, ctx.roles, ctx.organization);
     const now = new Date();
     const range = rangeOrThrow(input.range, now);
     const db = await dbOrThrow();
-    const scope = await scopeOf(db, ctx.user.id);
+    const scope = await scopeOf(db, ctx.user.id, ctx.organization);
     await assertFiltersInScope(def, input.filters, scope);
     const { evaluation, rows, truncated } = await evaluate(db, def, scope, range, input.filters, now, false);
     return { ...evaluation, rows, truncated };
@@ -230,7 +239,7 @@ export const analyticsRouter = router({
     const notSelf = defs.find(d => !d.selfScoped);
     if (notSelf) throw new TRPCError({ code: "BAD_REQUEST", message: `Metric ${notSelf.id} is not available as your own` });
     const db = await dbOrThrow();
-    const scope = await scopeOf(db, ctx.user.id);
+    const scope = await scopeOf(db, ctx.user.id, ctx.organization);
     const own = await ownOperator(db, ctx.user.id, scope);
     if ("reason" in own) {
       return { operatorId: null, reason: own.reason, metrics: [] };
@@ -247,7 +256,7 @@ export const analyticsRouter = router({
     const now = new Date();
     const range = rangeOrThrow(input.range, now);
     const db = await dbOrThrow();
-    const scope = await scopeOf(db, ctx.user.id);
+    const scope = await scopeOf(db, ctx.user.id, ctx.organization);
     const own = await ownOperator(db, ctx.user.id, scope);
     if ("reason" in own) throw new TRPCError({ code: "NOT_FOUND", message: own.reason });
     const { evaluation, rows, truncated } = await evaluate(db, def, scope, range, { operatorId: own.operatorId }, now, true);
