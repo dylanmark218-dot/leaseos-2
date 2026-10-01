@@ -46,6 +46,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/assetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/projectRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/integrationRouter.ts` | `ROLE_AUTHORIZED` (`integrationRouter`) / `INTEGRATION_CLIENT` (`inboundRouter`, `integrationProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md`) | **7** |
+| `server/integrationHubRouter.ts` | `ROLE_AUTHORIZED` — connector/credential/subscription/delivery/dead-letter/sync/conflict/contract administration; the raw-body inbound intake edge (`server/integrationHubInbound.ts`) is unauthenticated-by-design and verifies per-connector credentials itself, so it carries no procedure count here | **29** |
 | `server/telematicsRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/workforceRouter.ts` | `ROLE_AUTHORIZED` | **16** |
 | `server/auditRouter.ts` | `ROLE_AUTHORIZED` | **6** |
@@ -56,7 +57,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**387 role-authorized procedures. Zero on bare `protectedProcedure`.**
+**416 role-authorized procedures. Zero on bare `protectedProcedure`.**
 
 Baseline in `procedureAuthorization.test.ts` is 0 and must never rise.
 

@@ -12,6 +12,7 @@
 import express, { type Express } from "express";
 import { createServer, type Server } from "http";
 import { registerApi } from "./api";
+import { registerIntegrationHubInboundRoute } from "../integrationHubInbound";
 import { startProductionWorker } from "./productionWorker";
 import { ENV, assertProductionSecrets } from "./env";
 import { bootstrapSecretKeys } from "./secretKeys";
@@ -51,6 +52,9 @@ export async function startServer(frontend: Frontend): Promise<void> {
   console.log(`[secrets] key provider: ${keys.source}${keys.backend ? ` (${keys.backend})` : ""}`);
 
   const worker = await startProductionWorker();
+  // Integration Hub — the signed inbound edge reads the raw body, so it is mounted before
+  // registerApi's express.json() parser.
+  registerIntegrationHubInboundRoute(app);
   // Body parsers, the OAuth callback and the tRPC mount — one registration, shared with the HTTP
   // regression so the test drives the production mounting (P0-B).
   registerApi(app);
