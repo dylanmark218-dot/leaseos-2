@@ -166,6 +166,49 @@ export async function secretsUsingKey(purpose: SecretPurpose, keyId: string): Pr
   return rows.map((r: { secretRef: string }) => r.secretRef);
 }
 
+/**
+ * Would a write under this provider succeed, for this purpose, under these production rules?
+ *
+ * S2-E Phase 2A. The cutover preflight has to answer "can production create a canonical
+ * WEBHOOK_SECRET?" without creating one — a probe that left a row behind would be a write the
+ * preflight was supposed to be checking permission for. So this encrypts a throwaway value under a
+ * throwaway reference, decrypts it again, and persists nothing: no row, no log line, no plaintext
+ * in the answer. The same `guardProductionWrites` that protects `createSecret` runs inside
+ * `encryptSecret`, so the probe cannot answer "possible" where the real write would be refused.
+ *
+ * Reasons are the refusal messages the crypto core already guarantees carry neither key material nor
+ * plaintext. A provider that throws (a managed key system that is unreachable) is reported, never
+ * propagated — the preflight is a report, and a report that crashes says nothing.
+ */
+export function probeSecretWrite(args: {
+  purpose: SecretPurpose;
+  keys: SecretKeyProvider;
+  isProduction: boolean;
+}): { possible: true; keyId: string } | { possible: false; reason: string } {
+  const secretRef = newSecretRef();
+  const plaintext = randomBytes(24).toString("base64url");
+  try {
+    const envelope = encryptSecret({
+      purpose: args.purpose,
+      plaintext,
+      context: { secretRef },
+      keys: args.keys,
+      isProduction: args.isProduction,
+    });
+    const readBack = decryptSecret({
+      purpose: args.purpose,
+      envelope,
+      context: { secretRef },
+      keys: args.keys,
+      isProduction: args.isProduction,
+    });
+    if (readBack !== plaintext) return { possible: false, reason: "secret write probe: the value did not read back identically" };
+    return { possible: true, keyId: parseEnvelope(envelope).keyId };
+  } catch (error) {
+    return { possible: false, reason: error instanceof Error ? error.message : "secret write probe: provider failed" };
+  }
+}
+
 /** Metadata only. Deliberately has no `envelope` field — see the output-boundary test. */
 export async function describeSecret(secretRef: string): Promise<{
   secretRef: string;
