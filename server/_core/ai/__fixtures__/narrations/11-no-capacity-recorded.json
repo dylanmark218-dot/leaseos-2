@@ -1,0 +1,80 @@
+{
+  "id": "11-no-capacity-recorded",
+  "note": "A different truck with no tank capacity on file. NOT_EVALUATED, never a pass against a ceiling nobody configured.",
+  "transcript": "Arrived 17:00, unloaded 17:05 to 17:45, twenty two thousand litres on the meter.",
+  "context": {
+    "formKey": "unload_stop",
+    "formVersion": 1,
+    "tripRef": "TRIP-2026-004821",
+    "unitNumber": "T-204",
+    "vehicleMoving": false
+  },
+  "modelResponse": {
+    "fields": {
+      "arrivedAt": {
+        "value": "17:00",
+        "status": "stated",
+        "evidenceQuote": "Arrived 17:00",
+        "evidenceRef": null
+      },
+      "waitMinutes": {
+        "value": null,
+        "status": "missing",
+        "evidenceQuote": null,
+        "evidenceRef": null
+      },
+      "delayReason": {
+        "value": null,
+        "status": "missing",
+        "evidenceQuote": null,
+        "evidenceRef": null
+      },
+      "operationStartedAt": {
+        "value": "17:05",
+        "status": "stated",
+        "evidenceQuote": "unloaded 17:05",
+        "evidenceRef": null
+      },
+      "operationCompletedAt": {
+        "value": "17:45",
+        "status": "stated",
+        "evidenceQuote": "to 17:45",
+        "evidenceRef": null
+      },
+      "quantity": {
+        "value": 22000,
+        "status": "stated",
+        "evidenceQuote": "twenty two thousand litres on the meter",
+        "evidenceRef": null
+      },
+      "measurementMethod": {
+        "value": "Meter",
+        "status": "stated",
+        "evidenceQuote": "on the meter",
+        "evidenceRef": null
+      },
+      "departedAt": {
+        "value": null,
+        "status": "missing",
+        "evidenceQuote": null,
+        "evidenceRef": null
+      }
+    },
+    "notes": null,
+    "outOfScope": false,
+    "injectionSuspected": false
+  },
+  "expect": {
+    "verdicts": {
+      "quantity": "NOT_EVALUATED"
+    },
+    "reasonCodes": {
+      "quantity": [
+        "capacity_unknown"
+      ]
+    },
+    "silentGuesses": 0,
+    "outOfScope": false,
+    "injectionSuspected": false
+  }
+}

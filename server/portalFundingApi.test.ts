@@ -22,7 +22,7 @@ const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 
 let pool: mysql.Pool;
-let nextId = 810000 + Math.floor(Math.random() * 80000);
+let nextId = 406_000_000 + Math.floor(Math.random() * 80000);
 const newUserId = () => nextId++;
 
 beforeAll(async () => {
@@ -212,8 +212,8 @@ d("nothing is guaranteed through the API", () => {
     await pool.execute(
       `INSERT INTO fundingOpportunities
        (opportunityRef, financialEntityId, fundingProgramId, triggerEvent, matchStrength, status)
-       VALUES (?, 1, 1, 'training.created', 'possible', 'estimated')`,
-      [ref]
+       VALUES (?, ?, 1, 'training.created', 'possible', 'estimated')`,
+      [ref, await book()]   // F1.1 — a real book the single-tenant caller owns
     );
     const caller = callerFor(actor);
     await expect(
@@ -264,11 +264,20 @@ d("nothing is guaranteed through the API", () => {
   });
 });
 
+/** F1.1 — a real book, and a real expense in it: a claim is against the caller's own expense. */
+async function book(): Promise<number> {
+  return Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);
+}
+async function expense(expenseRef: string): Promise<string> {
+  await pool.execute("INSERT INTO expenseRecords (expenseRef, financialEntityId, transactionDate, total, totalCents) VALUES (?, ?, NOW(), 10000, 1000000)", [expenseRef, await book()]);
+  return expenseRef;
+}
+
 d("the claim ledger makes the next duplicate detectable", () => {
   it("records a first claim and flags a second on the same expense", async () => {
     const actor = await userWithRoles(["controller"]);
     const caller = callerFor(actor);
-    const expenseRef = `INV-${actor}`;
+    const expenseRef = await expense(`INV-${actor}`);
 
     const first = await caller.funding.claimRecord({
       claimRef: `C1-${actor}`, programKey: "ab.capg", expenseRef,
@@ -290,7 +299,7 @@ d("the claim ledger makes the next duplicate detectable", () => {
   it("holds a possible duplicate for review rather than recording it silently or refusing on a guess", async () => {
     const actor = await userWithRoles(["controller"]);
     const caller = callerFor(actor);
-    const expenseRef = `INV2-${actor}`;
+    const expenseRef = await expense(`INV2-${actor}`);
     await caller.funding.claimRecord({
       claimRef: `D1-${actor}`, programKey: "ab.capg", expenseRef,
       eligibleCost: 10000, claimedAmount: 5000,
@@ -308,7 +317,7 @@ d("the claim ledger makes the next duplicate detectable", () => {
   it("does not create a verified program row just to hang a claim on", async () => {
     const actor = await userWithRoles(["controller"]);
     await callerFor(actor).funding.claimRecord({
-      claimRef: `E1-${actor}`, programKey: "ab.capg", expenseRef: `INV3-${actor}`,
+      claimRef: `E1-${actor}`, programKey: "ab.capg", expenseRef: await expense(`INV3-${actor}`),
       eligibleCost: 100, claimedAmount: 50,
     });
     const [rows] = await pool.execute<mysql.RowDataPacket[]>(

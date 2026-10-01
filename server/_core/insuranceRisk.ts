@@ -19,6 +19,8 @@
  */
 
 import { roadsidePackagePermits } from "./fieldDevice";
+import { complianceRequirementValidity, type ComplianceDocumentRow, type ComplianceVerdict } from "./complianceDocumentValidity";
+import type { ValidityState } from "./documentValidity";
 
 export type CoverageStatus =
   | "coverage_verified" | "coverage_reported" | "document_missing"
@@ -32,9 +34,38 @@ export type PolicyRecord = {
   status: "quoted" | "binder" | "active" | "renewal_pending" | "cancelled" | "expired";
   coverageVerificationStatus: "coverage_verified" | "coverage_reported" | "coverage_unknown";
   coverages: readonly { coverageType: string; limitAmount: number | null; additionalInsuredEndorsement: boolean }[];
-  /** The proof document, if any. */
-  document: { expiresAt: Date | null; verificationStatus: "needs_review" | "verified" | "rejected" } | null;
+  /** The proof of coverage on file, if any. See `ProofOfCoverage`. */
+  document: ProofOfCoverage | null;
 };
+
+/**
+ * SPINE item 2 — what stands as proof of a policy's coverage.
+ *
+ * `compliance_document`: the canonical verdict on the entity's proof documents
+ * (`complianceRequirementValidity`), read from every accepted type and every row. Which row is in
+ * force, and whether it is, is that verdict's decision alone; this module maps it.
+ *
+ * `policy_record`: a company-level policy has no per-entity proof, and the policy row itself is
+ * its evidence. That is not a compliance document and nothing here judges it as one — the policy's
+ * own dates and `coverageVerificationStatus` are already checked above the proof.
+ */
+export type ProofOfCoverage =
+  | { source: "compliance_document"; verdict: ComplianceVerdict }
+  | { source: "policy_record" };
+
+/** The document types that prove insurance coverage. Dispatch and the insurance office read the same list. */
+export const INSURANCE_PROOF_DOC_TYPES: readonly string[] = ["insurance_proof", "insurance_card"];
+
+/**
+ * The proof on file for one entity, or null when there is none. The rows must be the entity's own
+ * (owner type AND owner id); every accepted type is judged and the most favourable verdict stands.
+ * A proof that exists but is not in force is returned as what it is, never replaced by a
+ * closer-looking row and never dropped to "missing".
+ */
+export function proofFromDocuments(rows: readonly ComplianceDocumentRow[], at: Date): ProofOfCoverage | null {
+  const verdict = complianceRequirementValidity(rows, INSURANCE_PROOF_DOC_TYPES, at);
+  return verdict.state === "none" ? null : { source: "compliance_document", verdict };
+}
 
 export type CoverageAssessment = {
   coverageType: string;
@@ -44,6 +75,11 @@ export type CoverageAssessment = {
   expiresAt: Date | null;
   daysToExpiry: number | null;
   reason: string;
+  /**
+   * SPINE item 2: the proof the status was mapped from, as the canonical verdict named it — so a
+   * reader can show which document and what standing without judging the document again.
+   */
+  proof?: { source: "compliance_document"; state: ValidityState; documentId: number | null } | { source: "policy_record" } | null;
 };
 
 /** The status of one coverage type for an entity, given the policies that cover it. */
@@ -54,7 +90,10 @@ export function assessCoverage(args: { coverageType: string; policies: readonly 
   }
   const best = [...relevant].sort((a, b) => b.expiresAt.getTime() - a.expiresAt.getTime())[0]!;
   const days = Math.floor((best.expiresAt.getTime() - args.now.getTime()) / 86_400_000);
-  const base = { coverageType: args.coverageType, policyRef: best.policyRef, expiresAt: best.expiresAt, daysToExpiry: days };
+  const proof: CoverageAssessment["proof"] = !best.document ? null
+    : best.document.source === "policy_record" ? { source: "policy_record" }
+    : { source: "compliance_document", state: best.document.verdict.state, documentId: best.document.verdict.documentId };
+  const base = { coverageType: args.coverageType, policyRef: best.policyRef, expiresAt: best.expiresAt, daysToExpiry: days, proof };
 
   if (best.expiresAt <= args.now || best.status === "expired") {
     return { ...base, status: "coverage_expired", effect: "blocked", reason: `${args.coverageType} policy ${best.policyRef} expired ${-days} day(s) ago` };
@@ -62,13 +101,37 @@ export function assessCoverage(args: { coverageType: string; policies: readonly 
   if (!best.document) {
     return { ...base, status: "document_missing", effect: "review", reason: `${args.coverageType} covered under ${best.policyRef} but no proof document on file — office to obtain; coverage is not assumed absent` };
   }
-  if (best.document.expiresAt && best.document.expiresAt <= args.now) {
-    return { ...base, status: "document_expired", effect: "review", reason: `Proof of ${args.coverageType} on file expired; policy ${best.policyRef} runs to ${best.expiresAt.toISOString().slice(0, 10)} — refresh the document` };
-  }
-  if (best.document.verificationStatus === "rejected") {
-    return { ...base, status: "document_missing", effect: "review", reason: `Proof of ${args.coverageType} was rejected on review — obtain a valid document` };
-  }
-  if (best.coverageVerificationStatus === "coverage_verified" && best.document.verificationStatus === "verified") {
+  /*
+   * The proof's standing is the canonical verdict, mapped — never re-read from a row's dates.
+   *
+   *   expired, or unverified whose own claimed date passed → document_expired
+   *   rejected (nothing else on file)                      → document_missing
+   *   unverified, incomplete, not_yet_effective            → coverage_reported (the proof is not in force)
+   *   in_force, expiring                                   → the proof stands; coverage verification decides
+   */
+  const proofStands = (() => {
+    if (best.document.source === "policy_record") return true;
+    const v = best.document.verdict;
+    switch (v.state) {
+      case "in_force":
+      case "expiring":
+        return true;
+      case "expired":
+        return { ...base, status: "document_expired" as const, effect: "review" as const, reason: `Proof of ${args.coverageType} on file expired; policy ${best.policyRef} runs to ${best.expiresAt.toISOString().slice(0, 10)} — refresh the document` };
+      case "rejected":
+      case "none":
+        return { ...base, status: "document_missing" as const, effect: "review" as const, reason: `Proof of ${args.coverageType} was rejected on review — obtain a valid document` };
+      case "unverified":
+        return v.claimLapsed
+          ? { ...base, status: "document_expired" as const, effect: "review" as const, reason: `Proof of ${args.coverageType} on file expired; policy ${best.policyRef} runs to ${best.expiresAt.toISOString().slice(0, 10)} — refresh the document` }
+          : { ...base, status: "coverage_reported" as const, effect: "review" as const, reason: `${args.coverageType} reported under ${best.policyRef} — proof on file is not verified (${v.reason})` };
+      case "incomplete":
+      case "not_yet_effective":
+        return { ...base, status: "coverage_reported" as const, effect: "review" as const, reason: `${args.coverageType} reported under ${best.policyRef} — proof on file is not in force (${v.reason})` };
+    }
+  })();
+  if (proofStands !== true) return proofStands;
+  if (best.coverageVerificationStatus === "coverage_verified") {
     const warn = args.warnDays ?? 30;
     return { ...base, status: "coverage_verified", effect: days <= warn ? "review" : "none", reason: days <= warn ? `${args.coverageType} verified; policy expires in ${days} day(s)` : `${args.coverageType} verified under ${best.policyRef}` };
   }

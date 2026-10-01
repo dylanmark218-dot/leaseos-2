@@ -4,6 +4,30 @@
 # gate regenerates it and fails if the committed copy differs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# The test universe is whatever the runner says it is. This used to be
+# `find server -name '*.test.ts'`, and the comment on that line already knew
+# the failure mode: a suite the runner enumerates and the counter does not.
+# On 2026-09-30 it was the 16 jsdom suites under client/src/**/*.dom.test.tsx —
+# in vitest's include since they were written, run by every gate, and absent
+# from this document, which said 378 while the gate ran 394. Asking vitest
+# itself means the two cannot drift, because there is one list.
+#
+# Fail closed: an empty answer is the runner or its config having broken, and
+# writing 0 into the document would be the exact false claim gate 8 exists
+# to catch. LEASEOS_VITEST_LIST_CMD exists so the test can prove that.
+list_tests() {
+  local cmd="${LEASEOS_VITEST_LIST_CMD:-pnpm exec vitest list --filesOnly}"
+  local list
+  list=$($cmd 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -E '\.(test|spec)\.tsx?$' | sort || true)
+  if [ -z "$list" ]; then
+    echo "current-state: the runner listed no test files (\`$cmd\`); refusing to write a count of 0" >&2
+    return 1
+  fi
+  printf '%s\n' "$list"
+}
+if [ "${1:-}" = "--list-tests" ]; then list_tests; exit $?; fi
+
 # Captured before line 23's `set -- $PERMS`, which overwrites the positional
 # parameters to unpack a count triple. Reading $2 after that point returns a
 # permission count, which is how this script briefly tried to write the
@@ -34,8 +58,10 @@ const sensN=arr("SENSITIVE_PERMISSIONS"), uniN=arr("UNIVERSAL_PERMISSIONS");
 console.log(perms.size+" "+sensN+" "+uniN);')
 # This clobbers $1/$2; OUT and RELEASE are captured at the top for that reason.
 set -- $PERMS; PERM_COUNT=$1; SENS_COUNT=$2; UNI_COUNT=$3
-TEST_FILES=$(ls server/*.test.ts server/_core/*.test.ts 2>/dev/null | wc -l | tr -d ' ')
-TEST_CASES=$(cat server/*.test.ts server/_core/*.test.ts | grep -cE '^\s*it\(' || true)
+# The runner's own list — see list_tests above for why not a find or a glob.
+TEST_FILE_LIST=$(list_tests)
+TEST_FILES=$(printf '%s\n' "$TEST_FILE_LIST" | grep -c . || true)
+TEST_CASES=$(printf '%s\n' "$TEST_FILE_LIST" | xargs cat | grep -cE '^\s*it\(' || true)
 NATIVE=$(grep -o 'NotOnDeviceError(' client/src/runtime/adapters/capacitor.ts | wc -l | tr -d ' ')
 
 # The document body is a quoted heredoc: bash interprets none of it.
@@ -71,7 +97,26 @@ here can be added rather than read.
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
 
-Records vault · roles and server-side authorization · payroll, finance, tax
+Records vault · roles and server-side authorization, scoped to the
+organization that granted them — with the migration that scoped them verified
+against a real MariaDB (pre-state, legacy rows of every shape, apply, assert),
+a read-only diagnostic that counts the quarantine before and after deployment,
+a bootstrap that can no longer mint cross-tenant authority, a resolution
+procedure for the grants the migration refused to guess at, a CI gate that
+now proves which suites ran from vitest's own report rather than by grepping
+coloured output, and People & Access — the first surface that creates a
+membership at all, through an invitation claimed with a one-time token and an
+authenticated identity rather than an unverified email: a role issued by one company authorizes
+nothing in another, capabilities and workspaces are computed from the acting
+organization's grants rather than filtered afterwards, branch grants name
+their organization explicitly because branch identifiers have no owner, grant
+and revoke are organization-specific, and a pre-scope grant that could not be
+attributed without guessing is quarantined rather than assigned · one identity
+across several jobs: the session surface that resolves membership,
+organization and workspace server-side, refuses a workspace the caller does
+not hold, ends access with the membership rather than with the grant, and
+verifies a named organization against the membership table before it scopes
+anything · payroll, finance, tax
 rules (unverified) · geospatial source registry (8 verified licences, 10
 blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card
@@ -214,8 +259,11 @@ browser fallback. Carried communication packages: fetched, hash-verified on
 this side, written to the encrypted vault, read back before being acknowledged,
 read again on every open, and refused rather than shown when they no longer
 match what was stored — proven in Node against the runtime contracts, with the
-native vault still a stub. Internal portal: shell, switcher, My Day, exceptions,
-inbox, timeline, search, sync indicator, quick capture, view-models.
+native vault still a stub. Internal portal: shell, server-authoritative switcher, My Day,
+exceptions, inbox, timeline, search, sync indicator, quick capture,
+view-models. Sign-in, organization chooser, workspace chooser and the refusal
+screens at `/login` and `/workspaces`, each rendering only what the server
+offered and each run through the axe WCAG A/AA rules at three widths.
 Training Academy at `/training-academy`: course catalog, My Training, current-version lesson completion, locked/unlocked final assessment, results, certificate/qualification portfolio, and self-signing of pending regulated certificates.
 Customer portal at `/customer`: invitation acceptance, job board,
 pre-clearance, signing screen, chain of custody, adjustments, line disputes,

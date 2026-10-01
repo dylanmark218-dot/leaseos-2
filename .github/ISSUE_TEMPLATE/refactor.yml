@@ -1,0 +1,51 @@
+name: Refactor / technical debt
+description: Something works but is costly, fragile or misleading
+labels: ["refactor"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A refactor is only safe when what must *not* change is written down first.
+        That is the point of the second field.
+
+  - type: textarea
+    id: debt
+    attributes:
+      label: Current debt
+      description: >
+        What the code does today, where it is, and what it costs — a bug class it keeps
+        producing, work it makes slow, or a claim it makes that is not true.
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Invariants that cannot change
+      description: >
+        The behaviour that must survive untouched: authorization and tenant boundaries,
+        audit records, compliance calculations, migration history, public API shapes,
+        pinned counts. Be specific — "it should still work" is not an invariant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification plan
+      description: >
+        How the change will be shown to be behaviour-preserving. Name the suites that
+        cover the invariants above, any characterization tests to add first, and — where
+        the point is that something remains impossible — the mutation that must turn
+        those tests red.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope boundary
+      description: >
+        What is deliberately out of scope, so the change does not widen while in flight.
+    validations:
+      required: false
