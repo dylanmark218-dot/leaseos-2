@@ -1,22 +1,22 @@
 # LeaseOS External Data Source Registry
 
-**Verification completed 2026-09-09.** Every field below was checked against the
-publisher and is now seeded into `externalDataSources` by
-`seedExternalDataSources()`. This document describes what the runtime enforces;
-it is not the enforcement itself.
+**Verification completed 2026-09-09; Canadian 511 tranche checked 2026-09-24.**
+Every field below was checked against the publisher and is now seeded into
+`externalDataSources` by `seedExternalDataSources()`. This document describes
+what the runtime enforces; it is not the enforcement itself.
 
-## Eight verified, thirteen not
+## Ten verified, eighteen not
 
 | | Count |
 |---|---|
-| Verified — usable per their licence | **8** |
-| Unverified — inspection only | **3** |
-| Total | **11** |
+| Verified — usable per their licence | **10** |
+| Unverified — inspection only | **18** |
+| Total | **28** |
 
 > **Correction.** The research summary stated "nine of eleven are clean" while
 > separately flagging three as unresolved. Eleven minus three is eight. Seeding
 > nine would have marked a blocked source usable. `externalSourceSeeds.test.ts`
-> now holds the counts at 8 / 3 / 11.
+> holds the counts — now 10 / 18 / 28 after the 511 tranche below.
 
 ## Verified sources
 
@@ -30,6 +30,8 @@ it is not the enforcement itself.
 | `drivebc_open511` | BC MoTI | OGL – BC | yes | yes | no |
 | `msc_geomet` | ECCC | ECCC End-use Licence | yes | yes | no |
 | `cwfis` | NRCan CFS | OGL – Canada | yes | yes | no |
+| `on511` | Ontario MTO | OGL – Ontario | yes | yes | no |
+| `qc_mtmd_roadworks` | Québec MTMD | CC BY 4.0 | yes | yes | no |
 
 ## Unverified — blocked for everything but inspection
 
@@ -38,6 +40,11 @@ it is not the enforcement itself.
 | `aer_st37` | AER Terms of Use, not an open licence. Commercial use and redistribution **unknown**. |
 | `aer_st102` | Same. |
 | `ab511` | Developer terms via account registration. No open licence stated. Commercial use and redistribution **unknown**. |
+| `mb511` | Manitoba 511. Same platform as Alberta: key and throttle documented, no licence on the Developer Resources page. **Unknown**. |
+| `nb511` | New Brunswick 511. Same. **Unknown**. |
+| `yt511` | 511 Yukon. Same. Publishes weight and bridge restrictions, so its answer matters most. **Unknown**. |
+| `nl511` | 511 Newfoundland and Labrador. Same. **Unknown**. |
+| `sk_highway_hotline` | Saskatchewan Highway Hotline. No developer API published; the website is not scraped. Access request drafted in `docs/P6_DATA_PERMISSION_REQUESTS.md` §4. |
 | `aer_st107` | Well and facility licence status. AER Terms of Use, not an open licence. The directory stores the WM approval number and links out; mirroring is **unknown** pending the written answer requested in `docs/P6_DATA_PERMISSION_REQUESTS.md` §2. |
 | `sk_iris` | Believed to be published under a standard unrestricted use licence, and believed is not recorded. Confirmation requested (§3); **unknown** until it arrives. |
 | `mb_petroleum` | Same question, second province (§3). **Unknown**. |
@@ -86,10 +93,27 @@ Rendered wherever the data appears:
 - Contains information licensed under the Open Government Licence – Canada
 - Contains information licensed under the Open Government Licence – Alberta
 - Contains information licensed under the Open Government Licence – British Columbia
+- Contains information licensed under the Open Government Licence – Ontario
+- Source : ministère des Transports et de la Mobilité durable du Québec, via Données Québec, sous licence CC BY 4.0 — données normalisées par LeaseOS
 - Contains data provided by Environment and Climate Change Canada
 
 `collectAttributions()` deduplicates these and **names any source missing
 required attribution** rather than skipping it.
+
+## Canadian road-information providers
+
+The per-province matrix is in
+[`docs/transport/CANADIAN_PROVIDER_MATRIX.md`](docs/transport/CANADIAN_PROVIDER_MATRIX.md): what
+each publisher offers, whether it needs a key, its licence, and LeaseOS's status. It covers every
+province and territory, including Nova Scotia, PEI, the Northwest Territories and Nunavut, which
+are surveyed there and not registered here. How a collected event reaches an approved route is in
+[`docs/transport/CANADIAN_PROVIDER_RUNTIME.md`](docs/transport/CANADIAN_PROVIDER_RUNTIME.md).
+
+This file stays the licence record per source key, and the tables above are the authority for each
+key's licence and verification. In short: `drivebc_open511`, `qc_mtmd_roadworks` and `on511` are
+cleared. Ontario still needs a developer key on the server. The other five 511s are blocked for
+rights, and Saskatchewan publishes no feed. Clearing a source is not the same as collecting from it:
+no feed is enabled in production.
 
 ## Software components — a separate registry
 
@@ -117,3 +141,7 @@ All eight are usable in a closed-source commercial product.
 No dataset has been imported. No PostGIS, Valhalla, Martin or MapLibre component
 has been deployed. This tranche made the verification machine-enforced; the
 import itself is P5 and remains gated on the reserved Spatial branch.
+
+No provincial road feed is collected in production either. The collection runtime is built and
+tested against a real database (`server/transportFeedRuntime.ts`), and nothing schedules it. Where
+the recurring tick runs is an owner decision, set out in `docs/transport/CANADIAN_PROVIDER_RUNTIME.md`.

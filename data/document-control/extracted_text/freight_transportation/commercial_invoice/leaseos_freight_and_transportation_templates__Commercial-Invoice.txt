@@ -1,0 +1,54 @@
+Commercial Invoice
+Itemize goods or services, charges and payment details. Use page 2 for international goods shipments where applicable.
+Company / issuer: __________________________  Home base: _____________________
+Record no. __________________  Revision: ______  Issue date / time: _______________
+Job / load no. __________________  Customer PO / AFE: _________________________
+Seller and buyer
+Seller legal name / address: _____________________________________________________
+Seller contact / email: __________________________  Tax registration ID: ______________
+Bill to legal name / address: ____________________________________________________
+Buyer contact / email: _________________________  Buyer tax ID if applicable: __________
+Ship to / service location: _______________________________________________________
+Invoice date: ______________  Due date: ______________  Currency: __________________
+Contract / BOL / delivery refs.: ___________________________________________________
+Goods and services
+Subtotal: ______________  Discount: ______________  Freight / other: _________________
+Invoice total: ______________  Credits / paid: ______________  Balance due: ____________
+Payment instructions
+Payment terms / method / remittance reference: _____________________________________
+Remittance contact: __________________________  Approved by: _____________________
+Verify any changed banking instructions through a known contact before payment.
+Commercial Invoice shipment details
+Record no. __________________  Job / load no. ______________  Date: ______________
+Complete for goods shipments as applicable. Mark unused fields N/A; do not guess customs classifications, origin or values.
+International shipment parties
+Exporter name / address / ID: ____________________________________________________
+Importer of record name / address / ID: ____________________________________________
+Consignee name / address if different: ______________________________________________
+Customs broker / contact / reference: ______________________________________________
+Shipment and valuation
+Export country: ______________  Destination country: ____________  Ship date: __________
+Transport mode / carrier / tracking: _________________________________________________
+Reason for export: [ ] Sale  [ ] Return  [ ] Repair  [ ] Sample  [ ] Other: ___________________
+Delivery term / named place / rule version if agreed: __________________________________
+Package count / marks: ___________________  Net / gross mass and unit: _______________
+Freight / insurance / other valuation adjustments and treatment: ________________________
+Related permits / origin evidence / packing list refs.: __________________________________
+Preparation and review
+Prepared by / title: _____________________________  Date: _________________________
+Signature: __________________________  Broker / reviewer: ________________________
+Customs fields are a preparation aid. Confirm the destination requirements and any prescribed invoice, declaration or supporting documents before submission.
+Description / item / service date | Qty | Unit | Unit price | Amount
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+Tax type / jurisdiction | Taxable amount | Rate | Tax amount
+ |  |  | 
+ |  |  | 
+Invoice line / goods description | Country of origin | HS code verified | Customs value / currency
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 

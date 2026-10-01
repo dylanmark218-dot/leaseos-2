@@ -152,6 +152,8 @@ export const DRAIN_PROCEDURES: readonly string[] = [
   "records.evidence.seal",
   "sync.receivePackage",
   "auth.me",
+  // An old install's access token expires like any other; without a refresh it could not drain.
+  "auth.refresh",
   "auth.logout",
 ];
 

@@ -209,7 +209,12 @@ describe("the gate in front of /api/trpc", () => {
     expect(contractGateDecision(old, [], withDrain)).toMatchObject({ allow: false, outcome: "drain_only" });
   });
   it("is mounted in front of the tRPC handler", () => {
-    const src = readFileSync("server/_core/index.ts", "utf8");
-    expect(src).toMatch(/"\/api\/trpc",\s*clientContractGate\(\),\s*createExpressMiddleware\(/);
+    // Registered in the one place the API is mounted, on the same path constant, ahead of the
+    // organization selector and the tRPC handler.
+    const src = readFileSync("server/_core/api.ts", "utf8");
+    const gate = src.indexOf("app.use(TRPC_MOUNT_PATH, clientContractGate())");
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(src.indexOf("app.use(TRPC_MOUNT_PATH, organizationSelectionMiddleware)"));
+    expect(gate).toBeLessThan(src.indexOf("app.use(TRPC_MOUNT_PATH, createExpressMiddleware("));
   });
 });
