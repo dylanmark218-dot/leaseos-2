@@ -847,9 +847,17 @@ export async function evidenceInScope(evidenceId: number, scope: TenantScope): P
 }
 /** An incident report the scope may see, or null: through its job, else its unit, else its operator, else the single tenant only. */
 export async function incidentInScope(incidentNumber: string, scope: TenantScope): Promise<{ id: number } | null> {
+  return incidentWhereInScope(eq(incidentReports.incidentNumber, incidentNumber), scope);
+}
+/** SEC-1: the same chain keyed by id — the restricted vault names incidents by id. */
+export async function incidentIdInScope(incidentReportId: number, scope: TenantScope): Promise<{ id: number } | null> {
+  return incidentWhereInScope(eq(incidentReports.id, incidentReportId), scope);
+}
+/** An incident is owned through its job, else its unit, else its operator; one with none stays with the single tenant. */
+async function incidentWhereInScope(where: ReturnType<typeof eq>, scope: TenantScope): Promise<{ id: number } | null> {
   const db = await getDb();
   if (!db) return null;
-  const i = (await db.select({ id: incidentReports.id, jobId: incidentReports.jobId, unitId: incidentReports.unitId, operatorId: incidentReports.operatorId }).from(incidentReports).where(eq(incidentReports.incidentNumber, incidentNumber)).limit(1))[0];
+  const i = (await db.select({ id: incidentReports.id, jobId: incidentReports.jobId, unitId: incidentReports.unitId, operatorId: incidentReports.operatorId }).from(incidentReports).where(where).limit(1))[0];
   if (!i) return null;
   if (i.jobId != null) return (await jobInScope(i.jobId, scope)) ? { id: i.id } : null;
   if (i.unitId != null) return (await unitInScope(i.unitId, scope)) ? { id: i.id } : null;
