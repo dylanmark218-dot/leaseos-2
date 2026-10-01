@@ -46,14 +46,29 @@ const read = (rel) => {
 
 const nvmrcRaw = read(".nvmrc");
 let nodeMajor = null;
+/** The exact build `.nvmrc` pins, as `major.minor.patch`. Null until it is established. */
+let nodeExact = null;
 
 if (nvmrcRaw !== null) {
   const trimmed = nvmrcRaw.trim();
-  const match = /^v?(\d+)(?:\.\d+)*$/.exec(trimmed);
+  /*
+   * EXACT, not a major. A major-only `.nvmrc` ("22") let CI float across patch builds, and
+   * patch builds carry different ICU and tz data. On 2026-10-01 the same commit answered two
+   * different instants for the Pacific date 2026-11-08: Node 22.23.2 (tz 2025c) on one runner
+   * image, 22.23.3 (tz 2026c, which knows British Columbia no longer falls back) on the next.
+   * A runtime whose civil-time answers depend on which image the job landed on is not a
+   * runtime LeaseOS controls. So the one declaration is a full version, and everything else
+   * is compared against it.
+   */
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(trimmed);
   if (!match) {
-    fail(`.nvmrc: expected a Node version such as "22", found ${JSON.stringify(trimmed)}.`);
+    fail(
+      `.nvmrc: expected an exact Node build such as "22.23.3", found ${JSON.stringify(trimmed)}. ` +
+        `A major alone floats across patch builds, which carry different ICU and tz data.`
+    );
   } else {
     nodeMajor = Number(match[1]);
+    nodeExact = `${match[1]}.${match[2]}.${match[3]}`;
   }
 }
 
@@ -155,8 +170,22 @@ if (nodeMajor !== null) {
     const lines = raw.split("\n").map((l) => l.split("#")[0]);
 
     lines.forEach((line, index) => {
-      // `node-version-file:` is a different key and is not matched: after `node-version`
-      // it has `-file:`, not `:`.
+      /*
+       * `node-version-file: .nvmrc` is the preferred declaration: the workflow reads the
+       * same file developers do, so the two cannot drift. It counts as an active declaration
+       * — it does state the runtime — and it must point at `.nvmrc` itself, not at some other
+       * file that could carry a second answer.
+       */
+      const fileMatch = /(?:^|\s)node-version-file:\s*(.*)$/.exec(line);
+      if (fileMatch) {
+        const where = `${path}:${index + 1}`;
+        const target = fileMatch[1].trim().split(/[,}]/)[0].replace(/^['"]|['"]$/g, "").trim();
+        activeDeclarations += 1;
+        if (target !== ".nvmrc") {
+          fail(`${where}: node-version-file points at ${JSON.stringify(target)}; it must be .nvmrc, the one declaration everything is compared against.`);
+        }
+        return;
+      }
       const match = /(?:^|\s)node-version:\s*(.*)$/.exec(line);
       if (!match) return;
 
@@ -223,26 +252,26 @@ if (nodeMajor !== null) {
 
         activeDeclarations += 1;
 
-        // `22`, `22.x`, `22.11.0`, `v22` all name major 22.
-        const parsed = /^v?(\d+)(?:\.[\dx*]+)*$/i.exec(token);
+        /*
+         * A literal is accepted only when it is the exact build `.nvmrc` pins. `22`, `22.x`
+         * and `v22` name a major, and a major floats across patch builds — the drift that
+         * produced two different civil-time answers for one commit. `lts/*`, `latest` and
+         * `node` are moving targets. All of those fail; the fix is `node-version-file: .nvmrc`.
+         */
+        const parsed = /^v?(\d+\.\d+\.\d+)$/i.exec(token);
         if (!parsed) {
-          /*
-           * `lts/*`, `latest`, `node` — a moving target this gate cannot pin. Failing is
-           * the fail-closed choice: an unverifiable runtime declaration defeats the whole
-           * point of comparing declarations.
-           */
           fail(
-            `${where}: node-version ${JSON.stringify(token)} does not name a fixed version, ` +
-              `so it cannot be compared with .nvmrc (${nodeMajor}).`
+            `${where}: node-version ${JSON.stringify(token)} is not an exact build. ` +
+              `A major or a moving target floats across patch builds, which carry different ICU and tz data. ` +
+              `Use "node-version-file: .nvmrc" (pinned to ${nodeExact}).`
           );
           continue;
         }
 
-        const major = Number(parsed[1]);
-        if (major !== nodeMajor) {
+        if (parsed[1] !== nodeExact) {
           fail(
-            `${where}: node-version is ${major}, but .nvmrc says ${nodeMajor}. ` +
-              `CI would run a different runtime than developers.`
+            `${where}: node-version is ${parsed[1]}, but .nvmrc pins ${nodeExact}. ` +
+              `CI would run a different build than developers; use "node-version-file: .nvmrc".`
           );
         }
       }
@@ -302,6 +331,29 @@ if (pkg) {
   }
 }
 
+/* ------------------------------------------------------------- the runtime */
+
+/*
+ * The declarations can all agree and the process can still be something else: setup-node
+ * substitutes a cached build, a developer's shell ignores .nvmrc. So the running process is
+ * compared with the pin too, and its ICU and tz data are printed on every run, because they
+ * are what a patch build actually changes.
+ *
+ * A mismatch FAILS, everywhere. Not "warn locally, fail in CI": the gate's civil-time answers
+ * come from the tz data the running build carries, so a gate run on another build is not a
+ * run of this gate, whoever started it. This is gate 0a, before anything expensive — a
+ * developer on the wrong build is told in the first second, not after the suite.
+ */
+const running = process.versions.node;
+const runtimeLine = `runtime: Node ${running} · ICU ${process.versions.icu ?? "none"} · tz ${process.versions.tz ?? "none"}`;
+if (nodeExact !== null && running !== nodeExact) {
+  fail(
+    `the running Node is ${running}, but .nvmrc pins ${nodeExact}. ` +
+      `The gate runs only on the pinned build (nvm use, or setup-node with node-version-file: .nvmrc); ` +
+      `a different patch build carries different ICU and tz data, so its answers are not this gate's.`
+  );
+}
+
 /* ---------------------------------------------------------------- verdict */
 
 if (problems.length > 0) {
@@ -312,4 +364,5 @@ if (problems.length > 0) {
 }
 
 const scanned = workflows.length === 1 ? "1 workflow" : `${workflows.length} workflows`;
-console.log(`version truth: Node ${nodeMajor} (.nvmrc, engines.node, ${scanned}) · pnpm ${pnpmVersion} (packageManager, engines.pnpm)`);
+console.log(`version truth: Node ${nodeExact} (.nvmrc, engines.node major ${nodeMajor}, ${scanned}) · pnpm ${pnpmVersion} (packageManager, engines.pnpm)`);
+console.log(runtimeLine);

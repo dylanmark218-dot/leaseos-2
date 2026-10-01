@@ -653,6 +653,8 @@ export const tripStops = mysqlTable("tripStops", {
 
 export const operatingZones = mysqlTable("operatingZones", {
   id: int("id").autoincrement().primaryKey(),
+  /** 0209 (P0-A2.1) — the organization whose geofence this is; NULL means the historical single tenant. */
+  orgRef: varchar("orgRef", { length: 64 }),
   name: varchar("name", { length: 180 }).notNull(),
   zoneType: mysqlEnum("zoneType", ["loading", "unloading", "both"]).notNull(),
   locationId: int("locationId"),

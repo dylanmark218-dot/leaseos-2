@@ -81,7 +81,8 @@ d("packages over the chain", () => {
     const office = await withRole("office");
     const controller = await withRole("controller");
     const driver = await withRole("driver");
-    const entityId = 3_600_000 + Math.floor(Math.random() * 90_000);
+    const [book] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture books', 'corporation', 'CA-AB')", [key("FE").slice(0, 40)]);   // P0-A3: a ticket bills only to an account in a book the caller may see; an ownerless book is the single tenant's
+    const entityId = Number(book.insertId);
     const acctRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'ABC Energy')", [acctRef, entityId]);
     const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress, createdAt) VALUES (?, 'hydrovac', 'hydrovac', 'ABC Energy', '10-22-045-06-W5', 'on_site', 0, NOW())", [key("JOB").slice(0, 40)]);
