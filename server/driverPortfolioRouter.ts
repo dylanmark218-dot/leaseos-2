@@ -32,6 +32,7 @@ import {
 } from "./_core/driverPortfolio";
 import { walletStatusAt } from "../shared/driverWallet";
 import { newToken, sha256 } from "./_core/externalIdentityPolicy";
+import { affectedRows } from "./_core/enforcementCommit";
 import { assertReadinessSubjectInScope } from "./dispatchEnforcementService";
 import { composeReadiness } from "./readinessComposer";
 import {
@@ -248,10 +249,17 @@ export const driverPortfolioRouter = router({
       if (!s) throw notFound("Share");
       if (s.revokedAt) return { shareRef: s.shareRef, revokedAt: s.revokedAt };
       const now = new Date();
-      await db.transaction(async tx => {
-        await tx.update(driverCredentialShares).set({ revokedAt: now, revokedByUserId: ctx.user.id }).where(and(eq(driverCredentialShares.id, s.id), isNull(driverCredentialShares.revokedAt)));
+      const won = await db.transaction(async tx => {
+        const r = await tx.update(driverCredentialShares).set({ revokedAt: now, revokedByUserId: ctx.user.id }).where(and(eq(driverCredentialShares.id, s.id), isNull(driverCredentialShares.revokedAt)));
+        // A concurrent revoke got there first: it wrote the one event; this request records nothing.
+        if (affectedRows(r) !== 1) return false;
         await recordPortfolioEvent(tx, { orgRef: orgRefFor(scope), operatorId: op.id, credentialId: s.credentialId, actorUserId: ctx.user.id, eventType: "share_revoked", detail: `Share ${s.shareRef} revoked`, at: now });
+        return true;
       });
+      if (!won) {
+        const winner = (await db.select().from(driverCredentialShares).where(eq(driverCredentialShares.id, s.id)).limit(1))[0];
+        return { shareRef: s.shareRef, revokedAt: winner?.revokedAt ?? now };
+      }
       return { shareRef: s.shareRef, revokedAt: now };
     }),
 
@@ -430,12 +438,14 @@ export const driverPortfolioRouter = router({
         const [{ portfolio: before }] = await loadPortfolios(tx, [op]);
         const previous = credentialHistory(before.credentials, type.code, now).current
           ?? before.credentials.filter(c => c.id !== doc.id && c.verificationStatus === "verified" && credentialType(c.docType)?.code === type.code)
-            .sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime())[0] ?? null;
-        await tx.update(complianceDocuments).set({
+            .sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime() || b.id - a.id)[0] ?? null;
+        const decided = await tx.update(complianceDocuments).set({
           verificationStatus: input.outcome, verifiedByUserId: ctx.user.id, verifiedAt: now,
           ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
           ...(input.issuedAt !== undefined ? { issuedAt: input.issuedAt } : {}),
         }).where(and(eq(complianceDocuments.id, doc.id), eq(complianceDocuments.verificationStatus, "needs_review")));
+        // Two verifiers both read needs_review: only the one whose update landed may record a decision.
+        if (affectedRows(decided) !== 1) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Another decision on this credential completed first" });
         await recordPortfolioEvent(tx, {
           orgRef, operatorId: op.id, credentialId: doc.id, actorUserId: ctx.user.id,
           eventType: input.outcome === "verified" ? "credential_verified" : "credential_rejected",
@@ -513,7 +523,7 @@ export const driverPortfolioRouter = router({
       await db.transaction(async tx => {
         const retired = await tx.update(driverRequirementBindings).set({ active: false, retiredAt: now, retiredByUserId: ctx.user.id })
           .where(and(eq(driverRequirementBindings.id, old.id), eq(driverRequirementBindings.active, true)));
-        if (Number((retired as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 1) === 0) throw new TRPCError({ code: "CONFLICT", message: "The requirement changed while this update was being made" });
+        if (affectedRows(retired) !== 1) throw new TRPCError({ code: "CONFLICT", message: "The requirement changed while this update was being made" });
         await tx.insert(driverRequirementBindings).values({
           bindingRef, supersedesBindingRef: old.bindingRef, orgRef: old.orgRef, subjectType: merged.subjectType, subjectCode: merged.subjectCode,
           requirementKind: merged.requirementKind, requirementCode: code, label: merged.label ?? null, enforcement: merged.enforcement,
@@ -531,11 +541,18 @@ export const driverPortfolioRouter = router({
       const b = await bindingInScopeOrThrow(db, input.bindingRef, scope);
       if (!b.active) return { bindingRef: b.bindingRef, retiredAt: b.retiredAt };
       const now = new Date();
-      await db.transaction(async tx => {
-        await tx.update(driverRequirementBindings).set({ active: false, retiredAt: now, retiredByUserId: ctx.user.id })
+      const won = await db.transaction(async tx => {
+        const r = await tx.update(driverRequirementBindings).set({ active: false, retiredAt: now, retiredByUserId: ctx.user.id })
           .where(and(eq(driverRequirementBindings.id, b.id), eq(driverRequirementBindings.active, true)));
+        // Retired (or superseded) concurrently: the winner wrote the event; answer with its result.
+        if (affectedRows(r) !== 1) return false;
         await recordPortfolioEvent(tx, { orgRef: orgRefFor(scope), operatorId: null, actorUserId: ctx.user.id, eventType: "requirement_retired", detail: `${b.bindingRef} retired (${describeBinding(b)}): ${input.reason}`, at: now });
+        return true;
       });
+      if (!won) {
+        const winner = (await db.select().from(driverRequirementBindings).where(eq(driverRequirementBindings.id, b.id)).limit(1))[0];
+        return { bindingRef: b.bindingRef, retiredAt: winner?.retiredAt ?? now };
+      }
       return { bindingRef: b.bindingRef, retiredAt: now };
     }),
 

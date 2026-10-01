@@ -101,6 +101,9 @@ d("a customer's mandatory ticket is a blocker in the one eligibility", () => {
     expect(plain.eligibility.blockers.some(x => x.code.startsWith("driver_credential_first_aid"))).toBe(false);
     const long = await composeReadiness({ ...subject, workEndsAt: days(5) }, NOW);
     expect(long.eligibility.blockers.find(x => x.code === "driver_credential_first_aid_cpr_expires_during_job")).toMatchObject({ severity: "blocking", overridable: false });
+    // The work end is the question, not a fact: a check made without it still matches at award, and
+    // the award refuses on the lapse itself (complianceReadinessC1a.db.test.ts).
+    expect(long.fingerprint).toBe(plain.fingerprint);
   });
 
   it("the dispatch view of the same answer carries no certificate detail", async () => {
@@ -134,6 +137,13 @@ d("equipment qualifications come from the authorizations already on record", () 
     const u = await composeReadiness({ operatorId: unlinked.operatorId, unitId: unlinked.unitId, trailerId: null, jobId: unlinked.jobId }, NOW);
     expect(u.eligibility.blockers.find(x => x.code === "portfolio_operator_unlinked")).toMatchObject({ severity: "unknown" });
     expect(u.eligibility.blockers.some(x => x.code.startsWith("driver_equipment_"))).toBe(false);
+
+    // Linking the operator to a user with no authorizations turns UNKNOWN into a hard block over the
+    // same empty equipment rows, so the link moves the fingerprint.
+    await pool.execute("UPDATE operators SET userId = ? WHERE id = ?", [900_000 + Math.floor(Math.random() * 90_000), unlinked.operatorId]);
+    const linked = await composeReadiness({ operatorId: unlinked.operatorId, unitId: unlinked.unitId, trailerId: null, jobId: unlinked.jobId }, NOW);
+    expect(linked.eligibility.blockers.find(x => x.code === "driver_equipment_tri_drive_vac_truck_not_authorized")).toMatchObject({ severity: "blocking" });
+    expect(linked.fingerprint).not.toBe(u.fingerprint);
   });
 });
 

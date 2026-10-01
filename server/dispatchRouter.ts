@@ -332,7 +332,15 @@ export const dispatchGateRouter = router({
       // v22.18 — the recompute asks the same question the check asked, route
       // included. Without the route the facts would be a smaller set than the
       // ones the fingerprint was taken over, and every award would refuse.
-      const current = await composeReadiness({ operatorId: check.operatorId, unitId: check.unitId, trailerId: check.trailerId, jobId: posting?.jobId ?? null, routeApprovalRef: check.routeApprovalRef }, now);
+      // The work end is asked here, where it is known: the driver portfolio judges every mandatory
+      // credential through `endsAt`. The work end is not part of the fingerprint, so the check still matches.
+      const current = await composeReadiness({ operatorId: check.operatorId, unitId: check.unitId, trailerId: check.trailerId, jobId: posting?.jobId ?? null, routeApprovalRef: check.routeApprovalRef, workEndsAt: input.endsAt }, now);
+      // The one gate's own finding, not a second decision: a mandatory credential that lapses before
+      // the awarded work ends is a hard block, and no stored check made without the end can clear it.
+      const lapsing = current.driverReadiness.items.filter(i => i.enforcement === "mandatory" && i.state === "expires_during_job");
+      if (lapsing.length) {
+        return { ok: false as const, refusals: lapsing.map(i => `driver_${i.kind}_${i.code}_expires_during_job`), explanation: lapsing.map(i => i.detail).join("; ") };
+      }
       // C1a-3 — the grantor recorded at grant time. This used to read `requestedByUserId` into the grantor.
       const grantedOverrides = await loadGrantedOverrides(db, check.id);
       const roles = await listActiveUserRoleNames(ctx.user.id);

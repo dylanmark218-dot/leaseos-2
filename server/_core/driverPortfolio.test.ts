@@ -227,6 +227,26 @@ describe("the expiry dashboard and the history", () => {
     expect(h.history.map(x => [x.credential.id, x.reason])).toEqual([[bad.id, "rejected"], [first.id, "expired"]]);
     expect(h.history[0]!.credential.docType).toBe("h2s_certificate");
   });
+
+  it("calls only an in-force credential current: a verified one that starts later is on file, not current", () => {
+    const future = cred("h2s_alive", { issuedAt: days(10), expiresAt: days(1000), capturedAt: days(-1) });
+    const h = credentialHistory([future], "h2s_alive", NOW);
+    expect(h.current).toBeNull();
+    expect(h.history.map(x => [x.credential.id, x.reason])).toEqual([[future.id, "not_yet_effective"]]);
+  });
+
+  it("maps the rule's version back to the same row when two share a capture second, as the rule orders them", () => {
+    // Capture times have second precision. The rule breaks the tie by id, so must the model.
+    const at = days(-30);
+    const older = cred("h2s_alive", { capturedAt: at, expiresAt: days(-1) });
+    const newer = cred("h2s_alive", { capturedAt: at, expiresAt: days(500) });
+    for (const rows of [[older, newer], [newer, older]]) {
+      const h = credentialHistory(rows, "h2s_alive", NOW);
+      expect(h.current?.id).toBe(newer.id);
+      expect(sharedCredentialView({ credentialId: older.id, code: "h2s_alive", holderName: "A", credentials: rows, at: NOW })).toMatchObject({ valid: false });
+      expect(sharedCredentialView({ credentialId: newer.id, code: "h2s_alive", holderName: "A", credentials: rows, at: NOW })).toMatchObject({ valid: true });
+    }
+  });
 });
 
 describe("sharing one credential", () => {

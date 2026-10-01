@@ -370,6 +370,37 @@ d("sharing one credential", () => {
   });
 });
 
+d("concurrent decisions record one event", () => {
+  it("two verifiers deciding at once: one decision lands, the other is refused, and one event is written", async () => {
+    const c = await company();
+    const second = await member(c.orgRef, ["safety"]);
+    const { credentialId } = await as(c.driver).driverPortfolio.submitCredential({ code: "whmis", expiresAt: days(300) });
+    const results = await Promise.allSettled([
+      as(c.safety).driverPortfolio.credentialVerify({ credentialId, outcome: "verified" }),
+      as(second).driverPortfolio.credentialVerify({ credentialId, outcome: "rejected" }),
+    ]);
+    expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+    expect((results.find(r => r.status === "rejected") as PromiseRejectedResult).reason).toMatchObject({ code: "PRECONDITION_FAILED" });
+    const decided = (await events(c.operatorId)).filter(e => e.eventType === "credential_verified" || e.eventType === "credential_rejected");
+    expect(decided).toHaveLength(1);
+    const [[row]] = await pool.query<mysql.RowDataPacket[]>("SELECT verificationStatus FROM complianceDocuments WHERE id = ?", [credentialId]) as unknown as [[{ verificationStatus: string }]];
+    expect(decided[0]!.eventType).toBe(row.verificationStatus === "verified" ? "credential_verified" : "credential_rejected");
+  });
+
+  it("two revokes or two retires at once both answer, and only one is recorded", async () => {
+    const c = await company();
+    const h2s = await credential(c.operatorId, "h2s_alive");
+    const share = await as(c.driver).driverPortfolio.shareIssue({ credentialId: h2s, audience: "Gate" });
+    await Promise.all([1, 2].map(() => as(c.driver).driverPortfolio.shareRevoke({ shareRef: share.shareRef })));
+    expect((await events(c.operatorId)).filter(e => e.eventType === "share_revoked")).toHaveLength(1);
+
+    const { bindingRef } = await as(c.safety).driverPortfolio.requirementCreate({ subjectType: "customer", subjectCode: `Cust ${rnd()}`, requirementKind: "credential", requirementCode: "whmis" });
+    await Promise.all([1, 2].map(() => as(c.safety).driverPortfolio.requirementRetire({ bindingRef, reason: "contract ended" })));
+    const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT eventType FROM driverPortfolioEvents WHERE orgRef = ? AND eventType = 'requirement_retired'", [c.orgRef]);
+    expect(rows).toHaveLength(1);
+  });
+});
+
 d("the portfolio audit trail", () => {
   it("cannot be updated or deleted, including the columns 0212 added", async () => {
     const c = await company();

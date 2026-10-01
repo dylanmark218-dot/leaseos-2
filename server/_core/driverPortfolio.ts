@@ -341,10 +341,14 @@ function rowsFor(credentials: readonly PortfolioCredential[], type: CredentialTy
   return credentials.filter(c => accepted.has(normalizeCode(c.docType))).map(c => ({ ...c, docType: type.code }));
 }
 
-/** Which row the validity rule chose: it numbers rows by capture order, from 1. */
+/**
+ * Which row the validity rule chose: it numbers rows by capture order, from 1, breaking ties by id
+ * exactly as `complianceDocumentValidity` does. Capture times have second precision, so two rows can
+ * share one; without the same tie-breaker the version would map back to a different credential.
+ */
 function rowForVersion(rows: readonly PortfolioCredential[], version: number | null): PortfolioCredential | null {
   if (version == null) return null;
-  return rows.slice().sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime())[version - 1] ?? null;
+  return rows.slice().sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime() || a.id - b.id)[version - 1] ?? null;
 }
 
 function evaluateCredential(
@@ -701,7 +705,7 @@ export function expiryAlerts(portfolios: readonly DriverPortfolio[], at: Date): 
  * the reason it is no longer current, because an audit asks what was held on
  * the day of the incident and not only what is held today.
  */
-export type HistoryReason = "superseded" | "expired" | "rejected" | "awaiting_verification";
+export type HistoryReason = "superseded" | "expired" | "rejected" | "awaiting_verification" | "not_yet_effective" | "incomplete";
 
 export function credentialHistory(credentials: readonly PortfolioCredential[], code: string, at: Date): {
   current: PortfolioCredential | null;
@@ -712,7 +716,9 @@ export function credentialHistory(credentials: readonly PortfolioCredential[], c
   const rows = rowsFor(credentials, type);
   const v = complianceDocumentValidity(rows, type.code, at);
   const chosen = rowForVersion(rows, v.version);
-  const inForce = chosen && chosen.verificationStatus === "verified" && v.state !== "expired" ? chosen : null;
+  // In force means the rule says so: a verified row that starts in the future, or lacks the expiry its
+  // type requires, is on file but not current, and the history says which.
+  const inForce = chosen && chosen.verificationStatus === "verified" && (v.state === "in_force" || v.state === "expiring") ? chosen : null;
   const original = (r: PortfolioCredential) => credentials.find(c => c.id === r.id)!;
   const history = rows
     .filter(r => r.id !== inForce?.id)
@@ -721,6 +727,7 @@ export function credentialHistory(credentials: readonly PortfolioCredential[], c
       credential: original(r),
       reason: (r.verificationStatus === "rejected" ? "rejected"
         : r.verificationStatus === "needs_review" ? "awaiting_verification"
+        : r.id === chosen?.id && (v.state === "not_yet_effective" || v.state === "incomplete") ? v.state
         : r.expiresAt && r.expiresAt.getTime() < at.getTime() ? "expired"
         : "superseded") as HistoryReason,
     }));

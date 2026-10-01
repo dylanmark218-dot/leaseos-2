@@ -170,11 +170,12 @@ missing informational card could be listed first.
   - **Shares:** minimum fields and a masked number; hash-only storage; revoked, expired, superseded and rejected all read not valid; another driver's, private, unverified or over-7-day shares are refused; revoking someone else's share is NOT_FOUND.
   - **Audit:** cannot be updated or deleted.
 - **`server/_core/driverPortfolio.test.ts` (31):** share tests rewritten for the token-hash design; offline rule; unverified-expiry alerts.
-- **Pinned counts updated:**
-  - operational procedures 629 → 646
-  - mounted paths 691 → 709
-  - public procedures 2 → 3 (`procedureAuthorization.test.ts` now counts `driverPortfolioRouter.ts` too, and pins `shareRedeem` by name)
+- **Pinned counts this branch adds** (on `main` as merged at `416ac93`):
+  - operational procedures 682 → 699 (+17)
+  - mounted paths 752 → 770 (+18: the 17 plus the public `shareRedeem`)
+  - public procedures 4 → 5 (`procedureAuthorization.test.ts` also counts `driverPortfolioRouter.ts`, and pins `shareRedeem` by name; the procedure census pin lists it too)
   - the universal-permission list
+  - migration head 0209 → 0212 (`migrationSlots.test.ts`)
 
 ## Unresolved, named
 

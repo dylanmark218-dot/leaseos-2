@@ -557,7 +557,12 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     equipment: unitForDriver ? [unitForDriver.vehicleType] : [],
     job: job ? [job.jobCode, String(job.id)] : [],
   };
-  const driverBindingRows = await db.select().from(driverRequirementBindings).where(eq(driverRequirementBindings.active, true));
+  // Tenant first, in SQL: only this organization's bindings are read (the (orgRef, active) index), and
+  // bindingApplies then matches the subject. NULL is the historical single tenant.
+  const driverBindingRows = await db.select().from(driverRequirementBindings).where(and(
+    eq(driverRequirementBindings.active, true),
+    driverFacts.orgRef == null ? isNull(driverRequirementBindings.orgRef) : eq(driverRequirementBindings.orgRef, driverFacts.orgRef),
+  ));
   const appliedDriverBindings = driverBindingRows.filter(b => bindingApplies(b, driverFacts, now));
   let driverRequirements: DriverRequirement[] = appliedDriverBindings.map(requirementFromBinding);
   // The base gate already evaluates the licence (with its legacy fallback) and, on a dangerous-goods
@@ -586,7 +591,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   for (const b of driverReadiness.blockers) extra.push(b);
   // Time moves these without any row changing: an authorization lapsing, a binding starting or ending.
   for (const e of equipmentRows) governingExpiries.push({ what: `equipmentAuth:${e.id}`, at: e.expiresAt });
-  for (const b of driverBindingRows.filter(x => (x.orgRef ?? null) === driverFacts.orgRef)) governingExpiries.push({ what: `driverBindingStart:${b.id}`, at: b.effectiveAt }, { what: `driverBindingEnd:${b.id}`, at: b.expiresAt });
+  for (const b of driverBindingRows) governingExpiries.push({ what: `driverBindingStart:${b.id}`, at: b.effectiveAt }, { what: `driverBindingEnd:${b.id}`, at: b.expiresAt });
   if (driverRequirements.length) {
     contributions.push({ engine: "portfolio", finding: `${driverReadiness.items.length} driver requirement(s): ${driverReadiness.verdict}; ${driverReadiness.items.filter(i => i.satisfied).length} satisfied${driverReadiness.notices.length ? `; ${driverReadiness.notices.length} informational not met (not blocking)` : ""}` });
   }
@@ -594,7 +599,12 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     ...appliedDriverBindings.map(b => `${b.id}:${b.requirementKind}:${b.requirementCode}:${b.enforcement}`),
     ...equipmentRows.map(e => `${e.id}:${e.equipmentType}:${e.status}:${e.expiresAt?.toISOString() ?? "∅"}`),
     `class:${op.licenseClass ?? "∅"}`,
-    subject.workEndsAt?.toISOString() ?? "∅",
+    // Linked or not decides UNKNOWN (portfolio_operator_unlinked) against not_authorized for the same
+    // empty equipment rows, so the link is a decision-bearing fact.
+    `user:${op.userId ?? "∅"}`,
+    // The work end is not here: it is a parameter of the question, not a fact of the world. A check
+    // made without one still describes the same world at award, and the award refuses directly on a
+    // mandatory credential that lapses before the work it is awarding ends (dispatchRouter.award).
   ]);
 
   if (dangerousGoods) required.push(credentialState(opCreds, ["tdg_certificate"], "TDG certificate", now));

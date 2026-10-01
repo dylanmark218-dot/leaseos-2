@@ -21,6 +21,12 @@ merged with `evaluateDispatchReadiness()`. The award fingerprint includes the
 bindings and authorizations, so an award refuses a check made before a ticket
 was verified or a binding changed.
 
+The award asks the question the check could not: `dispatch.award` knows the work's end, passes it to
+`composeReadiness`, and refuses when that same pipeline finds a mandatory credential lapsing before
+it (`driver_credential_<code>_expires_during_job`). The work end is a parameter of the question, not
+a fact of the world, so it is not in the fingerprint; whether the operator is linked to a user is a
+fact (it decides UNKNOWN against not-authorized), so it is.
+
 ```
 Operator ─┬─ complianceDocuments (tickets; recorded by one person, verified by another)
           └─ operatorEquipmentAuthorizations (equipment)
