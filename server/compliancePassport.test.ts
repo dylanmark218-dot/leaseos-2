@@ -241,7 +241,7 @@ describe("who may verify, who may load a requirement, who may read private detai
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let userSeq = 400000 + Math.floor(Math.random() * 50000);
+let userSeq = 402_000_000 + Math.floor(Math.random() * 50000);
 const nextUser = () => userSeq++;
 beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 6 }); });
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
