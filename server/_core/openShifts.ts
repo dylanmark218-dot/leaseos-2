@@ -40,8 +40,11 @@ export type ShiftPost = {
   seats: number;
   /** Assigned posts are dispatch's decision; open posts invite interest first. */
   kind: "assigned" | "open";
-  /** Only an open post takes interest. Absent in pure planning, where every post is open. */
-  status?: "open" | "filled" | "cancelled" | "expired";
+  /**
+   * Only an open post takes interest. Absent in pure planning, where every post is open. Open Work's
+   * `draft` and `closed` (0206) are not open either, and refuse the same way.
+   */
+  status?: PostStatus;
 };
 
 /**
@@ -254,4 +257,149 @@ export function intendToAssign(args: { post: ShiftPost; candidate: Candidate; in
     interestExpressed: args.interests.some(i => i.postRef === args.post.postRef && i.userId === args.candidate.userId),
     note: "Dispatch's decision, pending the readiness check. Interest is context and confers no claim.",
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* 0206 — the post's life, and the offer's                              */
+/* ------------------------------------------------------------------ */
+
+export type PostStatus = "draft" | "open" | "closed" | "filled" | "cancelled" | "expired";
+
+/**
+ * Where a post may go from where it is. Beside `POSTING_TRANSITIONS` in dispatchLifecycle and
+ * tested the same way. `filled` is reached only by the award; nothing else writes it.
+ */
+export const POST_TRANSITIONS: Record<PostStatus, readonly PostStatus[]> = {
+  draft: ["open", "cancelled"],
+  open: ["closed", "filled", "cancelled", "expired"],
+  // Reopening is allowed; filling still needs an award.
+  closed: ["open", "filled", "cancelled"],
+  filled: [],
+  cancelled: [],
+  expired: [],
+};
+
+export function canTransitionPost(from: PostStatus, to: PostStatus): boolean {
+  return POST_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+/** Terminal: nothing moves out of it. */
+export function isTerminalPost(status: PostStatus): boolean {
+  return POST_TRANSITIONS[status].length === 0;
+}
+
+/**
+ * Expiry is derived on read: an open post whose `closesAt` has passed is expired whether or not a
+ * mutation has persisted it yet. The persisted status catches up at the next mutation.
+ */
+export function effectivePostStatus(post: { status: PostStatus; closesAt: Date | null }, now: Date): PostStatus {
+  if (post.status === "open" && post.closesAt && post.closesAt.getTime() <= now.getTime()) return "expired";
+  return post.status;
+}
+
+/** A person's standing response to a post. One per person per post; a new one replaces it. */
+export type ResponseKind = "interested" | "available" | "request_assignment" | "declined";
+export const RESPONSE_KINDS: readonly ResponseKind[] = ["interested", "available", "request_assignment", "declined"];
+
+/** Responses that put a person in the candidate pool. `declined` records the answer and removes them. */
+export function responseVolunteers(kind: ResponseKind): boolean {
+  return kind !== "declined";
+}
+
+export type OfferStatus = "offered" | "accepted" | "declined" | "withdrawn" | "expired" | "awarded" | "not_selected";
+
+/**
+ * The offer's life. `accepted` is a person's statement and binds nothing; `awarded` and
+ * `not_selected` are written only by the award, under the posting lock.
+ */
+export const OFFER_TRANSITIONS: Record<OfferStatus, readonly OfferStatus[]> = {
+  offered: ["accepted", "declined", "withdrawn", "expired"],
+  accepted: ["withdrawn", "expired", "awarded", "not_selected"],
+  declined: [],
+  withdrawn: [],
+  expired: [],
+  awarded: [],
+  not_selected: [],
+};
+
+export function canTransitionOffer(from: OfferStatus, to: OfferStatus): boolean {
+  return OFFER_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+/** Live: still awaiting a decision from somebody. */
+export function isLiveOffer(status: OfferStatus): boolean {
+  return status === "offered" || status === "accepted";
+}
+
+/** An offer past its `expiresAt` is expired on read, exactly as a post is. */
+export function effectiveOfferStatus(offer: { status: OfferStatus; expiresAt: Date | null }, now: Date): OfferStatus {
+  if (offer.status === "offered" && offer.expiresAt && offer.expiresAt.getTime() <= now.getTime()) return "expired";
+  return offer.status;
+}
+
+/* ------------------------------------------------------------------ */
+/* 0206 — availability is a declaration                                 */
+/* ------------------------------------------------------------------ */
+
+export type AvailabilityState = "available" | "unavailable" | "on_call" | "available_for_overtime";
+
+export type AvailabilityDeclaration = {
+  state: AvailabilityState;
+  /** Both null = standing. A window is half-open: [starts, ends). */
+  windowStartsAt: Date | null;
+  windowEndsAt: Date | null;
+  preferences: AvailabilityPreferences | null;
+  declaredAt: Date;
+};
+
+export type AvailabilityPreferences = {
+  regions: string[];
+  equipmentClasses: string[];
+  jobTypes: string[];
+  maxDistanceKm: number | null;
+  overnight: boolean | null;
+  nights: boolean | null;
+  weekends: boolean | null;
+  overtime: boolean | null;
+};
+
+/** Whether a declaration covers an instant. A standing declaration covers every instant. */
+export function declarationCovers(d: { windowStartsAt: Date | null; windowEndsAt: Date | null }, at: Date): boolean {
+  if (d.windowStartsAt && d.windowStartsAt.getTime() > at.getTime()) return false;
+  if (d.windowEndsAt && d.windowEndsAt.getTime() <= at.getTime()) return false;
+  return true;
+}
+
+/**
+ * The declaration in force for one instant: the latest declared one that covers it. None is
+ * "undeclared", which is neither available nor unavailable — a candidate pool shows it as such
+ * rather than reading silence as consent.
+ */
+export function declaredStateAt(declarations: readonly AvailabilityDeclaration[], at: Date): AvailabilityState | "undeclared" {
+  const covering = declarations.filter(d => declarationCovers(d, at));
+  if (!covering.length) return "undeclared";
+  covering.sort((a, b) => b.declaredAt.getTime() - a.declaredAt.getTime());
+  return covering[0]!.state;
+}
+
+/**
+ * Whether a declaration puts a person in the pool for a post. Overtime work needs an overtime
+ * declaration or a plain `available`; `on_call` counts; `unavailable` excludes; `undeclared` is
+ * reported, never treated as either.
+ */
+export type AvailabilityReason = { code: "declared_unavailable" | "undeclared" | "declines_overtime" | "outside_region"; detail: string };
+
+export function availabilityReasons(args: {
+  state: AvailabilityState | "undeclared";
+  preferences: AvailabilityPreferences | null;
+  post: { overtime: boolean; regionCode: string | null };
+}): AvailabilityReason[] {
+  const reasons: AvailabilityReason[] = [];
+  if (args.state === "unavailable") reasons.push({ code: "declared_unavailable", detail: "Declared unavailable for this window" });
+  if (args.state === "undeclared") reasons.push({ code: "undeclared", detail: "No availability declared for this window — not the same as available" });
+  if (args.post.overtime && args.preferences?.overtime === false) reasons.push({ code: "declines_overtime", detail: "Declared no overtime" });
+  if (args.post.regionCode && args.preferences?.regions.length && !args.preferences.regions.includes(args.post.regionCode)) {
+    reasons.push({ code: "outside_region", detail: `Declared regions ${args.preferences.regions.join(", ")}; this post is ${args.post.regionCode}` });
+  }
+  return reasons;
 }

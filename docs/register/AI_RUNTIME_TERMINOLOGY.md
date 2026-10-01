@@ -14,8 +14,8 @@ model layer. On `main` itself `server/_core/ai/` does not exist until PR #7 merg
 this document says about that directory describes PR #7, and its status column says "declared /
 unwired" for all of it. Nothing below is aspirational unless its status column says so.
 
-**Part II** (§23–§37) adds AI Policy & Claims Guardrails and Voice, surveyed against `main` at
-`6f52b57` and refreshed against `b35bac4`. It is also documentation only.
+**Part II** (§24–§38) adds AI Policy & Claims Guardrails and Voice, surveyed against `main` at
+`6f52b57` and refreshed against `e1d8fd5`. It is also documentation only.
 
 **Why the document lives here.** The repository has no `docs/architecture/`. The two existing
 AI-layer register documents (`SECRETARY_MODEL_LAYER.md`, `SECRETARY_SPINE_MORATORIUM.md`) live in
@@ -731,6 +731,30 @@ handler (`enforcement`); every other event falls through `withHandlers()` to the
 `workflow_rules` processor, which runs `workflowEngine.ts` rules into `operationalTasks`
 (deduplicated by rule + subject) in production. The §4 verdict stands — no `orchestrator.ts` —
 and is stronger for it: a live, durable, deterministic coordinator already exists.
+
+---
+
+## 23. Tool and Skill terms (added 2026-10-01)
+
+The full survey is `docs/register/AI_AGENT_RUNTIME_ARCHITECTURE.md` §23, which uses that
+document's six-word status set. PR #7 has merged since §22 was written, so `server/_core/ai/` is
+in this tree. It is still `DECLARED_UNWIRED` under the moratorium.
+
+**Rule: a Tool carries authority and executes; a Skill carries procedure and grants zero
+authority.**
+
+| Term | LeaseOS definition | Repository home | Status |
+|---|---|---|---|
+| **Tool** | One narrowly defined executable capability: a model-facing key bound server-side to exactly one existing `ProcedureName`. | `ToolDefinition`, `SECRETARY_TOOLS` (11), `resolveTool()`, `invokeTool()` in `server/_core/ai/tools/` | **DECLARED_UNWIRED** |
+| **Tool request / execution / result / receipt** | One requested invocation; its attempted run; the structured outcome; the durable evidence. Kept as four shapes. | `ToolInvocation`; `invokeTool()`; `ToolResult` (not persisted); `authorizationDecisions` row per call, `assistantCommitReceipts` for commits | **PARTIAL** |
+| **Skill** | A reusable, versioned operating procedure for one class of task: objective, required information, expected tools, decision rules, verification, clarification, approval checkpoints, completion criteria, escalation. **Grants no authority.** | Not a named type. Decomposed across `FORMS` (fields, `precisionSensitive`), `TaskAllowlist` (tools, budget; `taskKey` is the natural Skill key), `PromptVersion` (procedure prose), and the validator / `detectGaps()` / `checkCommit()` (verification) | **PARTIAL**, with no binding type. The minimum future shape is §8's `PromptContract` |
+| **Skill selection** | Choosing which procedure applies. Done by the server from the entry point or form key, never by the model. An unknown Skill refuses (the existing `ToolNotAllowed` / perimeter refusal), so no `SKILL_NOT_AVAILABLE` code is needed. | `runSecretaryExtractionJob()` is handed its form; `assistant.draft` takes `formKey` from a server route | **IMPLEMENTED** (deterministic) |
+| **MCP** | A transport for exposing tools. Never an authorization model; connecting a server never grants its tools. | none | **MISSING → DEFERRED** |
+| **Offline tool class** | Declared, never inferred. Reuse the existing classes; do not add a second set. | `OfflineClass` (`local_safe`, `local_capture`, `local_prepare`, `server_authoritative`) in `offlineCapability.ts`; `CapabilityDefinition.requiresOnline` | **DECLARED_UNWIRED**; `requiresOnline` **IMPLEMENTED** in `decide()` |
+
+Skill ≠ permission: a Driver who has a fully loaded "dispatch a vacuum truck" Skill is still
+refused by the dispatch `roleProcedure`, and the refusal is recorded in `authorizationDecisions`.
+
 ---
 
 # Part II — AI Policy & Claims Guardrails, and Voice
@@ -738,12 +762,12 @@ and is stronger for it: a live, durable, deterministic coordinator already exist
 **Documentation only.** Part II adds no production code, no migration and no new engine. It
 maps the guardrail, claims-integrity and "human voice" concepts onto what the repository
 already has, the same way Part I did for the runtime. It was surveyed against `main` at
-`6f52b57` and refreshed against `main` at `b35bac4` (2026-10-01). Door 2 has since merged
+`6f52b57` and refreshed against `main` at `e1d8fd5` (2026-10-01). Door 2 has since merged
 (PR #7, `c626146`) and is **still declared unwired**: `server/engineReachability.test.ts`
 lists every `ai/*` module, and `productionWorker.ts` does not dispatch
 `secretary.narration.captured`. Where Part II writes "(PR #7)" it means code that arrived with
 PR #7 and is on `main`, unwired. Status words are those of §0, plus the six the survey request
-asked for, used in §36: `IMPLEMENTED`, `PARTIAL`,
+asked for, used in §37: `IMPLEMENTED`, `PARTIAL`,
 `DECLARED_UNWIRED`, `MISSING`, `DEFERRED`, `NOT_NEEDED`.
 
 The layer's canonical name is **AI Policy & Claims Guardrails**. It is not a "legal shield":
@@ -751,7 +775,7 @@ it narrows what the AI may say and do, keeps evidence and makes behaviour review
 architecture removes legal liability, and nothing in this document should be read as saying
 one does.
 
-## 23. The governing separation
+## 24. The governing separation
 
 One sentence carries Part II:
 
@@ -766,10 +790,10 @@ procedure, and `decide()` in `actionGateway.ts` for an agent capability.
 Two corollaries the rest of Part II depends on:
 
 1. **The system prompt is guidance, not the safety boundary.** Every rule that matters is
-   already enforced in code somewhere below the prompt, or is listed in §36 as a gap. The
+   already enforced in code somewhere below the prompt, or is listed in §37 as a gap. The
    prompt says "never state that anything is safe" (`buildSystemPrompt()` rule 5); the
    control is `detectOverreach()` plus the fact that a proposal cannot reach a record
-   without a person (§26).
+   without a person (§27).
 2. **Guardrails restrict claims and actions, not subjects.** LeaseOS must be able to
    explain HOS, TDG, WHMIS, permits, contracts, First Aid procedures and invoices. The
    repository already draws the line where it belongs: `checkClaim()` in
@@ -777,7 +801,7 @@ Two corollaries the rest of Part II depends on:
    **decision** rest only on binding authority. That is the rule; "legal topic → refuse" is
    not, and should never be added.
 
-## 24. The policy stack, mapped onto code
+## 25. The policy stack, mapped onto code
 
 The requested ordering, with the existing mechanism at each layer. **[live]**, **[unwired]**
 and **[missing]** mean what they mean in §1.
@@ -823,13 +847,13 @@ Voice / style                 [missing]  wraps the presentation of the result. I
 Nothing above the "Model safety instructions" line depends on the model behaving. That is
 the property to keep.
 
-## 25. Guardrail taxonomy
+## 26. Guardrail taxonomy
 
 §17 records that the repository has "no single 'guardrail' concept, correctly". Part II keeps
 that: the four categories below are a **classification of existing mechanisms**, not a new
 framework or module. Do not create `guardrails.ts`.
 
-### 25.1 Input guardrails (before inference)
+### 26.1 Input guardrails (before inference)
 
 | Concern | Existing mechanism | Status |
 |---|---|---|
@@ -843,7 +867,7 @@ framework or module. Do not create `guardrails.ts`.
 | Untrusted document content | `BlockKind` → `external_content`, which `MAY_INSTRUCT` excludes | implemented (type + gateway); assembly unwired |
 | Off-domain request | `classifyRequest()` (`knowledge/perimeter.ts`); `OUT_OF_PERIMETER` (PR #7) | unwired |
 
-### 25.2 Context guardrails (what reaches the model)
+### 26.2 Context guardrails (what reaches the model)
 
 | Concern | Existing mechanism | Status |
 |---|---|---|
@@ -852,9 +876,9 @@ framework or module. Do not create `guardrails.ts`.
 | Sensitive-field filtering | `ContextPack` is a pure module that cannot import the restricted vault or medical tables (`contextPerimeter.test.ts`) | unwired (PR #7) |
 | Minimum necessary data | `ContextItem { id, kind, label, value }` — projected fields, never rows | unwired (PR #7) |
 | Document trust / provenance | `AUTHORITY_LEVELS` A–F; `knowledgePassages.revision / jurisdiction / effectiveFrom / sourceId`; `reproductionBasis` | implemented |
-| Instruction / data separation | `AUTHORITY_OF: Record<BlockKind, InstructionAuthority>`; door 2 fences transcript and document text | type implemented; **door 1 does not fence** (§32) |
+| Instruction / data separation | `AUTHORITY_OF: Record<BlockKind, InstructionAuthority>`; door 2 fences transcript and document text | type implemented; **door 1 does not fence** (§33) |
 
-### 25.3 Output guardrails (before a result becomes authoritative)
+### 26.3 Output guardrails (before a result becomes authoritative)
 
 | Concern | Existing mechanism | Status |
 |---|---|---|
@@ -863,19 +887,22 @@ framework or module. Do not create `guardrails.ts`.
 | Missing provenance | door 2 `ExtractedField.status` requires `evidenceQuote` (stated) or `evidenceRef` (inferred) | unwired |
 | Unsafe recommendations, legal/compliance conclusions | `detectOverreach()` → `assistantProposals.overreachFlags` (door 1, on `notes` only); `checkClaim()` explanation/decision (no caller); `FORBIDDEN_AI_OUTCOMES` | partial |
 | Prohibited disclosure | admission + perimeter upstream; no output-side disclosure check | partial (upstream only) |
-| Defamatory / accusatory claims | none | **missing** (§29) |
-| Copyright-sensitive reproduction | `quotable()` restricts to `own_document` / `licensed_source`; `checkAssistantPassageUse()` | partial (§31) |
+| Defamatory / accusatory claims | none | **missing** (§30) |
+| Copyright-sensitive reproduction | `quotable()` restricts to `own_document` / `licensed_source`; `checkAssistantPassageUse()` | partial (§32) |
 | Malformed tool requests | `resolveTool()` → `ToolNotAllowed`; unknown and not-allowed refuse identically | unwired |
 
-### 25.4 Action guardrails (real-world operations)
+### 26.4 Action guardrails (real-world operations)
 
 All **implemented** and all already canonical: `roleProcedure`, acting scope, `TaskAllowlist`
 (unwired), `SafetyCeiling` / `ceilingFor()`, `NEVER_AUTOMATIC` / `NEVER_AUTONOMOUS`,
 `agentApprovals` bound to `payloadHash`, idempotency keys, domain validation, database
 constraints (unique `assistantCommitReceipts.proposalId`). **Nothing new belongs here.** A
-second authorization system is the failure this document exists to prevent.
+second authorization system is the failure this document exists to prevent. The layer-by-layer
+version, Skill through database, is `AI_AGENT_RUNTIME_ARCHITECTURE.md` §23.7 ("a rule that
+exists only in Skill prose is a suggestion to a model, not a control"); this taxonomy agrees
+with it and does not restate it.
 
-## 26. Deterministic first
+## 27. Deterministic first
 
 The repository already follows the rule the request states, and states it in its own
 comments: `contextAssembly.ts` ("If the only thing standing between an attacker and payroll
@@ -897,13 +924,13 @@ change the meaning of the statement?) is the only legitimate place for a model-a
 check, and §17's rule still applies: `verifierFor()` / `SameModelVerification` in
 `modelGateway.ts` already refuse to let a model verify itself.
 
-## 27. Claims integrity
+## 28. Claims integrity
 
 **Canonical term: Claims Integrity.** A factual statement the AI produces carries its
 evidence class, and the class survives presentation.
 
 The requested classes, mapped onto vocabularies that already exist. No new enum is proposed;
-the gap is that nothing joins them on one output (§36).
+the gap is that nothing joins them on one output (§37).
 
 | Requested class | Door 2 field status | Retrieval `ClaimState` | Knowledge authority | Other existing homes |
 |---|---|---|---|---|
@@ -929,10 +956,10 @@ Two things already hold and must keep holding:
   `INTERNAL_RECORD` claim whose `evidenceRef` would be the credential row id.
 
 **Gap.** There is no per-claim evidence record on free-text AI output. Fields have one (door
-2), retrieval answers have one (`citedPassageRefsJson`), prose `notes` do not. See §36 row
+2), retrieval answers have one (`citedPassageRefsJson`), prose `notes` do not. See §37 row
 "claims/evidence provenance".
 
-## 28. Facts versus inference, by domain
+## 29. Facts versus inference, by domain
 
 The high-risk domains the request names each already have a deterministic owner. The AI's
 job in each is to carry that owner's status, not to produce its own.
@@ -945,14 +972,14 @@ job in each is to carry that owner's status, not to produce its own.
 | Road restrictions | routing graph, `roadHazardObservations` | Observations stay observations. |
 | Equipment ratings | capacity fields; `capacity_unknown` → `NOT_EVALUATED` | Missing capacity is "not evaluated", never "fine". |
 | Safety procedures | `knowledgePassages` (company_policy, level D) | Retrieve and quote; do not improvise. |
-| Invoices | invoicing engine, integer cents | Recorded or calculated amounts only (§30). |
+| Invoices | invoicing engine, integer cents | Recorded or calculated amounts only (§31). |
 | Employee certifications | credential rows with `verificationStatus` | Carry `unverified` / `expired` through. |
 | Regulatory requirements | requirement registry; `COMPLIANCE_KNOWLEDGE_CATALOG` with authority, URL, `regulatoryVersion`, `verifiedOn` | Preserve jurisdiction, version and date. |
 
 `InterEngineStatus` rule 1 ("`NOT_EVALUATED` never rounds up to `PASS`") and SPINE item 1's
-`confirmed | unconfirmed | unknown` are the same rule at two layers. §33 extends it to voice.
+`confirmed | unconfirmed | unknown` are the same rule at two layers. §34 extends it to voice.
 
-## 29. Allegations, reports and findings
+## 30. Allegations, reports and findings
 
 **What exists.** The incident model keeps the person's words and the AI's rendering apart:
 
@@ -984,10 +1011,10 @@ not a guardrail module: a finding's status is a fact about the record. The AI-si
 attribution: render the claim with its source ("According to the submitted incident
 report…") while the record's status is anything short of a person's recorded finding. An
 `ai_proposed` summary already needs `ai_confirmed` before it is anyone's words; that is the
-right gate, and the evaluation in §35 should test that it preserves attribution.
+right gate, and the evaluation in §36 should test that it preserves attribution.
 **DEFERRED** until the AI writes incident summaries; today no path does.
 
-## 30. Legal, medical and financial content
+## 31. Legal, medical and financial content
 
 **Legal and regulatory.** Allowed: retrieve, explain, summarize, quote with revision and
 jurisdiction. Enforced today by `checkClaim()` (explanation vs decision; no caller yet),
@@ -1011,7 +1038,7 @@ request lists — e.g. funding `estimated / potential / … / received`, insuran
 calculated, estimate, projection, recommendation) from the row it came from; an estimate is
 never phrased as an amount owed. No AI path produces a financial figure today.
 
-## 31. Sources and reproduction
+## 32. Sources and reproduction
 
 **What exists.** Every quotable passage has a `reproductionBasis` (`own_document` or
 `licensed_source`; `unstated` rows are never quoted), a `sourceId` keyed to the licence
@@ -1024,10 +1051,10 @@ permits nothing". `admit(authority, intent)` distinguishes `index`, `chunk`, `an
 **What is missing.** A maximum-reproduction rule: a quotable passage is returned whole, with
 no cap on how much of a licensed source one answer may reproduce, and no field on the output
 that says whether it is a quotation, a summary or original text. That is a Skill-level
-concern for the day a model writes prose from passages (§36). The rule to carry forward:
+concern for the day a model writes prose from passages (§37). The rule to carry forward:
 **a retrieved document is context, not permission to republish it.**
 
-## 32. Prompt injection and untrusted content
+## 33. Prompt injection and untrusted content
 
 The requested precedence
 
@@ -1063,7 +1090,7 @@ from evidence. It is already pinned as the one request-handler model call
 and removing it is a named step in the owner's sequence; the fence arrives with door 2 when
 that happens. **Do not patch it during SPINE.**
 
-## 33. Voice
+## 34. Voice
 
 **Canonical term: Voice Profile.** Presentation policy only.
 
@@ -1104,7 +1131,7 @@ Rules, each with the existing mechanism it rests on:
    are the right size for claim-level bans; a style system should not become a growing list
    of words.
 
-## 34. Scoped claims, disclaimers, external communication
+## 35. Scoped claims, disclaimers, external communication
 
 **No universal compliance claims.** The AI must not say a company, driver, trip, load,
 vehicle or document is "fully compliant", "legally compliant", "safe" or "approved" unless a
@@ -1139,7 +1166,7 @@ future send procedure behind `roleProcedure`) → authorization → transmit →
 `autoExecute: []` keeps from running unattended. **"LLM → SMTP" must never exist**;
 `FORBIDDEN_CATEGORIES` includes `outbound_email` so that a Secretary tool cannot be one.
 
-## 35. Outcomes, versioning, observability, evaluation
+## 36. Outcomes, versioning, observability, evaluation
 
 **Policy outcomes.** Reuse, do not add. The requested set maps onto existing unions:
 
@@ -1194,7 +1221,7 @@ verbosity, tone consistency) must be scored separately from correctness, and cor
 gates first: the golden set's silent-guess floor already fails a run on its own, whatever
 else scored well. A well-written wrong answer fails.
 
-## 36. Current state, gaps and where each belongs
+## 37. Current state, gaps and where each belongs
 
 The surveyed areas, classified.
 
@@ -1218,8 +1245,8 @@ The surveyed areas, classified.
 | Organization terminology preferences | MISSING / DEFERRED | Skills (Voice Profile) |
 | Copyright / source handling | PARTIAL — basis and licence gates live; no reproduction cap | Retrieval + Skills |
 | Allegation / fact distinction | PARTIAL — `originalStatement`, `summarySource`, roles, dispositions; no finding status | Domain code |
-| Audit events | PARTIAL — see §35 observability | Agent runtime (provenance columns) |
-| Guardrail evaluation tests | PARTIAL — see §35 table | Agent runtime eval |
+| Audit events | PARTIAL — see §36 observability | Agent runtime (provenance columns) |
+| Guardrail evaluation tests | PARTIAL — see §36 table | Agent runtime eval |
 
 **What must stay deterministic.** Authorization, tenancy, admission, schema validation,
 enum and range checks, quote-in-transcript, claim-versus-binding-authority, automation
@@ -1241,14 +1268,18 @@ classification, and every status a Voice Profile might be tempted to round up.
 | Voice Profile | Skills | after the single Agent runtime |
 | Defamation / attribution evals | Agent runtime eval | with the first incident-summary Skill |
 
-A **Skill**, in this repository's terms, does not exist yet. Its nearest parts are `FORMS`
-(the output schema), `TaskAllowlist` (tools and budget) and `PromptVersion` (instructions);
-§8's `PromptContract` is the smallest type that binds them. A Voice Profile and an output
-claims contract would attach to that same record. A Skill grants no authority; neither does
-a guardrail, and neither does a model.
+A **Skill** is defined in §23: a versioned procedure that grants no authority, today
+decomposed across `FORMS`, `TaskAllowlist` and `PromptVersion`, with its minimum future shape
+in `AI_AGENT_RUNTIME_ARCHITECTURE.md` §23.16 (one `PromptContract` / `SkillDefinition` type
+keyed by `taskKey` + `version`, a constant registry, registration-time tests). Part II adds two
+references to that same record and nothing else: a **Voice Profile** key and an **output
+claims contract** (which evidence classes from §28 the Skill's output must carry, and whether
+it may quote at length, §32). Both fit §23.16's structural test: neither can name a
+permission, a procedure, a tenant or a mode. A Skill grants no authority; neither does a
+guardrail, a Voice Profile or a model.
 
 ```
-AGENT → SKILL (PromptContract: prompt, form, allowlist, voice, claims contract)
+AGENT → SKILL (PromptContract / SkillDefinition: prompt, form, allowlist, + voice key, claims contract)
           │
    Context + Evidence (admitted, projected)
           ▼
@@ -1266,7 +1297,7 @@ AGENT → SKILL (PromptContract: prompt, form, allowlist, voice, claims contract
                            DOMAIN ACTION → receipt
 ```
 
-## 37. Effect on the SPINE order
+## 38. Effect on the SPINE order
 
 **None.** No finding in Part II is a defect in a live path that needs fixing ahead of SPINE:
 the one live model path (door 1) produces a proposal a person must read back, its overreach
@@ -1289,7 +1320,8 @@ it.
 The owner's recorded sequence (`AI_AGENT_RUNTIME_ARCHITECTURE.md` §22) is the finer version
 of the same order — remaining SPINE wiring → remove the `assistant.draft` synchronous call →
 register the durable AI job → save tool results and evidence refs → step budget →
-database-backed idempotency → cancellation → multi-step executor. The guardrail work in §36
-attaches to the door-2 wiring and to the first Skill, after those steps, so that no guardrail
+database-backed idempotency → cancellation → multi-step executor → Skills
+(`AI_AGENT_RUNTIME_ARCHITECTURE.md` §23.18). The guardrail work in §37 attaches to the door-2
+wiring and to the Skills step, after the executor, so that no guardrail
 framework exists ahead of the runtime that consumes it. The one exception, consistent with
 that record, is a narrow integrity fix to a live path; Part II found none.
