@@ -1,0 +1,36 @@
+{
+  "id": "10-over-capacity",
+  "note": "More volume than the tank holds. A hard rule, so BLOCKED rather than REVIEW.",
+  "transcript": "Arrived 16:00, unloaded 16:05 to 16:45, twenty two thousand litres on the meter.",
+  "context": {
+    "formKey": "unload_stop",
+    "formVersion": 1,
+    "tripRef": "TRIP-2026-004821",
+    "unitNumber": "T-118",
+    "unitTankCapacityLitres": 16000,
+    "vehicleMoving": false
+  },
+  "modelResponse": {
+    "fields": {
+      "arrivedAt": { "value": "16:00", "status": "stated", "evidenceQuote": "Arrived 16:00", "evidenceRef": null },
+      "waitMinutes": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "delayReason": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null },
+      "operationStartedAt": { "value": "16:05", "status": "stated", "evidenceQuote": "unloaded 16:05", "evidenceRef": null },
+      "operationCompletedAt": { "value": "16:45", "status": "stated", "evidenceQuote": "to 16:45", "evidenceRef": null },
+      "quantity": { "value": 22000, "status": "stated", "evidenceQuote": "twenty two thousand litres on the meter", "evidenceRef": null },
+      "measurementMethod": { "value": "Meter", "status": "stated", "evidenceQuote": "on the meter", "evidenceRef": null },
+      "departedAt": { "value": null, "status": "missing", "evidenceQuote": null, "evidenceRef": null }
+    },
+    "notes": null,
+    "outOfScope": false,
+    "injectionSuspected": false
+  },
+  "expect": {
+    "verdicts": { "quantity": "BLOCKED" },
+    "reasonCodes": { "quantity": ["volume_over_capacity"] },
+    "silentGuesses": 0,
+    "outOfScope": false,
+    "injectionSuspected": false,
+    "heldBecause": "blocked"
+  }
+}

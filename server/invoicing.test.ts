@@ -76,7 +76,7 @@ d("an invoice from the ticket's decisions, end to end", () => {
     const office = await withRole("office");
     const controller = await withRole("controller");
     const driver = await withRole("driver");
-    const entityId = 5_100_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40);
     const customerName = `ABC Energy ${acctRef.slice(-5)}`;
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, ?)", [acctRef, entityId, customerName]);
@@ -175,7 +175,7 @@ d("an invoice from the ticket's decisions, end to end", () => {
 
   it("does not accept a disputed invoice over its dispute, and shows nothing to another account", async () => {
     const controller = await withRole("controller");
-    const entityId = 5_200_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40);
     const otherRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'DEF Oil')", [acctRef, entityId]);
@@ -204,7 +204,7 @@ d("an invoice from the ticket's decisions, end to end", () => {
     const management = await withRole("management");
     const bookkeeper = await withRole("bookkeeper");
     const driver = await withRole("driver");
-    const entityId = 5_300_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40);
     const customerName = `GHI Resources ${acctRef.slice(-5)}`;
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, ?)", [acctRef, entityId, customerName]);

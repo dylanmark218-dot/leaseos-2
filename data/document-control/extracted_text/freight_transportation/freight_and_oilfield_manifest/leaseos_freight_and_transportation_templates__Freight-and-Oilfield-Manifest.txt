@@ -1,0 +1,53 @@
+Freight and Oilfield Manifest
+Track individual load items, containers and custody transfers. Use linked prescribed documents for regulated shipments.
+Company / issuer: __________________________  Home base: _____________________
+Record no. __________________  Revision: ______  Issue date / time: _______________
+Job / load no. __________________  Customer PO / AFE: _________________________
+Movement and parties
+Shipper / generator: ___________________________  Contact / phone: _________________
+Origin site / lease / LSD: _________________________________________________________
+Receiver / facility: ____________________________  Contact / phone: _________________
+Destination address / lease / LSD: _________________________________________________
+Carrier / driver: ______________________________  Unit / trailer: ____________________
+Departure date / time: _________________________  Expected arrival: __________________
+BOL / dispatch / shipping document refs.: __________________________________________
+Load inventory
+Totals by measurement unit: ______________________________________________________
+Quantity basis / scale / meter references: ___________________________________________
+Container count / compartments / equipment serial refs.: ______________________________
+Handling and supporting documents
+Handling / segregation / temperature instructions: ____________________________________
+SDS / analysis / waste profile / permit / approval references: ___________________________
+Regulated shipping / waste document issuer and number: ______________________________
+General tracking manifest only. Do not use as a substitute for a required dangerous goods shipping document or prescribed hazardous waste manifest.
+Manifest custody and reconciliation
+Record no. __________________  Job / load no. ______________  Date: ______________
+Custody transfer register
+Receiver reconciliation
+Outcome: [ ] Accepted  [ ] Partly accepted  [ ] Refused  [ ] Pending verification
+External facility receipt issuer / number: ______________________________________________
+Rejected material destination / instructions / authorization: _____________________________
+Outstanding discrepancies / evidence refs.: __________________________________________
+Acknowledgments
+Shipper name / role: ___________________________  Signature: ______________________
+Date / time: ______________  Carrier / driver signature: ______________  Time: __________
+Receiver name / role: __________________________  Signature: ______________________
+Date / time: ______________  Facility stamp / reference: ______________________________
+Office reconciled by: __________________________  Date: ___________________________
+Related invoice / billing reference: __________________________________________________
+Item / container / seal ID | Material / equipment description | Qty / unit | Mass / unit | Condition / ref.
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+Date / time / location | From name / signature | To name / signature | Qty / unit / seal exceptions
+ |  |  | 
+ |  |  | 
+ |  |  | 
+ |  |  | 
+Item / container ID | Received qty / unit | Accepted qty / unit | Rejected qty / unit | Reason / receipt ref.
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 

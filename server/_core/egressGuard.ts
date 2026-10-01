@@ -70,6 +70,11 @@ export type EgressResponse = {
   /** Every URL requested, in order; the first is the caller's. */
   hops: string[];
   contentType: string | null;
+  /**
+   * The publisher's `Retry-After`, verbatim, when it sent one — the single response header a caller
+   * may read. A feed collector needs it to wait as long as it was asked to; nothing else crosses.
+   */
+  retryAfter: string | null;
   /** The body of a 2xx answer. A non-2xx body is not read. */
   bytes: Uint8Array;
   text(): string;
@@ -321,9 +326,9 @@ async function readBody(body: AsyncIterable<Uint8Array>, url: URL, limits: Egres
   return out;
 }
 
-function answer(status: number, url: URL, hops: string[], contentType: string | null, bytes: Uint8Array): EgressResponse {
+function answer(status: number, url: URL, hops: string[], contentType: string | null, bytes: Uint8Array, retryAfter: string | null = null): EgressResponse {
   const text = () => new TextDecoder("utf-8").decode(bytes);
-  return { ok: status >= 200 && status <= 299, status, url: url.href, hops, contentType, bytes, text, json: () => JSON.parse(text()) as unknown };
+  return { ok: status >= 200 && status <= 299, status, url: url.href, hops, contentType, retryAfter, bytes, text, json: () => JSON.parse(text()) as unknown };
 }
 
 /**
@@ -353,7 +358,7 @@ export async function guardedGet(target: string | URL, edges: EgressEdges, limit
           continue;
         }
         const contentType = res.headers["content-type"] ?? null;
-        if (res.status < 200 || res.status > 299) return answer(res.status, url, hops, contentType, new Uint8Array(0));
+        if (res.status < 200 || res.status > 299) return answer(res.status, url, hops, contentType, new Uint8Array(0), res.headers["retry-after"] ?? null);
         const media = (contentType ?? "").split(";")[0]!.trim().toLowerCase();
         if (limits.contentTypes.indexOf(media) < 0) throw new EgressRefused("content_type", `${url.host} answered ${media || "with no content type"}; expected ${limits.contentTypes.join(" or ")}`);
         const encoding = (res.headers["content-encoding"] ?? "identity").trim().toLowerCase();
@@ -364,6 +369,99 @@ export async function guardedGet(target: string | URL, edges: EgressEdges, limit
         res.close();
       }
     }
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+/* ---- POST ---- */
+
+/**
+ * Delivering to a URL somebody else chose — the webhook case.
+ *
+ * `integration.webhookSubscribe` takes a destination from a tenant administrator and the
+ * dispatcher POSTs to it, retrying six times over about fifteen hours. Until this existed it
+ * did that with a bare `fetch`, so the permission decided who could ask and nothing decided
+ * where the request went: a subscription pointed at 169.254.169.254 or a loopback admin port
+ * was delivered to, repeatedly. The URL check at subscribe time was `https://` and nothing
+ * more, and a check there could not have been enough anyway — a name resolves again at send
+ * time, hours later.
+ *
+ * This is deliberately a SMALLER operation than `guardedGet`, not a bigger one. Same host and
+ * address rules, same resolve-then-pin, same single deadline; and then three things it does
+ * not do:
+ *
+ *   - **No redirects.** Following one would re-send a body signed for the first destination
+ *     to a second host, and re-checking the hop would not undo that. A 3xx comes back as its
+ *     status, which every caller already treats as a failed delivery.
+ *   - **The answer's body is never read**, only closed. The caller needs the status; reading
+ *     would put an internal service's response bytes inside this process for no purpose.
+ *   - **No content-type, encoding or size rules**, because nothing is read to apply them to.
+ *
+ * Headers are the one thing a caller supplies, because a delivery has to carry its signature.
+ * They are names and values only — never a fetch configuration — and the names that would let
+ * a caller redirect the request, reuse a connection or attach a credential are refused rather
+ * than quietly overwritten.
+ */
+export interface EgressPostTransport {
+  post(input: { url: URL; addresses: ResolvedAddress[]; headers: Record<string, string>; body: string; signal: AbortSignal }): Promise<TransportResponse>;
+}
+
+export type EgressPostEdges = { resolve: Resolver; transport: EgressPostTransport };
+
+/** What a delivery answered. There is no body here on purpose. */
+export type EgressPostResult = { ok: boolean; status: number; url: string };
+
+/*
+ * Names the guard sets itself, or that would change where the request goes or what it carries
+ * as proof of identity. A caller passing one is a mistake worth a refusal: silently dropping it
+ * would ship a delivery that looks signed and is not, or one the caller believes is scoped and
+ * is not.
+ */
+const RESERVED_POST_HEADERS = [
+  "host", "connection", "content-length", "transfer-encoding", "accept-encoding", "upgrade", "te", "trailer",
+  "cookie", "set-cookie", "authorization", "proxy-authorization", "proxy-connection",
+];
+
+function postHeaders(caller: Record<string, string>, contentLength: number): Record<string, string> {
+  const out: Record<string, string> = { "user-agent": USER_AGENT, "accept-encoding": "identity", "content-length": String(contentLength) };
+  for (const [rawName, value] of Object.entries(caller)) {
+    const name = rawName.toLowerCase();
+    // A name or value carrying CR or LF splits one request into two at the socket.
+    if (!/^[a-z0-9!#$%&'*+.^_`|~-]+$/.test(name)) throw new EgressRefused("transport", `header name ${JSON.stringify(rawName)} is not a header name`);
+    if (RESERVED_POST_HEADERS.indexOf(name) >= 0) throw new EgressRefused("transport", `header ${name} is set by the egress guard and may not be supplied`);
+    if (/[\r\n]/.test(value)) throw new EgressRefused("transport", `header ${name} carries a line break`);
+    out[name] = value;
+  }
+  return out;
+}
+
+/**
+ * POST `body` to `target` under the rules above. Throws `EgressRefused` for a refused
+ * destination (`destination` true) or a request that did not complete; any answer that
+ * arrives is returned with its status, `ok` only for 2xx.
+ */
+export async function guardedPost(
+  target: string | URL,
+  edges: EgressPostEdges,
+  options: { body: string; headers?: Record<string, string>; timeoutMs: number },
+): Promise<EgressPostResult> {
+  const url = checkEgressUrl(target);
+  const bytes = new TextEncoder().encode(options.body).byteLength;
+  const headers = postHeaders(options.headers ?? {}, bytes);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+  const within: Within = work => untilDeadline(work, controller.signal, options.timeoutMs);
+  try {
+    const addresses = await connectableAddresses(url, edges.resolve, within);
+    const res = await within(
+      edges.transport.post({ url, addresses, headers, body: options.body, signal: controller.signal })
+        .catch((e: unknown) => { throw transportFailure(e, url); }),
+    );
+    // Closed without reading. The status is the whole answer.
+    res.close();
+    return { ok: res.status >= 200 && res.status <= 299, status: res.status, url: url.href };
   } finally {
     clearTimeout(timer);
     controller.abort();

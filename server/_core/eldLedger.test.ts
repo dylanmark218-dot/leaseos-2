@@ -1,5 +1,5 @@
 /**
- * 0187 — the ELD ledger's pure half.
+ * 0220 — the ELD ledger's pure half.
  *
  * What these assert: that the same event hashes the same everywhere, that any change to content
  * changes the hash, that a batch which contradicts itself is refused whole, that no field exists

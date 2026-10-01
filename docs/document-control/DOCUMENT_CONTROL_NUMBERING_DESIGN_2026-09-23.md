@@ -1,6 +1,6 @@
 # LeaseOS — Document Control + Controlled Numbering: Design (Checkpoint 0)
 
-Status: **design checkpoint for owner review. Nothing implemented.** No migration, no reserved slot, no production code, no seed. This document and nothing else is the deliverable.
+Status: **approved design (PR #18).** On 2026-09-24 the owner adopted the implementation already built on `claude/document-control-architecture-jlffzk` instead of building from this document, within the D-00 carve-out (`DC_RECONCILIATION_BRIEF_2026-09-24.md`). This document remains the approved intent and the record of rulings; `document-control-design.md` and `checkpoints/DC_IMPLEMENTATION_RECORD.md` describe what is built. One invariant is amended below (I-1).
 
 | | |
 |---|---|
@@ -269,6 +269,7 @@ Numbered so tests (§24) and failure cases (§21) cite them.
 
 **Identity**
 * **I-1** A controlled record has exactly one internal identity (`documentRecords.id` + opaque `recordRef`) that never changes and is never reused.
+  *Amended 2026-09-24 (adoption ruling):* as built, a controlled document is **one control number and one supersede chain** in the extended `commercialDocuments` register. Each version is a row with its own `documentRef`; a correction adds a row, and the control number moves to it in the same transaction, so the number always sits on the current version and is unique per business. Rows are never reused or deleted, and any version's reference resolves to the whole chain.
 * **I-2** A controlled record has at most one LeaseOS controlled number, owned by exactly one ledger row, stored as `(sequenceType, periodKey, sequence)` plus its rendered `displayNumber`. No code parses the display string to decide anything.
 * **I-3** A record may carry any number of external references. None overwrites, replaces or stands in for the controlled number; each names its issuer scope.
 * **I-4** Every rendered revision names the template revision, template content hash, renderer version and rendered-artifact hash. A later template revision never changes a stored revision.

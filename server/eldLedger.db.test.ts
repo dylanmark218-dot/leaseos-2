@@ -1,5 +1,5 @@
 /**
- * 0187 — the canonical ELD event ledger, against a real database.
+ * 0220 — the canonical ELD event ledger, against a real database.
  *
  * Every case goes through the production door: `device.enroll` + `device.activate` for identity,
  * `eld.eventsAppend` with a real P-256 signature for the push, raw SQL only to inspect rows and to
@@ -28,7 +28,7 @@ describe("ELD ledger — preconditions", () => {
 
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let userSeq = 830_000 + Math.floor(Math.random() * 40_000);
+let userSeq = 1_800_000 + Math.floor(Math.random() * 40_000);   // a band no other suite draws from (testIdBands.test.ts)
 const nextUser = () => userSeq++;
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });

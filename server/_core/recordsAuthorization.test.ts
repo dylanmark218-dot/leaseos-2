@@ -533,7 +533,7 @@ describe("payroll and tax authorization boundaries", () => {
       "dispatch.readiness_own",
       "academy.read_own", "academy.progress_own", "academy.assessment_own",
       "academy.certificate.sign_own", "academy.direct_supervision_attest_own",
-      // 0187 — a device appends its own ELD events: admitted only for a device enrolled to
+      // 0220 — a device appends its own ELD events: admitted only for a device enrolled to
       // `ctx.user.id`, and the store re-checks that binding before it writes.
       "eld.event.record_own",
     ]);

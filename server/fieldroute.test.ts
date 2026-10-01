@@ -2,12 +2,18 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import { getDb, grantUserRole, listActiveUserRoleNames } from "./db";
-import { jobs, units } from "../drizzle/schema";
+import { jobs, operators, units, users } from "../drizzle/schema";
 
 // P4.1: creates that name a job or unit must name one the caller may see. These were `jobId: FIXTURE_JOB_ID` / `unitId: FIXTURE_UNIT_ID`,
 // placeholders no row necessarily had; the suite now creates a real, unowned job and unit (the single tenant's).
 let FIXTURE_JOB_ID = 1;
 let FIXTURE_UNIT_ID = 1;
+// B23.1B: the operator too. This file had already learned the lesson above for
+// jobs and units and then went on saying `operatorId: 1` in three places — an
+// operator it does not create, which `fieldRoute.identity` resolves through the
+// ownership table. Once any suite claimed operator 1 for an organization, the
+// create was refused with "Operator 1 not found".
+let FIXTURE_OPERATOR_ID = 1;
 
 /**
  * B20.4 put personnel, billing, compliance, safety and maintenance behind
@@ -17,15 +23,45 @@ let FIXTURE_UNIT_ID = 1;
  * The grant is the fix rather than loosening the gate — these tests failing
  * against a role-less caller was the gate proving it works.
  */
-const TEST_USER_ID = 1;
+/**
+ * B23.2 — the caller is a user this suite CREATES, not user id 1.
+ *
+ * It was `const TEST_USER_ID = 1`, which held only while nothing gave user 1 an
+ * organization membership. B23.2 added the first code that creates memberships,
+ * and its adversarial suite creates users — on an empty database the first of
+ * them is id 1. `resolveActingScope` then answered with that organization
+ * instead of the historical single tenant, and every fixture row here (job,
+ * unit, operator, evidence: all with no owner) became invisible. Seven tests
+ * failed with "Job N not found", which reads exactly like an authorization bug
+ * and was a fixture naming an identity it did not own.
+ *
+ * Same rule as B23.1B applied to units and operators: create it, keep the id.
+ */
+let TEST_USER_ID = 0;
+/**
+ * The suite's own id window, declared so `testIdBands.test.ts` can see it. Both identities this suite
+ * creates come from it. TEST_USER_ID used to be AUTO_INCREMENT, which lands one above the highest id
+ * any earlier suite inserted explicitly — and a suite that inserts id M and then grants a role to M + 1
+ * without a users row hands that role to whoever is auto-incremented next. On 2026-10-01 that was this
+ * suite's caller, which arrived holding `driver` and was refused `personnel.write`.
+ */
+let seq = 297_000_000 + Math.floor(Math.random() * 50_000);
 
 beforeAll(async () => {
   if (!process.env.DATABASE_URL) return;
   const db = await getDb();
   if (db) {
     const tag = Math.random().toString(36).slice(2, 8).toUpperCase();
+    // The caller's own identity, with an openId of its own so the OAuth upsert
+    // could never collide with it.
+    TEST_USER_ID = seq++;
+    await db.insert(users).values({
+      id: TEST_USER_ID, openId: `fieldroute-test-${tag}`, name: "FieldRoute Test",
+      email: `fieldroute-${tag}@example.test`, loginMethod: "test",
+    } as never);
     FIXTURE_JOB_ID = (await db.insert(jobs).values({ jobCode: `JOB-FR-${tag}`, type: "Hydrovac", customer: "Fixture Energy", location: "Somewhere", status: "dispatched" } as never))[0].insertId;
     FIXTURE_UNIT_ID = (await db.insert(units).values({ unitNumber: `U-FR-${tag}`, vehicleType: "hydrovac" } as never))[0].insertId;
+    FIXTURE_OPERATOR_ID = (await db.insert(operators).values({ name: `Fixture Operator ${tag}`, licenseNumber: `LIC-FR-${tag}` } as never))[0].insertId;
   }
   // Dispatch enforcement is a global setting another suite may leave at "enforced"; this suite is about creating the
   // records, not about readiness, and its fixture unit (now real) carries no credentials. Establish "off" explicitly.
@@ -56,13 +92,21 @@ beforeAll(async () => {
       // Already granted by a concurrent run — the unique index is doing its job.
     }
   }
-  await appRouter.createCaller(createContext()).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
+  // F1.3 — the global mode is the fallback for every organization, so a platform administrator (a real users row
+  // with role "admin", holding the domain permission too) sets it; the suite's own user is not one.
+  if (db) {
+    // An explicit id from the suite's own window: auto-increment lands wherever other suites' explicit ids pushed it.
+    const adminId = seq++;
+    await db.insert(users).values({ id: adminId, openId: `fieldroute-admin-${adminId}`, role: "admin" } as never);
+    await grantUserRole({ userId: adminId, role: "management", scopeType: "global", grantedByUserId: TEST_USER_ID, grantedAt: new Date() });
+    await appRouter.createCaller({ ...createContext(), user: { ...createContext().user!, id: adminId, role: "admin" } }).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
+  }
 });
 
 function createContext(): TrpcContext {
   return {
     user: {
-      id: 1,
+      id: TEST_USER_ID,
       openId: "fieldroute-test-user",
       name: "FieldRoute Test",
       email: "test@fieldroute.local",
@@ -262,7 +306,7 @@ describe("fieldRoute job units and inspections", () => {
       caller.fieldRoute.identity.jobUnits.create({
         jobId: FIXTURE_JOB_ID,
         unitId: FIXTURE_UNIT_ID,
-        operatorId: 1,
+        operatorId: FIXTURE_OPERATOR_ID,
         role: "support unit",
         joinedAt: new Date(),
         hours: 3,
@@ -364,7 +408,7 @@ describe("trip operations", () => {
       odometerEndKm: 1142.6,
       jobId: FIXTURE_JOB_ID,
       unitId: FIXTURE_UNIT_ID,
-      operatorId: 1,
+      operatorId: FIXTURE_OPERATOR_ID,
       manifestId: 1,
     });
     expect(id).toBeDefined();
@@ -393,14 +437,9 @@ describe("trip operations", () => {
           departedAt: new Date(),
         })
       ).resolves.toBeDefined();
-      // The operator is created here rather than assumed to be row 1: on a fresh gate database the
-      // first operator row belongs to whichever suite vitest happened to schedule first, and when that
-      // suite scopes its operator to an organization, "operator 1" is out of this caller's scope.
-      const operatorId = await caller.fieldRoute.identity.operators.create({ name: "Duty Test Operator", company: "FieldRoute Test Co" });
-      expect(typeof operatorId).toBe("number");
       await expect(
         caller.fieldRoute.dutyRecords.create({
-          operatorId: operatorId as number,
+          operatorId: FIXTURE_OPERATOR_ID,
           tripId,
           dutyStatus: "driving",
           startedAt: new Date(),

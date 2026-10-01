@@ -1,5 +1,5 @@
 /**
- * 0187 — the ELD ledger's pure half: validation, hashing, batch preparation, chain assessment.
+ * 0220 — the ELD ledger's pure half: validation, hashing, batch preparation, chain assessment.
  *
  * No database, no network. Everything a device could also run. The store (`eldLedgerStore.ts`)
  * is the only thing that writes; this file decides what a well-formed batch is and what the rows

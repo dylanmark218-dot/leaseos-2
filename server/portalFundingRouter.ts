@@ -28,7 +28,8 @@ import { composeSession, organizationStateFrom, panelsForPortal, type PortalKey 
 import { resolveActingScope } from "./_core/actingScope";
 import { getDb } from "./db";
 import { and, eq } from "drizzle-orm";
-import { organizationMemberships } from "../drizzle/schema";
+import { expenseRecords, organizationMemberships } from "../drizzle/schema";
+import { assertCallerOwnsEntity, financeScopeFor } from "./_core/entityScope";
 import {
   assessStacking,
   canAdvanceOpportunity,
@@ -86,6 +87,18 @@ async function companyProfileFor(userId: number): Promise<CompanyProfile> {
   };
 }
 
+
+/**
+ * F1.1 — an expense is its book's (expenseRef is unique; the expense carries financialEntityId). The
+ * funding claims recorded against it are therefore that book's too. Anyone else: "No such expense".
+ */
+async function requireOwnExpense(userId: number, expenseRef: string): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  const exp = (await db.select({ financialEntityId: expenseRecords.financialEntityId }).from(expenseRecords).where(eq(expenseRecords.expenseRef, expenseRef)).limit(1))[0];
+  if (!exp) throw new TRPCError({ code: "NOT_FOUND", message: "No such expense" });
+  await assertCallerOwnsEntity(db as never, userId, exp.financialEntityId, "No such expense");
+}
 export const portalsRouter = router({
   mine: roleProcedure("portals.mine").query(async ({ ctx }) => {
     // Composed from the session's own roles. A second role only ever adds.
@@ -217,10 +230,11 @@ export const fundingRouter = router({
         proposedAmount: z.number().positive(),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const programs = await loadPrograms();
       const program = programs.find(p => p.programKey === input.programKey);
       if (!program) throw new TRPCError({ code: "NOT_FOUND", message: "No such program" });
+      await requireOwnExpense(ctx.user.id, input.expenseRef);   // F1.1 — another company's claims are not ours to read
       const existing: ExistingClaim[] = await funding.loadExistingClaims(input.expenseRef);
       return assessStacking({
         program,
@@ -231,8 +245,12 @@ export const fundingRouter = router({
       });
     }),
 
-  opportunitiesList: roleProcedure("funding.opportunitiesList").query(async () => {
-    return funding.listOpportunities();
+  opportunitiesList: roleProcedure("funding.opportunitiesList").query(async ({ ctx }) => {
+    // F1.1 — the caller's own books' opportunities; this used to list every company's.
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const owned = new Set((await financeScopeFor(db as never, ctx.user.id)).entityIds);
+    return (await funding.listOpportunities()).filter(o => owned.has(o.financialEntityId));
   }),
 
   opportunityAdvance: roleProcedure("funding.opportunityAdvance")
@@ -248,9 +266,13 @@ export const fundingRouter = router({
         // estimate and cash. The current status is read from the row.
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const row = await funding.loadOpportunity(input.opportunityRef);
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "No such opportunity" });
+      // F1.1 — another company's opportunity is "no such opportunity".
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      await assertCallerOwnsEntity(db as never, ctx.user.id, row.financialEntityId, "No such opportunity");
       const from = row.status as OpportunityStatus;
       if (!canAdvanceOpportunity(from, input.to as OpportunityStatus)) {
         throw new TRPCError({
@@ -276,6 +298,10 @@ export const fundingRouter = router({
       const programs = await loadPrograms();
       const program = programs.find(p => p.programKey === input.programKey);
       if (!program) throw new TRPCError({ code: "NOT_FOUND", message: "No such program" });
+
+      // F1.1 — a claim is against the caller's own expense. Without this, the stacking check read another
+      // company's claims on that expense.
+      await requireOwnExpense(ctx.user.id, input.expenseRef);
 
       const existing = await funding.loadExistingClaims(input.expenseRef);
       const stacking = assessStacking({

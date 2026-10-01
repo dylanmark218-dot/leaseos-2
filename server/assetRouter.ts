@@ -5,7 +5,9 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
-import { roleProcedure, router } from "./_core/trpc";
+import { moneyScoped, roleProcedure, router } from "./_core/trpc";
+import { ownedEntityWhere, requireOwnedEntity, type FinanceScope } from "./_core/entityScope";
+import { assetInScope, ccaScheduleInScope, requireEvidence, requireUnit, vendorBillIdInScope } from "./financeScope";
 import { getDb } from "./db";
 import { capitalAssets, ccaClassBalances, ccaSchedules, financialEntities, fuelTransactions, partMovements, tireInstallations, tires, trips, workOrders } from "../drizzle/schema";
 import { assetTwin, buildSchedule, capitalizationProposal, fiscalYearFor, type ClassRule } from "./_core/capitalAssets";
@@ -18,7 +20,8 @@ import { assertPeriodOpen } from "./periodCloseService";
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 async function dbOrThrow() { const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return db; }
-async function assetByRef(assetRef: string) { const db = await dbOrThrow(); const a = (await db.select().from(capitalAssets).where(eq(capitalAssets.assetRef, assetRef)).limit(1))[0]; if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "Asset not found" }); return a; }
+/** F1 — an asset in the caller's books, or "Asset not found". */
+async function assetByRef(fs: FinanceScope, assetRef: string) { return assetInScope(await dbOrThrow(), fs, assetRef); }
 
 async function rateLookup() {
   const rules = await loadTaxRules();
@@ -45,10 +48,15 @@ async function scheduleFor(financialEntityId: number, asOf: Date) {
 
 export const assetRouter = router({
   /** Register an asset against the unit or trailer the shop already has. It enters pending capital review; the review decides capitalize or expense. */
-  register: roleProcedure("asset.register")
+  register: moneyScoped(roleProcedure("asset.register"))
     .input(z.object({ financialEntityId: z.number().int().positive(), kind: z.enum(["unit", "trailer", "equipment", "building", "leasehold", "other"]), unitId: z.number().int().positive().nullable().optional(), trailerId: z.number().int().positive().nullable().optional(), description: z.string().min(1).max(220), acquiredAt: z.coerce.date(), acquisitionCostCents: z.number().int().positive(), acquisitionVendorBillId: z.number().int().positive().nullable().optional(), acquisitionEvidenceRecordId: z.number().int().positive().nullable().optional(), financing: z.enum(["owned", "financed", "leased"]).default("owned"), lender: z.string().max(160).nullable().optional(), financedPrincipalCents: z.number().int().nonnegative().nullable().optional(), expectedLifeKm: z.number().int().positive().nullable().optional(), expectedLifeYears: z.number().int().positive().max(50).nullable().optional(), capitalizationThresholdCents: z.number().int().nonnegative().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      await requireUnit(ctx.money, input.unitId);
+      await requireUnit(ctx.money, input.trailerId);   // a trailer is a units row (manifests.trailerUnitId)
+      if (input.acquisitionVendorBillId != null) await vendorBillIdInScope(await dbOrThrow(), ctx.money, input.acquisitionVendorBillId, input.financialEntityId);
+      await requireEvidence(ctx.money, input.acquisitionEvidenceRecordId);
       if (input.kind === "unit" && !input.unitId) throw new TRPCError({ code: "BAD_REQUEST", message: "A unit asset must name the unit the shop maintains — one truck, one identity" });
       if (input.financing !== "owned" && input.financedPrincipalCents == null) throw new TRPCError({ code: "BAD_REQUEST", message: "Financed or leased assets need the principal" });
       if (input.unitId) { const dup = (await db.select({ assetRef: capitalAssets.assetRef }).from(capitalAssets).where(eq(capitalAssets.unitId, input.unitId)).limit(1))[0]; if (dup) throw new TRPCError({ code: "CONFLICT", message: `Unit ${input.unitId} is already asset ${dup.assetRef}` }); }
@@ -60,11 +68,11 @@ export const assetRouter = router({
     }),
 
   /** Capitalize or expense — decided by someone other than the recorder. */
-  capitalReview: roleProcedure("asset.capitalReview")
+  capitalReview: moneyScoped(roleProcedure("asset.capitalReview"))
     .input(z.object({ assetRef: z.string().min(1).max(64), decision: z.enum(["capitalize", "expense"]), reason: z.string().min(5).max(400) }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
-      const a = await assetByRef(input.assetRef);
+      const a = await assetByRef(ctx.money, input.assetRef);
       if (a.status !== "pending_capital_review") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Asset is ${a.status}` });
       if (a.recordedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The person who recorded the asset may not decide its capital review" });
       await db.update(capitalAssets).set({ status: input.decision === "capitalize" ? "in_service" : "expensed", capitalReviewedByUserId: ctx.user.id, capitalReviewedAt: new Date(), capitalReviewReason: input.reason }).where(eq(capitalAssets.id, a.id));
@@ -72,48 +80,51 @@ export const assetRouter = router({
     }),
 
   /** A class candidate with its source. It is not a tax fact until verified. */
-  ccaClassSet: roleProcedure("asset.ccaClassSet")
+  ccaClassSet: moneyScoped(roleProcedure("asset.ccaClassSet"))
     .input(z.object({ assetRef: z.string().min(1).max(64), ccaClass: z.string().min(1).max(20), source: z.enum(["accountant", "owner_stated", "system_inferred"]) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
-      const a = await assetByRef(input.assetRef);
+      const a = await assetByRef(ctx.money, input.assetRef);
       await db.update(capitalAssets).set({ ccaClassCandidate: input.ccaClass, ccaClassSource: input.source, ccaClassVerificationStatus: "unverified", ccaClassVerifiedByUserId: null }).where(eq(capitalAssets.id, a.id));
       return { assetRef: a.assetRef, ccaClass: input.ccaClass, verificationStatus: "unverified" as const };
     }),
 
-  ccaClassVerify: roleProcedure("asset.ccaClassVerify")
+  ccaClassVerify: moneyScoped(roleProcedure("asset.ccaClassVerify"))
     .input(z.object({ assetRef: z.string().min(1).max(64) }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
-      const a = await assetByRef(input.assetRef);
+      const a = await assetByRef(ctx.money, input.assetRef);
       if (!a.ccaClassCandidate) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No class candidate to verify" });
       if (a.ccaClassSource !== "accountant") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The candidate is ${a.ccaClassSource?.replace(/_/g, " ")} — only an accountant-sourced class is verified` });
       await db.update(capitalAssets).set({ ccaClassVerificationStatus: "verified", ccaClassVerifiedByUserId: ctx.user.id }).where(eq(capitalAssets.id, a.id));
       return { assetRef: a.assetRef, ccaClass: a.ccaClassCandidate, verificationStatus: "verified" as const };
     }),
 
-  dispose: roleProcedure("asset.dispose")
+  dispose: moneyScoped(roleProcedure("asset.dispose"))
     .input(z.object({ assetRef: z.string().min(1).max(64), disposedAt: z.coerce.date(), proceedsCents: z.number().int().nonnegative(), evidenceRecordId: z.number().int().positive().nullable().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
-      const a = await assetByRef(input.assetRef);
+      const a = await assetByRef(ctx.money, input.assetRef);
       if (a.status === "disposed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Already disposed" });
+      await requireEvidence(ctx.money, input.evidenceRecordId);
       if (input.disposedAt < a.acquiredAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Disposed before acquired" });
       await assertPeriodOpen(a.financialEntityId, input.disposedAt, "Asset disposal");
       await db.update(capitalAssets).set({ status: "disposed", disposedAt: input.disposedAt, disposalProceedsCents: input.proceedsCents, disposalEvidenceRecordId: input.evidenceRecordId ?? null }).where(eq(capitalAssets.id, a.id));
       return { assetRef: a.assetRef, status: "disposed" as const, proceedsCents: input.proceedsCents, note: input.proceedsCents > a.acquisitionCostCents ? "Proceeds exceed cost — the excess is a capital gain, outside the CCA schedule" : null };
     }),
 
-  list: roleProcedure("asset.list").input(z.object({ financialEntityId: z.number().int().positive() })).query(async ({ input }) => {
+  list: moneyScoped(roleProcedure("asset.list")).input(z.object({ financialEntityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
     const db = await dbOrThrow();
+    requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
     const rows = await db.select().from(capitalAssets).where(eq(capitalAssets.financialEntityId, input.financialEntityId)).orderBy(desc(capitalAssets.acquiredAt));
     return { assets: rows.map(a => ({ assetRef: a.assetRef, kind: a.kind, unitId: a.unitId, description: a.description, acquiredAt: a.acquiredAt, acquisitionCostCents: a.acquisitionCostCents, financing: a.financing, ccaClass: a.ccaClassCandidate, ccaClassVerified: a.ccaClassVerificationStatus === "verified", status: a.status })) };
   }),
 
-  schedule: roleProcedure("cca.schedule").input(z.object({ financialEntityId: z.number().int().positive(), asOf: z.coerce.date().optional() })).query(async ({ input }) => scheduleFor(input.financialEntityId, input.asOf ?? new Date())),
+  schedule: moneyScoped(roleProcedure("cca.schedule")).input(z.object({ financialEntityId: z.number().int().positive(), asOf: z.coerce.date().optional() })).query(async ({ ctx, input }) => { requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`); return scheduleFor(input.financialEntityId, input.asOf ?? new Date()); }),
 
-  schedulePrepare: roleProcedure("cca.schedulePrepare").input(z.object({ financialEntityId: z.number().int().positive(), asOf: z.coerce.date().optional() })).mutation(async ({ ctx, input }) => {
+  schedulePrepare: moneyScoped(roleProcedure("cca.schedulePrepare")).input(z.object({ financialEntityId: z.number().int().positive(), asOf: z.coerce.date().optional() })).mutation(async ({ ctx, input }) => {
     const db = await dbOrThrow();
+    requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
     const s = await scheduleFor(input.financialEntityId, input.asOf ?? new Date());
     const summaryJson = JSON.stringify(s);
     const prior = (await db.select({ id: ccaSchedules.id, status: ccaSchedules.status }).from(ccaSchedules).where(and(eq(ccaSchedules.financialEntityId, input.financialEntityId), eq(ccaSchedules.fiscalYearEnd, s.fiscalYear.end))).orderBy(desc(ccaSchedules.id)).limit(1))[0];
@@ -123,10 +134,9 @@ export const assetRouter = router({
   }),
 
   /** Reviewed by another person; the ledger unchanged since preparation; only a fully computed schedule carries balances forward. */
-  scheduleReview: roleProcedure("cca.scheduleReview").input(z.object({ scheduleRef: z.string().min(1).max(64), note: z.string().min(5).max(400) })).mutation(async ({ ctx, input }) => {
+  scheduleReview: moneyScoped(roleProcedure("cca.scheduleReview")).input(z.object({ scheduleRef: z.string().min(1).max(64), note: z.string().min(5).max(400) })).mutation(async ({ ctx, input }) => {
     const db = await dbOrThrow();
-    const row = (await db.select().from(ccaSchedules).where(eq(ccaSchedules.scheduleRef, input.scheduleRef)).limit(1))[0];
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Schedule not found" });
+    const row = await ccaScheduleInScope(db, ctx.money, input.scheduleRef);
     if (row.status !== "prepared") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Schedule is ${row.status}` });
     if (row.preparedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The preparer may not review their own schedule" });
     const current = await scheduleFor(row.financialEntityId, new Date(row.fiscalYearEnd.getTime() - 1));
@@ -139,11 +149,13 @@ export const assetRouter = router({
   }),
 
   /** One unit, everything it has cost and done, and everything that is unknown about it. */
-  twin: roleProcedure("asset.twin").input(z.object({ unitId: z.number().int().positive(), labourRateCentsPerHour: z.number().int().positive().nullable().optional() })).query(async ({ input }) => {
+  twin: moneyScoped(roleProcedure("asset.twin")).input(z.object({ unitId: z.number().int().positive(), labourRateCentsPerHour: z.number().int().positive().nullable().optional() })).query(async ({ ctx, input }) => {
     const db = await dbOrThrow();
+    // F1 — the unit must be the caller's (coreRecordOwnership); its asset and fuel are read from the caller's books only.
+    await requireUnit(ctx.money, input.unitId);
     const asOf = new Date();
-    const asset = (await db.select().from(capitalAssets).where(eq(capitalAssets.unitId, input.unitId)).limit(1))[0];
-    const fuel = await db.select({ totalCents: fuelTransactions.totalCents, quantity: fuelTransactions.quantity, payerType: fuelTransactions.payerType, status: fuelTransactions.status }).from(fuelTransactions).where(eq(fuelTransactions.unitId, input.unitId));
+    const asset = (await db.select().from(capitalAssets).where(and(eq(capitalAssets.unitId, input.unitId), ownedEntityWhere(capitalAssets.financialEntityId, ctx.money))).limit(1))[0];
+    const fuel = await db.select({ totalCents: fuelTransactions.totalCents, quantity: fuelTransactions.quantity, payerType: fuelTransactions.payerType, status: fuelTransactions.status }).from(fuelTransactions).where(and(eq(fuelTransactions.unitId, input.unitId), ownedEntityWhere(fuelTransactions.financialEntityId, ctx.money)));
     const companyFuel = fuel.filter(f => f.payerType === "company" && f.status !== "rejected");
     const fuelCents = companyFuel.length ? companyFuel.reduce((a, f) => a + f.totalCents, 0) : null;
     const litres = companyFuel.length ? companyFuel.reduce((a, f) => a + (f.quantity ?? 0), 0) : null;

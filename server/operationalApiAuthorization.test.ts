@@ -9,6 +9,12 @@ import {
 } from "./_core/recordsAuthorization";
 import { grantUserRole, listActiveUserRoleNames } from "./db";
 
+// A unit id no test creates. These rows only need a unitId to satisfy the column;
+// the literal 1 used here before collided with whichever suite happened to create
+// the first unit in a fresh database, handing that suite's truck open critical
+// defects (complianceReadinessC1a failed on exactly that, order-dependently).
+const NO_SUCH_UNIT = 2_000_000_000;
+
 /**
  * The migrated operational surface, exercised the way a client meets it.
  *
@@ -22,7 +28,7 @@ const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 
 let pool: mysql.Pool;
-let nextId = 300000 + Math.floor(Math.random() * 90000);
+let nextId = 401_000_000 + Math.floor(Math.random() * 90000);
 const newUserId = () => nextId++;
 
 beforeAll(async () => {
@@ -261,7 +267,7 @@ d("safety and maintenance writes stay with the people who do them", () => {
     expect(
       await attempt(() =>
         caller.fieldRoute.compliance.maintenance.create({
-          unitId: 1,
+          unitId: NO_SUCH_UNIT,
           title: "Pump grinding on PTO",
           // Required by the input and omitted here, so the call was failing validation rather than
           // reaching the procedure. This suite asserts the authorization gate, which a validation
@@ -329,7 +335,8 @@ d("role-less and unauthenticated callers reach nothing", () => {
 d("the migrated tranche is coherent", () => {
   it("declares a permission for every migrated procedure", () => {
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(636)   // 0187: +2 eld.{eventsAppend,deviceIntegrity} (the ELD event ledger);   // canonical assignment: +3 dispatch.{createPosting,addRole,listRoles} — the slot model's missing production door;   // v22.40: +3 commercialOffice.{organizationCreate,organizationsList,facilityStatementsList} (P7.9);   // v22.38: +9 commercialOffice.document* (P7.7, 0144);   // v22.36: +2 facilityDirectory.{hydrovacImport,duplicates};   // v22.35: +6 facilityDirectory.{arcgisPresets,arcgisInspect,arcgisImportFeatures,arcgisImportFromLayer,arcgisRuns,lsdFind} (0142);   // v22.34: +1 facilityDirectory.seedBrief (0141);   // v22.33: +5 facilityDirectory.{hoursSet,callAheadRecord,waitReport,nearby,driverView} (0140);   // v22.32: +14 facilityDirectory.* (0139, re-based from feature/facility-map-v7);   // v22.31: +5 commercialOffice.{glAccountSet,glMappingSet,glList,glExportReadiness,profitabilityByDimension} (P7.6, 0138);   // v22.30: +1 commercialOffice.apAgingByOrganization (P7.5, 0137);   // v22.29: +2 commercialOffice.{arAgingByOrganization,approvalLedger} (P7.4, 0136);   // v22.28: +4 commercialOffice.facilityStatement* (P7.3, 0135);   // v22.27: +4 commercialOffice.link* (P7.2, 0134);   // v22.26: +15 commercialOffice.* (P7.1, 0133);   // v22.23: +2 academy.{sheetPrintRun,sheetScanFile} (0125); +3 widgets.{offerable,boardResolve,layoutSave} (B28);   // v22.21: census re-baselined to the real map (ChatGPT recovery commits added entries without bumping it); +14 contractorOperations.* (wired by procedure name)   // v22.21: +1 hos.limitPromote (recovered 0093)   // v22.20: +5 agent runtime   // v22.20: +1 (source licence review)   // v22.17: +16 communications; v22.18: +4 (policy propose/approve/current, channel retire); v22.20: +1 (source licence review); v22.19: +4 (package build/fetch/acknowledge/status); v22.20: +7 hours of service   // v22.7: +13 commercial setup   // v22.67: +6 automationPolicy.{resolve,set,setEntitlement,operationalOverride,history,snapshotFor} (P8.2) +1 hos.attestHours (P8.3), +1 hos.recordScannedLog, +8 restrictedVault.* (P8.5), +1 restrictedVault.restrictedIndex, +1 device.verifySeal (P1.2)
+    // Merged census: 662 main procedures, 10 auth-workspace, 8 Live Assist, and 2 paperwork.
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(725);   // 0220: +2 eld.{eventsAppend,deviceIntegrity} (the ELD event ledger);   // v23.31: +40 customerCommercial.*;   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
   });
 
   it("has a holder for every permission it uses", () => {

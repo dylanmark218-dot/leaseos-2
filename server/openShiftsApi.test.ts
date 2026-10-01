@@ -27,11 +27,18 @@ const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 const STARTS = new Date("2026-11-10T06:00:00Z");
 const ENDS = new Date("2026-11-10T18:00:00Z");
 
+/** On the single tenant's roster — an active crew membership — which the open-shift rule requires (SPINE item 2). */
+async function onRoster(userId: number) {
+  const crewRef = `CR-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+  await pool.execute("INSERT INTO crews (crewRef, tenantId, name, createdByUserId) VALUES (?, 'default', ?, 1)", [crewRef, crewRef]);
+  await pool.execute("INSERT INTO crewMembers (crewRef, userId, crewRole, joinedAt) VALUES (?, ?, 'driver', NOW())", [crewRef, userId]);
+}
 /** An operator row with a licence, since that is the one credential stored. */
 async function operatorWithLicence(userId: number, expires: Date | null) {
   await pool.execute(
-    "INSERT INTO operators (id, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,NOW())",
-    [userId, `Op ${rnd()}`, "1", expires]);
+    "INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())",
+    [userId, userId, `Op ${rnd()}`, "1", expires]);
+  await onRoster(userId);
 }
 const postShift = (dispatcher: number, over: Record<string, unknown> = {}) =>
   caller(dispatcher).shifts.post({ title: "Vac truck operator", startsAt: STARTS, endsAt: ENDS, requiredRole: "driver", ...over });
@@ -100,6 +107,7 @@ d("interest assigns nothing", () => {
   it("records it once, and says plainly what it is not", async () => {
     const dispatcher = await withRole("dispatcher");
     const driver = await withRole("driver");
+    await operatorWithLicence(driver, new Date("2027-01-01T00:00:00Z"));
     const p = await postShift(dispatcher);
     const first = await caller(driver).shifts.expressInterest({ postRef: p.postRef });
     expect(first).toMatchObject({ recorded: true, assigns: false });
@@ -121,6 +129,7 @@ d("interest assigns nothing", () => {
   it("lists the interested and says they have no claim", async () => {
     const dispatcher = await withRole("dispatcher");
     const driver = await withRole("driver");
+    await operatorWithLicence(driver, new Date("2027-01-01T00:00:00Z"));
     const p = await postShift(dispatcher);
     await caller(driver).shifts.expressInterest({ postRef: p.postRef });
     const i = await caller(dispatcher).shifts.interests({ postRef: p.postRef });

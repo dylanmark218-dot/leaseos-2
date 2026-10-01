@@ -1,0 +1,52 @@
+Rate and Load Confirmation
+Record the agreed load, service scope, charges and operating instructions before dispatch.
+Company / issuer: __________________________  Home base: _____________________
+Record no. __________________  Revision: ______  Issue date / time: _______________
+Job / load no. __________________  Customer PO / AFE: _________________________
+Parties and load
+Customer / broker legal name: _____________________  Contact / phone: _______________
+Carrier legal name / ID: __________________________  Contact / phone: _______________
+Rate confirmation no.: ____________________  Related contract / version: _______________
+Freight / product: ________________________  Qty / unit: __________  Mass / unit: ________
+Equipment / trailer required: ______________________  Load / BOL ref.: ________________
+Pickup site / address: __________________________________________________________
+Pickup appointment / time zone / contact: __________________________________________
+Delivery site / address: _________________________________________________________
+Delivery appointment / time zone / contact: _________________________________________
+Agreed charges
+Currency: __________  Subtotal: __________  Taxes: __________  Total: ________________
+Pricing: [ ] Fixed total  [ ] Estimated total  [ ] Unit rates subject to verified quantities
+Fuel surcharge basis / included charges: ___________________________________________
+Rate validity / expiry: __________________________________________________________
+Rate and Load Confirmation terms
+Record no. __________________  Job / load no. ______________  Date: ______________
+Accessorial and payment details
+Detention free time: __________  Rate / unit: __________  Required time evidence: ________
+Loading / unloading responsibility: _________________________________________________
+Layover / cancellation / additional stop rates and conditions: __________________________
+_________________________________________________________________________________________
+Additional charges require approval from: __________________  Approval method: _________
+Payment terms / due-date trigger: _________________________________________________
+Required billing documents: [ ] Invoice  [ ] Signed POD  [ ] BOL  [ ] Scale / facility tickets
+Other required evidence / submission address: ______________________________________
+Operating instructions
+Handling / securement / temperature / cleaning requirements:
+_________________________________________________________________________________________
+_________________________________________________________________________________________
+Site access / PPE / induction / permits: ______________________________________________
+Regulated shipment documents supplied by / references: ______________________________
+Dispatch changes / delay reporting contact: __________________________________________
+Agreement and authorization
+Governing contract / attachments and order of precedence: ______________________________
+Unresolved commercial terms: ____________________________________________________
+Authorized representatives confirm the entered service scope and commercial terms. Safety, legal operating limits and required permits are not waived by this confirmation.
+Customer / broker name and title: __________________________________________________
+Signature: _________________________________  Date / time: _______________________
+Carrier name and title: __________________________________________________________
+Signature: _________________________________  Date / time: _______________________
+Charge / service | Basis / unit | Qty | Rate | Amount
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 
+ |  |  |  | 

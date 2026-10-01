@@ -1,0 +1,29 @@
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Every tracked .csv here is stored CRLF today — all 9 of them, including
+# data/canada-disposal-facilities.csv and data/western-canada-facilities.csv,
+# which the application reads. The blanket `eol=lf` above would convert them on
+# the next renormalize, so they are excluded from conversion entirely.
+#
+# `-text`, not `text eol=crlf`: the latter still normalizes the *stored* blob to
+# LF and only restores CRLF on checkout, so it rewrites all 9 files in history
+# (measured: 5438 lines) while leaving the working tree looking unchanged.
+# `-text` stores the bytes exactly as they are. Revisit in a dedicated change if
+# these files should become LF; it should not ride along with a scaffolding commit.
+*.csv -text
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

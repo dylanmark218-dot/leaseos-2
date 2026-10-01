@@ -1,0 +1,102 @@
+{
+  "retrievedDate": "2026-09-22",
+  "verificationPolicy": "unverified_until_checked_by_authorized_reviewer",
+  "sources": [
+    {
+      "sourceKey": "fmcsa_operating_authority",
+      "authority": "Federal Motor Carrier Safety Administration",
+      "title": "What is Operating Authority (MC number) and who needs it?",
+      "url": "https://www.fmcsa.dot.gov/faq/what-operating-authority-mc-number-and-who-needs-it",
+      "reference": "49 U.S.C. 13902; 49 CFR Parts 365 and 368",
+      "supports": ["operating authority identifiers", "interstate for-hire context", "authority scope"]
+    },
+    {
+      "sourceKey": "fmcsa_registration_forms",
+      "authority": "Federal Motor Carrier Safety Administration",
+      "title": "Registration Forms",
+      "url": "https://www.fmcsa.dot.gov/registration/registration-forms",
+      "reference": "FMCSA registration and MCS-150 forms",
+      "supports": ["MCS-150", "operating authority applications", "registration updates"]
+    },
+    {
+      "sourceKey": "fmcsa_boc3_insurance",
+      "authority": "Federal Motor Carrier Safety Administration",
+      "title": "Ask FMCSA — operating authority / BOC-3 / financial responsibility",
+      "url": "https://www.fmcsa.dot.gov/registration/ask-fmcsa?keyword=operating%20authority&page=0&term_node_tid_depth=All",
+      "reference": "FMCSA current registration guidance",
+      "supports": ["BOC-3", "proof of insurance", "financial responsibility"]
+    },
+    {
+      "sourceKey": "epa_hazardous_waste_transportation",
+      "authority": "U.S. Environmental Protection Agency",
+      "title": "Hazardous Waste Transportation",
+      "url": "https://www.epa.gov/hw/hazardous-waste-transportation",
+      "reference": "40 CFR Parts 262-263; manifest system",
+      "supports": ["generator/transporter identity", "manifest tracking", "destination receipt", "chain of custody"]
+    },
+    {
+      "sourceKey": "epa_manifest",
+      "authority": "U.S. Environmental Protection Agency",
+      "title": "Hazardous Waste Manifest System",
+      "url": "https://www.epa.gov/hwgenerators/hazardous-waste-manifest-system",
+      "reference": "Uniform Hazardous Waste Manifest / e-Manifest",
+      "supports": ["manifest tracking", "waste quantity", "waste description", "signatures"]
+    },
+    {
+      "sourceKey": "phmsa_emergency_response_information",
+      "authority": "Pipeline and Hazardous Materials Safety Administration",
+      "title": "Hazardous Materials: Emergency Response Information Requirements",
+      "url": "https://www.phmsa.dot.gov/regulatory-compliance/phmsa-guidance/hazardous-materials-emergency-response-information",
+      "reference": "49 CFR 172.600 and 172.602",
+      "supports": ["hazmat shipping-paper linkage", "emergency response information"]
+    },
+    {
+      "sourceKey": "epa_release_reporting",
+      "authority": "U.S. Environmental Protection Agency",
+      "title": "Emergency Release Notifications",
+      "url": "https://www.epa.gov/epcra/emergency-release-notifications",
+      "reference": "40 CFR Parts 302 and 355",
+      "supports": ["reporting determination record", "notification log", "reportable-quantity review"]
+    },
+    {
+      "sourceKey": "nrc_agreement_states",
+      "authority": "U.S. Nuclear Regulatory Commission",
+      "title": "Agreement States",
+      "url": "https://www.nrc.gov/agreement-states",
+      "reference": "Agreement State radiation-control jurisdiction",
+      "supports": ["jurisdiction selection for radioactive-material records"]
+    },
+    {
+      "sourceKey": "texas_rrc_norm",
+      "authority": "Railroad Commission of Texas",
+      "title": "NORM (Naturally Occurring Radioactive Material)",
+      "url": "https://www.rrc.texas.gov/oil-and-gas/applications-and-permits/environmental-permit-types/norm-waste/",
+      "reference": "Texas oil-and-gas NORM jurisdiction split",
+      "supports": ["NORM oilfield disposal jurisdiction in Texas"]
+    },
+    {
+      "sourceKey": "texas_dshs_norm",
+      "authority": "Texas Department of State Health Services",
+      "title": "NORM (Naturally Occurring Radioactive Material) Licensing",
+      "url": "https://www.dshs.texas.gov/texas-radiation-control/radioactive-material-licensing-radiation-control-program/norm-naturally-occurring-radioactive-material-licensing",
+      "reference": "25 TAC Chapter 289, including §289.259",
+      "supports": ["NORM licensing", "receipt/possession/storage/transport context"]
+    },
+    {
+      "sourceKey": "texas_rrc_chapter4",
+      "authority": "Railroad Commission of Texas",
+      "title": "Environmental Permit Types",
+      "url": "https://www.rrc.texas.gov/oil-and-gas/applications-and-permits/environmental-permit-types/",
+      "reference": "Texas oil-and-gas Chapter 4 implementation",
+      "supports": ["oilfield waste permits", "waste profile", "waste manifest"]
+    },
+    {
+      "sourceKey": "texas_rrc_swr8",
+      "authority": "Railroad Commission of Texas",
+      "title": "Summary of Statewide Rule 8",
+      "url": "https://www.rrc.texas.gov/oil-and-gas/publications-and-notices/manuals/surface-waste-management-manual/swr8-summary/",
+      "reference": "Texas Statewide Rule 8",
+      "supports": ["oil-and-gas waste hauling records", "pollution/spill response context"]
+    }
+  ]
+}
