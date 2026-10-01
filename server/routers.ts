@@ -257,6 +257,7 @@ import {
 import { rehydrateProposal } from "./_core/assistantPersistence";
 import { executeAssistantCommit } from "./_core/assistantCommitService";
 import { invokeLLM } from "./_core/llm";
+import { isPrivateDocType } from "./_core/complianceProjection";
 
 /** Rebuild the in-memory proposal from its stored rows. */
 async function loadProposal(proposalId: string): Promise<Proposal | null> {
@@ -1719,7 +1720,7 @@ export const appRouter = router({
               confidence: z.enum(["low", "medium", "high"]).default("medium"),
             })
           )
-          .mutation(async ({ ctx, input }) => createComplianceDocument({ ...input, verificationStatus: "needs_review" }, await scopeFor(ctx.user.id))),   // review is documents.review
+          .mutation(async ({ ctx, input }) => createComplianceDocument({ ...input, verificationStatus: "needs_review", privateDetail: isPrivateDocType(input.docType) }, await scopeFor(ctx.user.id))),   // review is documents.review; SEC-1: private by type
         review: roleProcedure("documents.review")
           .input(
             z.object({

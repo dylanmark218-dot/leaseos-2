@@ -81,6 +81,7 @@ import {
   integrationClients,
   coreRecordOwnership, organizationInvitationRoles, organizationInvitations, organizationMemberships, organizations, fieldTickets, incidentReports, loads, financialEntities } from "../drizzle/schema";
 import { entityScopeWhere } from "./_core/entityScope";
+import { projectComplianceDocument } from "./_core/complianceProjection";
 import { ENV } from "./_core/env";
 import { membershipIsLive, type MembershipFact } from "./_core/workspaceAccess";
 import { grantsInOrganization, type RoleGrant } from "./_core/recordsAuthorization";
@@ -685,7 +686,9 @@ export async function listComplianceDocuments(scope: TenantScope, owner?: { owne
     .from(complianceDocuments)
     .where(owner ? and(inScope, eq(complianceDocuments.ownerType, owner.ownerType), eq(complianceDocuments.ownerId, owner.ownerId)) : inScope)
     .orderBy(desc(complianceDocuments.createdAt))
-    .limit(owner ? OWNER_DOCUMENT_LIST_CAP : 100);
+    .limit(owner ? OWNER_DOCUMENT_LIST_CAP : 100)
+    // SEC-1: a private credential's detail never leaves through the list (see complianceProjection.ts).
+    .then(rows => rows.map(projectComplianceDocument));
 }
 
 /** The organization that owns a document's subject record, or null when nobody does. */

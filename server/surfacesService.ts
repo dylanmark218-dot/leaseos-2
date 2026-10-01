@@ -10,6 +10,7 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { getDb, jobInScope, orgScopeWhere, ownershipScopeWhere, tripInScope, unitInScope } from "./db";
+import { projectComplianceDocument } from "./_core/complianceProjection";
 import { bookOrgWhere, ownedEntityWhere, type FinanceScope } from "./_core/entityScope";
 import { jobKeyedWhere, unitKeyedWhere } from "./financeScope";
 import {
@@ -110,7 +111,8 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   const history: (typeof complianceDocuments.$inferSelect)[] = [];
   for (let i = 0; i < owners.length; i += 200) {
     const chunk = owners.slice(i, i + 200);
-    history.push(...await db.select().from(complianceDocuments).where(or(...chunk.map(o => and(eq(complianceDocuments.ownerType, o.ownerType as never), eq(complianceDocuments.ownerId, o.ownerId))))));
+    // SEC-1: projected before the verdict is built — the verdict names its document, and the exception centre returns that name.
+    history.push(...(await db.select().from(complianceDocuments).where(or(...chunk.map(o => and(eq(complianceDocuments.ownerType, o.ownerType as never), eq(complianceDocuments.ownerId, o.ownerId)))))).map(projectComplianceDocument));
   }
   const credentialVerdicts = Array.from(flagged.values()).map(f => {
     const rows = history.filter(h => h.ownerType === f.ownerType && h.ownerId === f.ownerId && h.docType === f.docType);

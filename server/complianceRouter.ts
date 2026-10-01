@@ -14,6 +14,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { actingScopeFor, evidenceInScope, getDb, jobInScope, operatorInScope, unitInScope, userInScope } from "./db";
+import { isPrivateDocType } from "./_core/complianceProjection";
 import { assertCallerOwnsEntity } from "./_core/entityScope";
 import { requireProvableOwnership } from "./ownershipDomain";
 import { carrierProfileReviews, complianceConsents, complianceDocuments, complianceRequirements, writtenProgramVersions } from "../drizzle/schema";
@@ -174,7 +175,7 @@ export const complianceRouter = router({
         ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, requirementKey: input.requirementKey ?? null,
         title: input.title, identifier: input.identifier ?? null, capturedAt: new Date(), issuedAt: input.issuedAt ?? null,
         expiresAt: input.expiresAt ?? null, jurisdiction: input.jurisdiction ?? null, verificationStatus: "needs_review",
-        source: input.source ?? null, confidence: "medium", privateDetail: input.privateDetail || input.docType === "medical_fitness",
+        source: input.source ?? null, confidence: "medium", privateDetail: input.privateDetail || isPrivateDocType(input.docType),
         evidenceRecordId: input.evidenceRecordId ?? null,
       });
       return { credentialId: Number(ins[0]?.insertId ?? 0), verificationStatus: "needs_review" as const };
