@@ -917,6 +917,14 @@ const PROPOSAL_TARGET_KIND: Readonly<Record<string, "trip_stop" | "financial_ent
   fuel_receipt: "financial_entity",
 };
 
+/** SEC-1 — every job, trip and unit a record is anchored to is in scope (an absent anchor is no claim). */
+export async function recordAnchorsInScope(t: { jobId?: number | null; tripId?: number | null; unitId?: number | null }, scope: TenantScope): Promise<boolean> {
+  if (t.jobId != null && !(await jobInScope(t.jobId, scope))) return false;
+  if (t.tripId != null && !(await tripInScope(t.tripId, scope))) return false;
+  if (t.unitId != null && !(await unitInScope(t.unitId, scope))) return false;
+  return true;
+}
+
 /**
  * SEC-1 — every record an assistant proposal names is in the caller's organization.
  *
@@ -928,9 +936,7 @@ export async function assistantTargetsInScope(
   t: { formKey?: string | null; jobId?: number | null; tripId?: number | null; unitId?: number | null; targetRecordId?: number | null },
   scope: TenantScope,
 ): Promise<boolean> {
-  if (t.jobId != null && !(await jobInScope(t.jobId, scope))) return false;
-  if (t.tripId != null && !(await tripInScope(t.tripId, scope))) return false;
-  if (t.unitId != null && !(await unitInScope(t.unitId, scope))) return false;
+  if (!(await recordAnchorsInScope(t, scope))) return false;
   const kind = t.formKey ? PROPOSAL_TARGET_KIND[t.formKey] : undefined;
   if (t.targetRecordId == null || !kind) return true;
   const db = await getDb();

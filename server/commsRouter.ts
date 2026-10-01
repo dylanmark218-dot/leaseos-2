@@ -20,7 +20,8 @@ import { mayScopePolicyTo, resolveActingScope } from "./_core/actingScope";
 import { affectedRows } from "./_core/enforcementCommit";
 import { createHash } from "node:crypto";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, recordAnchorsInScope, userInScope, type TenantScope } from "./db";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import {
   communicationCoverage, communicationPackageDownloads, communicationPackages, communicationPlans,
   communicationPolicies, companyRadioAuthorizations, oosReleasePolicies, radioChannels,
@@ -98,6 +99,24 @@ async function planInputs(d: Awaited<ReturnType<typeof db>>, segmentIds: string[
     companyAuthorizations: authRows.map(a => ({ channelKey: a.channelKey, authorized: a.authorized, licenceRef: a.licenceRef, licenceExpiresAt: a.licenceExpiresAt, provinces: a.provincesJson ? (JSON.parse(a.provincesJson) as string[]) : null, approvedUnitIds: a.approvedUnitIdsJson ? (JSON.parse(a.approvedUnitIdsJson) as number[]) : null, verificationStatus: a.verificationStatus })),
     unit: cap ? toCapability(cap) : null,
   };
+}
+
+/**
+ * SEC-1 — whose a communication package is. The table carries no organization: a package is the
+ * organization's of every job, trip and unit it is anchored to, and an unanchored one is its
+ * builder's. Fetch, status and the predecessor a rebuild supersedes all go through this; across the
+ * boundary a package is simply not found.
+ */
+async function packageInScope(p: { jobId: number | null; tripId: number | null; unitId: number | null; builtByUserId: number | null }, scope: TenantScope): Promise<boolean> {
+  if (!(await recordAnchorsInScope(p, scope))) return false;
+  if (p.jobId != null || p.tripId != null || p.unitId != null) return true;
+  return p.builtByUserId != null ? userInScope(p.builtByUserId, scope) : scope.tenantId === SINGLE_TENANT_ID;
+}
+/** The newest current-or-stale package of this label that the scope owns. Labels are free text and collide across companies. */
+async function latestInScopeByLabel(d: Awaited<ReturnType<typeof db>>, label: string, scope: TenantScope) {
+  const candidates = await d.select().from(communicationPackages).where(and(eq(communicationPackages.label, label), inArray(communicationPackages.status, ["current", "stale"]))).orderBy(desc(communicationPackages.version)).limit(50);
+  for (const c of candidates) if (await packageInScope(c, scope)) return c;
+  return undefined;
 }
 
 export const commsRouter = router({
@@ -702,6 +721,8 @@ export const commsRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const d = await db();
+      const scope = await actingScopeFor(ctx.user.id);
+      if (!(await recordAnchorsInScope(input, scope))) throw new TRPCError({ code: "NOT_FOUND", message: "Record not found" });
       const segmentIds = input.segments.map(s => s.segmentId);
       const inputs = await planInputs(d, segmentIds, input.unitId ?? null);
       const buildGeo = input.buildRef ? await resolveRouteCommunicationGeography(d, { buildRef: input.buildRef, segmentIds }) : null;
@@ -721,7 +742,8 @@ export const commsRouter = router({
       // A stale predecessor is still a predecessor. Looking only for `current`
       // restarted the version at 1 and lost the supersession chain exactly when
       // a rebuild mattered most — which is after the world moved.
-      const prior = (await d.select().from(communicationPackages).where(and(eq(communicationPackages.label, input.label), inArray(communicationPackages.status, ["current", "stale"]))).orderBy(desc(communicationPackages.version)).limit(1))[0];
+      // SEC-1: the predecessor is this organization's package of the label, never another company's.
+      const prior = await latestInScopeByLabel(d, input.label, scope);
       const packageRef = ref("COMMPKG");
       await d.insert(communicationPackages).values({
         packageRef, label: input.label, version: (prior?.version ?? 0) + 1,
@@ -749,12 +771,15 @@ export const commsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const d = await db();
       if (!input.packageRef && !input.label) throw new TRPCError({ code: "BAD_REQUEST", message: "Name the package or the route it is for" });
+      // SEC-1: by reference or by label, only a package this organization owns.
+      const scope = await actingScopeFor(ctx.user.id);
+      const byRef = input.packageRef ? (await d.select().from(communicationPackages).where(eq(communicationPackages.packageRef, input.packageRef)).limit(1))[0] : undefined;
       const p = input.packageRef
-        ? (await d.select().from(communicationPackages).where(eq(communicationPackages.packageRef, input.packageRef)).limit(1))[0]
+        ? (byRef && (await packageInScope(byRef, scope)) ? byRef : undefined)
         // A stale package is still the package for that route. Refusing to hand
         // it over would leave a driver with nothing, which is worse than an out
         // of date package they have been told is out of date.
-        : (await d.select().from(communicationPackages).where(and(eq(communicationPackages.label, input.label!), inArray(communicationPackages.status, ["current", "stale"]))).orderBy(desc(communicationPackages.version)).limit(1))[0];
+        : await latestInScopeByLabel(d, input.label!, scope);
       if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "No communication package for that route — build one before departure" });
       if (p.status === "superseded") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Package ${p.packageRef} is superseded — fetch the current one instead` });
       const downloadRef = ref("COMMDL");
@@ -787,12 +812,18 @@ export const commsRouter = router({
    */
   packageStatus: roleProcedure("comms.packageStatus")
     .input(z.object({ label: z.string().max(220).optional(), packageRef: z.string().max(64).optional(), at: z.coerce.date().default(() => new Date()) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const d = await db();
       if (!input.packageRef && !input.label) throw new TRPCError({ code: "BAD_REQUEST", message: "Name the package or the route it is for" });
+      // SEC-1: by reference or by label, only a package this organization owns.
+      const scope = await actingScopeFor(ctx.user.id);
+      const byRef = input.packageRef ? (await d.select().from(communicationPackages).where(eq(communicationPackages.packageRef, input.packageRef)).limit(1))[0] : undefined;
       const p = input.packageRef
-        ? (await d.select().from(communicationPackages).where(eq(communicationPackages.packageRef, input.packageRef)).limit(1))[0]
-        : (await d.select().from(communicationPackages).where(and(eq(communicationPackages.label, input.label!), inArray(communicationPackages.status, ["current", "stale"]))).orderBy(desc(communicationPackages.version)).limit(1))[0];
+        ? (byRef && (await packageInScope(byRef, scope)) ? byRef : undefined)
+        // A stale package is still the package for that route. Refusing to hand
+        // it over would leave a driver with nothing, which is worse than an out
+        // of date package they have been told is out of date.
+        : await latestInScopeByLabel(d, input.label!, scope);
       if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "No communication package for that route" });
 
       const segmentIds = JSON.parse(p.segmentIdsJson) as string[];
