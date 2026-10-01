@@ -12,6 +12,7 @@ import { z } from "zod";
 import { assertEntityInScope, entityIdsInScope, type MoneyScope } from "./_core/entityScope";
 import { resolveActingScope } from "./_core/actingScope";
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { chargeDefinitions, commercialSetupProfiles, customerAccounts, customerContractTerms, customerPurchaseOrders, fieldTicketLines, fieldTickets, pricingDecisions, units, vendorBillLines, vendorBills, vendors } from "../drizzle/schema";
 import { getDb } from "./db";
@@ -95,6 +96,7 @@ export const commercialSetupRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       // F1: the financial entity must be in the caller's scope; otherwise it does not exist here.
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
       const d = await db();
       if (input.pricingMethod === "per_unit" && input.rateMillis == null) throw new TRPCError({ code: "BAD_REQUEST", message: "A per-unit definition carries a rate; without one it is a question, not a rate" });

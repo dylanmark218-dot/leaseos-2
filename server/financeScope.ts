@@ -27,6 +27,7 @@ import { auditPackages, bankAccounts, changeOrders, clientAdjustments, customerC
 import { bookOrgWhere, notFound, ownedEntityWhere, ownsBookOrg, ownsEntity, requireOwnedEntity, type FinanceScope } from "./_core/entityScope";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { requireProvableOwnership } from "./ownershipDomain";
+import { unitNotFound } from "./unitScope";
 import { evidenceInScope, fieldTicketInScope, getDb, incidentInScope, jobInScope, jobScopeSubquery, operatorInScope, ownershipScopeWhere, tripInScope, unitInScope, userInScope } from "./db";
 
 export type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
@@ -165,8 +166,11 @@ export async function roadsideEventInScope(db: Db, fs: FinanceScope, eventRef: s
 }
 
 // ── Operational references a finance record may name ─────────────────────────────────────────────
+// One wording for a unit the caller may not see, wherever the refusal comes from: CP1.5's
+// `unitNotFound` ("Unit <id> not found"), so another organization's unit and a unit that does not
+// exist are indistinguishable through this helper exactly as through server/unitScope.ts.
 export async function requireUnit(fs: FinanceScope, unitId: number | null | undefined) {
-  if (unitId != null && !(await unitInScope(unitId, fs))) throw notFound("Unit");
+  if (unitId != null && !(await unitInScope(unitId, fs))) throw unitNotFound(unitId);
 }
 export async function requireJob(fs: FinanceScope, jobId: number | null | undefined) {
   if (jobId != null && !(await jobInScope(jobId, fs))) throw notFound("Job");

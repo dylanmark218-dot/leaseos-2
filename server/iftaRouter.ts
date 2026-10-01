@@ -9,6 +9,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, lt } from "drizzle-orm";
@@ -59,6 +60,7 @@ export const iftaRouter = router({
       source: z.enum(["operator_stated", "imported"]), notes: z.string().max(400).optional(), evidenceRecordId: z.number().int().positive().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (input.periodEnd <= input.periodStart) throw new TRPCError({ code: "BAD_REQUEST", message: "periodEnd must be after periodStart" });

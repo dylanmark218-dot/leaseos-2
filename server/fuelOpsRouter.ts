@@ -10,6 +10,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
@@ -43,6 +44,7 @@ export const fuelOpsRouter = router({
   dispenseRecord: moneyScoped(roleProcedure("fuel.dispenseRecord"))
     .input(z.object({ tankRef: z.string().min(1).max(64), unitId: z.number().int().positive().nullable(), equipmentId: z.number().int().positive().nullable().optional(), litres: z.number().positive(), quantitySource: z.enum(["meter", "stick_before_after", "stated"]), meterBefore: z.number().nonnegative().nullable().optional(), meterAfter: z.number().nonnegative().nullable().optional(), odometerKm: z.number().nonnegative().nullable().optional(), occurredAt: z.coerce.date(), evidenceRecordId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — a dispense's odometer joins the unit's meter sequence
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const tank = await fuelTankInScope(db, ctx.money, input.tankRef);

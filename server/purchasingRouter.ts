@@ -19,7 +19,7 @@ import { normaliseUnit, priceLineAndRecord } from "./_core/linePricing";
 import { getDb, listActiveUserRoleNames } from "./db";
 import {
   maintenanceDefects, purchaseAuthorizations, roadsideServiceEvents, spendingLimits,
-  vendorBillLines, vendorBills, vendors, customerRecoveryProposals, units, customerAccounts } from "../drizzle/schema";
+  vendorBillLines, vendorBills, vendors, customerRecoveryProposals, customerAccounts } from "../drizzle/schema";
 import {
   assessAccrual, decideApproval, fourWayMatch, proposeCustomerRecovery,
   reconcileBillLines, roadsideConsequences, routeApproval, type SpendingLimit,
@@ -130,10 +130,11 @@ export const purchasingRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // The unit first (CP1.5): a unit the caller may not see is "not found" before anything else is judged.
+      await requireUnit(ctx.money, input.unitId);
       if (!input.vendorId && !input.vendorNameIfNew) throw new TRPCError({ code: "BAD_REQUEST", message: "Name a vendor or a new vendor" });
       requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
       if (input.vendorId) await vendorInScope(db, ctx.money, input.vendorId);
-      await requireUnit(ctx.money, input.unitId);
       await requireJob(ctx.money, input.jobId);
 
       let roadsideEventId: number | null = null;
@@ -218,12 +219,12 @@ export const vendorRouter = router({
       evidenceRecordId: z.number().int().positive().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireUnit(ctx.money, input.unitId);   // the unit first (CP1.5): not found before anything else is judged
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 
       requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
       await vendorInScope(db, ctx.money, input.vendorId);
-      await requireUnit(ctx.money, input.unitId);
       await requireJob(ctx.money, input.jobId);
       await requireEvidence(ctx.money, input.evidenceRecordId);
       const recon = reconcileBillLines({ lines: input.lines, statedSubtotal: input.subtotal, statedTax: input.taxAmount, statedTotal: input.total });

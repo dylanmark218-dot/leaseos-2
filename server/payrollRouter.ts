@@ -19,6 +19,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { roleProcedure, router } from "./_core/trpc";
 import * as svc from "./payrollService";
@@ -136,6 +137,7 @@ export const payrollRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — the profile is the caller's own; the unit must be too
       const me = await ownProfileOrThrow(ctx.user.id);
       const minutes = input.endedAt
         ? Math.round((input.endedAt.getTime() - input.startedAt.getTime()) / 60000)
@@ -667,6 +669,7 @@ export const financeRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       // F1 — the book must be the caller's organization's; any other id is "not found".
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
       const allocations = buildAllocations({
         total: input.total,
