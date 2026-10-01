@@ -6,8 +6,8 @@ movement-permit work, per the owner's instruction.
 | | |
 |---|---|
 | Base | `main` @ `c3f088b` (merge of #90, T1). Gated untouched before any change: PASS, 438 files, 6679 passed / 3 skipped |
-| Commits | `16221c0` P0 (defects 1–4, red first) · `c328567` P1–P3 · `9c03ac0` P4 · `8a7aea4` P5 · this record |
-| Gate-verified SHA | See *Gate result* below |
+| Commits | `16221c0` P0 (defects 1–4, red first) · `c328567` P1–P3 · `9c03ac0` P4 · `8a7aea4` P5 · `f2bcda3` docs · `fc7a386` and the run-3 commit (gate fixes) |
+| Gate-verified SHA | The commit that adds this record's *Gate result* table (run 3) |
 | Migration | **none**. Head unchanged at `0209_operating_zone_scope.sql`. No schema was needed, and 0210 is not used |
 | Owner decisions | D-01 stays in force for permits (recorded as T2-D1 in `docs/compliance/unified-compliance-engine-design.md` §23). Defects first, then P1–P5 |
 | Runtime | Node **22.23.3** (`.nvmrc`), tz **2026c** · **MariaDB 10.11.14** |
@@ -90,7 +90,13 @@ The pin moved in `structures.test.ts`: the dependency keys now include `legalRul
 Command: `DATABASE_URL=mysql://root@127.0.0.1:3306/<fresh db> bash scripts/ci-gate.sh`, run with
 the pinned Node.
 
-*Recorded below after the run.*
+Each run uses a fresh database. Failures are recorded as they happened.
+
+| Run | SHA | Result | Cause and fix |
+|---|---|---|---|
+| 1 | `f2bcda3` | **FAIL** at the test-file type ratchet (1 error, ceiling 0) | `routeLegalitySlice.db.test.ts:97`: `axleGroups` possibly undefined. Fixed in `fc7a386` |
+| 2 | `fc7a386` | **FAIL**: 3 of 6721 tests (439 of 441 files passed) | (a) `_core/regulatoryDataDiscipline.test.ts` pins that restrictions are windowed on the evaluation path in `spatialRouter.ts`. T2 moved that path to `routeLegality.ts`, so the pin now follows it, and still requires both read paths to window and to report what was set aside. My pre-gate suite list missed this `_core` file. (b) The P3 conflict test relied on the shared `ats_road_allowance` source row being verified. On a fresh database that depends on run order. Reproduced by setting that row unverified (old fixture fails, new one passes). The fixture now uses its own verified CA-AB source |
+| 3 | the commit that adds this table | Reported with the final push. This record is not amended after it, so the gated SHA is the final SHA | |
 
 ## Unresolved limitations
 

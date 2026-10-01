@@ -253,7 +253,7 @@ d("P3 — each segment uses its own jurisdiction's rule", () => {
     const c = await cast();
     const unitId = await newUnit();
     await profile(c, unitId);
-    const road = await albertaRoad();                   // road source: ats_road_allowance → verified CA-AB
+    const road = await albertaRoad();                   // road source: the fixture's verified CA-AB source
     await axleRule("CA-AB", { tandem: 17_000 });
     await banAt(c, road.segmentId, 75, "CA-BC");         // posted as BC on a road the data places in AB
     const v = await callerFor(c.dispatcher).spatial.routeEvaluateSegments({ unitId, buildRef: road.buildRef, segments: [{ segmentId: road.segmentId, label: "Fixture Rd", lengthKm: 4 }], requiredChecks: ["road_ban_level"] });
@@ -267,9 +267,13 @@ async function albertaRoad() {
   const buildRef = key("GB"), objectId = 700_000_000 + Math.floor(Math.random() * 200_000_000);
   const segmentId = `AB-ACCESS-${objectId}`;
   const lat = 54 + Math.random();
+  // The fixture's own verified CA-AB road source. The shared `ats_road_allowance` row is seeded and
+  // reviewed by other suites, so on a fresh database its status depends on run order.
+  const sourceKey = `t2_fixture_${objectId}`;
+  await pool.execute("INSERT INTO externalDataSources (sourceKey, displayName, authority, jurisdiction, category, status, verifiedAt, verifiedByUserId) VALUES (?, 'T2 fixture roads', 'Fixture', 'CA-AB', 'road_network', 'verified', NOW(), 1)", [sourceKey]);
   await pool.execute(
-    "INSERT INTO accessRoadSegments (objectId, name, featureType, featureTypeLabel, surfaceKind, lengthMetres, minLatitude, minLongitude, maxLatitude, maxLongitude, pathJson, sourceKey, sourceLayer, importRunRef, retrievedAt) VALUES (?, 'Fixture Rd', 2, 'Road', 'gravel', 4000, ?, -116.9, ?, -116.85, ?, 'ats_road_allowance', 'access', ?, NOW())",
-    [objectId, lat, lat + 0.01, JSON.stringify([[-116.9, lat], [-116.85, lat + 0.01]]), key("RUN")],
+    "INSERT INTO accessRoadSegments (objectId, name, featureType, featureTypeLabel, surfaceKind, lengthMetres, minLatitude, minLongitude, maxLatitude, maxLongitude, pathJson, sourceKey, sourceLayer, importRunRef, retrievedAt) VALUES (?, 'Fixture Rd', 2, 'Road', 'gravel', 4000, ?, -116.9, ?, -116.85, ?, ?, 'access', ?, NOW())",
+    [objectId, lat, lat + 0.01, JSON.stringify([[-116.9, lat], [-116.85, lat + 0.01]]), sourceKey, key("RUN")],
   );
   await pool.execute("INSERT INTO roadGraphBuilds (buildRef, label, minLatitude, minLongitude, maxLatitude, maxLongitude, snapToleranceMetres, segmentsConsidered, nodeCount, edgeCount, componentCount, largestComponentEdges, isolatedEdges, excludedSurfacesJson, sourceRunRefsJson, status, builtByUserId, builtAt) VALUES (?, 'legality fixture', 53, -118, 56, -115, 5, 1, 2, 1, 1, 1, 0, '[]', '[]', 'current', 1, NOW())", [buildRef]);
   const a = `N-${objectId}-A`, b = `N-${objectId}-B`;
