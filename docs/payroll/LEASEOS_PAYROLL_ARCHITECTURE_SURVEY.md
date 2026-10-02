@@ -1159,3 +1159,11 @@ canonical set, so the stored hash is the hash of the stored rules.
 - Updated: `financeScopeCoverage` (+ `payrollCompensation`, 132 money procedures), `procedureAuthorization`
   (791 mapped, new router in the wiring sources), `operationalApiAuthorization` (791), `crossLayerIntegrity`
   (+11 server paths), `PROCEDURE_AUTHORIZATION_INVENTORY.md` (new row, 507 total), `LEASEOS_CURRENT_STATE.md`.
+
+**P1 follow-up (same day).** The first full-suite run on the P1 tree surfaced two repository pins that a new
+migration and a new ladder row are expected to move, and they were updated explicitly rather than loosened:
+`server/migrationSlots.test.ts` now pins the head slot at `0226` with the reason recorded, and
+`server/commercialOffice.db.test.ts` now asserts the commercial office's 18 default rows (owner decision 2026-09-17)
+separately from the one payroll row (owner decision D4, 2026-10-02). A visible consequence of reusing the ladder:
+the commercial office's approval-policy list now shows a `compensation_agreement` row, and a book can add its own
+tier for that category through the existing policy editor (its category field accepts any snake_case key).
