@@ -2931,12 +2931,26 @@ export const syncPackages = mysqlTable("syncPackages", {
   verificationMode: mysqlEnum("verificationMode", ["exact_wire", "reconstructed", "unverified"]).default("unverified").notNull(),
   deviceClockAt: timestamp("deviceClockAt"),
   clockSkewMs: int("clockSkewMs"),
-  packageRef: varchar("packageRef", { length: 64 }).notNull().unique(),
+  // 0225 — no longer globally unique: a client picks this string, so one global
+  // namespace made two companies' clients collide, and the collision answered one
+  // organization's queued package to another. Unique per SENDER now, via the two
+  // generated keys below.
+  packageRef: varchar("packageRef", { length: 64 }).notNull(),
   deviceId: varchar("deviceId", { length: 120 }).notNull(),
   // v20.20 — an enrolled device, and the key it signed with.
   fieldDeviceId: int("fieldDeviceId"),
   signedWithFingerprint: varchar("signedWithFingerprint", { length: 64 }),
   operatorId: int("operatorId"),
+  // 0225 — persistent generated columns, COALESCE(operatorId, -1) and
+  // COALESCE(fieldDeviceId, -1), carrying the composite unique index with
+  // packageRef. Never written by the application: the database derives them, the
+  // same precedent as `userRoleAssignments.activeGrantKey`. They exist because
+  // NULLs are DISTINCT inside a unique index, so a plain composite over the
+  // nullable owner columns would constrain nothing on exactly the rows with no
+  // owner. Two columns because the two writers record the sender differently —
+  // queueSend an operator, receivePackage a field device.
+  packageOperatorKey: int("packageOperatorKey"),
+  packageDeviceKey: int("packageDeviceKey"),
   state: mysqlEnum("state", [
     "queued", "waiting_for_service", "transmitting", "server_received",
     "hash_verified", "office_accepted", "failed", "rejected",

@@ -311,11 +311,22 @@ export async function hasActiveLegalHold(evidenceId: number): Promise<boolean> {
 /**
  * Idempotent package creation. An offline client retries; retrying must not
  * create a second package for the same attempt.
+ *
+ * S3 — "the same attempt" is one SENDER's attempt. `packageRef` is a string the
+ * client chooses, so matching on it alone made every organization's clients share
+ * one namespace: where two agreed on a string, the second caller was told their
+ * send was already queued, handed the first one's item count, and had their own
+ * package silently dropped. Scoped to `operatorId`, which is the owner this row
+ * records and is resolved from the authenticated caller rather than supplied —
+ * `deviceId` travels in the same request as `packageRef` and is no boundary at
+ * all. The caller must have an operator identity: there is nothing to attribute
+ * an unowned package to, and a bucket shared by every unattributed sender is the
+ * defect again rather than a corner of it.
  */
 export async function createSyncPackage(args: {
   packageRef: string;
   deviceId: string;
-  operatorId: number | null;
+  operatorId: number;
   items: Array<{
     evidenceRecordId: number;
     declaredContentHash: string;
@@ -329,7 +340,7 @@ export async function createSyncPackage(args: {
   const existing = await db
     .select({ id: syncPackages.id, itemCount: syncPackages.itemCount })
     .from(syncPackages)
-    .where(eq(syncPackages.packageRef, args.packageRef))
+    .where(and(eq(syncPackages.packageRef, args.packageRef), eq(syncPackages.operatorId, args.operatorId)))
     .limit(1);
   if (existing[0]) {
     return {

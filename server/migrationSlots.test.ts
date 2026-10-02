@@ -62,14 +62,16 @@ describe("the real tree", () => {
     // Mechanic Portal CP2 took 0221–0222 (defect lifecycle and its guards): 0220 is claimed by
     // `claude/eld-compliance-intelligence-ramlrd`, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0222_defect_lifecycle_guards.sql");
-    // Main stabilization took 0224 (the offline capture reference stops being an
-    // installation-wide namespace). Drafted as 0223, but the scan of all 474 remote refs found
+    // Main stabilization took 0224–0225 (the two client-chosen identity namespaces:
+    // the offline capture reference and the queued package reference). Drafted as
+    // 0223/0224, but the scan of all 474 remote refs found
     // `claude/integration-hub-subsystem-6nzrkw` holding 0220–0223, so 0223 was
-    // already claimed and head+1 would have collided; the file moved before the
-    // branch was pushed and before any environment applied it. The register
+    // already claimed and head+1 would have collided; both files moved before the
+    // branch was pushed and before any environment applied either. The register
     // records the scan.
     expect(files).toContain("0224_offline_capture_identity_scope.sql");
-    expect(headSlot(files)).toBe("0224");
+    expect(files).toContain("0225_queued_package_identity_scope.sql");
+    expect(headSlot(files)).toBe("0225");
   });
 
   it("keeps the reserved slots empty", () => {

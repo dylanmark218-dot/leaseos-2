@@ -101,21 +101,28 @@ Next free number at that time: `0191` (superseded above).
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
 
-## Claim: 0224 (main tenant-scope stabilization — the offline capture reference, 2026-10-02)
+## Claim: 0224, 0225 (main tenant-scope stabilization — identity namespaces, 2026-10-02)
 
 | Number | Migration file | Branch | PR | Base | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|---|
 | 0224 | `0224_offline_capture_identity_scope.sql` | `fix/main-ci-stabilization` | none | `db7dc7c` (merge-base with `main` `70e86e2`) | gated on the branch | none | keeps 0224 |
+| 0225 | `0225_queued_package_identity_scope.sql` | `fix/main-ci-stabilization` | none | `db7dc7c` | gated on the branch | none | keeps 0225 |
 
-Drafted as `0223`. The scan of `origin/main` and all 474 remote refs found
+Both were drafted one slot lower (`0223`, `0224`). The scan of `origin/main` and all 474 remote refs found
 `main` ending at `0222` **and `claude/integration-hub-subsystem-6nzrkw` holding `0220`–`0223`**
 (`0220_integration_hub_connectors`, `0221_integration_hub_sync`, `0222_integration_hub_dead_letters`,
 `0223_integration_hub_conflicts_and_links`), so `0223` was already claimed and this checkpoint takes the
-first number above every claim in every lineage. The file was renamed from `0223_…` on this branch before
-it was pushed and before any environment applied it; its contents are unchanged apart from its own slot
-number in the header comment.
+first two numbers above every claim in every lineage. `0224_offline_capture_identity_scope.sql` was renamed
+from `0223_…` on this branch before it was pushed and before any environment applied it; the file's
+contents are unchanged apart from its own slot number in the header comment.
 
-Next free number: `0225`.
+Both migrations exist for the same reason: a unique index over a CLIENT-chosen string made one namespace
+of every organization's clients. `0224` moves `evidenceRecords.clientCaptureRef` to be unique per
+capturing user; `0225` moves `syncPackages.packageRef` to be unique per sender (operator, or field device
+for the sync path). Each DROPs a global unique index, so each is looser than what it replaces — which is
+the point, and the files record what was checked to depend on the old rule.
+
+Next free number: `0226`.
 
 ## Claim: 0221, 0222 (mechanic portal CP2 — defect to return to service, 2026-10-01)
 

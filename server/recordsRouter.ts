@@ -249,6 +249,15 @@ export const recordsRouter = router({
         for (const id of input.evidenceIds ?? []) if (!(await evidenceInScope(id, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${id} not found` });
       }
         const me = await svc.resolveOperatorForUser(ctx.user.id);
+        // S3 — `operatorId` is the only owner a queued package row carries, and
+        // the idempotency key below is scoped to it. A caller with no operator
+        // identity has nothing to attribute the package to, so its client-chosen
+        // reference could only go into a namespace shared with every other
+        // unattributed sender. Refused rather than filed against a guess.
+        if (me.operatorId == null) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Queuing a send needs an operator identity for this user" });
+        }
+        const operatorId = me.operatorId;
         const grants = await listActiveUserRoles(ctx.user.id);
 
         const candidates = [];
@@ -308,7 +317,7 @@ export const recordsRouter = router({
         const result = await svc.createSyncPackage({
           packageRef: input.packageRef,
           deviceId: input.deviceId,
-          operatorId: me.operatorId,
+          operatorId,
           queuedAt: new Date(),
           items: sendable.map(w => ({
             evidenceRecordId: w.subject.id,
