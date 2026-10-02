@@ -26,6 +26,7 @@
  */
 
 import { isOnShift, type RotationPattern } from "./calendarProjection";
+import { windowsOverlap } from "./bookingConflict";
 import { isAbsent, type LeaveRequest } from "./timeOff";
 
 export type ShiftPost = {
@@ -112,8 +113,6 @@ export type Candidate = {
   reasons: Ineligibility[];
 };
 
-const overlaps = (a: { startsAt: Date; endsAt: Date }, b: { startsAt: Date; endsAt: Date }) =>
-  a.startsAt < b.endsAt && b.startsAt < a.endsAt;
 
 /**
  * Whether one person could take one post, and every reason they could not.
@@ -143,7 +142,7 @@ export function shiftEligibility(post: ShiftPost, p: PersonFacts): Candidate {
     reasons.push({ code: "on_approved_leave", detail: "Away that day on leave already recorded" });
   }
 
-  const clash = p.commitments.find(c => overlaps(post, c));
+  const clash = p.commitments.find(c => windowsOverlap(post, c));   // the one rule: _core/bookingConflict.ts
   if (clash) reasons.push({ code: "overlaps_existing", detail: `Already on ${clash.assignmentRef} over this window` });
 
   switch (p.licence.kind) {

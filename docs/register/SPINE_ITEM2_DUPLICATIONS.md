@@ -69,6 +69,29 @@ imports it.
   - Tenant refusal was already pinned by the C1a tenant-scope test ("another organization's dispatcher cannot … award").
 - **Known limit, not introduced here:** the posting-row lock serializes awards on one posting, not two awards on different postings that race for the same unit.
 
+**Follow-up (2026-10-01): the rule itself, not just the removed copy.** Deleting `detectBookingConflicts`
+left the rule written out twice in live code and once more in memory, agreeing only by coincidence:
+the award's SQL (`dispatchTransaction.awardAssignment`), the open-shift read's SQL
+(`personFacts`, added by #89 in the router and moved to `openShiftsService.ts` by #59) and an `overlaps` helper in `_core/openShifts.ts`. The
+names guard could not see them because they were new names, not re-declared ones.
+
+- **One rule:** `server/_core/bookingConflict.ts` — `ACTIVE_BOOKING_STATES` (tentative, confirmed),
+  half-open `windowsOverlap`, resource identity by type and ref, as a function (`bookingConflicts`)
+  and as a query predicate (`conflictingBookingsWhere`).
+- **Callers:** the award's re-check and open-shift eligibility both query through
+  `conflictingBookingsWhere`; `shiftEligibility` judges a commitment through `windowsOverlap`.
+- **The award's check stays.** It is the final revalidation inside the transaction, immediately before
+  the booking is written: state can change between eligibility and award. It keeps its own decision of
+  which conflicts to ignore (a booking on the posting being awarded), which is the caller's business,
+  not the rule's.
+- **No behaviour changed:** the three copies already agreed; this makes them unable to drift.
+- **Tests:** `server/bookingConflict.db.test.ts` writes every state × window × resource combination
+  and requires the predicate and the function to select the same rows (10 of 64 per resource).
+- **Guard** (`server/spineItem2Duplicates.test.ts`, "a booking conflict has one definition"): only
+  `bookingConflict.ts` reads `resourceBookings`' window or state columns or names the holding states;
+  the award and `openShiftsService.personFacts` must call `conflictingBookingsWhere`; the open-shift engine compares no
+  window with a window and declares no `overlaps`. Each of main's three copies, restored, fails it.
+
 **Concepts C1/C2, suitability match and posting visibility: not duplicated.**
 
 - `matchOperatorToJob` and `filterVisiblePostings` have no live twin. No procedure submits bids or serves a posting feed.
