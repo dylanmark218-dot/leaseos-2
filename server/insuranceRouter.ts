@@ -16,6 +16,7 @@ import {
   complianceDocuments, evidenceRelationships, incidentReports, insuranceCertificates, insuranceClaimCosts, insuranceClaimRecoveries,
   insuranceClaims, insuranceCoveredEntities, insurancePolicies, insurancePolicyCoverages, insuranceProviders, insuranceRequirements,
 } from "../drizzle/schema";
+import { policiesForFinancialEntity } from "./_core/insuranceCoverage";
 import {
   assessCoverage, certificatesAffectedByRenewal, claimFinancials, dispatchInsuranceGate, matchCustomerRequirements,
   renewalCalendar, roadsideInsuranceItems, type PolicyRecord,
@@ -24,33 +25,11 @@ import {
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const ENTITY = z.enum(["unit", "trailer", "equipment", "operator", "branch", "facility", "company"]);
 
-/** Every policy covering an entity (or the whole company), as the engine sees it. */
+/** 0192 — the loader lives in _core/insuranceCoverage.ts so the marketplace reads cover through the same code. */
 async function policiesFor(financialEntityId: number, entity: { type: string; id: number } | null, now: Date): Promise<PolicyRecord[]> {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select().from(insurancePolicies).where(eq(insurancePolicies.financialEntityId, financialEntityId));
-  const out: PolicyRecord[] = [];
-  for (const p of rows) {
-    if (entity) {
-      const covered = await db.select({ id: insuranceCoveredEntities.id }).from(insuranceCoveredEntities).where(and(
-        eq(insuranceCoveredEntities.insurancePolicyId, p.id),
-        or(and(eq(insuranceCoveredEntities.entityType, entity.type as never), eq(insuranceCoveredEntities.entityId, entity.id)), eq(insuranceCoveredEntities.entityType, "company")),
-        or(isNull(insuranceCoveredEntities.coveredUntil), gte(insuranceCoveredEntities.coveredUntil, now)),
-      )).limit(1);
-      if (!covered[0]) continue;
-    }
-    const coverages = await db.select().from(insurancePolicyCoverages).where(eq(insurancePolicyCoverages.insurancePolicyId, p.id));
-    const doc = entity
-      ? (await db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, entity.type as never), eq(complianceDocuments.ownerId, entity.id), eq(complianceDocuments.docType, "insurance_proof"))).limit(1))[0]
-      : null;
-    out.push({
-      policyRef: p.policyRef, policyType: p.policyType, effectiveAt: p.effectiveAt, expiresAt: p.expiresAt, status: p.status,
-      coverageVerificationStatus: p.coverageVerificationStatus,
-      coverages: coverages.map(c => ({ coverageType: c.coverageType, limitAmount: c.limitAmount, additionalInsuredEndorsement: c.additionalInsuredEndorsement })),
-      document: doc ? { expiresAt: doc.expiresAt, verificationStatus: doc.verificationStatus } : null,
-    });
-  }
-  return out;
+  return policiesForFinancialEntity(db, financialEntityId, entity, now);
 }
 
 export const insuranceRouter = router({

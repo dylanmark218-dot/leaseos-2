@@ -11,7 +11,6 @@ import { describe, expect, it } from "vitest";
 import {
   BID_STATES,
   POSTING_STATES,
-  assessBidReadiness,
   bidContentHash,
   biddingWindow,
   clarificationVisibility,
@@ -26,7 +25,6 @@ import {
   transitionPosting,
   validateBidContent,
   type BidContent,
-  type BidderPicture,
   type PostingState,
 } from "./marketplace";
 
@@ -267,85 +265,7 @@ describe("bid content", () => {
   });
 });
 
-describe("bid readiness", () => {
-  const picture = (over: Partial<BidderPicture> = {}): BidderPicture => ({
-    bidderOrgRef: "ORG-BIDDER",
-    clientOrgRef: "ORG-CLIENT",
-    organizationStatus: "active",
-    contractorProfileStatus: "active",
-    distribution: "public",
-    invited: false,
-    window: { open: true, closesAt: null, remainingMs: null },
-    unitsRequired: 4,
-    requirements: { certifications: ["TDG", "H2S"], permits: [], dangerousGoods: ["CLASS_3"], insuranceLiabilityMinimumCents: 500_000_000, equipmentTypes: ["TRI_DRIVE_VAC"] },
-    content: fixed(),
-    ...over,
-  });
-
-  it("is eligible when every stated requirement is declared, and says 'declared, not verified'", () => {
-    const r = assessBidReadiness(picture(), NOW);
-    expect(r.verdict).toBe("eligible_to_submit");
-    expect(r.basis).toBe("declared_only");
-    const byCheck = Object.fromEntries(r.rows.map(x => [x.check, x]));
-    expect(byCheck.certifications!.result).toBe("WARNING");
-    expect(byCheck.certifications!.detail).toMatch(/declared, not verified/);
-    expect(byCheck.insurance!.result).toBe("WARNING");
-    expect(byCheck.units!.result).toBe("PASS");
-    expect(byCheck.driver_availability!.result).toBe("UNKNOWN");
-    expect(byCheck.hos_forecast!.result).toBe("UNKNOWN");
-    expect(r.rows.every(x => x.blocking === (x.result === "FAIL"))).toBe(true);
-  });
-
-  it("fails closed on a missing required certification, an insurance shortfall, or a missing DG declaration", () => {
-    const noTdg = assessBidReadiness(picture({ content: fixed({ qualifications: { ...fixed().qualifications, certifications: ["H2S"] } }) }), NOW);
-    expect(noTdg.verdict).toBe("draft_only");
-    expect(noTdg.rows.find(x => x.check === "certifications")).toMatchObject({ result: "FAIL", detail: "Not declared: TDG." });
-
-    const thin = assessBidReadiness(picture({ content: fixed({ qualifications: { ...fixed().qualifications, insuranceLiabilityCents: 200_000_000 } }) }), NOW);
-    expect(thin.rows.find(x => x.check === "insurance")).toMatchObject({ result: "FAIL" });
-
-    const noIns = assessBidReadiness(picture({ content: fixed({ qualifications: { ...fixed().qualifications, insuranceLiabilityCents: null } }) }), NOW);
-    expect(noIns.rows.find(x => x.check === "insurance")!.detail).toMatch(/none declared/);
-
-    const noDg = assessBidReadiness(picture({ content: fixed({ qualifications: { ...fixed().qualifications, dangerousGoods: [] } }) }), NOW);
-    expect(noDg.rows.find(x => x.check === "dangerous_goods")).toMatchObject({ result: "FAIL" });
-  });
-
-  it("matches requirement codes without regard to case or whitespace", () => {
-    const r = assessBidReadiness(picture({ content: fixed({ qualifications: { ...fixed().qualifications, certifications: [" tdg", "h2s "] } }) }), NOW);
-    expect(r.rows.find(x => x.check === "certifications")!.result).toBe("WARNING");
-  });
-
-  it("treats fewer units than required as a warning the client decides on, not a refusal", () => {
-    const r = assessBidReadiness(picture({ content: fixed({ unitsOffered: 3 }) }), NOW);
-    expect(r.verdict).toBe("eligible_to_submit");
-    expect(r.rows.find(x => x.check === "units")).toMatchObject({ result: "WARNING" });
-    expect(r.rows.find(x => x.check === "units")!.detail).toMatch(/3 of 4/);
-  });
-
-  it("refuses a self-bid, a non-active organization, an uninvited bidder on an invite-only tender, and a closed window", () => {
-    expect(assessBidReadiness(picture({ bidderOrgRef: "ORG-CLIENT" }), NOW).rows.find(x => x.check === "counterparty")!.result).toBe("FAIL");
-    expect(assessBidReadiness(picture({ organizationStatus: "suspended" }), NOW).rows.find(x => x.check === "organization")!.result).toBe("FAIL");
-    expect(assessBidReadiness(picture({ organizationStatus: "missing" }), NOW).rows.find(x => x.check === "organization")!.result).toBe("FAIL");
-    expect(assessBidReadiness(picture({ distribution: "invite_only", invited: false }), NOW).rows.find(x => x.check === "invitation")!.result).toBe("FAIL");
-    expect(assessBidReadiness(picture({ distribution: "invite_only", invited: true }), NOW).rows.find(x => x.check === "invitation")!.result).toBe("PASS");
-    const closed = assessBidReadiness(picture({ window: { open: false, reason: "closed_by_deadline" } }), NOW);
-    expect(closed.verdict).toBe("draft_only");
-    expect(closed.rows.find(x => x.check === "bidding_window")!.detail).toMatch(/closed_by_deadline/);
-  });
-
-  it("a bidder with no contractor profile is a warning, a suspended one a refusal", () => {
-    expect(assessBidReadiness(picture({ contractorProfileStatus: "none" }), NOW).rows.find(x => x.check === "contractor_profile")!.result).toBe("WARNING");
-    expect(assessBidReadiness(picture({ contractorProfileStatus: "suspended" }), NOW).verdict).toBe("draft_only");
-  });
-
-  it("a posting with no requirements passes every requirement row", () => {
-    const r = assessBidReadiness(picture({ requirements: { certifications: [], permits: [], dangerousGoods: [], insuranceLiabilityMinimumCents: null, equipmentTypes: [] }, unitsRequired: null }), NOW);
-    for (const c of ["certifications", "permits", "dangerous_goods", "insurance", "equipment", "units"]) {
-      expect(r.rows.find(x => x.check === c)!.result, c).toBe("PASS");
-    }
-  });
-});
+// 0192 — the declared-only readiness tests that lived here moved with the evaluator: see marketplaceReadiness.test.ts.
 
 describe("references", () => {
   it("are prefixed, ten characters of an unambiguous alphabet, and deterministic for a seeded source", () => {

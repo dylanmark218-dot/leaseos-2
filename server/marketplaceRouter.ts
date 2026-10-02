@@ -27,12 +27,24 @@ const code = z.string().min(1).max(60);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/, "a SHA-256 hex digest");
 const attachment = z.object({ name: z.string().min(1).max(200), sha256: sha256Hex, sizeBytes: z.number().int().nonnegative() });
 
+/**
+ * Typed tender requirements (0192). Every field names a record a canonical registry holds. The
+ * checkpoint-1 keys remain accepted and are mapped by `normalizeTenderRequirements`.
+ */
 const requirements = z.object({
-  certifications: z.array(code).max(40).default([]),
-  permits: z.array(code).max(40).default([]),
-  dangerousGoods: z.array(code).max(40).default([]),
-  insuranceLiabilityMinimumCents: z.number().int().nonnegative().nullable().default(null),
-  equipmentTypes: z.array(code).max(40).default([]),
+  workerQualificationCodes: z.array(code).max(40).optional(),
+  organizationDocTypes: z.array(z.string().min(1).max(100)).max(40).optional(),
+  tdgRequired: z.boolean().optional(),
+  insurance: z.object({ coverageType: z.string().min(1).max(80), minimumLimitCents: z.number().int().nonnegative().nullable().default(null), additionalInsuredRequired: z.boolean().default(false) }).nullable().optional(),
+  equipmentClasses: z.array(code).max(40).optional(),
+  jurisdiction: z.string().max(80).nullable().optional(),
+  clientSpecific: z.array(z.string().min(1).max(300)).max(40).optional(),
+  // checkpoint-1 spellings
+  certifications: z.array(code).max(40).optional(),
+  permits: z.array(code).max(40).optional(),
+  dangerousGoods: z.array(code).max(40).optional(),
+  insuranceLiabilityMinimumCents: z.number().int().nonnegative().nullable().optional(),
+  equipmentTypes: z.array(code).max(40).optional(),
 });
 
 const postingDraft = z.object({
@@ -59,7 +71,7 @@ const postingDraft = z.object({
   distribution: z.enum(["public", "invite_only"]).optional(),
   operatingArea: z.string().max(120).nullable().optional(),
   currency: z.string().length(3).toUpperCase().optional(),
-  requirements: requirements.partial().optional(),
+  requirements: requirements.optional(),
   documents: z.array(attachment).max(50).optional(),
 });
 
@@ -234,7 +246,8 @@ export const marketplaceRouter = router({
   }),
 
   /* ---- bids: the contractor's side ---- */
-  bidReadiness: roleProcedure("marketplace.bidReadiness").input(z.object({ postingRef: ref, content: bidContent })).query(async ({ ctx, input }) => {
+  /** The acting organization's VERIFIED readiness for a tender, from the canonical registries. Never another organization's. */
+  bidReadiness: roleProcedure("marketplace.bidReadiness").input(z.object({ postingRef: ref, content: bidContent.nullable().optional() })).query(async ({ ctx, input }) => {
     const { db, actor } = await actorFor(ctx.user.id);
     return svc.previewReadiness(db, actor, input);
   }),

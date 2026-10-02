@@ -6,9 +6,9 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **v23.28** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **421** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **172** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Release | **v23.29** | `LEASEOS_RELEASE` (or explicit argument 1) |
+| Tables | **422** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **173** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
 | Role-authorized procedures | **688** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
@@ -16,7 +16,7 @@ here can be added rather than read.
 | Permissions | **359** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **127** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **323 / 4398** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **325 / 4413** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **4 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -166,7 +166,13 @@ chain, and the contractor dispatches it through the one dispatch posting door,
 idempotently; and the social layer — the tender discussion private until the client
 publishes it with the asker withheld, following that matches public work as it opens,
 company profiles declared beside what is recorded, preferred lists invited in one
-act, every notification a row the universal inbox already reads — no UI yet).
+act, every notification a row the universal inbox already reads; and bid readiness
+verified against the registries themselves — the financial entity as carrier subject,
+carrier documents by the document engine, cover by the insurance engine, owned units,
+worker holdings by the Academy's rule — unknown hard requirements failing closed, the
+submission picture frozen on the revision beside the picture now, a lapse refusing the
+award with the bid standing, the client reading a projection without identifiers, and
+the dispatch gate untouched: marketplace bid readiness is not dispatch readiness — no UI yet).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 

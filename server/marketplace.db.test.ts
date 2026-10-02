@@ -11,6 +11,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
+import { qualifyOrganization } from "./fixtures/marketplaceQualify";
 
 const DB_URL = process.env.DATABASE_URL;
 
@@ -27,7 +28,13 @@ const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 
 beforeAll(() => { if (DB_URL) pool = mysql.createPool({ uri: DB_URL, connectionLimit: 4 }); });
-afterAll(async () => { await pool?.end(); });
+afterAll(async () => {
+  // Every marketplace write queues an outbox row. Left unprocessed, hundreds of them sit ahead of the
+  // outbox worker suites' own events in a FIFO claim of fifty; mark what this suite queued as
+  // processed so those suites find theirs. (Checked in-test above, where the rows are the point.)
+  if (pool) await pool.execute("UPDATE domainEventOutbox SET processedAt = NOW() WHERE eventType LIKE 'marketplace.%' AND processedAt IS NULL");
+  await pool?.end();
+});
 
 async function org(name: string, status: "active" | "suspended" = "active") {
   const orgRef = `ORG-${rnd()}`;
@@ -60,6 +67,8 @@ const POSTING = {
 };
 
 const QUALIFIED = { certifications: ["TDG", "H2S"], permits: [], dangerousGoods: ["CLASS_3"], insuranceLiabilityCents: 500_000_000, equipmentTypes: ["TRI_DRIVE_VAC"] };
+/** What the POSTING above requires of a bidder, as the registries hold it (0192). */
+const qualify = (orgRef: string, over: Parameters<typeof qualifyOrganization>[2] = {}) => qualifyOrganization(pool, orgRef, { workerCodes: ["TDG", "H2S", "TDG_ROAD"], unitClass: "TRI_DRIVE_VAC", liabilityLimit: 5_000_000, ...over });
 
 const fixedBid = (totalCents: number, units = 4) => ({
   pricingType: "fixed_price" as const, currency: "CAD", fixedTotalCents: totalCents, components: [],
@@ -74,6 +83,8 @@ d("a sealed tender from posting to award", () => {
     const stranger = await org("Nosy Hauling");
     await contractorProfile(prairie);
     await contractorProfile(abc);
+    await qualify(prairie);
+    await qualify(abc);
     const clientOffice = await member(client, ["office"]);
     const clientMgmt = await member(client, ["management"]);
     const prairieDispatch = await member(prairie, ["dispatcher"]);
@@ -99,8 +110,8 @@ d("a sealed tender from posting to award", () => {
     expect(published.state).toBe("published");
     await expect(callerFor(clientOffice).marketplace.postingUpdate({ postingRef: created.postingRef, draft: POSTING })).rejects.toThrow(/can no longer be edited/);
     const early = await callerFor(prairieDispatch).marketplace.bidReadiness({ postingRef: created.postingRef, content: fixedBid(1_940_000) });
-    expect(early.verdict).toBe("draft_only");
-    expect(early.rows.find(r => r.check === "bidding_window")?.detail).toMatch(/not_yet_open/);
+    expect(early.verdict).toBe("blocked");
+    expect(early.checks.find(r => r.check === "bidding_window")?.detail).toMatch(/not_yet_open/);
     const opened = await callerFor(clientOffice).marketplace.postingOpenBidding({ postingRef: created.postingRef });
     expect(opened.state).toBe("bidding");
 
@@ -113,7 +124,7 @@ d("a sealed tender from posting to award", () => {
     const v1 = await callerFor(prairieDispatch).marketplace.bidSubmit({ bidRef: draft.bidRef, expectedVersion: draft.version });
     expect(v1.revisionNumber).toBe(1);
     expect(v1.state).toBe("submitted");
-    expect(v1.readiness.verdict).toBe("eligible_to_submit");
+    expect(v1.readiness.verdict).toBe("submittable");
     await expect(callerFor(prairieDispatch).marketplace.bidDraftSave({ postingRef: created.postingRef, content: fixedBid(1_940_000) })).rejects.toThrow(/stands as submitted/);
     const withdrawn = await callerFor(prairieDispatch).marketplace.bidWithdraw({ bidRef: draft.bidRef, reason: "Re-pricing after the road ban lifted" });
     expect(withdrawn.state).toBe("withdrawn");
@@ -132,11 +143,11 @@ d("a sealed tender from posting to award", () => {
     // --- ABC submits a partial-capacity bid: a warning the client sees, not a refusal
     const abcDraft = await callerFor(abcOffice).marketplace.bidDraftSave({ postingRef: created.postingRef, content: fixedBid(1_790_000, 3) });
     const abcBid = await callerFor(abcOffice).marketplace.bidSubmit({ bidRef: abcDraft.bidRef });
-    expect(abcBid.readiness.rows.find(r => r.check === "units")).toMatchObject({ result: "WARNING" });
+    expect(abcBid.readiness.checks.find(r => r.check === "units_offered")).toMatchObject({ result: "WARN", blocking: false });
 
-    // --- a bid missing a required certification is draft-only, and the refusal names the gap
-    const noTdg = await callerFor(strangerMgmt).marketplace.bidDraftSave({ postingRef: created.postingRef, content: { ...fixedBid(900_000), qualifications: { ...QUALIFIED, certifications: ["H2S"] } } });
-    await expect(callerFor(strangerMgmt).marketplace.bidSubmit({ bidRef: noTdg.bidRef })).rejects.toThrow(/Not eligible to submit.*certifications: Not declared: TDG/);
+    // --- an organization with nothing on record may draft, and its submission is refused by the registries, not by what it declares
+    const noTdg = await callerFor(strangerMgmt).marketplace.bidDraftSave({ postingRef: created.postingRef, content: { ...fixedBid(900_000), qualifications: QUALIFIED } });
+    await expect(callerFor(strangerMgmt).marketplace.bidSubmit({ bidRef: noTdg.bidRef })).rejects.toThrow(/Not eligible to submit.*insurance \[UNKNOWN\].*worker_qualifications \[UNKNOWN\]/);
 
     // --- SEALED: the client sees the bids and their readiness, but no price, until it closes bidding
     const sealedView = await callerFor(clientOffice).marketplace.bidsForPosting({ postingRef: created.postingRef });
@@ -145,7 +156,10 @@ d("a sealed tender from posting to award", () => {
     for (const b of live) {
       expect(b.pricingWithheld).toMatch(/sealed tender/);
       expect(b.current?.pricing.visible).toBe(false);
-      expect(b.current?.readiness.verdict).toBe("eligible_to_submit");
+      // The client reads a projection: eligibility and check results, never the bidder's detail.
+      expect(["eligible", "eligible_with_warnings"]).toContain((b.current?.submissionReadiness as { eligibility: string }).eligibility);
+      expect(b.currentReadiness?.eligibility).toBe((b.current?.submissionReadiness as { eligibility: string }).eligibility);
+      expect(b.readinessChangedSinceSubmission).toBe(false);
     }
     const sealedPosting = await callerFor(clientOffice).marketplace.postingGet({ postingRef: created.postingRef });
     expect(sealedPosting.liveBidCount).toBe(2);
@@ -197,7 +211,8 @@ d("a sealed tender from posting to award", () => {
 
     // --- the trail: the client reads all of it; a bidder reads the posting's and its own bid's events only
     const trail = await callerFor(clientOffice).marketplace.postingEvents({ postingRef: created.postingRef });
-    const types = trail.map(e => e.eventType);
+    // `followers_notified` appears when a database carries follow-everything rows from another suite; it is not part of this tender's story.
+    const types = trail.map(e => e.eventType).filter(t => t !== "followers_notified");
     expect(types.slice(0, 5)).toEqual(["posting_created", "posting_updated", "posting_publish", "posting_open_bidding", "bid_draft_saved"]);
     expect(types).toContain("bid_withdrawn");
     expect(types.filter(t => t === "bid_submitted")).toHaveLength(3);
@@ -219,7 +234,7 @@ d("a sealed tender from posting to award", () => {
 
     // --- the frozen revisions are exactly what was submitted
     const [revs] = await pool.query<mysql.RowDataPacket[]>("SELECT revisionNumber, contentHash, comparableTotalCents, readinessVerdict FROM marketplaceBidRevisions WHERE postingId = ? AND bidderOrgRef = ? ORDER BY revisionNumber", [created.postingId, prairie]);
-    expect(revs.map(r => [r.revisionNumber, r.comparableTotalCents, r.readinessVerdict])).toEqual([[1, 2_100_000, "eligible_to_submit"], [2, 1_940_000, "eligible_to_submit"]]);
+    expect(revs.map(r => [r.revisionNumber, r.comparableTotalCents, r.readinessVerdict])).toEqual([[1, 2_100_000, "submittable"], [2, 1_940_000, "submittable"]]);
     expect(revs[0]!.contentHash).toBe(v1.contentHash);
   });
 });
@@ -229,6 +244,7 @@ d("the deadline is enforced by the clock, not by the row's state", () => {
     const client = await org("Deadline Energy");
     const bidder = await org("Punctual Vac");
     await contractorProfile(bidder);
+    await qualify(bidder);
     const clientOffice = await member(client, ["office"]);
     const bidderOffice = await member(bidder, ["office"]);
 
@@ -265,6 +281,7 @@ d("invite-only tenders and tenant isolation", () => {
     const uninvited = await org("Uninvited Vac");
     await contractorProfile(invited);
     await contractorProfile(uninvited);
+    await qualify(invited);
     const clientOffice = await member(client, ["office"]);
     const invitedOffice = await member(invited, ["office"]);
     const uninvitedOffice = await member(uninvited, ["office"]);
@@ -319,7 +336,7 @@ d("invite-only tenders and tenant isolation", () => {
     await expect(callerFor(suspendedOffice).marketplace.bidDraftSave({ postingRef: p.postingRef, content: fixedBid(1) })).rejects.toThrow(/asks for unit_rate bids/);
     const unit = { ...fixedBid(1), pricingType: "unit_rate" as const, fixedTotalCents: null, components: [{ code: "LOAD", label: "Per load", unit: "LOAD" as const, rateCents: 48_500, estimatedQuantityMillis: 8_000 }] };
     const sb = await callerFor(suspendedOffice).marketplace.bidDraftSave({ postingRef: p.postingRef, content: unit });
-    await expect(callerFor(suspendedOffice).marketplace.bidSubmit({ bidRef: sb.bidRef })).rejects.toThrow(/organization: Bidding organization is suspended/);
+    await expect(callerFor(suspendedOffice).marketplace.bidSubmit({ bidRef: sb.bidRef })).rejects.toThrow(/organization \[BLOCK\]: Bidding organization is suspended/);
 
     // Roles: a driver holds no marketplace permission; a dispatcher may read and bid but not post; office may not award.
     await expect(callerFor(clientDriver).marketplace.postingsList()).rejects.toThrow(/marketplace\.read/);
@@ -332,6 +349,7 @@ d("invite-only tenders and tenant isolation", () => {
     const client = await org("Cancel Energy");
     const vac = await org("Cancelled-On Vac");
     await contractorProfile(vac);
+    await qualify(vac);
     const clientMgmt = await member(client, ["management"]);
     const vacOffice = await member(vac, ["office"]);
 
@@ -360,6 +378,8 @@ d("invite-only tenders and tenant isolation", () => {
     const b = await org("Racer B");
     await contractorProfile(a);
     await contractorProfile(b);
+    await qualify(a);
+    await qualify(b);
     const clientMgmt = await member(client, ["management"]);
     const aOffice = await member(a, ["office"]);
     const bOffice = await member(b, ["office"]);
@@ -390,6 +410,7 @@ d("invite-only tenders and tenant isolation", () => {
     const client = await org("Tamper Energy");
     const vac = await org("Tampered Vac");
     await contractorProfile(vac);
+    await qualify(vac);
     const clientMgmt = await member(client, ["management"]);
     const vacOffice = await member(vac, ["office"]);
 

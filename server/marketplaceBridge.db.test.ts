@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
 import { jobModeForWorkType } from "./_core/marketplaceService";
+import { qualifyOrganization } from "./fixtures/marketplaceQualify";
 
 const DB_URL = process.env.DATABASE_URL;
 
@@ -34,7 +35,13 @@ const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 
 beforeAll(() => { if (DB_URL) pool = mysql.createPool({ uri: DB_URL, connectionLimit: 4 }); });
-afterAll(async () => { await pool?.end(); });
+afterAll(async () => {
+  // Every marketplace write queues an outbox row. Left unprocessed, hundreds of them sit ahead of the
+  // outbox worker suites' own events in a FIFO claim of fifty; mark what this suite queued as
+  // processed so those suites find theirs. (Checked in-test above, where the rows are the point.)
+  if (pool) await pool.execute("UPDATE domainEventOutbox SET processedAt = NOW() WHERE eventType LIKE 'marketplace.%' AND processedAt IS NULL");
+  await pool?.end();
+});
 
 async function org(name: string) {
   const orgRef = `ORG-${rnd()}`;
@@ -73,6 +80,7 @@ d("award → contract → dispatch, nothing re-entered", () => {
     const contractor = await org("Prairie Vac");
     const stranger = await org("Nosy Hauling");
     await pool.execute("INSERT INTO contractorBusinessProfiles (orgRef, operatingMode, legalName, status, createdByUserId) VALUES (?,?,?,?,1)", [contractor, "CONTRACTOR_COMPANY", "Prairie Vac Ltd.", "active"]);
+    await qualifyOrganization(pool, contractor, { workerCodes: ["TDG", "H2S"], unitClass: "TRI_DRIVE_VAC", liabilityLimit: 5_000_000 });
     const clientMgmt = await member(client, ["management"]);
     const contractorOffice = await member(contractor, ["office"]);
     const contractorDispatch = await member(contractor, ["dispatcher"]);
@@ -163,6 +171,7 @@ d("award → contract → dispatch, nothing re-entered", () => {
     const contractor = await org("Retry Vac");
     const clientMgmt = await member(client, ["management"]);
     const contractorDispatch = await member(contractor, ["dispatcher", "office"]);
+    await qualifyOrganization(pool, contractor, { workerCodes: ["TDG", "H2S"], unitClass: "TRI_DRIVE_VAC", liabilityLimit: 5_000_000 });
     const { p } = await awarded(clientMgmt, contractorDispatch);
     const contract = await callerFor(clientMgmt).marketplace.contractIssue({ postingRef: p.postingRef });
 

@@ -33,6 +33,7 @@ import {
   marketplacePreferredContractors,
   marketplaceInvitations,
   marketplacePostings,
+  marketplaceReadinessEvaluations,
   organizations,
   workflowNotifications,
   type MarketplaceAwardRow,
@@ -46,9 +47,17 @@ import type { Db, DbOrTx, Tx } from "./dbTypes";
 import { buildOutboxRow } from "./eventEmitter";
 import { nextSequence, pad2 } from "./commercialChainNumbers";
 import { createPosting as createDispatchPosting } from "../dispatchRoleService";
+import { gatherReadinessFacts } from "./marketplaceReadinessFacts";
 import {
-  EMPTY_REQUIREMENTS,
-  assessBidReadiness,
+  EMPTY_TENDER_REQUIREMENTS,
+  clientReadinessProjection,
+  evaluateMarketplaceReadiness,
+  normalizeTenderRequirements,
+  type MarketplaceReadiness,
+  type ReadinessStage,
+  type TenderRequirements,
+} from "./marketplaceReadiness";
+import {
   bidContentHash,
   bidIsLive,
   biddingWindow,
@@ -66,10 +75,8 @@ import {
   transitionPosting,
   validateBidContent,
   type BidContent,
-  type BidReadiness,
   type BidState,
   type PostingDistribution,
-  type PostingRequirements,
   type PostingState,
   type PostingVisibility,
 } from "./marketplace";
@@ -183,12 +190,18 @@ const forbidden = (message: string) => new TRPCError({ code: "FORBIDDEN", messag
 const conflict = (message: string) => new TRPCError({ code: "CONFLICT", message });
 const refused = (message: string) => new TRPCError({ code: "PRECONDITION_FAILED", message });
 
-function parseRequirements(json: string): PostingRequirements {
+/** A refused submission carries the picture, so the bidder gets the reasons in one answer rather than a sentence. */
+export class SubmissionBlocked extends TRPCError {
+  constructor(message: string, public readonly readiness: MarketplaceReadiness) {
+    super({ code: "PRECONDITION_FAILED", message });
+  }
+}
+
+function parseRequirements(json: string): TenderRequirements {
   try {
-    const v = JSON.parse(json) as Partial<PostingRequirements>;
-    return { ...EMPTY_REQUIREMENTS, ...v };
+    return normalizeTenderRequirements(JSON.parse(json));
   } catch {
-    return EMPTY_REQUIREMENTS;
+    return EMPTY_TENDER_REQUIREMENTS;
   }
 }
 
@@ -272,7 +285,8 @@ export type PostingDraft = {
   distribution?: PostingDistribution;
   operatingArea?: string | null;
   currency?: string;
-  requirements?: Partial<PostingRequirements>;
+  /** Typed tender requirements (`TenderRequirements`); checkpoint-1 keys are still read and mapped. */
+  requirements?: Record<string, unknown>;
   documents?: Array<{ name: string; sha256: string; sizeBytes: number }>;
 };
 
@@ -301,7 +315,7 @@ function draftColumns(d: PostingDraft) {
     distribution: d.distribution ?? "public",
     operatingArea: d.operatingArea ?? null,
     currency: d.currency ?? "CAD",
-    requirementsJson: JSON.stringify({ ...EMPTY_REQUIREMENTS, ...(d.requirements ?? {}) }),
+    requirementsJson: JSON.stringify(normalizeTenderRequirements(d.requirements ?? {})),
     documentsJson: JSON.stringify(d.documents ?? []),
   };
 }
@@ -437,25 +451,32 @@ export async function invite(db: Db, actor: MarketplaceActor, args: { postingRef
 
 /* ===================== bids ===================== */
 
-async function bidderPicture(db: DbOrTx, posting: MarketplacePostingRow, bidderOrgRef: string, content: BidContent, now: Date) {
-  const [org] = await db.select({ status: organizations.status }).from(organizations).where(eq(organizations.orgRef, bidderOrgRef)).limit(1);
-  const [profile] = await db.select({ status: contractorBusinessProfiles.status }).from(contractorBusinessProfiles).where(eq(contractorBusinessProfiles.orgRef, bidderOrgRef)).limit(1);
-  const [inv] = await db.select({ status: marketplaceInvitations.status }).from(marketplaceInvitations).where(and(eq(marketplaceInvitations.postingId, posting.id), eq(marketplaceInvitations.invitedOrgRef, bidderOrgRef))).limit(1);
-  return assessBidReadiness(
-    {
-      bidderOrgRef,
-      clientOrgRef: posting.clientOrgRef,
-      organizationStatus: org?.status ?? "missing",
-      contractorProfileStatus: profile?.status ?? "none",
-      distribution: posting.distribution,
-      invited: inv?.status === "sent",
-      window: biddingWindow({ state: posting.state, biddingClosesAt: posting.biddingClosesAt }, now),
-      unitsRequired: posting.unitsRequired,
-      requirements: parseRequirements(posting.requirementsJson),
-      content,
-    },
-    now,
-  );
+/**
+ * The verified picture: facts from the canonical registries, the evaluator's verdict. Private
+ * credential fields never reach this function — the loader reduces holdings to code, state and
+ * expiry, and the evaluator reduces those to counts.
+ */
+async function readinessFor(db: DbOrTx, posting: MarketplacePostingRow, bidderOrgRef: string, unitsOffered: number | null, now: Date, stage: ReadinessStage): Promise<MarketplaceReadiness> {
+  return evaluateMarketplaceReadiness(await gatherReadinessFacts(db, { posting, bidderOrgRef, unitsOffered, stage }, now), now);
+}
+
+/**
+ * A refusal must outlive the transaction that refused. Throwing inside `db.transaction` rolls the
+ * evaluation row and the trail event back with everything else, so a refusing transaction COMMITS
+ * its record and returns this marker; the caller throws after the commit.
+ */
+type Refusal = { refused: true; readiness: MarketplaceReadiness; message: string };
+const isRefusal = (v: unknown): v is Refusal => typeof v === "object" && v !== null && (v as Refusal).refused === true;
+
+/** Records an evaluation that decided something, beside the bid it decided. */
+async function recordEvaluation(tx: Tx, args: { postingId: number; bidId: number | null; bidRevisionId: number | null; bidderOrgRef: string; purpose: "submission" | "submission_refused" | "award" | "award_refused"; readiness: MarketplaceReadiness; actorUserId: number }) {
+  const evaluationRef = makeRef("MRE");
+  await tx.insert(marketplaceReadinessEvaluations).values({
+    evaluationRef, postingId: args.postingId, bidId: args.bidId, bidRevisionId: args.bidRevisionId, bidderOrgRef: args.bidderOrgRef,
+    purpose: args.purpose, verdict: args.readiness.verdict, dependencyFingerprint: args.readiness.dependencyFingerprint,
+    readinessJson: JSON.stringify(args.readiness), evaluatedByUserId: args.actorUserId, evaluatedAt: args.readiness.evaluatedAt,
+  });
+  return evaluationRef;
 }
 
 /** May this organization see the posting at all? Client, invited, or anyone once a public posting is published. */
@@ -474,12 +495,18 @@ async function visiblePosting(db: DbOrTx, postingRef: string, orgRef: string): P
   return posting;
 }
 
-/** The readiness picture for content the bidder has not committed to yet. Reads only. */
-export async function previewReadiness(db: Db, actor: MarketplaceActor, args: { postingRef: string; content: BidContent }, now = new Date()): Promise<BidReadiness> {
+/**
+ * The bidder's own verified picture, for a posting it can see, before it commits to anything.
+ * Reads only; evaluates the ACTING organization and nobody else — there is no input that names
+ * an organization, so one company cannot read another's picture through this door.
+ */
+export async function previewReadiness(db: Db, actor: MarketplaceActor, args: { postingRef: string; content?: BidContent | null }, now = new Date()): Promise<MarketplaceReadiness> {
   const posting = await visiblePosting(db, args.postingRef, actor.orgRef);
-  const v = validateBidContent(args.content);
-  if (!v.ok) throw new TRPCError({ code: "BAD_REQUEST", message: v.reasons.join(" ") });
-  return bidderPicture(db, posting, actor.orgRef, args.content, now);
+  if (args.content) {
+    const v = validateBidContent(args.content);
+    if (!v.ok) throw new TRPCError({ code: "BAD_REQUEST", message: v.reasons.join(" ") });
+  }
+  return readinessFor(db, posting, actor.orgRef, args.content?.unitsOffered ?? null, now, "submission");
 }
 
 /** Saves the working draft. Creates the bid head on first save. Never touches a revision. */
@@ -517,7 +544,7 @@ export async function saveBidDraft(db: Db, actor: MarketplaceActor, args: { post
  * passed a second ago is a refusal and not a race.
  */
 export async function submitBid(db: Db, actor: MarketplaceActor, args: { bidRef: string; expectedVersion?: number }, now = new Date()) {
-  return db.transaction(async tx => {
+  const outcome = await db.transaction(async tx => {
     const { head, posting } = await lockBidUnderPosting(tx, args.bidRef, actor);
     assertVersion(args.expectedVersion, head.version);
     const to = advanceBid(head, "submit");
@@ -525,10 +552,14 @@ export async function submitBid(db: Db, actor: MarketplaceActor, args: { bidRef:
     const content = parseContent(head.draftContentJson);
     const v = validateBidContent(content);
     if (!v.ok) throw new TRPCError({ code: "BAD_REQUEST", message: v.reasons.join(" ") });
-    const readiness = await bidderPicture(tx, posting, actor.orgRef, content, now);
-    if (readiness.verdict !== "eligible_to_submit") {
-      const fails = readiness.rows.filter(r => r.result === "FAIL").map(r => `${r.check}: ${r.detail}`);
-      throw refused(`Not eligible to submit — ${fails.join(" | ")}`);
+    const readiness = await readinessFor(tx, posting, actor.orgRef, content.unitsOffered, now, "submission");
+    if (readiness.verdict !== "submittable") {
+      // The refusal is recorded — the evaluation row and the trail event — and COMMITTED, so "we
+      // tried to submit and were blocked" is a fact the bidder and an auditor can both read.
+      const refusedRef = await recordEvaluation(tx, { postingId: posting.id, bidId: head.id, bidRevisionId: null, bidderOrgRef: actor.orgRef, purpose: "submission_refused", readiness, actorUserId: actor.userId });
+      await record(tx, actor, { postingId: posting.id, bidId: head.id, eventType: "bid_submission_refused", previousState: head.state, newState: head.state, detail: { evaluationRef: refusedRef, blockers: readiness.blockers.map(b => b.check), dependencyFingerprint: readiness.dependencyFingerprint } }, now);
+      const why = readiness.blockers.map(b => `${b.check} [${b.result}]: ${b.detail}`);
+      return { refused: true, readiness, message: `Not eligible to submit — ${why.join(" | ")}` } as Refusal;
     }
     const revisionNumber = head.revisionCount + 1;
     const revisionRef = makeRef("REV");
@@ -538,14 +569,17 @@ export async function submitBid(db: Db, actor: MarketplaceActor, args: { bidRef:
       revisionRef, bidId: head.id, postingId: posting.id, bidderOrgRef: actor.orgRef, revisionNumber,
       contentJson: head.draftContentJson, contentHash: hash, pricingType: content.pricingType, currency: content.currency,
       comparableTotalCents: cmp.totalCents, comparableBasis: cmp.basis,
-      readinessJson: JSON.stringify(readiness), readinessVerdict: readiness.verdict,
+      readinessJson: JSON.stringify(readiness), readinessVerdict: readiness.verdict, readinessFingerprint: readiness.dependencyFingerprint,
       submittedByUserId: actor.userId, submittedAt: now,
     });
     const [rev] = await tx.select({ id: marketplaceBidRevisions.id }).from(marketplaceBidRevisions).where(eq(marketplaceBidRevisions.revisionRef, revisionRef)).limit(1);
+    await recordEvaluation(tx, { postingId: posting.id, bidId: head.id, bidRevisionId: rev!.id, bidderOrgRef: actor.orgRef, purpose: "submission", readiness, actorUserId: actor.userId });
     await tx.update(marketplaceBids).set({ state: to, currentRevisionId: rev!.id, revisionCount: revisionNumber, draftContentJson: null, submittedAt: now, withdrawnAt: null, version: head.version + 1 }).where(eq(marketplaceBids.id, head.id));
-    await record(tx, actor, { postingId: posting.id, bidId: head.id, bidRevisionId: rev!.id, eventType: "bid_submitted", previousState: head.state, newState: to, detail: { revisionNumber, contentHash: hash, readinessVerdict: readiness.verdict } }, now);
+    await record(tx, actor, { postingId: posting.id, bidId: head.id, bidRevisionId: rev!.id, eventType: "bid_submitted", previousState: head.state, newState: to, detail: { revisionNumber, contentHash: hash, readinessVerdict: readiness.verdict, readinessFingerprint: readiness.dependencyFingerprint } }, now);
     return { bidRef: head.bidRef, revisionRef, revisionNumber, contentHash: hash, state: to, version: head.version + 1, readiness };
   });
+  if (isRefusal(outcome)) throw new SubmissionBlocked(outcome.message, outcome.readiness);
+  return outcome;
 }
 
 /** The revision stays exactly as it was; only the head's state moves. */
@@ -583,7 +617,7 @@ export async function shortlistBid(db: Db, actor: MarketplaceActor, args: { bidR
  */
 export async function awardPosting(db: Db, actor: MarketplaceActor, args: { postingRef: string; bidRef: string; rationale: string; expectedVersion?: number }, now = new Date()) {
   if (args.rationale.trim().length < 10) throw new TRPCError({ code: "BAD_REQUEST", message: "An award records why this bid was chosen; give a rationale of at least ten characters." });
-  return db.transaction(async tx => {
+  const outcome = await db.transaction(async tx => {
     const posting = await lockPosting(tx, args.postingRef);
     assertClient(posting, actor);
     assertVersion(args.expectedVersion, posting.version);
@@ -599,13 +633,23 @@ export async function awardPosting(db: Db, actor: MarketplaceActor, args: { post
     // A mismatch means the write-once row was touched, and that is a refusal, never a repair.
     const recomputed = bidContentHash(parseContent(rev.contentJson));
     if (recomputed !== rev.contentHash) throw refused(`Bid revision ${rev.revisionRef} no longer hashes to what was submitted; the award is refused and the trail must be examined.`);
+    // Readiness NOW, not readiness at submission: a certificate that lapsed since is a refusal here,
+    // recorded as one. The submission's own picture on the revision is untouched. The client's
+    // refusal names checks and results — never the bidder's private detail.
+    const current = await readinessFor(tx, posting, head.bidderOrgRef, parseContent(rev.contentJson).unitsOffered, now, "standing");
+    if (current.verdict !== "submittable") {
+      const evaluationRef = await recordEvaluation(tx, { postingId: posting.id, bidId: head.id, bidRevisionId: rev.id, bidderOrgRef: head.bidderOrgRef, purpose: "award_refused", readiness: current, actorUserId: actor.userId });
+      await record(tx, actor, { postingId: posting.id, bidId: head.id, bidRevisionId: rev.id, eventType: "award_refused_readiness", previousState: posting.state, newState: posting.state, detail: { evaluationRef, blockers: current.blockers.map(b => b.check), submissionFingerprint: rev.readinessFingerprint, currentFingerprint: current.dependencyFingerprint } }, now);
+      return { refused: true, readiness: current, message: `This bidder is not currently eligible: ${current.blockers.map(b => `${b.check} [${b.result}]`).join(", ")}. Its readiness changed since submission (${rev.readinessFingerprint === current.dependencyFingerprint ? "same facts, lapsed by time" : "facts changed"}); the award is refused, the bid stands as submitted.` } as Refusal;
+    }
 
     const bidTo = advanceBid(head, "accept");
     const awardRef = makeRef("AWD");
+    await recordEvaluation(tx, { postingId: posting.id, bidId: head.id, bidRevisionId: rev.id, bidderOrgRef: head.bidderOrgRef, purpose: "award", readiness: current, actorUserId: actor.userId });
     await tx.insert(marketplaceAwards).values({
       awardRef, postingId: posting.id, bidId: head.id, bidRevisionId: rev.id, clientOrgRef: posting.clientOrgRef, contractorOrgRef: head.bidderOrgRef,
       contentHash: rev.contentHash, comparableTotalCents: rev.comparableTotalCents, currency: rev.currency, rationale: args.rationale.trim(),
-      readinessJson: rev.readinessJson, awardedByUserId: actor.userId, awardedAt: now,
+      readinessJson: JSON.stringify(current), awardedByUserId: actor.userId, awardedAt: now,
     });
     const [award] = await tx.select({ id: marketplaceAwards.id }).from(marketplaceAwards).where(eq(marketplaceAwards.awardRef, awardRef)).limit(1);
     await tx.update(marketplaceBids).set({ state: bidTo, decidedAt: now, decidedByUserId: actor.userId, version: head.version + 1 }).where(eq(marketplaceBids.id, head.id));
@@ -628,6 +672,8 @@ export async function awardPosting(db: Db, actor: MarketplaceActor, args: { post
     await record(tx, actor, { postingId: posting.id, awardId: award!.id, bidId: head.id, bidRevisionId: rev.id, eventType: "posting_awarded", previousState: posting.state, newState: to, detail: { contractorOrgRef: head.bidderOrgRef, contentHash: rev.contentHash, rejectedBids: others.length - 1 } }, now);
     return { awardRef, postingRef: posting.postingRef, bidRef: head.bidRef, contractorOrgRef: head.bidderOrgRef, contentHash: rev.contentHash, state: to, version: posting.version + 1 };
   });
+  if (isRefusal(outcome)) throw refused(outcome.message);
+  return outcome;
 }
 
 /* ===================== read models ===================== */
@@ -704,9 +750,18 @@ export async function listPostings(db: Db, actor: MarketplaceActor, args: { mine
 /** Everything but draft: a posting is visible to others only once published. */
 const POSTED_STATES: PostingState[] = ["published", "bidding", "bidding_closed", "awarded", "contracted", "dispatched", "active", "completed", "closed", "cancelled"];
 
-function presentRevision(rev: MarketplaceBidRevisionRow, pricingVisible: boolean) {
+/** The picture as stored (0192 shape), or the checkpoint-1 declared picture on an older revision. */
+function storedReadiness(json: string): MarketplaceReadiness | { legacy: true; declaredOnly: unknown } {
+  const v = JSON.parse(json) as Partial<MarketplaceReadiness> & { rows?: unknown };
+  if (v && v.basis === "canonical_registries" && Array.isArray(v.checks)) return { ...(v as MarketplaceReadiness), evaluatedAt: new Date(v.evaluatedAt as unknown as string) };
+  return { legacy: true, declaredOnly: v };
+}
+
+/** `own`: the bidder reads its own full picture; the client reads the projection. */
+function presentRevision(rev: MarketplaceBidRevisionRow, pricingVisible: boolean, own: boolean) {
   const content = parseContent(rev.contentJson);
-  const readiness = JSON.parse(rev.readinessJson) as BidReadiness;
+  const stored = storedReadiness(rev.readinessJson);
+  const submissionReadiness = "legacy" in stored ? { legacy: true as const } : own ? stored : clientReadinessProjection(stored);
   const priced = {
     pricingType: rev.pricingType,
     currency: rev.currency,
@@ -720,7 +775,8 @@ function presentRevision(rev: MarketplaceBidRevisionRow, pricingVisible: boolean
     revisionNumber: rev.revisionNumber,
     contentHash: rev.contentHash,
     submittedAt: rev.submittedAt,
-    readiness,
+    submissionReadiness,
+    readinessFingerprint: rev.readinessFingerprint,
     unitsOffered: content.unitsOffered,
     availableFrom: content.availableFrom,
     qualifications: content.qualifications,
@@ -740,41 +796,50 @@ export async function bidsForPosting(db: Db, actor: MarketplaceActor, args: { po
   const ids = heads.flatMap(h => (h.currentRevisionId ? [h.currentRevisionId] : []));
   const revisions = ids.length ? await db.select().from(marketplaceBidRevisions).where(inArray(marketplaceBidRevisions.id, ids)) : [];
   const byId = new Map(revisions.map(r => [r.id, r]));
-  return heads
-    .filter(h => h.state !== "draft")
-    .map(h => {
-      const rev = h.currentRevisionId ? byId.get(h.currentRevisionId) ?? null : null;
-      const vis = mayViewBidPricing({ viewerOrgRef: actor.orgRef, clientOrgRef: posting.clientOrgRef, bidderOrgRef: h.bidderOrgRef, visibility: posting.visibility, postingState: posting.state });
-      return {
-        bidRef: h.bidRef,
-        bidderOrgRef: h.bidderOrgRef,
-        state: h.state,
-        revisionCount: h.revisionCount,
-        submittedAt: h.submittedAt,
-        withdrawnAt: h.withdrawnAt,
-        current: rev ? presentRevision(rev, vis.visible) : null,
-        pricingWithheld: vis.visible ? null : vis.reason,
-      };
-    })
-    .sort((a, b) => Number(bidIsLive(b.state)) - Number(bidIsLive(a.state)));
+  const out = [];
+  for (const h of heads.filter(x => x.state !== "draft")) {
+    const rev = h.currentRevisionId ? byId.get(h.currentRevisionId) ?? null : null;
+    const vis = mayViewBidPricing({ viewerOrgRef: actor.orgRef, clientOrgRef: posting.clientOrgRef, bidderOrgRef: h.bidderOrgRef, visibility: posting.visibility, postingState: posting.state });
+    // Readiness NOW for a standing bid, as the client's projection: eligibility, check names and
+    // results, counts. The submission's own picture stays on the revision. Nothing private.
+    const live = rev && bidIsLive(h.state) ? await readinessFor(db, posting, h.bidderOrgRef, parseContent(rev.contentJson).unitsOffered, now, "standing") : null;
+    out.push({
+      bidRef: h.bidRef,
+      bidderOrgRef: h.bidderOrgRef,
+      state: h.state,
+      revisionCount: h.revisionCount,
+      submittedAt: h.submittedAt,
+      withdrawnAt: h.withdrawnAt,
+      current: rev ? presentRevision(rev, vis.visible, false) : null,
+      currentReadiness: live ? clientReadinessProjection(live) : null,
+      readinessChangedSinceSubmission: live && rev ? live.dependencyFingerprint !== rev.readinessFingerprint : null,
+      pricingWithheld: vis.visible ? null : vis.reason,
+    });
+  }
+  return out.sort((a, b) => Number(bidIsLive(b.state)) - Number(bidIsLive(a.state)));
 }
 
 /** The bidder's own bids, every revision included; its own pricing is always visible to it. */
-export async function myBids(db: Db, actor: MarketplaceActor, args: { postingRef?: string }) {
+export async function myBids(db: Db, actor: MarketplaceActor, args: { postingRef?: string }, now = new Date()) {
   const heads = args.postingRef
     ? await db.select({ bid: marketplaceBids }).from(marketplaceBids).innerJoin(marketplacePostings, eq(marketplacePostings.id, marketplaceBids.postingId)).where(and(eq(marketplaceBids.bidderOrgRef, actor.orgRef), eq(marketplacePostings.postingRef, args.postingRef))).then(r => r.map(x => x.bid))
     : await db.select().from(marketplaceBids).where(eq(marketplaceBids.bidderOrgRef, actor.orgRef)).orderBy(desc(marketplaceBids.createdAt));
   const out = [];
   for (const h of heads) {
     const revisions = await db.select().from(marketplaceBidRevisions).where(eq(marketplaceBidRevisions.bidId, h.id)).orderBy(asc(marketplaceBidRevisions.revisionNumber));
-    const [posting] = await db.select({ postingRef: marketplacePostings.postingRef, title: marketplacePostings.title, state: marketplacePostings.state }).from(marketplacePostings).where(eq(marketplacePostings.id, h.postingId)).limit(1);
+    const [postingRow] = await db.select().from(marketplacePostings).where(eq(marketplacePostings.id, h.postingId)).limit(1);
+    const current = revisions.find(r => r.id === h.currentRevisionId) ?? null;
+    // The bidder's own picture now, full detail, beside the immutable one on each revision.
+    const live = postingRow && bidIsLive(h.state) && current ? await readinessFor(db, postingRow, actor.orgRef, parseContent(current.contentJson).unitsOffered, now, "standing") : null;
     out.push({
       bidRef: h.bidRef,
-      posting,
+      posting: postingRow ? { postingRef: postingRow.postingRef, title: postingRow.title, state: postingRow.state } : null,
       state: h.state,
       version: h.version,
       draft: h.draftContentJson ? parseContent(h.draftContentJson) : null,
-      revisions: revisions.map(r => presentRevision(r, true)),
+      revisions: revisions.map(r => presentRevision(r, true, true)),
+      currentReadiness: live,
+      readinessChangedSinceSubmission: live && current ? live.dependencyFingerprint !== current.readinessFingerprint : null,
     });
   }
   return out;
@@ -895,7 +960,7 @@ export async function dispatchContract(db: Db, actor: MarketplaceActor, args: { 
         roleCode: "PRIMARY_UNIT",
         roleLabel: `${posting.equipmentType ?? "Unit"} ${i + 1} of ${units}`,
         required: true,
-        requiredEquipmentClass: requirements.equipmentTypes[0] ?? null,
+        requiredEquipmentClass: requirements.equipmentClasses[0] ?? null,
       })),
       actorUserId: actor.userId,
       scope: { tenantId: actor.orgRef },

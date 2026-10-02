@@ -216,7 +216,13 @@ chain, and the contractor dispatches it through the one dispatch posting door,
 idempotently; and the social layer — the tender discussion private until the client
 publishes it with the asker withheld, following that matches public work as it opens,
 company profiles declared beside what is recorded, preferred lists invited in one
-act, every notification a row the universal inbox already reads — no UI yet).
+act, every notification a row the universal inbox already reads; and bid readiness
+verified against the registries themselves — the financial entity as carrier subject,
+carrier documents by the document engine, cover by the insurance engine, owned units,
+worker holdings by the Academy's rule — unknown hard requirements failing closed, the
+submission picture frozen on the revision beside the picture now, a lapse refusing the
+award with the bid standing, the client reading a projection without identifiers, and
+the dispatch gate untouched: marketplace bid readiness is not dispatch readiness — no UI yet).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 

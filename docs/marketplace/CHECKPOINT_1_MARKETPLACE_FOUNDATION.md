@@ -85,6 +85,10 @@ eligible viewers an aggregate range over live bids, never a competitor's bid.
 
 ### Bid readiness — declared, not verified
 
+> **Superseded at 0192 (checkpoint 4).** Readiness is now verified against the canonical registries;
+> the declared qualifications remain in the bid's content and decide nothing. See
+> `CHECKPOINT_4_VERIFIED_READINESS.md`. The paragraph below describes checkpoint 1 as built.
+
 `assessBidReadiness` produces the ladder a client reads: counterparty, organization, contractor
 profile, invitation, bidding window, certifications, permits, dangerous goods, insurance,
 equipment, units, driver availability, HOS forecast. Each row is `PASS` / `WARNING` / `FAIL` /

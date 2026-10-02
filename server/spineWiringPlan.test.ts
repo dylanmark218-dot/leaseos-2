@@ -103,13 +103,16 @@ describe("the reachability census is consistent with it", () => {
 
   it("names only engines the census accounts for, declared or reached", () => {
     const census = readFileSync(CENSUS, "utf8");
+    // Every production source, _core included: the reachability census counts an engine reached
+    // when any wired production module imports it, transitively — complianceDocumentValidity is
+    // reached through marketplaceReadiness (0192) and no router names it directly. Reading only the
+    // routers here called that "neither declared nor reached" while the census called it wired.
     const production = walk("server", n => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n))
-      .filter(p => !p.includes("/_core/"))
       .map(p => readFileSync(p, "utf8"))
       .join("\n");
     for (const name of spineEngines()) {
       const declared = new RegExp(`^\\s*"?${name}"?:`, "m").test(census);
-      const reached = new RegExp(`_core/${name}["']`).test(production);
+      const reached = new RegExp(`/${name}["']`).test(production);
       expect(declared || reached, `${name} is on the spine, and the census neither declares nor reaches it`).toBe(true);
     }
   });

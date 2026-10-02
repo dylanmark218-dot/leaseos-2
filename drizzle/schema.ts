@@ -8997,6 +8997,8 @@ export const marketplaceBidRevisions = mysqlTable("marketplaceBidRevisions", {
   /** The readiness picture at submission — rows and verdict — as the bidder and the client both saw it. */
   readinessJson: text("readinessJson").notNull(),
   readinessVerdict: varchar("readinessVerdict", { length: 24 }).notNull(),
+  /** 0192 — `MR-` + SHA-256 over the canonical facts the submission picture read. NULL = submitted before verified readiness existed. */
+  readinessFingerprint: varchar("readinessFingerprint", { length: 80 }),
   submittedByUserId: int("submittedByUserId").notNull(),
   submittedAt: timestamp("submittedAt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -9163,3 +9165,29 @@ export const marketplacePreferredContractors = mysqlTable("marketplacePreferredC
 }));
 export type MarketplaceClarificationRow = typeof marketplaceClarifications.$inferSelect;
 export type MarketplaceFollowRow = typeof marketplaceFollows.$inferSelect;
+
+/**
+ * 0192 — every readiness evaluation that decided something: a submission, an award, a refusal.
+ * The revision carries the picture it was submitted on (immutable); this carries the pictures
+ * computed since, so "readiness at submission" and "readiness now" are two records, never one
+ * overwritten. Mirrors `dispatchEligibilityChecks`: verdict, fingerprint, the facts' picture.
+ */
+export const marketplaceReadinessEvaluations = mysqlTable("marketplaceReadinessEvaluations", {
+  id: int("id").autoincrement().primaryKey(),
+  evaluationRef: varchar("evaluationRef", { length: 64 }).notNull().unique(),
+  postingId: int("postingId").notNull(),
+  bidId: int("bidId"),
+  bidRevisionId: int("bidRevisionId"),
+  bidderOrgRef: varchar("bidderOrgRef", { length: 40 }).notNull(),
+  purpose: mysqlEnum("purpose", ["submission", "submission_refused", "award", "award_refused"]).notNull(),
+  verdict: mysqlEnum("verdict", ["submittable", "blocked"]).notNull(),
+  dependencyFingerprint: varchar("dependencyFingerprint", { length: 80 }).notNull(),
+  readinessJson: text("readinessJson").notNull(),
+  evaluatedByUserId: int("evaluatedByUserId").notNull(),
+  evaluatedAt: timestamp("evaluatedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  bidIdx: index("marketplaceReadinessEvaluations_bid_idx").on(t.bidId, t.evaluatedAt),
+  postingIdx: index("marketplaceReadinessEvaluations_posting_idx").on(t.postingId, t.evaluatedAt),
+}));
+export type MarketplaceReadinessEvaluationRow = typeof marketplaceReadinessEvaluations.$inferSelect;

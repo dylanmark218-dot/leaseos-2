@@ -42,6 +42,7 @@ and `0157` is historically used twice. None of those is reused.
 | 0189 | `0189_marketplace_bid_award.sql` | `claude/leaseos-marketplace-bidding-h3stdw` | none yet | `6f52b57` | open branch | none | first number free on `main` and on every open branch at 2026-10-01 (0175–0188 claimed: client-services-portal, driver-portfolio-api, document-control, integration-hub, safety-program-builder, assistant-proposal-tenancy, canadian-govt-apis, eld-compliance, training-academy-workforce) |
 | 0190 | `0190_marketplace_contracts.sql` | `claude/leaseos-marketplace-bidding-h3stdw` | none yet | `6f52b57` | open branch | none | follows 0189 on the same branch |
 | 0191 | `0191_marketplace_social_layer.sql` | `claude/leaseos-marketplace-bidding-h3stdw` | none yet | `6f52b57` | open branch | none | follows 0190 on the same branch |
+| 0192 | `0192_marketplace_verified_readiness.sql` | `claude/leaseos-marketplace-bidding-h3stdw` | none yet | `6f52b57` | open branch | none (0197 is the next number any other branch holds) | follows 0191 on the same branch |
 
 ## Change log
 
@@ -50,3 +51,5 @@ and `0157` is historically used twice. None of those is reused.
   No other branch was renumbered.
 * **2026-10-01**: `claude/leaseos-marketplace-bidding-h3stdw` claims `0189` for the marketplace
   foundation after scanning every remote branch; the highest number held anywhere was `0188`. The same branch takes `0190` for checkpoint 2 and `0191` for checkpoint 3.
+* **2026-10-02**: the same branch takes `0192` for checkpoint 4 (verified readiness); a rescan found `0197` held by
+  `claude/leaseos-intelligence-engine-cr2fg1` and nothing between.

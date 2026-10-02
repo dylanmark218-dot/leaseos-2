@@ -35,7 +35,9 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   // role grant. 2026-09-20 is kept though it is now past: `dates` below is built from future
   // in-window dates only, so a departed date is already a non-event and dropping it from the
   // record would only lose the evidence that it was certified while it still mattered.
-  "server/cash.test.ts": { dates: ["2026-09-25", "2026-09-28", "2026-09-30", "2026-10-02", "2026-10-10", "2026-10-20", "2026-11-20"], verdict: "clock_independent", reason: "statement periods and END are fixed ranges compared with each other, not with now" },
+  // Re-recorded 2026-10-02 with the file unchanged: 2026-12-01 came into range — the aging `asOf` at
+  // lines 121, 214 and 253, an explicit argument compared with fixed invoice dates, never with now.
+  "server/cash.test.ts": { dates: ["2026-09-25", "2026-09-28", "2026-09-30", "2026-10-02", "2026-10-10", "2026-10-20", "2026-11-20", "2026-12-01"], verdict: "clock_independent", reason: "statement periods and END are fixed ranges compared with each other, not with now; aging asOf is explicit" },
   "server/auditPackage.test.ts": { dates: ["2026-09-30"], verdict: "clock_independent", reason: "periodFrom/periodTo bound the package; nothing compares them with now" },
   // Recorded 2026-10-01 with the file unchanged, as the 60-day window reached 2026-10-15. The three
   // dates are the schedule's explicit `asOf`, the disposal date and the fiscal year end that `asOf`
