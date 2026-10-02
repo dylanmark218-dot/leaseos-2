@@ -299,7 +299,7 @@ export const facilities = mysqlTable("facilities", {
 export const inspections = mysqlTable("inspections", {
   id: int("id").autoincrement().primaryKey(),
   unitId: int("unitId").notNull(),
-  type: mysqlEnum("type", ["training", "pre_trip", "post_trip"]).notNull(),
+  type: mysqlEnum("type", ["training", "pre_trip", "post_trip", "return_to_service"]).notNull(),
   status: mysqlEnum("status", [
     "pass",
     "fail",
@@ -313,6 +313,12 @@ export const inspections = mysqlTable("inspections", {
   observedAt: timestamp("observedAt").notNull(),
   authenticatedOperatorId: int("authenticatedOperatorId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /* 0221 — a return-to-service inspection: the second person's verification of a released repair. */
+  inspectionRef: varchar("inspectionRef", { length: 64 }).unique(),
+  outcome: mysqlEnum("outcome", ["pass", "fail"]),
+  inspectorUserId: int("inspectorUserId"),
+  workOrderId: int("workOrderId"),
+  releaseId: int("releaseId"),
 });
 
 export const maintenanceDefects = mysqlTable("maintenanceDefects", {
@@ -347,6 +353,15 @@ export const maintenanceDefects = mysqlTable("maintenanceDefects", {
   resolvedByReleaseId: int("resolvedByReleaseId"),
   resolutionNote: varchar("resolutionNote", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /* 0221 — what the reporter said and proposed, kept apart from what was decided. `severity` above is the
+     decision readiness reads; `severityProposed` never is. NULL on rows from before 0221: not recorded. */
+  defectRef: varchar("defectRef", { length: 64 }).unique(),
+  source: mysqlEnum("source", ["driver_report", "mechanic_inspection", "roadside", "enforcement", "telematics", "office"]),
+  driverStatement: text("driverStatement"),
+  severityProposed: mysqlEnum("severityProposed", ["advisory", "inspection_required", "critical"]),
+  severityProposedByUserId: int("severityProposedByUserId"),
+  severityDecidedByUserId: int("severityDecidedByUserId"),
+  severityDecidedAt: timestamp("severityDecidedAt"),
 });
 
 export const deliveries = mysqlTable("deliveries", {
@@ -706,6 +721,8 @@ export const workOrders = mysqlTable("workOrders", {
     "waiting_parts",
     "ready_for_service",
     "closed",
+    // 0199 — cancelled is not closed: nothing was repaired, so it can never evidence a release.
+    "cancelled",
   ])
     .default("open")
     .notNull(),
@@ -722,6 +739,11 @@ export const workOrders = mysqlTable("workOrders", {
   parts: text("parts"),
   findings: text("findings"),
   correctiveAction: text("correctiveAction"),
+  /* 0199 — who opened it, and the cancellation act on the row it changes. NULL on older rows means not recorded. */
+  openedByUserId: int("openedByUserId"),
+  cancelledAt: timestamp("cancelledAt"),
+  cancelledByUserId: int("cancelledByUserId"),
+  cancelReason: varchar("cancelReason", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -9253,78 +9275,28 @@ export const calibrationSweepFindings = mysqlTable("calibrationSweepFindings", {
   determinationBasis: varchar("determinationBasis", { length: 500 }),
 });
 
-/* ---- 0210/0211: Driver Portfolio and Credential Wallet ---- */
+/* ------------------------------------------------------------------ */
+/* 0199 — Fleet maintenance, checkpoint 1: who owns a work order        */
+/* ------------------------------------------------------------------ */
 
-/**
- * What a customer, a site, a job type, a piece of equipment or the company
- * itself requires of the operator. `company` binds with subjectCode `*` and
- * applies to every job; it is also the wallet's baseline. Only a `mandatory`
- * binding can block dispatch.
- */
-export const driverRequirementBindings = mysqlTable("driverRequirementBindings", {
+/** Who owns a work order, as history. The current assignee is the newest row; nothing updates one. */
+export const workOrderAssignments = mysqlTable("workOrderAssignments", {
   id: int("id").autoincrement().primaryKey(),
-  bindingRef: varchar("bindingRef", { length: 96 }).notNull().unique(),
-  /** 0212 — an update retires a binding and creates this successor, which names what it replaced. */
-  supersedesBindingRef: varchar("supersedesBindingRef", { length: 96 }),
-  /** NULL = the historical single tenant. Applies only to work of the same organization. */
-  orgRef: varchar("orgRef", { length: 64 }),
-  subjectType: mysqlEnum("subjectType", ["company", "customer", "site", "job_type", "equipment", "job"]).notNull(),
-  subjectCode: varchar("subjectCode", { length: 160 }).notNull(),
-  requirementKind: mysqlEnum("requirementKind", ["credential", "licence_class", "equipment"]).notNull(),
-  requirementCode: varchar("requirementCode", { length: 160 }).notNull(),
-  label: varchar("label", { length: 220 }),
-  enforcement: mysqlEnum("enforcement", ["mandatory", "informational"]).default("mandatory").notNull(),
-  effectiveAt: timestamp("effectiveAt"),
-  expiresAt: timestamp("expiresAt"),
-  active: boolean("active").default(true).notNull(),
-  createdByUserId: int("createdByUserId").notNull(),
-  retiredByUserId: int("retiredByUserId"),
-  retiredAt: timestamp("retiredAt"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-
-/** Append-only (0211): what happened to a driver's credentials, and who did it. */
-export const driverPortfolioEvents = mysqlTable("driverPortfolioEvents", {
-  id: int("id").autoincrement().primaryKey(),
-  eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
-  /** 0212 — the organization the event belongs to. NULL = the historical single tenant. */
-  orgRef: varchar("orgRef", { length: 64 }),
-  /** NULL for an organization-level event (a requirement bound, changed or retired). */
-  operatorId: int("operatorId"),
-  credentialId: int("credentialId"),
-  actorUserId: int("actorUserId"),
-  eventType: mysqlEnum("eventType", [
-    "credential_uploaded", "credential_verified", "credential_rejected", "credential_superseded",
-    "requirement_bound", "requirement_modified", "requirement_retired",
-    "wallet_viewed", "portfolio_viewed", "credential_shared", "share_revoked", "share_verified", "used_for_dispatch",
-  ]).notNull(),
-  detail: varchar("detail", { length: 400 }),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  workOrderId: int("workOrderId").notNull(),
+  unitId: int("unitId").notNull(),
+  eventType: mysqlEnum("eventType", ["assigned", "reassigned", "unassigned"]).notNull(),
+  fromUserId: int("fromUserId"),
+  toUserId: int("toUserId"),
+  shopFacilityId: int("shopFacilityId"),
+  expectedCompletionAt: timestamp("expectedCompletionAt"),
+  reason: varchar("reason", { length: 400 }),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 40 }).notNull(),
   occurredAt: timestamp("occurredAt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-/**
- * 0212 — a one-credential share. The token is `newToken()` and only its SHA-256
- * is stored; redeeming re-reads the credential, so a share never outlives the
- * credential being valid. Revocation is `revokedAt`; the audit is in
- * `driverPortfolioEvents`.
- */
-export const driverCredentialShares = mysqlTable("driverCredentialShares", {
-  id: int("id").autoincrement().primaryKey(),
-  shareRef: varchar("shareRef", { length: 96 }).notNull().unique(),
-  orgRef: varchar("orgRef", { length: 64 }),
-  operatorId: int("operatorId").notNull(),
-  credentialId: int("credentialId").notNull(),
-  credentialCode: varchar("credentialCode", { length: 160 }).notNull(),
-  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
-  audience: varchar("audience", { length: 160 }).notNull(),
-  issuedByUserId: int("issuedByUserId").notNull(),
-  issuedAt: timestamp("issuedAt").notNull(),
-  expiresAt: timestamp("expiresAt").notNull(),
-  revokedAt: timestamp("revokedAt"),
-  revokedByUserId: int("revokedByUserId"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
 /* ==================================================================
  * DC-A (0178) — Document Control: the definition registry and the
  * catalog's provenance. A definition says how a class of controlled record
@@ -9649,6 +9621,80 @@ export const providerCredentials = mysqlTable("providerCredentials", {
   tenantIdx: index("providerCredentials_tenant_idx").on(t.orgRef, t.providerKey),
 }));
 
+/* ------------------------------------------------------------------ */
+/* 0200 — Fleet & Equipment Portfolio, foundation slice                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A manual or workflow-placed hold on a unit. Holds that are other records (a critical defect, a
+ * government order, an open roadside event, a critical fault) are read from their source and are not
+ * rows here. `out_of_service` exactly when `holdType` is `safety`. Placement is immutable and a hold is
+ * released once (0201 triggers). See docs/fleet/FLEET_PORTFOLIO_FOUNDATION_RECONCILIATION.md.
+ */
+export const unitHolds = mysqlTable("unitHolds", {
+  id: int("id").autoincrement().primaryKey(),
+  holdRef: varchar("holdRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  unitId: int("unitId").notNull(),
+  holdType: mysqlEnum("holdType", ["safety", "maintenance", "inspection", "compliance", "damage", "administrative"]).notNull(),
+  dispatchEffect: mysqlEnum("dispatchEffect", ["warn", "block", "out_of_service"]).notNull(),
+  reason: varchar("reason", { length: 600 }).notNull(),
+  sourceKind: mysqlEnum("sourceKind", ["manual", "incident", "damage_report", "inspection", "document_expiry", "defect", "work_order", "enforcement"]).default("manual").notNull(),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  evidenceRecordId: int("evidenceRecordId"),
+  placedByUserId: int("placedByUserId").notNull(),
+  placedByRole: varchar("placedByRole", { length: 40 }).notNull(),
+  placedAt: timestamp("placedAt").notNull(),
+  status: mysqlEnum("status", ["active", "released"]).default("active").notNull(),
+  releasedAt: timestamp("releasedAt"),
+  releasedByUserId: int("releasedByUserId"),
+  releasedByRole: varchar("releasedByRole", { length: 40 }),
+  releaseReason: varchar("releaseReason", { length: 600 }),
+  releaseEvidenceRecordId: int("releaseEvidenceRecordId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * Meter readings with no other home (mechanic, inspection, job closeout, import). Telemetry, work
+ * order, fuel, trip and tire figures stay in their own tables and are read beside these; nothing is
+ * copied here. What was observed is immutable (0201); verification is decided once, by a second person.
+ */
+export const unitMeterReadings = mysqlTable("unitMeterReadings", {
+  id: int("id").autoincrement().primaryKey(),
+  readingRef: varchar("readingRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  unitId: int("unitId").notNull(),
+  meterType: mysqlEnum("meterType", ["odometer_km", "engine_hours", "pto_hours", "pump_hours", "blower_hours", "compressor_hours", "generator_hours", "other"]).notNull(),
+  reading: double("reading").notNull(),
+  recordedAt: timestamp("recordedAt").notNull(),
+  source: mysqlEnum("source", ["driver_manual", "mechanic", "inspection", "job_closeout", "imported"]).notNull(),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  enteredByUserId: int("enteredByUserId").notNull(),
+  confidence: mysqlEnum("confidence", ["low", "medium", "high"]).default("medium").notNull(),
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "rejected"]).default("unverified").notNull(),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  note: varchar("note", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** The portfolio's append-only history (0201 refuses UPDATE and DELETE). */
+export const fleetPortfolioEvents = mysqlTable("fleetPortfolioEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  unitId: int("unitId").notNull(),
+  subjectType: varchar("subjectType", { length: 40 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  eventType: mysqlEnum("eventType", ["asset_created", "asset_edited", "lifecycle_changed", "hold_placed", "hold_released", "component_attached", "component_detached", "meter_recorded", "meter_verified", "meter_rejected", "document_recorded", "document_verified", "inspection_recorded", "defect_reported", "portfolio_viewed", "used_for_dispatch"]).notNull(),
+  previousState: varchar("previousState", { length: 80 }),
+  newState: varchar("newState", { length: 80 }),
+  detail: varchar("detail", { length: 600 }),
+  actorUserId: int("actorUserId"),
+  actorRole: varchar("actorRole", { length: 40 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
 /* ---- LA-1a (0202/0203): the Live Assist session spine ---- */
 
 /**
@@ -10311,5 +10357,125 @@ export const jobCommercialSnapshots = mysqlTable("jobCommercialSnapshots", {
   payloadJson: text("payloadJson").notNull(),
   payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
   supersedesSnapshotId: int("supersedesSnapshotId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/* ------------------------------------------------------------------ */
+/* 0221 — Fleet maintenance, checkpoint 2: defect to return to service */
+/* ------------------------------------------------------------------ */
+
+/** Every act on a defect, as history (0222: append-only). Written in the transaction of the act. */
+export const maintenanceDefectEvents = mysqlTable("maintenanceDefectEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  defectId: int("defectId").notNull(),
+  unitId: int("unitId").notNull(),
+  eventType: mysqlEnum("eventType", ["reported", "severity_decided", "sent_to_shop", "task_added", "task_status", "released", "returned_to_service", "return_to_service_failed", "resolved", "hold_placed", "hold_released", "roadside_closed"]).notNull(),
+  fromValue: varchar("fromValue", { length: 120 }),
+  toValue: varchar("toValue", { length: 120 }),
+  reason: varchar("reason", { length: 600 }),
+  actorUserId: int("actorUserId").notNull(),
+  actorRole: varchar("actorRole", { length: 40 }).notNull(),
+  workOrderId: int("workOrderId"),
+  releaseId: int("releaseId"),
+  taskId: int("taskId"),
+  inspectionId: int("inspectionId"),
+  holdRef: varchar("holdRef", { length: 96 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** The repair as tasks. Forward only; a finished task is history (0222); a release waits for every task. */
+export const workOrderTasks = mysqlTable("workOrderTasks", {
+  id: int("id").autoincrement().primaryKey(),
+  taskRef: varchar("taskRef", { length: 64 }).notNull().unique(),
+  workOrderId: int("workOrderId").notNull(),
+  unitId: int("unitId").notNull(),
+  seq: int("seq").notNull(),
+  kind: mysqlEnum("kind", ["inspect", "diagnose", "repair", "replace", "adjust", "road_test", "other"]).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  instructions: text("instructions"),
+  defectId: int("defectId"),
+  status: mysqlEnum("status", ["open", "in_progress", "done", "not_required", "deferred"]).default("open").notNull(),
+  findings: text("findings"),
+  correctiveAction: text("correctiveAction"),
+  deferredReason: varchar("deferredReason", { length: 400 }),
+  createdByUserId: int("createdByUserId").notNull(),
+  completedByUserId: int("completedByUserId"),
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/* ---- 0210/0211: Driver Portfolio and Credential Wallet ---- */
+
+/**
+ * What a customer, a site, a job type, a piece of equipment or the company
+ * itself requires of the operator. `company` binds with subjectCode `*` and
+ * applies to every job; it is also the wallet's baseline. Only a `mandatory`
+ * binding can block dispatch.
+ */
+export const driverRequirementBindings = mysqlTable("driverRequirementBindings", {
+  id: int("id").autoincrement().primaryKey(),
+  bindingRef: varchar("bindingRef", { length: 96 }).notNull().unique(),
+  /** 0212 — an update retires a binding and creates this successor, which names what it replaced. */
+  supersedesBindingRef: varchar("supersedesBindingRef", { length: 96 }),
+  /** NULL = the historical single tenant. Applies only to work of the same organization. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  subjectType: mysqlEnum("subjectType", ["company", "customer", "site", "job_type", "equipment", "job"]).notNull(),
+  subjectCode: varchar("subjectCode", { length: 160 }).notNull(),
+  requirementKind: mysqlEnum("requirementKind", ["credential", "licence_class", "equipment"]).notNull(),
+  requirementCode: varchar("requirementCode", { length: 160 }).notNull(),
+  label: varchar("label", { length: 220 }),
+  enforcement: mysqlEnum("enforcement", ["mandatory", "informational"]).default("mandatory").notNull(),
+  effectiveAt: timestamp("effectiveAt"),
+  expiresAt: timestamp("expiresAt"),
+  active: boolean("active").default(true).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** Append-only (0211): what happened to a driver's credentials, and who did it. */
+export const driverPortfolioEvents = mysqlTable("driverPortfolioEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
+  /** 0212 — the organization the event belongs to. NULL = the historical single tenant. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  /** NULL for an organization-level event (a requirement bound, changed or retired). */
+  operatorId: int("operatorId"),
+  credentialId: int("credentialId"),
+  actorUserId: int("actorUserId"),
+  eventType: mysqlEnum("eventType", [
+    "credential_uploaded", "credential_verified", "credential_rejected", "credential_superseded",
+    "requirement_bound", "requirement_modified", "requirement_retired",
+    "wallet_viewed", "portfolio_viewed", "credential_shared", "share_revoked", "share_verified", "used_for_dispatch",
+  ]).notNull(),
+  detail: varchar("detail", { length: 400 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * 0212 — a one-credential share. The token is `newToken()` and only its SHA-256
+ * is stored; redeeming re-reads the credential, so a share never outlives the
+ * credential being valid. Revocation is `revokedAt`; the audit is in
+ * `driverPortfolioEvents`.
+ */
+export const driverCredentialShares = mysqlTable("driverCredentialShares", {
+  id: int("id").autoincrement().primaryKey(),
+  shareRef: varchar("shareRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  operatorId: int("operatorId").notNull(),
+  credentialId: int("credentialId").notNull(),
+  credentialCode: varchar("credentialCode", { length: 160 }).notNull(),
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  audience: varchar("audience", { length: 160 }).notNull(),
+  issuedByUserId: int("issuedByUserId").notNull(),
+  issuedAt: timestamp("issuedAt").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokedByUserId: int("revokedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

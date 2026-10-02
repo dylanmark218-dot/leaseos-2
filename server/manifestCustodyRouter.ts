@@ -13,6 +13,7 @@ import { z } from "zod";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { reconcileManifestFacts, type ManifestFactKey } from "./_core/manifestFactReconciliation";
 import { TRPCError } from "@trpc/server";
+import { requireUnitInScope } from "./unitScope";
 import { and, asc, eq } from "drizzle-orm";
 import { router, roleProcedure } from "./_core/trpc";
 import { actingScopeFor, getDb, manifestInScope } from "./db";
@@ -90,7 +91,9 @@ async function resolveParties(db: Db, orgRef: string, p: z.infer<typeof PARTY>) 
   for (const [key, role] of [["unitId", "unit"], ["trailerUnitId", "trailer"]] as const) {
     const id = p[key];
     if (!id) continue;
-    if (!(await recordBelongsToOrganization(db, orgRef, "unit", id))) throw new TRPCError({ code: "FORBIDDEN", message: `${role === "unit" ? "Unit" : "Trailer"} is not owned by this organization` });
+    // CP1.5 — the canonical unit check: another organization's unit or trailer is not found, like a
+    // missing one. (FORBIDDEN "not owned" told the historical tenant which ids existed.)
+    await requireUnitInScope(id, { tenantId: orgRef }, role === "unit" ? "Unit" : "Trailer");
     const u = (await db.select({ unitNumber: units.unitNumber }).from(units).where(eq(units.id, id)).limit(1))[0];
     if (!u) throw new TRPCError({ code: "NOT_FOUND", message: `${role} not found` });
     snapshots.push({ role, canonicalEntityId: id, capturedName: u.unitNumber, capturedIdentifier: null });
