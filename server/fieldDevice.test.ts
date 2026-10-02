@@ -451,6 +451,21 @@ d("office receipt: a verified hash, not a 200, releases the device copy", () => 
     expect(await codes(ok)).toEqual(expect.arrayContaining(["office_not_received"]));
 
     const item = (id: number, m: string) => ({ evidenceRecordId: id, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" as const });
+
+    // Naming an id is not delivering a record. A package that names a record that does not exist, or one
+    // with no stored object, leaves no receipt behind — otherwise the next record to take that id would
+    // arrive already "received" (which is how the full gate caught the first version of this).
+    const [maxRow] = await pool.query<mysql.RowDataPacket[]>("SELECT MAX(id) AS m FROM evidenceRecords");
+    const ghost = Number(maxRow[0]!.m) + 100_000;
+    const [meta] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt, capturedBy, status, createdAt) VALUES ('no bytes', 'ticket', NOW(), ?, 'needs_review', NOW())", [driver]);
+    // Another company's record, with real stored bytes, is still not this caller's to mark received.
+    const orgRef = `ORG-${key("x")}`.slice(0, 40);
+    await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?, ?, 'active')", [orgRef, `o ${orgRef}`]);
+    const [theirJob] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, orgRef) VALUES (?, 'Hydrovac', 'Fixture', 'Elsewhere', 'dispatched', ?)", [key("JOB").slice(0, 40), orgRef]);
+    const [theirs] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (jobId, title, category, storageKey, capturedAt, status, createdAt) SELECT ?, 'theirs', 'ticket', storageKey, NOW(), 'needs_review', NOW() FROM evidenceRecords WHERE id = ?", [theirJob.insertId, ok]);
+    await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [item(ghost, mOk), item(meta.insertId, mOk), item(theirs.insertId, mOk)] }));
+    const [none] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM recordRetentionState WHERE evidenceRecordId IN (?, ?, ?)", [ghost, meta.insertId, theirs.insertId]);
+    expect(Number(none[0]!.n)).toBe(0);
     const pushed = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [item(ok, mOk), item(tampered, mBad)] }));
     expect(pushed).toMatchObject({ verified: 1, rejected: 1 });
 

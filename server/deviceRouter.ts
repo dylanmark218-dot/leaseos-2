@@ -12,7 +12,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, evidenceInScope, getDb } from "./db";
 import { sealIsTrustworthy, verifySealAgainstStored } from "./_core/evidenceSeal";
 import { recordOfficeReceipt } from "./recordsService";
 import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
@@ -288,23 +288,29 @@ export const syncRouter = router({
       // stored object cannot be read, the item is rejected rather than trusted.
       const recomputed = await Promise.all(items.map(async it => {
         const rec = (await db.select({ storageKey: evidenceRecords.storageKey }).from(evidenceRecords).where(eq(evidenceRecords.id, it.evidenceRecordId)).limit(1))[0];
-        if (!rec?.storageKey) return { ...it, computedContentHash: "0".repeat(64), computedManifestHash: it.declaredManifestHash };
+        // `stored`: the server read real bytes for a record that exists. Only then has the office received anything.
+        if (!rec?.storageKey) return { ...it, computedContentHash: "0".repeat(64), computedManifestHash: it.declaredManifestHash, stored: false };
         try {
           const bytes = await storageRead(rec.storageKey);
-          return { ...it, computedContentHash: createHash("sha256").update(bytes).digest("hex"), computedManifestHash: it.declaredManifestHash };
+          return { ...it, computedContentHash: createHash("sha256").update(bytes).digest("hex"), computedManifestHash: it.declaredManifestHash, stored: true };
         } catch {
-          return { ...it, computedContentHash: "0".repeat(64), computedManifestHash: it.declaredManifestHash };
+          return { ...it, computedContentHash: "0".repeat(64), computedManifestHash: it.declaredManifestHash, stored: false };
         }
       }));
       const verification = verifyPackageItems({ items: recomputed, seals });
+      const receiptScope = await actingScopeFor(ctx.user.id);
 
       for (const it of items) {
         const v = verification.verdicts.find(x => x.evidenceRecordId === it.evidenceRecordId)!;
         await db.insert(syncPackageItems).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, declaredContentHash: it.declaredContentHash, declaredManifestHash: it.declaredManifestHash,
           captureAuthorizationClaim: it.captureAuthorizationClaim, captureAuthorizationReason: it.captureAuthorizationReason ?? null, state: v.outcome === "verified" ? "verified" : "mismatch" });
         await db.insert(syncReceipts).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, computedContentHash: recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)!.computedContentHash, computedManifestHash: recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)!.computedManifestHash, matched: v.outcome === "verified", receivedAt: now, failureDetail: v.outcome === "verified" ? null : v.reason });
-        // B20's rule: a verified hash, not a 200, is what lets the device let go of its copy.
-        await recordOfficeReceipt({ evidenceId: it.evidenceRecordId, at: now, integrityVerified: v.outcome === "verified" });
+        // B20's rule: a verified hash, not a 200, is what lets the device let go of its copy. A receipt is
+        // recorded only for a record that exists, whose stored bytes the server read, in the caller's own
+        // organization — a package can name any id, and naming one must not mark it received.
+        if (recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)?.stored && (await evidenceInScope(it.evidenceRecordId, receiptScope))) {
+          await recordOfficeReceipt({ evidenceId: it.evidenceRecordId, at: now, integrityVerified: v.outcome === "verified" });
+        }
       }
       await db.update(syncPackages).set({
         state: verification.packageOutcome,
