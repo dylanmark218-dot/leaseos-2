@@ -169,8 +169,10 @@ export function startDrainWorker(
         const batch = await ports.claimBatch(cfg.workerId, cfg.batchSize);
         stats.claimed += batch.length;
 
+        // A stop does not break out of the batch: every event here is claimed under a lease
+        // (CLAIM_LEASE_SECONDS), and one abandoned mid-batch could not be taken by any worker until
+        // that lease ran out. The loop condition stops the next claim instead.
         for (const event of batch) {
-          if (!running) break;
           try {
             const result = await ports.processEvent(event);
             await ports.markProcessed(event.id);

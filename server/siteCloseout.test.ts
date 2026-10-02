@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { classifyDelay, closeoutState, composeSiteSnapshot, lineDecision, postSiteSupplement, signatureDecision, whyTheseHours, type PostSiteAuthorization, type SignatoryAuthority, type TicketEvent, type TicketLine } from "./_core/siteCloseout";
+import { fieldTicketSignatureVerdict } from "./_core/fieldTicketSignature";
 import { appRouter } from "./routers";
 import { grantUserRole } from "./db";
 import type { DomainRole } from "./_core/recordsAuthorization";
@@ -98,15 +99,18 @@ describe("delays are classified by the contract, or held", () => {
   });
 });
 
+// The canonical verdict a ticket with no signature on file gets — what closeout reads, never a null row.
+const UNSIGNED = fieldTicketSignatureVerdict({ ticket: { status: "presented", signatureStatus: "unsigned" }, signatures: [], revisions: [] });
+
 describe("three closes, and why the hours are what they are", () => {
   it("walks OPEN → WORK_ACTIVE → SITE_CLOSE_PENDING → SITE_SIGNED/POST_SITE → BILLING_READY, naming each blocker", () => {
     const lines = [line({ id: 1, sourceTrackingNumber: "DT-1" })];
-    expect(closeoutState({ events: [], lines, siteWorkCompleteAt: null, signature: null, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 }).state).toBe("OPEN");
-    expect(closeoutState({ events: [ev("site_work", "07:31", null)], lines, siteWorkCompleteAt: null, signature: null, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 }).state).toBe("WORK_ACTIVE");
-    const pending = closeoutState({ events: [ev("site_work", "07:31", "17:06")], lines, siteWorkCompleteAt: at("17:06"), signature: null, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 });
+    expect(closeoutState({ events: [], lines, siteWorkCompleteAt: null, signature: UNSIGNED, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 }).state).toBe("OPEN");
+    expect(closeoutState({ events: [ev("site_work", "07:31", null)], lines, siteWorkCompleteAt: null, signature: UNSIGNED, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 }).state).toBe("WORK_ACTIVE");
+    const pending = closeoutState({ events: [ev("site_work", "07:31", "17:06")], lines, siteWorkCompleteAt: at("17:06"), signature: UNSIGNED, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 });
     expect(pending.state).toBe("SITE_CLOSE_PENDING");
     expect(pending.blockers).toEqual(["Site ticket not signed", "Post-site supplement not prepared"]);
-    const sig = { signedAt: at("17:14"), signerName: "M. Johnson", result: "accepted" };
+    const sig = fieldTicketSignatureVerdict({ ticket: { status: "closed", signatureStatus: "accepted" }, signatures: [{ revision: 1, result: "accepted", payloadHash: "h1", capturedAt: at("17:14"), signerName: "M. Johnson" }], revisions: [{ revision: 1, kind: "site_signed", snapshotHash: "h1" }] });
     const active = closeoutState({ events: [ev("site_work", "07:31", "17:06"), ev("travel_to_disposal", "17:18", null)], lines, siteWorkCompleteAt: at("17:06"), signature: sig, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 });
     expect(active.state).toBe("POST_SITE_ACTIVE");
     expect(active.fieldClosed).toEqual({ at: "2026-09-10T17:14:00.000Z", by: "M. Johnson" });

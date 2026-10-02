@@ -32,6 +32,7 @@ import { produceFieldTicketSignature } from "./_core/attest/attestProducers";
 import { AttestRefusal } from "./_core/attest/attestService";
 import { coreRecordOwnership } from "../drizzle/schema";
 import { clientAdjustments, customerAccounts, customerContractTerms, delayEvents, disposalTickets, fieldTicketDocuments, fieldTicketEvents, fieldTicketLines, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, jobs, loads, payrollAdjustments, roadHazardObservations, signatoryAuthorities, tripStops, weatherObservations } from "../drizzle/schema";
+import { fieldTicketSignatureVerdict, type SignatureVerdict } from "./_core/fieldTicketSignature";
 import { EVENT_CLOCK, canonicalJson, classifyDelay, closeoutState, composeSiteSnapshot, lineDecision, postSiteSupplement, sha256, signatureDecision, whyTheseHours, type Authority, type DelayRules, type EventType, type PostSiteAuthorization, type SiteSnapshot, type Supplement, type TicketEvent, type TicketLine } from "./_core/siteCloseout";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -56,7 +57,16 @@ export async function loadTicket(ticketNumber: string) {
   const ln: TicketLine[] = lines.map(l => ({ id: l.id, lineKind: l.lineKind, description: l.description, quantity: l.quantity, quantityUnit: l.quantityUnit, measurementMethod: l.measurementMethod, sourceTrackingNumber: l.sourceTrackingNumber, disposition: l.disposition, operatorStatement: l.operatorStatement, customerStatement: l.customerStatement }));
   // v22.2 — the account's approved contract terms in effect on the ticket's date, or null.
   const terms = await termsFor(account?.id ?? null, t.completedAt ?? t.createdAt);
-  return { db, t, terms, events: ev, lines: ln, signature: sigs[0] ?? null, revisions, job, account };
+  // SPINE item 2 — whether the signature this ticket needs is established is decided once, from every
+  // signature row, every revision and the ticket's own record. `signature` stays the evidence the
+  // workflow locks and the documents read; `signatureVerdict` is the answer the decisions read.
+  const signatureVerdict = fieldTicketSignatureVerdict({ ticket: t, signatures: sigs, revisions });
+  return { db, t, terms, events: ev, lines: ln, signature: sigs[0] ?? null, signatureVerdict, revisions, job, account };
+}
+
+/** The workflow's own refusal, unchanged for a ticket with no signature; any other unsatisfied verdict names why. */
+export function unsignedMessage(message: string, verdict: SignatureVerdict): string {
+  return verdict.state === "unsigned" ? message : `${message} — ${verdict.reason}`;
 }
 
 export function snapshotFor(x: Awaited<ReturnType<typeof loadTicket>>) {
@@ -136,7 +146,7 @@ deviceAttestation?: { deviceRef: string; keyFingerprint: string; signatureP1363B
 export async function decideLine(args: { ticketNumber: string; lineId: number; disposition: "accepted" | "disputed"; customerQuantity: number | null; customerStatement: string | null; customerAccountIdMustMatch: number | null }) {
   const x = await loadTicket(args.ticketNumber);
   if (args.customerAccountIdMustMatch != null && x.t.customerAccountId !== args.customerAccountIdMustMatch) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket on this account" });
-  if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Lines are decided against a signed ticket" });
+  if (!x.signatureVerdict.satisfied) throw new TRPCError({ code: "PRECONDITION_FAILED", message: unsignedMessage("Lines are decided against a signed ticket", x.signatureVerdict) });
   const line = x.lines.find(l => l.id === args.lineId);
   if (!line) throw new TRPCError({ code: "NOT_FOUND", message: "Line not found" });
   const d = lineDecision(line, { disposition: args.disposition, customerQuantity: args.customerQuantity, customerStatement: args.customerStatement });
@@ -327,7 +337,7 @@ export const closeoutRouter = router({
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
       const x = await loadTicket(input.ticketNumber);
-      if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A supplement follows a signed site ticket" });
+      if (!x.signature || !x.signatureVerdict.satisfied) throw new TRPCError({ code: "PRECONDITION_FAILED", message: unsignedMessage("A supplement follows a signed site ticket", x.signatureVerdict) });
       if (!x.t.completedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Site work completion is not recorded" });
       const authorization = x.signature.postSiteAuthorizationJson ? (JSON.parse(x.signature.postSiteAuthorizationJson) as PostSiteAuthorization) : null;
       const dt = input.disposalTicketNumber ? (await x.db.select().from(disposalTickets).where(eq(disposalTickets.ticketNumber, input.disposalTicketNumber)).limit(1))[0] : undefined;
@@ -353,7 +363,7 @@ export const closeoutRouter = router({
       const supplement = await latestSupplement(x);
       const loads = x.lines.filter(l => l.lineKind === "load").length;
       const withEvidence = x.lines.filter(l => l.lineKind === "load" && l.sourceTrackingNumber).length;
-      return { ticketNumber: x.t.ticketNumber, ...closeoutState({ events: x.events, lines: x.lines, siteWorkCompleteAt: x.t.completedAt, signature: x.signature ? { signedAt: x.signature.capturedAt, signerName: x.signature.signerName ?? "unknown signer", result: x.signature.result } : null, supplement, postSiteRequired: x.t.postSiteRequired, loadsWithDisposalEvidence: withEvidence, loads }), revisions: x.revisions.map(r => ({ documentRef: r.documentRef, revision: r.revision, kind: r.kind, snapshotHash: r.snapshotHash, generatedAt: r.generatedAt })) };
+      return { ticketNumber: x.t.ticketNumber, ...closeoutState({ events: x.events, lines: x.lines, siteWorkCompleteAt: x.t.completedAt, signature: x.signatureVerdict, supplement, postSiteRequired: x.t.postSiteRequired, loadsWithDisposalEvidence: withEvidence, loads }), revisions: x.revisions.map(r => ({ documentRef: r.documentRef, revision: r.revision, kind: r.kind, snapshotHash: r.snapshotHash, generatedAt: r.generatedAt })) };
     }),
 
   whyTheseHours: roleProcedure("closeout.whyTheseHours")
@@ -530,7 +540,7 @@ export const closeoutRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const x = await loadTicket(input.ticketNumber);
-      if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A completion package needs a signed ticket" });
+      if (!x.signature || !x.signatureVerdict.satisfied) throw new TRPCError({ code: "PRECONDITION_FAILED", message: unsignedMessage("A completion package needs a signed ticket", x.signatureVerdict) });
       const latest = [...x.revisions].sort((a, b) => b.revision - a.revision)[0]!;
       const [docs, adj, jobLoads] = await Promise.all([
         db.select().from(fieldTicketDocuments).where(eq(fieldTicketDocuments.fieldTicketId, x.t.id)),
