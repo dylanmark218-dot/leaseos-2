@@ -188,3 +188,96 @@ d("a commercial link may only name a record this book can see", () => {
     expect(foreign).toBe(fictional);
   }, 30_000);
 });
+
+/**
+ * F4 — unknown ownership is not shared ownership in the commercial book.
+ *
+ * `bookWhere` read a member's own rows AND every row whose `bookOrgRef` is
+ * NULL. On the five tables 0133 SEEDS that is the design: NULL is the platform
+ * default layer, a business's own row wins, and `layerFor`/`numberingPolicyFor`
+ * need both layers in hand — take the defaults away and a new organization has
+ * no role types, no document types and no approval tier.
+ *
+ * On the tables nothing seeds, NULL means the opposite: ownership was never
+ * established. Those rows are one business's real commercial data, and a member
+ * must not read them. The two readings are one nullable column, so nothing at a
+ * call site distinguishes them — which is how one helper came to serve both.
+ * commercialBookScope.test.ts derives the split from the migrations so it cannot
+ * rot; these tests pin the behaviour.
+ */
+d("F4 — a member does not read the book's unattributed rows", () => {
+  it("keeps a member out of an unowned chart of accounts, and keeps the seeded defaults", async () => {
+    const book = await org();
+    const office = await member(book, ["office", "management"]);
+    const legacyCode = `9${String(seq++).slice(-5)}`;
+    await pool.execute(
+      "INSERT INTO commercialGlAccounts (bookOrgRef, code, name, kind, source) VALUES (NULL,?,?,'revenue','legacy import')",
+      [legacyCode, "Unattributed legacy revenue"],
+    );
+
+    const gl = await callerFor(office).commercialOffice.gl.list();
+    expect(gl.accounts.map(a => a.code)).not.toContain(legacyCode);
+    expect(gl.accounts.every(a => a.bookOrgRef === book)).toBe(true);
+
+    // The SEEDED default layer is not ownership data and must survive.
+    const types = await callerFor(office).commercialOffice.roleTypes.list();
+    expect(types.some(t => t.bookOrgRef === null && t.builtIn)).toBe(true);
+  }, 30_000);
+
+  it("will not map a GL key onto an account the book cannot see", async () => {
+    const book = await org();
+    const office = await member(book, ["office", "management"]);
+    const legacyCode = `9${String(seq++).slice(-5)}`;
+    await pool.execute(
+      "INSERT INTO commercialGlAccounts (bookOrgRef, code, name, kind, source) VALUES (NULL,?,?,'revenue','legacy import')",
+      [legacyCode, "Unattributed legacy revenue"],
+    );
+    await expect(
+      callerFor(office).commercialOffice.gl.mappingSet({ mappingKind: "service_code", mappingKey: `svc-${rnd()}`, glAccountCode: legacyCode }),
+    ).rejects.toThrow(/not in this business's chart/i);
+  }, 30_000);
+
+  it("keeps a member out of unowned and foreign facility statements", async () => {
+    const bookA = await org(), bookB = await org();
+    const officeA = await member(bookA, ["office", "management"]);
+    const fac = await facility();
+    const mk = async (book: string | null, ref: string) => pool.execute(
+      "INSERT INTO facilityStatements (statementRef, bookOrgRef, facilityId, periodStart, periodEnd, contentHash, importedByUserId) VALUES (?,?,?,'2026-01-01','2026-01-31',?,1)",
+      [ref, book, fac, rnd()],
+    );
+    const legacyRef = `FSTMT-LEGACY-${rnd()}`, foreignRef = `FSTMT-B-${rnd()}`;
+    await mk(null, legacyRef);
+    await mk(bookB, foreignRef);
+
+    const seen = await callerFor(officeA).commercialOffice.disposal.statements({});
+    const refs = seen.map((s: { statementRef: string }) => s.statementRef);
+    expect(refs).not.toContain(legacyRef);
+    expect(refs).not.toContain(foreignRef);
+  }, 30_000);
+});
+
+d("a link refusal does not name the other book's counterparty", () => {
+  it("states the conflict on a shared facility without naming who holds it", async () => {
+    const bookA = await org(), bookB = await org();
+    const officeA = await member(bookA, ["office", "management"]);
+    const officeB = await member(bookB, ["office", "management"]);
+    const shared = await facility();
+
+    const bsCounterparty = await counterpartyFor(officeB, "disposal_facility");
+    const bsLink = await callerFor(officeB).commercialOffice.links.set({
+      recordType: "facility", recordId: shared, orgRef: bsCounterparty,
+    });
+
+    const asCounterparty = await counterpartyFor(officeA, "disposal_facility");
+    const refusal = await callerFor(officeA).commercialOffice.links.set({
+      recordType: "facility", recordId: shared, orgRef: asCounterparty,
+    }).then(() => null, (e: Error) => e.message);
+
+    // The conflict itself is inherent to an exclusive shared directory and may
+    // be stated. B's counterparty, B's link reference and B's book may not.
+    expect(refusal).toBeTruthy();
+    expect(refusal).not.toContain(bsCounterparty);
+    expect(refusal).not.toContain(bsLink.linkRef);
+    expect(refusal).not.toContain(bookB);
+  }, 30_000);
+});
