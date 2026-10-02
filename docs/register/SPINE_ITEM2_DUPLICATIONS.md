@@ -221,6 +221,37 @@ A mutation that bypasses `shiftEligibility` in `expressInterest` fails the guard
 
 #59 also brought a census that forbids open-work files from importing a validity engine (`documentValidityCanonical.test.ts`). That collided with the rule's `readExpiry` licence check and turned main red. dylanmark218-dot/leaseos-2#117 gave the census exactly one exception: `_core/openShifts.ts` may import `readExpiry` from `./documentValidity` and nothing else. That keeps one licence-date classifier rather than adding a second.
 
+**Follow-up (2026-10-01): the licence, read through the canonical verdict.** #89 made the licence
+part of the one open-shift rule, but the rule judged it from `operators.licenseExpiresAt` itself
+(`readExpiry`), and so did shift readiness (`readinessRouter`). That legacy date is an unverified
+claim under #52's ruling, so a worker dispatch held at "licence unknown" was shown an open shift as
+eligible, and shift readiness read it as satisfied. Shift readiness also read the operator whose id
+equalled the user id rather than the person's own record. `documentValidityCanonical.test.ts`
+(added by #59) forbids the open-work files from importing a validity engine, so `main` failed it.
+#117 then restored green with a single census exception for that `readExpiry` import; this follow-up
+removes the import, and with it the exception.
+
+- **One verdict:** `driverLicenceVerdict` (`_core/complianceDocumentValidity.ts`): structured
+  `driver_licence` documents first; the legacy date only when they establish nothing, and then as
+  an unverified claim. The dispatch composer's inline legacy rule moved here unchanged.
+- **One read:** `server/licenceReads.ts` `driverLicenceStanding(operator, at)` reads the person's
+  own operator record (`operators.userId`, in scope), its licence documents and legacy date, and
+  narrows the verdict to a `LicenceStanding` by table: in force, lapsed (expired, or an unverified
+  claim already past), not established (unverified, no expiry, rejected, not yet effective), none,
+  ambiguous. It is asked at the shift's start.
+- **Callers:** `openShiftsService.personFacts` and `readinessRouter.checksFor` read the standing;
+  `shiftEligibility` maps it and imports no validity module. A new refusal,
+  `licence_not_established`, says which unknown it is; the preview counts it as not established.
+- **Behaviour change (intended):** a worker with only the legacy date is no longer open-shift
+  eligible or shift-ready on the licence; a verified `driver_licence` document is needed, as
+  dispatch already required. Fixtures in four suites now file one.
+- **Tests:** `openShiftsEligibility.db.test.ts` files seven licence shapes and asks the open-shift
+  view, `readiness.forShift` and `composeReadiness`; all three give the same standing. Main's
+  files, restored, fail all seven.
+- **Guard** (`complianceValidityGuard.test.ts`): only `licenceReads.ts` and `readinessComposer.ts`
+  read `operators.licenseExpiresAt`, and both call `driverLicenceVerdict`; open shifts and shift
+  readiness call `driverLicenceStanding`; `shiftEligibility` compares no document date.
+
 ## 4. `complianceDocumentValidity`: resolved by #52
 
 This pair was resolved on its own branch, `claude/item2-compliance-validity`, merged as #52 under the
