@@ -12,7 +12,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb, orgScopeWhere, type TenantScope } from "./db";
+import { evidenceInScope, getDb, orgScopeWhere, type TenantScope } from "./db";
 import { sealIsTrustworthy, verifySealAgainstStored } from "./_core/evidenceSeal";
 import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
 import { createHash } from "node:crypto";
@@ -224,7 +224,8 @@ export const syncRouter = router({
        * message is kept for the case it actually describes — a real row with no
        * binding, which only the caller with no organization can see.
        */
-      const d = await loadDevice(input.deviceRef, await resolveActingScope(db, ctx.user.id));
+      const scope = await resolveActingScope(db, ctx.user.id);
+      const d = await loadDevice(input.deviceRef, scope);
       if (!d) throw noSuchDevice();
       const history = await db.select().from(deviceKeyEvents).where(eq(deviceKeyEvents.fieldDeviceId, d.id));
       if (!d.orgRef) throw unboundDevice();
@@ -295,6 +296,42 @@ export const syncRouter = router({
         keyHistory: history.map(h => ({ keyFingerprint: h.keyFingerprint, eventType: h.eventType, validFrom: h.validFrom, validUntil: h.validUntil }) satisfies KeyEvent),
         now,
       });
+
+      /*
+       * S1 — every evidence record this package names must be one the acting
+       * organization can already see, checked HERE: after admission, which is a
+       * pure function of the device record and its key history and reads no
+       * evidence at all, and before the first seal read below.
+       *
+       * `evidenceRecordId` arrives as a bare integer the device chose, and nothing
+       * scoped it. A package could name another company's evidence and the server
+       * would read their seal, pull their file out of the blob store, hash its
+       * bytes, write `syncPackageItems` and `syncReceipts` rows against their
+       * record, and hand the caller a per-item verdict saying whether the hash
+       * they DECLARED matched — a confirmation oracle over another company's
+       * sealed content, plus rows written into their data, with every read
+       * happening before anything could have refused it.
+       *
+       * Behind admission rather than ahead of it, because admission leaks nothing
+       * about evidence while the reverse order would: a revoked or not-yet-
+       * activated device would otherwise learn whether an id is in scope before
+       * being told its own state disqualifies it.
+       *
+       * `evidenceInScope` is this repository's own authoritative chain (job, else
+       * capturing user, else the single tenant only) rather than a join that
+       * happens to be available, and it answers null for "no such record" and
+       * "not yours" alike — so the refusal cannot tell the two apart. The whole
+       * package is refused and no id is named: a per-item rejection would write a
+       * receipt row against the foreign record, and naming the offending id would
+       * rebuild the oracle one record at a time.
+       */
+      if (admission.admitted) {
+        for (const it of items) {
+          if (!(await evidenceInScope(it.evidenceRecordId, scope))) {
+            return refuse("Package names evidence this organization cannot see");
+          }
+        }
+      }
 
       // Even a refused package is a row: the office can see a revoked device tried.
       const pkg = await db.insert(syncPackages).values({

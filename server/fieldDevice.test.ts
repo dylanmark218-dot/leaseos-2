@@ -360,9 +360,14 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
 
     const recordRef = key("DSP");
     __seedServerVersion("disposal_ticket", recordRef, { version: 4, values: { netKg: 22790, facilityTicketNumber: "A-1" } });
+    // S1 — a real capture of this driver's, not a placeholder id. The package's
+    // items are now checked against what the caller can see before any seal is
+    // read, so a fabricated id is refused for the same reason another company's
+    // id is; a device only ever names evidence it uploaded itself.
+    const ev = Number((await callerFor(driver).fieldRoute.evidence.upload({ title: "e", category: "photo", fileName: "e.bin", mimeType: "application/octet-stream", dataBase64: Buffer.from(key("bytes")).toString("base64"), clientCaptureRef: key("cap-________") })).id);
     const r = await callerFor(driver).sync.receivePackage(signedPackage(K, {
       deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(),
-      items: [{ evidenceRecordId: 9, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }],
+      items: [{ evidenceRecordId: ev, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }],
       recordUpdates: [{ recordType: "disposal_ticket", recordRef, baseVersion: 3, baseValues: { netKg: 22800, facilityTicketNumber: "A-1" }, deviceValues: { netKg: 22700, facilityTicketNumber: "A-1" } }],
     }));
     expect(r.conflicts).toBe(1);
