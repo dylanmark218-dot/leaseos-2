@@ -29,6 +29,7 @@ const NOT_A_SURFACE: Record<string, string> = {
   "client/src/dispatch/DispatchReadiness.tsx": "the readiness panel's container: a live tRPC caller that resolves the job's assignment and queries the gate; the panel it renders, DispatchReadinessView, is a surface in the suite",
   "client/src/dispatch/DispatchJobDetail.tsx": "the detail screen's container: a live tRPC caller that reads the job, its crew slots and the name lists, writes slot assignments, and composes the readiness panel; the screen it renders, DispatchJobDetailView, is a surface in the suite",
   "client/src/pages/Login.tsx": "a live router and session caller; LoginView is the surface, and all four of its states are run through the axe rules",
+  "client/src/pages/Marketplace.tsx": "the Marketplace container: a live tRPC caller over marketplace.*; MarketplaceView is the surface, run through the axe rules on every tab",
 };
 
 describe("the accessibility suite keeps up with the screens", () => {

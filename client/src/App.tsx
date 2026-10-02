@@ -24,6 +24,7 @@ import RouteSafetyWorkspace from "./showcase/RouteSafetyWorkspace";
 import DisposalDirectory from "./pages/DisposalDirectory";
 import DisposalFinder from "./pages/DisposalFinder";
 import CommercialOffice from "./pages/CommercialOffice";
+import Marketplace from "./pages/Marketplace";
 import CommunicationsPackage from "./pages/CommunicationsPackage";
 import TransmitCheck from "./pages/TransmitCheck";
 import CommunicationsPackageStatus from "./pages/CommunicationsPackageStatus";
@@ -108,6 +109,7 @@ function Router() {
           </DashboardRoute>
         )}
       />
+      <Route path="/marketplace" component={() => <DashboardRoute><Marketplace /></DashboardRoute>} />
       <Route path="/trip-operations" component={() => <Redirect to="/showcase/trips" />} />
       <Route path="/training-academy" component={() => <DashboardRoute><TrainingAcademy /></DashboardRoute>} />
       <Route path="/404" component={NotFound} />

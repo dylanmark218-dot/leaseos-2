@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NEEDS_A_RENDERER, VIEWPORTS, describeRun, runAxe, setViewport } from "./axeHarness";
 import { DisposalFinderView, type DisposalFinderViewProps } from "../pages/DisposalFinderView";
 import { CommercialOfficeView, type CommercialOfficeViewProps } from "../pages/CommercialOfficeView";
+import { MarketplaceView, type MarketplaceViewProps } from "../pages/MarketplaceView";
 import { DispatchReadinessView, type DispatchReadinessViewProps } from "../dispatch/DispatchReadinessView";
 import { DispatchJobDetailView, type DispatchJobDetailViewProps } from "../dispatch/DispatchJobDetailView";
 import { SourcedPanel } from "../showcase/SourcedPanel";
@@ -146,6 +147,27 @@ const a11yPortals = [
   { portal: "fleet_maintenance", displayName: "Fleet Maintenance", purpose: "Work orders, defects and vehicle maintenance" },
 ];
 
+/** P10.5 — the Marketplace at every tab, as a bidder and as the client. */
+const marketplace = (tab: MarketplaceViewProps["tab"], role: "bidder" | "client" = "bidder"): MarketplaceViewProps => {
+  const posting = { postingRef: "MKT-1", title: "Produced water haul", workType: "FLUID_HAULING", operatingArea: "Fox Creek", pickupLocation: "Fox Creek, AB", destination: "Disposal XYZ", unitsRequired: 4, equipmentType: "Tri-drive vac", requestedStart: "2026-10-24T07:00:00Z", biddingClosesAt: "2026-10-22T18:00:00Z", state: (role === "client" ? "bidding_closed" : "bidding") as "bidding" | "bidding_closed", visibility: "sealed" as const, distribution: "invite_only" as const, biddingWindow: { open: true as const, closesAt: "2026-10-22T18:00:00Z", remainingMs: 3_600_000 }, isClient: role === "client", version: 1, clientOrgRef: "ORG-CLIENT" };
+  const readiness = { verdict: "blocked" as const, dependencyFingerprint: "MR-" + "a".repeat(64), checks: [{ check: "organization", result: "PASS" as const, blocking: false, detail: "Active." }, { check: "insurance", result: "BLOCK" as const, blocking: true, detail: "Policy limit below the minimum." }, { check: "equipment", result: "WARN" as const, blocking: false, detail: "3 of 4." }, { check: "worker_qualifications", result: "UNKNOWN" as const, blocking: true, detail: "No linked worker." }], notEvaluated: [{ capability: "hos", decidedBy: "dispatch gate at assignment" }] };
+  const myBid = { bidRef: "BID-1", posting: { postingRef: "MKT-1", title: "Produced water haul", state: "bidding" as const }, state: "draft" as const, version: 1, revisions: [{ revisionNumber: 1, submittedAt: "2026-10-01T12:00:00Z", summary: "CA$21,000.00 fixed", comparableTotalCents: 2_100_000, readinessVerdict: "submittable" }], currentReadiness: readiness, readinessChangedSinceSubmission: true };
+  return {
+    tab, onTab: () => {}, busy: false,
+    postings: [posting, { ...posting, postingRef: "MKT-2", title: "Gravel haul", state: "awarded" as const, isClient: true }], selectedRef: "MKT-1", onSelect: () => {},
+    detail: { ...posting, description: "600 m³ produced water.", requirements: { workerQualificationCodes: ["H2S_ALIVE", "TDG_ROAD"], organizationDocTypes: ["wcb_clearance"], tdgRequired: true, insurance: { coverageType: "general_liability", minimumLimitCents: 500_000_000, additionalInsuredRequired: false }, equipmentClasses: ["TRI_DRIVE_VAC"], jurisdiction: "CA-AB", clientSpecific: ["Site orientation"] }, liveBidCount: 2, openBidRange: null, award: role === "client" ? { awardRef: "AWD-1", contractorOrgRef: "ORG-PRAIRIE", state: "awarded", comparableTotalCents: 1_940_000, currency: "CAD", rationale: "Four units on the date." } : null, invitations: [] },
+    clarifications: [{ clarificationRef: "CLQ-1", kind: "question" as const, status: (role === "client" ? "open" : "published") as "open" | "published", askerOrgRef: role === "client" ? "ORG-PRAIRIE" : null, question: "Is disposal included?", answer: role === "client" ? null : "Billed separately.", mine: false }, { clarificationRef: "CLQ-2", kind: "question" as const, status: "answered" as const, askerOrgRef: "ORG-ABC", question: "Tri-drive mandatory?", answer: "Yes.", mine: false }],
+    onAsk: () => {}, onAnswer: () => {}, onPublishClarification: () => {}, onNotice: () => {},
+    onPublish: () => {}, onOpenBidding: () => {}, onCloseBidding: () => {}, onCancel: () => {},
+    clientBids: role === "client" ? [{ bidRef: "BID-A", bidderOrgRef: "ORG-PRAIRIE", state: "submitted" as const, revisionCount: 2, pricing: { visible: true as const, summary: "CA$19,400.00 fixed", comparableTotalCents: 1_940_000 }, submissionReadiness: { eligibility: "eligible" as const, checks: [{ check: "insurance", result: "PASS" as const }], blockerCount: 0, warningCount: 0 }, currentReadiness: { eligibility: "not_currently_eligible" as const, checks: [{ check: "insurance", result: "BLOCK" as const }], blockerCount: 1, warningCount: 0 }, readinessChangedSinceSubmission: true, unitsOffered: 4 }, { bidRef: "BID-B", bidderOrgRef: "ORG-ABC", state: "shortlisted" as const, revisionCount: 1, pricing: { visible: false as const, reason: "sealed" }, submissionReadiness: null, currentReadiness: { eligibility: "eligible_with_warnings" as const, checks: [{ check: "equipment", result: "WARN" as const }], blockerCount: 0, warningCount: 1 }, readinessChangedSinceSubmission: false, unitsOffered: 3 }] : [],
+    onShortlist: () => {}, onAward: () => {}, onIssueContract: () => {}, onNewPosting: () => {},
+    readiness: role === "bidder" ? readiness : null, myBidOnSelected: role === "bidder" ? myBid : null, onSaveDraft: () => {}, onSubmit: () => {}, onWithdraw: () => {},
+    myBids: [myBid, { ...myBid, bidRef: "BID-9", state: "rejected" as const }],
+    contracts: [{ contractRef: "CON-1", postingTitle: null, clientOrgRef: "ORG-CLIENT", contractorOrgRef: "ORG-ME", isClient: role === "client", isContractor: role === "bidder", state: "issued" as const, jobCode: "JOB-X", chainNumber: "JOB-X-C01", dispatchPostingNumber: null }, { contractRef: "CON-2", postingTitle: null, clientOrgRef: "ORG-CLIENT", contractorOrgRef: "ORG-ME", isClient: false, isContractor: true, state: "dispatched" as const, jobCode: "JOB-Y", chainNumber: "JOB-Y-C01", dispatchPostingNumber: "POST-1" }],
+    onDispatch: () => {},
+  };
+};
+
 const surfaces = [
   { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
   { name: "dispatch readiness — blocked", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked)} />) },
@@ -162,6 +184,13 @@ const surfaces = [
   { name: "commercial office — documents", render: () => render(<CommercialOfficeView {...office("documents")} />) },
   { name: "commercial office — disposal", render: () => render(<CommercialOfficeView {...office("disposal")} />) },
   { name: "commercial office — month close", render: () => render(<CommercialOfficeView {...office("month_close")} />) },
+  { name: "marketplace — board as a bidder", render: () => render(<MarketplaceView {...marketplace("board")} />) },
+  { name: "marketplace — board as the client", render: () => render(<MarketplaceView {...marketplace("board", "client")} />) },
+  { name: "marketplace — my bids", render: () => render(<MarketplaceView {...marketplace("bids")} />) },
+  { name: "marketplace — invitations", render: () => render(<MarketplaceView {...marketplace("invitations")} />) },
+  { name: "marketplace — awards", render: () => render(<MarketplaceView {...marketplace("awards")} />) },
+  { name: "marketplace — contracts", render: () => render(<MarketplaceView {...marketplace("contracts")} />) },
+  { name: "marketplace — completed", render: () => render(<MarketplaceView {...marketplace("completed")} />) },
   { name: "showcase panel — records", render: () => render(<SourcedPanel title="Saved decisions" source={fromQuery("x.list", [{ id: 1 }])}><p>body</p></SourcedPanel>) },
   { name: "widget board", render: () => render(<WidgetBoard name="Yard mornings" seeded={false} deviceClass="desktop" tiles={a11yTiles} />) },
   { name: "widget tile — blocked", render: () => render(<WidgetTileShell title="Unit Readiness" variant="status" payload={blocked([{ code: "A", detail: "Annual inspection expired" }])} />) },

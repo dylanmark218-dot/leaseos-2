@@ -222,7 +222,7 @@ carrier documents by the document engine, cover by the insurance engine, owned u
 worker holdings by the Academy's rule — unknown hard requirements failing closed, the
 submission picture frozen on the revision beside the picture now, a lapse refusing the
 award with the bid standing, the client reading a projection without identifiers, and
-the dispatch gate untouched: marketplace bid readiness is not dispatch readiness — no UI yet).
+the dispatch gate untouched: marketplace bid readiness is not dispatch readiness).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 
@@ -234,6 +234,7 @@ match what was stored — proven in Node against the runtime contracts, with the
 native vault still a stub. Internal portal: shell, switcher, My Day, exceptions,
 inbox, timeline, search, sync indicator, quick capture, view-models.
 Training Academy at `/training-academy`: course catalog, My Training, current-version lesson completion, locked/unlocked final assessment, results, certificate/qualification portfolio, and self-signing of pending regulated certificates.
+Marketplace at `/marketplace`: Job Board, My Bids, Invitations, Awards, Active Contracts, Completed Work over the marketplace procedures only — sealed prices as the server withheld them, the client's eligibility projections, a bidder's own readiness rows, submit enabled only on the server's verdict, the award with its reason.
 Customer portal at `/customer`: invitation acceptance, job board,
 pre-clearance, signing screen, chain of custody, adjustments, line disputes,
 approval queue, timeline, alerts and preferences, documents with download,
