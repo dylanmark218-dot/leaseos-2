@@ -202,3 +202,63 @@ describe("SPINE item 2 — a field ticket's signature has one verdict", () => {
     expect([...declared].filter(([, names]) => names.has("fieldTicketSignatureVerdict")).map(([f]) => f)).toEqual([RULE]);
   });
 });
+
+/*
+ * "Is this resource already booked over this window?" — one rule, in _core/bookingConflict.ts.
+ *
+ * Removing `detectBookingConflicts` left two live copies of the rule (the award's SQL and the
+ * open-shift router's SQL) and an in-memory `overlaps` in the open-shift engine, which agreed by
+ * coincidence. The names guard above could not see them: they were new, not re-declared. So this one
+ * protects the rule itself: only bookingConflict.ts may read a booking's window or state columns,
+ * both production readers must ask it, and the open-shift engine judges overlap only through it.
+ * The award's re-check stays — it is the final revalidation inside the transaction — but it may
+ * not carry its own definition.
+ */
+describe("SPINE item 2 — a booking conflict has one definition", () => {
+  const RULE = "server/_core/bookingConflict.ts";
+  const sources = files.filter(f => !/\.test\.tsx?$/.test(f)).map(f => ({ f, sf: ts.createSourceFile(f, readFileSync(f, "utf8"), ts.ScriptTarget.Latest, true) }));
+  const visitAll = (n: ts.Node, fn: (n: ts.Node) => void): void => { fn(n); n.forEachChild(c => visitAll(c, fn)); };
+
+  it("only the rule reads resourceBookings' window or state columns", () => {
+    const readers: string[] = [];
+    for (const { f, sf } of sources) {
+      visitAll(sf, n => {
+        if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "resourceBookings"
+          && ["startsAt", "endsAt", "bookingState"].includes(n.name.text)) readers.push(`${f}: resourceBookings.${n.name.text}`);
+      });
+    }
+    expect([...new Set(readers.map(r => r.split(":")[0]))]).toEqual([RULE]);
+  });
+
+  it("names the holding states in one place", () => {
+    const lists: string[] = [];
+    for (const { f, sf } of sources) {
+      visitAll(sf, n => {
+        if (ts.isArrayLiteralExpression(n)) {
+          const words = n.elements.filter(ts.isStringLiteral).map(e => e.text);
+          if (words.includes("tentative") && words.includes("confirmed")) lists.push(f);
+        }
+        if ((ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) && /'tentative'\s*,\s*'confirmed'/.test(n.getText())) lists.push(f);
+      });
+    }
+    expect([...new Set(lists)]).toEqual([RULE]);
+  });
+
+  it("the award's final revalidation and open-shift eligibility both ask conflictingBookingsWhere", () => {
+    for (const f of ["server/_core/dispatchTransaction.ts", "server/openShiftsService.ts"]) {
+      expect(readFileSync(f, "utf8"), f).toMatch(/\bconflictingBookingsWhere\(/);
+    }
+  });
+
+  it("the open-shift engine judges overlap only through windowsOverlap, and declares no overlap helper", () => {
+    const sf = sources.find(s => s.f === "server/_core/openShifts.ts")!.sf;
+    const compares: string[] = [];
+    visitAll(sf, n => {
+      if (ts.isBinaryExpression(n) && [ts.SyntaxKind.LessThanToken, ts.SyntaxKind.GreaterThanToken, ts.SyntaxKind.LessThanEqualsToken, ts.SyntaxKind.GreaterThanEqualsToken].includes(n.operatorToken.kind)
+        && /\b(startsAt|endsAt)\b/.test(n.left.getText()) && /\b(startsAt|endsAt)\b/.test(n.right.getText())) compares.push(n.getText());
+    });
+    expect(compares, "a window compared with a window outside bookingConflict.ts is a second overlap rule").toEqual([]);
+    expect(declared.get("server/_core/openShifts.ts")?.has("overlaps")).toBe(false);
+    expect(readFileSync("server/_core/openShifts.ts", "utf8")).toMatch(/\bwindowsOverlap\(/);
+  });
+});
