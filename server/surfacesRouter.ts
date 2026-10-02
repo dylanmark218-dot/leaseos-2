@@ -61,6 +61,12 @@ const may = (userId: number, grants: RoleGrant[]) => {
   };
 };
 
+/**
+ * TEN-INBOX-1 — the inbox and My Day take nothing from the caller: the person and the organization are the
+ * session's. A request that names one (or anything else) is refused, not silently ignored.
+ */
+const NO_INPUT = z.object({}).strict().optional();
+
 export const surfacesRouter = router({
   /**
    * Needs attention — derived from state, filtered to what the caller may act on.
@@ -78,7 +84,7 @@ export const surfacesRouter = router({
     }),
 
   /** Mine to do. Self-scoped; no user id in the input. */
-  inbox: roleProcedure("surfaces.inbox").query(async ({ ctx }) => {
+  inbox: roleProcedure("surfaces.inbox").input(NO_INPUT).query(async ({ ctx }) => {
     const { roles, grants } = await grantsFor(ctx.user.id);
     const can = may(ctx.user.id, grants);
     const items = await loadInbox({ userId: ctx.user.id, roles, canApprovePurchases: can("purchasing.approve"), canResolveConflicts: can("sync.resolve_conflict"), canReviewAssistant: can("assistant.review") });
@@ -88,7 +94,7 @@ export const surfacesRouter = router({
   }),
 
   /** My day: what am I doing, what needs attention, what am I waiting for, what should I do next. */
-  myDay: roleProcedure("surfaces.myDay").query(async ({ ctx }) => {
+  myDay: roleProcedure("surfaces.myDay").input(NO_INPUT).query(async ({ ctx }) => {
     const { roles, grants } = await grantsFor(ctx.user.id);
     const can = may(ctx.user.id, grants);
     const [inbox, exceptions] = await Promise.all([

@@ -320,15 +320,19 @@ async function admittedSource(sourceRevisionRef: string, row: RequirementRow) {
  */
 async function ensureLicenceAssessmentTask(tx: { insert: Awaited<ReturnType<typeof dbOrThrow>>["insert"]; select: Awaited<ReturnType<typeof dbOrThrow>>["select"] }, row: RequirementRow) {
   const host = hostOf(row.sourceUrl) ?? "unknown";
+  // TEN-INBOX-1: the task is the organization's whose revision it is. The only caller reaches it through
+  // revisionInScope, which already required orgRef to equal the acting organization, so a NULL here means a
+  // path nobody intended — refused rather than handed to the shared single tenant's legal queue.
+  if (!row.orgRef) throw new VerificationError("NOT_FOUND", "Requirement revision has no owning organization");
   const dedupeKey = `source_licence_assessment|${row.orgRef}|${host}`;
   const open = await tx.select({ id: operationalTasks.id }).from(operationalTasks)
-    .where(and(eq(operationalTasks.dedupeKey, dedupeKey), inArray(operationalTasks.status, ["open", "acknowledged", "in_progress", "waiting"]))).limit(1);
+    .where(and(eq(operationalTasks.tenantId, row.orgRef), eq(operationalTasks.dedupeKey, dedupeKey), inArray(operationalTasks.status, ["open", "acknowledged", "in_progress", "waiting"]))).limit(1);
   if (open[0]) return;
   await tx.insert(operationalTasks).values({
     taskNumber: ref("TASK-SLA").slice(0, 40), taskType: "source_licence_assessment",
     title: `Assess licensing and reuse of ${row.sourceAuthority ?? host} (${host}) as a regulatory source`,
     description: `Requirements citing ${host} are CITATION_VERIFIED only. Source-document ingestion is pending until a person records a licence assessment for this publisher and admits its documents. LeaseOS has not determined that this site may be reproduced, cached or reused.`,
-    status: "open", priority: "normal", tenantId: row.orgRef ?? "default", subjectType: "regulatory_source", subjectId: host.slice(0, 64),
+    status: "open", priority: "normal", tenantId: row.orgRef, subjectType: "regulatory_source", subjectId: host.slice(0, 64),
     assignedRole: "legal", sourceRuleKey: "c1b2b.citation_verified", dedupeKey, requiresEvidence: true,
   });
 }

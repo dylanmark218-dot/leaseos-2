@@ -148,6 +148,10 @@ code was restored.
 
 ## 5. Open items for owner decision
 
+> **Ruled 2026-10-01 (B1–B5):** AIL-1B approved at `d942e1d` / `30f6c6b`. The rulings on admission (B1, AIL-1B.1),
+> gap signals (B2), `merchantMemory` (B3), proposers (B4, unchanged) and the inbox (B5, TEN-INBOX-1) are recorded in
+> `TEN_INBOX_1_INBOX_TENANCY.md` §0.
+
 1. **Admission into model context.** Approved entries are not yet read by any assistant path. That
    is a separate checkpoint. When it happens, entries go in as `record_data`, organization-first,
    with GLOBAL kept separate.

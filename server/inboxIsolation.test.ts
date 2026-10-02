@@ -50,14 +50,16 @@ d("a role-addressed alert stays inside its organization", () => {
     expect(titles.some(t => t.includes(theirs))).toBe(false);
   });
 
-  it("tolerates a null tenant in the query even though this table forbids one", async () => {
-    // workflowNotifications.tenantId is NOT NULL, so a legacy row cannot exist
-    // here — the null branch in the query is for the tables that do allow it.
-    // Asserting the shape rather than inserting an impossible row.
+  it("has no null-tenant branch: an unowned row is nobody's (TEN-INBOX-1, owner ruling B5)", async () => {
+    // Both tables forbid a NULL tenant, so the old "a row with no organization is still shown" branch matched
+    // nothing — but it read as the rule. It is gone, and every task and notification read is strict and
+    // checks the records the row names (taskInScope / notificationInScope).
     const { readFileSync } = await import("node:fs");
     const svc = readFileSync("server/surfacesService.ts", "utf8");
-    expect(svc).toContain("isNull(workflowNotifications.tenantId)");
-    expect(svc).toContain("isNull(operationalTasks.tenantId)");
+    expect(svc).not.toContain("isNull(workflowNotifications.tenantId)");
+    expect(svc).not.toContain("isNull(operationalTasks.tenantId)");
+    expect(svc).toContain("taskInScope(scope)");
+    expect(svc).toContain("notificationInScope(scope)");
   });
 
   it("delivers to a member with no organization on the single-tenant fallback", async () => {

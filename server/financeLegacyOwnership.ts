@@ -24,6 +24,7 @@
  * the same transaction (`scripts/finance-legacy-ownership.ts`).
  */
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 
 export type Evidence = { source: "customer_account" | "payment_allocation" | "customer_credit" | "job_organization"; ref: string; entityIds: number[] };
 export type Classification =
@@ -113,6 +114,9 @@ export async function assignProvenBook(pool: Pool, invoiceNumber: string, by: { 
     const cls = classifyOwnership(e.evidence);
     if (cls.verdict !== "PROVEN") { await conn.rollback(); return { assigned: false, refusal: `${cls.verdict}: ${cls.reason} — quarantined for administrator review, not assigned` }; }
     const [ent] = await rows(conn, "SELECT orgRef FROM financialEntities WHERE id = ?", [cls.financialEntityId]);
+    // TEN-INBOX-1: the event is the book owner's. A NULL orgRef is the historical single tenant (0146); a book
+    // that does not exist has no owner, and its event is not written to anybody's queue.
+    if (!ent) { await conn.rollback(); return { assigned: false, refusal: `Book ${cls.financialEntityId} not found` }; }
     await conn.query("UPDATE invoices SET financialEntityId = ? WHERE id = ? AND financialEntityId IS NULL", [cls.financialEntityId, inv.id]);
     // The assignment and its evidence are one outbox row in the same transaction. Written directly, as the
     // other outbox writers do (enforcementOutbox): `_core/eventEmitter` is declared unwired on purpose.
@@ -120,7 +124,7 @@ export async function assignProvenBook(pool: Pool, invoiceNumber: string, by: { 
     const eventId = `EVT-${occurredAt.getTime().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     await conn.query(
       "INSERT INTO domainEventOutbox (eventId, eventType, eventVersion, aggregateType, aggregateId, tenantId, correlationId, actorSource, actorUserId, payloadJson, occurredAt) VALUES (?, 'finance.legacy_book_assigned', 1, 'invoice', ?, ?, ?, 'human', ?, ?, ?)",
-      [eventId, String(inv.id), ent?.orgRef ?? "default", eventId, by.userId != null ? String(by.userId) : null, JSON.stringify({ invoiceNumber, financialEntityId: cls.financialEntityId, previous: null, evidence: cls.evidence, reason: by.reason, assignedBy: by.label }), occurredAt],
+      [eventId, String(inv.id), ent.orgRef ?? SINGLE_TENANT_ID, eventId, by.userId != null ? String(by.userId) : null, JSON.stringify({ invoiceNumber, financialEntityId: cls.financialEntityId, previous: null, evidence: cls.evidence, reason: by.reason, assignedBy: by.label }), occurredAt],
     );
     await conn.commit();
     return { assigned: true, financialEntityId: cls.financialEntityId };

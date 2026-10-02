@@ -63,6 +63,18 @@ export const questionInScope = (scope: TenantScope) => ownedBy(scope, [ownerOf.p
 export const syncConflictInScope = (scope: TenantScope) => ownedBy(scope, [ownerOf.device(syncConflicts.fieldDeviceId)], [
   [syncConflicts.syncPackageId, ownerOf.syncPackage(syncConflicts.syncPackageId)],
 ]);
+/**
+ * TEN-INBOX-1 — a task is its own organization's (`tenantId`, stamped by its writer), and every record it
+ * names must agree; a notification likewise, and the task it points at must be the same organization's.
+ */
+export const taskInScope = (scope: TenantScope) => ownedBy(scope, [sql<string | null>`${operationalTasks.tenantId}`], [
+  [operationalTasks.jobId, ownerOf.job(operationalTasks.jobId)],
+  [operationalTasks.tripId, ownerOf.trip(operationalTasks.tripId)],
+  [operationalTasks.unitId, ownerOf.unit(operationalTasks.unitId)],
+]);
+export const notificationInScope = (scope: TenantScope) => ownedBy(scope, [sql<string | null>`${workflowNotifications.tenantId}`], [
+  [workflowNotifications.taskId, sql<string | null>`(SELECT k.tenantId FROM operationalTasks k WHERE k.id = ${workflowNotifications.taskId})`],
+]);
 /** An inspector request is its subject person's organization, and the certificate's holder must agree. */
 const inspectorRequestInScope = (scope: TenantScope, now: Date) => ownedBy(scope, [
   ownerOf.user(academyInspectorRequests.subjectUserId, now),
@@ -238,9 +250,13 @@ export type InboxItem = {
  * an out-of-service notification for "dispatcher" reached every dispatcher in
  * every organization, because the read matched on the role string alone.
  *
- * A row with no organization on it is still shown. Legacy rows predate the
- * column and hiding them would empty real people's inboxes to fix a leak that
- * only exists between organizations.
+ * TEN-INBOX-1: a role match does not create ownership. Every task and
+ * notification is read only when its own organization is the caller's acting
+ * organization, compared strictly, and a task's job, trip and unit — and a
+ * notification's task — must be that organization's too. The role and the
+ * person are audience qualifiers AFTER ownership. (Both columns have been NOT
+ * NULL since they were created, so the old "a row with no organization is still
+ * shown" branch matched nothing; it is gone rather than left to read as a rule.)
  */
 export async function loadInbox(args: { userId: number; roles: readonly string[]; canApprovePurchases: boolean; canResolveConflicts: boolean; canReviewAssistant: boolean }): Promise<InboxItem[]> {
   const db = await getDb();
@@ -252,12 +268,12 @@ export async function loadInbox(args: { userId: number; roles: readonly string[]
     db.select().from(operationalTasks).where(and(
       inArray(operationalTasks.status, ["open", "acknowledged", "in_progress"] as never),
       or(eq(operationalTasks.assignedUserId, args.userId), inArray(operationalTasks.assignedRole, roles)),
-      or(eq(operationalTasks.tenantId, acting.tenantId), isNull(operationalTasks.tenantId)),
+      taskInScope(scope),
     )).limit(200),
     db.select().from(workflowNotifications).where(and(
       or(eq(workflowNotifications.recipientUserId, args.userId), inArray(workflowNotifications.recipientRole, roles)),
       isNull(workflowNotifications.acknowledgedAt),
-      or(eq(workflowNotifications.tenantId, acting.tenantId), isNull(workflowNotifications.tenantId)),
+      notificationInScope(scope),
     )).orderBy(desc(workflowNotifications.queuedAt)).limit(100),
     db.select({ proposalId: assistantProposals.proposalId, title: assistantProposals.title, formKey: assistantProposals.formKey, createdAt: assistantProposals.createdAt }).from(assistantProposals).where(and(eq(assistantProposals.createdByUserId, args.userId), eq(assistantProposals.tenantId, acting.tenantId), eq(assistantProposals.commitState, "awaiting_readback"))).limit(50),
     db.select({ questionRef: assistantQuestions.questionRef, question: assistantQuestions.question, createdAt: assistantQuestions.createdAt }).from(assistantQuestions).where(and(eq(assistantQuestions.askedToUserId, args.userId), eq(assistantQuestions.status, "pending"), questionInScope(scope))).limit(50),

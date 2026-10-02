@@ -327,7 +327,11 @@ d("one company's morning, through the five surfaces", () => {
     await expect(callerFor(nextUser()).surfaces.inbox()).rejects.toBeTruthy();
     const src = readFileSync("server/surfacesRouter.ts", "utf8");
     const inbox = src.slice(src.indexOf("inbox: roleProcedure"), src.indexOf("myDay: roleProcedure"));
-    expect(inbox).not.toContain(".input(");
+    // TEN-INBOX-1: the only input is NO_INPUT — a strict empty object — so the request can carry no user id,
+    // organization or anything else; one that tries is refused rather than ignored.
+    expect(inbox.match(/\.input\(([^)]*)\)/g)).toEqual([".input(NO_INPUT)"]);
+    expect(src).toContain("const NO_INPUT = z.object({}).strict().optional();");
+    await expect(callerFor(nextUser()).surfaces.inbox({ userId: 1 } as never)).rejects.toBeTruthy();
   });
 });
 

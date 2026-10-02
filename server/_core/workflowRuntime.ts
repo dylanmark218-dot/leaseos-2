@@ -215,9 +215,10 @@ export async function applyEventConsequences(
   // Read existing open tasks for this subject so dedupe is decided against
   // the database, not against an in-memory guess.
   const [openRows] = await tx.execute<Row[]>(
+    // TEN-INBOX-1: another organization's open task for the same subject decides nothing here.
     `SELECT dedupeKey, status FROM operationalTasks
-     WHERE subjectType = ? AND subjectId = ? AND status NOT IN ('completed','cancelled')`,
-    [event.subject.entityType, event.subject.entityId]
+     WHERE tenantId = ? AND subjectType = ? AND subjectId = ? AND status NOT IN ('completed','cancelled')`,
+    [event.tenantId, event.subject.entityType, event.subject.entityId]
   );
 
   const plan = planTasks(

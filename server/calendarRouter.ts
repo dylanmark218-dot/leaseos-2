@@ -23,7 +23,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, gte, isNull, lte } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { getDb, userInScope } from "./db";
 import { crewMembers, crews, leaveRequests, shiftInterests, shiftPosts } from "../drizzle/schema";
 import { resolveActingScope } from "./_core/actingScope";
 import type { DbOrTx } from "./_core/dbTypes";
@@ -166,6 +166,9 @@ export const calendarRouter = router({
     .query(async ({ ctx, input }) => {
       const d = await db();
       const acting = await resolveActingScope(d, ctx.user.id);
+      // TEN-INBOX-1: somebody else's calendar only inside the caller's organization. A person in another
+      // organization is "not found" — never their leave windows, redacted or not.
+      if (!(await userInScope(input.userId, { tenantId: acting.tenantId }))) throw new TRPCError({ code: "NOT_FOUND", message: "Person not found" });
       const to = new Date(input.from.getTime() + input.days * 86_400_000);
       const events = await buildEvents(d, { tenantId: acting.tenantId, forUserId: input.userId, from: input.from, to });
       const visible = visibleTo(events, { kind: "operational", userId: ctx.user.id });
@@ -183,6 +186,9 @@ export const calendarRouter = router({
     .query(async ({ ctx, input }) => {
       const d = await db();
       const acting = await resolveActingScope(d, ctx.user.id);
+      // TEN-INBOX-1: somebody else's calendar only inside the caller's organization. A person in another
+      // organization is "not found" — never their leave windows, redacted or not.
+      if (!(await userInScope(input.userId, { tenantId: acting.tenantId }))) throw new TRPCError({ code: "NOT_FOUND", message: "Person not found" });
       const to = new Date(input.from.getTime() + input.days * 86_400_000);
       const events = await buildEvents(d, { tenantId: acting.tenantId, forUserId: input.userId, from: input.from, to });
       const visible = visibleTo(events, { kind: "operational", userId: ctx.user.id });

@@ -11,7 +11,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createHash } from "node:crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { externalProcedure, router, type ExternalContext } from "./_core/trpc";
 import { getDb } from "./db";
 import { CUSTOMER_ALERT_KINDS, changeOrders, clientAdjustments, customerAccounts, customerCredits, customerPurchaseOrders, disposalTickets, disputeCases, externalAccessLog, externalAlertPreferences, externalIdentities, facilities, fieldTicketDocuments, fieldTicketEvents, fieldTicketRevisions, fieldTickets, invoices, jobs, loads, paymentAllocations, portalSubmissions, quoteLines, quotes, rfis, roadHazardObservations, safetyEvents, trips, vendorBills, vendors, weatherObservations, workflowNotifications, invoiceLines } from "../drizzle/schema";
@@ -23,7 +23,7 @@ import { ENV } from "./_core/env";
 import { decideAdjustment } from "./_core/clientAdjustments";
 import { noticeFor, operationalState, projectReadiness } from "./_core/customerProjections";
 import { DEFAULT_ON } from "./_core/customerAlerts";
-import { queueCustomerAlert } from "./customerAlertService";
+import { customerAlertOwner, queueCustomerAlert } from "./customerAlertService";
 import { fromCents } from "./_core/money";
 import { changeOrderAuthority, quoteAcceptanceDecision, type Authority } from "./_core/commercialProjects";
 import { composeReadiness } from "./readinessComposer";
@@ -50,6 +50,15 @@ async function submit(external: ExternalContext, kind: "vendor_bill" | "disposal
   return { submissionRef, status: "submitted" as const, duplicate: false as const };
 }
 
+/**
+ * TEN-INBOX-1 — an external identity's alerts are read only inside the organization that owns its customer
+ * account (the account's book, `customerAlertOwner`). The `external:<identityRef>` role names the person; it does
+ * not, on its own, establish whose record the alert is. An identity with no resolvable owner sees no alerts.
+ */
+async function alertOwnerCondition(e: ExternalContext) {
+  const owner = e.kind === "customer" ? await customerAlertOwner(e.accountId) : null;
+  return owner ? eq(workflowNotifications.tenantId, owner) : sql`false`;
+}
 const identityOf = (e: ExternalContext): ExternalIdentity => ({ id: e.identityId, kind: e.kind, customerAccountId: e.kind === "customer" ? e.accountId : null, vendorId: e.kind === "vendor" ? e.accountId : null, facilityId: e.kind === "facility" ? e.accountId : null, status: "active" });
 
 
@@ -191,7 +200,7 @@ export const portalRouter = router({
       if (t.completedAt && !x.signature) toSign.push({ ticketNumber: t.ticketNumber, siteWorkCompleteAt: t.completedAt });
       for (const l of x.lines) if (l.disposition === "not_presented") toDecide.push({ ticketNumber: t.ticketNumber, lineId: l.id, description: l.description, operatorStatement: l.operatorStatement });
     }
-    const unread = await db.select({ id: workflowNotifications.id }).from(workflowNotifications).where(and(eq(workflowNotifications.recipientRole, `external:${e.identityRef}`), inArray(workflowNotifications.status, ["queued", "sent", "delivered"])));
+    const unread = await db.select({ id: workflowNotifications.id }).from(workflowNotifications).where(and(eq(workflowNotifications.recipientRole, `external:${e.identityRef}`), await alertOwnerCondition(e), inArray(workflowNotifications.status, ["queued", "sent", "delivered"])));
     await logAccess(e, "view", "approvalQueue", "account", null, `${toSign.length} to sign, ${toDecide.length} to decide`);
     return { toSign, toDecide, unreadAlerts: unread.length };
   }),
@@ -225,7 +234,7 @@ export const portalRouter = router({
     const e = ext(ctx);
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-    const rows = await db.select().from(workflowNotifications).where(eq(workflowNotifications.recipientRole, `external:${e.identityRef}`)).orderBy(desc(workflowNotifications.queuedAt)).limit(100);
+    const rows = await db.select().from(workflowNotifications).where(and(eq(workflowNotifications.recipientRole, `external:${e.identityRef}`), await alertOwnerCondition(e))).orderBy(desc(workflowNotifications.queuedAt)).limit(100);
     return { alerts: rows.map(r => ({ id: r.id, title: r.title, body: r.body, deepLink: r.deepLink, status: r.status, queuedAt: r.queuedAt, acknowledgedAt: r.acknowledgedAt })) };
   }),
 
@@ -233,7 +242,7 @@ export const portalRouter = router({
     const e = ext(ctx);
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-    const row = (await db.select({ id: workflowNotifications.id, recipientRole: workflowNotifications.recipientRole }).from(workflowNotifications).where(eq(workflowNotifications.id, input.id)).limit(1))[0];
+    const row = (await db.select({ id: workflowNotifications.id, recipientRole: workflowNotifications.recipientRole }).from(workflowNotifications).where(and(eq(workflowNotifications.id, input.id), await alertOwnerCondition(e))).limit(1))[0];
     if (!row || row.recipientRole !== `external:${e.identityRef}`) throw new TRPCError({ code: "NOT_FOUND", message: "No such alert for this identity" });
     await db.update(workflowNotifications).set({ status: "acknowledged", acknowledgedAt: new Date() }).where(eq(workflowNotifications.id, row.id));
     return { id: row.id, status: "acknowledged" as const };
