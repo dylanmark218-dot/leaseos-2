@@ -57,6 +57,9 @@ export type Permission =
   | "evidence.read_commercial"
   | "evidence.read_personnel"
   | "evidence.read_legal"
+  // The file manager's gate. Opening the browser is not reading a record: each
+  // record is still decided on its own category read (or evidence.read_own).
+  | "evidence.browse"
   // Safety
   | "incident.create"
   | "incident.read_summary"
@@ -422,6 +425,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "evidence.seal",
     "evidence.send",
     "evidence.read_own",
+    "evidence.browse",
     "evidence.delete_device_copy",
     "incident.create",
     "roadside.open",
@@ -528,6 +532,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.read",
     "comms.plan.compute",
     "evidence.read_job_operational",
+    "evidence.browse",
     "incident.create",
     // Summary only. A dispatcher must know a unit is unavailable; they do not
     // need the operator's injury details to reassign a job.
@@ -632,6 +637,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // job the unit was on. It is not granted commercial or personnel reads at
     // all, so nothing has to be subtracted later.
     "evidence.read_maintenance",
+    "evidence.browse",
     "evidence.read_job_operational",
     "maintenance.read_defect",
     "maintenance.write_defect",
@@ -717,6 +723,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.read",
     "comms.unit.capability",
     "evidence.read_maintenance",
+    "evidence.browse",
     "evidence.read_job_operational",
     "maintenance.read_defect",
     "maintenance.write_defect",
@@ -858,6 +865,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.observation.decide",
     "comms.plan.compute",
     "evidence.read_safety_summary",
+    "evidence.browse",
     "evidence.read_job_operational",
     "evidence.read_maintenance",
     "evidence.export",
@@ -993,6 +1001,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.plan.compute",
     "comms.assignment.record",
     "evidence.read_job_operational",
+    "evidence.browse",
     "evidence.read_commercial",
     "evidence.read_safety_summary",
     "evidence.read_maintenance",
@@ -1246,6 +1255,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.observation.decide",
     "comms.plan.compute",
     "evidence.read_job_operational",
+    "evidence.browse",
     "evidence.read_commercial",
     "evidence.read_safety_summary",
     "evidence.read_maintenance",
@@ -1434,6 +1444,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "academy.evaluate",
     "academy.certificate.issue",
     "evidence.read_personnel",
+    "evidence.browse",
     "incident.read_summary",
     "incident.read_investigation",
     "payroll.read",
@@ -1476,6 +1487,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.second_approve",
     "compliance.verification.govern",
     "evidence.read_legal",
+    "evidence.browse",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
     "evidence.export",
@@ -1508,6 +1520,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "document.read",
     "facility.directory.read",
     "evidence.read_job_operational",
+    "evidence.browse",
     "evidence.read_safety_summary",
     "evidence.read_maintenance",
     "evidence.export",
@@ -1583,6 +1596,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "billing.read",
     "compliance.read",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.read_job_operational",
     "contractor.read",
     "funding.read",
@@ -1650,6 +1664,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.rate.read",
     "payroll.export",
     "evidence.read_personnel",
+    "evidence.browse",
     "personnel.read",
     "payroll.profile.write",
     "contractor.read",
@@ -1669,6 +1684,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "tax.adjust",
     "tax.export",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.export",
     "contractor.read",
     "funding.read",
@@ -1735,6 +1751,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.rate.read",
     "payroll.rate.write",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.export",
     "finance.entity.write",
     "contractor.read",
@@ -1872,6 +1889,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "banking.read",
     "billing.read",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.export",
     "contractor.read",
     "funding.read",
@@ -2587,6 +2605,11 @@ export const RECORDS_PROCEDURE_PERMISSIONS = {
   "records.evidence.amend": "evidence.amend",
   "records.evidence.listForOperator": "evidence.read_own",
   "records.evidence.export": "evidence.export",
+  // The Records & File Manager. The gate opens the browser; each record is then
+  // decided on its own category read, and one out of reach is "not found".
+  "records.files.list": "evidence.browse",
+  "records.files.get": "evidence.browse",
+  "records.files.download": "evidence.browse",
   "records.incident.capture": "incident.create",
   "records.incident.readInvestigation": "incident.read_investigation",
   "records.incident.review": "incident.review",
