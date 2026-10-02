@@ -25,6 +25,12 @@
  * driver sees what was counted, and nobody sees a remaining figure the engine cannot defend. When
  * a regime's mechanics module exists and is verified (a later checkpoint), it replaces the default
  * and these downgrades stop applying to the limits it governs.
+ *
+ * Checkpoint 2c adds the operator's DESIGNATED duty day (`dutyDay.ts`, recorded in 0224) and counts
+ * the four duty statuses over it, exactly, through 23- and 25-hour days. That is arithmetic, not a
+ * rule: nothing verified yet says that a regime's daily limits are counted over this day. So a
+ * designation changes WHY a daily limit is unknown (HOS_DAY_RULE_UNVERIFIED instead of
+ * HOS_DAY_BOUNDARY_UNKNOWN) and shows the day's clocks; it does not unlock a single verdict.
  */
 import {
   computeClocks, determine, selectProfile, LIMIT_LABELS,
@@ -32,8 +38,9 @@ import {
 } from "../hos";
 import { projectDutyEntries, type HosProjection, type LedgerEventLike } from "./hosProjection";
 import type { HosReasonCode } from "./reasonCodes";
+import { dutyDayClocks, type DutyDayClocks, type DutyDayDesignation } from "./dutyDay";
 
-export const HOS_ENGINE_VERSION = "hos-engine/2a" as const;
+export const HOS_ENGINE_VERSION = "hos-engine/2c" as const;
 
 /** The only mechanics this checkpoint implements. Named, so a result can say which one produced it. */
 export const DEFAULT_MECHANICS = "trailing_window" as const;
@@ -42,8 +49,11 @@ export type HosEngineInput = {
   operatorId: number;
   /** One operator's ledger rows (other operators' rows are ignored and counted). */
   events: readonly LedgerEventLike[];
-  /** The operator's home-terminal zone. There is no column for it yet, so today this is always null. */
-  homeTerminalTimezone: string | null;
+  /**
+   * The operator's duty-day designation in force at `at` (0224), or null when none is on record.
+   * The ref and effective time travel through to the result so a reader can find the row.
+   */
+  dutyDay: (DutyDayDesignation & { designationRef?: string | null; effectiveFrom?: Date | null }) | null;
   context: OperatingContext;
   profiles: readonly HosRuleProfile[];
   /** Sequence ranges the device chain is missing, from `assessDeviceChain`. Overlap with the window is flagged. */
@@ -73,6 +83,17 @@ export type HosEngineResult = {
   determination: HosDetermination;
   currentStatus: Clocks["currentStatus"];
   timeInCurrentStatusMinutes: number;
+  /**
+   * The designated duty day containing `at` and the four statuses counted over it, up to `at`. Null
+   * when no designation is on record, or when the runtime no longer knows its zone. Shown, never
+   * compared against a limit: no verified rule yet says a regime counts a limit over this day.
+   */
+  dutyDay: (DutyDayClocks & {
+    designationRef: string | null;
+    designationEffectiveFrom: Date | null;
+    /** The designation took effect after this day began: the day's start was computed by a designation not in force at that start. */
+    designationChangedDuringDay: boolean;
+  }) | null;
   /** Remaining, per clock, and only from a determination whose limit AND boundary are verified. */
   remaining: { drivingMinutes: number | null; onDutyMinutes: number | null; shiftWindowMinutes: number | null; cycleMinutes: number | null; basisRuleIds: string[] };
   violations: HosFinding[];
@@ -111,14 +132,18 @@ const verifiedFigure = (p: HosRuleProfile | null, k: LimitKey): number | undefin
 const uniq = <T>(xs: T[]) => Array.from(new Set(xs));
 
 /** Downgrade one determination when its meaning depends on a boundary the mechanics cannot vouch for. */
-function applyMechanics(d: LimitDetermination, shiftBoundaryVerified: boolean): { d: LimitDetermination; code: HosReasonCode | null; why: string | null } {
+function applyMechanics(d: LimitDetermination, shiftBoundaryVerified: boolean, dayDesignated: boolean): { d: LimitDetermination; code: HosReasonCode | null; why: string | null } {
   if (d.result === "unknown") return { d, code: null, why: null };
   const label = LIMIT_LABELS[d.limitKey];
   const downgrade = (code: HosReasonCode, why: string) => ({
     d: { ...d, result: "unknown" as const, limitMinutes: null, remainingMinutes: null, reason: `${label}: ${d.usedMinutes ?? "—"} min counted; ${why}` },
     code, why,
   });
-  if (DAY_BOUND.includes(d.limitKey)) return downgrade("HOS_DAY_BOUNDARY_UNKNOWN", "the figure is verified but the duty day it is counted in is not defined — the clock is a rolling 24 hours, not a regime's day");
+  if (DAY_BOUND.includes(d.limitKey)) {
+    return dayDesignated
+      ? downgrade("HOS_DAY_RULE_UNVERIFIED", "the figure is verified and the operator's duty day is designated, but no verified rule says this regime counts the limit over that day — the counted figure is a rolling 24 hours, and the designated day's clocks are shown beside it")
+      : downgrade("HOS_DAY_BOUNDARY_UNKNOWN", "the figure is verified but the duty day it is counted in is not defined — the clock is a rolling 24 hours, not a regime's day");
+  }
   if (CYCLE_BOUND.includes(d.limitKey)) return downgrade("HOS_MECHANICS_DEFAULTED", "the figure is verified but the cycle is counted over rolling days, not the regime's cycle days");
   if (SHIFT_BOUND.includes(d.limitKey) && !shiftBoundaryVerified) return downgrade("HOS_MECHANICS_DEFAULTED", "the figure is verified but the rest that ends a shift is not, so where this shift began is a default");
   return { d, code: null, why: null };
@@ -147,12 +172,25 @@ export function evaluateHos(input: HosEngineInput): HosEngineResult {
   if (selection.outcome === "conflict") reasonCodes.push("HOS_PROFILE_CONFLICT");
   if (profile && !profile.limits.length) reasonCodes.push("HOS_LIMIT_NOT_STATED");
   reasonCodes.push("HOS_MECHANICS_DEFAULTED");
-  if (input.homeTerminalTimezone == null) reasonCodes.push("HOS_TIMEZONE_UNKNOWN");
+
+  // The designated day, when there is one the runtime can still place. A zone the database no longer
+  // knows is reported as an unknown zone, never replaced by UTC or by the server's own zone.
+  let dutyDay: HosEngineResult["dutyDay"] = null;
+  if (input.dutyDay) {
+    try {
+      const c = dutyDayClocks(projection.entries, input.at, input.dutyDay);
+      const eff = input.dutyDay.effectiveFrom ?? null;
+      dutyDay = { ...c, designationRef: input.dutyDay.designationRef ?? null, designationEffectiveFrom: eff, designationChangedDuringDay: eff != null && eff.getTime() > c.window.from.getTime() };
+    } catch {
+      dutyDay = null;
+    }
+  }
+  if (!dutyDay) reasonCodes.push("HOS_TIMEZONE_UNKNOWN");
 
   // A verified parameter was consumed by the clocks; it is not a limit anyone can be within or over.
   const consumedParameters = raw.determinations.filter(d => PARAMETERS.includes(d.limitKey) && d.limitMinutes != null).map(d => d.limitKey);
   const determinations = raw.determinations.filter(d => !consumedParameters.includes(d.limitKey)).map(d0 => {
-    const { d, code } = applyMechanics(d0, coreRest != null);
+    const { d, code } = applyMechanics(d0, coreRest != null, dutyDay != null);
     if (code) reasonCodes.push(code);
     if (d.result === "exceeded") {
       violations.push({ code: EXCEEDED_CODE[d.limitKey] ?? "HOS_ON_DUTY_LIMIT_EXCEEDED", limitKey: d.limitKey, ruleId: ruleId(d.limitKey), usedMinutes: d.usedMinutes, limitMinutes: d.limitMinutes, explanation: d.reason });
@@ -211,7 +249,7 @@ export function evaluateHos(input: HosEngineInput): HosEngineResult {
   return {
     engineVersion: HOS_ENGINE_VERSION, at: input.at, operatorId: input.operatorId, mechanicsKey: DEFAULT_MECHANICS,
     selection, projection, clocks, determination,
-    currentStatus: clocks.currentStatus, timeInCurrentStatusMinutes: clocks.currentStatusMinutes,
+    currentStatus: clocks.currentStatus, timeInCurrentStatusMinutes: clocks.currentStatusMinutes, dutyDay,
     remaining: { drivingMinutes: drv.minutes, onDutyMinutes: onDuty.minutes, shiftWindowMinutes: shiftWin.minutes, cycleMinutes: cyc.minutes, basisRuleIds: uniq([...drv.ids, ...onDuty.ids, ...shiftWin.ids, ...cyc.ids]) },
     violations, unknowns, verdict, reasonCodes: codes, explanation,
   };

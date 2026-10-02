@@ -178,7 +178,7 @@ export type Permission =
   | "sync.push_own" | "sync.resolve_conflict"
   /* 0220 — the ELD event ledger. A device appends its own events (self-scoped in code: the device
      must be enrolled to the session user); reading a device's chain is an office act. */
-  | "eld.event.record_own" | "eld.read"
+  | "eld.event.record_own" | "eld.read" | "eld.dutyday.designate"
   // v20.21 — compliance master registry. Reading a passport is broad
   // verifying evidence, loading requirements and reading private credential
   // detail are not.
@@ -853,6 +853,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "enforcement.release",
     "oos.policy.manage",
     "eld.read",
+    "eld.dutyday.designate",
     "hos.read",
     "comms.package.build",
     "comms.policy.manage",
@@ -1233,6 +1234,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "oos.policy.approve",
     "geo.source.review",
     "eld.read",
+    "eld.dutyday.designate",
     "hos.read",
     "hos.rule.manage",
     "hos.rule.verify",
@@ -1994,6 +1996,8 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  // ELD 2c (0224) — where an operator's duty day begins decides how every later day is counted.
+  "eld.dutyday.designate",
   "live_assist.use",
   "live_assist.administer",
   "live_assist.review",
@@ -2954,6 +2958,10 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   /* ---- 0220: the ELD event ledger ---- */
   "eld.eventsAppend": "eld.event.record_own",
   "eld.deviceIntegrity": "eld.read",
+  // 0224: where a duty day begins changes how every later day is counted, so it is safety's and
+  // management's to record, and an audited (sensitive) act. Reading the history is the office's.
+  "eld.dutyDayDesignate": "eld.dutyday.designate",
+  "eld.dutyDayHistory": "eld.read",
   // ELD checkpoint 2b: the gate is hos.read (a driver reads their own hours); the procedure also
   // requires eld.read in code before it names another operator.
   "eld.hosStatus": "hos.read",

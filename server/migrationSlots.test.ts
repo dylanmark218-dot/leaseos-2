@@ -66,7 +66,10 @@ describe("the real tree", () => {
     // Mechanic Portal CP2 took 0221–0222 (defect lifecycle and its guards): 0220 is claimed by
     // `claude/eld-compliance-intelligence-ramlrd`, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0222_defect_lifecycle_guards.sql");
-    expect(headSlot(files)).toBe("0222");
+    // ELD checkpoint 2c took 0224 (duty-day designations): 0223 is held by
+    // `claude/integration-hub-subsystem-6nzrkw`, so head+1 would have collided; the register records the scan.
+    expect(files).toContain("0224_eld_duty_day_designations.sql");
+    expect(headSlot(files)).toBe("0224");
   });
 
   it("keeps the reserved slots empty", () => {

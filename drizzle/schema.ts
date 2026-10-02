@@ -10458,6 +10458,33 @@ export type EldEventRow = typeof eldEvents.$inferSelect;
 export type InsertEldEvent = typeof eldEvents.$inferInsert;
 export type EldEventIngestConflictRow = typeof eldEventIngestConflicts.$inferSelect;
 export type InsertEldEventIngestConflict = typeof eldEventIngestConflicts.$inferInsert;
+
+/**
+ * 0224 — where an operator's duty day begins: an IANA zone and a local start minute, in force from
+ * `effectiveFrom`. History, never edited (triggers refuse UPDATE and DELETE); a change is a new row.
+ * The one in force at an instant is the latest `effectiveFrom` at or before it. `dayStartMinutes`
+ * is held to 0–1439 by a CHECK in the migration. Recording one decides no limit.
+ */
+export const eldDutyDayDesignations = mysqlTable("eldDutyDayDesignations", {
+  id: int("id").autoincrement().primaryKey(),
+  designationRef: varchar("designationRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  operatorId: int("operatorId").notNull(),
+  timezone: varchar("timezone", { length: 64 }).notNull(),
+  dayStartMinutes: smallint("dayStartMinutes").notNull(),
+  effectiveFrom: timestamp("effectiveFrom", { fsp: 3 }).notNull(),
+  reason: varchar("reason", { length: 300 }).notNull(),
+  /** The IANA database version of the server that recorded it. */
+  tzVersion: varchar("tzVersion", { length: 16 }),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  recordedAt: timestamp("recordedAt", { fsp: 3 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  operatorEffective: index("eldDutyDayDesignations_operator_effective").on(t.orgRef, t.operatorId, t.effectiveFrom),
+}));
+
+export type EldDutyDayDesignationRow = typeof eldDutyDayDesignations.$inferSelect;
+export type InsertEldDutyDayDesignation = typeof eldDutyDayDesignations.$inferInsert;
 /* ------------------------------------------------------------------ */
 /* 0221 — Fleet maintenance, checkpoint 2: defect to return to service */
 /* ------------------------------------------------------------------ */

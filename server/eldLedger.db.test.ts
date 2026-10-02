@@ -499,7 +499,7 @@ d("eld.hosStatus reads hours from the ledger, and only the caller's own unless t
 
     const r = await callerFor(s.userId).eld.hosStatus({ at: AT });
     expect(r.operatorId).toBe(s.operatorId);
-    expect(r.engineVersion).toBe("hos-engine/2a");
+    expect(r.engineVersion).toBe("hos-engine/2c");
     expect(r.projection.entryEventRefs).toEqual([e0.eventRef, e1.eventRef]);
     // Hand-computed: on duty 14:00, driving 14:30, read at 16:30.
     expect(r.clocks).toMatchObject({ shiftOnDutyMinutes: 150, shiftDriveMinutes: 120, continuousDriveMinutes: 120, currentStatus: "driving", currentStatusMinutes: 120 });
@@ -578,5 +578,100 @@ d("eld.hosStatus reads hours from the ledger, and only the caller's own unless t
   it("takes no organization or device from the caller", async () => {
     const s = await driverScenario();
     await expect(callerFor(s.userId).eld.hosStatus({ at: AT, orgRef: "elsewhere" } as never)).rejects.toThrow();
+  });
+});
+
+/* ================================================================== */
+/* ELD checkpoint 2c — the designated duty day                         */
+/* ================================================================== */
+
+d("eld.dutyDayDesignate records where a duty day begins, as history that is only ever extended", () => {
+  const MIN = 60_000;
+  const designationRow = async (ref: string) => (await pool.execute<mysql.RowDataPacket[]>("SELECT * FROM eldDutyDayDesignations WHERE designationRef = ?", [ref]))[0][0];
+
+  it("records a designation under the database's own zone name and version, and keeps it immutable", async () => {
+    const s = await driverScenario();
+    const safety = await userIn(s.orgRef, "safety");
+    const r = await callerFor(safety).eld.dutyDayDesignate({ operatorId: s.operatorId, timezone: "america/regina", dayStartMinutes: 360, reason: "Home terminal: Regina yard" });
+    expect(r).toMatchObject({ orgRef: s.orgRef, operatorId: s.operatorId, timezone: "America/Regina", dayStartMinutes: 360, tzVersion: "2026c", recordedByUserId: safety, reason: "Home terminal: Regina yard" });
+    expect(r.designationRef).toMatch(/^ELDDD-/);
+    expect(r.effectiveFrom.getTime()).toBe(r.recordedAt.getTime());          // omitted means "from now", by the server's clock
+
+    await expect(pool.execute("UPDATE eldDutyDayDesignations SET dayStartMinutes = 0 WHERE designationRef = ?", [r.designationRef])).rejects.toThrow(/history/);
+    await expect(pool.execute("DELETE FROM eldDutyDayDesignations WHERE designationRef = ?", [r.designationRef])).rejects.toThrow(/never deleted/);
+    expect((await designationRow(r.designationRef)).dayStartMinutes).toBe(360);
+    await expect(pool.execute("INSERT INTO eldDutyDayDesignations (designationRef, orgRef, operatorId, timezone, dayStartMinutes, effectiveFrom, reason, recordedByUserId, recordedAt) VALUES (?,?,?,?,1440,NOW(3),'x',1,NOW(3))",
+      [key("ELDDD").slice(0, 60), s.orgRef, s.operatorId, "America/Regina"])).rejects.toThrow(/start_range|CONSTRAINT/i);
+  });
+
+  it("refuses a backdated designation, one not after the latest, an unknown zone and a fixed offset", async () => {
+    const s = await driverScenario();
+    const safety = await userIn(s.orgRef, "safety");
+    const base = { operatorId: s.operatorId, timezone: "America/Regina", dayStartMinutes: 0, reason: "terminal" };
+    await expect(callerFor(safety).eld.dutyDayDesignate({ ...base, effectiveFrom: new Date(Date.now() - 60 * MIN) })).rejects.toThrow(/backdated/);
+    await callerFor(safety).eld.dutyDayDesignate({ ...base, effectiveFrom: new Date(Date.now() + 86_400_000) });
+    await expect(callerFor(safety).eld.dutyDayDesignate({ ...base, effectiveFrom: new Date(Date.now() + 60 * MIN) })).rejects.toThrow(/not_after_latest/);
+    await expect(callerFor(safety).eld.dutyDayDesignate({ ...base, timezone: "Mars/Olympus_Mons" })).rejects.toThrow(/timezone_unknown/);
+    await expect(callerFor(safety).eld.dutyDayDesignate({ ...base, timezone: "+05:00" })).rejects.toThrow(/timezone_unknown/);
+    await expect(callerFor(safety).eld.dutyDayDesignate({ ...base, dayStartMinutes: 1440 })).rejects.toThrow();
+    await expect(callerFor(safety).eld.dutyDayDesignate({ ...base, reason: "   " })).rejects.toThrow();
+    const history = await callerFor(safety).eld.dutyDayHistory({ operatorId: s.operatorId });
+    expect(history).toHaveLength(1);
+  });
+
+  it("is safety's or management's to record, the office's to read, and invisible across organizations", async () => {
+    const s = await driverScenario();
+    const base = { operatorId: s.operatorId, timezone: "America/Regina", dayStartMinutes: 0, reason: "terminal" };
+    await expect(callerFor(s.userId).eld.dutyDayDesignate(base)).rejects.toThrow(/grants eld\.dutyday\.designate/);
+    await expect(callerFor(await userIn(s.orgRef, "dispatcher")).eld.dutyDayDesignate(base)).rejects.toThrow(/grants eld\.dutyday\.designate/);
+    const mgmt = await userIn(s.orgRef, "management");
+    await callerFor(mgmt).eld.dutyDayDesignate(base);
+    expect(await callerFor(await userIn(s.orgRef, "dispatcher")).eld.dutyDayHistory({ operatorId: s.operatorId })).toHaveLength(1);
+    await expect(callerFor(s.userId).eld.dutyDayHistory({ operatorId: s.operatorId })).rejects.toThrow(/grants eld\.read/);
+
+    const elsewhere = await userIn(await org(), "safety");
+    await expect(callerFor(elsewhere).eld.dutyDayDesignate(base)).rejects.toThrow(/not found/i);
+    await expect(callerFor(elsewhere).eld.dutyDayHistory({ operatorId: s.operatorId })).rejects.toThrow(/not found/i);
+    await expect(callerFor(mgmt).eld.dutyDayHistory({ operatorId: 2_000_000_000 })).rejects.toThrow(/not found/i);
+    await expect(callerFor(mgmt).eld.dutyDayDesignate({ ...base, orgRef: "elsewhere" } as never)).rejects.toThrow();
+  });
+
+  it("reaches eld.hosStatus: the day's clocks are shown, the designation is named, and the daily answer stays UNKNOWN", async () => {
+    const s = await driverScenario();
+    // A Regina day (UTC−06:00 all year) chosen to have begun three whole minutes-aligned hours ago,
+    // so the expected clocks are literals whatever time the suite runs.
+    const dayStart = Math.floor(Date.now() / MIN) * MIN - 180 * MIN;
+    const startLocalMinutes = ((Math.floor(dayStart / MIN) % 1440) - 360 + 1440) % 1440;
+    const safety = await userIn(s.orgRef, "safety");
+    const des = await callerFor(safety).eld.dutyDayDesignate({ operatorId: s.operatorId, timezone: "America/Regina", dayStartMinutes: startLocalMinutes, reason: "Regina yard" });
+    accepted(await callerFor(s.userId).eld.eventsAppend(signedBatch(s, [
+      ev(0, { eventAtMs: dayStart - 30 * MIN, dutyStatus: "on_duty" }),
+      ev(1, { eventAtMs: dayStart + 60 * MIN, dutyStatus: "driving" }),
+    ])));
+    const at = new Date(dayStart + 200 * MIN);                                // after the designation took effect
+    const r = await callerFor(s.userId).eld.hosStatus({ at });
+    expect(r.engineVersion).toBe("hos-engine/2c");
+    expect(r.dutyDay).toMatchObject({ designationRef: des.designationRef, drivingMinutes: 140, onDutyMinutes: 200, offDutyMinutes: 0, sleeperMinutes: 0, unrecordedMinutes: 0, designationChangedDuringDay: true });
+    expect(r.dutyDay!.window).toMatchObject({ timezone: "America/Regina", dayStartMinutes: startLocalMinutes, lengthMinutes: 1440 });
+    expect(r.dutyDay!.window.from.getTime()).toBe(dayStart);
+    expect(r.reasonCodes).not.toContain("HOS_TIMEZONE_UNKNOWN");
+    expect(r.verdict).toBe("unknown");
+
+    // Before the designation took effect there was no designated day, and there still is not.
+    const earlier = await callerFor(s.userId).eld.hosStatus({ at: new Date(dayStart + 60 * MIN) });
+    expect(earlier.dutyDay).toBeNull();
+    expect(earlier.reasonCodes).toContain("HOS_TIMEZONE_UNKNOWN");
+  });
+
+  it("uses the designation in force at the instant asked about, so a later one never rewrites an earlier answer", async () => {
+    const s = await driverScenario();
+    const safety = await userIn(s.orgRef, "safety");
+    const first = await callerFor(safety).eld.dutyDayDesignate({ operatorId: s.operatorId, timezone: "America/Regina", dayStartMinutes: 0, reason: "Regina yard" });
+    const second = await callerFor(safety).eld.dutyDayDesignate({ operatorId: s.operatorId, timezone: "America/Winnipeg", dayStartMinutes: 300, effectiveFrom: new Date(Date.now() + 2 * 86_400_000), reason: "Moved to the Winnipeg terminal" });
+    const inFirst = await callerFor(s.userId).eld.hosStatus({ at: new Date(Date.now() + 86_400_000) });
+    const inSecond = await callerFor(s.userId).eld.hosStatus({ at: new Date(Date.now() + 3 * 86_400_000) });
+    expect(inFirst.dutyDay).toMatchObject({ designationRef: first.designationRef, window: expect.objectContaining({ timezone: "America/Regina" }) });
+    expect(inSecond.dutyDay).toMatchObject({ designationRef: second.designationRef, window: expect.objectContaining({ timezone: "America/Winnipeg", dayStartMinutes: 300 }) });
+    expect((await callerFor(safety).eld.dutyDayHistory({ operatorId: s.operatorId })).map(h => h.designationRef)).toEqual([first.designationRef, second.designationRef]);
   });
 });

@@ -46,7 +46,7 @@ const synthetic = (limits: HosLimit[], key = "SYN"): HosRuleProfile => ({
   limits, sourceAuthority: "test fixture", sourceCitation: "synthetic", verificationStatus: "verified",
 });
 const input = (events: LedgerEventLike[], profiles: HosRuleProfile[], o: Partial<HosEngineInput> = {}): HosEngineInput => ({
-  operatorId: OP, events, homeTerminalTimezone: null, profiles, at: AT,
+  operatorId: OP, events, dutyDay: null, profiles, at: AT,
   context: { carrierAuthority: "provincial", jurisdiction: "ZZ", latitude: 53.5, at: AT }, ...o,
 });
 

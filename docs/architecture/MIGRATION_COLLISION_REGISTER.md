@@ -355,4 +355,14 @@ recorded above, claimed after this branch's `0220` and around it). `0220` is sti
 `claude/integration-hub-subsystem-6nzrkw`, whose `0221`/`0222` now also collide with `main`'s. The ledger applies
 by name, so `0220` runs on a database that already has `0221`–`0222`.
 
-**Next free number for new work: `0224`** (re-check with the scan before committing).
+## Claim: 0224 (ELD duty-day designations, 2026-10-02, `main` = `db7dc7c`)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0224 | `0224_eld_duty_day_designations.sql` | `claude/eld-compliance-intelligence-ramlrd` | none | `db7dc7c` (main merged in) | gated | none | keeps 0224 |
+
+Scanned `origin/main` and all 123 remote refs immediately before committing: `main` ends at `0222`, and the
+highest number held anywhere is `0223` (`claude/integration-hub-subsystem-6nzrkw`), so `0224` is the first
+number free everywhere. Recorded in the commit that creates the migration.
+
+**Next free number for new work: `0225`** (re-check with the scan before committing).

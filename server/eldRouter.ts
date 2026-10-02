@@ -1,15 +1,16 @@
 /**
  * 0220 — the ELD ledger's API.
  *
- * Three procedures and nothing that decides. `eventsAppend` is the device's push: the same transport
+ * Five procedures and nothing that decides. `eventsAppend` is the device's push: the same transport
  * discipline as `sync.receivePackage` (enrolled device, P-256 signature over the canonical batch,
  * single-use nonce, freshness by the device's clock), then everything about identity, tenancy and
  * idempotency is `appendEldEvents`'s. `deviceIntegrity` reads what one device's chain proves.
- * `hosStatus` reads one operator's hours from the ledger through `evaluateHos`.
+ * `hosStatus` reads one operator's hours from the ledger through `evaluateHos`. `dutyDayDesignate`
+ * and `dutyDayHistory` (0224) record and read where an operator's duty day begins.
  *
  * No procedure here accepts an organization or a driver's name. The device is the identity on the
- * write path, and it is looked up. The only operator id any procedure takes is `hosStatus`'s, a READ
- * that is checked against the caller's organization and, for anyone but the caller, `eld.read`.
+ * write path, and it is looked up. An operator id is taken only where an operator is the subject —
+ * `hosStatus`, the duty-day procedures — and is always checked against the caller's organization.
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -23,6 +24,8 @@ import { admitPackage, type FieldDeviceRecord, type KeyEvent } from "./_core/fie
 import { canonicalEldBatch, type BatchProblem } from "./_core/eld/ledger";
 import { appendEldEvents, deviceLedgerIntegrity, loadHosLedgerWindow } from "./_core/eld/eldLedgerStore";
 import { evaluateHos } from "./_core/eld/hosEngine";
+import { dutyDayWindow } from "./_core/eld/dutyDay";
+import { dutyDayDesignationAt, dutyDayDesignationHistory, recordDutyDayDesignation, type DutyDayDesignationRefusal } from "./_core/eld/dutyDayStore";
 import { authorize } from "./_core/recordsAuthorization";
 import { recordBelongsToOrganization } from "./_core/coreRecordOwnership";
 import { loadProfiles } from "./hosRouter";
@@ -31,6 +34,12 @@ import { loadProfiles } from "./hosRouter";
 export type EldTransportRefusalCode = "device_unknown" | "device_no_organization" | "device_legacy_key" | "signature_stale" | "signature_invalid" | "device_not_admitted";
 
 const FINGERPRINT = z.string().regex(/^[a-f0-9]{64}$/, "fingerprint must be a lowercase SHA-256 hex string");
+
+/** A designation refusal is the caller's input or the history's order, never the server's fault. */
+const DESIGNATION_REFUSAL_STATUS: Record<DutyDayDesignationRefusal, "NOT_FOUND" | "BAD_REQUEST" | "CONFLICT"> = {
+  operator_not_found: "NOT_FOUND", timezone_unknown: "BAD_REQUEST", day_start_invalid: "BAD_REQUEST",
+  reason_required: "BAD_REQUEST", backdated: "BAD_REQUEST", not_after_latest: "CONFLICT",
+};
 
 export const eldRouter = router({
   /**
@@ -172,16 +181,69 @@ export const eldRouter = router({
       }
 
       const at = input.at ?? new Date();
-      const since = new Date(at.getTime() - input.lookbackDays * 86_400_000);
+      const designation = await dutyDayDesignationAt(db, { orgRef: acting, operatorId, at });
+      // The window always covers the whole designated day, which can be 25 hours long — longer than
+      // the shortest lookback. A zone the runtime no longer knows leaves the lookback as asked.
+      let since = new Date(at.getTime() - input.lookbackDays * 86_400_000);
+      if (designation) {
+        try {
+          const day = dutyDayWindow(at, designation);
+          if (day.from.getTime() < since.getTime()) since = day.from;
+        } catch { /* the engine reports HOS_TIMEZONE_UNKNOWN */ }
+      }
       const window = await loadHosLedgerWindow(db, { orgRef: acting, operatorId, since, at });
       const result = evaluateHos({
         operatorId, events: window.rows,
-        homeTerminalTimezone: null,              // no column yet; the engine reports HOS_TIMEZONE_UNKNOWN
+        dutyDay: designation ? { timezone: designation.timezone, dayStartMinutes: designation.dayStartMinutes, designationRef: designation.designationRef, effectiveFrom: designation.effectiveFrom } : null,
         context: { carrierAuthority: input.carrierAuthority, jurisdiction: input.jurisdiction, crossedBoundary: input.crossedBoundary, registeredWeightKg: input.registeredWeightKg, operationClass: input.operationClass, latitude: input.latitude, at },
         profiles: await loadProfiles(db),
         chainGaps: window.chainGaps.map(g => ({ fromAt: g.fromAt, toAt: g.toAt })),
         at,
       });
       return { ...result, window: { from: since, to: at, rowsRead: window.rows.length, chainGaps: window.chainGaps } };
+    }),
+
+  /**
+   * ELD checkpoint 2c — record where an operator's duty day begins, from a moment on.
+   *
+   * A new row every time; the store refuses a designation that would take effect before it is
+   * recorded or before the operator's latest one, so no answer already given can change. The
+   * timezone is checked against this server's IANA database and stored under its canonical name,
+   * with the database version beside it. Recording a designation decides no limit: daily limits
+   * stay UNKNOWN until a rule saying how a regime counts them over this day is verified.
+   */
+  dutyDayDesignate: roleProcedure("eld.dutyDayDesignate")
+    .input(z.object({
+      operatorId: z.number().int().positive(),
+      timezone: z.string().min(1).max(64),
+      dayStartMinutes: z.number().int().min(0).max(1439),
+      effectiveFrom: z.coerce.date().optional(),
+      reason: z.string().trim().min(1).max(300),
+    }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const acting = (await resolveActingScope(db, ctx.user.id)).tenantId;
+      const r = await recordDutyDayDesignation(db, {
+        orgRef: acting, operatorId: input.operatorId, timezone: input.timezone, dayStartMinutes: input.dayStartMinutes,
+        effectiveFrom: input.effectiveFrom ?? null, reason: input.reason, recordedByUserId: ctx.user.id, recordedAt: new Date(),
+      });
+      if (r.state === "refused") throw new TRPCError({ code: DESIGNATION_REFUSAL_STATUS[r.code], message: `${r.code}: ${r.reason}` });
+      return r.designation;
+    }),
+
+  /** Every duty-day designation an operator has had in the caller's organization, oldest first. */
+  dutyDayHistory: roleProcedure("eld.dutyDayHistory")
+    .input(z.object({ operatorId: z.number().int().positive() }).strict())
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const acting = (await resolveActingScope(db, ctx.user.id)).tenantId;
+      // Out of scope reads as absent, and so does an operator that does not exist at all.
+      const exists = (await db.select({ id: operators.id }).from(operators).where(eq(operators.id, input.operatorId)).limit(1))[0];
+      if (!exists || !(await recordBelongsToOrganization(db, acting, "operator", input.operatorId))) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `Operator ${input.operatorId} not found` });
+      }
+      return dutyDayDesignationHistory(db, { orgRef: acting, operatorId: input.operatorId });
     }),
 });

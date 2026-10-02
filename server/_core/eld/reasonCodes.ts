@@ -14,6 +14,7 @@ export const HOS_REASON_CODES = [
   "HOS_LIMIT_NOT_STATED",            // the profile carries no figure for this limit
   "HOS_MECHANICS_DEFAULTED",         // day/shift/cycle boundaries came from the trailing-window default, not a regime rule
   "HOS_DAY_BOUNDARY_UNKNOWN",        // the regime needs a designated duty day and none is established
+  "HOS_DAY_RULE_UNVERIFIED",         // a duty day is designated, but no verified rule says this limit is counted over it
   "HOS_TIMEZONE_UNKNOWN",            // the operator's home-terminal zone is not on record
   "HOS_NO_DUTY_RECORD",              // the ledger holds no duty status for this operator in the window
   "HOS_REQUIRED_REST_UNDETERMINED",  // earliest legal driving time cannot be computed under what is verified

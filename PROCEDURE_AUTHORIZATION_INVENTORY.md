@@ -55,12 +55,12 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/liveAssistRouter.ts` | `ROLE_AUTHORIZED` — LA-1a session spine only; every permission sensitive; no universal grant (`docs/live-assist/LA1A_OWNER_RULING.md`) | **8** |
 | `server/documentControlRouter.ts` | `ROLE_AUTHORIZED` | **23** (DC-A: definitions list/get, catalog seed, overlay/create/retire, source artifacts; DC-B: intake, register rendered, confirm, issue, void, supersede, withdraw, amend, get, list; DC-C: series list, gap report, blocks, allocate/retire device block, void number) |
 | `server/attestRouter.ts` | `ROLE_AUTHORIZED` — SA1 Sign & Attest (`docs/sign-attest/SA1_OWNER_RULING.md`); `attest.sign` and `attest.decline` are universal and self-scoped (the signer row must name `ctx.user.id`); every other write is sensitive | **14** |
-| `server/eldRouter.ts` | `ROLE_AUTHORIZED` (0220: `eld.eventsAppend` self-scoped to the enrolled device; `eld.deviceIntegrity` an office read; `eld.hosStatus` gated on `hos.read`, own operator only unless the caller also holds `eld.read`) | **3** |
+| `server/eldRouter.ts` | `ROLE_AUTHORIZED` (0220: `eld.eventsAppend` self-scoped to the enrolled device; `eld.deviceIntegrity` an office read; `eld.hosStatus` gated on `hos.read`, own operator only unless the caller also holds `eld.read`; 0224: `eld.dutyDayDesignate` sensitive, safety and management; `eld.dutyDayHistory` an office read) | **5** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**493 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
+**495 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
 The table lists the surfaces reviewed here, not every router; the system-wide count is generated into
 `LEASEOS_CURRENT_STATE.md`. The numbers in this table are written by `node scripts/procedure-inventory.mjs`,
 which reads them from the routers (CP1.5: nine rows had drifted below their routers and the total said 356).
