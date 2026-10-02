@@ -428,3 +428,50 @@ d("0142 — exact-wire verification and the tablet's clock", () => {
     expect(wrong.reason).toContain("beyond a day");
   }, 60_000);
 });
+
+d("office receipt: a verified hash, not a 200, releases the device copy", () => {
+  it("records receipt for every item, verification only for a matching one, first write wins, and the deletion gate follows", async () => {
+    const driver = await withRole("driver");
+    await pool.execute("INSERT INTO operators (name, userId, createdAt) VALUES (?, ?, NOW())", [`Op ${key("o")}`, driver]);
+    const A = deviceKey();
+    const en = await callerFor(driver).device.enroll({ platform: "android", publicKeySpkiBase64: A.spki, keystoreAttestation: "hardware", encryptedStorageAttested: true });
+    await callerFor(driver).device.activate({ deviceRef: en.deviceRef });
+
+    const good = key("bytes"), c = sha(good);
+    const up = async (data: string) => Number((await callerFor(driver).fieldRoute.evidence.upload({ title: "ticket", category: "ticket", fileName: "t.bin", mimeType: "application/octet-stream", dataBase64: Buffer.from(data).toString("base64"), clientCaptureRef: key("cap-________") })).id);
+    const ok = await up(good);
+    const tampered = await up("not the bytes the device sealed");
+    // Both are sealed claiming `c`; only `ok`'s stored bytes actually hash to it.
+    const seal = (evidenceId: number) => callerFor(driver).records.evidence.seal({ evidenceId, contentHash: c, recordType: "load_ticket", relationships: [{ entityType: "unit", entityRef: "U-RCPT" }] });
+    const mOk = (await seal(ok)).manifestHash, mBad = (await seal(tampered)).manifestHash;
+    // Take the 14-day device clock out of the picture, so the office facts are all that decide.
+    await pool.execute("UPDATE recordRetentionState SET deviceRetainUntil = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE evidenceRecordId IN (?, ?)", [ok, tampered]);
+
+    const codes = async (id: number) => (await callerFor(driver).records.evidence.requestDeviceDeletion({ evidenceId: id })).blockers.map((b: { code: string }) => b.code);
+    expect(await codes(ok)).toEqual(expect.arrayContaining(["office_not_received"]));
+
+    const item = (id: number, m: string) => ({ evidenceRecordId: id, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" as const });
+    const pushed = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [item(ok, mOk), item(tampered, mBad)] }));
+    expect(pushed).toMatchObject({ verified: 1, rejected: 1 });
+
+    const state = async (id: number) => (await pool.execute<mysql.RowDataPacket[]>("SELECT officeReceivedAt, officeIntegrityVerifiedAt FROM recordRetentionState WHERE evidenceRecordId = ?", [id]))[0][0];
+    const first = await state(ok);
+    expect(first.officeReceivedAt).not.toBeNull();
+    expect(first.officeIntegrityVerifiedAt).not.toBeNull();
+    const bad = await state(tampered);
+    expect(bad.officeReceivedAt).not.toBeNull();          // the office has it…
+    expect(bad.officeIntegrityVerifiedAt).toBeNull();     // …and it is not the record that was sealed
+
+    // A re-send after a lost acknowledgement moves nothing.
+    await new Promise(r => setTimeout(r, 1100));
+    await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [item(ok, mOk)] }));
+    const again = await state(ok);
+    expect(new Date(again.officeReceivedAt).getTime()).toBe(new Date(first.officeReceivedAt).getTime());
+    expect(new Date(again.officeIntegrityVerifiedAt).getTime()).toBe(new Date(first.officeIntegrityVerifiedAt).getTime());
+
+    // The gate B20 built and nothing could ever open: the verified record may now leave the device; the tampered one may not.
+    expect(await codes(tampered)).toEqual(["office_integrity_unverified"]);
+    const release = await callerFor(driver).records.evidence.requestDeviceDeletion({ evidenceId: ok });
+    expect(release).toMatchObject({ allowed: true, officeVerified: true, blockers: [] });
+  }, 60_000);
+});

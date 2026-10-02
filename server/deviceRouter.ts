@@ -14,6 +14,7 @@ import { and, eq, isNull, desc } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { sealIsTrustworthy, verifySealAgainstStored } from "./_core/evidenceSeal";
+import { recordOfficeReceipt } from "./recordsService";
 import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
 import { createHash } from "node:crypto";
 import { handleSyncRefusal, type SyncRefusalCode, DEVICE_SIGNATURE_MAX_SKEW_MS, canonicalDevicePackage, fingerprintP256Spki, signatureFreshness, verifyP256PackageSignature } from "./_core/deviceSignature";
@@ -302,6 +303,8 @@ export const syncRouter = router({
         await db.insert(syncPackageItems).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, declaredContentHash: it.declaredContentHash, declaredManifestHash: it.declaredManifestHash,
           captureAuthorizationClaim: it.captureAuthorizationClaim, captureAuthorizationReason: it.captureAuthorizationReason ?? null, state: v.outcome === "verified" ? "verified" : "mismatch" });
         await db.insert(syncReceipts).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, computedContentHash: recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)!.computedContentHash, computedManifestHash: recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)!.computedManifestHash, matched: v.outcome === "verified", receivedAt: now, failureDetail: v.outcome === "verified" ? null : v.reason });
+        // B20's rule: a verified hash, not a 200, is what lets the device let go of its copy.
+        await recordOfficeReceipt({ evidenceId: it.evidenceRecordId, at: now, integrityVerified: v.outcome === "verified" });
       }
       await db.update(syncPackages).set({
         state: verification.packageOutcome,

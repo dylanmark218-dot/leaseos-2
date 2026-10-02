@@ -7,7 +7,7 @@
  * asking about can name itself.
  */
 
-import { and, desc, eq, inArray, isNull, ne, notInArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { getDb, jobScopeSubquery, type TenantScope } from "./db";
 import { placeHold, releaseHold } from "./fleetPortfolioService";
@@ -276,6 +276,44 @@ export async function loadRetentionState(evidenceId: number) {
     .where(eq(recordRetentionState.evidenceRecordId, evidenceId))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * The office has the record. Called from `sync.receivePackage` for every item
+ * it receives, after the server has recomputed the hash from the bytes it
+ * stored — never on the device's word.
+ *
+ * Received and integrity-verified are separate facts, because they release
+ * different things: `evaluateDeviceDeletion` lets a device drop its copy only
+ * once the office has BOTH received it and verified its hash. A mismatched item
+ * is received and stays unverified, so it can never release a device copy.
+ *
+ * First write wins. A device that re-sends after a lost acknowledgement does
+ * not move the dates, and a later mismatch cannot un-verify what an earlier
+ * receipt verified from the same stored bytes. One statement, so two receipts
+ * racing for the same record cannot both insert.
+ *
+ * Seal-time retention (`persistSeal`) writes only the retention fields, so a
+ * receipt that arrives before or after the seal leaves both halves intact.
+ */
+export async function recordOfficeReceipt(args: { evidenceId: number; at: Date; integrityVerified: boolean }) {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .insert(recordRetentionState)
+    .values({
+      evidenceRecordId: args.evidenceId,
+      officeReceivedAt: args.at,
+      officeIntegrityVerifiedAt: args.integrityVerified ? args.at : null,
+    })
+    .onDuplicateKeyUpdate({
+      set: {
+        officeReceivedAt: sql`COALESCE(${recordRetentionState.officeReceivedAt}, ${args.at})`,
+        ...(args.integrityVerified
+          ? { officeIntegrityVerifiedAt: sql`COALESCE(${recordRetentionState.officeIntegrityVerifiedAt}, ${args.at})` }
+          : {}),
+      },
+    });
 }
 
 export async function markDeviceCopyDeleted(args: {
