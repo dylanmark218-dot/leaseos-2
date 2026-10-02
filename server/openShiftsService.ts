@@ -24,9 +24,9 @@
  * The stored, fingerprinted check the award consumes is `dispatch.evaluate`'s, made by a dispatcher
  * for the exact slot, and the award refuses without it — readiness is enforced there, fail closed.
  */
-import { and, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, or } from "drizzle-orm";
 import {
-  crewMembers, crews, leaveRequests, operators, resourceBookings, shiftInterests, shiftOffers,
+  crewMembers, crews, leaveRequests, resourceBookings, shiftInterests, shiftOffers,
   shiftPostEvents, shiftPosts, workerAvailability,
 } from "../drizzle/schema";
 import type { DbOrTx } from "./_core/dbTypes";
@@ -39,6 +39,7 @@ import {
 } from "./_core/openShifts";
 import { composeReadiness } from "./readinessComposer";
 import { effectiveQualifications } from "./qualificationReads";
+import { driverLicenceStanding } from "./licenceReads";
 import { conflictingBookingsWhere } from "./_core/bookingConflict";
 import { listActiveUserRoles, operatorForUserInScope, orgScopeWhere, userInScope } from "./db";
 
@@ -140,11 +141,11 @@ export async function personFacts(d: DbOrTx, tenantId: string, post: ShiftPost, 
 
   // The person's own operator record (operators.userId, owned by this organization). Two is a refusal, not a choice.
   const op = await operatorForUserInScope(userId, scope);
-  let licence: PersonFacts["licence"] = { kind: op.kind === "ambiguous" ? "ambiguous" : "none" };
+  // The licence at the shift, through the licence read adapter over the canonical verdict
+  // (documents first, the legacy date only as an unverified claim) — never judged here.
+  const licence = await driverLicenceStanding(d, op, post.startsAt);
   let commitments: PersonFacts["commitments"] = [];
   if (op.kind === "resolved") {
-    const row = (await d.select({ licenseExpiresAt: operators.licenseExpiresAt }).from(operators).where(eq(operators.id, op.operatorId)).limit(1))[0];
-    licence = { kind: "recorded", expiresAt: row?.licenseExpiresAt ?? null };
     // The one booking-conflict rule (_core/bookingConflict.ts), the same one the award re-checks.
     const booked = await d.select().from(resourceBookings)
       .where(conflictingBookingsWhere({ type: "operator", ref: String(op.operatorId) }, post)).limit(20);
@@ -183,7 +184,7 @@ export type Preview = {
 };
 
 /** Codes of the rule that mean "could not be established" rather than "established and excluding". */
-const UNESTABLISHED: ReadonlySet<IneligibilityCode> = new Set<IneligibilityCode>(["no_licence_recorded", "qualification_unknown", "qualification_unverified"]);
+const UNESTABLISHED: ReadonlySet<IneligibilityCode> = new Set<IneligibilityCode>(["no_licence_recorded", "licence_not_established", "qualification_unknown", "qualification_unverified"]);
 
 /** The rule's verdict for one person, from their records. Nothing in it is the caller's to supply. */
 export async function eligibilityOf(d: DbOrTx, args: { post: ShiftPostRow; userId: number; scope: ActingScope }): Promise<Candidate> {

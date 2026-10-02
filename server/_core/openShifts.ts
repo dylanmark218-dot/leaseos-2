@@ -4,8 +4,9 @@
  * Pure. No network, no database.
  *
  * Composes approved leave from `timeOff`, rotation from `calendarProjection`,
- * licence expiry from `documentValidity` and qualification standing from the
- * qualification read adapter. It re-decides none
+ * the licence standing from the licence read adapter (`licenceReads`, over the canonical
+ * `driverLicenceVerdict`) and qualification standing from the qualification read adapter. It
+ * re-decides none
  * of them: whether somebody holds a qualification, whether they are on leave,
  * whether they are rostered — all already answered elsewhere, and a second
  * opinion in a job-posting screen is how a person is shown as eligible for work
@@ -25,7 +26,6 @@
  */
 
 import { isOnShift, type RotationPattern } from "./calendarProjection";
-import { readExpiry } from "./documentValidity";
 import { windowsOverlap } from "./bookingConflict";
 import { isAbsent, type LeaveRequest } from "./timeOff";
 
@@ -56,13 +56,31 @@ export type ShiftPost = {
 export type IneligibilityCode =
   | "not_in_organization"
   | "wrong_role" | "not_rostered" | "on_approved_leave" | "overlaps_existing"
-  | "no_licence_recorded" | "licence_expired"
+  | "no_licence_recorded" | "licence_expired" | "licence_not_established"
   | "qualification_unknown" | "qualification_unverified" | "qualification_expired";
 
 export type Ineligibility = { code: IneligibilityCode; detail: string };
 
 /** A qualification's standing as the qualification read adapter reports it (`effectiveQualifications`). */
 export type QualificationStanding = { code: string; held: boolean; notHeld: string | null; reason: string };
+
+/**
+ * A licence's standing at the shift, from the canonical verdict (`driverLicenceVerdict`), already
+ * narrowed by the read adapter. The rule maps it; it never reads a date.
+ *
+ *   none        — no operator record, or one with no licence documents and no legacy date
+ *   ambiguous   — more than one operator record; no licence is chosen between them
+ *   in_force    — in force or expiring, but not yet expired, at the shift
+ *   lapsed      — expired, or an unverified claim whose own date has passed, by the shift
+ *   not_established — on record but not established: unverified (including the legacy date),
+ *                 verified with no expiry, rejected, or not yet effective. Unknown refuses.
+ */
+export type LicenceStanding =
+  | { kind: "none" }
+  | { kind: "ambiguous" }
+  | { kind: "in_force" }
+  | { kind: "lapsed"; expiresAt: Date | null }
+  | { kind: "not_established"; reason: string };
 
 /** An existing commitment over some window — a confirmed or tentative booking. */
 export type Commitment = { assignmentRef: string; startsAt: Date; endsAt: Date };
@@ -81,8 +99,8 @@ export type PersonFacts = {
   rosters: readonly { rotation: RotationPattern | null }[];
   leave: readonly LeaveRequest[];
   commitments: readonly Commitment[];
-  /** The person's own operator record: none, more than one (ambiguous), or its licence expiry. */
-  licence: { kind: "none" } | { kind: "ambiguous" } | { kind: "recorded"; expiresAt: Date | null };
+  /** The person's licence at the shift, as `licenceReads.driverLicenceStanding` reports it. */
+  licence: LicenceStanding;
   /** One standing per code the post requires. A required code with no standing is unknown. */
   qualifications: readonly QualificationStanding[];
 };
@@ -127,14 +145,21 @@ export function shiftEligibility(post: ShiftPost, p: PersonFacts): Candidate {
   const clash = p.commitments.find(c => windowsOverlap(post, c));   // the one rule: _core/bookingConflict.ts
   if (clash) reasons.push({ code: "overlaps_existing", detail: `Already on ${clash.assignmentRef} over this window` });
 
-  if (p.licence.kind === "none") {
-    reasons.push({ code: "no_licence_recorded", detail: "No licence on record — this cannot be established as current" });
-  } else if (p.licence.kind === "ambiguous") {
-    reasons.push({ code: "no_licence_recorded", detail: "More than one operator record for this person — no licence is chosen between them" });
-  } else if (!p.licence.expiresAt) {
-    reasons.push({ code: "no_licence_recorded", detail: "No licence expiry on record — this cannot be established as current" });
-  } else if (readExpiry(p.licence.expiresAt, post.startsAt, 0).expiry === "expired") {
-    reasons.push({ code: "licence_expired", detail: `Licence expires ${p.licence.expiresAt.toISOString().slice(0, 10)}, before this shift` });
+  switch (p.licence.kind) {
+    case "none":
+      reasons.push({ code: "no_licence_recorded", detail: "No licence on record — this cannot be established as current" });
+      break;
+    case "ambiguous":
+      reasons.push({ code: "no_licence_recorded", detail: "More than one operator record for this person — no licence is chosen between them" });
+      break;
+    case "lapsed":
+      reasons.push({ code: "licence_expired", detail: p.licence.expiresAt ? `Licence expires ${p.licence.expiresAt.toISOString().slice(0, 10)}, before this shift` : "Licence expired before this shift" });
+      break;
+    case "not_established":
+      reasons.push({ code: "licence_not_established", detail: `Licence not established — ${p.licence.reason}` });
+      break;
+    case "in_force":
+      break;
   }
 
   // From the adapter's structured verdict, never from its prose. A required code with no standing
