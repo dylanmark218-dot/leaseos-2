@@ -8,7 +8,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, eq, inArray } from "drizzle-orm";
-import { billingBookEntries, billingBooks, billingSnapshots, customerAccounts, customerBillingConfigs, customerCredits, disputeCases, fieldTicketDocuments, fieldTicketLines, fieldTicketSignatures, fieldTickets, invoiceLines, invoices, jobs, paymentAllocations, pricingDecisions } from "../drizzle/schema";
+import { billingBookEntries, billingBooks, billingSnapshots, customerAccounts, customerBillingConfigs, customerCredits, disputeCases, fieldTicketDocuments, fieldTicketLines, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, invoiceLines, invoices, jobs, paymentAllocations, pricingDecisions } from "../drizzle/schema";
 import { renderPdf, sha256Hex } from "./_core/ticketPdf";
 import { storagePut } from "./storage";
 import { queueCustomerAlert } from "./customerAlertService";
@@ -20,6 +20,7 @@ import { disputeCaseInScope, invoiceInScope } from "./financeScope";
 import { assertPeriodOpen } from "./periodCloseService";
 import { disputeResolution, draftFromTicket, finalizeCheck, snapshotHash, voidCheck, type TicketLineForInvoice } from "./_core/invoiceDraft";
 import { determine } from "./_core/taxRuleEngine";
+import { fieldTicketSignatureVerdict } from "./_core/fieldTicketSignature";
 import { GST_RATE_RULE_TYPE, GST_RATE_SEEDS } from "./_core/gstSeeds";
 import { loadTaxRules } from "./payrollService";
 
@@ -31,8 +32,9 @@ async function ticketForInvoice(d: Awaited<ReturnType<typeof db>>, fs: FinanceSc
   if (!(await fieldTicketInScope(ticketNumber, fs))) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket" });
   const t = (await d.select().from(fieldTickets).where(eq(fieldTickets.ticketNumber, ticketNumber)).limit(1))[0];
   if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket" });
-  const [sigs, lines, job, account] = await Promise.all([
+  const [sigs, revisions, lines, job, account] = await Promise.all([
     d.select().from(fieldTicketSignatures).where(eq(fieldTicketSignatures.fieldTicketId, t.id)),
+    d.select().from(fieldTicketRevisions).where(eq(fieldTicketRevisions.fieldTicketId, t.id)),
     d.select().from(fieldTicketLines).where(eq(fieldTicketLines.fieldTicketId, t.id)),
     d.select().from(jobs).where(eq(jobs.id, t.jobId)).limit(1).then(r => r[0] ?? null),
     t.customerAccountId != null ? d.select().from(customerAccounts).where(eq(customerAccounts.id, t.customerAccountId)).limit(1).then(r => r[0] ?? null) : Promise.resolve(null),
@@ -42,9 +44,10 @@ async function ticketForInvoice(d: Awaited<ReturnType<typeof db>>, fs: FinanceSc
   const decisions = refs.length ? await d.select().from(pricingDecisions).where(inArray(pricingDecisions.decisionRef, refs)) : [];
   const byRef = new Map(decisions.map(x => [x.decisionRef, x]));
   const forDraft: TicketLineForInvoice[] = lines.map(l => { const dec = l.pricingDecisionRef ? byRef.get(l.pricingDecisionRef) : null; return { id: l.id, description: l.description, serviceCode: l.serviceCode, disposition: l.disposition, quantity: l.quantity, quantityUnit: l.quantityUnit, decision: dec ? { decisionRef: dec.decisionRef, outcome: dec.outcome, amountCents: dec.amountCents, billableQuantityMillis: dec.billableQuantityMillis, rateMillis: dec.rateMillis, unit: dec.unit, quantityMillis: dec.quantityMillis, scopeLevel: dec.scopeLevel, reasons: JSON.parse(dec.reasonsJson) as string[] } : null }; });
-  const signed = sigs.some(s => s.result === "accepted" || s.result === "partially_accepted");   // a refusal or an absent representative is not a signature to invoice on
+  // SPINE item 2 — the site sign-off's verdict, not "some signature row says accepted".
+  const signature = fieldTicketSignatureVerdict({ ticket: t, signatures: sigs, revisions });
   const config = account ? (await d.select().from(customerBillingConfigs).where(eq(customerBillingConfigs.customer, account.name)).limit(1))[0] ?? null : null;
-  return { t, job, account, lines, forDraft, signed, partialAcceptanceAllowed: !!config?.partialAcceptanceAllowed };
+  return { t, job, account, lines, forDraft, signature, partialAcceptanceAllowed: !!config?.partialAcceptanceAllowed };
 }
 
 /** The invoice document's lines, from the frozen snapshot only — nothing re-read from live records. */
@@ -150,7 +153,7 @@ export const invoicingRouter = router({
       const liveByInvoice = new Map(liveInvoices.filter(i => i.status !== "void").map(i => [i.id, i.invoiceNumber]));
       const alreadyInvoiced = new Map<number, string>();
       for (const o of onLines) { const n = liveByInvoice.get(o.invoiceId); if (n && o.fieldTicketLineId != null) alreadyInvoiced.set(o.fieldTicketLineId, n); }
-      const draft = draftFromTicket({ signed: x.signed, ticketStatus: x.t.status, lines: x.forDraft, partialAcceptanceAllowed: x.partialAcceptanceAllowed, alreadyInvoiced });
+      const draft = draftFromTicket({ signature: x.signature, lines: x.forDraft, partialAcceptanceAllowed: x.partialAcceptanceAllowed, alreadyInvoiced });
       if (draft.blockers.length) return { drafted: false as const, blockers: draft.blockers, excluded: draft.excluded, subtotalCents: draft.subtotalCents };
       // the job's billing book, opened if absent
       let book = (await d.select().from(billingBooks).where(eq(billingBooks.jobId, x.t.jobId)).limit(1))[0];
