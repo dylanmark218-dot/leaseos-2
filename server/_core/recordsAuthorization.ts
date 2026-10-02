@@ -155,6 +155,13 @@ export type Permission =
   | "payroll.time.submit_own"
   | "payroll.dispute.raise_own"
   | "payroll.profile.write"
+  // Payroll P1 (0226) — compensation agreements and the earning-code catalogue, split by act (D4):
+  // reading compensation, proposing it, approving it, and administering a book's earning codes are
+  // four different authorities. None of them is held by dispatch, a driver, a mechanic or management.
+  | "payroll.compensation.read"
+  | "payroll.compensation.propose"
+  | "payroll.compensation.approve"
+  | "payroll.earning_code.manage"
   // Contractor settlement is its own ledger, never employee payroll.
   | "contractor.read" | "contractor.write" | "contractor.approve"
   | "finance.entity.write"
@@ -1451,6 +1458,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.read_own",
     "payroll.read_employee",
     "payroll.review",
+    "payroll.compensation.read",
+    "payroll.compensation.propose",
     "personnel.read",
     "personnel.write",
     "hos.read",
@@ -1667,6 +1676,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "evidence.browse",
     "personnel.read",
     "payroll.profile.write",
+    "payroll.compensation.read",
+    "payroll.compensation.propose",
+    "payroll.earning_code.manage",
     "contractor.read",
     "surface.exceptions.read",
     "surface.search",
@@ -1750,6 +1762,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.approve",
     "payroll.rate.read",
     "payroll.rate.write",
+    "payroll.compensation.read",
+    "payroll.compensation.approve",
+    "payroll.earning_code.manage",
     "evidence.read_commercial",
     "evidence.browse",
     "evidence.export",
@@ -1966,20 +1981,27 @@ export function isUniversalPermission(p: Permission): boolean {
  * mechanic has no commercial read to begin with. They stay because a future
  * grant edit that widens a role should still not silently open these.
  */
+/**
+ * Payroll P1 — every compensation authority, denied by name to the roles that work beside payroll but
+ * must never see or set what a person is paid. Sharing a job, a dispatch or a truck grants none of it.
+ */
+const COMPENSATION_PERMISSIONS: readonly Permission[] = ["payroll.compensation.read", "payroll.compensation.propose", "payroll.compensation.approve", "payroll.earning_code.manage"];
+
 const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
-  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
-  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
-  dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
-  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation"],
-  auditor: ["payroll.read", "billing.write", "personnel.write"],
+  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  auditor: ["payroll.read", "billing.write", "personnel.write", ...COMPENSATION_PERMISSIONS],
 
   // The banking and tax-identifier reads are held by nobody in this model.
   // They exist so the permission has a name to be denied under, and so adding
   // a holder is a deliberate, reviewable act rather than a side effect of a
   // broad grant. Same reason `authority_certified` sits empty in the
   // measurement ladder.
-  bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve"],
-  payroll_admin: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.approve", "billing.write"],
+  bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve", ...COMPENSATION_PERMISSIONS],
+  // P1 — the administrator proposes compensation; approving it is the controller's (D4).
+  payroll_admin: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.approve", "billing.write", "payroll.compensation.approve"],
   tax_preparer: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "billing.write", "banking.reconcile"],
   controller: ["payroll.bank.read", "payroll.tax_identifier.read"],
   external_accountant: [
@@ -2195,6 +2217,11 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "assistant.commit",
   // B20.7
   "payroll.profile.write",
+  // P1 — proposing or approving compensation, and changing a book's earning codes, are refused when
+  // their authorization row cannot be written.
+  "payroll.compensation.propose",
+  "payroll.compensation.approve",
+  "payroll.earning_code.manage",
   "contractor.approve",
   "finance.entity.write",
   // B20.13 — a claim ties an expense to a program on the stacking ledger, and
@@ -2916,6 +2943,19 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "payroll.export": "payroll.export",
 
   // Contractor settlement — a separate ledger from employee payroll.
+  // Payroll P1 (0226) — compensation agreements and the earning-code catalogue.
+  "payrollCompensation.earningCodesList": "payroll.compensation.read",
+  "payrollCompensation.earningCodeCreate": "payroll.earning_code.manage",
+  "payrollCompensation.earningCodeRetire": "payroll.earning_code.manage",
+  "payrollCompensation.profileClassification": "payroll.compensation.read",
+  "payrollCompensation.agreementsList": "payroll.compensation.read",
+  "payrollCompensation.agreementGet": "payroll.compensation.read",
+  "payrollCompensation.agreementCreate": "payroll.compensation.propose",
+  "payrollCompensation.versionPropose": "payroll.compensation.propose",
+  "payrollCompensation.versionApprove": "payroll.compensation.approve",
+  "payrollCompensation.versionReject": "payroll.compensation.approve",
+  "payrollCompensation.versionInForce": "payroll.compensation.read",
+
   "contractors.settlementsList": "contractor.read",
   "contractors.settlementCreate": "contractor.write",
   "contractors.settlementApprove": "contractor.approve",

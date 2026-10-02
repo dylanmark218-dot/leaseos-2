@@ -1038,3 +1038,124 @@ the export adapter (P6), the approval-policy configuration and solo-administrato
   gate's own row. P5's `payrollAuditEvents` table takes over as the originator record; the trail rows remain valid
   history and `findOriginator` is the one place that reads them.
 - `payroll.export` stays a stub that now says so (`exported: false`). P6 replaces it with the batch model (D5, D6).
+
+---
+
+## 24. P1 — Compensation Agreements & Earning Codes (implemented 2026-10-02)
+
+**Synchronized main:** `3e44aa9` (merged into the P1 branch at `2a546d6`; an earlier sync at `13ddc4c` merged `70e86e2`).
+**P0 checkpoint preserved:** `2552380` (unchanged; P1 sits on top of it through the two sync merges).
+**Branch:** `claude/payroll-p1-compensation-agreements`.
+**Migration:** **`0226_payroll_compensation_agreements.sql`** — one migration. Drafted as `0224` from the first scan of
+the day; the pre-commit rescan found `0224` claimed by `claude/eld-compliance-intelligence-ramlrd` and
+`fix/main-ci-stabilization` and `0225` by `fix/main-ci-stabilization`, so it moved before any environment applied
+it. The claim is in `docs/architecture/MIGRATION_COLLISION_REGISTER.md`; next free is `0227`.
+
+### Tables and columns
+
+| Table / change | Purpose |
+|---|---|
+| `earningCodes` (new) | The catalogue. `financialEntityId` NULL = shared seed for every book; a book's own row with the same `code` is that book's override. PERSISTENT generated `codeKey` = `COALESCE(financialEntityId,'*'):code`, unique (the `dispatchRoleTypes` 0170 pattern, still current on main). 23 shared seed codes (REG … CORRECTION). `taxTreatmentMetaJson` is metadata only. |
+| `compensationAgreements` (new) | One agreement → one payroll profile → one book. `status` draft/active/ended; `startsOn`/`endsOn` (`date`); snapshotted `workerClassification` + `classificationSource` (D9). |
+| `compensationAgreementVersions` (new) | The unit of approval and history: `version` (unique per agreement), `[effectiveFrom, effectiveUntil)`, `basis` (11 values), `currency` varchar(3), `rulesHash` char(64), frozen `rulesJson` (the canonical rule set), proposer/approver/rejecter with timestamps, `approvalRef` (the commercial ledger row), `supersedesVersionId`/`supersededByVersionId`; status proposed → approved | rejected; approved → superseded. |
+| `compensationEarningRules` (new) | One row per earning code in a version: `earningCodeId` and the code text as proposed, `calculation`, `unit` (11 values), `rateMillis` (thousandths), `percentMillis` (thousandths of a percent), `overtimeRuleJson` / `eligibleRevenueBasisJson` (configuration only in P1), `minimumMeasurementAuthority`, `requiresJob`/`requiresUnit`. |
+| `employeePayrollProfiles` + `workerClassification`, `classificationSource`, `organizationWorkerRef` | D9 snapshot on the profile, NULL until established. |
+| `commercialApprovalPolicies` + one default row | Category `compensation_agreement`, unbounded tier, `approverRole = controller`, `separationOfDuties = true`, no second person by default (a book may add its own tier). |
+
+No foreign keys (repository convention). No `tenantId`/`orgRef` on the money rows: the book is the boundary (0146). No
+floating-point money: rates and percentages are integer thousandths. `date` columns are normalized to `YYYY-MM-DD` on
+read with local-date getters (mysql2 returns `Date` at local midnight; drizzle's string mode adds no mapper).
+
+### Permissions
+
+| Permission | Holders | Sensitive |
+|---|---|---|
+| `payroll.compensation.read` | payroll_admin, hr, controller | no (reads stay best-effort, as elsewhere) |
+| `payroll.compensation.propose` | payroll_admin, hr | yes |
+| `payroll.compensation.approve` | controller | yes |
+| `payroll.earning_code.manage` | payroll_admin, controller | yes |
+
+Denied by name (`COMPENSATION_PERMISSIONS` in `DENIALS`) to dispatcher, driver, mechanic, shop_lead, auditor and
+bookkeeper; `payroll.compensation.approve` is additionally denied to payroll_admin. Management holds none.
+Eleven procedures in `server/payrollCompensationRouter.ts`, mounted as `payrollCompensation.*`, every one
+`moneyScoped` with `ctx.money` and point checks: `earningCodesList`, `earningCodeCreate`, `earningCodeRetire`,
+`profileClassification`, `agreementsList`, `agreementGet`, `agreementCreate`, `versionPropose`, `versionApprove`,
+`versionReject`, `versionInForce`. `financeScopeCoverage.test.ts` guards the namespace.
+
+### Approval (D4)
+
+`versionApprove` refuses, before the ledger is touched, the proposer and anyone whose own profile the agreement
+pays. It then calls the existing commercial approval ladder (`decide`, 0136) inside one transaction with the version
+row locked: the ladder resolves the controller tier, bars the preparer (the proposer), counts only live roles in the
+acting organization, and records the signature. Only on `satisfied` does the version become approved and its
+predecessor closed and superseded, in the same transaction. A book tier requiring a second person leaves the version
+`proposed` and returns `awaiting`. `versionReject` records a refusal through the same ladder. No payroll approval
+engine was added; the solo-administrator exception remains deferred to P7.
+
+### Effective-date contract
+
+`[effectiveFrom, effectiveUntil)` by calendar date: inclusive start, exclusive end, `NULL` end open. A work date
+resolves to exactly one `approved` or `superseded` version whose window contains it, or to `none`, or to
+`integrity_error` when two approved windows claim it — never to "the latest". Proposed and rejected versions never
+resolve. Approving a version closes the version in force at its start (its `effectiveUntil` becomes the new start;
+status `superseded`) and refuses a version that starts on or before an approved start, or a bounded version that
+would sit inside an approved window that runs past it: approved windows of one agreement never overlap, so history
+is never rewritten by a later proposal. The same check runs at proposal for early feedback.
+
+### Hash contract
+
+`rulesHash = sha256(canonicalJson(canonicalRuleSet))`, using the repository's `canonicalJson` (keys sorted
+recursively). The canonical set is `{ basis, currency (upper-cased), rules }`, each rule reduced to its financial
+terms — `earningCode, calculation, unit, rateMillis, percentMillis, overtimeRule, eligibleRevenueBasis,
+minimumMeasurementAuthority, requiresJob, requiresUnit` — with absent optionals as `null`, and rules sorted by code,
+then calculation, then unit. Display order (`sortOrder`) and notes are not hashed. The stored `rulesJson` is that
+canonical set, so the stored hash is the hash of the stored rules.
+
+### New agreements and legacy `payRates` (D3)
+
+- **New configuration** uses agreement → version → rule → earning code, and is authoritative for it.
+- **Legacy** `payRates` is untouched: nothing in P1 creates, converts, closes or supersedes a legacy rate, and the
+  P0-scoped `payroll.rateCreate` / `ratesList` / `earningPropose` path keeps working exactly as before (tested).
+- Until the earning-generation slice consumes agreements, existing earnings continue to price from `payRates`.
+  When it does, an earning will record the agreement ref, the version ref, the earning code, the rate applied in
+  millis, the version's `rulesHash` and the work date it was resolved for — all of which P1 already stores.
+
+### Classification mapping (D9)
+
+1. A linked `organizationWorkers` row in the organization that owns the profile's book (by user, then operator) →
+   its `workerType`, source `organization_worker`.
+2. Otherwise, a linked operator record → `EMPLOYEE_DRIVER`, source `legacy_mapped`.
+3. Otherwise, the first live role in the book's organization in this order: driver → `EMPLOYEE_DRIVER`, mechanic →
+   `MECHANIC`, shop_lead → `MAINTENANCE_SUPERVISOR`, dispatcher → `DISPATCHER`, bookkeeper → `BOOKKEEPER`, safety →
+   `SAFETY_COMPLIANCE`, office → `OFFICE_ADMIN`.
+4. Otherwise refused visibly (`PRECONDITION_FAILED`, "link an organizationWorkers row"); never defaulted.
+
+`OWNER_DRIVER` is refused an employee agreement (contractor settlement). An unknown `workerType` is refused.
+
+### Deviations from the September design (§12), and why
+
+- **Migration number** `0226`, not `0182`/`0220` (both taken by the time P1 ran).
+- **No `payrollApprovalPolicies` table** in P1: D4 routes approval through the commercial ladder; the
+  payroll-specific policy (solo-administrator exception) is P7's.
+- **Earning codes reference the book by `financialEntityId`**, not a separate scope column, so the 0146 boundary
+  applies to codes exactly as to every other money row.
+- **`compensationAgreementVersions.financialEntityId`** is denormalized from the agreement so a version can be proved
+  in scope with one read.
+- **Classification enum** reuses `organizationWorkers.workerType` (14 values) instead of the 8-value list in §12.4,
+  per D9.
+- **Rule calculation must equal the earning code's `calculationType`** — a stricter rule than §12 stated, chosen so a
+  code's meaning cannot drift per version.
+- **Agreements of one profile may not overlap** — a change of pay is a version, not a second agreement.
+
+### Tests and gates
+
+- `server/_core/payrollCompensation.test.ts` (24, pure): hash determinism and sensitivity, rule validation, the
+  window contract at every boundary, supersession, D9 mapping.
+- `server/payrollCompensation.db.test.ts` (14, database, through `appRouter`): tenant isolation, book mismatch,
+  owner-driver and unclassifiable refusals, classification snapshots, proposer/revoked/self approval refusals and the
+  ledger record, proposed/rejected never resolving, raises and historical reproducibility, gaps, future versions,
+  overlap refusal and integrity reporting, hash determinism through the API, earning-code override and retirement
+  isolation, role refusals for dispatch/driver/mechanic/management/bookkeeper/auditor, legacy `payRates` unchanged.
+- Updated: `financeScopeCoverage` (+ `payrollCompensation`, 132 money procedures), `procedureAuthorization`
+  (791 mapped, new router in the wiring sources), `operationalApiAuthorization` (791), `crossLayerIntegrity`
+  (+11 server paths), `PROCEDURE_AUTHORIZATION_INVENTORY.md` (new row, 507 total), `LEASEOS_CURRENT_STATE.md`.
