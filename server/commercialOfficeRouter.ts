@@ -14,14 +14,14 @@ import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
 import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries, evidenceRecords, fieldTicketDocuments, retentionPolicies, documentDefinitions } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
-import { financeScopeFor, requireOwnedEntity } from "./_core/entityScope";
+import { bookOrgWhere, financeScopeFor, ownsEntity, requireOwnedEntity } from "./_core/entityScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { matchFacilityStatementLine, type DisposalTicketLite } from "./_core/facilityStatements";
 import { aging, type ArInvoice } from "./_core/accountsReceivable";
 import { derivability, empty, finish, type Dimension, type Figures } from "./_core/profitability";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb, listActiveUserRoleNames } from "./db";
+import { getDb, listActiveUserRoleNames, orgScopeWhere } from "./db";
 
 async function bookFor(userId: number) {
   const db = await getDb();
@@ -43,6 +43,54 @@ async function ownedBook(userId: number, financialEntityId: number) {
   return { db, bookOrgRef: fs.tenantId === SINGLE_TENANT_ID ? null : fs.tenantId };
 }
 const bookWhere = <T extends { bookOrgRef: any }>(t: T, bookOrgRef: string | null) => bookOrgRef ? or(isNull(t.bookOrgRef), eq(t.bookOrgRef, bookOrgRef)) : isNull(t.bookOrgRef);
+
+/**
+ * The record a link may name: one this caller can already see, or nothing.
+ *
+ * It used to be fetched by primary key alone. The counterparty organization WAS
+ * checked — it has to hold the matching role in the caller's own book — but the
+ * record never was, and `links.set` then writes the organization reference onto
+ * that row. So a caller in book A could pass the id of a book-B vendor, customer
+ * account or job and rewrite it: a cross-tenant write reachable by guessing an
+ * integer, which also planted a link row in A's book pointing at B's record.
+ *
+ * The rule is "you may link what you can already see", so each type reuses the
+ * boundary its own reads use rather than a new, stricter one:
+ *
+ *   vendor           `bookOrgWhere` — the book that keeps the vendor record (0149)
+ *   customer_account `ownsEntity` — its financial entity, the money boundary (F1.1)
+ *   job_customer     `orgScopeWhere` — the job's owning organization
+ *
+ * Facilities are deliberately NOT scoped. They carry no book ownership because
+ * the disposal directory is shared reference data — a regulator-approved site is
+ * not one business's record — so they keep the first-come rule the active-link
+ * check already enforces.
+ *
+ * Returns undefined for both "no such record" and "not yours", so the caller
+ * answers one NOT_FOUND to each and the refusal is not an existence oracle.
+ */
+async function linkableRecord(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  fs: Awaited<ReturnType<typeof financeScopeFor>>,
+  recordType: "vendor" | "facility" | "job_customer" | "customer_account",
+  recordId: number,
+): Promise<{ id: number } | undefined> {
+  if (recordType === "vendor") {
+    return (await db.select({ id: vendors.id }).from(vendors)
+      .where(and(eq(vendors.id, recordId), bookOrgWhere(vendors.bookOrgRef, fs))).limit(1))[0];
+  }
+  if (recordType === "job_customer") {
+    return (await db.select({ id: jobs.id }).from(jobs)
+      .where(and(eq(jobs.id, recordId), orgScopeWhere(jobs, { tenantId: fs.tenantId }))).limit(1))[0];
+  }
+  if (recordType === "customer_account") {
+    const a = (await db.select({ id: customerAccounts.id, financialEntityId: customerAccounts.financialEntityId })
+      .from(customerAccounts).where(eq(customerAccounts.id, recordId)).limit(1))[0];
+    return a && ownsEntity(fs, a.financialEntityId) ? { id: a.id } : undefined;
+  }
+  return (await db.select({ id: facilities.id }).from(facilities).where(eq(facilities.id, recordId)).limit(1))[0];
+}
+
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const hash8 = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 8);
 /** MariaDB returns JSON columns as text; read them as the arrays they are. */
@@ -262,8 +310,7 @@ export const commercialOfficeRouter = router({
           .where(and(eq(organizationCommercialRoles.orgRef, input.orgRef), eq(organizationCommercialRoles.roleKey, roleKeyRequired), eq(organizationCommercialRoles.status, "active"),
             bookOrgRef ? eq(organizationCommercialRoles.bookOrgRef, bookOrgRef) : isNull(organizationCommercialRoles.bookOrgRef))).limit(1))[0];
         if (!role) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${input.orgRef} does not hold the ${roleKeyRequired} role in this book; assign it first` });
-        const table = input.recordType === "vendor" ? vendors : input.recordType === "facility" ? facilities : input.recordType === "customer_account" ? customerAccounts : jobs;
-        const record = (await db.select({ id: table.id }).from(table).where(eq(table.id, input.recordId)).limit(1))[0];
+        const record = await linkableRecord(db, await financeScopeFor(db, ctx.user.id), input.recordType, input.recordId);
         if (!record) throw new TRPCError({ code: "NOT_FOUND", message: `${input.recordType} ${input.recordId} does not exist` });
         const open = (await db.select({ linkRef: organizationRecordLinks.linkRef, orgRef: organizationRecordLinks.orgRef }).from(organizationRecordLinks)
           .where(and(eq(organizationRecordLinks.recordType, input.recordType), eq(organizationRecordLinks.recordId, input.recordId), eq(organizationRecordLinks.status, "active"))).limit(1))[0];

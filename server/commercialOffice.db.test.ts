@@ -110,7 +110,7 @@ d("P7.2 — linking records to organizations is a person's act", () => {
   it("links a vendor only to an organization holding the vendor role, keeps the history, and clears the reference on unlink", async () => {
     const book = await org(), counterparty = await org();
     const office = await member(book, ["office"]);
-    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [`VEN-${rnd()}`, "Acme Parts Ltd"]);
+    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, bookOrgRef, name, category, status) VALUES (?,?,?,'parts','active')", [`VEN-${rnd()}`, book, "Acme Parts Ltd"]);
     // No role yet: refused by name.
     await expect(callerFor(office).commercialOffice.links.set({ recordType: "vendor", recordId: v.insertId, orgRef: counterparty })).rejects.toThrow(/does not hold the vendor role/);
     await callerFor(office).commercialOffice.roles.assign({ orgRef: counterparty, roleKey: "vendor" });
@@ -262,7 +262,7 @@ d("P7.5 — payables through the same ledger, and by organization", () => {
     const book = await org(), vendorOrg = await org();
     const bookkeeper = await member(book, ["bookkeeper"]), controller = await member(book, ["controller"]), mgr1 = await member(book, ["management"]), mgr2 = await member(book, ["management"]);
     const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, book]))[0].insertId);   // F1 — the book is the organization's own
-    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [`VEN-${rnd()}`, `Big Iron ${rnd()}`]);
+    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, bookOrgRef, name, category, status) VALUES (?,?,?,'parts','active')", [`VEN-${rnd()}`, book, `Big Iron ${rnd()}`]);
     await callerFor(bookkeeper).commercialOffice.roles.assign({ orgRef: vendorOrg, roleKey: "vendor" });
     await callerFor(bookkeeper).commercialOffice.links.set({ recordType: "vendor", recordId: v.insertId, orgRef: vendorOrg });
     const billRef = `BILL-${rnd()}`;
@@ -282,7 +282,7 @@ d("P7.5 — payables through the same ledger, and by organization", () => {
     const ledger = await callerFor(mgr1).commercialOffice.ar.approvalLedger({ subjectType: "vendor_bill_payment", subjectRef: billRef });
     expect(ledger!.signatures.map(s => s.userId)).toEqual([mgr1, mgr3]);
     // AP aging: a second, unpaid bill from an unlinked vendor.
-    const [v2] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [`VEN-${rnd()}`, "Nobody Linked Me Ltd"]);
+    const [v2] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, bookOrgRef, name, category, status) VALUES (?,?,?,'parts','active')", [`VEN-${rnd()}`, book, "Nobody Linked Me Ltd"]);
     await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, vendorInvoiceNumber, invoiceDate, receivedAt, dueAt, currency, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?,?,?,?, '2026-06-01', '2026-06-02 00:00:00', '2026-07-01 00:00:00', 'CAD', 90000, 0, 90000, 'match', 'needs_approval')", [`BILL-${rnd()}`, entityId, v2.insertId, `VI-${rnd()}`]);
     const a = await callerFor(controller).commercialOffice.ap.agingByOrganization({ financialEntityId: entityId, asOf: new Date("2026-09-17T00:00:00Z") });
     expect(a.organizations.find(o => o.orgRef === vendorOrg)).toBeUndefined();   // the linked vendor's only bill is paid
@@ -327,7 +327,7 @@ d("P7.6 — GL mapping is the business's own; profitability comes only from evid
     const jobId = Number(j[0]!.id);
     await callerFor(office).commercialOffice.links.set({ recordType: "job_customer", recordId: jobId, orgRef: clientOrg });
     await invoice(entityId, "Fixture Energy", jobId, 500_000, "HYDROVAC_HR", "taxable");
-    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, name, category, status) VALUES (?,?,'parts','active')", [`VEN-${rnd()}`, "Disposal Co"]);
+    const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (vendorRef, bookOrgRef, name, category, status) VALUES (?,?,?,'parts','active')", [`VEN-${rnd()}`, book, "Disposal Co"]);
     await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, vendorInvoiceNumber, invoiceDate, receivedAt, currency, subtotalCents, taxAmountCents, totalCents, matchOutcome, status, jobId, unitId) VALUES (?,?,?,?, '2026-08-10', '2026-08-11 00:00:00', 'CAD', 120000, 6000, 126000, 'match', 'ready_to_pay', ?, 42)", [`BILL-${rnd()}`, entityId, v.insertId, `VI-${rnd()}`, jobId]);
     const byJob = await callerFor(office).commercialOffice.profitability.byDimension({ financialEntityId: entityId, dimension: "job", from: new Date("2026-08-01"), to: new Date("2026-08-31") });
     expect(byJob.derivable).toBe(true);
