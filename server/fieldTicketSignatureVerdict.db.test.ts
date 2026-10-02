@@ -28,7 +28,7 @@ import type { DomainRole } from "./_core/recordsAuthorization";
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 921_000_000 + Math.floor(Math.random() * 50_000);
+let seq = 922_000_000 + Math.floor(Math.random() * 50_000);
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
 beforeAll(async () => { if (URL) pool = mysql.createPool({ uri: URL, connectionLimit: 4 }); });
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
