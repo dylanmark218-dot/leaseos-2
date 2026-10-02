@@ -30,20 +30,58 @@ async function anEvent(over: Record<string, string | null> = {}) {
   return { id, eventId };
 }
 /**
- * Whether a real claim would offer this event. A claim takes up to 50 events from the whole outbox,
- * which other suites share, and nothing here processes them: left claimed they would sit behind the
- * lease (CLAIM_LEASE_SECONDS) where no worker could take them. So every claim taken here is released.
+ * Claim the way workers do — in id order, 50 at a time — until this event is offered or nothing more
+ * is, then release every claim taken. The outbox is shared by every database suite, so this event may
+ * sit behind other suites' backlog, and nothing here processes what it claims: left claimed, those
+ * events would wait out the lease (CLAIM_LEASE_SECONDS) where no worker could take them. Returns, per
+ * worker, whether it was ever offered the event; claims stay held until the end, so two workers
+ * claiming in the same round cannot both be offered it.
  */
-const claimable = async (id: number, workerId: string) => {
-  const got = await createWorkerPorts(pool as never).claimBatch(workerId, 50);
-  const ids = got.map((e: { id: number }) => e.id);
-  if (ids.length) {
-    await pool.query(
-      `UPDATE domainEventOutbox SET claimedAt = NULL, claimedBy = NULL, attemptCount = GREATEST(attemptCount - 1, 0)
-        WHERE claimedBy = ? AND id IN (${ids.map(() => "?").join(",")})`, [workerId, ...ids]);
+/**
+ * One claim, retried after a short random pause on a lock deadlock between concurrent claimers, as the
+ * drain worker retries a failed claim. The batch is recorded in `taken` the moment it is claimed, so it
+ * is released even if a sibling claim fails.
+ */
+async function claimRetrying(workerId: string, taken: Array<{ workerId: string; ids: number[] }>): Promise<number[]> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const ids = (await createWorkerPorts(pool as never).claimBatch(workerId, 50)).map((e: { id: number }) => e.id);
+      taken.push({ workerId, ids });
+      return ids;
+    } catch (e) {
+      if ((e as { code?: string }).code !== "ER_LOCK_DEADLOCK" || attempt >= 10) throw e;
+      await new Promise(r => setTimeout(r, 5 + Math.floor(Math.random() * 40)));
+    }
   }
-  return ids.includes(id);
-};
+}
+
+/**
+ * Claim the way workers do — in id order, 50 at a time — until this event is offered or nothing more
+ * is, then release every claim taken. The outbox is shared by every database suite, so this event may
+ * sit behind other suites' backlog, and nothing here processes what it claims: left claimed, those
+ * events would wait out the lease (CLAIM_LEASE_SECONDS) where no worker could take them. Returns, per
+ * worker, whether it was ever offered the event; claims stay held until the end, so two workers
+ * claiming in the same round cannot both be offered it.
+ */
+async function claimRounds(id: number, workerIds: string[]): Promise<boolean[]> {
+  const offered = workerIds.map(() => false);
+  const taken: Array<{ workerId: string; ids: number[] }> = [];
+  try {
+    for (let round = 0; round < 200; round++) {
+      const batches = await Promise.all(workerIds.map(w => claimRetrying(w, taken)));
+      batches.forEach((ids, k) => { if (ids.includes(id)) offered[k] = true; });
+      if (offered.some(Boolean) || batches.every(b => b.length === 0)) break;
+    }
+  } finally {
+    for (const t of taken.filter(t => t.ids.length)) {
+      await pool.query(
+        `UPDATE domainEventOutbox SET claimedAt = NULL, claimedBy = NULL, attemptCount = GREATEST(attemptCount - 1, 0)
+          WHERE claimedBy = ? AND id IN (${t.ids.map(() => "?").join(",")})`, [t.workerId, ...t.ids]);
+    }
+  }
+  return offered;
+}
+const claimable = async (id: number, workerId: string) => (await claimRounds(id, [workerId]))[0]!;
 
 d("a crashed worker eventually loses its event", () => {
   it("does not offer an event whose claim is still fresh", async () => {
@@ -122,11 +160,7 @@ d("a dead letter says it is one", () => {
 d("two workers do not both get the same event", () => {
   it("hands a claimable event to exactly one of two concurrent claimers", async () => {
     const { id } = await anEvent();
-    const [a, b] = await Promise.all([
-      createWorkerPorts(pool as never).claimBatch("worker-a", 50),
-      createWorkerPorts(pool as never).claimBatch("worker-b", 50),
-    ]);
-    const holders = [a, b].filter(batch => batch.some((e: { id: number }) => e.id === id)).length;
+    const holders = (await claimRounds(id, ["worker-a", "worker-b"])).filter(Boolean).length;
     expect(holders).toBe(1);
   });
 });
