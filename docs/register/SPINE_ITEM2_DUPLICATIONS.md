@@ -26,7 +26,7 @@ not duplicated, and item 2 does not delete it.
 | `openShifts` | shift eligibility, interest | `openShiftsRouter.ts` inline | **router copy deleted**; the engine's `shiftEligibility` is the one rule (owner's ruling: the union of both), and the router enforces it |
 | `complianceDocumentValidity` | document validity | `readinessComposer` / `dispatchReadiness` / tile and other readers | **resolved by #52** (rulings B and C); every reader now takes the canonical verdict |
 
-**All four pairs are resolved** (2026-10-01). Each has one implementation; the last two were settled by the owner's rulings and applied on `claude/spine-item2-openshifts-fieldticket` (§2, §3 and "Item 2 — completion" below). Item 2 is recorded **COMPLETE** only once that branch is merged and CI on the resulting `main` commit is green; that record follows the merge.
+**Item 2 is COMPLETE** (2026-10-01). All four pairs have one implementation. The last two were settled by the owner's rulings in dylanmark218-dot/leaseos-2#89, merged as `3f2bcec`. That commit's own main run was cancelled when the next merge superseded it. The next main commit, `c3f088b` (#90), contains it and is green (CI run 36912636248). See §2, §3 and "Item 2 — completion" below.
 
 ---
 
@@ -174,6 +174,12 @@ A mutation that bypasses `shiftEligibility` in `expressInterest` fails the guard
 
 **Fixtures** in four older suites now give workers a roster and a linked operator record, which the stricter rule requires. `engineReachability`: `openShifts` is wired, and the unwired pin goes 86 → 85.
 
+**After the merge.** dylanmark218-dot/leaseos-2#59 (Open Work) was merged after #89 and adapted around the one rule:
+- `openShiftsRouter.ts` calls `shiftEligibility` in `shifts.eligibility` and in `shifts.expressInterest`;
+- the fact reader moved to `openShiftsService.personFacts`, which still resolves the licence through `operatorForUserInScope` (`operators.userId`).
+
+#59 also brought a census that forbids open-work files from importing a validity engine (`documentValidityCanonical.test.ts`). That collided with the rule's `readExpiry` licence check and turned main red. dylanmark218-dot/leaseos-2#117 gave the census exactly one exception: `_core/openShifts.ts` may import `readExpiry` from `./documentValidity` and nothing else. That keeps one licence-date classifier rather than adding a second.
+
 **Follow-up (2026-10-01): the licence, read through the canonical verdict.** #89 made the licence
 part of the one open-shift rule, but the rule judged it from `operators.licenseExpiresAt` itself
 (`readExpiry`), and so did shift readiness (`readinessRouter`). That legacy date is an unverified
@@ -181,6 +187,8 @@ claim under #52's ruling, so a worker dispatch held at "licence unknown" was sho
 eligible, and shift readiness read it as satisfied. Shift readiness also read the operator whose id
 equalled the user id rather than the person's own record. `documentValidityCanonical.test.ts`
 (added by #59) forbids the open-work files from importing a validity engine, so `main` failed it.
+#117 then restored green with a single census exception for that `readExpiry` import; this follow-up
+removes the import, and with it the exception.
 
 - **One verdict:** `driverLicenceVerdict` (`_core/complianceDocumentValidity.ts`): structured
   `driver_licence` documents first; the legacy date only when they establish nothing, and then as
@@ -202,8 +210,6 @@ equalled the user id rather than the person's own record. `documentValidityCanon
 - **Guard** (`complianceValidityGuard.test.ts`): only `licenceReads.ts` and `readinessComposer.ts`
   read `operators.licenseExpiresAt`, and both call `driverLicenceVerdict`; open shifts and shift
   readiness call `driverLicenceStanding`; `shiftEligibility` compares no document date.
-
-**Not resolved here.** dylanmark218-dot/leaseos-2#59 (open, design checkpoint) rewrites `openShiftsRouter.ts`, and it must rebase onto this one rule rather than reintroduce inline eligibility. The guard will refuse the latter.
 
 ## 4. `complianceDocumentValidity`: resolved by #52
 
