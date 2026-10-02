@@ -62,8 +62,29 @@ const openTasks = async (subjectType: string, subjectId: string) => {
   return rows;
 };
 
-/** Drain everything currently queued, so assertions are about end state. */
-async function drainAll(workerId = "test-worker") {
+/**
+ * Drain until THIS test's own events are processed, so assertions are about end state.
+ *
+ * `subject` is the aggregate id the test just emitted against — every test here
+ * makes one with `uid()`, so it names nobody else's events.
+ *
+ * Waiting on the subject rather than on the queue is what makes this correct
+ * under concurrency. The condition used to be "no event is CLAIMABLE", i.e. it
+ * counted only rows with `claimedAt IS NULL`. The outbox is shared by every
+ * database suite in the run and five of them run drain workers, so a concurrent
+ * worker could claim THIS test's event between the emit and the check: the loop
+ * then saw nothing claimable, called the queue drained, and returned before that
+ * worker had created the task, and the assertion read zero. Proven by
+ * construction rather than inferred — a single unprocessed row claimed one
+ * second earlier by a foreign worker makes the old count report 0 while a real
+ * event is still outstanding. It cost one failure in three full-gate runs,
+ * always in the same assertion.
+ *
+ * Still bounded, and still not a fixed window: a fixed 300 ms could end before
+ * this test's event was reached, while a stream of other suites' events must not
+ * hold the test open.
+ */
+async function drainAll(workerId = "test-worker", subject?: string) {
   const ports = createWorkerPorts(pool);
   const w = startDrainWorker(ports, {
     workerId,
@@ -71,18 +92,21 @@ async function drainAll(workerId = "test-worker") {
     idleIntervalMs: 5,
     batchSize: 10,
   });
-  // Run until nothing is claimable, not for a fixed window. The outbox is shared by every
-  // database suite in the run, and since Open Work (0206) writes board events into it too, a
-  // fixed 300 ms could end before this test's event was reached. Bounded, so a stream of other
-  // suites' events cannot hold the test open.
   const deadline = Date.now() + 15_000;
   await new Promise(r => setTimeout(r, 300));
   while (Date.now() < deadline) {
-    const [rows] = await pool.query<mysql.RowDataPacket[]>(
-      `SELECT COUNT(*) AS n FROM domainEventOutbox
-        WHERE processedAt IS NULL AND deadLetteredAt IS NULL
-          AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW()) AND claimedAt IS NULL`
-    );
+    const [rows] = subject
+      ? await pool.query<mysql.RowDataPacket[]>(
+          `SELECT COUNT(*) AS n FROM domainEventOutbox
+            WHERE aggregateId = ? AND processedAt IS NULL AND deadLetteredAt IS NULL
+              AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW())`,
+          [subject]
+        )
+      : await pool.query<mysql.RowDataPacket[]>(
+          `SELECT COUNT(*) AS n FROM domainEventOutbox
+            WHERE processedAt IS NULL AND deadLetteredAt IS NULL
+              AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW()) AND claimedAt IS NULL`
+        );
     if (Number(rows[0]!.n) === 0) break;
     await new Promise(r => setTimeout(r, 50));
   }
@@ -126,7 +150,7 @@ d("end to end: critical defect", () => {
     await conn.commit();
     conn.release();
 
-    const stats = await drainAll();
+    const stats = await drainAll("test-worker", unit);
     expect(stats.processed).toBeGreaterThan(0);
 
     const tasks = await openTasks("unit", unit);
@@ -157,7 +181,7 @@ d("end to end: critical defect", () => {
     await conn.commit();
     conn.release();
 
-    await drainAll();
+    await drainAll("test-worker", unit);
 
     const [rows] = await pool.execute<mysql.RowDataPacket[]>(
       "SELECT recipientRole, status FROM workflowNotifications WHERE title LIKE ? ORDER BY id DESC LIMIT 5",
@@ -181,7 +205,7 @@ d("end to end: critical defect", () => {
       });
       await conn.commit();
       conn.release();
-      await drainAll();
+      await drainAll("test-worker", unit);
     }
     expect(await openTasks("unit", unit)).toHaveLength(2);
   });
@@ -200,7 +224,7 @@ d("end to end: critical defect", () => {
     await conn.commit();
     conn.release();
 
-    await drainAll();
+    await drainAll("test-worker", unit);
     expect(await openTasks("unit", unit)).toHaveLength(0);
   });
 });
@@ -221,7 +245,7 @@ d("end to end: disposal ticket", () => {
     await conn.commit();
     conn.release();
 
-    await drainAll();
+    await drainAll("test-worker", load);
     const tasks = await openTasks("load", load);
     expect(tasks).toHaveLength(1);
     expect(tasks[0].taskType).toBe("upload_disposal_ticket");
@@ -244,7 +268,7 @@ d("end to end: disposal ticket", () => {
     conn.release();
 
     expect(row).toBeNull();
-    await drainAll();
+    await drainAll("test-worker", load);
     expect(await openTasks("load", load)).toHaveLength(0);
   });
 });
@@ -266,7 +290,7 @@ d("end to end: dispatch invalidation", () => {
     await conn.commit();
     conn.release();
 
-    await drainAll();
+    await drainAll("test-worker", assignment);
     const tasks = await openTasks("assignment", assignment);
     expect(tasks).toHaveLength(1);
     expect(tasks[0].assignedRole).toBe("dispatcher");
@@ -290,7 +314,7 @@ d("end to end: dispatch invalidation", () => {
 
     // This is the loop guard: without it, re-evaluate → emit → re-evaluate.
     expect(row).toBeNull();
-    await drainAll();
+    await drainAll("test-worker", assignment);
     expect(await openTasks("assignment", assignment)).toHaveLength(0);
   });
 });
@@ -316,7 +340,7 @@ d("transactional integrity of emission", () => {
     );
     expect(rows[0].n).toBe(0);
 
-    await drainAll();
+    await drainAll("test-worker", unit);
     expect(await openTasks("unit", unit)).toHaveLength(0);
   });
 });
@@ -325,8 +349,9 @@ d("unmatched events", () => {
   it("marks an event with no matching rule processed rather than retrying it forever", async () => {
     const conn = await pool.getConnection();
     await conn.beginTransaction();
+    const calloutRef = uid("CO");
     await emitCalloutAuthorityUnverified(conn as never, ctx(), {
-      calloutRef: uid("CO"),
+      calloutRef,
       callerName: "Unknown",
       callerCompany: "Bearpaw Drilling",
       claimedAuthority: "third_party_operator",
@@ -335,7 +360,7 @@ d("unmatched events", () => {
     await conn.commit();
     conn.release();
 
-    const stats = await drainAll();
+    const stats = await drainAll("test-worker", calloutRef);
     expect(stats.processed).toBeGreaterThan(0);
     expect(stats.deadLettered).toBe(0);
 
