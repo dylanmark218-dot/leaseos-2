@@ -965,3 +965,76 @@ Contractor settlement, tax engines, legal pay stubs, and direct-deposit data are
 | credential wallet | the driver's tickets and licence projection (PR #16); not a money wallet |
 | SPINE moratorium | "no new engines until the one-driver, one-job path is wired" |
 | P9 | the standing finding that no tax, regulatory or rate rule is verified; determinations read UNKNOWN |
+
+---
+
+## 22. Owner decisions recorded (2026-10-02) — the architecture is approved
+
+The owner approved the architecture in this document and its 2026-10-01 addendum as the governing design,
+subject to the decisions below. They are recorded here verbatim in substance so that no slice reinterprets them.
+
+| # | Decision | Recorded ruling |
+|---|---|---|
+| D1 | SPINE moratorium | **Approved with a narrow payroll exception.** The global new-engine moratorium remains in force for unrelated engines. Payroll P1–P8 is authorized because the payroll bounded context already exists (0022, `payrollRouter.ts`, `payrollService.ts`, `payrollEngine.ts`, finance scoping, the authorization framework). The exception covers the payroll-specific tables, routers, pure rule modules, audit records, statements, schedules, approval state, exceptions and export boundary in this design. It does **not** authorize a second finance ledger, a new accounting engine, a tax calculation engine, a duplicate document engine, a duplicate authorization system, a duplicate offline-sync engine, a separate integration framework, or unrelated engines. Existing infrastructure is reused wherever the design names it. **P0 must complete and pass its gates before P1 begins.** |
+| D2 | Money scope | **Approved.** Existing payroll procedures migrate to `moneyScoped(roleProcedure(...))` in P0 where safe and mechanically equivalent; handlers use `ctx.money` / `FinanceScope`; explicit point-ownership checks for referenced records stay; cross-tenant records fail closed as NOT_FOUND; organization or financial ownership is never accepted from input. |
+| D3 | Pay rates / compensation agreements | **Approved.** Agreements and effective-dated versions are authoritative for new profiles and new configuration. `payRates` remains a supported read-only legacy path; historical rate records are never destroyed or rewritten. Every finalized earning preserves enough version/rate information to reproduce what was paid. Customer billing rates, dispatch bid rates and employee compensation rates remain separate concepts. |
+| D4 | Approval architecture | **Approved.** Reuse the commercial approval ladder for pay-run approval and compensation-agreement approval; add only payroll-specific policy that cannot live in the generic framework; no competing payroll approval engine. Separation of duties is mandatory by default (creator ≠ approver); sensitive compensation changes require the appropriate path; the solo-administrator exception exists only through an explicit policy and an auditable event, never a silent bypass. |
+| D5 | First export adapter | **Approved: generic CSV first.** Provider-neutral adapter interface; first implementation deterministic generic CSV; designed so QuickBooks, Sage, Xero, Wagepoint, ADP, Dayforce and others can follow; no provider integration in the first slice; export reproducible and idempotent from a finalized snapshot; the ledger is coupled to no provider. |
+| D6 | Accounting period | **Approved.** Payroll keeps its own lock and state machine. An export or posting uses its payment/export posting date and must respect `assertPeriodOpen`; a closed accounting period blocks posting/export into it unless properly reopened. The accounting period never owns the payroll state machine. |
+| D7 | YTD | **Approved conservatively.** Until a verified jurisdiction/rule source establishes the basis, YTD fields are stored NULL and exposed as unavailable. No Canadian, Alberta, calendar-year or other jurisdictional treatment is assumed inside the core engine; later rules must be sourced, effective-dated and testable. |
+| D8 | Bank / direct-deposit / tax identifiers | **Approved with security restriction.** Core LeaseOS stores no raw bank credentials, direct-deposit account/routing data, SIN or equivalent identifiers as ordinary payroll fields; external providers own them. Later LeaseOS may store opaque provider employee IDs, tokenized references, status and synchronization metadata only. `payroll.bank.read` / `payroll.tax_identifier.read` remain effectively unusable unless a future approved architecture changes this. |
+| D9 | Worker classification | **Approved, with one normalization requirement.** `organizationWorkers.workerType` is the canonical operational vocabulary where the worker is linked; the applicable classification is snapshotted into payroll records when reproducibility requires it; no competing taxonomy. A legacy profile that cannot be linked is explicitly mapped into the canonical model, never free text. Employee payroll and contractor/owner-operator settlement remain separate ledgers. |
+| D10 | Supervisor | **Approved.** For field workers, `crewMembers.crewRole = supervisor` within the same tenant is the primary relationship for team time approval; with no valid crew supervisor, approval routes to an appropriately scoped `payroll_admin`. Supervisory rights are never inferred from being a dispatcher, manager, coworker or job viewer. Team projections expose no compensation amounts unless the caller independently holds the required payroll permission. |
+| D11 | Operational data → payroll time | **Approved: candidates only.** HOS, dispatch bookings, field tickets, trips, loads and work orders may produce read-only candidates and never approved/payable rows: source record → candidate → human submission/review → approval → payable record. HOS remains HOS, dispatch remains dispatch, billing remains billing, payroll remains payroll. No synchronization or projection upgrades a candidate into approved payroll. |
+| D12 | Pay statement document | **Approved.** An internal pay-statement PDF is in scope for P5, using the existing rendering/storage infrastructure, restricted-access storage, `PAY` numbering, an immutable source snapshot/hash, and audit-before-serve / fail-closed access. Until a legally verified implementation exists it is marked **INTERNAL PAYROLL STATEMENT — NOT A LEGAL PAY STUB** and is never presented as satisfying statutory requirements. |
+
+### Implementation authorization and sequence
+
+Coding is authorized, starting with **P0 — Payroll Repair & Hardening**, from current `main` (not the survey base),
+with no migration unless repository facts make that impossible, and no migration number allocated during P0.
+P0 is committed separately and reported before P1. P1 (compensation agreements and earning codes) re-scans the
+migration slot immediately before its own work rather than assuming `0220` is free. No PR is created and nothing
+is merged unless the owner asks.
+
+## 23. P0 — Payroll Repair & Hardening (implemented 2026-10-02)
+
+**Base:** `main` = `75815c3` (which already carries this document via PR #123). Migration head at the time: `0222`.
+**No migration.** Every change is code, tests and documents over the 0022 tables.
+
+| Item | Defect on `main` | Repair |
+|---|---|---|
+| P0.1 | `payroll.myStatements` listed every book's paid/closed runs and stamped the caller's employee number on them (G1) | `listOwnStatements` joins `payRuns` to `payRunLines` for the caller's own profile in the book that pays it; a run with no line for the profile, or in another book, is not returned. The profile is still resolved from the session and must be in `ctx.money`. |
+| P0.2 | `payroll.rateCreate` superseded any `rateKey` anywhere (G4) | A rate names exactly one owner (`employeePayrollProfileId` or `payGroupId`) that must be in the caller's books; superseding an existing key requires the key's current version to be in the caller's books through its profile or pay group; a key with no owner is nobody's (NOT_FOUND). `payRates` is otherwise untouched (D3). |
+| P0.3 | Run approval separated by role only (G5); nothing recorded who created a run or proposed an earning | `runCreate` and `earningPropose` write a subject-bearing `allowed` row to `authorizationDecisions` in the same transaction as the record (the assistant-commit precedent; no schema change). `runApprove` and `earningApprove` read the originator and refuse the same person (FORBIDDEN) and an unknown originator (fail closed). `separationOfDuties()` is the pure rule in the engine. The solo-administrator exception waits for the approved policy (P7, D4). |
+| P0.4 | A run could not leave `draft` (G7) | `payroll.runCollect` performs the engine's `draft → collecting` and collects; `payroll.runSubmit` performs `collecting → review`; `runApprove` keeps the controller's edges. All transitions come from `PAY_RUN_TRANSITIONS`; nothing is duplicated. |
+| P0.5 | Nothing wrote `payRunLines`; nothing approved an earning | `payroll.earningApprove` (`payroll.review`) is the human door `pending → approved`; `held` is not approvable. `collectApprovedEarnings` runs in one transaction with the run row locked, selects through `selectCollectible()` (approved only, the run's book and period only, integer shadow present, not already carried by any run), and writes lines with `amountCents`/`rateAppliedMillis` from the shadows (the doubles are derived from them, never the reverse). Idempotent; a second collect or a second run collects nothing and says why. No HOS, dispatch, ticket or work-order record is read. Contractors never hold a profile, so nothing of theirs can enter. Statements are not created (P5). |
+| P0.6 | Payroll used its own in-handler `moneyScope()` | The `payroll` and `contractors` namespaces are `moneyScoped(roleProcedure(...))` and read `ctx.money`; point checks (`assertProfileInScope`, `assertPeriodInScope`, `assertRunInScope`, `requireOwnedEntity`, …) stay; `financeScopeCoverage.test.ts` now guards both namespaces. The `finance` namespace keeps its in-handler convention, which the coverage test already accepts. The strict resolver now applies: a lapsed membership is refused, not revived. |
+| P0.7 | G2, G3, G6 | Verified fixed on `main` (PR #56, `periodRouter.ts:13-21`, `commercialApprovalService.ts:40`); no patch. |
+
+**Also changed:** `payroll.export` no longer answers `exported: true`; it reports `exported: false` with the reason
+until P6. `earningPropose` and `runCreate` refuse a period and profile (or book) that do not share a financial entity.
+
+**New procedures (3):** `payroll.runCollect` → `payroll.run`, `payroll.runSubmit` → `payroll.run`,
+`payroll.earningApprove` → `payroll.review`. Pinned counts move accordingly (router 40 → 43; operational map +3;
+server paths +3; the inventory is regenerated by `scripts/procedure-inventory.mjs`).
+
+**Tests:** `server/payrollP0.db.test.ts` (new, database-backed, through `appRouter.createCaller` with real roles,
+memberships and books), additions to `server/_core/payrollFinanceTax.test.ts` (pure: transitions, collection
+selection, separation of duties) and to `server/payrollApiAuthorization.test.ts` (role gates on the new
+procedures; count and own-profile pins).
+
+**Remaining after P0 (by design):** compensation agreements and earning codes (P1), schedules (P2), time and
+expense approval with candidates (P3/P4), statements, audit table, `PAY` numbering and the finalized-run guard (P5/P8),
+the export adapter (P6), the approval-policy configuration and solo-administrator exception (P7), UI (P9).
+
+**Interim choices named, not hidden:**
+
+- `payroll.earningApprove` is mapped to the existing `payroll.review` permission (payroll_admin, hr) so that the
+  lifecycle is executable without a new permission in a no-migration slice. `payroll.review` is not in
+  `SENSITIVE_PERMISSIONS` (it also covers reads such as `disputesList`, which the audit policy keeps best-effort).
+  P3 introduces `payroll.time.approve` as a sensitive permission with the D10 supervisor routing and moves earning
+  approval onto it; the person-level separation (proposer ≠ approver) is already enforced here.
+- The run's creator and the earning's proposer are recorded on `authorizationDecisions` with a subject, beside the
+  gate's own row. P5's `payrollAuditEvents` table takes over as the originator record; the trail rows remain valid
+  history and `findOriginator` is the one place that reads them.
+- `payroll.export` stays a stub that now says so (`exported: false`). P6 replaces it with the batch model (D5, D6).

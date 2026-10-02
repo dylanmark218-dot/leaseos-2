@@ -2904,6 +2904,12 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   // roles. Neither role can do both.
   "payroll.runsList": "payroll.read_all",
   "payroll.runCreate": "payroll.run",
+  // P0.4 / P0.5 — collecting approved earnings into lines and submitting the run for review are the
+  // payroll administrator's acts; approving it stays the controller's (below). Approving ONE earning is
+  // the reviewer's act (payroll_admin, hr): the human door between a proposed earning and a payable line.
+  "payroll.runCollect": "payroll.run",
+  "payroll.runSubmit": "payroll.run",
+  "payroll.earningApprove": "payroll.review",
   "payroll.runApprove": "payroll.approve",
   "payroll.adjustmentRequest": "payroll.adjust",
   "payroll.adjustmentApprove": "payroll.approve",
