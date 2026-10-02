@@ -118,7 +118,7 @@ describe("records surface is fully role-authorized", () => {
   it("uses roleProcedure for every records procedure", () => {
     const roleCount = (recordsRouter.match(/roleProcedure\(/g) ?? []).length;
     expect(roleCount).toBe(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length);
-    expect(roleCount).toBe(20);   // merge of main into #64: main's 18 + #64's 2.   // B23.1A: +1 records.roles.resolveLegacy — resolving a grant 0170 quarantined;   // B23.1: +1 records.roles.revoke
+    expect(roleCount).toBe(23);   // +3 records.files.{list,get,download} (Records & File Manager).   // merge of main into #64: main's 18 + #64's 2.   // B23.1A: +1 records.roles.resolveLegacy — resolving a grant 0170 quarantined;   // B23.1: +1 records.roles.revoke
   });
 
   it("has no protectedProcedure fallback in the records router", () => {
@@ -131,7 +131,7 @@ describe("records surface is fully role-authorized", () => {
     const names = Array.from(
       recordsRouter.matchAll(/roleProcedure\("([^"]+)"\)/g)
     ).map(m => m[1]);
-    expect(names.length).toBe(20);   // merge of main into #64: main's 18 + #64's 2.   // B23.1A: +1 records.roles.resolveLegacy;   // B23.1: +1 records.roles.revoke
+    expect(names.length).toBe(23);   // +3 records.files.{list,get,download} (Records & File Manager).   // merge of main into #64: main's 18 + #64's 2.   // B23.1A: +1 records.roles.resolveLegacy;   // B23.1: +1 records.roles.revoke
     for (const n of names) {
       expect(
         Object.prototype.hasOwnProperty.call(RECORDS_PROCEDURE_PERMISSIONS, n),
