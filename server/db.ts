@@ -201,10 +201,31 @@ export async function listEvidenceRecords(scope: TenantScope) {
     .limit(100);
 }
 
-export async function findEvidenceByClientCaptureRef(clientCaptureRef: string) {
+/**
+ * The capture this user's own device already uploaded under this reference.
+ *
+ * `clientCaptureRef` is a string the DEVICE picks, and this lookup decides "you
+ * already sent me this, here it is". Unscoped, an 8-character guess was enough to
+ * be handed somebody else's record: the caller got back another organization's
+ * evidence id and storage key with `alreadyUploaded: true`, and the evidence they
+ * were actually uploading was discarded unstored. One request, a disclosure and a
+ * data loss.
+ *
+ * Scoped to the capturing USER rather than the organization, deliberately, and it
+ * is the tighter of the two: idempotency here means "this handset is retrying",
+ * and two people in one company carry two handsets whose capture counters are
+ * unrelated. It needs no ownership inference either — `capturedBy` is written from
+ * the authenticated caller, so the scope is a fact about the row rather than a
+ * chain that has to be resolved. 0223 makes the unique index agree, so a second
+ * user can also INSERT the same reference instead of colliding on a global one.
+ */
+export async function findEvidenceByClientCaptureRef(clientCaptureRef: string, capturedBy: number) {
   const db = await getDb();
   if (!db) return undefined;
-  const rows = await db.select({ id: evidenceRecords.id, storageKey: evidenceRecords.storageKey, storageUrl: evidenceRecords.storageUrl }).from(evidenceRecords).where(eq(evidenceRecords.clientCaptureRef, clientCaptureRef)).limit(1);
+  const rows = await db.select({ id: evidenceRecords.id, storageKey: evidenceRecords.storageKey, storageUrl: evidenceRecords.storageUrl })
+    .from(evidenceRecords)
+    .where(and(eq(evidenceRecords.clientCaptureRef, clientCaptureRef), eq(evidenceRecords.capturedBy, capturedBy)))
+    .limit(1);
   return rows[0];
 }
 

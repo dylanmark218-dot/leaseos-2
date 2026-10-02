@@ -561,7 +561,7 @@ export const appRouter = router({
             });
           }
           if (input.clientCaptureRef) {
-            const existing = await findEvidenceByClientCaptureRef(input.clientCaptureRef);
+            const existing = await findEvidenceByClientCaptureRef(input.clientCaptureRef, ctx.user.id);
             if (existing) return { id: existing.id, key: existing.storageKey ?? "", alreadyUploaded: true as const };
           }
           const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "-");
