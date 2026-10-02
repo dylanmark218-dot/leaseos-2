@@ -29,9 +29,20 @@ async function anEvent(over: Record<string, string | null> = {}) {
   }
   return { id, eventId };
 }
+/**
+ * Whether a real claim would offer this event. A claim takes up to 50 events from the whole outbox,
+ * which other suites share, and nothing here processes them: left claimed they would sit behind the
+ * lease (CLAIM_LEASE_SECONDS) where no worker could take them. So every claim taken here is released.
+ */
 const claimable = async (id: number, workerId: string) => {
   const got = await createWorkerPorts(pool as never).claimBatch(workerId, 50);
-  return got.some((e: { id: number }) => e.id === id);
+  const ids = got.map((e: { id: number }) => e.id);
+  if (ids.length) {
+    await pool.query(
+      `UPDATE domainEventOutbox SET claimedAt = NULL, claimedBy = NULL, attemptCount = GREATEST(attemptCount - 1, 0)
+        WHERE claimedBy = ? AND id IN (${ids.map(() => "?").join(",")})`, [workerId, ...ids]);
+  }
+  return ids.includes(id);
 };
 
 d("a crashed worker eventually loses its event", () => {
