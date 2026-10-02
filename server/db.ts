@@ -216,7 +216,7 @@ export async function listEvidenceRecords(scope: TenantScope) {
  * and two people in one company carry two handsets whose capture counters are
  * unrelated. It needs no ownership inference either — `capturedBy` is written from
  * the authenticated caller, so the scope is a fact about the row rather than a
- * chain that has to be resolved. 0223 makes the unique index agree, so a second
+ * chain that has to be resolved. 0224 makes the unique index agree, so a second
  * user can also INSERT the same reference instead of colliding on a global one.
  */
 export async function findEvidenceByClientCaptureRef(clientCaptureRef: string, capturedBy: number) {

@@ -1,4 +1,4 @@
--- 0223 — the offline capture reference stops being an installation-wide namespace.
+-- 0224 — the offline capture reference stops being an installation-wide namespace.
 --
 -- `evidenceRecords.clientCaptureRef` is a string the DEVICE picks (0043), and the
 -- upload path uses it to decide "you already sent me this, here it is". Backed by

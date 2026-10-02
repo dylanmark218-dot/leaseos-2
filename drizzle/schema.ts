@@ -66,13 +66,13 @@ export const evidenceRecords = mysqlTable("evidenceRecords", {
   // one: an evidence object has one identity, not two.
   trackingNumber: varchar("trackingNumber", { length: 64 }).unique(),
   // v21.6 — the device's own reference; makes an offline upload idempotent.
-  // 0223 — unique per CAPTURING USER, not per installation: it is a string the
+  // 0224 — unique per CAPTURING USER, not per installation: it is a string the
   // device picks, so a global index let one company's handset take a name out of
   // another's namespace and, worse, made the idempotency lookup match across
   // companies. The composite index lives in the migration (it is over a
   // generated column) and is asserted by columnParity.
   clientCaptureRef: varchar("clientCaptureRef", { length: 80 }),
-  // 0223 — persistent generated column, COALESCE(capturedBy, -1), carrying the
+  // 0224 — persistent generated column, COALESCE(capturedBy, -1), carrying the
   // composite unique index with clientCaptureRef. Never written by the
   // application: the database derives it, the same precedent as
   // `userRoleAssignments.activeGrantKey`. It exists because NULLs are DISTINCT
