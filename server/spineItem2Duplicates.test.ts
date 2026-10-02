@@ -153,6 +153,56 @@ describe("SPINE item 2 — the open-shift router enforces the one rule and holds
   });
 });
 
+/**
+ * Field-ticket signature: whether a ticket carries the signature it needs is decided once, by
+ * `fieldTicketSignatureVerdict` (_core/fieldTicketSignature.ts), from every signature row, every
+ * revision and the ticket's record. Before it, invoicing asked "does any row say accepted?", closeout
+ * "does the newest row exist?", and the portal read the denormalized column — three answers that
+ * diverged on a stale or disagreeing record. This fails if a file that reads signatures compares a
+ * signature's `result` or a ticket's `signatureStatus` to a signature outcome again, or if a consumer
+ * stops asking the verdict. A row-existence check that locks the workflow (no second signature, no
+ * edit after signing) is a lock, not a verdict, and is not what this counts.
+ */
+describe("SPINE item 2 — a field ticket's signature has one verdict", () => {
+  const RULE = "server/_core/fieldTicketSignature.ts";
+  const OUTCOMES = new Set(["unsigned", "accepted", "partially_accepted", "refused", "no_representative"]);
+  const readers = files.filter(f => f !== RULE && !/\.test\.tsx?$/.test(f) && /fieldTicketSignatures|signatureStatus/.test(readFileSync(f, "utf8")));
+
+  /** `a.result === "accepted"`, `t.signatureStatus !== "unsigned"` and the like: a signature outcome judged in place. */
+  const judgedInPlace = (file: string, text: string): string[] => {
+    const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const found: string[] = [];
+    const isField = (e: ts.Expression) => ts.isPropertyAccessExpression(e) && (e.name.text === "result" || e.name.text === "signatureStatus");
+    const isOutcome = (e: ts.Expression) => ts.isStringLiteralLike(e) && OUTCOMES.has(e.text);
+    const visit = (n: ts.Node): void => {
+      if (ts.isBinaryExpression(n) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken].includes(n.operatorToken.kind)
+        && ((isField(n.left) && isOutcome(n.right)) || (isField(n.right) && isOutcome(n.left)))) {
+        found.push(`${file}:${sf.getLineAndCharacterOfPosition(n.getStart()).line + 1}: ${n.getText()}`);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    return found;
+  };
+
+  it("finds an in-place judgement, and not a mention", () => {
+    expect(judgedInPlace("x.ts", `const a = s.result === "accepted"; const b = "x.signatureStatus === 'refused'"; const c = s.kind === "accepted";`)).toHaveLength(1);
+  });
+
+  it("no file that reads signatures judges a signature outcome itself", () => {
+    expect(readers.flatMap(f => judgedInPlace(f, readFileSync(f, "utf8"))), `Ask fieldTicketSignatureVerdict (${RULE}); a signature row is evidence, not the verdict`).toEqual([]);
+  });
+
+  it("invoicing, closeout and the portal's daily count ask the verdict; the draft and the closeout state take it", () => {
+    for (const f of ["server/invoicingRouter.ts", "server/closeoutRouter.ts", "server/portalRouter.ts"]) {
+      expect(readFileSync(f, "utf8"), `${f} no longer asks fieldTicketSignatureVerdict`).toMatch(/fieldTicketSignatureVerdict\(/);
+    }
+    expect(readFileSync("server/_core/invoiceDraft.ts", "utf8")).toMatch(/signature: SignatureVerdict/);
+    expect(readFileSync("server/_core/siteCloseout.ts", "utf8")).toMatch(/signature: SignatureVerdict/);
+    expect([...declared].filter(([, names]) => names.has("fieldTicketSignatureVerdict")).map(([f]) => f)).toEqual([RULE]);
+  });
+});
+
 /*
  * "Is this resource already booked over this window?" — one rule, in _core/bookingConflict.ts.
  *
