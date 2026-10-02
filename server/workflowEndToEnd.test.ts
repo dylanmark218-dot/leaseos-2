@@ -64,6 +64,8 @@ const openTasks = async (subjectType: string, subjectId: string) => {
 
 /** Drain everything currently queued, so assertions are about end state. */
 async function drainAll(workerId = "test-worker") {
+  const [maxRows] = await pool.query<mysql.RowDataPacket[]>("SELECT COALESCE(MAX(id), 0) AS maxId FROM domainEventOutbox");
+  const maxId = Number(maxRows[0]!.maxId);
   const ports = createWorkerPorts(pool);
   const w = startDrainWorker(ports, {
     workerId,
@@ -71,17 +73,20 @@ async function drainAll(workerId = "test-worker") {
     idleIntervalMs: 5,
     batchSize: 10,
   });
-  // Run until nothing is claimable, not for a fixed window. The outbox is shared by every
-  // database suite in the run, and since Open Work (0206) writes board events into it too, a
-  // fixed 300 ms could end before this test's event was reached. Bounded, so a stream of other
-  // suites' events cannot hold the test open.
+  // Run until every event that existed when the drain started has been processed (or dead-lettered,
+  // or deferred to a later retry), not for a fixed window. The outbox is shared by every database
+  // suite in the run, and other suites run drain workers of their own: one of them may claim this
+  // test's event. Waiting only until nothing is *unclaimed* ended the wait while that worker still
+  // held the event, before its tasks were written. Bounded, so a stuck worker cannot hang the suite;
+  // the assertions after it still decide the test. (Same wait as b20WorkflowWiring.test.ts.)
   const deadline = Date.now() + 15_000;
   await new Promise(r => setTimeout(r, 300));
   while (Date.now() < deadline) {
     const [rows] = await pool.query<mysql.RowDataPacket[]>(
       `SELECT COUNT(*) AS n FROM domainEventOutbox
-        WHERE processedAt IS NULL AND deadLetteredAt IS NULL
-          AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW()) AND claimedAt IS NULL`
+        WHERE id <= ? AND processedAt IS NULL AND deadLetteredAt IS NULL
+          AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW())`,
+      [maxId]
     );
     if (Number(rows[0]!.n) === 0) break;
     await new Promise(r => setTimeout(r, 50));
