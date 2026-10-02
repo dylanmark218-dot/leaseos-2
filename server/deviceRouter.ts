@@ -12,7 +12,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { getDb, orgScopeWhere, type TenantScope } from "./db";
 import { sealIsTrustworthy, verifySealAgainstStored } from "./_core/evidenceSeal";
 import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
 import { createHash } from "node:crypto";
@@ -26,12 +26,42 @@ import {
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const FINGERPRINT = z.string().regex(/^[a-f0-9]{64}$/, "fingerprint must be a lowercase SHA-256 hex string");
 
-async function loadDevice(deviceRef: string) {
+/**
+ * A device the acting organization may act on, or nothing.
+ *
+ * F6 — the scope is IN the query, not a check after it, because every caller
+ * that looked one up afterwards had to remember to, and two did not in the same
+ * way: `revoke` and `sync.receivePackage` answered FORBIDDEN for a device that
+ * existed in another organization while answering something else for a
+ * `deviceRef` that existed nowhere. That difference is an enumeration oracle —
+ * walk the reference space, keep whatever answers FORBIDDEN, and you have a list
+ * of another company's devices without ever being allowed to read one.
+ * `activate` and `rotateKey` happened not to leak, but only because they check
+ * `userId` first, which is a different rule that could be reordered away.
+ *
+ * Filtering here also means the refusal cannot be a partial success: the row is
+ * never loaded, so nothing downstream can act on it by mistake.
+ *
+ * `orgScopeWhere` is the same helper the rest of this lineage uses, so a device
+ * carries the same two on-disk encodings as everything else: a member's device
+ * holds its `orgRef`, and the single tenant's holds NULL or the literal
+ * `default`. A legacy device with no binding is therefore visible only to the
+ * caller with no organization — for a member it is unattributed, and
+ * unattributed is not shared.
+ */
+async function loadDevice(deviceRef: string, scope: TenantScope) {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(fieldDevices).where(eq(fieldDevices.deviceRef, deviceRef)).limit(1);
+  const rows = await db.select().from(fieldDevices)
+    .where(and(eq(fieldDevices.deviceRef, deviceRef), orgScopeWhere(fieldDevices, scope)))
+    .limit(1);
   return rows[0] ?? null;
 }
+
+/** The one refusal for "no such device, or not yours to see". Identical on every path, deliberately. */
+const noSuchDevice = (what = "Device not found") => new TRPCError({ code: "NOT_FOUND", message: what });
+/** A device that predates organization binding. Only ever reachable by the caller with no organization. */
+const unboundDevice = () => new TRPCError({ code: "PRECONDITION_FAILED", message: "Legacy device has no organization binding and must be re-enrolled" });
 
 export const deviceRouter = router({
   enroll: roleProcedure("device.enroll")
@@ -75,10 +105,9 @@ export const deviceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const d = await loadDevice(input.deviceRef);
-      if (!d || d.userId !== ctx.user.id) throw new TRPCError({ code: "NOT_FOUND", message: "Device not found for this user" });
-      const actingOrgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
-      if (!d.orgRef || d.orgRef !== actingOrgRef) throw new TRPCError({ code: "FORBIDDEN", message: "Device organization binding does not match the active organization" });
+      const d = await loadDevice(input.deviceRef, await resolveActingScope(db, ctx.user.id));
+      if (!d || d.userId !== ctx.user.id) throw noSuchDevice("Device not found for this user");
+      if (!d.orgRef) throw unboundDevice();
       if (d.status !== "enrolled") throw new TRPCError({ code: "CONFLICT", message: `Device is ${d.status}` });
       await db.update(fieldDevices).set({ status: "active", activatedAt: new Date() }).where(eq(fieldDevices.id, d.id));
       return { deviceRef: d.deviceRef, status: "active" as const };
@@ -89,10 +118,9 @@ export const deviceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const d = await loadDevice(input.deviceRef);
-      if (!d || d.userId !== ctx.user.id) throw new TRPCError({ code: "NOT_FOUND", message: "Device not found for this user" });
-      const actingOrgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
-      if (!d.orgRef || d.orgRef !== actingOrgRef) throw new TRPCError({ code: "FORBIDDEN", message: "Device organization binding does not match the active organization" });
+      const d = await loadDevice(input.deviceRef, await resolveActingScope(db, ctx.user.id));
+      if (!d || d.userId !== ctx.user.id) throw noSuchDevice("Device not found for this user");
+      if (!d.orgRef) throw unboundDevice();
       if (d.status === "revoked") throw new TRPCError({ code: "CONFLICT", message: "A revoked device does not rotate keys; enroll a new device" });
       let newKeyFingerprint: string;
       try { newKeyFingerprint = fingerprintP256Spki(input.newPublicKeySpkiBase64); }
@@ -111,10 +139,17 @@ export const deviceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const d = await loadDevice(input.deviceRef);
-      if (!d) throw new TRPCError({ code: "NOT_FOUND", message: "Device not found" });
-      const actingOrgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
-      if (!d.orgRef || d.orgRef !== actingOrgRef) throw new TRPCError({ code: "FORBIDDEN", message: "Device organization binding does not match the active organization" });
+      /*
+       * No `userId` check, deliberately: revoking is an administrative act over
+       * the organization's fleet, not over your own handset — safety and
+       * management revoke other people's devices, which is the point. The
+       * organization IS the boundary here, which is exactly why this procedure
+       * leaked: with no user check to fall back on, the org mismatch was the only
+       * thing left, and it answered FORBIDDEN.
+       */
+      const d = await loadDevice(input.deviceRef, await resolveActingScope(db, ctx.user.id));
+      if (!d) throw noSuchDevice();
+      if (!d.orgRef) throw unboundDevice();
       const now = new Date();
       await db.update(fieldDevices).set({ status: "revoked", revokedAt: now, revokedByUserId: ctx.user.id, revocationReason: input.reason }).where(eq(fieldDevices.id, d.id));
       await db.update(deviceKeyEvents).set({ validUntil: now }).where(and(eq(deviceKeyEvents.fieldDeviceId, d.id), isNull(deviceKeyEvents.validUntil)));
@@ -181,13 +216,20 @@ export const syncRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const now = new Date();
 
-      const d = await loadDevice(input.deviceRef);
-      const history = d ? await db.select().from(deviceKeyEvents).where(eq(deviceKeyEvents.fieldDeviceId, d.id)) : [];
-      if (!d?.orgRef) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Legacy device has no organization binding and must be re-enrolled" });
+      /*
+       * F6 — "no such device" and "another organization's device" were two
+       * different answers here (PRECONDITION_FAILED "legacy device…" and
+       * FORBIDDEN), and the first was also untrue: a `deviceRef` that exists
+       * nowhere is not a legacy device. Both are NOT_FOUND now, and the legacy
+       * message is kept for the case it actually describes — a real row with no
+       * binding, which only the caller with no organization can see.
+       */
+      const d = await loadDevice(input.deviceRef, await resolveActingScope(db, ctx.user.id));
+      if (!d) throw noSuchDevice();
+      const history = await db.select().from(deviceKeyEvents).where(eq(deviceKeyEvents.fieldDeviceId, d.id));
+      if (!d.orgRef) throw unboundDevice();
       const orgRef = d.orgRef;
-      const actingOrgRef = (await resolveActingScope(db, ctx.user.id)).tenantId;
-      if (d.orgRef !== actingOrgRef) throw new TRPCError({ code: "FORBIDDEN", message: "Device is not bound to the active organization" });
-      if (d && !d.publicKeySpkiBase64) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Legacy fingerprint-only device must be re-enrolled with a public key" });
+      if (!d.publicKeySpkiBase64) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Legacy fingerprint-only device must be re-enrolled with a public key" });
       // A refused package is a row, whatever refused it. The pre-0110 rule was
       // "refusals and rejections are rows"; 0110's signature checks threw
       // instead, which left the office unable to see that a device with a bad
