@@ -83,11 +83,12 @@ async function profileIdsInScope(db: Db, entityIds: readonly number[]): Promise<
 }
 
 /**
- * Resolve the caller's own profile or refuse. Never takes an id from input; the profile's
- * book must be one of the caller's (`ctx.money`), or there is no profile "in this organization".
+ * Resolve the caller's own profile or refuse. Never takes an id from input. The operator fallback
+ * resolves only in the caller's acting organization (OPID), and the profile's book must be one of the
+ * caller's (`ctx.money`), or there is no profile "in this organization".
  */
 async function ownProfileOrThrow(userId: number, money: FinanceScope) {
-  const p = await svc.resolveOwnPayrollProfile(userId);
+  const p = await svc.resolveOwnPayrollProfile(userId, money);
   if (!p) {
     throw notFound("No payroll profile is linked to your account");
   }

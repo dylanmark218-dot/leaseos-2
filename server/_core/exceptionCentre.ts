@@ -28,7 +28,7 @@ import { authorize, type Permission, type RoleGrant } from "./recordsAuthorizati
 
 export type ExceptionCategory =
   | "critical" | "dispatch" | "billing" | "purchasing" | "workforce" | "fleet"
-  | "finance" | "ai" | "sync" | "devices" | "calibration" | "insurance" | "compliance";
+  | "finance" | "ai" | "sync" | "devices" | "calibration" | "insurance" | "compliance" | "integration";
 
 export type ExceptionSeverity = "critical" | "high" | "medium" | "low";
 
@@ -104,6 +104,12 @@ export type ExceptionSources = {
     conflicting: { facilityKey: string; name: string }[];
     unreviewedRegulatorEvidence: { facilityKey: string; name: string; count: number; oldestRetrievedAt: Date }[];
     duplicateGroups: { legalLocation: string; facilityKeys: string[] }[];
+  };
+  /** The Integration Hub's open items: dead letters needing a person, connectors failing or needing credentials, and conflicts pending manual resolution. */
+  integrationHub?: {
+    deadLetters: { deadLetterRef: string; kind: string; eventType: string | null; reason: string; deadLetteredAt: Date; connectorName: string | null }[];
+    connectors: { connectorRef: string; name: string; healthState: string; lastError: string | null; critical: boolean; since: Date | null }[];
+    conflicts: { conflictRef: string; entityType: string; entityRef: string; detectedAt: Date }[];
   };
 };
 
@@ -398,6 +404,39 @@ export function deriveExceptions(s: ExceptionSources): Exception[] {
         deepLink: { portal: "office", route: `/security/incidents/${si.incidentRef}` }, requiredPermission: "incident.review", since: null, dueAt: null,
       });
     }
+  }
+
+  /** The Integration Hub: a dead letter nobody requeued, a connector not currently healthy, or a conflict a contract held for review. */
+  for (const d of s.integrationHub?.deadLetters ?? []) {
+    out.push({
+      key: `integration-dl:${d.deadLetterRef}`, category: "integration", severity: d.kind === "outbound_delivery" ? "high" : "medium",
+      title: `${d.connectorName ?? "An integration"}: ${(d.eventType ?? d.kind).replace(/_/g, " ")} dead-lettered`,
+      reason: `${d.reason.replace(/_/g, " ")} — accepted but could not be completed; it is not retried automatically`,
+      subjectType: "integrationDeadLetter", subjectId: d.deadLetterRef, action: "Inspect it; requeue, retry now, or cancel with a reason",
+      deepLink: { portal: "office_administration", route: `/integrations/dead-letters/${d.deadLetterRef}` }, requiredPermission: "integration.deadletter.manage",
+      since: d.deadLetteredAt, dueAt: null,
+    });
+  }
+  for (const c of s.integrationHub?.connectors ?? []) {
+    out.push({
+      key: `integration-connector:${c.connectorRef}`, category: "integration",
+      severity: c.critical && (c.healthState === "failing" || c.healthState === "authentication_required") ? "high" : "medium",
+      title: `${c.name}: ${c.healthState.replace(/_/g, " ")}`,
+      reason: c.lastError ?? `Connector health is ${c.healthState.replace(/_/g, " ")}`,
+      subjectType: "integrationConnector", subjectId: c.connectorRef,
+      action: c.healthState === "authentication_required" ? "Rotate or reissue the connector's credential" : "Investigate and restore the connector",
+      deepLink: { portal: "office_administration", route: `/integrations/${c.connectorRef}` }, requiredPermission: "integration.connector.manage",
+      since: c.since, dueAt: null,
+    });
+  }
+  for (const c of s.integrationHub?.conflicts ?? []) {
+    out.push({
+      key: `integration-conflict:${c.conflictRef}`, category: "integration", severity: "medium",
+      title: `Integration conflict on ${c.entityType} ${c.entityRef}`, reason: "Two sources disagree and the contract holds it for manual review",
+      subjectType: "integrationConflict", subjectId: c.conflictRef, action: "Choose the source's value, LeaseOS's, or a custom resolution",
+      deepLink: { portal: "office_administration", route: `/integrations/conflicts/${c.conflictRef}` }, requiredPermission: "integration.conflict.resolve",
+      since: c.detectedAt, dueAt: null,
+    });
   }
 
   for (const f of s.facilityDirectory?.conflicting ?? []) {

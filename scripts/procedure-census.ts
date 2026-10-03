@@ -63,6 +63,9 @@ function* walk(dir: string): Generator<string> {
  */
 export const KIND_CLASS = {
   roleProcedure: "gated", externalProcedure: "gated", integrationProcedure: "gated",
+  // #61: a domain permission for an own-organization target, platform (or single-owner bootstrap)
+  // authority for a global one, and a refusal otherwise — never ungated.
+  platformOrOrganizationProcedure: "gated",
   publicProcedure: "ungated", adminProcedure: "ungated",
   // #64 (v23.26): signed in and audited, but no role or permission is checked, so every site is
   // pinned like a public one. Its names are also pinned in SESSION_PROCEDURE_PERMISSIONS.

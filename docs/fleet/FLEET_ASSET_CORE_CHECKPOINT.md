@@ -39,15 +39,15 @@ Foundation: `docs/fleet/FLEET_PORTFOLIO_FOUNDATION_CHECKPOINT.md`,
 
 ## Counts
 
-| | `main` `2864723` | this branch, merged | delta |
+| | `main` `d93eb13` | this branch, merged | delta |
 |---|---|---|---|
-| Tables | 482 | **483** | +1 (`unitComponents`) |
-| Migrations | 207 | **209** | +2 (`0242_fleet_asset_identity.sql`, `0243_fleet_component_guards.sql`) |
-| Role-authorized procedures | 897 | **907** | +10 (`server/fleetAssetRouter.ts`, spread into `fleet`) |
-| Operational procedure map | 874 | **884** | +10 |
-| Mounted server paths | 952 | **962** | +10 |
-| Permissions | 436 | **440** | +4 |
-| Sensitive (fail-closed) | 178 | **181** | +3 |
+| Tables | 490 | **491** | +1 (`unitComponents`) |
+| Migrations | 211 | **213** | +2 (`0242_fleet_asset_identity.sql`, `0243_fleet_component_guards.sql`) |
+| Role-authorized procedures | 925 | **935** | +10 (`server/fleetAssetRouter.ts`, spread into `fleet`) |
+| Operational procedure map | 904 | **914** | +10 |
+| Mounted server paths | 982 | **992** | +10 |
+| Permissions | 442 | **446** | +4 |
+| Sensitive (fail-closed) | 184 | **187** | +3 |
 | Universal (self-scoped) | 21 | **22** | +1 (`fleet.read_own`) |
 | Classification | `c1a.4` | **`c1a.5`** | four fleet rules |
 | Unwired `_core` engines | — | unchanged | `fleetAssets` is reached from its router |
@@ -143,7 +143,7 @@ axe rules in the accessibility suite in seven states. The former demonstration s
 ## Gate
 
 `DATABASE_URL=… bash scripts/ci-gate.sh` from a dropped and recreated MariaDB 10.11 on Node 22.23.3
-(`.nvmrc`), on the tree merged with `main` `2864723`; the result is recorded in the commit that
+(`.nvmrc`), on the tree merged with `main` `d93eb13` (after `2864723`, the third merge of main); the result is recorded in the commit that
 carries this document. The two suites that were red on `main` `240b2dd` itself
 (`server/documentValidityCanonical.test.ts` and `server/calendarFixtures.test.ts`) are fixed on
 `main` and pass here.

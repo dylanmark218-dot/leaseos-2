@@ -93,12 +93,11 @@ beforeAll(async () => {
     }
   }
   // F1.3 — the global mode is the fallback for every organization, so a platform administrator (a real users row
-  // with role "admin", holding the domain permission too) sets it; the suite's own user is not one.
+  // with role "admin") sets it. Platform authority alone suffices; no domain role is granted. The suite's own user is not one.
   if (db) {
     // An explicit id from the suite's own window: auto-increment lands wherever other suites' explicit ids pushed it.
     const adminId = seq++;
     await db.insert(users).values({ id: adminId, openId: `fieldroute-admin-${adminId}`, role: "admin" } as never);
-    await grantUserRole({ userId: adminId, role: "management", scopeType: "global", grantedByUserId: TEST_USER_ID, grantedAt: new Date() });
     await appRouter.createCaller({ ...createContext(), user: { ...createContext().user!, id: adminId, role: "admin" } }).dispatch.enforcementSet({ mode: "off", reason: "fieldroute suite: records, not readiness" });
   }
 });

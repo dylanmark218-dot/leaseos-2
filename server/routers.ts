@@ -101,6 +101,7 @@ import {
   unitInScope,
   workOrderInScope,
   proposalInScope,
+  assistantTargetsInScope,
   rateCardInScope,
   trackingSubjectInScope,
   transferTrackingNumber,
@@ -142,6 +143,7 @@ import { fleetPortfolioRouter } from "./fleetPortfolioRouter";
 import { assetRouter } from "./assetRouter";
 import { projectRouter } from "./projectRouter";
 import { inboundRouter, integrationRouter } from "./integrationRouter";
+import { integrationHubRouter } from "./integrationHubRouter";
 import { telematicsRouter } from "./telematicsRouter";
 import { workforceRouter } from "./workforceRouter";
 import { trainingAcademyRouter } from "./trainingAcademyRouter";
@@ -429,6 +431,7 @@ export const appRouter = router({
   asset: assetRouter,
   project: projectRouter,
   integration: integrationRouter,
+  integrationHub: integrationHubRouter,
   telematics: telematicsRouter,
   workforce: workforceRouter,
   academy: trainingAcademyRouter,
@@ -555,7 +558,9 @@ export const appRouter = router({
             category: z.string().min(1).max(80),
             fileName: z.string().min(1).max(220),
             mimeType: z.string().min(1).max(120),
-            dataBase64: z.string().min(1),
+            // 15 MiB of bytes is exactly this many base64 characters. Refusing
+            // here stops an oversized upload before it is decoded into memory.
+            dataBase64: z.string().min(1).max(20_971_520),
             latitude: z.number().optional(),
             longitude: z.number().optional(),
             notes: z.string().optional(),
@@ -574,6 +579,9 @@ export const appRouter = router({
           }
           if (input.clientCaptureRef) {
             const existing = await findEvidenceByClientCaptureRef(input.clientCaptureRef);
+            // SEC-1: idempotent for the person who uploaded it. The reference is globally unique, so
+            // anyone else sending it is refused — never handed that record's id and storage key.
+            if (existing && existing.capturedBy !== ctx.user.id) throw new TRPCError({ code: "CONFLICT", message: "This capture reference is already in use" });
             if (existing) return { id: existing.id, key: existing.storageKey ?? "", alreadyUploaded: true as const };
           }
           const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "-");
@@ -865,6 +873,12 @@ export const appRouter = router({
         )
         .mutation(async ({ ctx, input }) => {
           await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — before the model is asked anything; the proposal would be visible to the unit's owner
+          // SEC-1: every id the draft will store is authority at commit, so each must be in the
+          // caller's organization — refused here, before the model is called, with the same
+          // not-found a missing record gets.
+          if (!(await assistantTargetsInScope(input, await scopeFor(ctx.user.id)))) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Record not found" });
+          }
           if (input.idempotencyKey) {
             const existing = await getAssistantProposal(input.idempotencyKey);
             if (existing) {

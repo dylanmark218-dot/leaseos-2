@@ -73,6 +73,10 @@ describe("the real tree", () => {
     // the first slot free on main and on all 131 remote branches at the scan.
     expect(files).toContain("0228_safety_program_builder.sql");
     expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
+    // The Integration Hub took 0220–0223 (connectors/contracts, sync, dead letters, conflicts + the nullable
+    // connector links); renumbered 2026-10-03 to 0229–0232 when main took 0221/0222 and 0226/0227 and other
+    // branches held 0220 and 0228 (0228 is now #99's, on main).
+    expect(files).toContain("0232_integration_hub_conflicts_and_links.sql");
     // The approved external source registry took 0233. Drafted as 0228 when that was free, it moved before any
     // environment applied it when the pre-commit scan found 0228 claimed by payroll P3 and 0229–0232 by the
     // integration hub; main has since taken 0228 itself (the program builder, #99). 0233 was still free on main
