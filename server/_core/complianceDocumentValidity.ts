@@ -173,3 +173,32 @@ export function documentExpiry(
     (a.daysRemaining ?? Number.MAX_SAFE_INTEGER) - (b.daysRemaining ?? Number.MAX_SAFE_INTEGER) ||
     a.docType.localeCompare(b.docType));
 }
+
+/**
+ * SPINE item 2 — the one answer to "is this person's driver licence in force?".
+ *
+ * The structured `driver_licence` documents decide, through `complianceRequirementValidity`. Only
+ * when they establish nothing (none on file, or only rejected rows) does the flat legacy date
+ * `operators.licenseExpiresAt` speak — and then as an UNVERIFIED claim, never a clearance (owner's
+ * ruling, 2026-09-25): nobody has checked it against a licence. A legacy date already past is a
+ * lapsed claim, which may block.
+ *
+ * Dispatch (`readinessComposer`), open-shift eligibility and shift readiness all read the licence
+ * through this. Before it, open shifts and shift readiness each read the legacy date themselves
+ * and treated a future one as in force — so a worker dispatch held at "licence unknown" was shown
+ * an open shift as eligible.
+ */
+export const DRIVER_LICENCE_DOC_TYPES: readonly string[] = ["driver_licence"];
+
+export function driverLicenceVerdict(
+  rows: readonly ComplianceDocumentRow[], legacyExpiresAt: Date | null, at: Date,
+): ComplianceVerdict & { source: "documents" | "legacy_record" } {
+  const v = complianceRequirementValidity(rows, DRIVER_LICENCE_DOC_TYPES, at);
+  if ((v.state !== "none" && v.state !== "rejected") || !legacyExpiresAt) return { ...v, source: "documents" };
+  return {
+    state: "unverified", version: null, expiresAt: null, daysRemaining: null,
+    reason: "the date is from the legacy operator record, which nobody has checked against a licence",
+    docType: "driver_licence", documentId: null, claimedExpiresAt: legacyExpiresAt,
+    claimLapsed: legacyExpiresAt.getTime() < at.getTime(), source: "legacy_record",
+  };
+}

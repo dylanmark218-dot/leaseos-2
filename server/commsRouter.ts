@@ -13,6 +13,7 @@
  * the radio shop is the radio shop.
  */
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import type { Tx } from "./_core/dbTypes";
 import { z } from "zod";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
@@ -189,6 +190,7 @@ export const commsRouter = router({
       evidenceRecordId: z.number().int().positive().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitIds: input.approvedUnitIds });   // CP1.5 — a licence approves only units the caller can see
       const d = await db();
       const c = (await d.select().from(radioChannels).where(eq(radioChannels.channelKey, input.channelKey)).limit(1))[0];
       if (!c) throw new TRPCError({ code: "NOT_FOUND", message: `No channel ${input.channelKey} in the registry — record the channel before authorizing it` });
@@ -233,6 +235,7 @@ export const commsRouter = router({
       programmedAt: z.coerce.date().optional(), programmedBy: z.string().max(200).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — readiness reads this radio fit for the unit's route
       const d = await db();
       const values = {
         unitId: input.unitId, vhf: input.vhf, uhf: input.uhf, cb: input.cb, satellite: input.satellite, cellular: input.cellular,
@@ -469,6 +472,7 @@ export const commsRouter = router({
       at: z.coerce.date().default(() => new Date()),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — it reads the unit's radio fit, too
       const d = await db();
       const segmentIds = input.segments.map(s => s.segmentId);
       const [assignRows, coverRows, channelRows, authRows] = await Promise.all([
@@ -720,6 +724,7 @@ export const commsRouter = router({
       at: z.coerce.date().default(() => new Date()),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const d = await db();
       const scope = await actingScopeFor(ctx.user.id);
       if (!(await recordAnchorsInScope(input, scope))) throw new TRPCError({ code: "NOT_FOUND", message: "Record not found" });

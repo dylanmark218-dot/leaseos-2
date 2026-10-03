@@ -61,7 +61,11 @@ d("records belong to the organization that owns the job, unit or person", () => 
     await expect(callerFor(safetyA).records.incident.readInvestigation({ incidentNumber })).resolves.toBeTruthy();
     // Work-order release: through the unit.
     await expect(callerFor(mechB).records.maintenance.recordRelease({ workOrderId: uA.workOrderId, releaseType: "full", repairSummary: "brake line replaced and bled", roadTestPerformed: true, technicianIdentifier: "TECH-1" } as never)).rejects.toMatchObject({ code: "NOT_FOUND", message: `Work order ${uA.workOrderId} not found` });
-    await expect(callerFor(mechA).records.maintenance.recordRelease({ workOrderId: uA.workOrderId, releaseType: "full", repairSummary: "brake line replaced and bled", roadTestPerformed: true, technicianIdentifier: "TECH-1" } as never)).resolves.toMatchObject({ released: true });   // the owner's mechanic releases it
+    // 0221 — that door is closed (one release door, design S-1). The owner's mechanic is in scope, so they hear why;
+    // they release through shop.workOrderRelease, which scopes the work order the same way.
+    await expect(callerFor(mechA).records.maintenance.recordRelease({ workOrderId: uA.workOrderId, releaseType: "full", repairSummary: "brake line replaced and bled", roadTestPerformed: true, technicianIdentifier: "TECH-1" } as never)).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: expect.stringMatching(/shop\.workOrderRelease/) });
+    await expect(callerFor(mechB).shop.workOrderRelease({ workOrderId: uA.workOrderId, releaseType: "full", repairSummary: "brake line replaced and bled", roadTestPerformed: true })).rejects.toMatchObject({ code: "NOT_FOUND", message: `Work order ${uA.workOrderId} not found` });
+    await expect(callerFor(mechA).shop.workOrderRelease({ workOrderId: uA.workOrderId, releaseType: "full", repairSummary: "brake line replaced and bled", roadTestPerformed: true })).resolves.toMatchObject({ releaseId: expect.any(Number), mechanicReleaseGiven: true });   // the owner's mechanic releases it
     // Role grant: only to a person in the organization.
     await expect(callerFor(safetyA).records.roles.grant({ targetUserId: personB, role: "mechanic" } as never)).rejects.toMatchObject({ code: "NOT_FOUND", message: `User ${personB} not found` });
     // B23.1A: this used to assert only that A's own person was NOT refused as
