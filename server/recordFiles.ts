@@ -133,6 +133,60 @@ export function readCategoryFor(recordType: string): ReadCategory | null {
     : null;
 }
 
+/* ------------------------------------------------------------------ *
+ * Sealing: the client's word for what a record is, normalized
+ * ------------------------------------------------------------------ */
+
+/**
+ * The field device's capture kinds (client/src/runtime/contracts.ts
+ * `CaptureKind`) that name a sealed record type. The kind is the device's
+ * vocabulary, not the vault's: `pretrip` is not `pre_trip`, and nothing the
+ * device sends is written as a record type without passing through here.
+ */
+export const CAPTURE_KIND_RECORD_TYPE = {
+  pretrip: "pre_trip",
+  posttrip: "post_trip_dvir",
+  tailgate: "safety_meeting",
+  fuel_receipt: "bill_receipt",
+  expense_receipt: "bill_receipt",
+  load_ticket: "load_ticket",
+  disposal_ticket: "disposal_ticket",
+  photo: "photo",
+  incident: "incident",
+  defect_report: "defect_report",
+  // A field signature capture carries the raw stroke document (SIGN_ATTEST_DESIGN §6.2: files =
+  // [strokes.json, render.svg]). It is sealed as the most restrictive signing type, never as `other`,
+  // which every job-operational reader can browse.
+  signature: "signature_strokes",
+} as const satisfies Record<string, EvidenceRecordType>;
+
+/** Types only Sign & Attest produces. A sealing client may not name them. */
+const SIGNING_ONLY_TYPES: readonly EvidenceRecordType[] = ["signature_strokes", "signature_render", "signed_artifact", "attest_receipt"];
+
+export type NormalizedRecordType = {
+  recordType: EvidenceRecordType;
+  /** How it was decided — for the seal's caller and for tests, never for authorization. */
+  basis: "capture_kind" | "canonical" | "unrecognized";
+};
+
+/**
+ * What a seal request's `recordType` becomes. Exact match only — "PRETRIP",
+ * " pretrip" and "pre-trip" are not capture kinds, and normalizing them here
+ * would be a second, looser vocabulary. Anything unrecognized is `other`, the
+ * column's default and what every record has been until now: it can never
+ * reach a category it did not already have, and an unknown string can never
+ * become a new one.
+ */
+export function normalizeSealRecordType(raw: string): NormalizedRecordType {
+  if (Object.prototype.hasOwnProperty.call(CAPTURE_KIND_RECORD_TYPE, raw)) {
+    return { recordType: CAPTURE_KIND_RECORD_TYPE[raw as keyof typeof CAPTURE_KIND_RECORD_TYPE], basis: "capture_kind" };
+  }
+  if (Object.prototype.hasOwnProperty.call(SEALED_TYPE_READ_CATEGORY, raw) && !SIGNING_ONLY_TYPES.includes(raw as EvidenceRecordType)) {
+    return { recordType: raw as EvidenceRecordType, basis: "canonical" };
+  }
+  return { recordType: "other", basis: "unrecognized" };
+}
+
 export type VisibilityBasis = "category" | "own";
 
 export type FileVisibility =

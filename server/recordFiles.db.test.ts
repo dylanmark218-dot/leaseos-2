@@ -258,3 +258,40 @@ d("records.files — lifecycle, legacy rows and downloads", () => {
     expect(signed.keys).toEqual([]);
   }, 60_000);
 });
+
+d("records.evidence.seal — the device's kind is normalized before it is written", () => {
+  it("writes the canonical type for every approved kind, other for anything else, and leaves legacy rows alone", async () => {
+    const A = await org();
+    const jobA = await job(A);
+    const driver = await member(A, ["driver"]);
+    const office = await member(A, ["office"]);
+    const legacy = await evidence({ jobId: jobA, title: `legacy ${rnd()}`, capturedBy: driver });   // never sealed: the default
+    const sealAs = async (recordType: string) => {
+      const id = await evidence({ jobId: jobA, title: `cap ${recordType} ${rnd()}`, capturedBy: driver });
+      const r = await callerFor(driver).records.evidence.seal({ evidenceId: id, contentHash: "a".repeat(64), recordType, relationships: [{ entityType: "unit", entityRef: "U-1" }] });
+      const [row] = await pool.execute<mysql.RowDataPacket[]>("SELECT recordType, sealState FROM evidenceRecords WHERE id = ?", [id]);
+      return { id, returned: r.recordType, stored: row[0]!.recordType as string, sealState: row[0]!.sealState as string };
+    };
+
+    const expected: Record<string, string> = {
+      pretrip: "pre_trip", posttrip: "post_trip_dvir", tailgate: "safety_meeting", fuel_receipt: "bill_receipt",
+      expense_receipt: "bill_receipt", load_ticket: "load_ticket", disposal_ticket: "disposal_ticket", photo: "photo",
+      incident: "incident", defect_report: "defect_report", signature: "signature_strokes",
+      // unrecognized, hostile or signing-only: the legacy default, never a new category
+      PRETRIP: "other", " pretrip": "other", credential: "other", signed_artifact: "other", attest_receipt: "other", hos_event: "other", "": "other",
+    };
+    for (const [kind, type] of Object.entries(expected)) {
+      const r = await sealAs(kind);
+      expect([r.returned, r.stored, r.sealState], JSON.stringify(kind)).toEqual([type, type, "sealed"]);
+    }
+
+    // Over-long input is refused at the boundary, before anything is written.
+    const longId = await evidence({ jobId: jobA, title: `long ${rnd()}`, capturedBy: driver });
+    await expect(callerFor(driver).records.evidence.seal({ evidenceId: longId, contentHash: "a".repeat(64), recordType: "x".repeat(61), relationships: [{ entityType: "unit", entityRef: "U-1" }] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const [still] = await pool.execute<mysql.RowDataPacket[]>("SELECT recordType, sealState FROM evidenceRecords WHERE id = ?", [longId]);
+    expect([still[0]!.recordType, still[0]!.sealState]).toEqual(["other", "draft"]);
+
+    // A record sealed before normalization existed keeps its type and still projects.
+    await expect(callerFor(office).records.files.get({ evidenceId: legacy })).resolves.toMatchObject({ recordType: "other", folder: "other" });
+  }, 120_000);
+});

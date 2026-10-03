@@ -8,7 +8,9 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  CAPTURE_KIND_RECORD_TYPE,
   FORWARD_TYPE_READ_CATEGORY,
+  normalizeSealRecordType,
   READ_CATEGORY_BY_RECORD_TYPE,
   SEALED_TYPE_READ_CATEGORY,
   fileVisibility,
@@ -316,5 +318,57 @@ describe("search says why", () => {
 
   it("reads record types as words", () => {
     expect(matchRecord("disposal ticket", r).matched).toBe(true);
+  });
+});
+
+describe("sealing normalizes the device's capture kind", () => {
+  /** The approved mapping, written out as the decision; compared with the implementation both ways. */
+  const APPROVED: Record<string, string> = {
+    pretrip: "pre_trip", posttrip: "post_trip_dvir", tailgate: "safety_meeting",
+    fuel_receipt: "bill_receipt", expense_receipt: "bill_receipt",
+    load_ticket: "load_ticket", disposal_ticket: "disposal_ticket", photo: "photo", incident: "incident", defect_report: "defect_report",
+    // Not in the original table: a field signature capture carries raw strokes, so it seals as the most restrictive type.
+    signature: "signature_strokes",
+  };
+  for (const [kind, type] of Object.entries(APPROVED)) {
+    it(`${kind} → ${type}`, () => expect(normalizeSealRecordType(kind)).toEqual({ recordType: type, basis: "capture_kind" }));
+  }
+  it("maps exactly the approved kinds, no more", () => {
+    expect(Object.keys(CAPTURE_KIND_RECORD_TYPE).sort()).toEqual(Object.keys(APPROVED).sort());
+  });
+  it("only ever produces a type the seal knows", () => {
+    for (const t of Object.values(CAPTURE_KIND_RECORD_TYPE)) expect(SEAL_TYPES).toContain(t);
+  });
+
+  it("accepts a canonical type named directly, as non-runtime callers do", () => {
+    for (const t of ["daily_log", "manifest", "scale_ticket", "work_order", "inspection", "permit", "near_miss", "other"]) {
+      expect(normalizeSealRecordType(t), t).toEqual({ recordType: t, basis: "canonical" });
+    }
+  });
+
+  it("never lets a sealing client name a signing type — those are Sign & Attest's", () => {
+    for (const t of ["signature_strokes", "signature_render", "signed_artifact", "attest_receipt"]) {
+      expect(normalizeSealRecordType(t), t).toEqual({ recordType: "other", basis: "unrecognized" });
+    }
+  });
+
+  const hostile = [
+    // casing and padding are not a second vocabulary
+    "PRETRIP", "Pretrip", " pretrip", "pretrip ", "pre trip", "pre-trip", "Photo", "PHOTO",
+    // a privileged-sounding string is not a privilege
+    "credential", "employment_record", "legal_correspondence", "invoice", "evidence.read_legal", "admin", "legal",
+    // device kinds with no approved type yet
+    "hos_event", "job_accept", "tdg_document", "voice_note", "roadside_enforcement", "oos_order", "scanned_document", "board_message",
+    // malformed
+    "", " ", "\u0000", "pretrip\u0000", "__proto__", "constructor", "toString", "hasOwnProperty", "x".repeat(60),
+  ];
+  for (const raw of hostile) {
+    it(`${JSON.stringify(raw)} seals as other`, () => expect(normalizeSealRecordType(raw)).toEqual({ recordType: "other", basis: "unrecognized" }));
+  }
+
+  it("an unrecognized kind reaches no category it did not have before — the legacy default, nothing wider", () => {
+    const other = readCategoryFor(normalizeSealRecordType("brand_new_kind").recordType);
+    expect(other).toBe("evidence.read_job_operational");
+    for (const raw of hostile) expect(readCategoryFor(normalizeSealRecordType(raw).recordType), raw).toBe(other);
   });
 });

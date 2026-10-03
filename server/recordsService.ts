@@ -164,6 +164,8 @@ export async function listEvidenceForOperator(operatorId: number) {
 
 export async function persistSeal(args: {
   evidenceId: number;
+  /** The normalized record type, written on the first seal only; an amendment keeps the record's type. */
+  recordType?: string;
   version: number;
   contentHash: string;
   manifestHash: string;
@@ -215,6 +217,7 @@ export async function persistSeal(args: {
     .set({
       sealState: args.version > 1 ? "amended" : "sealed",
       currentVersion: args.version,
+      ...(args.recordType ? { recordType: args.recordType } : {}),
     })
     .where(eq(evidenceRecords.id, args.evidenceId));
 

@@ -35,6 +35,7 @@ import {
 } from "./_core/recordsAuthorization";
 import {
   fileVisibility,
+  normalizeSealRecordType,
   folderCounts,
   inFolder,
   lifecycleStage,
@@ -225,10 +226,12 @@ export const recordsRouter = router({
         }
 
         const sealedAt = new Date();
+        const sealType = normalizeSealRecordType(input.recordType);
         // Hashes are computed here from what the server holds, not accepted.
         const seal = sealEvidence({
           trackingNumber: subject.trackingNumber ?? `DOC-${subject.id}`,
-          recordType: input.recordType as never,
+          // The device's word for what this is, normalized by the server: never written as-is.
+          recordType: sealType.recordType,
           version: 1,
           contentHash: input.contentHash,
           capturedAt: sealedAt,
@@ -247,6 +250,7 @@ export const recordsRouter = router({
 
         await svc.addEvidenceRelationships(subject.id, relationships);
         await svc.persistSeal({
+          recordType: sealType.recordType,
           evidenceId: subject.id,
           version: 1,
           contentHash: seal.contentHash,
@@ -269,6 +273,7 @@ export const recordsRouter = router({
         return {
           sealed: true,
           version: 1,
+          recordType: sealType.recordType,
           manifestHash: seal.manifestHash,
           deviceRetainUntil: retention.deviceRetainUntil,
           officeRetainUntil: retention.officeRetainUntil,
