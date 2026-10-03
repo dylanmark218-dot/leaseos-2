@@ -7,16 +7,16 @@ here can be added rather than read.
 | Measure | Value | Read from |
 |---|---|---|
 | Release | **v23.31** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **473** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **208** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **872** | `roleProcedure(` call sites across all routers |
+| Tables | **487** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **209** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **910** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **40** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **426** | the `Permission` union |
-| Sensitive (fail-closed) permissions | **174** | `SENSITIVE_PERMISSIONS` |
-| Universal (self-scoped) permissions | **19** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **485 / 6611** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Permissions | **433** | the `Permission` union |
+| Sensitive (fail-closed) permissions | **178** | `SENSITIVE_PERMISSIONS` |
+| Universal (self-scoped) permissions | **21** | `UNIVERSAL_PERMISSIONS` |
+| Test files / cases | **487 / 6662** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -45,7 +45,11 @@ rules (unverified) · geospatial source registry (8 verified licences, 10
 blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card
 statements, anomalies · roadside, purchasing, AP · compliance registry,
-requirement engine, packs, calibration · insurance and risk · universal
+requirement engine, packs, calibration · safety & compliance program builder
+(module and pack library, controlled policies with chained versions, stepwise
+acknowledgements, client overlays, reviews, training requirements and matrix
+snapshots, corrective actions, COR readiness, vendor package manifest; 0228) ·
+insurance and risk · universal
 surfaces (exceptions, inbox, my day, search, timeline) · dispatch gate with
 enforcement setting · IFTA · GST/HST · period close · bank reconciliation ·
 accounts receivable, credits, collections, write-offs · customer identity ·

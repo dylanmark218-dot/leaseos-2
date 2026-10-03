@@ -68,9 +68,14 @@ describe("the real tree", () => {
     expect(files).toContain("0226_payroll_compensation_agreements.sql");
     // Payroll P2 took 0227 (pay schedules): 0223–0225 are still claimed by open branches, below main's 0226.
     expect(files).toContain("0227_payroll_pay_schedules.sql");
+    // The Safety & Compliance Program Builder took 0228. It was drafted as 0182 when that was free everywhere;
+    // on merging main, document control had claimed 0182 and main's head was 0227, so it moved to 0228,
+    // the first slot free on main and on all 131 remote branches at the scan.
+    expect(files).toContain("0228_safety_program_builder.sql");
+    expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
     // The Integration Hub took 0220–0223 (connectors/contracts, sync, dead letters, conflicts + the nullable
     // connector links); renumbered 2026-10-03 to 0229–0232 when main took 0221/0222 and 0226/0227 and other
-    // branches held 0220 and 0228.
+    // branches held 0220 and 0228 (0228 is now #99's, on main).
     expect(files).toContain("0232_integration_hub_conflicts_and_links.sql");
     expect(headSlot(files)).toBe("0232");
   });

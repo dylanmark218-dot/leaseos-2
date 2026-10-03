@@ -309,6 +309,9 @@ anywhere is `0193`, so `0194` is the first free everywhere.
 
 ## Change log
 
+* **2026-10-03**: the Safety & Compliance Program Builder (#99) moves `0182 → 0228` on merging main: document
+  control had claimed `0182`, and `0228` was the first slot above every slot in use in any lineage.
+
 * **2026-09-25 (S2-E Phase 1)**: claimed `0194` and recorded it **in the commit that creates the
   migration**, rather than afterwards. That ordering is the correction for the `0191`–`0193`
   omission recorded above: those numbers were each verified free before use, but the verification
@@ -371,6 +374,19 @@ colliding with nothing on main, applied by name. The earlier provisional claim o
 design document is withdrawn (those numbers were taken by other branches).
 
 **Next free number for new work after this merge: `0220`** (re-check with the scan before committing).
+
+## Claim: 0228 (Safety & Compliance Program Builder, 2026-10-03)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0228 | `0228_safety_program_builder.sql` | `claude/safety-compliance-program-builder-2qnty0` | #99 | `48a64e1` (main merged in) | gated | none | keeps 0228 |
+
+Drafted as `0182` on 2026-09-24, the first number no branch held then. At the merge of main on 2026-10-03,
+`claude/document-control-architecture-jlffzk` held `0182_document_control_intake.sql` and main's head was `0227`.
+A scan of main and all 131 remote branches found every slot from `0180` to `0227` in use somewhere except
+`0184` and `0204`, and none above `0227`; under the rule of thumb the checkpoint takes the first slot above
+every slot in use, so it moved to `0228`. The migration creates only new tables and depends on nothing after
+`0174`, so the move changes no DDL order. `server/migrationSlots.test.ts` records it and pins the head at `0228`.
 
 ## Change log (continued)
 

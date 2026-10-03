@@ -201,6 +201,8 @@ const READERS: Record<string, string> = {
   "server/driverPortfolioService.ts": "loads the operator's complianceDocuments rows for driverPortfolio; decides nothing itself",
   // C1b-3's D-05 read adapter (#57), added on merging main.
   "server/qualificationReads.ts": "an Academy grant's evidence document through complianceDocumentValidity; the grant itself through academyVerdict (qualificationValidity)",
+  // 0228 — the Safety & Compliance Program Builder, added on merging main.
+  "server/safetyProgramRouter.ts": "the vendor compliance package manifest: the carrier's COR, WCB, insurance and Safety Fitness documents and each unit's CVIP through complianceDocumentValidity; decides nothing itself",
 };
 
 function readdirTs(dir: string): string[] {
