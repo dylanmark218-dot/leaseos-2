@@ -78,7 +78,12 @@ d("a line decision belongs to the organization that owns the ticket", () => {
     const t = await callerFor(driver).closeout.ticketOpen({ jobId: await jobOwnedBy(orgRef), customerAccountRef: await accountRef(orgRef), unitId: await unitOwnedBy(orgRef), operatorId: 7, serviceDescription: "Hydrovac excavation", postSiteRequired: false } as never);
     await callerFor(driver).closeout.lineAdd({ ticketNumber: t.ticketNumber, lineKind: "service", serviceCode: "HV-HR", description: "truck hours", quantity: 2 } as never);
     const [[ticket]] = await pool.query<mysql.RowDataPacket[]>("SELECT id FROM fieldTickets WHERE ticketNumber = ?", [t.ticketNumber]);
-    await pool.execute("INSERT INTO fieldTicketSignatures (fieldTicketId, revision, result, signerName, capturedAt) VALUES (?, 1, 'accepted', 'M. Johnson', NOW())", [ticket.id]);
+    // The records the site sign-off writes (closeoutRouter.recordSignature): the frozen R1, a signature on its
+    // hash, and the ticket's own record — a signature row alone is not a signed ticket.
+    const hash = "a".repeat(64);
+    await pool.execute("INSERT INTO fieldTicketRevisions (documentRef, fieldTicketId, revision, kind, snapshotJson, snapshotHash, generatedAt) VALUES (?, ?, 1, 'site_signed', '{}', ?, NOW())", [`${t.ticketNumber}-R1`, ticket.id, hash]);
+    await pool.execute("INSERT INTO fieldTicketSignatures (fieldTicketId, revision, result, signerName, payloadHash, capturedAt) VALUES (?, 1, 'accepted', 'M. Johnson', ?, NOW())", [ticket.id, hash]);
+    await pool.execute("UPDATE fieldTickets SET status = 'closed', signatureStatus = 'accepted' WHERE id = ?", [ticket.id]);
     const [[line]] = await pool.query<mysql.RowDataPacket[]>("SELECT id FROM fieldTicketLines WHERE fieldTicketId = ? ORDER BY id LIMIT 1", [ticket.id]);
     return { ticketNumber: t.ticketNumber as string, ticketId: Number(ticket.id), lineId: Number(line.id) };
   }

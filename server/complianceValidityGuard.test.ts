@@ -186,6 +186,7 @@ const READERS: Record<string, string> = {
   "server/readinessComposer.ts": "dispatch: credentials, medical fitness and insurance proof, each through complianceRequirementValidity / proofFromDocuments",
   "server/insuranceRouter.ts": "insurance office: the entity's proof through proofFromDocuments",
   "server/complianceRouter.ts": "medicalEligibility through complianceRequirementValidity; the passport's credentials (with id, capture time and owner) for evaluateRequirement → candidateVerdict; writes decide nothing",
+  "server/licenceReads.ts": "a person's driver-licence documents and legacy date for driverLicenceVerdict — open shifts and shift readiness read the licence only through it",
   "server/db.ts": "listComplianceDocuments (the documentExpiry tile's source) and writes; decides nothing",
   "server/surfacesService.ts": "the exception centre: flagged owners' whole history per type through complianceRequirementValidity; exceptionCentre.ts maps the verdicts",
   "server/requirementRouter.ts": "requirement-engine credentials (with id, capture time and owner) for evaluateRequirement → candidateVerdict",
@@ -217,5 +218,36 @@ describe("the complianceDocuments readers are a known list", () => {
       return hit;
     });
     expect(readers.sort()).toEqual(Object.keys(READERS).sort());
+  });
+});
+
+/*
+ * SPINE item 2 — "is this person's driver licence in force?" has one answer: driverLicenceVerdict.
+ *
+ * Open shifts and shift readiness used to read the legacy operators.licenseExpiresAt themselves and
+ * treat a future date as in force, while dispatch held the same person at "licence unknown" (the
+ * legacy date is an unverified claim, owner's ruling 2026-09-25). Now only the canonical module
+ * judges it; these are the only two production files that may touch the legacy column, and both
+ * hand it to the verdict.
+ */
+describe("the driver licence has one verdict", () => {
+  it("only the licence adapter and the dispatch composer read operators.licenseExpiresAt, and both ask driverLicenceVerdict", () => {
+    const readers = readdirTs("server").filter(f => !/\.test\.tsx?$/.test(f)).filter(f => {
+      let hit = false;
+      walk(parse(f), n => {
+        // `input.licenseExpiresAt` is a procedure argument being written (workforce hiring), not a read.
+        if (ts.isPropertyAccessExpression(n) && n.name.text === "licenseExpiresAt" && n.expression.getText() !== "input") hit = true;
+      });
+      return hit;
+    });
+    expect(readers.sort()).toEqual(["server/licenceReads.ts", "server/readinessComposer.ts"]);
+    for (const f of readers) expect(calls(parse(f), ["driverLicenceVerdict"]), `${f} must judge the licence through driverLicenceVerdict`).toBe(true);
+  });
+
+  it("open shifts and shift readiness reach the licence only through the adapter", () => {
+    for (const f of ["server/openShiftsService.ts", "server/readinessRouter.ts"]) {
+      expect(calls(parse(f), ["driverLicenceStanding"]), `${f} must read the licence through licenceReads.driverLicenceStanding`).toBe(true);
+    }
+    expect(inlineValidity(findNamed(parse("server/_core/openShifts.ts"), "shiftEligibility")!)).toEqual([]);
   });
 });
