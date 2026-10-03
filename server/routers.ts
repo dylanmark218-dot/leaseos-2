@@ -143,6 +143,7 @@ import { fleetPortfolioRouter } from "./fleetPortfolioRouter";
 import { assetRouter } from "./assetRouter";
 import { projectRouter } from "./projectRouter";
 import { inboundRouter, integrationRouter } from "./integrationRouter";
+import { integrationHubRouter } from "./integrationHubRouter";
 import { telematicsRouter } from "./telematicsRouter";
 import { workforceRouter } from "./workforceRouter";
 import { trainingAcademyRouter } from "./trainingAcademyRouter";
@@ -430,6 +431,7 @@ export const appRouter = router({
   asset: assetRouter,
   project: projectRouter,
   integration: integrationRouter,
+  integrationHub: integrationHubRouter,
   telematics: telematicsRouter,
   workforce: workforceRouter,
   academy: trainingAcademyRouter,

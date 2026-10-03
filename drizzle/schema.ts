@@ -5697,6 +5697,8 @@ export const INBOUND_FEEDS = ["gps_position", "fuel_transaction", "eld_duty_stat
 export const integrationClients = mysqlTable("integrationClients", {
   id: int("id").autoincrement().primaryKey(),
   orgRef: varchar("orgRef", { length: 40 }),
+  /** 0229 — the Integration Hub connector this machine identity belongs to. NULL for a pre-Hub client. */
+  connectorId: int("connectorId"),
   clientRef: varchar("clientRef", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 160 }).notNull(),
   kind: mysqlEnum("kind", ["telematics", "eld", "fuel_card", "accounting", "customer_system", "facility_system", "other"]).notNull(),
@@ -5730,22 +5732,40 @@ export const inboundEvents = mysqlTable("inboundEvents", {
   id: int("id").autoincrement().primaryKey(),
   orgRef: varchar("orgRef", { length: 40 }),
   inboundRef: varchar("inboundRef", { length: 64 }).notNull().unique(),
-  clientId: int("clientId").notNull(),
+  /** 0229 — NULL for an event received through a Hub connector's signed edge rather than a machine key. */
+  clientId: int("clientId"),
+  /** 0229 — the Hub connector the event arrived through. The event's tenant + idempotency uniqueness boundary is (connectorId, idempotencyKey). */
+  connectorId: int("connectorId"),
   feed: mysqlEnum("feed", [...INBOUND_FEEDS]).notNull(),
   idempotencyKey: varchar("idempotencyKey", { length: 120 }).notNull(),
+  /** 0229 — the canonical envelope: a stable logical event id surviving retries, its type, schema version, source and occurrence. */
+  eventId: varchar("eventId", { length: 64 }),
+  eventType: varchar("eventType", { length: 80 }),
+  schemaVersion: varchar("schemaVersion", { length: 20 }),
+  sourceSystem: varchar("sourceSystem", { length: 80 }),
+  contentType: varchar("contentType", { length: 80 }),
+  correlationId: varchar("correlationId", { length: 64 }),
+  occurredAt: timestamp("occurredAt"),
+  contractId: int("contractId"),
+  /** The contract-mapped observation, when a contract accepted it. Never authoritative by itself. */
+  normalizedJson: text("normalizedJson"),
   payloadJson: text("payloadJson").notNull(),
   payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
-  status: mysqlEnum("status", ["accepted", "rejected", "duplicate"]).notNull(),
+  status: mysqlEnum("status", ["accepted", "rejected", "duplicate", "quarantined", "processed"]).notNull(),
   resultKind: varchar("resultKind", { length: 40 }),
   resultRef: varchar("resultRef", { length: 80 }),
   rejectionReason: varchar("rejectionReason", { length: 400 }),
   receivedAt: timestamp("receivedAt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => ({
+  connectorKey: uniqueIndex("inboundEvents_connector_key_unique").on(t.connectorId, t.idempotencyKey),
+}));
 
 export const webhookSubscriptions = mysqlTable("webhookSubscriptions", {
   id: int("id").autoincrement().primaryKey(),
   orgRef: varchar("orgRef", { length: 40 }),
+  /** 0229 — the Integration Hub connector this destination belongs to. NULL for a subscription created outside the Hub. */
+  connectorId: int("connectorId"),
   subscriptionRef: varchar("subscriptionRef", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 160 }).notNull(),
   url: varchar("url", { length: 500 }).notNull(),
@@ -11020,6 +11040,265 @@ export const safetyProgramEvents = mysqlTable("safetyProgramEvents", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, t => ({ subjectIdx: index("safetyProgramEvents_subject").on(t.subjectType, t.subjectRef) }));
 export type SafetyProgramEventRow = typeof safetyProgramEvents.$inferSelect;
+
+/* ==================================================================
+ * Integration Hub (0229–0232)
+ *
+ * One integration plane. Connectors are the typed, tenant-owned definitions of an
+ * external system; contracts are the versioned, declarative data-sync agreements
+ * over what crosses the boundary; sync runs and cursors are durable polling state;
+ * dead letters are where an exhausted or terminally refused operation goes to be
+ * seen; conflicts are where two authorities disagree and a person decides; hub
+ * events are the audit trail.
+ *
+ * Credential storage is NOT duplicated here: a connector's credential is a row in
+ * `providerCredentials` (S2-C), resolved through `providerCredentialService.ts`,
+ * keyed by a deterministic providerKey (`connectorProviderKey`). Outbound webhook
+ * delivery, its claim/lease and retry schedule are NOT duplicated either: they are
+ * `webhookSubscriptions`/`webhookDeliveries` and `webhookDispatchService.ts`
+ * (SEC-004), extended only by a nullable `connectorId` on `webhookSubscriptions`.
+ * ================================================================== */
+
+export const INTEGRATION_PROVIDER_TYPES = ["transportation_feed", "eld", "telematics", "fuel_card", "disposal_facility", "customer_system", "vendor_system", "accounting", "payroll", "email_sms", "mapping", "document_storage", "government_regulatory", "other"] as const;
+export const INTEGRATION_AUTH_METHODS = ["none", "api_key", "hmac_shared_secret", "bearer_token", "oauth2_client_credentials", "oauth2_refresh", "signed_request", "mutual_tls"] as const;
+export const INTEGRATION_HEALTH_STATES = ["unknown", "healthy", "degraded", "rate_limited", "authentication_required", "disabled", "suspended", "failing", "dead_letter_backlog"] as const;
+export const INTEGRATION_CONFLICT_POLICIES = ["reject_review", "source_wins", "leaseos_wins", "newest_wins", "manual"] as const;
+
+export const integrationConnectors = mysqlTable("integrationConnectors", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  connectorRef: varchar("connectorRef", { length: 64 }).notNull().unique(),
+  /** The registry definition this instance is of (server/_core/integrationHub/registry.ts). */
+  connectorKey: varchar("connectorKey", { length: 80 }).notNull(),
+  definitionVersion: int("definitionVersion").default(1).notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  providerType: mysqlEnum("providerType", [...INTEGRATION_PROVIDER_TYPES]).notNull(),
+  direction: mysqlEnum("direction", ["inbound", "outbound", "bidirectional"]).notNull(),
+  authMethod: mysqlEnum("authMethod", [...INTEGRATION_AUTH_METHODS]).notNull(),
+  /** Declared capabilities accepted from the registry: inbound/outbound event types, scopes, sync support. */
+  capabilitiesJson: text("capabilitiesJson").notNull(),
+  /** Non-secret configuration only. Secret material is a providerCredentials row, referenced by providerKey convention. */
+  configJson: text("configJson").notNull(),
+  status: mysqlEnum("status", ["draft", "active", "disabled", "suspended", "revoked"]).default("draft").notNull(),
+  /** A critical connector's failure is surfaced to readiness; an optional one never takes the service down. */
+  critical: boolean("critical").default(false).notNull(),
+  dataClassification: mysqlEnum("dataClassification", ["public", "internal", "confidential", "restricted"]).default("internal").notNull(),
+  timeoutMs: int("timeoutMs").default(10000).notNull(),
+  maxPayloadBytes: int("maxPayloadBytes").default(1048576).notNull(),
+  syncIntervalSeconds: int("syncIntervalSeconds"),
+  nextSyncAt: timestamp("nextSyncAt"),
+  defaultContractId: int("defaultContractId"),
+  /** Links a data source to the licence registry (externalDataSources.sourceKey); the adapter asks that gate before fetching. */
+  externalSourceKey: varchar("externalSourceKey", { length: 80 }),
+  residency: varchar("residency", { length: 40 }),
+  retentionDays: int("retentionDays"),
+  requiresApprovalJson: text("requiresApprovalJson"),
+  healthState: mysqlEnum("healthState", [...INTEGRATION_HEALTH_STATES]).default("unknown").notNull(),
+  consecutiveFailures: int("consecutiveFailures").default(0).notNull(),
+  circuitOpenUntil: timestamp("circuitOpenUntil"),
+  lastSuccessAt: timestamp("lastSuccessAt"),
+  lastInboundAt: timestamp("lastInboundAt"),
+  lastOutboundAt: timestamp("lastOutboundAt"),
+  lastSyncAt: timestamp("lastSyncAt"),
+  lastHealthCheckAt: timestamp("lastHealthCheckAt"),
+  lastError: varchar("lastError", { length: 400 }),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  orgStatus: index("integrationConnectors_org_status_idx").on(t.orgRef, t.status),
+  due: index("integrationConnectors_sync_due_idx").on(t.status, t.nextSyncAt),
+}));
+
+export const integrationContracts = mysqlTable("integrationContracts", {
+  id: int("id").autoincrement().primaryKey(),
+  /** NULL = a shared, system-defined contract every organization may use. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  /** orgRef, or "shared" — so uniqueness of (scope, key, version) holds across NULL. */
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  contractKey: varchar("contractKey", { length: 80 }).notNull(),
+  version: int("version").notNull(),
+  direction: mysqlEnum("direction", ["inbound", "outbound", "bidirectional"]).notNull(),
+  sourceEntity: varchar("sourceEntity", { length: 80 }).notNull(),
+  destinationEntity: varchar("destinationEntity", { length: 80 }).notNull(),
+  schemaVersion: varchar("schemaVersion", { length: 20 }).notNull(),
+  /** The declarative definition (fields, validation, normalization) — see contracts.ts. Never executable. */
+  definitionJson: text("definitionJson").notNull(),
+  conflictPolicy: mysqlEnum("conflictPolicy", [...INTEGRATION_CONFLICT_POLICIES]).notNull(),
+  idempotencyStrategy: mysqlEnum("idempotencyStrategy", ["external_id", "payload_hash", "external_id_and_revision"]).notNull(),
+  cursorStrategy: mysqlEnum("cursorStrategy", ["none", "opaque", "timestamp", "sequence", "page"]).notNull(),
+  tombstoneBehaviour: mysqlEnum("tombstoneBehaviour", ["ignore", "mark_deleted", "reject"]).default("reject").notNull(),
+  freshnessSeconds: int("freshnessSeconds"),
+  retentionClass: varchar("retentionClass", { length: 40 }).default("operational").notNull(),
+  /** The LeaseOS permission a person needs to act on what this contract produces. */
+  authorizationRequirement: varchar("authorizationRequirement", { length: 80 }).notNull(),
+  dataOwnership: mysqlEnum("dataOwnership", ["external", "leaseos", "shared"]).notNull(),
+  checksum: varchar("checksum", { length: 64 }).notNull(),
+  status: mysqlEnum("status", ["draft", "active", "retired"]).default("active").notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  version: uniqueIndex("integrationContracts_scope_key_version_unique").on(t.scopeKey, t.contractKey, t.version),
+}));
+
+/** The Hub's audit trail: append-only, one row per operator or system action, with before/after where a value changed. Never a secret. */
+export const integrationHubEvents = mysqlTable("integrationHubEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
+  eventType: varchar("eventType", { length: 60 }).notNull(),
+  targetType: varchar("targetType", { length: 40 }).notNull(),
+  targetRef: varchar("targetRef", { length: 80 }).notNull(),
+  actorUserId: int("actorUserId"),
+  actorSource: mysqlEnum("actorSource", ["human", "system", "integration"]).notNull(),
+  correlationId: varchar("correlationId", { length: 64 }),
+  beforeJson: text("beforeJson"),
+  afterJson: text("afterJson"),
+  detail: varchar("detail", { length: 500 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  org: index("integrationHubEvents_org_idx").on(t.orgRef, t.occurredAt),
+  target: index("integrationHubEvents_target_idx").on(t.targetType, t.targetRef),
+}));
+
+export const integrationSyncRuns = mysqlTable("integrationSyncRuns", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  connectorId: int("connectorId").notNull(),
+  contractId: int("contractId"),
+  runRef: varchar("runRef", { length: 64 }).notNull().unique(),
+  triggerKind: mysqlEnum("triggerKind", ["scheduled", "manual", "replay", "resume"]).notNull(),
+  state: mysqlEnum("state", ["pending", "claimed", "running", "succeeded", "failed", "cancelled", "dead"]).default("pending").notNull(),
+  cursorBefore: text("cursorBefore"),
+  cursorAfter: text("cursorAfter"),
+  recordsExamined: int("recordsExamined").default(0).notNull(),
+  recordsAccepted: int("recordsAccepted").default(0).notNull(),
+  recordsRejected: int("recordsRejected").default(0).notNull(),
+  recordsChanged: int("recordsChanged").default(0).notNull(),
+  recordsUnchanged: int("recordsUnchanged").default(0).notNull(),
+  pagesFetched: int("pagesFetched").default(0).notNull(),
+  failureCount: int("failureCount").default(0).notNull(),
+  attemptCount: int("attemptCount").default(0).notNull(),
+  lastError: varchar("lastError", { length: 400 }),
+  lastErrorClass: varchar("lastErrorClass", { length: 32 }),
+  scheduledFor: timestamp("scheduledFor"),
+  nextAttemptAt: timestamp("nextAttemptAt"),
+  claimedAt: timestamp("claimedAt"),
+  claimedBy: varchar("claimedBy", { length: 64 }),
+  startedAt: timestamp("startedAt"),
+  finishedAt: timestamp("finishedAt"),
+  correlationId: varchar("correlationId", { length: 64 }),
+  requestedByUserId: int("requestedByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  due: index("integrationSyncRuns_due_idx").on(t.state, t.nextAttemptAt),
+  org: index("integrationSyncRuns_org_idx").on(t.orgRef, t.connectorId, t.createdAt),
+}));
+
+/** A checkpoint advances only inside the transaction that committed the work it stands for. */
+export const integrationSyncCursors = mysqlTable("integrationSyncCursors", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  connectorId: int("connectorId").notNull(),
+  contractId: int("contractId").default(0).notNull(),
+  cursorKey: varchar("cursorKey", { length: 80 }).default("default").notNull(),
+  cursorValue: text("cursorValue"),
+  cursorHash: varchar("cursorHash", { length: 64 }),
+  committedRunId: int("committedRunId"),
+  committedAt: timestamp("committedAt"),
+  resetByUserId: int("resetByUserId"),
+  resetAt: timestamp("resetAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  one: uniqueIndex("integrationSyncCursors_unique").on(t.connectorId, t.contractId, t.cursorKey),
+}));
+
+export const integrationDeadLetters = mysqlTable("integrationDeadLetters", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  connectorId: int("connectorId"),
+  deadLetterRef: varchar("deadLetterRef", { length: 64 }).notNull().unique(),
+  kind: mysqlEnum("kind", ["outbound_delivery", "inbound_event", "sync_run"]).notNull(),
+  /** deliveryRef, inboundRef or runRef — the thing that died. */
+  sourceRef: varchar("sourceRef", { length: 80 }).notNull(),
+  subscriptionId: int("subscriptionId"),
+  eventId: varchar("eventId", { length: 64 }),
+  eventType: varchar("eventType", { length: 80 }),
+  occurredAt: timestamp("occurredAt"),
+  payloadRef: varchar("payloadRef", { length: 120 }),
+  payloadHash: varchar("payloadHash", { length: 64 }),
+  attemptHistoryJson: text("attemptHistoryJson").notNull(),
+  attemptCount: int("attemptCount").default(0).notNull(),
+  lastError: varchar("lastError", { length: 400 }),
+  httpStatus: int("httpStatus"),
+  contractVersion: varchar("contractVersion", { length: 40 }),
+  correlationId: varchar("correlationId", { length: 64 }),
+  reason: varchar("reason", { length: 40 }).notNull(),
+  reasonDetail: varchar("reasonDetail", { length: 500 }),
+  deadLetteredAt: timestamp("deadLetteredAt").notNull(),
+  state: mysqlEnum("state", ["open", "requeued", "cancelled", "acknowledged", "resolved"]).default("open").notNull(),
+  requeueCount: int("requeueCount").default(0).notNull(),
+  /** A requeued item that dies again is a NEW dead letter pointing back here; nothing loops on its own. */
+  previousDeadLetterId: int("previousDeadLetterId"),
+  acknowledgedByUserId: int("acknowledgedByUserId"),
+  acknowledgedAt: timestamp("acknowledgedAt"),
+  resolvedByUserId: int("resolvedByUserId"),
+  resolvedAt: timestamp("resolvedAt"),
+  resolutionNote: varchar("resolutionNote", { length: 500 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  org: index("integrationDeadLetters_org_state_idx").on(t.orgRef, t.state, t.deadLetteredAt),
+  source: index("integrationDeadLetters_source_idx").on(t.kind, t.sourceRef),
+}));
+
+export const integrationDeadLetterActions = mysqlTable("integrationDeadLetterActions", {
+  id: int("id").autoincrement().primaryKey(),
+  deadLetterId: int("deadLetterId").notNull(),
+  sequence: int("sequence").notNull(),
+  action: mysqlEnum("action", ["inspected", "requeued", "retried_now", "cancelled", "acknowledged", "resolved", "reopened"]).notNull(),
+  actorUserId: int("actorUserId"),
+  note: varchar("note", { length: 500 }),
+  resultRef: varchar("resultRef", { length: 80 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  seq: uniqueIndex("integrationDeadLetterActions_seq_unique").on(t.deadLetterId, t.sequence),
+}));
+
+export const integrationConflicts = mysqlTable("integrationConflicts", {
+  id: int("id").autoincrement().primaryKey(),
+  orgRef: varchar("orgRef", { length: 64 }).notNull(),
+  connectorId: int("connectorId").notNull(),
+  contractId: int("contractId"),
+  conflictRef: varchar("conflictRef", { length: 64 }).notNull().unique(),
+  entityType: varchar("entityType", { length: 80 }).notNull(),
+  entityRef: varchar("entityRef", { length: 120 }).notNull(),
+  fieldPath: varchar("fieldPath", { length: 160 }),
+  sourceValueJson: text("sourceValueJson"),
+  leaseosValueJson: text("leaseosValueJson"),
+  sourceRevision: varchar("sourceRevision", { length: 80 }),
+  leaseosRevision: varchar("leaseosRevision", { length: 80 }),
+  policy: mysqlEnum("policy", [...INTEGRATION_CONFLICT_POLICIES]).notNull(),
+  decision: mysqlEnum("decision", ["pending", "source_applied", "leaseos_kept", "newest_applied", "rejected", "manual_source", "manual_leaseos", "manual_custom"]).default("pending").notNull(),
+  inboundEventId: int("inboundEventId"),
+  syncRunId: int("syncRunId"),
+  detectedAt: timestamp("detectedAt").notNull(),
+  resolvedByUserId: int("resolvedByUserId"),
+  resolvedAt: timestamp("resolvedAt"),
+  resolutionNote: varchar("resolutionNote", { length: 500 }),
+  resolvedValueJson: text("resolvedValueJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  org: index("integrationConflicts_org_decision_idx").on(t.orgRef, t.decision),
+}));
+
+export type InsertIntegrationConnector = typeof integrationConnectors.$inferInsert;
+export type IntegrationConnector = typeof integrationConnectors.$inferSelect;
+export type IntegrationContract = typeof integrationContracts.$inferSelect;
+export type IntegrationSyncRun = typeof integrationSyncRuns.$inferSelect;
+export type IntegrationDeadLetter = typeof integrationDeadLetters.$inferSelect;
+export type IntegrationConflict = typeof integrationConflicts.$inferSelect;
 
 /* ---- 0233: approved external source registry — endpoints, approvals, events (server/_core/sourceRegistry.ts) ---- */
 
