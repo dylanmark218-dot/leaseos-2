@@ -34,7 +34,9 @@ import type { Receipt as LifecycleReceipt } from "./messageLifecycle";
 
 export type ChannelType =
   | "announcement" | "dispatch" | "safety" | "maintenance" | "field_operations"
-  | "road_conditions" | "training" | "general" | "job" | "client" | "private" | "emergency";
+  | "road_conditions" | "training" | "general" | "job" | "client" | "private" | "emergency"
+  // 0205 — conversations between named people, a department, a unit, a shift.
+  | "direct" | "group" | "department" | "unit" | "shift";
 
 export type Channel = {
   channelRef: string;
@@ -252,4 +254,115 @@ export function broadcastReaches(target: BroadcastTarget, person: { branchRef: s
     case "job": return person.jobRefs.includes(target.jobRef);
     case "units": return person.unitRef != null && target.unitRefs.includes(person.unitRef);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* 0205 — membership: who may open an explicit channel                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How a person is admitted to a channel.
+ *
+ *   open      the rule above — every internal viewer, `private` for management only
+ *   crew      through a current or historical crew membership (crewChannels)
+ *   explicit  through a `messageChannelMembers` row, by the same four standings the crew rule draws
+ *
+ * A channel is one of the three. The router decides once, in `openChannel`.
+ */
+export type MembershipMode = "open" | "explicit" | "crew";
+
+/** A channel role. It confers nothing outside this channel and is not a domain role. */
+export type MemberRole = "member" | "moderator" | "dispatcher" | "manager" | "read_only";
+
+export type ChannelMember = {
+  channelRef: string;
+  userId: number;
+  memberRole: MemberRole;
+  joinedAt: Date;
+  /** Set when the person left. The row stays: what they were sent stays theirs to read. */
+  leftAt: Date | null;
+};
+
+/**
+ * Four standings, not two — the crew rule, reused verbatim.
+ *
+ * `current = !leftAt` is wrong: a membership beginning tomorrow with no leaving date is not in
+ * force today. A future-only member must not be admitted, and must not be mistaken for a
+ * historical one either — they were never here.
+ */
+export type MemberStanding = "current" | "historical" | "future_only" | "never";
+
+export function memberStanding(rows: readonly ChannelMember[], at: Date): { standing: MemberStanding; current: ChannelMember | null } {
+  const current = rows.find(m => m.joinedAt.getTime() <= at.getTime() && (!m.leftAt || m.leftAt.getTime() > at.getTime())) ?? null;
+  if (current) return { standing: "current", current };
+  if (rows.some(m => m.leftAt && m.leftAt.getTime() <= at.getTime())) return { standing: "historical", current: null };
+  if (rows.length) return { standing: "future_only", current: null };
+  return { standing: "never", current: null };
+}
+
+/**
+ * Admission to an explicit channel. Reading is a member's — current or historical; writing is a
+ * current member's whose channel role allows it. A moderator is not admitted here: moderation is a
+ * separate authority (`board.moderate`) and every use of it is an event, never a wider reading of
+ * membership.
+ */
+export function mayOpenExplicit(standing: MemberStanding): ChannelAccess {
+  if (standing === "current") return { allowed: true, reason: "Member" };
+  if (standing === "historical") return { allowed: true, reason: "Former member — what you were sent stays yours to read" };
+  if (standing === "future_only") return { allowed: false, reason: "Membership of this channel has not begun. A joining date in the future is not current membership." };
+  return { allowed: false, reason: "Not a member of this channel. Being an internal user is not being in this conversation." };
+}
+
+/** Whether a channel role may post. `read_only` reads. */
+export function memberMayPost(role: MemberRole): boolean {
+  return role !== "read_only";
+}
+
+/** Channel types whose posts are publications rather than conversation. */
+export const PUBLISH_CHANNEL_TYPES: readonly ChannelType[] = ["announcement", "emergency"];
+
+/**
+ * Whether posting this needs the publish authority (`board.publish`) rather than `board.post`.
+ *
+ * Derived, like `requiresAcknowledgement`: an emergency is an emergency whatever channel it lands
+ * in, and an announcement channel is a publication whatever priority the poster chose.
+ */
+export function requiresPublishAuthority(channelType: ChannelType, priority: Priority): boolean {
+  return priority === "emergency" || PUBLISH_CHANNEL_TYPES.includes(channelType)
+    // Checkpoint 5 — a safety channel is where anyone reports a hazard, but a post there that demands
+    // a roll-call of acknowledgements is a safety bulletin, and a bulletin is published, not sent.
+    || (channelType === "safety" && ACKNOWLEDGEMENT_REQUIRED.includes(priority));
+}
+
+/** Channel types that are explicit by construction: a conversation between named people. */
+export const EXPLICIT_ONLY_TYPES: readonly ChannelType[] = ["direct", "group"];
+
+/**
+ * The membership mode a new channel takes when the caller names none: a direct or group channel is
+ * explicit (it has no meaning otherwise), a crew channel is crew, everything else is open.
+ */
+export function defaultMembershipMode(type: ChannelType, crewRef: string | null): MembershipMode {
+  if (crewRef) return "crew";
+  if (EXPLICIT_ONLY_TYPES.includes(type)) return "explicit";
+  return "open";
+}
+
+/** The audience an announcement must have: nobody is not an audience. */
+export const MAX_ANNOUNCEMENT_AUDIENCE = 500;
+
+/**
+ * Whether a post's audience is acceptable for its channel. An announcement with no recipients has
+ * no roll-call and is refused; a larger company gets branch channels rather than a truncated list.
+ */
+export function announcementAudienceRefusal(channelType: ChannelType, recipientCount: number): string | null {
+  if (channelType !== "announcement") return null;
+  if (recipientCount === 0) return "An announcement with no audience has no roll-call. Name recipients, or let the organization's membership be resolved as the audience.";
+  if (recipientCount > MAX_ANNOUNCEMENT_AUDIENCE) return `An announcement reaches at most ${MAX_ANNOUNCEMENT_AUDIENCE} people here; a larger company announces by branch channel rather than to an arbitrary subset called the audience.`;
+  return null;
+}
+
+/** The one channel two people share. Order-independent, so A→B and B→A resolve to the same room. */
+export function directChannelKey(a: number, b: number): string {
+  const [x, y] = a < b ? [a, b] : [b, a];
+  return `direct:${x}:${y}`;
 }

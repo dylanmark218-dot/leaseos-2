@@ -47,7 +47,10 @@ export function EvidenceSurface() {
     <Shell title="Evidence">
       <h1 className="mt-1 text-xl font-semibold">Evidence</h1>
       <p className="mt-2 text-sm text-[#5b6b82]">Evidence is captured from a job, trip or ticket in the operations portal, so a capture carries the context it was taken in — or is saved unattached for a person to associate. Nothing captured here is stamped with a job or a coordinate it did not come from, and a capture is verified only by <code>evidence.verify</code>.</p>
-      <a className="mt-3 inline-block rounded-lg bg-[#132a4a] px-4 py-2 text-sm text-white" href="/portal">Open the operations portal</a>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <a className="inline-block rounded-lg bg-[#132a4a] px-4 py-2 text-sm text-white" href="/records">Open records &amp; files</a>
+        <a className="inline-block rounded-lg border border-[#132a4a] px-4 py-2 text-sm text-[#132a4a]" href="/portal">Open the operations portal</a>
+      </div>
     </Shell>
   );
 }

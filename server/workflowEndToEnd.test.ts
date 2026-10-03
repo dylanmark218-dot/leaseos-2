@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import mysql from "mysql2/promise";
 import {
   applyEventConsequences,
@@ -38,11 +38,18 @@ let pool: mysql.Pool & PoolLike;
 const uid = (p: string) =>
   `${p}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
+/** Every event this file emits carries this correlation id, so a drain can wait for exactly these. */
+const RUN = `e2e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 const ctx = (): EmitContext => ({
   tenantId: "T1",
   branchId: "GP",
   actor: { source: "human", userId: "u1", role: "driver" },
+  correlationId: RUN,
 });
+
+// A drain may wait up to 15 s for another suite's worker to finish this file's event.
+vi.setConfig({ testTimeout: 30_000 });
 
 beforeAll(async () => {
   if (!URL) return;
@@ -71,7 +78,24 @@ async function drainAll(workerId = "test-worker") {
     idleIntervalMs: 5,
     batchSize: 10,
   });
+  // Run until this file's own events are processed (or dead-lettered, or deferred to a later
+  // retry), not for a fixed window and not until nothing is merely *unclaimed*. The outbox is shared
+  // by every database suite in the run, and other suites run drain workers of their own: one of them
+  // may claim this file's event, and the wait must last until it is processed, not just taken. Other
+  // suites' events are not waited for — some are deliberately left pending. Bounded, so a stuck
+  // worker cannot hang the suite; the assertions after it still decide the test.
+  const deadline = Date.now() + 15_000;
   await new Promise(r => setTimeout(r, 300));
+  while (Date.now() < deadline) {
+    const [rows] = await pool.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM domainEventOutbox
+        WHERE correlationId = ? AND processedAt IS NULL AND deadLetteredAt IS NULL
+          AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW())`,
+      [RUN]
+    );
+    if (Number(rows[0]!.n) === 0) break;
+    await new Promise(r => setTimeout(r, 50));
+  }
   w.stop();
   return w.done;
 }

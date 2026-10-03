@@ -71,7 +71,10 @@ d("binding and tenancy", () => {
     expect(r.hash).toMatch(/^[0-9a-f]{64}$/);
     const other = await fixtures(b);
     await expect(callerFor(office).manifestCustody.bind({ manifestNumber: f.manifestNumber, operatorId: other.operatorId })).rejects.toThrow(/Operator is not owned by this organization/);
-    await expect(callerFor(office).manifestCustody.bind({ manifestNumber: f.manifestNumber, unitId: other.unitId })).rejects.toThrow(/Unit is not owned by this organization/);
+    // CP1.5 — another organization's unit (or trailer) is not found, in the same words as one that does not exist.
+    await expect(callerFor(office).manifestCustody.bind({ manifestNumber: f.manifestNumber, unitId: other.unitId })).rejects.toMatchObject({ code: "NOT_FOUND", message: `Unit ${other.unitId} not found` });
+    await expect(callerFor(office).manifestCustody.bind({ manifestNumber: f.manifestNumber, unitId: 1_999_999_999 })).rejects.toMatchObject({ code: "NOT_FOUND", message: "Unit 1999999999 not found" });
+    await expect(callerFor(office).manifestCustody.bind({ manifestNumber: f.manifestNumber, trailerUnitId: other.trailerId })).rejects.toMatchObject({ code: "NOT_FOUND", message: `Trailer ${other.trailerId} not found` });
     // A manifest owned by A is invisible to B, not "forbidden" — nothing about its existence leaks.
     const officeB = await member(b, ["office"]);
     await expect(callerFor(officeB).manifestCustody.chain({ manifestNumber: f.manifestNumber })).rejects.toThrow(/Manifest not found/);
