@@ -1,4 +1,4 @@
--- 0222 — Integration Hub: dead letters and their operator action history.
+-- 0231 — Integration Hub: dead letters and their operator action history.
 --
 -- No acknowledged integration operation may disappear. `integrationDeadLetters` is populated
 -- additively, by scanning for terminal failures that already happened elsewhere (a webhookDeliveries

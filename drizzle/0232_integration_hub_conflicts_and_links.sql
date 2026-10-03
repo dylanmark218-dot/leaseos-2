@@ -1,4 +1,4 @@
--- 0223 — Integration Hub: conflicts, and the connector links on existing gateway tables.
+-- 0232 — Integration Hub: conflicts, and the connector links on existing gateway tables.
 --
 -- A conflict records BOTH competing values and the policy the contract declared. Business, safety,
 -- billing, HOS, compliance, ticket, dispatch and identity data default to manual review

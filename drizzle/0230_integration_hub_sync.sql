@@ -1,4 +1,4 @@
--- 0221 — Integration Hub: durable sync runs and cursors.
+-- 0230 — Integration Hub: durable sync runs and cursors.
 --
 -- A sync run walks pages under a cursor. The one rule that matters: the checkpoint advances only
 -- in the same transaction as the writes it stands for (integrationHubService.ts executeSyncRun).

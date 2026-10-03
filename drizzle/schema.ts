@@ -5608,7 +5608,7 @@ export const INBOUND_FEEDS = ["gps_position", "fuel_transaction", "eld_duty_stat
 export const integrationClients = mysqlTable("integrationClients", {
   id: int("id").autoincrement().primaryKey(),
   orgRef: varchar("orgRef", { length: 40 }),
-  /** 0220 — the Integration Hub connector this machine identity belongs to. NULL for a pre-Hub client. */
+  /** 0229 — the Integration Hub connector this machine identity belongs to. NULL for a pre-Hub client. */
   connectorId: int("connectorId"),
   clientRef: varchar("clientRef", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 160 }).notNull(),
@@ -5643,13 +5643,13 @@ export const inboundEvents = mysqlTable("inboundEvents", {
   id: int("id").autoincrement().primaryKey(),
   orgRef: varchar("orgRef", { length: 40 }),
   inboundRef: varchar("inboundRef", { length: 64 }).notNull().unique(),
-  /** 0220 — NULL for an event received through a Hub connector's signed edge rather than a machine key. */
+  /** 0229 — NULL for an event received through a Hub connector's signed edge rather than a machine key. */
   clientId: int("clientId"),
-  /** 0220 — the Hub connector the event arrived through. The event's tenant + idempotency uniqueness boundary is (connectorId, idempotencyKey). */
+  /** 0229 — the Hub connector the event arrived through. The event's tenant + idempotency uniqueness boundary is (connectorId, idempotencyKey). */
   connectorId: int("connectorId"),
   feed: mysqlEnum("feed", [...INBOUND_FEEDS]).notNull(),
   idempotencyKey: varchar("idempotencyKey", { length: 120 }).notNull(),
-  /** 0220 — the canonical envelope: a stable logical event id surviving retries, its type, schema version, source and occurrence. */
+  /** 0229 — the canonical envelope: a stable logical event id surviving retries, its type, schema version, source and occurrence. */
   eventId: varchar("eventId", { length: 64 }),
   eventType: varchar("eventType", { length: 80 }),
   schemaVersion: varchar("schemaVersion", { length: 20 }),
@@ -5675,7 +5675,7 @@ export const inboundEvents = mysqlTable("inboundEvents", {
 export const webhookSubscriptions = mysqlTable("webhookSubscriptions", {
   id: int("id").autoincrement().primaryKey(),
   orgRef: varchar("orgRef", { length: 40 }),
-  /** 0220 — the Integration Hub connector this destination belongs to. NULL for a subscription created outside the Hub. */
+  /** 0229 — the Integration Hub connector this destination belongs to. NULL for a subscription created outside the Hub. */
   connectorId: int("connectorId"),
   subscriptionRef: varchar("subscriptionRef", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 160 }).notNull(),
@@ -9881,7 +9881,7 @@ export const jobCommercialSnapshots = mysqlTable("jobCommercialSnapshots", {
 });
 
 /* ==================================================================
- * Integration Hub (0220–0223)
+ * Integration Hub (0229–0232)
  *
  * One integration plane. Connectors are the typed, tenant-owned definitions of an
  * external system; contracts are the versioned, declarative data-sync agreements

@@ -78,3 +78,8 @@ plus the small additive columns on `webhookSubscriptions`/`integrationClients`/`
 Re-verified against a full branch scan including a newly-appeared branch,
 `claude/ri-p-b1-tenant-first-webhooks` (an unrelated, unmerged, small tenant-scoping fix to
 `dispatchWebhooks`'s subscription query — no file this work edits, so no collision either way).
+
+**Renumbered 2026-10-03: `0220`–`0223` → `0229`–`0232`.** `main` took `0221`/`0222` (defect lifecycle) and
+`0226`/`0227` (payroll), and an ELD branch holds `0220`. As the later, unmerged claimant this branch moved,
+unchanged, to the first four numbers free on `main` and every remote branch (`0228` is held by a payroll
+branch).

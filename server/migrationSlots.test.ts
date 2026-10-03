@@ -57,10 +57,11 @@ describe("the real tree", () => {
     // v23.31 took 0217–0219 (Customer, Contract and Rate Management): 0210–0216 are claimed by open
     // branches, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0219_job_commercial_context.sql");
-    // The Integration Hub took 0220–0223 (connectors/contracts, sync, dead letters, conflicts +
+    // The Integration Hub took 0220–0223, renumbered 2026-10-03 to 0229–0232 (main took 0221/0222 and
+    // 0226/0227; 0220 and 0228 are held by other branches) (connectors/contracts, sync, dead letters, conflicts +
     // the nullable connector links), confirmed free across main and every open branch at the time.
-    expect(files).toContain("0223_integration_hub_conflicts_and_links.sql");
-    expect(headSlot(files)).toBe("0223");
+    expect(files).toContain("0232_integration_hub_conflicts_and_links.sql");
+    expect(headSlot(files)).toBe("0232");
   });
 
   it("keeps the reserved slots empty", () => {
@@ -111,8 +112,10 @@ describe("the guard catches what it exists to catch", () => {
   });
 
   it("accepts a correctly allocated next migration", () => {
-    expect(auditMigrationSlots([...files, "0224_the_next_one.sql"])).toEqual([]);
-    expect(headSlot([...files, "0224_the_next_one.sql"])).toBe("0224");
+    // The slot after the real head, whatever it is today — so this case does not need moving each checkpoint.
+    const next = String(Number(headSlot(files)) + 1).padStart(4, "0");
+    expect(auditMigrationSlots([...files, `${next}_the_next_one.sql`])).toEqual([]);
+    expect(headSlot([...files, `${next}_the_next_one.sql`])).toBe(next);
   });
 
   it("gives every tolerated duplicate a reason that says something", () => {

@@ -1,8 +1,11 @@
--- 0220 — Integration Hub: connectors, contracts, and the Hub's own audit trail.
+-- 0229 — Integration Hub: connectors, contracts, and the Hub's own audit trail.
 --
 -- Slot: main ends at 0219. Open remote branches at claim time (2026-10-01) hold through 0219
 -- (customer-contract-rates, just merged) with no branch above it. This takes 0220, the first
 -- number free on main and on every open branch. docs/architecture/MIGRATION_COLLISION_REGISTER.md.
+-- Renumbered 0220 → 0229 on 2026-10-03 (with 0221–0223 → 0230–0232), unchanged otherwise: main took
+-- 0221/0222 (defect lifecycle) and 0226/0227 (payroll), and the ELD branch also holds 0220; 0229 was
+-- the first number free on main and every remote branch. The register records the move.
 --
 -- A connector is the typed, tenant-owned definition of one external system (orgRef NOT NULL from
 -- the first migration — tenancy is not a later patch). A contract is the versioned, declarative
