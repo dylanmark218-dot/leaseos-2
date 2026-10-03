@@ -10,11 +10,22 @@ this repository, so the eventual runtime is built from parts that exist rather t
 resolver and chain rule), then re-checked after merging `main` at `88608f3` into this branch: the
 agent runtime, `llm.ts`, the worker and `0100_agent_runs.sql` are unchanged on `main`; the one
 request-handler model call moved from `routers.ts:690` to `routers.ts:794` with no second call
-added. **PR #7 (the Secretary model layer, `server/_core/ai/`) is still open
-and is not in this tree.** Everything this document attributes to `server/_core/ai/` is described
-from PR #7's head (`929f721`), exactly as the terminology survey did, and is marked
-`DECLARED_UNWIRED (PR #7)`. That includes `server/_core/ai/workerBoundary.test.ts`, the test that
-pins the one synchronous model call; on this branch that pin does not exist yet (§20, finding F1).
+added.
+
+**Current state (re-checked 2026-10-03 against `main` at `9895188`).** PR #7 (the Secretary model
+layer) **has merged**. `server/_core/ai/` is on `main`, and so is
+`server/_core/ai/workerBoundary.test.ts`, along with the moratorium document it cites
+(`docs/register/SECRETARY_SPINE_MORATORIUM.md`). F1's request-handler guard has also landed, as
+`server/aiRequestBoundary.test.ts`. **Merged is not wired.** Every `server/_core/ai/` module is
+still listed in `DECLARED_UNWIRED` in `server/engineReachability.test.ts` (21 `ai/*` keys; corrected
+2026-10-03 from "30", which counted every `"ai/` string in that file, including the nine-module
+internal-cluster list). No
+non-test file outside `server/_core/ai/` imports one. `productionWorker.ts` does not dispatch
+`secretary.narration.captured`, and no composition root supplies `createCaller`. Where the body
+below writes `(PR #7)`, read it as "arrived with PR #7, now in-tree, still unwired unless the row
+says otherwise". The statuses were written that way and remain correct. Only the claim that the
+code was outside this tree is withdrawn. §23 additionally reflects the post-#7 registry change
+(`agentMayNotCall()`, `HUMAN_AUTHORIZATION_PERMISSIONS`).
 
 **The SPINE is first.** Nothing here is authorization to build. §18 restates the order and §21
 answers whether anything found here changes it (it does not).
@@ -27,7 +38,7 @@ answers whether anything found here changes it (it does not).
 |---|---|
 | `IMPLEMENTED` | Exists and is reached from a mounted `roleProcedure` or the production worker. |
 | `PARTIAL` | Some of it is reached; a named piece is missing. |
-| `DECLARED_UNWIRED` | Code and tests exist, no production caller. `(PR #7)` means the code is in the open PR, not this tree. |
+| `DECLARED_UNWIRED` | Code and tests exist, no production caller. `(PR #7)` means the code arrived with PR #7. That PR has merged, so the code is in this tree, and it is still unwired under the moratorium. |
 | `MISSING` | Needed by the design; nothing exists. |
 | `DEFERRED` | Not built on purpose until a named condition holds. |
 | `NOT_NEEDED` | The design asks for it, the repository already answers it another way, or LeaseOS declines it on principle. |
@@ -554,7 +565,7 @@ remaining SPINE wiring          ← four duplications → offlineCapability → 
       ↓
 remove synchronous request-handler LLM call (assistant.draft, owner's carve-out ruling)
       ↓
-durable AI worker path          ← register the Secretary handler (PR #7 lands first)
+durable AI worker path          ← register the Secretary handler (PR #7 has merged; the handler is still unregistered)
       ↓
 tool execution                  ← createCaller composition root; persisted tool results (P9.3, P9.4)
       ↓
@@ -584,7 +595,9 @@ calls `invokeLLM()` inside `fieldRoute.assistant.draft`. The test that pins that
 (`server/_core/ai/workerBoundary.test.ts`) and the moratorium document it cites
 (`docs/register/SECRETARY_SPINE_MORATORIUM.md`) arrive with PR #7, which is open. Until #7 lands,
 nothing on `main`-line branches stops a second in-request model call. **Decision (2026-09-25):**
-port only the guard, independently of PR #7, on its own branch (§22).
+port only the guard, independently of PR #7, on its own branch (§22). *Status 2026-10-03: resolved.*
+Both have since reached `main`: the guard as `server/aiRequestBoundary.test.ts`, and PR #7 with
+its own pin. The finding's text above records the state when it was written.
 
 **F2 — `agentActions.idempotencyKey` is not unique.** `drizzle/0100_agent_runs.sql` line 16 says
 "`idempotencyKey` is unique", but line 90 creates a plain `INDEX`. `agent.requestAction` does
@@ -736,14 +749,30 @@ management → only then reconsider multi-agent
 
 ## 23. Tools versus Skills
 
-**Documentation only, added 2026-10-01 after merging `main` at `b35bac4`.** No code, type,
-table, loader or registry was added for this section. "The survey" means
-`AI_RUNTIME_TERMINOLOGY.md`; its §23 carries the short term entries for Tool and Skill. **PR #7 has
-since merged:** `server/_core/ai/` is now in this tree. Every module in it is still listed in
-`DECLARED_UNWIRED` in `server/engineReachability.test.ts` under the moratorium, so the statuses
-below are unchanged. Only the "(PR #7)" qualifier no longer applies. Since §1–§22 were written,
-#7's merge made one change that matters here: `idempotencyKeyFor()` now returns a versioned hash
-(`IK1-…`, 40 characters, pinned by test), not `toolKey:captureId`.
+**Documentation only.** Added 2026-10-01 (merged as PR #102); re-verified 2026-10-03 against
+`main` at `9895188`. No code, type, table, loader or registry was added for this section. "The
+survey" means `AI_RUNTIME_TERMINOLOGY.md`; its §23 carries the short term entries for Tool and
+Skill. `server/_core/ai/` is in this tree (PR #7 merged) and every module in it is still
+`DECLARED_UNWIRED` (see the document header). Two post-#7 changes matter here:
+`idempotencyKeyFor()` returns a versioned hash (`IK1-…`, 40 characters, pinned by test), not
+`toolKey:captureId`; and `resolveTool()` now refuses through `agentMayNotCall()`, which checks
+`NEVER_AUTONOMOUS` by procedure name **and** `HUMAN_AUTHORIZATION_PERMISSIONS` by permission
+(CP1.5: no agent tool may perform a release or a return to service).
+
+**Status in one line.** **Tools** are implemented as code: a typed, server-owned registry with
+tests, `DECLARED_UNWIRED`. **Skills** are **PARTIAL — architecturally defined, runtime
+`DEFERRED`**. Their parts exist as forms, task allowlists, a versioned prompt and validators,
+but there is no Skill type, Skill registry, Skill loader or Skill selection in the code. Nothing
+in this section should be read as saying a Skill runtime exists.
+
+> **Invariants.**
+> 1. **A Skill grants no permission.**
+> 2. **Tool availability does not equal Tool authorization.** A tool in the registry, in a task
+>    allowlist or in a Skill is a tool the agent may *ask for*, nothing more.
+> 3. Effective authority derives only from the existing LeaseOS security path: `TrpcContext` →
+>    `resolveActingScope()` → `roleProcedure` / `authorize()` → `decide()` → automation policy.
+>    It never derives from a Skill, a task key, an agent declaration, a prompt or a model
+>    decision.
 
 ### 23.1 The rule
 
@@ -789,21 +818,29 @@ audit (`authorizationDecisions`, `agentActions`).
 ### 23.2 Effective authority is an intersection
 
 ```text
-Skill's expected tools        (a Skill can only name — never grant)
-    ∩  Actor permission        roleProcedure → permissionForProcedure()      [live]
+Registered capability       CAPABILITIES / buildRegistry(); SECRETARY_TOOLS  [live / unwired]
+    ∩  Agent / task allowlist  AgentDeclaration.tasks (proposed, roster §5);
+                               TaskAllowlist + resolveTool() → agentMayNotCall()  [proposed / unwired]
+    ∩  Actor permission        roleProcedure → permissionForProcedure()
+                               → authorize()                                 [live]
     ∩  Acting scope            resolveActingScope()                          [live]
-    ∩  Tool allowlist          TaskAllowlist + resolveTool()                 [unwired]
     ∩  Gateway decision        decide(): origin, registry, NEVER_AUTONOMOUS,
-                               compliance, heldPermissions, requiresOnline,
-                               revision, risk ladder, autoExecute            [live, executes nothing]
+                               HUMAN_AUTHORIZATION_PERMISSIONS, compliance,
+                               heldPermissions, requiresOnline, revision,
+                               risk ladder, autoExecute                      [live, executes nothing]
     ∩  Automation policy       resolveAutomation(), SAFETY_CEILINGS          [live]
-    ∩  Worker / device ability OfflineClass, CapabilityDefinition.requiresOnline
-    =  Effective authority
+    ∩  Worker / tool limits    stepBudget / spendStep(), OfflineClass,
+                               requiresOnline, pinned formKey                [mixed]
+    =  Effective executable authority
+
+    A Skill appears nowhere on the left. It may only *name* tools inside the allowlist term,
+    and naming adds nothing.
 ```
 
 Every term in the intersection can only make the set smaller. The code already has this shape
-in three places. `resolveTool()` refuses anything outside the task list and re-checks
-`NEVER_AUTONOMOUS` even for listed tools. `invokeTool()` calls through the driver's own
+in three places. `resolveTool()` refuses anything outside the task list and, through
+`agentMayNotCall()`, re-checks `NEVER_AUTONOMOUS` and `HUMAN_AUTHORIZATION_PERMISSIONS` even for
+listed tools. `invokeTool()` calls through the driver's own
 `createCaller(ctx)`, so `roleProcedure` refuses exactly what it would refuse the driver.
 `evaluateOperationalOverride()` may narrow toward MANUAL and never widen.
 
@@ -853,7 +890,7 @@ each hop:
 | Hop | Code | Refuses when | Status |
 |---|---|---|---|
 | model emits key + args | — (no path does this) | — | MISSING |
-| key → definition | `resolveTool(allowlist, key)` | key unknown **or** not on the task list (identical message); procedure on `NEVER_AUTONOMOUS` | DECLARED_UNWIRED |
+| key → definition | `resolveTool(allowlist, key)` → `agentMayNotCall(procedure)` | key unknown **or** not on the task list (identical message); procedure on `NEVER_AUTONOMOUS`; procedure authorized by a `HUMAN_AUTHORIZATION_PERMISSIONS` permission | DECLARED_UNWIRED |
 | budget | `spendStep()` (after allowlist, so a refusal costs no step) | `stepBudget` spent → `StepBudgetExhausted` | DECLARED_UNWIRED |
 | arguments pinned | `planToolCall()` overwrites `formKey`; derives idempotency key | — | DECLARED_UNWIRED |
 | caller | `invokeTool({ ctx, createCaller })`, driver's own `TrpcContext` | no composition root supplies `createCaller` | DECLARED_UNWIRED |
@@ -913,7 +950,7 @@ The requested terminal outcomes map onto existing equivalents. **No new enum is 
 | Set | Where | Example today |
 |---|---|---|
 | registered tools | `SECRETARY_TOOLS` | 11 |
-| available to the job | `TaskAllowlist.toolKeys` | `LOAD_UNLOAD_NARRATION` 5, `BILL_SCAN` 2 |
+| available to the job | `TaskAllowlist.toolKeys` | `LOAD_UNLOAD_NARRATION` 5, `BILL_SCAN` 2. Five registered tools are on **no** allowlist yet, so no task can reach them: `read.approvedDocuments`, `propose.disposalTicket`, `propose.preTripFinding`, `propose.fuelReceipt`, `human.requestAction` |
 | authorized for the actor | `roleProcedure` at call time | computed per call, not in advance |
 | currently executable | `decide()` + automation policy + `requiresOnline` | computed per call |
 
@@ -924,8 +961,10 @@ the call-time check stays authoritative. **DEFERRED** until door 2 is wired.
 
 ### 23.4 Does LeaseOS already have Skills?
 
-**Not by name. The parts exist, split across four artifacts that nothing binds together.** For
-the Secretary's form-driven tasks, the Skill is already present in decomposed form:
+**No. There is no Skill in the code. The parts a Skill would bind exist, split across four
+artifacts that nothing binds together.** Overall status: **PARTIAL — architecturally defined,
+runtime `DEFERRED`.** The table lists those parts. Its statuses describe each *part*, not a
+Skill:
 
 | Skill element | Existing artifact | Status |
 |---|---|---|
@@ -973,12 +1012,12 @@ examples map as follows:
 |---|---|---|
 | Skill definition | decomposed across `FORMS` × `TaskAllowlist` × `PromptVersion` × validator (23.4) | PARTIAL |
 | Skill loader | `loadPrompt()` loads one versioned prompt file with a cache; no loader for anything larger | NOT_NEEDED now; DEFERRED. A typed constant module (like `SECRETARY_TOOLS`) is preferable to a runtime file loader, because the compiler then checks tool keys and form keys. Do not assume `SKILL.md`. |
-| Skill registry | two `TaskAllowlist` constants; no lookup by key | PARTIAL / DECLARED_UNWIRED |
-| Skill selection | by entry point: `runSecretaryExtractionJob()` is handed its `FormDefinition` by the caller; `assistant.draft` takes `formKey` from a server route. The model never picks the task. | IMPLEMENTED deterministically — keep it that way |
-| Unsupported Skill | an unknown form key has no schema; an unknown task has no allowlist; `resolveTool()` refuses; `classifyRequest()` refuses off-perimeter | IMPLEMENTED in effect. The requested `SKILL_NOT_AVAILABLE` is `ToolNotAllowed` / a perimeter refusal. No new code. |
+| Skill registry | none. The nearest thing is two `TaskAllowlist` constants with no lookup by key | MISSING → DEFERRED |
+| Skill selection | no Skill is selected anywhere. What exists is *form* selection by entry point: `assistant.draft` takes `formKey` from a server route (live), and `runSecretaryExtractionJob()` is handed its `FormDefinition` by the caller (unwired). The model never picks the form or task. | MISSING as Skill selection → DEFERRED. The principle to keep is that selection is server-side and deterministic |
+| Unsupported Skill | an unknown form key has no schema; an unknown task has no allowlist; `resolveTool()` refuses; `classifyRequest()` refuses off-perimeter | No Skill code exists, so nothing can "select" a missing one. When Skills exist, the requested `SKILL_NOT_AVAILABLE` should reuse these refusals (`ToolNotAllowed`, perimeter refusal), not add a new code. DEFERRED |
 | Skill versioning | `formVersion` stored; `promptHash` computed and **not stored**; tool and allowlist unversioned; policy via append-only `automationPolicies` + `PolicySnapshot` | PARTIAL |
 | Verification | door 1: `detectGaps()`, read-back, `checkCommit()`, commit adapters; door 2: `validateExtraction()` | IMPLEMENTED (door 1) / unwired (door 2) |
-| Progressive loading | by construction: each request loads **one** form schema, **one** prompt, **one** context pack (`buildSystemPrompt(form)`, `runExtraction()`) | IMPLEMENTED at form granularity |
+| Progressive loading | **no dynamic Skill loader exists.** Request construction already loads **one** form schema and **one** prompt per call: door 1 `buildSystemPrompt(form)` is live; door 2 `runExtraction()` plus one context pack is unwired. That is single-form request construction, not Skill loading | Skill loading MISSING → DEFERRED; single-form construction IMPLEMENTED (door 1) / DECLARED_UNWIRED (door 2) |
 | Skill tests | `agentTools.test.ts` resolves each tool's procedure through `permissionForProcedure()`; `FORBIDDEN_CATEGORIES` asserted structurally; `goldenSet.test.ts` scores per form | PARTIAL; the pattern exists |
 
 **"Done" is defined by the procedure, not by the model.** This already holds on the live path.
@@ -998,8 +1037,11 @@ Skill content**: a Skill, like a prompt, must be a new version rather than an in
 ### 23.6 Worked example — "Process Disposal Ticket", with real names
 
 ```text
-SKILL (not built; composed from what exists): disposal_ticket
-  form: FORMS.disposal_ticket v1   prompt: secretary-extract.v1   ceiling: HYBRID
+SKILL — hypothetical, nothing below is built. Identity per 23.19:
+  taskKey: <new, e.g. disposal_ticket_capture>   skillVersion: 1     (no such task exists today)
+  references → formKey: disposal_ticket (FORMS v1) · prompt: secretary-extract.v1 · ceiling: HYBRID
+  needs     → a TaskAllowlist naming read.tripStops, read.loads, read.closeoutState,
+              propose.disposalTicket (none exists; propose.disposalTicket is on no allowlist)
 
  1. Read trip stops ............ Tool read.tripStops     → tripStops.list      [roleProcedure]
  2. Read loads ................. Tool read.loads         → loads.list          [roleProcedure]
@@ -1121,8 +1163,9 @@ This is the HS1 seam that SPINE ordering step 3 already schedules.
 ### 23.12 Context budget
 
 The target is **base contract + one selected Skill + relevant policy + authorized context +
-current tool results**. Nothing today loads every form, prompt or manual into a request (23.5,
-progressive loading). The record of which Skill ran belongs in the same provenance columns as
+current observations / tool results**. That is future architecture: no Skill loader exists.
+Today's requests are built with one form and one prompt each, and nothing loads every form,
+prompt or manual into a request (23.5). The record of which Skill ran belongs in the same provenance columns as
 the prompt hash (23.5). Store it on the proposal and, when runs execute, on `agentRuns`/
 `agentSteps`. No new table is needed.
 
@@ -1141,25 +1184,32 @@ never become Skills:
   (`gstReturn`, `iftaEngine`), payroll, period close.
 - Authorization, automation policy, approval binding, the never-automatic floors.
 - Offline class assignment (23.11).
-- Skill *selection* itself, for now (23.5).
+- Skill *selection* itself (23.5): server-side and deterministic. The model never chooses or invents a Skill.
+
+**Design principle: not every LeaseOS workflow should become a Skill.** If something can stay
+deterministic code, a state machine, a domain validator, a policy engine or a database
+constraint, it stays there. Skills are for procedural work that genuinely needs AI judgement,
+interpretation, sequencing or clarification, so the AI architecture does not swallow ordinary
+LeaseOS business logic.
 
 ### 23.14 Classification summary
 
 | Concept | Classification | Evidence |
 |---|---|---|
-| Tool registry | PARTIAL | `SECRETARY_TOOLS` unwired; `CAPABILITIES` live, unjoined |
+| Tool registry | PARTIAL | `SECRETARY_TOOLS` (11) implemented as code, unwired; refuses via `agentMayNotCall()`; `CAPABILITIES` (6) live, unjoined |
 | Tool definition | DECLARED_UNWIRED | `ToolDefinition`; no version, no capability link |
 | Tool request | PARTIAL | `ToolInvocation` unwired; `ActionRequest` live |
 | Tool execution | DECLARED_UNWIRED | `invokeTool()`; no `createCaller` supplier |
 | Tool result | PARTIAL | returned, not persisted; `agentActions.outcome` stuck at `requested` |
 | Tool receipt | PARTIAL | `authorizationDecisions` per call; commit receipts for commits only |
-| Skill definition | PARTIAL | decomposed across `FORMS` × `TaskAllowlist` × `PromptVersion` × validator |
-| Skill loader | NOT_NEEDED (now) | typed constants preferred; `loadPrompt()` covers prompt files |
-| Skill registry | DECLARED_UNWIRED | two `TaskAllowlist` constants |
-| Skill selection | IMPLEMENTED (deterministic) | caller supplies form / task; model never selects |
-| Skill versioning | PARTIAL | `formVersion` stored; prompt hash, tool and task versions not |
+| **Skills (overall)** | **PARTIAL — architecturally defined, runtime DEFERRED** | parts exist; no Skill type, registry, loader or selection |
+| Skill definition | PARTIAL | decomposed across `FORMS` × `TaskAllowlist` × `PromptVersion` × validator; no binding type |
+| Skill loader | MISSING → DEFERRED | none; when built, typed constants are preferred over a file loader; `loadPrompt()` covers prompt files only |
+| Skill registry | MISSING → DEFERRED | nearest: two `TaskAllowlist` constants |
+| Skill selection | MISSING → DEFERRED | form selection is server-side (live for door 1); no Skill is selected |
+| Skill versioning | MISSING → DEFERRED (23.20) | no Skill version exists; of its neighbours only `formVersion` is stored |
 | Verification | IMPLEMENTED (door 1) / DECLARED_UNWIRED (door 2) | `detectGaps`, read-back, `checkCommit`; `validateExtraction` |
-| Progressive loading | IMPLEMENTED (form granularity) | one form + one prompt + one pack per request |
+| Progressive (Skill) loading | MISSING → DEFERRED | no loader; requests are built with one form + one prompt each (door 1 live, door 2 unwired) |
 | MCP | MISSING → DEFERRED | nothing in tree |
 | External integrations | IMPLEMENTED (not as tools) | `integrationGateway.ts`, `integrationRouter.ts` |
 | Sandbox / code execution | NOT_NEEDED | nothing in tree, by design |
@@ -1185,25 +1235,41 @@ When the SPINE order reaches it, and not before:
 
 1. **One type**, the survey §8 `PromptContract` renamed `SkillDefinition` or kept as is, which is the
    owner's call. It *references* existing artifacts by typed key and restates none of them:
-   `taskKey`, `version`, `formKey`, `promptVersion`, `allowlist: TaskAllowlist`, `ceiling`,
+   `taskKey`, `skillVersion`, `formKey`, `promptVersion`, `allowlist: TaskAllowlist`, `ceiling`,
    `verify: (existing validator functions)`, `escalation`.
 2. **A constant registry** in the same shape as `SECRETARY_TOOLS`: typed, compiled and
    test-asserted. No runtime file loader.
 3. **Registration-time tests** extending `agentTools.test.ts`: every referenced tool key exists;
    no tool in `FORBIDDEN_CATEGORIES`; every tool's procedure resolves through
    `permissionForProcedure()`; the form exists in `FORMS`; the ceiling is no wider than
-   `SAFETY_CEILINGS` and never covers a `NEVER_AUTOMATIC` action; `(taskKey, version)` is unique;
+   `SAFETY_CEILINGS` and never covers a `NEVER_AUTOMATIC` action; `(taskKey, skillVersion)` is unique;
    a clarification path exists; offline classes are consistent via `classRiskDisagreements()`;
    **and the type has no field that could name a permission, a procedure, a tenant or a mode.**
    The last property is the structural proof that a Skill grants nothing.
-4. **Provenance**: `taskKey` + `version` recorded with the run-provenance columns.
+4. **Provenance**: `taskKey` + `skillVersion` recorded with the run-provenance columns (23.20).
 
-**How this meets the agent roster.** `SECRETARY_AGENT_ROSTER.md` §5 proposes an
-`AgentDeclaration` whose `tasks` field lists `TaskAllowlist["taskKey"]` values. A Skill is keyed
-by the same `taskKey`, so the two fit with no new key space: an agent *declares which Skills it
-may run*, and each Skill *binds the tools, form, prompt and verification for that task*. Neither
-carries permissions. Effective authority stays *delegating user's permissions ∩ agent
-capabilities ∩ the Skill's task tools ∩ policy*, and holding a Skill never widens it.
+**How this meets the agent roster, without overstating it.** `SECRETARY_AGENT_ROSTER.md` is a
+proposal. Its §5 `AgentDeclaration` is marked "Proposed. Not in the tree." and no agent
+declaration exists in code. As proposed, its `tasks` field lists `TaskAllowlist["taskKey"]`
+values, and a Skill would be keyed by that same `taskKey` (23.19). The three layers then
+separate cleanly:
+
+```text
+Agent declaration   identifies the task keys the agent may *attempt*    (proposed, roster §5)
+   ↓ permitted taskKey
+Skill               procedural contract for *how* that task is performed (architecture only)
+   ↓ steps / checks / expected tool keys
+Tool                executable capability used while performing it       (SECRETARY_TOOLS, unwired)
+   ↓ tool key → ProcedureName
+Authorization       roleProcedure / authorize() / decide() / automation policy   (live)
+   ↓
+Domain operation    the existing procedure
+```
+
+None of the first three carries permissions. Being permitted a task key, holding a Skill or
+listing a tool authorizes nothing. Authority is decided only at the Authorization layer, as the
+delegating user (`createCaller(ctx)`), and every layer above it can only narrow what is
+requested.
 
 Nothing else is needed: no Skill agent, no Skill orchestrator, no MCP, no sandbox.
 
@@ -1215,7 +1281,7 @@ Nothing else is needed: no Skill agent, no Skill orchestrator, no MCP, no sandbo
                             ▼
                   AGENT RUNTIME  (agentRouter.ts + actionGateway.ts)
                             │
-          Select applicable SKILL — by entry point / form key, not by the model
+          Select applicable SKILL — server-side by task key (future), never by the model
           ┊  SKILL SELECTION GRANTS NO AUTHORITY  ┊
                             │
                             ▼
@@ -1249,7 +1315,8 @@ its existing home:
 LeaseOS AI Runtime
 ├── Agent runtime ........ agentRuns / agentSteps / agentActions; budgets (survey §11);
 │                          context (ContextPack, admitSource); evaluation (golden set)
-├── Skills ............... FORMS × TaskAllowlist × PromptVersion × validator  (unbound — 23.4)
+├── Skills ............... architecture only; parts in FORMS × TaskAllowlist × PromptVersion
+│                          × validator, unbound (23.4); runtime DEFERRED
 ├── Tools ................ SECRETARY_TOOLS: read / propose / human_step
 │                          (no communication or controlled-action category — FORBIDDEN_CATEGORIES)
 ├── Integration layer .... existing roleProcedures; integrationGateway; (no MCP)
@@ -1276,3 +1343,56 @@ because a Skill is only as real as the tools it references, and every one of tho
 still unwired. The one cross-link worth recording is that the offline half of a Skill depends on
 the `offlineCapability` → HS1 seam, which is already part of the remaining SPINE wiring. No new
 Tools, no Skills runtime, no MCP and no sandbox were added.
+
+### 23.19 Key spaces — one string, one job
+
+Reusing the task key as the Skill's identity is safe only if no other identifier already does
+that job, and if the task key is not doing another job already. Audited on `main` at `9895188`:
+
+| Identifier | Example values | Job | Defined where | Collides with Skill identity? |
+|---|---|---|---|---|
+| **`TaskAllowlist.taskKey`** | `load_unload_narration`, `bill_scan` | names one bounded AI task: its tools and step budget | `server/_core/ai/tools/registry.ts` (2 constants) | **no. This is the identity to reuse** |
+| `ToolDefinition.key` | `read.tripStops`, `propose.disposalTicket` | one executable capability | `SECRETARY_TOOLS` (11) | no. Dotted `verb.noun`, a different shape and job |
+| `CapabilityDefinition.key` | `jobs.read`, `billing.issueInvoice` | a risk-classed action the gateway decides | `CAPABILITIES` (6) | no |
+| form key | `unload_stop`, `disposal_ticket` | a data contract (fields, precision) | `FORMS` (5) | **keep separate.** A task *references* a form. The existing tasks already differ from their forms (`bill_scan` → `expense_receipt`), and one task may need more than one form |
+| `PromptVersion` | `secretary-extract.v1` | one versioned instruction file | `prompts/index.ts` | no. Shared by tasks; it is a version, not an identity |
+| `ProcedureName` | `tripStops.list`, `assistant.draft` | an authorized server procedure | `recordsAuthorization.ts` | no. The model never sees it |
+| workflow `taskType` | `upload_disposal_ticket`, `resolve_critical_defect` | a **human** work item raised by a deterministic rule | `workflowSeeds.ts` → `operationalTasks.taskType` | **no, but the word is shared.** "Task" means a human work item here and an AI task in the registry. Never reuse a `taskType` string as a `taskKey` |
+| `workflowKey` / `ruleKey` | `critical_defect` | deterministic state machine / rule | `workflowEngine.ts`, `workflowSeeds.ts` | no. Deterministic, never a Skill (23.13) |
+| automation-policy `task` scope id | free text, ≤ 64 chars | narrows a capability's automation mode for one task | `automationPolicies.scope = "task"`, `scopeId`; supplied only through `automationPolicyRouter` input; no code defines its values | **the one real overlap risk.** When Skills exist, the `task` scope id used for AI work should be the same `taskKey` string, not a third name |
+| `AgentDeclaration.tasks` | — | which task keys an agent may attempt | roster §5, **proposed, not in code** | no. It is *defined* as a list of `taskKey`s |
+
+**Verdict.** `taskKey` is the correct Skill identity. A Skill version travels beside it rather
+than inside it, and no new namespace is created:
+
+```text
+taskKey:      disposal_ticket_capture      ← identity (hypothetical; must not equal a workflow taskType)
+skillVersion: 3                            ← procedure revision
+formKey:      disposal_ticket              ← referenced data contract, independently versioned
+```
+
+No Skill registry is implemented here.
+
+### 23.20 Versioning — six independent axes
+
+Procedural Skills will change on a different clock from Tools, prompts and policy. An audit of a
+job must be able to name every one that governed it:
+
+| Axis | What changes it | Exists today | Stored on the job/proposal today |
+|---|---|---|---|
+| task key | a new kind of AI task | `TaskAllowlist.taskKey` | **no** |
+| Skill version | steps, decision rules, checks, escalation change | none | **no** |
+| tool key | a new capability | `ToolDefinition.key` | **no** (the `authorizationDecisions` row records the procedure) |
+| tool version | a tool's contract changes | none (survey §19) | **no** |
+| prompt version | instruction text changes | `PromptVersion` + `promptHash()` | **no** (hash computed, no column) |
+| policy version | automation policy changes | `automationPolicies.policyVersionId`, append-only + supersession; `PolicySnapshot` | partly (`safetyCeilingApplied`; committed provenance) |
+| *(form version, for reference)* | data contract changes | `FormDefinition.version` | **yes** (`assistantProposals.formVersion`) |
+
+These axes evolve independently. A prompt fix should not bump the Skill, and a Skill's new
+verification step should not bump the tools. The rule `prompts/index.ts` already applies to
+prompts extends to all of them: **a changed artifact is a new version, never an in-place edit**,
+so "re-run under exactly what governed it" stays answerable. Their home is the run-provenance
+column set already recommended (survey §19, P9.2), with `taskKey` and `skillVersion` beside
+`promptVersion`/`promptHash`. **Architecture only: no schema or runtime change in this
+checkpoint.**
+

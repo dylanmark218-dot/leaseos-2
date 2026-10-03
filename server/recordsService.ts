@@ -9,7 +9,7 @@
 
 import { and, desc, eq, inArray, isNull, ne, notInArray, or } from "drizzle-orm";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
-import { getDb, jobScopeSubquery, type TenantScope } from "./db";
+import { actingScopeFor, getDb, jobScopeSubquery, operatorForUserInScope, type TenantScope } from "./db";
 import { placeHold, releaseHold } from "./fleetPortfolioService";
 import { defectEvent } from "./defectLifecycleService";
 import type { DbOrTx } from "./_core/dbTypes";
@@ -39,18 +39,16 @@ export type OperatorIdentity = {
   employeeNumber: string | null;
 };
 
-/** The caller's operator identity, derived from the session user. */
+/**
+ * The caller's operator identity, derived from the session user: their own record in the acting
+ * organization (`operatorForUserInScope`). A record another organization owns is not theirs here,
+ * and two in-scope records are ambiguous — both are "no operator", never the first row.
+ */
 export async function resolveOperatorForUser(
   userId: number
 ): Promise<OperatorIdentity> {
-  const db = await getDb();
-  if (!db) return { operatorId: null, employeeNumber: null };
-  const rows = await db
-    .select({ id: operators.id })
-    .from(operators)
-    .where(eq(operators.userId, userId))
-    .limit(1);
-  return { operatorId: rows[0]?.id ?? null, employeeNumber: null };
+  const r = await operatorForUserInScope(userId, await actingScopeFor(userId));
+  return { operatorId: r.kind === "resolved" ? r.operatorId : null, employeeNumber: null };
 }
 
 export type EvidenceSubject = {

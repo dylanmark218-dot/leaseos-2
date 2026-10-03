@@ -24,6 +24,9 @@ import { complianceRequirementValidity, type ComplianceDocumentRow } from "./_co
 import type { ValidityState } from "./_core/documentValidity";
 import type { ResolveTask } from "./_core/widgetDashboard";
 
+/** SEC-1: the exception loader reads one organization; tests read it as the person whose view they assert. */
+const scopeOf = async (userId: number) => (await import("./_core/entityScope")).financeScopeFor((await (await import("./db")).getDb()) as never, userId);
+
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
@@ -179,7 +182,7 @@ d("the exception centre raises expiry from the verdict, over the owner's whole h
     const [lapsed] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name) VALUES (?)", [`Op ${rnd()}`]);
     await file("operator", lapsed.insertId, "driver_licence", [{ status: "verified", expires: -20, captured: -400 }]);
 
-    const xs = deriveExceptions(await loadExceptionSources(new Date()));
+    const xs = deriveExceptions(await loadExceptionSources(await scopeOf(w.userId), new Date()));
     const about = (id: number) => xs.filter(x => x.subjectType === "operator" && x.subjectId === id && x.key.startsWith("cred:")).map(x => x.key.split(":").pop());
     expect(about(w.operatorId)).toEqual([]);
     expect(about(lapsed.insertId)).toEqual(["expired"]);

@@ -208,7 +208,8 @@ d("citation verification", () => {
     const operatorId = await operatorRow();
     expect((await passportItem(p, operatorId))?.status).toBe("missing");
     const rec = await callerFor(cast.office).compliance.credentialRecord({ ownerType: "operator", ownerId: operatorId, docType: p.doc, title: "Fixture credential", expiresAt: days(400) });
-    await callerFor(cast.office).compliance.credentialVerify({ credentialId: rec.credentialId, outcome: "verified" });
+    // A second office user verifies: the one who recorded it may not (credentialVerificationService).
+    await callerFor(await withRole("office")).compliance.credentialVerify({ credentialId: rec.credentialId, outcome: "verified" });
     const item = await passportItem(p, operatorId);
     expect(item?.status).toBe("satisfied");
     expect(item?.requirementRef).toMatchObject({

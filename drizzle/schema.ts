@@ -207,6 +207,8 @@ export const complianceDocuments = mysqlTable("complianceDocuments", {
   confidence: mysqlEnum("confidence", ["low", "medium", "high"])
     .default("medium")
     .notNull(),
+  /** 0236 — who entered the row. NULL = not known (historical rows are never back-filled). */
+  recordedByUserId: int("recordedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -3605,6 +3607,20 @@ export type InsertPersonalTaxDocuments = typeof personalTaxDocuments.$inferInser
  * B20.8 — External data source registry
  * ================================================================== */
 
+/* 0233 — the approved-source registry's vocabulary; the rules that use it are server/_core/sourceRegistry.ts. */
+export const SOURCE_LIFECYCLES = ["draft", "pending_approval", "approved", "suspended", "revoked", "retired"] as const;
+export const SOURCE_APPROVAL_STATES = ["proposed", "approved", "rejected", "superseded", "revoked"] as const;
+export const SOURCE_CLASSES = ["regulator", "government", "commercial", "community", "customer", "vendor"] as const;
+export const RISK_CLASSES = ["low", "moderate", "high"] as const;
+export const SENSITIVITY_CLASSES = ["public", "restricted", "confidential"] as const;
+export const ENDPOINT_SERVICE_TYPES = ["arcgis_feature_server", "arcgis_map_server", "rest_json", "geojson", "wfs", "json_feed", "xml", "csv", "webhook", "other"] as const;
+/** providerCredentials.authScheme, verbatim — an endpoint names a credential the way the credential store does. */
+export const ENDPOINT_AUTH_SCHEMES = ["NONE", "API_KEY", "STATIC_BEARER", "OAUTH2_CLIENT_CREDENTIALS", "OAUTH2_REFRESH", "SIGNED_REQUEST", "MUTUAL_TLS"] as const;
+export const ENDPOINT_METHODS = ["GET", "POST"] as const;
+export const ENDPOINT_PATH_MATCHES = ["exact", "prefix"] as const;
+export const ENDPOINT_OUTCOMES = ["ok", "http_error", "refused_registry", "refused_network", "timeout", "unexpected_response", "transport"] as const;
+export const SOURCE_EVENT_TYPES = ["seeded", "created", "updated", "endpoint_added", "endpoint_updated", "endpoint_disabled", "credential_bound", "review_requested", "rejected", "approved", "suspended", "resumed", "revoked", "retired"] as const;
+
 export const externalDataSources = mysqlTable("externalDataSources", {
   id: int("id").autoincrement().primaryKey(),
   sourceKey: varchar("sourceKey", { length: 120 }).notNull().unique(),
@@ -3634,6 +3650,19 @@ export const externalDataSources = mysqlTable("externalDataSources", {
   status: mysqlEnum("status", ["unverified", "verified", "superseded", "withdrawn"]).default("unverified").notNull(),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  // 0233 — the approval lifecycle (whether LeaseOS may contact the source), separate from `status`
+  // (whether its licence has been reviewed). See server/_core/sourceRegistry.ts.
+  lifecycle: mysqlEnum("lifecycle", SOURCE_LIFECYCLES).default("draft").notNull(),
+  revision: int("revision").default(1).notNull(),
+  rowVersion: int("rowVersion").default(1).notNull(),
+  revisionByUserId: int("revisionByUserId"),
+  lifecycleChangedAt: timestamp("lifecycleChangedAt"),
+  sourceClass: mysqlEnum("sourceClass", SOURCE_CLASSES),
+  riskClass: mysqlEnum("riskClass", RISK_CLASSES),
+  sensitivity: mysqlEnum("sensitivity", SENSITIVITY_CLASSES),
+  termsUrl: varchar("termsUrl", { length: 600 }),
+  createdByUserId: int("createdByUserId"),
+  updatedAt: timestamp("updatedAt"),
 });
 
 export const externalDatasetImports = mysqlTable("externalDatasetImports", {
@@ -3656,6 +3685,11 @@ export const externalDatasetImports = mysqlTable("externalDatasetImports", {
   failureReason: text("failureReason"),
   supersedesImportId: int("supersedesImportId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  // 0233 — the registry authority an import ran under.
+  endpointId: int("endpointId"),
+  sourceRevision: int("sourceRevision"),
+  approvalId: int("approvalId"),
+  purpose: varchar("purpose", { length: 80 }),
 });
 
 export const externalFeedFetches = mysqlTable("externalFeedFetches", {
@@ -3669,9 +3703,11 @@ export const externalFeedFetches = mysqlTable("externalFeedFetches", {
   recordCount: int("recordCount"),
   servedFromCache: boolean("servedFromCache").default(false).notNull(),
   staleSeconds: int("staleSeconds"),
-  outcome: mysqlEnum("outcome", ["ok", "rate_limited", "error", "stale_served", "unavailable"]).notNull(),
+  outcome: mysqlEnum("outcome", ["ok", "rate_limited", "error", "stale_served", "unavailable", "refused"]).notNull(),
   detail: varchar("detail", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  // 0233
+  endpointId: int("endpointId"),
 });
 
 export type InsertExternalDataSources = typeof externalDataSources.$inferInsert;
@@ -9044,6 +9080,8 @@ export const facilityImportRuns = mysqlTable("facilityImportRuns", {
   startedByUserId: int("startedByUserId").notNull(),
   startedAt: timestamp("startedAt").defaultNow().notNull(),
   note: varchar("note", { length: 500 }),
+  // 0233 — the provenance record (externalDatasetImports) this run wrote.
+  externalDatasetImportId: int("externalDatasetImportId"),
 });
 
 // 0144 — P7.7 commercial document registry, over the records vault.
@@ -11261,3 +11299,89 @@ export type IntegrationContract = typeof integrationContracts.$inferSelect;
 export type IntegrationSyncRun = typeof integrationSyncRuns.$inferSelect;
 export type IntegrationDeadLetter = typeof integrationDeadLetters.$inferSelect;
 export type IntegrationConflict = typeof integrationConflicts.$inferSelect;
+
+/* ---- 0233: approved external source registry — endpoints, approvals, events (server/_core/sourceRegistry.ts) ---- */
+
+/** Exactly what may be contacted for a source. Host and path are stored canonical and compared exactly. */
+export const externalSourceEndpoints = mysqlTable("externalSourceEndpoints", {
+  id: int("id").autoincrement().primaryKey(),
+  endpointRef: varchar("endpointRef", { length: 210 }).notNull().unique(),
+  externalDataSourceId: int("externalDataSourceId").notNull(),
+  endpointKey: varchar("endpointKey", { length: 80 }).notNull(),
+  displayName: varchar("displayName", { length: 200 }).notNull(),
+  serviceType: mysqlEnum("serviceType", ENDPOINT_SERVICE_TYPES).notNull(),
+  httpMethod: mysqlEnum("httpMethod", ENDPOINT_METHODS).default("GET").notNull(),
+  hostname: varchar("hostname", { length: 253 }).notNull(),
+  port: int("port").default(443).notNull(),
+  pathPrefix: varchar("pathPrefix", { length: 600 }).notNull(),
+  pathMatch: mysqlEnum("pathMatch", ENDPOINT_PATH_MATCHES).default("prefix").notNull(),
+  canonicalUrl: varchar("canonicalUrl", { length: 1024 }).notNull(),
+  authScheme: mysqlEnum("authScheme", ENDPOINT_AUTH_SCHEMES).default("NONE").notNull(),
+  /** A pointer into providerCredentials, never a value. */
+  credentialRef: varchar("credentialRef", { length: 64 }),
+  contentTypesJson: json("contentTypesJson").$type<string[]>().notNull(),
+  timeoutMs: int("timeoutMs"),
+  maxBytes: int("maxBytes"),
+  enabled: boolean("enabled").default(false).notNull(),
+  lastAttemptAt: timestamp("lastAttemptAt"),
+  lastSuccessAt: timestamp("lastSuccessAt"),
+  lastFailureAt: timestamp("lastFailureAt"),
+  consecutiveFailures: int("consecutiveFailures").default(0).notNull(),
+  lastOutcome: mysqlEnum("lastOutcome", ENDPOINT_OUTCOMES),
+  lastHttpStatus: int("lastHttpStatus"),
+  lastSchemaFingerprint: varchar("lastSchemaFingerprint", { length: 64 }),
+  schemaChangedAt: timestamp("schemaChangedAt"),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt"),
+}, t => ({
+  sourceKey: uniqueIndex("externalSourceEndpoints_source_key_unique").on(t.externalDataSourceId, t.endpointKey),
+  host: index("externalSourceEndpoints_host_idx").on(t.hostname, t.port),
+}));
+export type ExternalSourceEndpointRow = typeof externalSourceEndpoints.$inferSelect;
+
+/** One request for approval and what became of it: one revision, a scope, a review-by date. */
+export const externalSourceApprovals = mysqlTable("externalSourceApprovals", {
+  id: int("id").autoincrement().primaryKey(),
+  approvalRef: varchar("approvalRef", { length: 40 }).notNull().unique(),
+  externalDataSourceId: int("externalDataSourceId").notNull(),
+  sourceRevision: int("sourceRevision").notNull(),
+  state: mysqlEnum("state", SOURCE_APPROVAL_STATES).default("proposed").notNull(),
+  scopeJson: json("scopeJson").$type<string[]>().notNull(),
+  requestedByUserId: int("requestedByUserId"),
+  requestedAt: timestamp("requestedAt").defaultNow().notNull(),
+  requestReason: varchar("requestReason", { length: 1000 }).notNull(),
+  reviewedByUserId: int("reviewedByUserId"),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewNote: varchar("reviewNote", { length: 1000 }),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  expiresAt: timestamp("expiresAt"),
+  revokedByUserId: int("revokedByUserId"),
+  revokedAt: timestamp("revokedAt"),
+  revokeReason: varchar("revokeReason", { length: 1000 }),
+  supersededAt: timestamp("supersededAt"),
+}, t => ({
+  source: index("externalSourceApprovals_source_idx").on(t.externalDataSourceId, t.state),
+}));
+export type ExternalSourceApprovalRow = typeof externalSourceApprovals.$inferSelect;
+
+/** Append-only: every change to a source, its endpoints or its approval. Triggers in 0233 refuse an UPDATE or a DELETE. */
+export const externalSourceEvents = mysqlTable("externalSourceEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  externalDataSourceId: int("externalDataSourceId").notNull(),
+  endpointId: int("endpointId"),
+  approvalId: int("approvalId"),
+  eventType: mysqlEnum("eventType", SOURCE_EVENT_TYPES).notNull(),
+  fromLifecycle: mysqlEnum("fromLifecycle", SOURCE_LIFECYCLES),
+  toLifecycle: mysqlEnum("toLifecycle", SOURCE_LIFECYCLES),
+  sourceRevision: int("sourceRevision").notNull(),
+  actorUserId: int("actorUserId"),
+  reason: varchar("reason", { length: 1000 }),
+  detailJson: json("detailJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  source: index("externalSourceEvents_source_idx").on(t.externalDataSourceId, t.id),
+}));
+export type ExternalSourceEventRow = typeof externalSourceEvents.$inferSelect;
