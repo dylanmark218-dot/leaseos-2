@@ -159,9 +159,11 @@ export function finalizeReadiness(runStates: readonly string[]): Readiness {
 }
 
 /** A period may be voided only while nothing has been recorded against it. */
-export function voidReadiness(args: { runCount: number; earningCount: number }): Readiness {
+export function voidReadiness(args: { runCount: number; earningCount: number; timeEntryCount?: number }): Readiness {
   const reasons: string[] = [];
   if (args.runCount) reasons.push(`${args.runCount} pay run(s) reference this period`);
   if (args.earningCount) reasons.push(`${args.earningCount} earning(s) reference this period`);
+  // P3 — submitted time is a worker's claim on the period; voiding it would orphan the claim.
+  if (args.timeEntryCount) reasons.push(`${args.timeEntryCount} time entr${args.timeEntryCount === 1 ? "y" : "ies"} reference this period`);
   return { ready: reasons.length === 0, reasons };
 }

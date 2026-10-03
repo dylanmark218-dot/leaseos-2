@@ -30,9 +30,10 @@ import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
 import * as svc from "./payrollService";
+import * as timeSvc from "./payrollTimeService";
 import { loadPeriodState } from "./payrollScheduleService";
 import { PERIOD_STATE_LABEL, periodAcceptsEarnings, periodAcceptsRuns } from "./_core/payrollSchedule";
-import { getDb } from "./db";
+import { getDb, jobInScope, tripInScope } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
 import { assertAdjustmentInScope, assertDisputeInScope, assertEntityInScope, assertPeriodInScope, assertProfileInScope, assertRunInScope, assertSettlementInScope, entityIdsInScope, entityOwnerFor, ownsEntity, requireOwnedEntity, type FinanceScope, type MoneyScope } from "./_core/entityScope";
 import { employeePayrollProfiles, expenseRecords } from "../drizzle/schema";
@@ -170,27 +171,25 @@ export const payrollRouter = router({
     .mutation(async ({ ctx, input }) => {
       await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — the profile is the caller's own; the unit must be too
       const me = await ownProfileOrThrow(ctx.user.id, ctx.money);
-      const minutes = input.endedAt
-        ? Math.round((input.endedAt.getTime() - input.startedAt.getTime()) / 60000)
-        : null;
-      if (minutes !== null && minutes < 0) {
+      if (input.endedAt && input.endedAt.getTime() < input.startedAt.getTime()) {
         throw badRequest("End time is before start time");
       }
-      const id = await svc.submitTimeEntry({
-        employeePayrollProfileId: me.id,
-        activity: input.activity,
-        startedAt: input.startedAt,
-        endedAt: input.endedAt ?? null,
-        minutes,
-        source: "employee_submitted",
-        confirmedByEmployee: true,
-        jobId: input.jobId ?? null,
-        tripId: input.tripId ?? null,
-        unitId: input.unitId ?? null,
-        status: "submitted",
+      // P3: the job and trip must be this organization's too (they were unchecked), and the submission goes through the
+      // one submission path — the period must be open, overlaps are flagged, the entry gets a ref and a work date.
+      const scope = { tenantId: ctx.money.tenantId };
+      if (input.jobId != null && !(await jobInScope(input.jobId, scope))) throw notFound(`Job ${input.jobId} not found`);
+      if (input.tripId != null && !(await tripInScope(input.tripId, scope))) throw notFound(`Trip ${input.tripId} not found`);
+      if (await timeSvc.isOwnerOperator(me)) throw badRequest("An owner-operator is paid through contractor settlement, not employee payroll time");
+      const r = await timeSvc.submitEntry({
+        profile: me, actorUserId: ctx.user.id, state: "submitted", activity: input.activity, startedAt: input.startedAt, endedAt: input.endedAt ?? null,
+        earningCode: null, jobId: input.jobId ?? null, unitId: input.unitId ?? null, tripId: input.tripId ?? null, notes: null, locationText: null,
+        clientCaptureRef: null, capturedAt: null, deviceRef: null, source: "employee_submitted", provenance: null, supersedes: null, promote: null,
       });
+      if (r.outcome === "refused") throw new TRPCError({ code: r.code, message: r.message });
+      const row = await timeSvc.loadEntryByRef(r.entryRef);
+      const id = row?.id;
       // Recording payroll activity never writes an HOS duty status.
-      return { id: id ? Number(id) : null, hosDutyStatusChanged: false };
+      return { id: id ? Number(id) : null, entryRef: r.entryRef, hosDutyStatusChanged: false };
     }),
 
   raiseDispute: moneyScoped(roleProcedure("payroll.raiseDispute"))
@@ -245,6 +244,12 @@ export const payrollRouter = router({
       // drove a truck. Hard refusal, not a warning.
       const eligible = assertPayrollEligibility({ kind: input.workerKind });
       if (!eligible.allowed) throw badRequest(eligible.reason!);
+      // P3: a pay group now decides the schedule a person is paid on, so it must be this book's (it was unchecked).
+      if (input.payGroupId != null) {
+        const g = await svc.loadPayGroup(input.payGroupId);
+        if (!g || g.financialEntityId == null || !ownsEntity(ctx.money, g.financialEntityId)) throw notFound(`Pay group ${input.payGroupId} not found`);
+        if (g.financialEntityId !== input.financialEntityId) throw badRequest("The pay group belongs to a different financial entity than the profile");
+      }
 
       const id = await svc.upsertPayrollProfile({
         employeeNumber: input.employeeNumber,
@@ -442,7 +447,7 @@ export const payrollRouter = router({
       const sod = separationOfDuties({ originatorUserId: proposer, actorUserId: ctx.user.id, act: "approve this earning" });
       if (!sod.allowed) throw forbidden(sod.reason!);
       if (e.status !== "pending") throw precondition(`Earning is ${e.status}; only a pending earning can be approved${e.status === "held" ? ` (held: ${e.blockedReason ?? "blocked"})` : ""}`);
-      const r = await svc.approveEarning({ earningRef: input.earningRef });
+      const r = await svc.approveEarning({ earningRef: input.earningRef, approvedByUserId: ctx.user.id });
       if (r !== "approved") throw precondition("Earning is no longer pending");
       return { earningRef: input.earningRef, status: "approved" as const };
     }),

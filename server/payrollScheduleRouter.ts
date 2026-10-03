@@ -13,7 +13,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
-import { ownsEntity, requireOwnedEntity } from "./_core/entityScope";
+import { assertProfileInScope, ownsEntity, requireOwnedEntity } from "./_core/entityScope";
+import { getDb } from "./db";
 import { separationOfDuties } from "./_core/payrollEngine";
 import {
   DATE_TEXT,
@@ -124,6 +125,56 @@ export const payrollScheduleRouter = router({
       return { ...view(p), runStates: await sch.runStatesForPeriod(p.id), earningCount: await sch.earningCountForPeriod(p.id) };
     }),
 
+  /* ---------------- Pay groups → schedules (P3, 0228) ---------------- */
+
+  /** The book's pay groups and the schedule each is paid on. */
+  payGroupsList: moneyScoped(roleProcedure("payrollSchedule.payGroupsList")).query(async ({ ctx }) => sch.listPayGroups(ctx.money.entityIds)),
+
+  /**
+   * Create a pay group (no `groupKey`) or change one. Its schedule must be an active schedule of the same book: a
+   * profile is paid on exactly one schedule, through its one pay group, and that is never guessed.
+   */
+  payGroupSave: moneyScoped(roleProcedure("payrollSchedule.payGroupSave"))
+    .input(z.object({ groupKey: REF.optional(), financialEntityId: z.number().int(), label: z.string().min(1).max(180), scheduleRef: REF.nullable(), active: z.boolean().default(true) }))
+    .mutation(async ({ ctx, input }) => {
+      requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
+      let payScheduleId: number | null = null;
+      if (input.scheduleRef) {
+        const s = await scheduleInScope(input.scheduleRef, ctx.money);
+        if (s.financialEntityId !== input.financialEntityId) throw badRequest("The schedule belongs to a different financial entity than the pay group");
+        if (s.status !== "active") throw precondition("A retired schedule pays nobody");
+        payScheduleId = s.id;
+      }
+      if (!input.groupKey) {
+        const groupKey = await sch.createPayGroup({ financialEntityId: input.financialEntityId, label: input.label, payScheduleId, active: input.active });
+        if (!groupKey) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+        return { groupKey, scheduleRef: input.scheduleRef };
+      }
+      const g = await sch.loadPayGroupByKey(input.groupKey);
+      if (!g || g.financialEntityId == null || !ownsEntity(ctx.money, g.financialEntityId)) throw notFound(`Pay group ${input.groupKey} not found`);
+      if (g.financialEntityId !== input.financialEntityId) throw badRequest("A pay group does not move between financial entities");
+      await sch.updatePayGroup({ id: g.id, label: input.label, payScheduleId, active: input.active });
+      return { groupKey: g.groupKey, scheduleRef: input.scheduleRef };
+    }),
+
+  /** Put a payroll profile in a pay group of its own book (or take it out with `groupKey: null`). */
+  profileAssignPayGroup: moneyScoped(roleProcedure("payrollSchedule.profileAssignPayGroup"))
+    .input(z.object({ employeePayrollProfileId: z.number().int(), groupKey: REF.nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const profile = await assertProfileInScope(db, input.employeePayrollProfileId, ctx.money);
+      let payGroupId: number | null = null;
+      if (input.groupKey) {
+        const g = await sch.loadPayGroupByKey(input.groupKey);
+        if (!g || g.financialEntityId == null || !ownsEntity(ctx.money, g.financialEntityId)) throw notFound(`Pay group ${input.groupKey} not found`);
+        if (g.financialEntityId !== profile.financialEntityId) throw badRequest("The pay group belongs to a different financial entity than the profile");
+        payGroupId = g.id;
+      }
+      await sch.setProfilePayGroup({ employeePayrollProfileId: profile.id, payGroupId });
+      return { employeePayrollProfileId: profile.id, groupKey: input.groupKey };
+    }),
+
   /* ---------------- The machine ---------------- */
 
   /** OPEN → REVIEWING: the administrator says the period's time and earnings are in. Runs may still collect. */
@@ -197,7 +248,7 @@ export const payrollScheduleRouter = router({
     .mutation(async ({ ctx, input }) => {
       const p = await periodInScope(input.periodRef, ctx.money);
       requireEdge(p.state as PayPeriodState, "voided");
-      const ready = voidReadiness({ runCount: (await sch.runStatesForPeriod(p.id)).length, earningCount: await sch.earningCountForPeriod(p.id) });
+      const ready = voidReadiness({ runCount: (await sch.runStatesForPeriod(p.id)).length, earningCount: await sch.earningCountForPeriod(p.id), timeEntryCount: await sch.timeEntryCountForPeriod(p.id) });
       if (!ready.ready) throw precondition(ready.reasons.join("; "));
       if (!(await sch.transitionPeriod({ id: p.id, from: p.state as PayPeriodState, to: "voided", set: { voidedByUserId: ctx.user.id, voidedAt: new Date(), voidReason: input.reason, lockedAt: new Date(), lockedByUserId: ctx.user.id } }))) throw precondition("The period moved while you were acting on it");
       return { periodRef: p.periodRef, state: "voided" as const, stateLabel: PERIOD_STATE_LABEL.voided };

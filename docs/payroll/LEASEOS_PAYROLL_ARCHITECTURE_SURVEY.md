@@ -1296,3 +1296,219 @@ Ad-hoc periods move through the same `payrollSchedule.period*` procedures (they 
   new router in the wiring sources), `operationalApiAuthorization` (803), `crossLayerIntegrity` (880 server paths),
   `migrationSlots` (head `0227`), `PROCEDURE_AUTHORIZATION_INVENTORY.md` (new row, 519 total),
   `LEASEOS_CURRENT_STATE.md`.
+
+## 26. P3 — Payroll Time, Operational Candidates, Earning Approval & Exceptions (implemented 2026-10-03)
+
+**Base:** `main` = `b36f43a` (P2 merged as #131). **Checkpoints in its history:** P0 `2552380`; P1 `84f2554`,
+`67dbbfc` (#130); P2 `459543e` (#131). **Branch:** `claude/payroll-p3-time-candidates`.
+**Migration:** **`0228_payroll_time_candidates_exceptions.sql`** — one migration, allocated immediately before it was
+written (scan of `origin/main` and all 131 remote refs: open claims `0220`–`0225`, nothing at or above `0228`) and
+re-scanned before the commit. Claim recorded in `docs/architecture/MIGRATION_COLLISION_REGISTER.md`; next free `0229`.
+
+### D11, as built
+
+```
+operational record ─► read-only candidate ─► worker submits ─► payroll time entry ─► D10 approver approves
+   ─► approved earning (approved P1 version × its rule) ─► runCollect (P0/P2 — still the only way into a run)
+```
+
+Candidates are never stored. `payrollTime.myCandidates` reads operational records scoped to the caller's
+organization and writes nothing (tested: entry, earning and exception counts are unchanged, and two reads are equal).
+No background process and no read path creates, submits or approves time. An approved earning is never placed on a
+run; `runCollect` collects it later like any other approved earning.
+
+### Schema changes (0228)
+
+| Change | Purpose |
+|---|---|
+| `payGroups.payScheduleId` | The P2 deviation resolved: profile → its one pay group → that group's schedule → the period containing the work date. No profile-level override (none was needed), so a profile has exactly one schedule path. |
+| `payrollTimeEntries` + `entryRef` (unique), `workDate` (`date`, in the schedule's zone), `earningCode` | Identity, the calendar date that decides the period and the compensation version, and the code it pays under. |
+| … + `sourceRecordType`, `sourceRecordRef`, `sourceSegment`, `candidateKey`, `sourceVersion`, `sourceFingerprint` | Provenance of a candidate-based entry (identity, version, material-fact hash). |
+| … + `notes`, `locationText`, `clientCaptureRef`, `capturedAt`, `deviceRef` | Worker context and offline capture identity (the device's claims, stored as claims). |
+| … + `createdByUserId`, `submittedBy/At`, `approvedBy/At`, `approvalRoute`, `approvalCrewRef`, `rejectedBy/At/Reason`, `withdrawnBy/At/Reason`, `supersedesEntryId`, `payrollEarningEventId` | Who did what. A rejection or withdrawal is `status = void` with its own provenance; **no status value was added**. |
+| `payrollTimeEntries.effectiveSourceKey` | PERSISTENT generated: `candidateKey` while the row is effective (not void, not superseded), else NULL; **unique** — one effective entry per source segment, across every profile. |
+| UNIQUE `(employeePayrollProfileId, clientCaptureRef)` | One capture is one entry, however often a device replays it. |
+| `payrollEarningEvents` + `earningCode`, `compensationAgreementVersionId`, `agreementVersionRef`, `rulesHash`, `compensationRuleId`, `payrollTimeEntryId` (unique), `workDate`, `workedMinutes`, `approvedByUserId`, `approvedAt` | The P1 compensation an earning was priced from, the entry it came from (one earning per entry), integer minutes, and its approver (earningApprove now records it too). |
+| `payrollExceptions` (new) | `exceptionRef`, book, period, profile, `kind` (17), `severity`, subject, deterministic `conditionKey`, `detail`, `state` open/resolved/dismissed, raiser, resolver, resolution time and note. PERSISTENT `openConditionKey` (unique) = one open exception per condition. |
+
+No floating-point money was added (the only new number is `workedMinutes`); no foreign keys; the key columns are
+`varchar(64)` because MariaDB refuses a generated expression over `CHAR` (its value depends on
+`PAD_CHAR_TO_FULL_LENGTH`) — found when 0228 first failed on a fresh database.
+
+### Candidate sources and the authority matrix
+
+| Source | Read from | Authority | What it can show | P3 time-eligible | Version used for change detection |
+|---|---|---|---|---|---|
+| `hos_duty` | `dutyRecords` (driving / on_duty only), the worker's operator, `coreRecordOwnership` | regulatory duty | a regulatory duty window — **not paid time** | yes, if the interval is closed | none (insert-only table); material facts |
+| `dispatch_booking` | `resourceBookings` (operator), its job in the organization | planned assignment | the **planned** window — not proof of work | yes, if `confirmed` | none (insert-only); material facts |
+| `field_ticket` | `fieldTickets` (operator, job in the organization), latest `fieldTicketRevisions` | actual operational | an actual window | yes, if closed or sealed | the latest sealed revision (`revN:snapshotHash`) + material facts |
+| `trip` | `trips` (operator, `orgRef`) | actual operational | distance, completion | **no** — quantity evidence | `updatedAt` + material facts |
+| `load` | `loads` (operator, job in the organization) | measured quantity | a measured quantity | **no** — quantity evidence | material facts (no version column) |
+
+Not sources, on purpose: **work orders** carry only a free-text technician and a single labour total
+(`workOrders.technician`, `laborMinutes`), which cannot be attributed to a person, so no person-level candidate is made
+from them; **training** records carry no duration and tailgate attendance is free text. Every candidate carries
+source type and ref, profile, work date, window or quantity, job/unit/trip when known, measurement authority,
+version and fingerprint, warnings (the source's authority statement first), `eligible` and the reason when not.
+
+### Identity, duplicates and idempotency
+
+- **Candidate identity** `candidateKey = sha256(canonicalJson({sourceType, sourceRef, segment}))` — the source
+  record's authoritative identity (its unique ref, or its table and primary key when it has none: `dutyRecords:41`,
+  `resourceBookings:9`). It survives edits to the source, so an edited source can never become a second payable entry.
+- **Provenance** `sourceFingerprint = sha256(canonicalJson({identity, sourceVersion, window, quantity, material facts}))`.
+- **Duplicate source:** the effective-source unique index, with the submission locking the profile row first and
+  checking the key; a second submission of the same segment is `CONFLICT` and leaves a `duplicate_entry` exception
+  (concurrent submissions: exactly one succeeds, tested with three at once).
+- **Duplicate capture:** a replay of a `clientCaptureRef` returns the first entry (`replayed: true`), sequentially and
+  concurrently (tested); the unique index stands behind the profile lock.
+- **Supersession:** a correction inserts the new row without the key, marks the old row superseded, then gives the new
+  row the key — inside one transaction. A superseded row is never payable and never counts toward overlap.
+
+### Overlap
+
+Half-open `[startedAt, endedAt)` per profile, over effective, closed, non-draft entries. Adjacent entries do not
+overlap; nested and crossing ones do. An overlap raises `overlapping_entries` on **both** entries and changes neither;
+it blocks approval until a person resolves it (tested).
+
+### Source-change contract
+
+At approval, inside the approval transaction, the source is re-read by identity **`FOR UPDATE`**, scoped to the
+organization and to the worker's operator, and its fingerprint recomputed. Different, or gone → refused with
+`source_changed_after_preparation` (blocking). A concurrent edit that holds the source row makes the approval wait and
+then see the change (tested with a second connection). The worker re-reads the source with
+`myEntryCorrect({ refreshSource: true })`, which supersedes the entry with the current version. Limitation, recorded:
+HOS duty records and dispatch bookings keep no version column, so their material facts are the comparison; loads have
+neither a version nor timestamps beyond `createdAt`.
+
+### D10 — approver resolution
+
+`resolvePayrollTimeApprovers` (pure) over the organization's **active** crews (`crews.tenantId`, `state = active`):
+the supervisors (`crewMembers.crewRole = supervisor`) of every crew the worker was a member of **at the time worked**
+whose supervisor membership is current **now**, excluding the worker. If there is none, the book's payroll
+administrators (a live `payroll_admin` grant reaching the organization, and an active membership in it). Nothing else:
+no dispatcher role, management role, job, dispatch or branch implies supervision, and `crews.supervisorUserId` is not
+read (one source of truth). With a crew supervisor in place the payroll administrator is **not** an approver (strict
+D10). The claimant, the submitter and the entry's creator are always refused (`self_approval_blocked`, recorded); with
+no approver at all the entry stays pending with `no_valid_approver`.
+
+`payroll.time.approve` / `.reject` / `.read_team` are gates held by roles that can sit on a crew (driver, mechanic,
+shop_lead, safety, management) and by payroll_admin; the handler then requires the relationship, so the role alone
+approves nothing. Dispatcher, bookkeeper and auditor are denied them by name. The team view shows worker identity,
+date, window, job, source, status and open exceptions — no rate, agreement, salary or gross (tested by key).
+
+### Period-lock interaction (D6)
+
+| Period | New time | Approving submitted time | Earning from approved time |
+|---|---|---|---|
+| OPEN (`collecting`) | yes | yes | yes |
+| REVIEWING (`review`) | **no** (refused, `locked_pay_period` recorded) | yes | yes |
+| APPROVED and later, VOIDED | no | no | no |
+
+Every one of these writes re-reads the period `FOR UPDATE` in its own transaction (a lock that lands first wins:
+tested with a second connection). This refines P2 in one respect: an earning **derived from time already approved**
+may be added while the period is REVIEWING (that is when time is approved); ad-hoc `payroll.earningPropose` stays
+OPEN-only. P2's `periodVoid` now also refuses while effective time entries reference the period. Time with no
+schedule, or no generated period for its date, is recorded with `no_pay_schedule` / `no_matching_pay_period` and
+cannot be approved until the period resolves; approval re-resolves it and closes those exceptions.
+
+### Offline semantics
+
+There is no server-side registry of typed capture kinds (sync packages become evidence records only), and D1 forbids a
+second sync engine, so P3 implements the **server contract** and defers client transport wiring:
+`myEntryCreate` accepts `clientCaptureRef` (idempotent), `capturedAt` and `deviceRef` (stored as the device's claims)
+and `captureState` (`open` or `submitted` only — `serverStateForCapture`); inputs are strict, so a payload carrying
+`status` is refused. Approval, rejection, compensation decisions, collection and finalization are online and
+server-side only. Wiring a `payroll_time_entry` capture kind into `client/src/runtime` (`CaptureKind`,
+`DIRECT_CAPTURE_KINDS`, `BoardQueue`) is a client change for P9.
+
+### Exception catalogue
+
+| Kind | Severity | Blocks | Cleared by |
+|---|---|---|---|
+| `cross_tenant_reference`, `duplicate_entry`, `locked_pay_period` | blocking | submission (refused; the exception records it) | a person |
+| `overlapping_entries`, `outside_employment`, `source_changed_after_preparation` | blocking | approval | a person (approval refuses while open) |
+| `no_pay_schedule`, `no_matching_pay_period`, `self_approval_blocked`, `no_valid_approver` | blocking | approval | the condition (approval re-checks and closes them) |
+| `no_active_agreement`, `missing_earning_code`, `earning_rule_mismatch`, `job_reference_missing` | blocking | the earning (time is still approved) | the condition (a successful `earningGenerate` closes them) |
+| `clock_variance` (submitted vs source window > 15 min), `long_shift` (> 16 h, a diagnostic), `missing_approval` (`exceptionsScan`) | review | nothing | a person |
+
+HOS disagreeing with payroll is never blocking: they are different clocks. `earning_rule_mismatch` was added to the
+September list (a code or rule that is not hourly-per-hour, or has no rate). Exception details carry no amounts.
+
+### Time → earning contract
+
+Approval of time, in the same transaction, resolves: the earning code active for the book on the work date
+(`resolveEarningCode`); the profile's agreement covering the work date (two is an integrity error); the approved or
+superseded P1 version in force on that date (`versionInForce`); that version's rule for the code. The code and rule
+must be `hourly` per `hour` with a rate; a code or rule that requires a job (or unit) needs one on the entry. Then
+`amountCents = minutes × rateMillis / 600`, on integers, rounded half-up at the cent (`hourlyAmountCents`, tested at
+1, 15, 30, 457 minutes and the half-cent boundary). The earning is written `approved`, `source = approved_timesheet`,
+with the version ref, `rulesHash`, rule id, code, minutes and approver. A legacy `payRates` key is never consulted on
+this path; legacy profiles without an agreement get `no_active_agreement` and continue to price through the documented
+P1 legacy path (`payroll.earningPropose`). `overtimeRuleJson` stays configuration: overtime is paid by submitting the
+overtime code, whose own rule carries its rate. No jurisdictional rule is assumed. `payrollTime.earningGenerate`
+(payroll_admin) retries a blocked earning once the cause is cured and may fill a missing code; it never changes hours.
+
+### Authorization changes
+
+| Permission | Holders | Sensitive |
+|---|---|---|
+| `payroll.time.read_own` | driver, mechanic, shop_lead (the holders of `payroll.time.submit_own`) | no |
+| `payroll.time.read_team`, `payroll.time.approve`, `payroll.time.reject` | driver, mechanic, shop_lead, safety, management, payroll_admin — **plus the D10 relationship in the handler** | approve, reject: yes |
+| `payroll.exception.read` | payroll_admin, hr, controller | no |
+| `payroll.exception.resolve` | payroll_admin, controller | yes |
+| `payroll.earning.approve` | payroll_admin, hr (the holders P0 gave earning approval through `payroll.review`) | yes |
+
+`payroll.earningApprove` moves from the interim `payroll.review` to `payroll.earning.approve`. The P0 note said earning
+approval would move onto `payroll.time.approve`; it does not, because that gate is held by field roles under D10 and
+must never approve money. Denied by name: dispatcher, auditor and bookkeeper the team/approval/exception/earning
+permissions; driver, mechanic and shop_lead the exception and earning permissions. Eighteen procedures: fifteen in
+`server/payrollTimeRouter.ts` (`payrollTime.*`: `myCandidates`, `myEntries`, `myEntryCreate`, `myEntryUpdate`,
+`myEntrySubmit`, `myCandidateSubmit`, `myEntryCorrect`, `myEntryWithdraw`, `teamEntries`, `entryApprove`,
+`entryReject`, `earningGenerate`, `exceptionsList`, `exceptionsScan`, `exceptionResolve`) and three in
+`payrollSchedule.*` (`payGroupsList`, `payGroupSave`, `profileAssignPayGroup`), all `moneyScoped`.
+
+### Hardening of existing paths
+
+- `payroll.submitTime` now goes through the same submission path (period lock, overlap, work date, ref) and proves
+  `jobId`/`tripId` in the organization — it accepted any id before (T13). One P0 test passed `jobId: 1`, a job of no
+  organization; it now creates a job in its own organization.
+- `payroll.profileUpsert` accepted a `payGroupId` from any book; it is now refused (not found) unless it is the
+  profile's book's, since pay groups decide schedules.
+- `payroll.earningApprove` records `approvedByUserId`/`approvedAt` on the earning.
+
+### Deviations from the September design, and why
+
+- **Migration `0228`**, not `0222` (taken long ago).
+- **No new time-entry status**: rejection and withdrawal are `void` with provenance, preferring existing states.
+- **Candidates are not persisted**; the design's T7 "the second is `held`" became a refusal with a `duplicate_entry`
+  exception — nothing payable is written twice.
+- **Work orders and training are not candidate sources** (no person-level time exists in them).
+- **Earning approval** moved to its own permission, not onto `payroll.time.approve` (see above).
+- **Exceptions** gained `earning_rule_mismatch`, `no_valid_approver`, `no_pay_schedule`, `no_matching_pay_period`,
+  `locked_pay_period`; `duplicate_expense`/`receipt_required` wait for P4; `status` is `open/resolved/dismissed`.
+- **`payRunId` on earnings** was not added: `payRunLines.payrollEarningEventId` already records collection.
+- **Offline client wiring deferred** (server contract only), per D1.
+
+### Tests
+
+- `server/_core/payrollTime.test.ts` (23, pure): candidate identity and determinism, version/fingerprint sensitivity,
+  candidates never other than `candidate`, zone-correct work dates, the authority matrix, overlap (adjacent, nested,
+  crossing), effectiveness and payability, the entry machine, profile → schedule → period (none, two), D10 (crew
+  supervisor, dispatcher and peers are not supervisors, payroll_admin fallback, nobody), exception policy, integer
+  pay, time → earning (every blocking path), the offline state guard.
+- `server/payrollTime.db.test.ts` (31, through `appRouter`): own submission; no profile/user/status from input;
+  coworker isolation; owner-operator refusal; cross-tenant entries and job ids; pay groups kept to their book; D10
+  (crew supervisor approves; other crew's supervisor, dispatcher, payroll_admin-while-a-supervisor-exists, hr,
+  controller, bookkeeper and management refused; payroll_admin fallback; claimant refused; nobody → pending);
+  rejection and withdrawal history; correction supersedes; draft edit/submit; capture replay (sequential and
+  concurrent); overlap; HOS/dispatch/field-ticket candidates write nothing; candidate submitted once; same source at
+  most once under concurrency; source change blocks approval (revision, and a concurrent edit); foreign sources;
+  period lock (reviewing refuses, in-transaction re-check under a held lock, void refused while time exists); no
+  schedule → pending until a period exists; approved time → approved earning priced from the P1 version (P1 hash
+  and rules unchanged) and collected only by `runCollect`; no agreement and no code → no earning until cured;
+  REVIEWING approves and APPROVED refuses; offline claims; role refusals for exceptions and earnings.
+- Updated: `payrollP0.db.test.ts` (the `jobId: 1` fixture), `_core/payrollSchedule.test.ts` (void readiness),
+  `financeScopeCoverage` (+ `payrollTime`, 162 money procedures), `procedureAuthorization` (821 mapped, new router in
+  the wiring sources), `operationalApiAuthorization` (821), `crossLayerIntegrity` (898), `migrationSlots` (head
+  `0228`), `PROCEDURE_AUTHORIZATION_INVENTORY.md` (537), `LEASEOS_CURRENT_STATE.md`.

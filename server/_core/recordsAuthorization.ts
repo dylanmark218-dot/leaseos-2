@@ -168,6 +168,15 @@ export type Permission =
   | "payroll.schedule.manage"
   | "payroll.finalize"
   | "payroll.void"
+  // Payroll P3 (0228) — payroll time and exceptions. Approving and rejecting time need the permission AND the D10
+  // relationship (crew supervisor, else the book's payroll admin); earning approval leaves `payroll.review`.
+  | "payroll.time.read_own"
+  | "payroll.time.read_team"
+  | "payroll.time.approve"
+  | "payroll.time.reject"
+  | "payroll.exception.read"
+  | "payroll.exception.resolve"
+  | "payroll.earning.approve"
   // Contractor settlement is its own ledger, never employee payroll.
   | "contractor.read" | "contractor.write" | "contractor.approve"
   | "finance.entity.write"
@@ -473,6 +482,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "assistant.use",
     "transfer.acknowledge",
     "payroll.time.submit_own",
+    // P3 (0228) — one's own payroll time and candidates; and, gated again by the D10 crew-supervisor relationship,
+    // the team view, approval and rejection. The role alone approves nothing.
+    "payroll.time.read_own",
+    "payroll.time.read_team",
+    "payroll.time.approve",
+    "payroll.time.reject",
     "payroll.dispute.raise_own",
     "roadside.report",
     "purchasing.request",
@@ -672,6 +687,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "assistant.use",
     "evidence.upload",
     "payroll.time.submit_own",
+    // P3 (0228) — one's own payroll time and candidates; and, gated again by the D10 crew-supervisor relationship,
+    // the team view, approval and rejection. The role alone approves nothing.
+    "payroll.time.read_own",
+    "payroll.time.read_team",
+    "payroll.time.approve",
+    "payroll.time.reject",
     "payroll.dispute.raise_own",
     "roadside.report",
     "purchasing.request",
@@ -760,6 +781,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "assistant.use",
     "evidence.upload",
     "payroll.time.submit_own",
+    // P3 (0228) — one's own payroll time and candidates; and, gated again by the D10 crew-supervisor relationship,
+    // the team view, approval and rejection. The role alone approves nothing.
+    "payroll.time.read_own",
+    "payroll.time.read_team",
+    "payroll.time.approve",
+    "payroll.time.reject",
     "payroll.dispute.raise_own",
     "funding.read",
     "roadside.report",
@@ -812,6 +839,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.meter.verify",
   ],
   safety: [
+    // P3 (0228) — the team view, approval and rejection of payroll time, gated again by the D10 crew-supervisor relationship.
+    "payroll.time.read_team",
+    "payroll.time.approve",
+    "payroll.time.reject",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -1150,6 +1181,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "maintenance.defect.send_to_shop",
   ],
   management: [
+    // P3 (0228) — the team view, approval and rejection of payroll time, gated again by the D10 crew-supervisor relationship.
+    "payroll.time.read_team",
+    "payroll.time.approve",
+    "payroll.time.reject",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -1464,6 +1499,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.read_own",
     "payroll.read_employee",
     "payroll.review",
+    // P3 (0228) — reads payroll exceptions; keeps the earning approval it held through payroll.review.
+    "payroll.exception.read",
+    "payroll.earning.approve",
     "payroll.compensation.read",
     "payroll.compensation.propose",
     "payroll.schedule.read",
@@ -1675,6 +1713,13 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.read_employee",
     "payroll.read_all",
     "payroll.review",
+    // P3 (0228) — payroll time under D10 (the fallback approver), exceptions, and earning approval.
+    "payroll.time.read_team",
+    "payroll.time.approve",
+    "payroll.time.reject",
+    "payroll.exception.read",
+    "payroll.exception.resolve",
+    "payroll.earning.approve",
     "payroll.run",
     "payroll.adjust",
     "payroll.rate.read",
@@ -1779,6 +1824,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.schedule.manage",
     "payroll.finalize",
     "payroll.void",
+    // P3 (0228) — payroll exceptions. Earning approval stays with payroll_admin and hr, the holders P0 gave it.
+    "payroll.exception.read",
+    "payroll.exception.resolve",
     "evidence.read_commercial",
     "evidence.browse",
     "evidence.export",
@@ -2003,19 +2051,28 @@ const COMPENSATION_PERMISSIONS: readonly Permission[] = ["payroll.compensation.r
   // P2 — the payroll calendar and the period machine, denied to the same roles for the same reason.
   "payroll.schedule.read", "payroll.schedule.manage", "payroll.finalize", "payroll.void"];
 
+/**
+ * P3 — authority over other people's payroll time and over payroll exceptions. Dispatch sees the operation, never
+ * decides pay: a dispatcher is denied the team view and time approval by name, so neither can ever arrive through a
+ * second role or a broad grant. The bookkeeper and the auditor read books, not timesheets.
+ */
+const TIME_AUTHORITY_PERMISSIONS: readonly Permission[] = ["payroll.time.read_team", "payroll.time.approve", "payroll.time.reject", "payroll.exception.read", "payroll.exception.resolve", "payroll.earning.approve"];
+/** Field roles approve their crew's time under D10; they do not read exceptions or approve earnings. */
+const PAYROLL_OFFICE_PERMISSIONS: readonly Permission[] = ["payroll.exception.read", "payroll.exception.resolve", "payroll.earning.approve"];
+
 const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
-  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
-  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
-  dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
-  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
-  auditor: ["payroll.read", "billing.write", "personnel.write", ...COMPENSATION_PERMISSIONS],
+  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...PAYROLL_OFFICE_PERMISSIONS],
+  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...PAYROLL_OFFICE_PERMISSIONS],
+  dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...TIME_AUTHORITY_PERMISSIONS],
+  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...PAYROLL_OFFICE_PERMISSIONS],
+  auditor: ["payroll.read", "billing.write", "personnel.write", ...COMPENSATION_PERMISSIONS, ...TIME_AUTHORITY_PERMISSIONS],
 
   // The banking and tax-identifier reads are held by nobody in this model.
   // They exist so the permission has a name to be denied under, and so adding
   // a holder is a deliberate, reviewable act rather than a side effect of a
   // broad grant. Same reason `authority_certified` sits empty in the
   // measurement ladder.
-  bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve", ...COMPENSATION_PERMISSIONS],
+  bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve", ...COMPENSATION_PERMISSIONS, ...TIME_AUTHORITY_PERMISSIONS],
   // P1 — the administrator proposes compensation; approving it is the controller's (D4).
   payroll_admin: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.approve", "billing.write", "payroll.compensation.approve", "payroll.void"],
   tax_preparer: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "billing.write", "banking.reconcile"],
@@ -2242,6 +2299,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "payroll.schedule.manage",
   "payroll.finalize",
   "payroll.void",
+  "payroll.time.approve",
+  "payroll.time.reject",
+  "payroll.exception.resolve",
+  "payroll.earning.approve",
   "contractor.approve",
   "finance.entity.write",
   // B20.13 — a claim ties an expense to a program on the stacking ledger, and
@@ -2956,7 +3017,8 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   // the reviewer's act (payroll_admin, hr): the human door between a proposed earning and a payable line.
   "payroll.runCollect": "payroll.run",
   "payroll.runSubmit": "payroll.run",
-  "payroll.earningApprove": "payroll.review",
+  // P3 — earning approval leaves the interim `payroll.review` for its own sensitive permission.
+  "payroll.earningApprove": "payroll.earning.approve",
   "payroll.runApprove": "payroll.approve",
   "payroll.adjustmentRequest": "payroll.adjust",
   "payroll.adjustmentApprove": "payroll.approve",
@@ -2989,6 +3051,25 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "payrollSchedule.periodProcess": "payroll.run",
   "payrollSchedule.periodFinalize": "payroll.finalize",
   "payrollSchedule.periodVoid": "payroll.void",
+  "payrollSchedule.payGroupsList": "payroll.schedule.read",
+  "payrollSchedule.payGroupSave": "payroll.schedule.manage",
+  "payrollSchedule.profileAssignPayGroup": "payroll.schedule.manage",
+  // Payroll P3 (0228) — payroll time. Own procedures resolve the profile from the session; team ones add D10.
+  "payrollTime.myCandidates": "payroll.time.read_own",
+  "payrollTime.myEntries": "payroll.time.read_own",
+  "payrollTime.myEntryCreate": "payroll.time.submit_own",
+  "payrollTime.myEntryUpdate": "payroll.time.submit_own",
+  "payrollTime.myEntrySubmit": "payroll.time.submit_own",
+  "payrollTime.myCandidateSubmit": "payroll.time.submit_own",
+  "payrollTime.myEntryCorrect": "payroll.time.submit_own",
+  "payrollTime.myEntryWithdraw": "payroll.time.submit_own",
+  "payrollTime.teamEntries": "payroll.time.read_team",
+  "payrollTime.entryApprove": "payroll.time.approve",
+  "payrollTime.entryReject": "payroll.time.reject",
+  "payrollTime.earningGenerate": "payroll.run",
+  "payrollTime.exceptionsList": "payroll.exception.read",
+  "payrollTime.exceptionsScan": "payroll.exception.resolve",
+  "payrollTime.exceptionResolve": "payroll.exception.resolve",
 
   "contractors.settlementsList": "contractor.read",
   "contractors.settlementCreate": "contractor.write",

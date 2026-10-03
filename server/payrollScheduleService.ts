@@ -5,9 +5,9 @@
  * module writes rows, in a transaction where the schedule must be locked (generation) and with a guarded UPDATE
  * where a transition must not race another (`WHERE state = from`).
  */
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "./db";
-import { payPeriods, payRuns, payrollEarningEvents, paySchedules } from "../drizzle/schema";
+import { employeePayrollProfiles, payGroups, payPeriods, payRuns, payrollEarningEvents, payrollTimeEntries, paySchedules } from "../drizzle/schema";
 import { dateText } from "./payrollCompensationService";
 import { fromDateText } from "./_core/transport/fields";
 import type { GeneratedPeriod, PayPeriodState } from "./_core/payrollSchedule";
@@ -127,4 +127,47 @@ export async function transitionPeriod(args: { id: number; from: PayPeriodState;
   if (!db) return false;
   const r = await db.update(payPeriods).set({ ...args.set, state: args.to }).where(and(eq(payPeriods.id, args.id), eq(payPeriods.state, args.from)));
   return (r[0]?.affectedRows ?? 0) === 1;
+}
+
+/* ---------------- Pay groups → schedules (P3, 0228) ---------------- */
+
+export async function listPayGroups(entityIds: readonly number[]) {
+  const db = await getDb();
+  if (!db || !entityIds.length) return [];
+  return db.select({ id: payGroups.id, groupKey: payGroups.groupKey, label: payGroups.label, financialEntityId: payGroups.financialEntityId, active: payGroups.active, payScheduleId: payGroups.payScheduleId, scheduleRef: paySchedules.scheduleRef })
+    .from(payGroups).leftJoin(paySchedules, eq(paySchedules.id, payGroups.payScheduleId))
+    .where(inArray(payGroups.financialEntityId, [...entityIds])).orderBy(asc(payGroups.id)).limit(500);
+}
+
+export async function loadPayGroupByKey(groupKey: string) {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select().from(payGroups).where(eq(payGroups.groupKey, groupKey)).limit(1))[0] ?? null;
+}
+
+export async function createPayGroup(values: { financialEntityId: number; label: string; payScheduleId: number | null; active: boolean }) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const groupKey = ref("PG");
+  await db.insert(payGroups).values({ ...values, groupKey });
+  return groupKey;
+}
+
+export async function updatePayGroup(args: { id: number; label: string; payScheduleId: number | null; active: boolean }) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(payGroups).set({ label: args.label, payScheduleId: args.payScheduleId, active: args.active }).where(eq(payGroups.id, args.id));
+}
+
+export async function setProfilePayGroup(args: { employeePayrollProfileId: number; payGroupId: number | null }) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(employeePayrollProfiles).set({ payGroupId: args.payGroupId }).where(eq(employeePayrollProfiles.id, args.employeePayrollProfileId));
+}
+
+/** Effective time entries on a period (P3): a worker's submitted claim keeps a period from being voided. */
+export async function timeEntryCountForPeriod(payPeriodId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  return Number((await db.select({ n: sql<number>`count(*)` }).from(payrollTimeEntries).where(and(eq(payrollTimeEntries.payPeriodId, payPeriodId), ne(payrollTimeEntries.status, "void"), isNull(payrollTimeEntries.supersededByEntryId))))[0]?.n ?? 0);
 }

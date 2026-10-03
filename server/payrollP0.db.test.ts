@@ -86,8 +86,10 @@ d("P0.1 — my statements are mine", () => {
     const colleague = await member(c.orgRef, ["driver"]);
     const colleagueNumber = `EMP-${rnd()}`;
     await callerFor(c.admin).payroll.profileUpsert({ employeeNumber: colleagueNumber, financialEntityId: c.entityId, userId: colleague, workerKind: "employee", employmentType: "full_time", defaultPayMethod: "hourly" });
-    await callerFor(c.worker).payroll.submitTime({ activity: "driving", startedAt: new Date("2026-09-03T08:00:00Z"), endedAt: new Date("2026-09-03T16:00:00Z"), jobId: 1 });
-    await callerFor(colleague).payroll.submitTime({ activity: "driving", startedAt: new Date("2026-09-03T08:00:00Z"), endedAt: new Date("2026-09-03T16:00:00Z"), jobId: 1 });
+    // P3: the job must be this organization's (submitTime used to accept any id, including another company's).
+    const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, orgRef) VALUES (?,?,?,?,'dispatched',?)", [`JOB-${rnd()}`, "Hydrovac", "Fixture Energy", "10-22-045-06-W5", c.orgRef]);
+    await callerFor(c.worker).payroll.submitTime({ activity: "driving", startedAt: new Date("2026-09-03T08:00:00Z"), endedAt: new Date("2026-09-03T16:00:00Z"), jobId: job.insertId });
+    await callerFor(colleague).payroll.submitTime({ activity: "driving", startedAt: new Date("2026-09-03T08:00:00Z"), endedAt: new Date("2026-09-03T16:00:00Z"), jobId: job.insertId });
 
     const e = await approvedEarning(c, 8);
     const run = await paidRun(c);

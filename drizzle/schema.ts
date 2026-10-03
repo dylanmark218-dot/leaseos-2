@@ -3325,6 +3325,8 @@ export const payGroups = mysqlTable("payGroups", {
   financialEntityId: int("financialEntityId"),
   active: boolean("active").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0228 (P3) — the schedule this group's people are paid on: profile → pay group → schedule → period. */
+  payScheduleId: int("payScheduleId"),
 });
 
 /** 0226 (D9) — `organizationWorkers.workerType`, the one classification vocabulary payroll snapshots. */
@@ -3417,6 +3419,38 @@ export const payrollTimeEntries = mysqlTable("payrollTimeEntries", {
   supersededByEntryId: int("supersededByEntryId"),
   status: mysqlEnum("status", ["open", "submitted", "verified", "disputed", "approved", "void"]).default("open").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0228 (P3) — identity, work date (in the schedule's zone), earning code, source provenance, offline capture, actors. */
+  entryRef: varchar("entryRef", { length: 64 }).unique(),
+  workDate: date("workDate", { mode: "string" }),
+  earningCode: varchar("earningCode", { length: 40 }),
+  sourceRecordType: mysqlEnum("sourceRecordType", ["hos_duty", "dispatch_booking", "trip", "load", "field_ticket"]),
+  sourceRecordRef: varchar("sourceRecordRef", { length: 120 }),
+  sourceSegment: varchar("sourceSegment", { length: 120 }),
+  candidateKey: varchar("candidateKey", { length: 64 }),
+  sourceVersion: varchar("sourceVersion", { length: 160 }),
+  sourceFingerprint: varchar("sourceFingerprint", { length: 64 }),
+  notes: varchar("notes", { length: 1000 }),
+  locationText: varchar("locationText", { length: 200 }),
+  clientCaptureRef: varchar("clientCaptureRef", { length: 80 }),
+  capturedAt: timestamp("capturedAt"),
+  deviceRef: varchar("deviceRef", { length: 120 }),
+  createdByUserId: int("createdByUserId"),
+  submittedByUserId: int("submittedByUserId"),
+  submittedAt: timestamp("submittedAt"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  approvalRoute: mysqlEnum("approvalRoute", ["crew_supervisor", "payroll_admin"]),
+  approvalCrewRef: varchar("approvalCrewRef", { length: 64 }),
+  rejectedByUserId: int("rejectedByUserId"),
+  rejectedAt: timestamp("rejectedAt"),
+  rejectionReason: varchar("rejectionReason", { length: 400 }),
+  withdrawnByUserId: int("withdrawnByUserId"),
+  withdrawnAt: timestamp("withdrawnAt"),
+  withdrawReason: varchar("withdrawReason", { length: 400 }),
+  supersedesEntryId: int("supersedesEntryId"),
+  payrollEarningEventId: int("payrollEarningEventId"),
+  /** PERSISTENT generated (0228): `candidateKey` while the row is effective (not void, not superseded), else NULL; unique. Never written. */
+  effectiveSourceKey: varchar("effectiveSourceKey", { length: 64 }),
 });
 
 export const payrollTimeReconciliations = mysqlTable("payrollTimeReconciliations", {
@@ -3455,6 +3489,17 @@ export const payrollEarningEvents = mysqlTable("payrollEarningEvents", {
   blockedReason: varchar("blockedReason", { length: 300 }),
   status: mysqlEnum("status", ["pending", "verified", "approved", "held", "paid", "void"]).default("pending").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0228 (P3) — the P1 compensation it was priced from, the time entry it came from (unique), integer minutes, approver. */
+  earningCode: varchar("earningCode", { length: 40 }),
+  compensationAgreementVersionId: int("compensationAgreementVersionId"),
+  agreementVersionRef: varchar("agreementVersionRef", { length: 64 }),
+  rulesHash: varchar("rulesHash", { length: 64 }),
+  compensationRuleId: int("compensationRuleId"),
+  payrollTimeEntryId: int("payrollTimeEntryId").unique(),
+  workDate: date("workDate", { mode: "string" }),
+  workedMinutes: int("workedMinutes"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
 });
 
 export const payrollEarningEvidence = mysqlTable("payrollEarningEvidence", {
@@ -10569,3 +10614,36 @@ export const paySchedules = mysqlTable("paySchedules", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type PayScheduleRow = typeof paySchedules.$inferSelect;
+
+/* ---- 0228: Payroll P3 — payroll exceptions ---- */
+
+export const PAYROLL_EXCEPTION_KIND_VALUES = [
+  "missing_approval", "overlapping_entries", "duplicate_entry", "no_active_agreement", "missing_earning_code",
+  "earning_rule_mismatch", "outside_employment", "long_shift", "job_reference_missing", "source_changed_after_preparation",
+  "clock_variance", "cross_tenant_reference", "self_approval_blocked", "no_valid_approver", "no_pay_schedule",
+  "no_matching_pay_period", "locked_pay_period",
+] as const;
+
+/** Review signals with a deterministic condition key; one open row per condition. They never alter pay by themselves. */
+export const payrollExceptions = mysqlTable("payrollExceptions", {
+  id: int("id").autoincrement().primaryKey(),
+  exceptionRef: varchar("exceptionRef", { length: 64 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  payPeriodId: int("payPeriodId"),
+  employeePayrollProfileId: int("employeePayrollProfileId"),
+  kind: mysqlEnum("kind", PAYROLL_EXCEPTION_KIND_VALUES).notNull(),
+  severity: mysqlEnum("severity", ["blocking", "review"]).notNull(),
+  subjectType: varchar("subjectType", { length: 40 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  conditionKey: varchar("conditionKey", { length: 64 }).notNull(),
+  detail: varchar("detail", { length: 500 }).notNull(),
+  state: mysqlEnum("state", ["open", "resolved", "dismissed"]).default("open").notNull(),
+  raisedByUserId: int("raisedByUserId"),
+  resolvedByUserId: int("resolvedByUserId"),
+  resolvedAt: timestamp("resolvedAt"),
+  resolutionNote: varchar("resolutionNote", { length: 1000 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** PERSISTENT generated (0228): `conditionKey` while open, else NULL; unique. Never written. */
+  openConditionKey: varchar("openConditionKey", { length: 64 }),
+});
+export type PayrollExceptionRow = typeof payrollExceptions.$inferSelect;

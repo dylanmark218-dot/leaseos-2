@@ -55,6 +55,7 @@ import {
 } from "./payrollRouter";
 import { payrollCompensationRouter } from "./payrollCompensationRouter";   // payroll P1 (0226)
 import { payrollScheduleRouter } from "./payrollScheduleRouter";   // payroll P2 (0227)
+import { payrollTimeRouter } from "./payrollTimeRouter";   // payroll P3 (0228)
 import { fundingRouter, portalsRouter } from "./portalFundingRouter";
 import { purchasingRouter, recoveryRouter, roadsideRouter, vendorRouter } from "./purchasingRouter";
 import { deviceRouter, syncRouter } from "./deviceRouter";
@@ -381,6 +382,7 @@ export const appRouter = router({
   payroll: payrollRouter,
   payrollCompensation: payrollCompensationRouter,
   payrollSchedule: payrollScheduleRouter,
+  payrollTime: payrollTimeRouter,
   contractors: contractorRouter,
   contractorOperations: contractorOperationsRouter,
   finance: financeRouter,

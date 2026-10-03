@@ -119,5 +119,6 @@ describe("P2 — the pay-period machine", () => {
     expect(finalizeReadiness(["paid", "processing"]).reasons[0]).toMatch(/not paid yet \(processing\)/);
     expect(voidReadiness({ runCount: 0, earningCount: 0 }).ready).toBe(true);
     expect(voidReadiness({ runCount: 1, earningCount: 2 }).reasons).toEqual(["1 pay run(s) reference this period", "2 earning(s) reference this period"]);
+    expect(voidReadiness({ runCount: 0, earningCount: 0, timeEntryCount: 1 }).reasons).toEqual(["1 time entry reference this period"]);
   });
 });

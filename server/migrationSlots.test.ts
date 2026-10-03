@@ -67,7 +67,10 @@ describe("the real tree", () => {
     expect(files).toContain("0226_payroll_compensation_agreements.sql");
     // Payroll P2 took 0227 (pay schedules): 0223–0225 are still claimed by open branches, below main's 0226.
     expect(files).toContain("0227_payroll_pay_schedules.sql");
-    expect(headSlot(files)).toBe("0227");
+    // Payroll P3 took 0228 (payroll time, candidates, exceptions): scanned immediately before it was written; nothing
+    // in any lineage held 0228 or above.
+    expect(files).toContain("0228_payroll_time_candidates_exceptions.sql");
+    expect(headSlot(files)).toBe("0228");
   });
 
   it("keeps the reserved slots empty", () => {
