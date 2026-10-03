@@ -67,7 +67,7 @@ async function company() {
 }
 
 d("the driver's own wallet", () => {
-  it("answers for the caller's operator only, and says READY FOR WORK only while it holds", async () => {
+  it("answers for the caller's operator only, and says BASELINE MET only while it holds", async () => {
     const c = await company();
     await as(c.safety).driverPortfolio.requirementCreate({ subjectType: "company", subjectCode: "*", requirementKind: "credential", requirementCode: "H2S Alive" });
     await as(c.safety).driverPortfolio.requirementCreate({ subjectType: "company", subjectCode: "*", requirementKind: "credential", requirementCode: "confined_space", enforcement: "informational" });
@@ -81,7 +81,7 @@ d("the driver's own wallet", () => {
     await credential(c.operatorId, "h2s_alive", { expiresAt: days(5) });
     const w = await as(c.driver).driverPortfolio.myWallet();
     // The informational requirement is missing and still does not stop the driver.
-    expect(w.status).toBe("READY FOR WORK");
+    expect(w.status).toBe("BASELINE MET");
     expect(w.cards.find(x => x.code === "confined_space")).toMatchObject({ required: "informational", satisfied: false });
     expect(w.cards.find(x => x.code === "h2s_alive")).toMatchObject({ warningTier: 7, verification: "verified" });
     // The offline contract: a required ticket lapsing in five days shortens the 24-hour allowance only when sooner.
@@ -98,7 +98,7 @@ d("the driver's own wallet", () => {
     const lapse = new Date(Math.floor((Date.now() + 3 * 3_600_000) / 1000) * 1000);
     await credential(c.operatorId, "first_aid_cpr", { expiresAt: lapse });
     const w = await as(c.driver).driverPortfolio.myWallet();
-    expect(w.status).toBe("READY FOR WORK");
+    expect(w.status).toBe("BASELINE MET");
     expect(w.cache).toMatchObject({ limitedBy: "credential_expiry", limitingCredential: { code: "first_aid_cpr" } });
     expect(w.cache.validUntil.getTime()).toBe(lapse.getTime());
     expect(walletStatusAt({ headline: w.headline, validUntil: w.cache.validUntil }, new Date(lapse.getTime() + 60_000))).toBe("STALE");
@@ -229,7 +229,7 @@ d("the credential verification workflow", () => {
     await expect(as(other.safety).driverPortfolio.credentialVerify({ credentialId, outcome: "verified" })).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect((await as(c.safety).driverPortfolio.verificationQueue({})).map(q => q.credentialId)).toContain(credentialId);
     await as(c.safety).driverPortfolio.credentialVerify({ credentialId, outcome: "verified" });
-    expect((await as(c.driver).driverPortfolio.myWallet()).status).toBe("READY FOR WORK");
+    expect((await as(c.driver).driverPortfolio.myWallet()).status).toBe("BASELINE MET");
     await expect(as(c.safety).driverPortfolio.credentialVerify({ credentialId, outcome: "rejected" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     const ev = await events(c.operatorId);
     expect(ev.map(e => e.eventType)).toEqual(expect.arrayContaining(["credential_uploaded", "credential_verified"]));
