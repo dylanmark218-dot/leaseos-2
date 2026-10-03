@@ -113,6 +113,11 @@ export const CLASSIFICATION: readonly Rule[] = [
   r("driver.academy.conditions", /^academy_binding_conditions_unknown$/, "driver_qualification", "carrier_safety_policy", ...UNKNOWN_BLOCKS),
   r("driver.academy.review", /^academy_review_/, "driver_qualification", "carrier_safety_policy", ...WARN_ACK),
   r("driver.academy.unsatisfied", /^academy_/, "driver_qualification", "carrier_safety_policy", ...HARD),
+  /* Driver Portfolio requirement bindings (0210): company, client, site, job-type, equipment and job
+   * requirements. Only mandatory bindings produce these codes; informational ones produce none. */
+  r("driver.portfolio.unlinked", /^portfolio_operator_unlinked$/, "driver_qualification", "carrier_safety_policy", ...UNKNOWN_BLOCKS),
+  r("driver.portfolio.unknown", /^driver_(credential|licence_class|equipment)_.+_(unverified|no_expiry_recorded|class_unknown|unknown_requirement)$/, "driver_qualification", "carrier_safety_policy", ...UNKNOWN_BLOCKS),
+  r("driver.portfolio.unsatisfied", /^driver_(credential|licence_class|equipment)_/, "driver_qualification", "carrier_safety_policy", ...HARD),
 
   /* hours of service */
   r("hos.insufficient", /^hos_insufficient$/, "hos", "statute_regulation", ...HARD),

@@ -13,6 +13,7 @@
 
 import { and, desc, eq, gte, lte, inArray } from "drizzle-orm";
 import { getDb } from "./db";
+import type { Tx } from "./_core/dbTypes";
 import {
   contractorSettlementLines,
   contractorSettlements,
@@ -804,10 +805,22 @@ type TrailRow = { actorUserId: number; procedureName: string; permission: string
  * Create a pay run and its originator row in one transaction. A run whose creator could not
  * be recorded is not created: separation of duties later depends on this row existing.
  */
+/**
+ * P2 lock, re-read inside the insert's transaction with the period row locked, so an approval that lands between the
+ * router's check and the insert cannot let a row into a locked period (the approval's guarded UPDATE waits on this).
+ */
+async function requirePeriodState(tx: Tx, payPeriodId: number, accepted: readonly string[], what: string) {
+  const period = (await tx.select({ state: payPeriods.state }).from(payPeriods).where(eq(payPeriods.id, payPeriodId)).for("update").limit(1))[0];
+  if (!period || !accepted.includes(period.state)) {
+    throw Object.assign(new Error(`Pay period is ${period?.state ?? "missing"}; ${what}`), { code: "PRECONDITION_FAILED" });
+  }
+}
+
 export async function createPayRunWithTrail(args: { run: typeof payRuns.$inferInsert; trail: TrailRow }) {
   const db = await getDb();
   if (!db) return undefined;
   return db.transaction(async tx => {
+    await requirePeriodState(tx, args.run.payPeriodId, ["collecting", "review"], "a pay run is created only on an open or reviewing period");
     const r = await tx.insert(payRuns).values(args.run);
     const id = Number(r[0]?.insertId);
     const t = await tx.insert(authorizationDecisions).values({
@@ -824,6 +837,7 @@ export async function insertEarningWithTrail(args: { earning: typeof payrollEarn
   const db = await getDb();
   if (!db) return undefined;
   return db.transaction(async tx => {
+    await requirePeriodState(tx, args.earning.payPeriodId, ["collecting"], "earnings are proposed only into an open period");
     const r = await tx.insert(payrollEarningEvents).values(args.earning);
     const id = Number(r[0]?.insertId);
     const t = await tx.insert(authorizationDecisions).values({
@@ -877,6 +891,11 @@ export async function collectApprovedEarnings(args: { payRunRef: string }): Prom
     if (!run) return null;
     if (!payRunMayCollect(run.state)) {
       throw Object.assign(new Error(`Pay run is ${run.state}; lines may be collected only in draft or collecting`), { code: "PRECONDITION_FAILED" });
+    }
+    // P2 lock, read under the run's lock: a locked period takes no more lines.
+    const period = (await tx.select({ state: payPeriods.state }).from(payPeriods).where(eq(payPeriods.id, run.payPeriodId)).for("update").limit(1))[0];
+    if (!period || !(period.state === "collecting" || period.state === "review")) {
+      throw Object.assign(new Error(`Pay period is ${period?.state ?? "missing"}; lines are collected only while the period is open or under review`), { code: "PRECONDITION_FAILED" });
     }
     if (run.state === "draft") {
       await tx.update(payRuns).set({ state: "collecting" }).where(eq(payRuns.id, run.id));
