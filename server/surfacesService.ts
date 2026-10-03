@@ -9,9 +9,10 @@
 
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
-import { getDb, jobInScope, orgScopeWhere, ownershipScopeWhere, tripInScope, unitInScope } from "./db";
-import { bookOrgWhere, ownedEntityWhere, type FinanceScope } from "./_core/entityScope";
-import { jobKeyedWhere, unitKeyedWhere } from "./financeScope";
+import { complianceDocumentScopeWhere, getDb, jobInScope, jobScopeSubquery, orgScopeWhere, ownershipScopeWhere, tripInScope, tripScopeSubquery, unitInScope } from "./db";
+import { projectComplianceDocument } from "./_core/complianceProjection";
+import { bookOrgWhere, entityIdsInScope, ownedEntityWhere, type FinanceScope } from "./_core/entityScope";
+import { jobKeyedWhere, unitKeyedWhere, userKeyedWhere } from "./financeScope";
 import {
   assistantCommitReceipts, assistantProposals, assistantQuestions, calibrationEvents, carrierProfileReviews,
   billingBooks, calibrationSweeps, complianceDocuments, disposalTickets, fieldTickets, manifests, fieldDevices, fuelTransactions, insurancePolicies, invoices, jobs, loads,
@@ -48,7 +49,23 @@ async function loadFacilityDirectoryExceptions(db: Awaited<ReturnType<typeof get
   };
 }
 
-export async function loadExceptionSources(now = new Date()): Promise<ExceptionSources> {
+/** Field devices the scope's organization holds; a sync conflict belongs to the device that raised it. */
+function devicesInScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, fs: FinanceScope) {
+  return db.select({ id: fieldDevices.id }).from(fieldDevices).where(bookOrgWhere(fieldDevices.orgRef, fs));
+}
+
+/**
+ * SEC-1 — every source the exception centre reads, through the caller's organization or books.
+ *
+ * The scope is required: this used to take none and read every organization's defects, bills,
+ * purchase requests, credentials, proposals, conflicts, devices, policies, inspector requests and
+ * open security incidents, filtered afterwards by permission only. Each source now carries the
+ * chain its table already has, in the idiom `searchEverything` uses (P0-A3): a unit's owner, a
+ * job's or trip's organization, a money record's book, a field device's organization, a person's
+ * membership. The facility directory is the one shared source — a public regulator directory, not
+ * any organization's records.
+ */
+export async function loadExceptionSources(fs: FinanceScope, now = new Date()): Promise<ExceptionSources> {
   const db = await getDb();
   const empty: ExceptionSources = {
     now, criticalDefects: [], roadsideOpen: [], vendorBills: [], purchaseRequests: [], credentialsAwaitingVerification: [], credentialVerdicts: [], aiProposals: [], aiQuestions: [],
@@ -60,31 +77,40 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   const [defects, roadside, bills, pas, creds, proposals, questions, conflicts, revoked, devices, policies, reviews] = await Promise.all([
     db.select({ id: maintenanceDefects.id, unitId: maintenanceDefects.unitId, title: maintenanceDefects.title, reportedAt: maintenanceDefects.reportedAt, status: maintenanceDefects.status, unitNumber: units.unitNumber })
       .from(maintenanceDefects).leftJoin(units, eq(units.id, maintenanceDefects.unitId))
-      .where(and(eq(maintenanceDefects.severity, "critical"), inArray(maintenanceDefects.status, ["open", "in_progress"]))).limit(500),
+      .where(and(eq(maintenanceDefects.severity, "critical"), inArray(maintenanceDefects.status, ["open", "in_progress"]), unitKeyedWhere(maintenanceDefects.unitId, fs))).limit(500),
     db.select({ id: roadsideServiceEvents.id, eventRef: roadsideServiceEvents.eventRef, eventType: roadsideServiceEvents.eventType, occurredAt: roadsideServiceEvents.occurredAt, assignedVendorId: roadsideServiceEvents.assignedVendorId, unitNumber: units.unitNumber })
       .from(roadsideServiceEvents).leftJoin(units, eq(units.id, roadsideServiceEvents.unitId))
-      .where(inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"])).limit(500),
+      .where(and(inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"]), unitKeyedWhere(roadsideServiceEvents.unitId, fs))).limit(500),
     db.select({ id: vendorBills.id, billRef: vendorBills.billRef, totalCents: vendorBills.totalCents, status: vendorBills.status, matchOutcome: vendorBills.matchOutcome, receivedAt: vendorBills.receivedAt, dueAt: vendorBills.dueAt, vendorName: vendors.name })
       .from(vendorBills).leftJoin(vendors, eq(vendors.id, vendorBills.vendorId))
-      .where(inArray(vendorBills.status, ["needs_coding", "needs_approval", "missing_receipt", "mismatch", "duplicate_suspected"])).limit(500),
-    db.select().from(purchaseAuthorizations).where(eq(purchaseAuthorizations.status, "requested")).limit(500),
-    db.select({ id: complianceDocuments.id, ownerType: complianceDocuments.ownerType, ownerId: complianceDocuments.ownerId, docType: complianceDocuments.docType, title: complianceDocuments.title, expiresAt: complianceDocuments.expiresAt, pendingReview: sql<boolean>`${complianceDocuments.verificationStatus} = 'needs_review'`.mapWith(Boolean) })
+      .where(and(inArray(vendorBills.status, ["needs_coding", "needs_approval", "missing_receipt", "mismatch", "duplicate_suspected"]), ownedEntityWhere(vendorBills.financialEntityId, fs))).limit(500),
+    db.select().from(purchaseAuthorizations).where(and(eq(purchaseAuthorizations.status, "requested"), ownedEntityWhere(purchaseAuthorizations.financialEntityId, fs))).limit(500),
+    db.select({ id: complianceDocuments.id, ownerType: complianceDocuments.ownerType, ownerId: complianceDocuments.ownerId, docType: complianceDocuments.docType, title: complianceDocuments.title, privateDetail: complianceDocuments.privateDetail, expiresAt: complianceDocuments.expiresAt, pendingReview: sql<boolean>`${complianceDocuments.verificationStatus} = 'needs_review'`.mapWith(Boolean) })
       .from(complianceDocuments)
-      .where(or(eq(complianceDocuments.verificationStatus, "needs_review"), and(lte(complianceDocuments.expiresAt, horizon), eq(complianceDocuments.verificationStatus, "verified")))).limit(2000),
+      .where(and(or(eq(complianceDocuments.verificationStatus, "needs_review"), and(lte(complianceDocuments.expiresAt, horizon), eq(complianceDocuments.verificationStatus, "verified"))), complianceDocumentScopeWhere(fs))).limit(2000)
+      // A credential awaiting review is listed by title; a private one's title is its content (complianceProjection.ts).
+      .then(rows => rows.map(projectComplianceDocument)),
     db.select({ proposalId: assistantProposals.proposalId, formKey: assistantProposals.formKey, title: assistantProposals.title, createdAt: assistantProposals.createdAt, commitState: assistantProposals.commitState })
-      .from(assistantProposals).where(eq(assistantProposals.commitState, "awaiting_readback")).limit(500),
+      .from(assistantProposals).where(and(
+        eq(assistantProposals.commitState, "awaiting_readback"),
+        // Every anchor in scope, as proposalInScope requires; an unanchored proposal stays with the single tenant.
+        fs.tenantId === SINGLE_TENANT_ID ? undefined : or(isNotNull(assistantProposals.jobId), isNotNull(assistantProposals.tripId), isNotNull(assistantProposals.unitId)),
+        or(isNull(assistantProposals.jobId), inArray(assistantProposals.jobId, jobScopeSubquery(db, fs))),
+        or(isNull(assistantProposals.tripId), inArray(assistantProposals.tripId, tripScopeSubquery(db, fs))),
+        or(isNull(assistantProposals.unitId), unitKeyedWhere(assistantProposals.unitId, fs)),
+      )).limit(500),
     db.select({ askedToUserId: assistantQuestions.askedToUserId, count: sql<number>`count(*)`, oldest: sql<Date | null>`min(${assistantQuestions.createdAt})` })
-      .from(assistantQuestions).where(eq(assistantQuestions.status, "pending")).groupBy(assistantQuestions.askedToUserId),
+      .from(assistantQuestions).where(and(eq(assistantQuestions.status, "pending"), userKeyedWhere(db, assistantQuestions.askedToUserId, fs))).groupBy(assistantQuestions.askedToUserId),
     db.select({ id: syncConflicts.id, conflictRef: syncConflicts.conflictRef, recordType: syncConflicts.recordType, recordRef: syncConflicts.recordRef, material: syncConflicts.material, detectedAt: syncConflicts.detectedAt })
-      .from(syncConflicts).where(eq(syncConflicts.status, "unresolved")).limit(500),
+      .from(syncConflicts).where(and(eq(syncConflicts.status, "unresolved"), inArray(syncConflicts.fieldDeviceId, devicesInScope(db, fs)))).limit(500),
     db.select({ deviceRef: fieldDevices.deviceRef, userId: fieldDevices.userId, revokedAt: fieldDevices.revokedAt, queued: sql<number>`count(${syncPackages.id})` })
       .from(fieldDevices).innerJoin(syncPackages, and(eq(syncPackages.fieldDeviceId, fieldDevices.id), eq(syncPackages.state, "queued")))
-      .where(eq(fieldDevices.status, "revoked")).groupBy(fieldDevices.id),
-    db.select().from(measurementDevices).where(inArray(measurementDevices.status, ["active", "out_of_service"])).limit(500),
+      .where(and(eq(fieldDevices.status, "revoked"), bookOrgWhere(fieldDevices.orgRef, fs))).groupBy(fieldDevices.id),
+    db.select().from(measurementDevices).where(and(inArray(measurementDevices.status, ["active", "out_of_service"]), ownedEntityWhere(measurementDevices.financialEntityId, fs))).limit(500),
     db.select({ policyRef: insurancePolicies.policyRef, policyType: insurancePolicies.policyType, expiresAt: insurancePolicies.expiresAt, status: insurancePolicies.status })
-      .from(insurancePolicies).where(lte(insurancePolicies.expiresAt, horizon)).limit(500),
+      .from(insurancePolicies).where(and(lte(insurancePolicies.expiresAt, horizon), ownedEntityWhere(insurancePolicies.financialEntityId, fs))).limit(500),
     db.select({ reviewRef: carrierProfileReviews.reviewRef, unmatchedExternalEvents: carrierProfileReviews.unmatchedExternalEvents, reviewedAt: carrierProfileReviews.reviewedAt, nextReviewDueAt: carrierProfileReviews.nextReviewDueAt })
-      .from(carrierProfileReviews).orderBy(desc(carrierProfileReviews.profileObtainedAt)).limit(50),
+      .from(carrierProfileReviews).where(ownedEntityWhere(carrierProfileReviews.financialEntityId, fs)).orderBy(desc(carrierProfileReviews.profileObtainedAt)).limit(50),
   ]);
 
   // Owner labels for credentials: operator names where the owner is an operator.
@@ -110,7 +136,8 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
   const history: (typeof complianceDocuments.$inferSelect)[] = [];
   for (let i = 0; i < owners.length; i += 200) {
     const chunk = owners.slice(i, i + 200);
-    history.push(...await db.select().from(complianceDocuments).where(or(...chunk.map(o => and(eq(complianceDocuments.ownerType, o.ownerType as never), eq(complianceDocuments.ownerId, o.ownerId))))));
+    // SEC-1: projected before the verdict is built — the verdict names its document, and the exception centre returns that name.
+    history.push(...(await db.select().from(complianceDocuments).where(or(...chunk.map(o => and(eq(complianceDocuments.ownerType, o.ownerType as never), eq(complianceDocuments.ownerId, o.ownerId)))))).map(projectComplianceDocument));
   }
   const credentialVerdicts = Array.from(flagged.values()).map(f => {
     const rows = history.filter(h => h.ownerType === f.ownerType && h.ownerId === f.ownerId && h.docType === f.docType);
@@ -137,14 +164,14 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
     suspectFrom: calibrationSweeps.suspectFrom, runAt: calibrationSweeps.runAt,
   }).from(calibrationSweeps)
     .leftJoin(measurementDevices, eq(measurementDevices.id, calibrationSweeps.measurementDeviceId))
-    .where(eq(calibrationSweeps.state, "open")).limit(200);
+    .where(and(eq(calibrationSweeps.state, "open"), ownedEntityWhere(measurementDevices.financialEntityId, fs))).limit(200);
   const inspector = await db.select({ requestRef: academyInspectorRequests.requestRef, issuingAuthority: academyInspectorRequests.issuingAuthority, dueAt: academyInspectorRequests.dueAt, state: academyInspectorRequests.state, irrecoverable: academyInspectorRequests.irrecoverable })
-    .from(academyInspectorRequests).where(inArray(academyInspectorRequests.state, ["received", "assembling", "incomplete"])).limit(200);
+    .from(academyInspectorRequests).where(and(inArray(academyInspectorRequests.state, ["received", "assembling", "incomplete"]), userKeyedWhere(db, academyInspectorRequests.subjectUserId, fs))).limit(200);
   return {
     now,
     openCalibrationSweeps: sweeps,
     inspectorRequests: inspector.map(r => ({ requestRef: r.requestRef, issuingAuthority: r.issuingAuthority, dueAt: r.dueAt, state: r.state, irrecoverable: !!r.irrecoverable })),
-    securityIncidents: await loadOpenSecurityIncidents(db),
+    securityIncidents: await loadOpenSecurityIncidents(db, fs),
     facilityDirectory: await loadFacilityDirectoryExceptions(db),
     criticalDefects: defects.map(d => ({ id: d.id, unitId: d.unitId, unitNumber: d.unitNumber ?? null, title: d.title, reportedAt: d.reportedAt, status: d.status })),
     roadsideOpen: roadside.map(r => ({ id: r.id, eventRef: r.eventRef, unitNumber: r.unitNumber ?? null, eventType: r.eventType, occurredAt: r.occurredAt, vendorAssigned: r.assignedVendorId != null })),
@@ -159,8 +186,8 @@ export async function loadExceptionSources(now = new Date()): Promise<ExceptionS
     measurementDevices: devices.map(d => { const st = calibrationStatus({ events: evByDevice.get(d.id) ?? [], intervalDays: d.calibrationIntervalDays, now }); return { deviceRef: d.deviceRef, deviceType: d.deviceType, status: d.status, calibrationState: st.status, daysRemaining: st.daysRemaining }; }),
     insurancePolicies: policies,
     carrierProfileReviews: Array.from(latestReviews.values()),
-    ungatedAssignments: await loadUngatedAssignments(),
-    ...(await loadFuelLineFindings()),
+    ungatedAssignments: await loadUngatedAssignments(fs),
+    ...(await loadFuelLineFindings(fs)),
   };
 }
 
@@ -191,6 +218,8 @@ export async function loadInbox(args: { userId: number; roles: readonly string[]
   if (!db) return [];
   const roles = args.roles.length ? args.roles : ["__none__"];
   const acting = await resolveActingScope(db, args.userId);
+  // SEC-1: the approver's and resolver's queues are this organization's books and devices, from the same resolution.
+  const books = async (): Promise<FinanceScope> => ({ tenantId: acting.tenantId, entityIds: await entityIdsInScope(db as never, acting) });
   const [tasks, notes, myProposals, myQuestions, myRequests] = await Promise.all([
     db.select().from(operationalTasks).where(and(
       inArray(operationalTasks.status, ["open", "acknowledged", "in_progress"] as never),
@@ -213,12 +242,12 @@ export async function loadInbox(args: { userId: number; roles: readonly string[]
   for (const q of myQuestions) items.push({ kind: "ai_question", ref: q.questionRef, title: q.question, detail: null, dueAt: null, since: q.createdAt, deepLink: { portal: "field_workforce", route: `/assistant/questions/${q.questionRef}` } });
   for (const r of myRequests) items.push({ kind: "my_request", ref: r.authorizationRef, title: `Your purchase request $${r.estimatedAmount.toFixed(2)} is awaiting approval`, detail: null, dueAt: null, since: r.requestedAt, deepLink: { portal: "field_workforce", route: `/purchasing/${r.authorizationRef}` } });
   if (args.canApprovePurchases) {
-    const pending = await db.select({ authorizationRef: purchaseAuthorizations.authorizationRef, estimatedAmount: purchaseAuthorizations.estimatedAmount, emergency: purchaseAuthorizations.emergency, requestedAt: purchaseAuthorizations.requestedAt, requestedByUserId: purchaseAuthorizations.requestedByUserId }).from(purchaseAuthorizations).where(eq(purchaseAuthorizations.status, "requested")).limit(50);
+    const pending = await db.select({ authorizationRef: purchaseAuthorizations.authorizationRef, estimatedAmount: purchaseAuthorizations.estimatedAmount, emergency: purchaseAuthorizations.emergency, requestedAt: purchaseAuthorizations.requestedAt, requestedByUserId: purchaseAuthorizations.requestedByUserId }).from(purchaseAuthorizations).where(and(eq(purchaseAuthorizations.status, "requested"), ownedEntityWhere(purchaseAuthorizations.financialEntityId, await books()))).limit(50);
     // Never one's own request — that is not an approval one may give.
     for (const p of pending.filter(p => p.requestedByUserId !== args.userId)) items.push({ kind: "approval", ref: p.authorizationRef, title: `${p.emergency ? "Emergency " : ""}purchase approval: $${p.estimatedAmount.toFixed(2)}`, detail: null, dueAt: null, since: p.requestedAt, deepLink: { portal: "management", route: `/purchasing/${p.authorizationRef}` } });
   }
   if (args.canResolveConflicts) {
-    const conflicts = await db.select({ conflictRef: syncConflicts.conflictRef, recordType: syncConflicts.recordType, recordRef: syncConflicts.recordRef, detectedAt: syncConflicts.detectedAt }).from(syncConflicts).where(eq(syncConflicts.status, "unresolved")).limit(50);
+    const conflicts = await db.select({ conflictRef: syncConflicts.conflictRef, recordType: syncConflicts.recordType, recordRef: syncConflicts.recordRef, detectedAt: syncConflicts.detectedAt }).from(syncConflicts).where(and(eq(syncConflicts.status, "unresolved"), inArray(syncConflicts.fieldDeviceId, devicesInScope(db, await books())))).limit(50);
     for (const c of conflicts) items.push({ kind: "conflict", ref: c.conflictRef, title: `Resolve sync conflict on ${c.recordType} ${c.recordRef}`, detail: null, dueAt: null, since: c.detectedAt, deepLink: { portal: "office_administration", route: `/sync/conflicts/${c.conflictRef}` } });
   }
   return items.sort((a, b) => (a.dueAt?.getTime() ?? Infinity) - (b.dueAt?.getTime() ?? Infinity) || b.since.getTime() - a.since.getTime());
@@ -355,9 +384,9 @@ export async function loadTimeline(args: { entityType: "unit" | "job" | "trip" |
 
 
 /** 0131 — open security incidents with what the exception centre needs to know about them. */
-async function loadOpenSecurityIncidents(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
+async function loadOpenSecurityIncidents(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, fs: FinanceScope) {
   const open = await db.select({ id: securityIncidents.id, incidentRef: securityIncidents.incidentRef, title: securityIncidents.title, severity: securityIncidents.severity, personalInformationSuspected: securityIncidents.personalInformationSuspected })
-    .from(securityIncidents).where(inArray(securityIncidents.status, ["open", "triaging", "contained", "investigating", "recovering", "monitoring"])).limit(200);
+    .from(securityIncidents).where(and(inArray(securityIncidents.status, ["open", "triaging", "contained", "investigating", "recovering", "monitoring"]), bookOrgWhere(securityIncidents.orgRef, fs))).limit(200);
   if (!open.length) return [];
   const ids = open.map(o => o.id);
   const [assessed, unsent] = await Promise.all([
