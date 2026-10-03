@@ -24,9 +24,7 @@
  * registry version and when it was computed, so a screen can say "as of" and repeat the question.
  */
 import { TRPCError } from "@trpc/server";
-import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { operators } from "../drizzle/schema";
 import { AmbiguousOrganization, resolveActingScope, type ActingScope } from "./_core/actingScope";
 import { aggregate, type DrillRow, type FilterKey, type MetricDefinition } from "./_core/analytics/metricContract";
 import { METRICS, METRIC_REGISTRY_VERSION, metricById } from "./_core/analytics/metricRegistry";
@@ -34,7 +32,7 @@ import { resolverFor, type Db } from "./_core/analytics/metricSources";
 import { RANGE_LABELS, RangeRefused, resolveRange, type ResolvedRange } from "./_core/analytics/ranges";
 import { authorize } from "./_core/recordsAuthorization";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb, jobInScope, operatorInScope, unitInScope } from "./db";
+import { getDb, jobInScope, operatorForUserInScope, operatorInScope, unitInScope } from "./db";
 
 const rangeInput = z.object({
   label: z.enum(RANGE_LABELS),
@@ -175,20 +173,17 @@ async function evaluate(db: Db, def: MetricDefinition, scope: ActingScope, range
 }
 
 /**
- * The caller's own operator record. One, or an answer saying why there is not one — never a guess
- * between two, which would put somebody else's hours on this person's screen.
+ * The caller's own operator record, through the one lookup the tree allows (`operatorForUserInScope`,
+ * held to that by operatorIdentityGuard). It is scoped to the organization, so a record the
+ * organization does not own reads as no record here — said in words, never as a row of zeros —
+ * and two records are refused rather than guessed between, which would put somebody else's hours
+ * on this person's screen.
  */
-async function ownOperator(db: Db, userId: number, scope: ActingScope): Promise<{ operatorId: number } | { reason: string }> {
-  const mine = await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, userId)).orderBy(asc(operators.id)).limit(2);
-  if (mine.length === 0) return { reason: "No operator record is linked to your login" };
-  if (mine.length > 1) return { reason: "More than one operator record is linked to your login; analytics will not pick one" };
-  // Every source is read in the organization's scope, so an operator record the organization does
-  // not own would read as a row of zeros. Say why instead (workforce.applicantDecide writes no
-  // ownership row — the survey's §1.3).
-  if (!(await operatorInScope(mine[0]!.id, { tenantId: scope.tenantId }))) {
-    return { reason: "Your operator record is not recorded as belonging to your organization, so its records cannot be counted here" };
-  }
-  return { operatorId: mine[0]!.id };
+async function ownOperator(userId: number, scope: ActingScope): Promise<{ operatorId: number } | { reason: string }> {
+  const r = await operatorForUserInScope(userId, { tenantId: scope.tenantId });
+  if (r.kind === "none") return { reason: "No operator record in your organization is linked to your login" };
+  if (r.kind === "ambiguous") return { reason: "More than one operator record is linked to your login; analytics will not pick one" };
+  return { operatorId: r.operatorId };
 }
 
 const definitionView = (def: MetricDefinition) => ({
@@ -246,7 +241,7 @@ export const analyticsRouter = router({
     if (notSelf) throw new TRPCError({ code: "BAD_REQUEST", message: `Metric ${notSelf.id} is not available as your own` });
     const db = await dbOrThrow();
     const scope = await scopeOf(db, ctx.user.id, ctx.organization);
-    const own = await ownOperator(db, ctx.user.id, scope);
+    const own = await ownOperator(ctx.user.id, scope);
     if ("reason" in own) {
       return { operatorId: null, reason: own.reason, metrics: [] };
     }
@@ -263,7 +258,7 @@ export const analyticsRouter = router({
     const range = rangeOrThrow(input.range, now);
     const db = await dbOrThrow();
     const scope = await scopeOf(db, ctx.user.id, ctx.organization);
-    const own = await ownOperator(db, ctx.user.id, scope);
+    const own = await ownOperator(ctx.user.id, scope);
     if ("reason" in own) throw new TRPCError({ code: "NOT_FOUND", message: own.reason });
     const { evaluation, rows, truncated } = await evaluate(db, def, scope, range, { operatorId: own.operatorId }, now, true);
     return { ...evaluation, rows, truncated };

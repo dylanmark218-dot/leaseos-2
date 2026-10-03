@@ -47,7 +47,7 @@ tRPC procedures under `driverPortfolio.*`. The conceptual REST route is given wh
 | `credentialVerify` | `POST /driver-portfolio/credentials/:id/verification` | `compliance.credential.verify` (reused, sensitive) | shop lead, safety, office, management, HR |
 | `requirementList` / `requirementGet` | `GET /driver-portfolio/requirements` | `portfolio.read` | safety, HR, management |
 | `requirementCreate` / `requirementUpdate` / `requirementRetire` | `POST/PATCH/… /driver-portfolio/requirements` | `portfolio.requirement.manage` (sensitive) | safety, management |
-| `shareRedeem` | `GET /share/:token` | **public** | whoever holds the token |
+| `shareRedeem` | `POST /share/redeem` (token in the body; the QR page holds it in its `#fragment`) — was `GET /share/:token` until the 2026-10-03 hardening | **public**, rate-limited | whoever holds the token |
 
 Permissions:
 - **Added:** five, all in `recordsAuthorization.ts`:
@@ -61,7 +61,7 @@ Permissions:
 ### What each view exposes
 
 - **Wallet** (the driver):
-  - a status of `READY FOR WORK` / `ACTION REQUIRED` / `NOT READY` / `STALE`
+  - a status of `BASELINE MET` / `ACTION REQUIRED` / `NOT READY` / `STALE`
   - cards with the requirement kind and code, name, state, expiry, warning tier, verification state, mandatory/informational/optional, and the blocker reason
   - requirements that apply only to some work (customer, site, job type, equipment, job), each named by binding
   - upcoming expirations, equipment qualifications, and the driver's own credential metadata (never storage keys or URLs)
@@ -115,7 +115,7 @@ Permissions:
 - `limitingCredential` (the required ticket whose expiry shortened the window)
 
 `shared/driverWallet.walletStatusAt(wallet, now)` is the rule both sides run:
-- past `validUntil`, READY FOR WORK and ACTION REQUIRED read **STALE**
+- past `validUntil`, BASELINE MET and ACTION REQUIRED read **STALE**
 - NOT READY stays NOT READY
 - an unreadable `validUntil` reads STALE
 

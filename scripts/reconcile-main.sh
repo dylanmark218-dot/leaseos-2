@@ -8,6 +8,12 @@
 # pull requests that could not merge into `main`, six conflicted on this file
 # and nothing else.
 #
+# SINCE CI-STATE-1 (2026-10-03) this is rarer. The test totals — the row that changed in every one of
+# the document's 105 commits, and the only row in 69 of them — are no longer committed (they come from
+# `current-state.sh --metrics`). What remains here are architecture counts: two branches still
+# conflict when both change the schema, the routers or the permissions, and this script is still the
+# way to settle that.
+#
 # PICKING A SIDE IS WRONG, not merely lazy. The counts describe the tree, and
 # the merged tree is neither parent. Reconciling one such branch by hand gave:
 #

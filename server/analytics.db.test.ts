@@ -392,11 +392,11 @@ d("a driver's own numbers", () => {
   it("says why rather than report zeros when the organization does not own the driver's operator record", async () => {
     const hired = await person([w.A], ["driver"]);
     await insert("INSERT INTO operators (name, userId) VALUES (?,?)", [`Unowned ${rnd()}`, hired]);
-    expect(await callerFor(hired).analytics.mine({ range: RANGE })).toMatchObject({ operatorId: null, reason: expect.stringContaining("not recorded as belonging to your organization"), metrics: [] });
+    expect(await callerFor(hired).analytics.mine({ range: RANGE })).toMatchObject({ operatorId: null, reason: "No operator record in your organization is linked to your login", metrics: [] });
   });
 
   it("says plainly when no operator record is linked, and is open to every role", async () => {
-    expect(await callerFor(w.dispatcherNoOperator).analytics.mine({ range: RANGE })).toEqual({ operatorId: null, reason: "No operator record is linked to your login", metrics: [] });
+    expect(await callerFor(w.dispatcherNoOperator).analytics.mine({ range: RANGE })).toEqual({ operatorId: null, reason: "No operator record in your organization is linked to your login", metrics: [] });
     expect((await callerFor(w.bookA).analytics.mine({ range: RANGE })).operatorId).toBeNull();
     await expect(callerFor(w.dispatcherNoOperator).analytics.mineDrilldown({ metricId: "ops.trips.completed", range: RANGE })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });

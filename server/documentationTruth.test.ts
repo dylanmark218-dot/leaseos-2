@@ -79,6 +79,7 @@ describe("the generated current state agrees with the tree", () => {
       ["server/workforceRouter.ts", /workforce lifecycle/i], ["server/auditRouter.ts", /audit packages/i], ["server/spatialRouter.ts", /spatial foundation/i],
       ["server/_core/contractTerms.ts", /contract terms/i], ["server/_core/money.ts", /money precision/i], ["server/customerAlertService.ts", /customer transaction/i],
       ["client/src/lib/showcaseGuard.ts", /operational truth boundary/i], ["server/commercialSetupRouter.ts", /rate resolution/i], ["server/invoicingRouter.ts", /invoice path/i], ["server/geoRouter.ts", /mapping foundation/i], ["server/_core/roadGraph.ts", /routing graph/i], ["server/commercialSetupRouter.ts", /commercial setup/i],
+      ["server/sourceRegistryRouter.ts", /approved external source registry/i],
     ];
     for (const [path, phrase] of must) if (existsSync(path)) expect(implemented, `${path} exists but the state's server narrative does not mention ${phrase.source}`).toMatch(phrase);
   });
