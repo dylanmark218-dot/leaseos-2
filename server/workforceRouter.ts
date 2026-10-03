@@ -11,6 +11,7 @@ import { getDb, revokeUserRole } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
 import { applicantScreenings, applicants, competencySignoffs, complianceDocuments, fieldDevices, offboardings, onboardingPlans, onboardingTasks, operators, probationReviews, serializedTools, toolCheckouts, trainingRecords, userRoleAssignments } from "../drizzle/schema";
 import { COURSE_CREDENTIALS, competencyDecision, hireReadiness, offboardingClose, onboardingGaps, probationDecision, screeningRecordDecision, trainingVerification } from "./_core/workforce";
+import { assertMayDecide } from "./credentialVerificationService";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 async function dbOrThrow() { const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return db; }
@@ -49,10 +50,10 @@ async function ownerFor(userId: number): Promise<{ ownerType: "operator" | "user
   const op = (await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, userId)).limit(1))[0];
   return op ? { ownerType: "operator", ownerId: op.id } : { ownerType: "user", ownerId: userId };
 }
-async function writeCredential(args: { userId: number; docType: string; title: string; issuedAt: Date; expiresAt: Date | null; evidenceRecordId: number; source: string; verifiedByUserId: number }) {
+async function writeCredential(args: { userId: number; docType: string; title: string; issuedAt: Date; expiresAt: Date | null; evidenceRecordId: number; source: string; verifiedByUserId: number; recordedByUserId: number | null }) {
   const db = await dbOrThrow();
   const owner = await ownerFor(args.userId);
-  const ins = await db.insert(complianceDocuments).values({ ownerType: owner.ownerType, ownerId: owner.ownerId, docType: args.docType, requirementKey: null, title: args.title, identifier: null, storageKey: null, storageUrl: null, capturedAt: new Date(), issuedAt: args.issuedAt, expiresAt: args.expiresAt, jurisdiction: null, verificationStatus: "verified", verifiedByUserId: args.verifiedByUserId, verifiedAt: new Date(), privateDetail: false, evidenceRecordId: args.evidenceRecordId, source: args.source, confidence: "high" } as never);
+  const ins = await db.insert(complianceDocuments).values({ ownerType: owner.ownerType, ownerId: owner.ownerId, docType: args.docType, requirementKey: null, title: args.title, identifier: null, storageKey: null, storageUrl: null, capturedAt: new Date(), issuedAt: args.issuedAt, expiresAt: args.expiresAt, jurisdiction: null, verificationStatus: "verified", verifiedByUserId: args.verifiedByUserId, verifiedAt: new Date(), privateDetail: false, evidenceRecordId: args.evidenceRecordId, source: args.source, confidence: "high", recordedByUserId: args.recordedByUserId } as never);
   return Number(ins[0]?.insertId ?? 0);
 }
 
@@ -162,7 +163,10 @@ export const workforceRouter = router({
     if (!t.completedAt || !t.evidenceRecordId) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Not completed with evidence" });
     if (t.completedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The person who completed the task may not verify it" });
     if (t.verifiedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Already verified" });
-    const docId = await writeCredential({ userId: p.userId, docType: t.credentialDocType, title: t.title, issuedAt: t.completedAt, expiresAt: t.credentialValidDays ? new Date(t.completedAt.getTime() + t.credentialValidDays * 86_400_000) : null, evidenceRecordId: t.evidenceRecordId, source: `onboarding ${p.planRef}/${t.taskCode}`, verifiedByUserId: ctx.user.id });
+    // The credential this mints is verified at birth: the one separation-of-duties rule also refuses the
+    // person the plan is for, not only the person who completed the task.
+    assertMayDecide({ verifierUserId: ctx.user.id, subjectUserId: p.userId, recordedByUserIds: t.completedByUserId != null ? [t.completedByUserId] : [], state: "needs_review" });
+    const docId = await writeCredential({ userId: p.userId, docType: t.credentialDocType, title: t.title, issuedAt: t.completedAt, expiresAt: t.credentialValidDays ? new Date(t.completedAt.getTime() + t.credentialValidDays * 86_400_000) : null, evidenceRecordId: t.evidenceRecordId, source: `onboarding ${p.planRef}/${t.taskCode}`, verifiedByUserId: ctx.user.id, recordedByUserId: t.completedByUserId ?? null });
     await db.update(onboardingTasks).set({ verifiedByUserId: ctx.user.id, verifiedAt: new Date(), complianceDocumentId: docId }).where(eq(onboardingTasks.id, t.id));
     const tasks = await db.select().from(onboardingTasks).where(eq(onboardingTasks.planId, p.id));
     const gaps = onboardingGaps(tasks, new Date());
@@ -191,10 +195,13 @@ export const workforceRouter = router({
     if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Training record not found" });
     if (t.verificationStatus !== "unverified") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Already ${t.verificationStatus}` });
     if (input.decision === "rejected") { await db.update(trainingRecords).set({ verificationStatus: "rejected", verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(eq(trainingRecords.id, t.id)); return { trainingRef: t.trainingRef, verificationStatus: "rejected" as const, complianceDocumentId: null }; }
+    // The credential this mints is verified at birth, so the one separation-of-duties rule applies here too:
+    // neither the person trained nor the person who recorded the training may verify it.
+    assertMayDecide({ verifierUserId: ctx.user.id, subjectUserId: t.userId, recordedByUserIds: [t.recordedByUserId], state: "needs_review" });
     const v = trainingVerification({ courseCode: t.courseCode, evidenceRecordId: t.evidenceRecordId, expiresAt: t.expiresAt, completedAt: t.completedAt, recordedByUserId: t.recordedByUserId, verifierUserId: ctx.user.id });
     if (!v.permitted) throw new TRPCError({ code: v.refusals.some(r => r.includes("may not verify")) ? "FORBIDDEN" : "PRECONDITION_FAILED", message: v.refusals.join("; ") });
     let docId: number | null = null;
-    if (v.credential) docId = await writeCredential({ userId: t.userId, docType: v.credential.docType, title: t.title, issuedAt: t.completedAt, expiresAt: v.credential.expiresAt, evidenceRecordId: t.evidenceRecordId!, source: `training ${t.trainingRef}${t.certificateNumber ? ` #${t.certificateNumber}` : ""}`, verifiedByUserId: ctx.user.id });
+    if (v.credential) docId = await writeCredential({ userId: t.userId, docType: v.credential.docType, title: t.title, issuedAt: t.completedAt, expiresAt: v.credential.expiresAt, evidenceRecordId: t.evidenceRecordId!, source: `training ${t.trainingRef}${t.certificateNumber ? ` #${t.certificateNumber}` : ""}`, verifiedByUserId: ctx.user.id, recordedByUserId: t.recordedByUserId });
     await db.update(trainingRecords).set({ verificationStatus: "verified", verifiedByUserId: ctx.user.id, verifiedAt: new Date(), complianceDocumentId: docId }).where(eq(trainingRecords.id, t.id));
     return { trainingRef: t.trainingRef, verificationStatus: "verified" as const, complianceDocumentId: docId, expiresAt: v.credential?.expiresAt ?? null, note: v.refusals[0] ?? null };
   }),

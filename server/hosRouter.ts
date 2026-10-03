@@ -105,6 +105,8 @@ export const hosRouter = router({
         // What LeaseOS can vouch for is an image of a page nobody here has totalled.
         confidence: "low",
         privateDetail: false,
+        // 0229 — who filed the page.
+        recordedByUserId: ctx.user.id,
       });
       return {
         documentId: Number(ins[0]?.insertId ?? 0),

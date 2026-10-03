@@ -144,6 +144,7 @@ import { telematicsRouter } from "./telematicsRouter";
 import { workforceRouter } from "./workforceRouter";
 import { trainingAcademyRouter } from "./trainingAcademyRouter";
 import { driverPortfolioRouter } from "./driverPortfolioRouter";
+import { decideComplianceCredential } from "./credentialVerificationService";
 import { contractorOperationsRouter } from "./contractorOperationsRouter";
 import { auditRouter } from "./auditRouter";
 import { spatialRouter } from "./spatialRouter";
@@ -181,7 +182,6 @@ import {
   listJobUnits,
   createInspection,
   listInspections,
-  reviewComplianceDocument,
   listLocationIdentities,
   createLocationIdentity,
   listManifests,
@@ -1740,7 +1740,7 @@ export const appRouter = router({
               confidence: z.enum(["low", "medium", "high"]).default("medium"),
             })
           )
-          .mutation(async ({ ctx, input }) => createComplianceDocument({ ...input, verificationStatus: "needs_review" }, await scopeFor(ctx.user.id))),   // review is documents.review
+          .mutation(async ({ ctx, input }) => createComplianceDocument({ ...input, verificationStatus: "needs_review", recordedByUserId: ctx.user.id }, await scopeFor(ctx.user.id))),   // review is documents.review
         review: roleProcedure("documents.review")
           .input(
             z.object({
@@ -1748,7 +1748,12 @@ export const appRouter = router({
               status: z.enum(["verified", "rejected"]),
             })
           )
-          .mutation(async ({ ctx, input }) => { const ok = await reviewComplianceDocument(input.id, input.status, await scopeFor(ctx.user.id)); if (!ok) throw new TRPCError({ code: "NOT_FOUND", message: `Document ${input.id} not found` }); return ok; }),
+          // Through the one verification door (credentialVerificationService): subject scope, separation of
+          // duties, the needs_review state and the conditional update. Out of scope stays "Document N not found".
+          .mutation(async ({ ctx, input }) => {
+            await decideComplianceCredential({ credentialId: input.id, outcome: input.status, verifierUserId: ctx.user.id, path: "documents.review", notFoundMessage: `Document ${input.id} not found` });
+            return true;
+          }),
       }),
     }),
     compliance: router({

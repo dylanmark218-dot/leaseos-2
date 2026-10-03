@@ -35,10 +35,11 @@ import { newToken, sha256 } from "./_core/externalIdentityPolicy";
 import { affectedRows } from "./_core/enforcementCommit";
 import { assertReadinessSubjectInScope } from "./dispatchEnforcementService";
 import { composeReadiness } from "./readinessComposer";
+import { decideComplianceCredential } from "./credentialVerificationService";
 import {
   asBinding, bindingInScopeOrThrow, bindingsInScope, companyBaseline, credentialSummary, dbOrThrow, loadPortfolios, myOperator, newRef,
   notFound, operatorInScopeOrThrow, operatorsInScope, orgRefFor, portfolioEventsPage, readinessImpact, recordPortfolioEvent,
-  recordPortfolioView, scopedRequirements, submitterOf, type BindingRow,
+  recordPortfolioView, scopedRequirements, type BindingRow,
 } from "./driverPortfolioService";
 
 const LIMIT = z.number().int().min(1).max(200).default(50);
@@ -187,6 +188,7 @@ export const driverPortfolioRouter = router({
           ownerType: "operator", ownerId: op.id, docType: type.docTypes[0]!, title: input.title ?? type.label,
           identifier: input.identifier ?? null, capturedAt: now, issuedAt: input.issuedAt ?? null, expiresAt: input.expiresAt ?? null,
           verificationStatus: "needs_review", source: input.source ?? "driver portfolio", confidence: "medium", privateDetail: false,
+          recordedByUserId: ctx.user.id,
           evidenceRecordId: input.evidenceRecordId ?? null,
         });
         const credentialId = Number(ins[0]?.insertId ?? 0);
@@ -422,41 +424,15 @@ export const driverPortfolioRouter = router({
       expiresAt: z.coerce.date().nullable().optional(),
       issuedAt: z.coerce.date().nullable().optional(),
     }))
-    .mutation(async ({ ctx, input }) => {
-      const { db, scope } = await scoped(ctx.user.id);
-      const doc = (await db.select().from(complianceDocuments).where(eq(complianceDocuments.id, input.credentialId)).limit(1))[0];
-      if (!doc || doc.ownerType !== "operator" || doc.privateDetail || !credentialType(doc.docType)) throw notFound("Credential");
-      const op = await operatorInScopeOrThrow(db, doc.ownerId, scope).catch(() => { throw notFound("Credential"); });
-      if (op.userId != null && op.userId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may not verify your own credential" });
-      if ((await submitterOf(db, doc.id)) === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The person who submitted the credential may not verify it" });
-      if (doc.verificationStatus !== "needs_review") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Credential is already ${doc.verificationStatus}` });
-      const type = credentialType(doc.docType)!;
-      const now = new Date();
-      const orgRef = orgRefFor(scope);
-      await db.transaction(async tx => {
-        // What was in force before this decision, so a renewal can say what it replaced.
-        const [{ portfolio: before }] = await loadPortfolios(tx, [op]);
-        const previous = credentialHistory(before.credentials, type.code, now).current
-          ?? before.credentials.filter(c => c.id !== doc.id && c.verificationStatus === "verified" && credentialType(c.docType)?.code === type.code)
-            .sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime() || b.id - a.id)[0] ?? null;
-        const decided = await tx.update(complianceDocuments).set({
-          verificationStatus: input.outcome, verifiedByUserId: ctx.user.id, verifiedAt: now,
-          ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
-          ...(input.issuedAt !== undefined ? { issuedAt: input.issuedAt } : {}),
-        }).where(and(eq(complianceDocuments.id, doc.id), eq(complianceDocuments.verificationStatus, "needs_review")));
-        // Two verifiers both read needs_review: only the one whose update landed may record a decision.
-        if (affectedRows(decided) !== 1) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Another decision on this credential completed first" });
-        await recordPortfolioEvent(tx, {
-          orgRef, operatorId: op.id, credentialId: doc.id, actorUserId: ctx.user.id,
-          eventType: input.outcome === "verified" ? "credential_verified" : "credential_rejected",
-          detail: `${type.label} ${input.outcome}${input.note ? `: ${input.note}` : ""}`, at: now,
-        });
-        if (input.outcome === "verified" && previous && previous.id !== doc.id && previous.capturedAt.getTime() < doc.capturedAt.getTime()) {
-          await recordPortfolioEvent(tx, { orgRef, operatorId: op.id, credentialId: previous.id, actorUserId: ctx.user.id, eventType: "credential_superseded", detail: `${type.label} superseded by credential ${doc.id}`, at: now });
-        }
-      });
-      return { credentialId: doc.id, verificationStatus: input.outcome };
-    }),
+    // The portfolio decides only an operator's catalogue credential that is not private; the decision
+    // itself — scope, separation of duties, state, the conditional update and the audit row — is the
+    // one verification service's (credentialVerificationService), the same door compliance uses.
+    .mutation(async ({ ctx, input }) => decideComplianceCredential({
+      credentialId: input.credentialId, outcome: input.outcome, verifierUserId: ctx.user.id,
+      note: input.note ?? null, expiresAt: input.expiresAt, issuedAt: input.issuedAt,
+      path: "driverPortfolio.credentialVerify",
+      accept: doc => doc.ownerType === "operator" && !doc.privateDetail && credentialType(doc.docType) != null,
+    })),
 
   /* ================================================================ */
   /* Requirements                                                       */

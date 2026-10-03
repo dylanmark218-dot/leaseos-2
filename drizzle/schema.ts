@@ -207,6 +207,8 @@ export const complianceDocuments = mysqlTable("complianceDocuments", {
   confidence: mysqlEnum("confidence", ["low", "medium", "high"])
     .default("medium")
     .notNull(),
+  /** 0229 — who entered the row. NULL = not known (historical rows are never back-filled). */
+  recordedByUserId: int("recordedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
