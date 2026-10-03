@@ -163,7 +163,7 @@ d("jobUnits.create under off, advisory and enforced", () => {
 
     // OFF: the setting is global and persists across runs, so establish it rather than assume it.
     await callerFor(manager).dispatch.enforcementSet({ mode: "off", reason: "Test start — establish the default explicitly" });
-    expect((await callerFor(dispatcher).dispatch.enforcementGet()).mode).toBe("off");
+    expect((await callerFor(manager).dispatch.enforcementGet()).mode).toBe("off");
     // Assigns as it always has, and records that it did so under "off".
     const id1 = await identity(dispatcher).create({ jobId, unitId, operatorId, role: "operator", joinedAt: new Date() });
     const [r1] = await pool.execute<mysql.RowDataPacket[]>("SELECT enforcementModeAtCreate, eligibilityCheckId FROM jobUnits WHERE id = ?", [id1]);
@@ -231,7 +231,7 @@ d("jobUnits.create under off, advisory and enforced", () => {
 
     // Back to off, so other suites' legacy assignments are unaffected.
     await callerFor(manager).dispatch.enforcementSet({ mode: "off", reason: "Test teardown — restore default" });
-    expect((await callerFor(dispatcher).dispatch.enforcementGet()).mode).toBe("off");
+    expect((await callerFor(manager).dispatch.enforcementGet()).mode).toBe("off");
   });
 });
 
