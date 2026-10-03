@@ -30,6 +30,8 @@ import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
 import * as svc from "./payrollService";
+import { loadPeriodState } from "./payrollScheduleService";
+import { PERIOD_STATE_LABEL, periodAcceptsEarnings, periodAcceptsRuns } from "./_core/payrollSchedule";
 import { getDb } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
 import { assertAdjustmentInScope, assertDisputeInScope, assertEntityInScope, assertPeriodInScope, assertProfileInScope, assertRunInScope, assertSettlementInScope, entityIdsInScope, entityOwnerFor, ownsEntity, requireOwnedEntity, type FinanceScope, type MoneyScope } from "./_core/entityScope";
@@ -331,7 +333,8 @@ export const payrollRouter = router({
       if (input.endsOn <= input.startsOn) {
         throw badRequest("Pay period ends before it starts");
       }
-      const id = await svc.openPayPeriod({ ...input, state: "collecting" });
+      // P2: an ad-hoc period records who opened it, so its approval can be refused to them.
+      const id = await svc.openPayPeriod({ ...input, state: "collecting", createdByUserId: ctx.user.id });
       return { id: id ? Number(id) : null };
     }),
 
@@ -375,6 +378,9 @@ export const payrollRouter = router({
       const profile = await assertProfileInScope(db, input.employeePayrollProfileId, ctx.money);
       // The period and the profile must share a book: an earning is paid from the book that employs the person.
       if (period.financialEntityId !== profile.financialEntityId) throw badRequest("The pay period and the payroll profile belong to different financial entities");
+      // P2 lock: earnings are proposed only into an OPEN period.
+      const pstate = await loadPeriodState(input.payPeriodId);
+      if (!pstate || !periodAcceptsEarnings(pstate)) throw precondition(`Pay period is ${pstate ? PERIOD_STATE_LABEL[pstate] : "unknown"}; earnings are proposed only into an open period`);
       const rates = await svc.listPayRates(input.earningType, await profileIdsInScope(db, ctx.money.entityIds));
       const calc = calculateEarning({
         proposal: {
@@ -410,7 +416,7 @@ export const payrollRouter = router({
           status: calc.status === "calculated" ? "pending" : "held",
         },
         trail: { actorUserId: ctx.user.id, procedureName: "payroll.earningPropose", permission: "payroll.run", subjectType: "payrollEarning", subjectId: input.earningRef, detail: "proposed" },
-      });
+      }).catch(rethrow);
 
       return {
         id: id ? Number(id) : null,
@@ -514,6 +520,9 @@ export const payrollRouter = router({
       requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
       const period = await assertPeriodInScope(db, input.payPeriodId, ctx.money);
       if (period.financialEntityId !== input.financialEntityId) throw badRequest("The pay period belongs to a different financial entity than the run");
+      // P2 lock: a run is created only while its period is OPEN or REVIEWING.
+      const pstate = await loadPeriodState(input.payPeriodId);
+      if (!pstate || !periodAcceptsRuns(pstate)) throw precondition(`Pay period is ${pstate ? PERIOD_STATE_LABEL[pstate] : "unknown"}; a pay run is created only on an open or reviewing period`);
       let id: number | undefined;
       try {
         id = await svc.createPayRunWithTrail({

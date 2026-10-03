@@ -181,3 +181,22 @@ d("OPID-6 the field summary's assignment check uses the caller's operator in the
     await expect(callerFor(userId).customerCommercial.jobs.fieldSummary({ jobId: j.insertId })).rejects.toMatchObject({ code: "NOT_FOUND" });
   }, 30_000);
 });
+
+/*
+ * The driver portfolio (#16, merged into main after OPID) resolved the caller's own record with the
+ * first row in the organization. It now goes through operatorForUserInScope like every other site.
+ */
+d("OPID-8 the driver portfolio resolves the caller's own operator in the acting organization", () => {
+  it("reaches the acting organization's record when the first row is another organization's", async () => {
+    const p = await splitPerson(["driver"]);
+    const w = await callerFor(p.userId).driverPortfolio.myWallet();
+    expect(w).toBeTruthy();
+  }, 30_000);
+
+  it("two records in the acting organization are refused, not resolved to the first", async () => {
+    const acting = await org();
+    const userId = await member(acting, ["driver"]);
+    await operator(userId, acting); await operator(userId, acting);
+    await expect(callerFor(userId).driverPortfolio.myWallet()).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: expect.stringMatching(/More than one operator record/) });
+  }, 30_000);
+});
