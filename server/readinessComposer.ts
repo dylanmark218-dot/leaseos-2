@@ -639,7 +639,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       mechanicReleaseGiven: owingEvidence.length > 0 && withoutEvidence.length === 0,
     };
     /*
-     * 0221 — the asset core: lifecycle, class and components. A unit out of the fleet or in storage is
+     * 0237 — the asset core: lifecycle, class and components. A unit out of the fleet or in storage is
      * a finding; a trailer bound where a power unit belongs is a mismatch when its class is known; a
      * mounted component's critical defect or safety hold is the truck's (O-9). All three join the
      * unit's version so a change to any of them stales a check.
@@ -719,7 +719,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       db.select().from(unitHolds).where(and(eq(unitHolds.unitId, tr.id), eq(unitHolds.status, "active"))),
     ]);
     for (const h of tHolds) extra.push(holdBlocker("trailer", tr.unitNumber, h));
-    // 0221 — the trailer's lifecycle, class and components, as the unit's.
+    // 0237 — the trailer's lifecycle, class and components, as the unit's.
     const tComponents = await componentStatesFor(db, tr.id);
     const tLifecycle = lifecycleBlocker("trailer", tr.unitNumber, tr.lifecycleStatus);
     if (tLifecycle) extra.push(tLifecycle);

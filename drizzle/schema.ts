@@ -157,7 +157,7 @@ export const units = mysqlTable("units", {
     .default("clear")
     .notNull(),
   qrTag: varchar("qrTag", { length: 120 }),
-  /* 0221 — Fleet & Equipment Portfolio, asset core: identity and lifecycle (docs/fleet). `assetClass` is the
+  /* 0237 — Fleet & Equipment Portfolio, asset core: identity and lifecycle (docs/fleet). `assetClass` is the
    * structural discriminator the dispatch gate reads; NULL = not classified, never guessed from vehicleType.
    * Lifecycle is stored; operational state is derived and stored nowhere. */
   assetClass: mysqlEnum("assetClass", ["power_unit", "trailer", "mounted_system", "portable_equipment", "component"]),
@@ -10374,8 +10374,8 @@ export const fleetPortfolioEvents = mysqlTable("fleetPortfolioEvents", {
 });
 
 /* ==================================================================
- * 0221 — Fleet & Equipment Portfolio: components. Both ends are `units`
- * rows; a detachment sets removedAt and 0222 refuses any rewrite or
+ * 0237 — Fleet & Equipment Portfolio: components. Both ends are `units`
+ * rows; a detachment sets removedAt and 0238 refuses any rewrite or
  * delete, so what was attached during a job is a temporal query.
  * ================================================================== */
 export const unitComponents = mysqlTable("unitComponents", {

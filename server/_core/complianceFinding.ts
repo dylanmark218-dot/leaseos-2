@@ -144,7 +144,7 @@ export const CLASSIFICATION: readonly Rule[] = [
   r("fleet.hold.out_of_service", /^(unit|trailer)_hold_safety$/, "maintenance", "carrier_safety_policy", ...HARD),
   r("fleet.hold.block", /^(unit|trailer)_hold_(maintenance|inspection|compliance|damage|administrative)$/, "maintenance", "carrier_safety_policy", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
   /*
-   * 0221 — Fleet & Equipment Portfolio asset core. Out of the fleet (retired, sold, transferred) is
+   * 0237 — Fleet & Equipment Portfolio asset core. Out of the fleet (retired, sold, transferred) is
    * nobody's to override; seasonal storage is releasable only under an approved policy; a unit bound
    * where its class does not belong, and a mounted component's critical defect or safety hold, are the
    * truck's own safety state.

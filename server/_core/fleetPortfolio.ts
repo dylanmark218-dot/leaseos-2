@@ -115,9 +115,9 @@ export type PortfolioFacts = {
   openRoadside: readonly { eventRef: string; status: string; occurredAt: Date | null }[];
   faults: readonly { id: number; code: string; status: string; severityDetermination: string; occurrenceCount: number; lastSeenAt: Date | null }[];
   meters: readonly Pick<MeterSequence, "meterType" | "trust" | "regressions">[];
-  /** 0221 — the stored lifecycle; absent (an older caller) reads as active, which is what every existing unit is. */
+  /** 0237 — the stored lifecycle; absent (an older caller) reads as active, which is what every existing unit is. */
   lifecycle?: { status: "active" | "seasonal_storage" | "retired" | "sold" | "transferred"; changedAt: Date | null } | null;
-  /** 0221 — the components attached now, each with the two facts that hold the parent (O-9). */
+  /** 0237 — the components attached now, each with the two facts that hold the parent (O-9). */
   components?: readonly { componentRef: string; childUnitId: number; childUnitNumber: string; relationship: string; criticalDefectOpen: boolean; safetyHold: boolean }[];
   /** Sources the caller tried and failed to read. Each one makes the state indeterminate. */
   unreadable: readonly string[];
@@ -163,7 +163,7 @@ export function operationalState(f: PortfolioFacts): OperationalState {
   const reasons: StateReason[] = [];
   const push = (r: StateReason) => reasons.push(r);
 
-  // 0221 — out of the fleet is out of service; storage holds the unit; a component's critical defect or
+  // 0237 — out of the fleet is out of service; storage holds the unit; a component's critical defect or
   // safety hold holds its parent until it is detached, which is a recorded act.
   const life = f.lifecycle?.status ?? "active";
   if (life === "retired" || life === "sold" || life === "transferred") {

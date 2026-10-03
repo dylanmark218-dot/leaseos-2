@@ -238,7 +238,7 @@ const a11ySheet = (o: Partial<RateSheetDetail> = {}): RateSheetDetail => ({
 const withheld = (): RateSheetDetail => { const s = a11ySheet({ confidential: false }); return { ...s, versions: s.versions.map(v => ({ ...v, lines: v.lines.map(({ rateMillis: _r, flatCents: _f, basisPoints: _b, multiplierMillis: _m, minimumQuantityMillis: _q, minimumChargeCents: _c, billingIncrementMillis: _i, roundingMode: _o, currency: _cu, ...rest }) => rest) })) }; };
 const sheetProps = (o: Partial<RateSheetViewProps> = {}): RateSheetViewProps => ({ offline: false, sheet: { kind: "loaded", data: a11ySheet() }, selectedVersion: null, onSelectVersion: () => {}, canPropose: true, canApprove: true, busy: false, onVersionCreate: () => {}, onLineAdd: () => {}, onLineRemove: () => {}, onSubmit: () => {}, onDecide: () => {}, onOpenCustomer: () => {}, onOpenContract: () => {}, onOpenJob: () => {}, ...o });
 
-/* ---- 0221: the Fleet portfolio's screens ---- */
+/* ---- 0237: the Fleet portfolio's screens ---- */
 const fleetFilters = { status: null, lifecycle: null, assetClass: null, q: "" };
 const fleetRow = (o: Partial<FleetListRow>): FleetListRow => ({
   unitId: 1, unitNumber: "27", assetClass: "power_unit", assetType: "hydrovac", make: "Kenworth", model: "T880", modelYear: 2021, plate: "ABC 123",
@@ -287,7 +287,7 @@ const surfaces = [
   { name: "dispatch readiness — query failed", render: () => render(<DispatchReadinessView {...readinessPanel({ kind: "failed", message: "Database unavailable" })} />) },
   { name: "dispatch readiness — capability picture", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked, readinessCapabilities, { status: "BLOCKED", explanation: "1 capability blocked; 1 was not evaluated.", missingRequired: [] })} />) },
   { name: "dispatch detail — a filled slot and an open one", render: () => render(<DispatchJobDetailView {...jobDetail()} />) },
-  // 0221 — the Fleet portfolio: the list in three states, the detail with a held unit and a refused control.
+  // 0237 — the Fleet portfolio: the list in three states, the detail with a held unit and a refused control.
   { name: "fleet list — held, unestablished and operational units", render: () => render(<FleetListView state={{ kind: "loaded", rows: fleetRows, total: 3, cap: 100 }} filters={fleetFilters} onFilter={() => {}} onOpen={() => {}} />) },
   { name: "fleet list — empty answer", render: () => render(<FleetListView state={{ kind: "loaded", rows: [], total: 0, cap: 100 }} filters={fleetFilters} onFilter={() => {}} onOpen={() => {}} />) },
   { name: "fleet list — read failed", render: () => render(<FleetListView state={{ kind: "failed", message: "Database unavailable" }} filters={fleetFilters} onFilter={() => {}} onOpen={() => {}} />) },
