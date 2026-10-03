@@ -469,13 +469,16 @@ d("office receipt: a verified hash, not a 200, releases the device copy", () => 
     const pushed = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [item(ok, mOk), item(tampered, mBad)] }));
     expect(pushed).toMatchObject({ verified: 1, rejected: 1 });
 
-    const state = async (id: number) => (await pool.execute<mysql.RowDataPacket[]>("SELECT officeReceivedAt, officeIntegrityVerifiedAt FROM recordRetentionState WHERE evidenceRecordId = ?", [id]))[0][0];
+    const state = async (id: number) => (await pool.execute<mysql.RowDataPacket[]>("SELECT officeReceivedAt, officeIntegrityVerifiedAt, officeReviewedAt FROM recordRetentionState WHERE evidenceRecordId = ?", [id]))[0][0];
     const first = await state(ok);
     expect(first.officeReceivedAt).not.toBeNull();
     expect(first.officeIntegrityVerifiedAt).not.toBeNull();
-    const bad = await state(tampered);
-    expect(bad.officeReceivedAt).not.toBeNull();          // the office has it…
-    expect(bad.officeIntegrityVerifiedAt).toBeNull();     // …and it is not the record that was sealed
+    // A tampered item is not a receipt at all: the office does not have the record that was sealed. What
+    // arrived stays on the audit trail (syncReceipts, matched = 0), not in retention state.
+    const bad = await state(tampered);   // the row exists — sealing wrote its retention dates — but no receipt is on it
+    expect([bad.officeReceivedAt, bad.officeIntegrityVerifiedAt]).toEqual([null, null]);
+    const [trail] = await pool.execute<mysql.RowDataPacket[]>("SELECT matched FROM syncReceipts WHERE evidenceRecordId = ?", [tampered]);
+    expect(trail.map(r => Number(r.matched))).toEqual([0]);
 
     // A re-send after a lost acknowledgement moves nothing.
     await new Promise(r => setTimeout(r, 1100));
@@ -484,9 +487,21 @@ d("office receipt: a verified hash, not a 200, releases the device copy", () => 
     expect(new Date(again.officeReceivedAt).getTime()).toBe(new Date(first.officeReceivedAt).getTime());
     expect(new Date(again.officeIntegrityVerifiedAt).getTime()).toBe(new Date(first.officeIntegrityVerifiedAt).getTime());
 
-    // The gate B20 built and nothing could ever open: the verified record may now leave the device; the tampered one may not.
-    expect(await codes(tampered)).toEqual(["office_integrity_unverified"]);
+    // Received and intact is not accepted: the device keeps its copy until a person at the office accepts it.
+    expect(await codes(tampered)).toEqual(["office_not_received"]);
+    expect(await codes(ok)).toEqual(["office_not_accepted"]);
+    // The driver cannot accept their own record; acceptance is the office's verification act.
+    await expect(callerFor(driver).fieldRoute.evidence.verify({ id: ok })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const office = await withRole("office");
+    await callerFor(office).fieldRoute.evidence.verify({ id: ok });
+    const accepted = await state(ok);
+    expect(accepted.officeReviewedAt).not.toBeNull();
+    // Accepting the tampered record releases nothing: acceptance does not stand in for receipt or integrity.
+    await callerFor(office).fieldRoute.evidence.verify({ id: tampered });
+    expect(await codes(tampered)).toEqual(["office_not_received"]);
+
+    // Received, verified, accepted, retention elapsed: the gate B20 built finally opens.
     const release = await callerFor(driver).records.evidence.requestDeviceDeletion({ evidenceId: ok });
-    expect(release).toMatchObject({ allowed: true, officeVerified: true, blockers: [] });
+    expect(release).toMatchObject({ allowed: true, officeVerified: true, officeAccepted: true, blockers: [] });
   }, 60_000);
 });

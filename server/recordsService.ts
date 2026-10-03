@@ -282,39 +282,54 @@ export async function loadRetentionState(evidenceId: number) {
 }
 
 /**
- * The office has the record. Called from `sync.receivePackage` for every item
- * it receives, after the server has recomputed the hash from the bytes it
- * stored — never on the device's word.
+ * The office has the record, and it is the record that was sealed. Called from
+ * `sync.receivePackage` only for an item the server verified from the bytes it
+ * stored — never on the device's word, and never for a mismatch, which stays
+ * in syncReceipts/syncPackageItems as the audit of what arrived.
  *
- * Received and integrity-verified are separate facts, because they release
- * different things: `evaluateDeviceDeletion` lets a device drop its copy only
- * once the office has BOTH received it and verified its hash. A mismatched item
- * is received and stays unverified, so it can never release a device copy.
+ * Received and integrity-verified are separate columns because they are
+ * separate facts; this path sets both, at the moment verification succeeds.
+ * Neither is acceptance: that is a person's decision (`recordOfficeAcceptance`).
  *
  * First write wins. A device that re-sends after a lost acknowledgement does
- * not move the dates, and a later mismatch cannot un-verify what an earlier
- * receipt verified from the same stored bytes. One statement, so two receipts
- * racing for the same record cannot both insert.
- *
- * Seal-time retention (`persistSeal`) writes only the retention fields, so a
- * receipt that arrives before or after the seal leaves both halves intact.
+ * not move the dates. One statement, so two receipts racing for the same
+ * record cannot both insert. Seal-time retention (`persistSeal`) writes only
+ * the retention fields, so receipt before or after the seal leaves both intact.
  */
-export async function recordOfficeReceipt(args: { evidenceId: number; at: Date; integrityVerified: boolean }) {
+export async function recordOfficeReceipt(args: { evidenceId: number; at: Date }) {
   const db = await getDb();
   if (!db) return;
   await db
     .insert(recordRetentionState)
-    .values({
-      evidenceRecordId: args.evidenceId,
-      officeReceivedAt: args.at,
-      officeIntegrityVerifiedAt: args.integrityVerified ? args.at : null,
-    })
+    .values({ evidenceRecordId: args.evidenceId, officeReceivedAt: args.at, officeIntegrityVerifiedAt: args.at })
     .onDuplicateKeyUpdate({
       set: {
         officeReceivedAt: sql`COALESCE(${recordRetentionState.officeReceivedAt}, ${args.at})`,
-        ...(args.integrityVerified
-          ? { officeIntegrityVerifiedAt: sql`COALESCE(${recordRetentionState.officeIntegrityVerifiedAt}, ${args.at})` }
-          : {}),
+        officeIntegrityVerifiedAt: sql`COALESCE(${recordRetentionState.officeIntegrityVerifiedAt}, ${args.at})`,
+      },
+    });
+}
+
+/**
+ * The office accepted the record — a business decision, made by a person
+ * holding `evidence.verify`, through the existing verification act. Recorded in
+ * B20's `officeReviewedAt` / `officeReviewedByUserId`, which existed for this
+ * and which nothing wrote.
+ *
+ * Acceptance does not imply receipt or integrity, and does not stand in for
+ * them: device release requires all three, so accepting a record whose bytes
+ * never verified releases nothing. First acceptance wins.
+ */
+export async function recordOfficeAcceptance(args: { evidenceId: number; userId: number; at: Date }) {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .insert(recordRetentionState)
+    .values({ evidenceRecordId: args.evidenceId, officeReviewedAt: args.at, officeReviewedByUserId: args.userId })
+    .onDuplicateKeyUpdate({
+      set: {
+        officeReviewedAt: sql`COALESCE(${recordRetentionState.officeReviewedAt}, ${args.at})`,
+        officeReviewedByUserId: sql`COALESCE(${recordRetentionState.officeReviewedByUserId}, ${args.userId})`,
       },
     });
 }
@@ -901,6 +916,7 @@ export type FileCandidate = {
   syncState: "pending" | "received" | "verified" | "mismatch" | null;
   sealVerification: "pending" | "verified" | "hash_mismatch" | "manifest_mismatch" | "content_unavailable" | null;
   officeReviewedAt: Date | null;
+  deviceCopyDeletedAt: Date | null;
   officeRetainUntil: Date | null;
 };
 
@@ -961,6 +977,7 @@ export async function listFileCandidates(scope: TenantScope, limit: number): Pro
       syncState: latestItem?.state ?? null,
       sealVerification: seal?.verificationResult ?? null,
       officeReviewedAt: ret?.officeReviewedAt ?? null,
+      deviceCopyDeletedAt: ret?.deviceCopyDeletedAt ?? null,
       officeRetainUntil: ret?.officeRetainUntil ?? null,
     };
   });

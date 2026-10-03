@@ -262,6 +262,7 @@ describe("device deletion gate", () => {
     deviceRetainUntil: DEVICE_UNTIL,
     officeReceivedAt: new Date("2026-09-06T12:44:00Z"),
     officeIntegrityVerifiedAt: new Date("2026-09-06T12:44:05Z"),
+    officeAcceptedAt: new Date("2026-09-07T08:00:00Z"),
     underLegalHold: false,
     policy: {
       deletionRequiresOfficeReceipt: true,
@@ -269,7 +270,7 @@ describe("device deletion gate", () => {
     },
   };
 
-  it("allows deletion once retention elapsed and office verified it", () => {
+  it("allows deletion once retention elapsed and the office received, verified and accepted it", () => {
     const d = evaluateDeviceDeletion({ ...base, now: new Date("2026-09-21T00:00:00Z") });
     expect(d.allowed).toBe(true);
     expect(d.blockers).toEqual([]);
@@ -302,6 +303,27 @@ describe("device deletion gate", () => {
     });
     expect(d.allowed).toBe(false);
     expect(d.blockers.map(b => b.code)).toContain("office_integrity_unverified");
+  });
+
+  it("blocks when the office has it intact but nobody has accepted it", () => {
+    // Received and verified is a machine fact; accepted is a person's decision. Both are required.
+    const d = evaluateDeviceDeletion({ ...base, officeAcceptedAt: null, now: new Date("2027-01-01T00:00:00Z") });
+    expect(d.allowed).toBe(false);
+    expect(d.blockers.map(b => b.code)).toEqual(["office_not_accepted"]);
+  });
+
+  it("does not let acceptance stand in for integrity or receipt", () => {
+    const unverified = evaluateDeviceDeletion({ ...base, officeIntegrityVerifiedAt: null, now: new Date("2027-01-01T00:00:00Z") });
+    expect(unverified.allowed).toBe(false);
+    expect(unverified.blockers.map(b => b.code)).toEqual(["office_integrity_unverified"]);
+    const unreceived = evaluateDeviceDeletion({ ...base, officeReceivedAt: null, officeIntegrityVerifiedAt: null, now: new Date("2027-01-01T00:00:00Z") });
+    expect(unreceived.allowed).toBe(false);
+    expect(unreceived.blockers.map(b => b.code)).toEqual(["office_not_received"]);
+  });
+
+  it("does not let acceptance override a legal hold or the field retention period", () => {
+    expect(evaluateDeviceDeletion({ ...base, underLegalHold: true, now: new Date("2030-01-01T00:00:00Z") }).blockers.map(b => b.code)).toEqual(["legal_hold"]);
+    expect(evaluateDeviceDeletion({ ...base, now: new Date("2026-09-10T00:00:00Z") }).blockers.map(b => b.code)).toEqual(["device_retention_active"]);
   });
 
   it("blocks under legal hold regardless of elapsed retention", () => {

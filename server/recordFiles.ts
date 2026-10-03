@@ -228,10 +228,11 @@ export type LifecycleStage =
   | "server_received"
   | "hash_verified"
   | "office_accepted"
+  | "device_released"
   | "integrity_failed";
 
 export const LIFECYCLE_ORDER: readonly LifecycleStage[] = [
-  "draft", "sealed", "queued", "server_received", "hash_verified", "office_accepted",
+  "draft", "sealed", "queued", "server_received", "hash_verified", "office_accepted", "device_released",
 ];
 
 export const LIFECYCLE_LABELS: Readonly<Record<LifecycleStage, string>> = {
@@ -241,6 +242,7 @@ export const LIFECYCLE_LABELS: Readonly<Record<LifecycleStage, string>> = {
   server_received: "Server received",
   hash_verified: "Hash verified",
   office_accepted: "Office accepted",
+  device_released: "Device copy released",
   integrity_failed: "Integrity check failed",
 };
 
@@ -255,7 +257,10 @@ export function lifecycleStage(args: {
   sealState: "draft" | "sealed" | "amended" | "superseded";
   syncState: "pending" | "received" | "verified" | "mismatch" | null;
   sealVerification: "pending" | "verified" | "hash_mismatch" | "manifest_mismatch" | "content_unavailable" | null;
+  /** When a person at the office accepted it (recordRetentionState.officeReviewedAt). */
   officeReviewedAt: Date | null;
+  /** When the device let go of its copy; only ever after acceptance, receipt and integrity. */
+  deviceCopyDeletedAt?: Date | null;
 }): LifecycleStage {
   if (args.sealState === "draft") return "draft";
   if (
@@ -264,7 +269,9 @@ export function lifecycleStage(args: {
     args.sealVerification === "manifest_mismatch"
   ) return "integrity_failed";
   const verified = args.syncState === "verified" || args.sealVerification === "verified";
-  if (verified && args.officeReviewedAt) return "office_accepted";
+  // Acceptance is a person's decision and counts only on a verified record: an
+  // accepted record whose bytes never verified is still shown where it really is.
+  if (verified && args.officeReviewedAt) return args.deviceCopyDeletedAt ? "device_released" : "office_accepted";
   if (verified) return "hash_verified";
   if (args.syncState === "received") return "server_received";
   if (args.syncState === "pending") return "queued";

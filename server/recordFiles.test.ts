@@ -257,6 +257,13 @@ describe("lifecycle", () => {
     expect(lifecycleStage({ ...base, syncState: "received", officeReviewedAt: new Date() })).toBe("server_received");
   });
 
+  it("shows a released device copy only after acceptance", () => {
+    expect(lifecycleStage({ ...base, syncState: "verified", officeReviewedAt: new Date(), deviceCopyDeletedAt: new Date() })).toBe("device_released");
+    // A deletion stamp on a record nobody accepted is not shown as a clean release.
+    expect(lifecycleStage({ ...base, syncState: "verified", deviceCopyDeletedAt: new Date() })).toBe("hash_verified");
+    expect(lifecycleStage({ ...base, syncState: "mismatch", officeReviewedAt: new Date(), deviceCopyDeletedAt: new Date() })).toBe("integrity_failed");
+  });
+
   it("a draft is a draft whatever else is recorded", () => {
     expect(lifecycleStage({ ...base, sealState: "draft", syncState: "verified" })).toBe("draft");
   });

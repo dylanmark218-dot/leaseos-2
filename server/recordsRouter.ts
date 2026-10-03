@@ -413,6 +413,7 @@ export const recordsRouter = router({
           deviceRetainUntil: state?.deviceRetainUntil ?? null,
           officeReceivedAt: state?.officeReceivedAt ?? null,
           officeIntegrityVerifiedAt: state?.officeIntegrityVerifiedAt ?? null,
+          officeAcceptedAt: state?.officeReviewedAt ?? null,
           underLegalHold: underHold,
           policy: DEFAULT_POLICY,
         });
@@ -429,6 +430,7 @@ export const recordsRouter = router({
           blockers: decision.blockers,
           retainUntil: state?.deviceRetainUntil ?? null,
           officeVerified: Boolean(state?.officeIntegrityVerifiedAt),
+          officeAccepted: Boolean(state?.officeReviewedAt),
           legalHold: underHold,
         };
       }),
@@ -674,6 +676,7 @@ export const recordsRouter = router({
             syncState: d.latestSync?.state ?? null,
             sealVerification: currentSeal?.verificationResult ?? null,
             officeReviewedAt: d.retention?.officeReviewedAt ?? null,
+            deviceCopyDeletedAt: d.retention?.deviceCopyDeletedAt ?? null,
           }),
           integrity: currentSeal
             ? {

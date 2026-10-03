@@ -48,6 +48,7 @@ const REFUSED = z.undefined({ message: "Trust-bearing value refused: this state 
 import { systemRouter } from "./_core/systemRouter";
 import { peopleRouter } from "./peopleRouter";
 import { recordsRouter } from "./recordsRouter";
+import { recordOfficeAcceptance } from "./recordsService";
 import {
   contractorRouter,
   financeRouter,
@@ -621,7 +622,11 @@ export const appRouter = router({
         .mutation(async ({ ctx, input }) => {
         // P4.1: scope guard
         if (!(await evidenceInScope(input.id, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${input.id} not found` });
-        return verifyEvidenceRecord(input.id);
+        const verified = await verifyEvidenceRecord(input.id);
+        // Verifying is the office's acceptance of the record — a person's decision, recorded as such.
+        // It is not receipt and not integrity, and device release still requires both of those too.
+        if (verified) await recordOfficeAcceptance({ evidenceId: input.id, userId: ctx.user.id, at: new Date() });
+        return verified;
       }),
     }),
     trips: router({

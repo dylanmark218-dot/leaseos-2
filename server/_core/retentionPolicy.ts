@@ -141,6 +141,7 @@ export type DeviceDeletionBlocker = {
     | "device_retention_active"
     | "office_not_received"
     | "office_integrity_unverified"
+    | "office_not_accepted"
     | "legal_hold";
   label: string;
   clearsAt?: Date;
@@ -164,6 +165,8 @@ export function evaluateDeviceDeletion(args: {
   deviceRetainUntil: Date | null;
   officeReceivedAt: Date | null;
   officeIntegrityVerifiedAt: Date | null;
+  /** The office's acceptance — a person's decision, separate from receipt and integrity. */
+  officeAcceptedAt: Date | null;
   underLegalHold: boolean;
   policy: Pick<
     RetentionPolicy,
@@ -204,6 +207,14 @@ export function evaluateDeviceDeletion(args: {
       blockers.push({
         code: "office_integrity_unverified",
         label: "Office received it but integrity is not verified",
+      });
+    } else if (!args.officeAcceptedAt) {
+      // Received and intact is not accepted. The device keeps its copy until a
+      // person at the office has accepted the record — the same rule the device's
+      // own release (`syncPermitsDeviceRelease`: office_accepted) has always had.
+      blockers.push({
+        code: "office_not_accepted",
+        label: "Office has the record intact but has not accepted it",
       });
     }
   }

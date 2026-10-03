@@ -306,10 +306,11 @@ export const syncRouter = router({
           captureAuthorizationClaim: it.captureAuthorizationClaim, captureAuthorizationReason: it.captureAuthorizationReason ?? null, state: v.outcome === "verified" ? "verified" : "mismatch" });
         await db.insert(syncReceipts).values({ syncPackageId: packageId, evidenceRecordId: it.evidenceRecordId, computedContentHash: recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)!.computedContentHash, computedManifestHash: recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)!.computedManifestHash, matched: v.outcome === "verified", receivedAt: now, failureDetail: v.outcome === "verified" ? null : v.reason });
         // B20's rule: a verified hash, not a 200, is what lets the device let go of its copy. A receipt is
-        // recorded only for a record that exists, whose stored bytes the server read, in the caller's own
-        // organization — a package can name any id, and naming one must not mark it received.
-        if (recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)?.stored && (await evidenceInScope(it.evidenceRecordId, receiptScope))) {
-          await recordOfficeReceipt({ evidenceId: it.evidenceRecordId, at: now, integrityVerified: v.outcome === "verified" });
+        // recorded only when all four hold: the record exists, the server read its stored bytes, it is in
+        // the caller's own organization, and those bytes verified. A package can name any id, and naming
+        // one must not mark it received; a mismatch is kept in syncReceipts/syncPackageItems, not here.
+        if (v.outcome === "verified" && recomputed.find(r => r.evidenceRecordId === it.evidenceRecordId)?.stored && (await evidenceInScope(it.evidenceRecordId, receiptScope))) {
+          await recordOfficeReceipt({ evidenceId: it.evidenceRecordId, at: now });
         }
       }
       await db.update(syncPackages).set({
