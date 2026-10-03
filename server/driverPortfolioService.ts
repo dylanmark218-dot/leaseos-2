@@ -20,7 +20,7 @@ import { and, desc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import {
   complianceDocuments, coreRecordOwnership, driverPortfolioEvents, driverRequirementBindings, operatorEquipmentAuthorizations, operators,
 } from "../drizzle/schema";
-import { getDb, orgScopeWhere, ownershipScopeWhere, type TenantScope } from "./db";
+import { getDb, operatorForUserInScope, orgScopeWhere, ownershipScopeWhere, type TenantScope } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { entityIdsInScope } from "./_core/entityScope";
 import { isMedicalDocType } from "./_core/compliancePassport";
@@ -66,10 +66,12 @@ export async function operatorInScopeOrThrow(db: Db | Tx, operatorId: number, sc
  * organization. The request names no operator: self-scope is structural.
  */
 export async function myOperator(db: Db, userId: number, scope: TenantScope): Promise<OperatorRow> {
-  const op = (await db.select().from(operators)
-    .where(and(eq(operators.userId, userId), ownershipScopeWhere("operator", operators.id, scope))).limit(1))[0];
-  if (!op) throw new TRPCError({ code: "NOT_FOUND", message: "No operator record is linked to your user in this organization" });
-  return op;
+  // OPID: the person's record is resolved in one place, and two records in this organization are a
+  // refusal, never a choice of the first row.
+  const r = await operatorForUserInScope(userId, scope);
+  if (r.kind === "none") throw new TRPCError({ code: "NOT_FOUND", message: "No operator record is linked to your user in this organization" });
+  if (r.kind === "ambiguous") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "More than one operator record names this person in this organization" });
+  return operatorInScopeOrThrow(db, r.operatorId, scope);
 }
 
 export async function operatorCredentials(db: Db | Tx, operatorIds: readonly number[]): Promise<CredentialRow[]> {

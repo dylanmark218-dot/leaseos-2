@@ -25,12 +25,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { commercialScope, jobSnapshotCaptureIfReady } from "./customerCommercialService";
 import { financeScopeFor } from "./_core/entityScope";
-import { getDb, jobInScope, listActiveUserRoleNames } from "./db";
+import { getDb, jobInScope, listActiveUserRoleNames, operatorForUserInScope } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { assertEntityInScope } from "./_core/entityScope";
 import { singleOwnershipDomain } from "./ownershipDomain";
 import { platformAuthorityProven } from "./platformAuthority";
-import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, dispatchPostings, operators } from "../drizzle/schema";
+import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, dispatchPostings } from "../drizzle/schema";
 import { assertReadinessSubjectInScope, checkInScope, dispatchScopeFor, loadEnforcementMode, loadGrantedOverrides } from "./dispatchEnforcementService";
 import { asFinding, resolveOverridePolicy } from "./_core/complianceFinding";
 import { asChecklist, composeReadiness } from "./readinessComposer";
@@ -389,8 +389,11 @@ export const dispatchGateRouter = router({
     .input(z.object({ unitId: z.number().int().positive().nullable().optional(), jobId: z.number().int().positive().nullable().optional() }).optional())
     .query(async ({ ctx, input }) => {
       const { db, scope } = await scopedDb(ctx.user.id);
-      const me = (await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, ctx.user.id)).limit(1))[0];
-      if (!me) return { verdict: "unknown" as const, items: [], note: "No operator record is linked to your user" };
+      // The caller's own record in the acting organization; another organization's is not theirs here, and two is a refusal.
+      const mine = await operatorForUserInScope(ctx.user.id, scope);
+      if (mine.kind === "none") return { verdict: "unknown" as const, items: [], note: "No operator record is linked to your user in this organization" };
+      if (mine.kind === "ambiguous") return { verdict: "unknown" as const, items: [], note: "There is more than one operator record for your user in this organization" };
+      const me = { id: mine.operatorId };
       // C1a — the operator is the caller's own, but the unit and job are named by the caller.
       await assertReadinessSubjectInScope(db, scope, { operatorId: me.id, unitId: input?.unitId ?? null, jobId: input?.jobId ?? null });
       const r = await composeReadiness({ operatorId: me.id, unitId: input?.unitId ?? null, trailerId: null, jobId: input?.jobId ?? null });
