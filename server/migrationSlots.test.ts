@@ -73,7 +73,11 @@ describe("the real tree", () => {
     // the first slot free on main and on all 131 remote branches at the scan.
     expect(files).toContain("0228_safety_program_builder.sql");
     expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
-    expect(headSlot(files)).toBe("0228");
+    // Driver Portfolio security hardening took 0236 (compliance document recorder). Drafted as 0229; on
+    // merging main, 0229 was claimed by the integration hub and 0230–0235 by other open branches, so it
+    // moved to 0236, the first slot free on main and on all 144 remote branches at the scan.
+    expect(files).toContain("0236_compliance_document_recorder.sql");
+    expect(headSlot(files)).toBe("0236");
   });
 
   it("keeps the reserved slots empty", () => {

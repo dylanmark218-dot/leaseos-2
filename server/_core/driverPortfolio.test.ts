@@ -157,12 +157,12 @@ describe("licence class and equipment", () => {
 describe("the wallet", () => {
   const baseline = [must("driver_licence"), must("h2s_alive"), must("company_orientation"), nice("defensive_driving")];
 
-  it("says READY FOR WORK, and stops saying it when the first required ticket lapses", () => {
+  it("says BASELINE MET, and stops saying it when the first required ticket lapses", () => {
     const creds = [cred("driver_licence", { expiresAt: days(500) }), cred("h2s_alive", { expiresAt: days(5) }), cred("company_orientation", { expiresAt: null })];
     const w = walletView({ portfolio: portfolio(creds), baseline, at: NOW, offlineHours: 24 * 30 });
-    expect(w.headline).toBe("READY FOR WORK");
+    expect(w.headline).toBe("BASELINE MET");
     expect(w.validUntil.toISOString()).toBe(days(5).toISOString());
-    expect(walletHeadlineAt(w, days(4))).toBe("READY FOR WORK");
+    expect(walletHeadlineAt(w, days(4))).toBe("BASELINE MET");
     expect(walletHeadlineAt(w, days(5))).toBe("STALE");
     expect(w.freshness).toMatchObject({ limitedBy: "credential_expiry", limitingCredential: { code: "h2s_alive" } });
   });
@@ -330,12 +330,12 @@ describe("the offline freshness rule the phone shares", () => {
   it("never lets a cached READY outlive validUntil, and never softens NOT READY", async () => {
     const { walletStatusAt } = await import("../../shared/driverWallet");
     const until = days(1);
-    expect(walletStatusAt({ headline: "READY FOR WORK", validUntil: until }, NOW)).toBe("READY FOR WORK");
-    expect(walletStatusAt({ headline: "READY FOR WORK", validUntil: until }, until)).toBe("STALE");
-    expect(walletStatusAt({ headline: "READY FOR WORK", validUntil: until.toISOString() }, days(2))).toBe("STALE");
+    expect(walletStatusAt({ headline: "BASELINE MET", validUntil: until }, NOW)).toBe("BASELINE MET");
+    expect(walletStatusAt({ headline: "BASELINE MET", validUntil: until }, until)).toBe("STALE");
+    expect(walletStatusAt({ headline: "BASELINE MET", validUntil: until.toISOString() }, days(2))).toBe("STALE");
     expect(walletStatusAt({ headline: "ACTION REQUIRED", validUntil: until }, days(2))).toBe("STALE");
     expect(walletStatusAt({ headline: "NOT READY", validUntil: until }, days(2))).toBe("NOT READY");
-    expect(walletStatusAt({ headline: "READY FOR WORK", validUntil: "not a date" }, NOW)).toBe("STALE");
+    expect(walletStatusAt({ headline: "BASELINE MET", validUntil: "not a date" }, NOW)).toBe("STALE");
   });
 });
 
