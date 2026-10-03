@@ -1,5 +1,5 @@
 /**
- * Marketplace bid readiness — verified against LeaseOS's own registries (0236, P10.3).
+ * Marketplace bid readiness — verified against LeaseOS's own registries (0240, P10.3).
  *
  * PURE. The facts arrive already read from the canonical systems — the organization row, the
  * contractor profile, the organization's financial entities and their carrier credentials
@@ -80,7 +80,7 @@ export const EMPTY_TENDER_REQUIREMENTS: TenderRequirements = {
 /**
  * Reads a posting's stored requirements. Checkpoint 1 stored `certifications`, `permits`,
  * `dangerousGoods`, `insuranceLiabilityMinimumCents` and `equipmentTypes`; those map onto the
- * typed shape here so a posting written before 0236 is evaluated, not ignored.
+ * typed shape here so a posting written before 0240 is evaluated, not ignored.
  */
 export function normalizeTenderRequirements(raw: unknown): TenderRequirements {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;

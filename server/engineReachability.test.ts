@@ -305,7 +305,7 @@ describe("every engine is reached, or says why not", () => {
       // Declared before their consumers were, each waiting on the same wiring.
       "deviceManifest",
       "monitoringNotice",
-      // eventEmitter left this cluster at 0233 — reached from marketplaceService.
+      // eventEmitter left this cluster at 0237 — reached from marketplaceService.
       // SPINE item 1, landing as one chain before its router: boundaryEvidence holds the
       // chain rule and imports boundaryConfirmation, which imports siteBaseline's types.
       // Not the `billing` shape — nothing else in the tree answers "which boundaries does
@@ -336,7 +336,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(73);   // merge of main: measured on the merged tree; this branch: Marketplace reaches eventEmitter (0233) and complianceDocumentValidity (0236), both already reached on main;   // merge of main (b35bac4) into #59: main's 73 already counts openShifts as reached (SPINE item 2), the one engine #59 wired;   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
+    expect(unwired).toHaveLength(73);   // merge of main: measured on the merged tree; this branch: Marketplace reaches eventEmitter (0237) and complianceDocumentValidity (0240), both already reached on main;   // merge of main (b35bac4) into #59: main's 73 already counts openShifts as reached (SPINE item 2), the one engine #59 wired;   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });

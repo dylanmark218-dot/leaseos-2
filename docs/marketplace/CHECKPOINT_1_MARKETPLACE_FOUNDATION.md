@@ -1,9 +1,9 @@
-# Marketplace — Checkpoint 1: Posting + Bid + Award domain (0233)
+# Marketplace — Checkpoint 1: Posting + Bid + Award domain (0237)
 
-> **Migration numbers renumbered 2026-10-03:** this work was written as `0189`–`0192`; `main` took `0189`, `0191` and `0192` first, so the four marketplace migrations now ship as `0233`–`0236`, unchanged. Numbers in these checkpoint documents use the new slots.
+> **Migration numbers renumbered 2026-10-03:** this work was written as `0189`–`0192`; `main` took `0189`, `0191` and `0192` first, so the four moved to `0233`–`0236`; `main` then took `0236` (#135) with `0233`–`0235` claimed by other open branches, so the four marketplace migrations now ship as `0237`–`0240`, unchanged. Numbers in these checkpoint documents use the new slots.
 
 **Release label:** v23.26
-**Migration:** `0233_marketplace_bid_award.sql` (0175–0188 are claimed by open branches; see
+**Migration:** `0237_marketplace_bid_award.sql` (0175–0188 are claimed by open branches; see
 `docs/architecture/MIGRATION_COLLISION_REGISTER.md`)
 **Date:** 2026-10-01
 
@@ -87,7 +87,7 @@ eligible viewers an aggregate range over live bids, never a competitor's bid.
 
 ### Bid readiness — declared, not verified
 
-> **Superseded at 0236 (checkpoint 4).** Readiness is now verified against the canonical registries;
+> **Superseded at 0240 (checkpoint 4).** Readiness is now verified against the canonical registries;
 > the declared qualifications remain in the bid's content and decide nothing. See
 > `CHECKPOINT_4_VERIFIED_READINESS.md`. The paragraph below describes checkpoint 1 as built.
 

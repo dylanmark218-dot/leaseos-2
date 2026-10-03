@@ -1,9 +1,9 @@
-# Marketplace — Checkpoint 4 (P10.3): verified bid readiness (0236)
+# Marketplace — Checkpoint 4 (P10.3): verified bid readiness (0240)
 
 **Release label:** v23.29
-**Migration:** `0236_marketplace_verified_readiness.sql`
+**Migration:** `0240_marketplace_verified_readiness.sql`
 **Date:** 2026-10-02
-**Builds on:** checkpoints 1–3 (0233–0235)
+**Builds on:** checkpoints 1–3 (0237–0239)
 
 ## The rule this checkpoint records
 

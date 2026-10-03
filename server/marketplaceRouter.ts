@@ -28,7 +28,7 @@ const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/, "a SHA-256 hex digest");
 const attachment = z.object({ name: z.string().min(1).max(200), sha256: sha256Hex, sizeBytes: z.number().int().nonnegative() });
 
 /**
- * Typed tender requirements (0236). Every field names a record a canonical registry holds. The
+ * Typed tender requirements (0240). Every field names a record a canonical registry holds. The
  * checkpoint-1 keys remain accepted and are mapped by `normalizeTenderRequirements`.
  */
 const requirements = z.object({
@@ -142,7 +142,7 @@ export const marketplaceRouter = router({
     return svc.awardPosting(db, actor, input);
   }),
 
-  /* ---- the award → dispatch bridge (0234) ---- */
+  /* ---- the award → dispatch bridge (0238) ---- */
   /** The client issues the contract: the job (owned by the contractor) and the commercial chain are created from the award, nothing re-entered. */
   contractIssue: roleProcedure("marketplace.contractIssue").input(z.object({ postingRef: ref, ...withVersion })).mutation(async ({ ctx, input }) => {
     const { db, actor } = await actorFor(ctx.user.id);
@@ -162,7 +162,7 @@ export const marketplaceRouter = router({
     return svc.contractsMine(db, actor);
   }),
 
-  /* ---- the social layer (0235): tender discussion ---- */
+  /* ---- the social layer (0239): tender discussion ---- */
   questionAsk: roleProcedure("marketplace.questionAsk").input(z.object({ postingRef: ref, question: z.string().min(5).max(2000) })).mutation(async ({ ctx, input }) => {
     const { db, actor } = await actorFor(ctx.user.id);
     return svc.askQuestion(db, actor, input);
@@ -185,7 +185,7 @@ export const marketplaceRouter = router({
     return svc.listClarifications(db, actor, input);
   }),
 
-  /* ---- the social layer (0235): following, profiles, preferred contractors ---- */
+  /* ---- the social layer (0239): following, profiles, preferred contractors ---- */
   followSet: roleProcedure("marketplace.followSet").input(z.object({ workType: code.nullable().optional(), operatingArea: z.string().max(120).nullable().optional() })).mutation(async ({ ctx, input }) => {
     const { db, actor } = await actorFor(ctx.user.id);
     return svc.followSet(db, actor, input);

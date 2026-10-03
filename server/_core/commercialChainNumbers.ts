@@ -1,7 +1,7 @@
 /**
  * Commercial chain numbering — the one allocator behind `JOB-…-C01`, `-S01` and `-L001`.
  *
- * Lifted out of contractorOperationsRouter at 0234 so the marketplace bridge numbers the chain it
+ * Lifted out of contractorOperationsRouter at 0238 so the marketplace bridge numbers the chain it
  * creates from an award the same way a contractor-office chain is numbered, from the same
  * `commercialChainSequences` row under the same lock, rather than with a second allocator that
  * could drift.

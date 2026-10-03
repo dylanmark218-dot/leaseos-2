@@ -1,9 +1,9 @@
-# Marketplace — Checkpoint 3: the social layer on the commercial core (0235)
+# Marketplace — Checkpoint 3: the social layer on the commercial core (0239)
 
 **Release label:** v23.28
-**Migration:** `0235_marketplace_social_layer.sql`
+**Migration:** `0239_marketplace_social_layer.sql`
 **Date:** 2026-10-01
-**Builds on:** checkpoints 1 (0233) and 2 (0234)
+**Builds on:** checkpoints 1 (0237) and 2 (0238)
 
 ## What this adds, and the one rule it is built on
 

@@ -207,6 +207,8 @@ export const complianceDocuments = mysqlTable("complianceDocuments", {
   confidence: mysqlEnum("confidence", ["low", "medium", "high"])
     .default("medium")
     .notNull(),
+  /** 0236 — who entered the row. NULL = not known (historical rows are never back-filled). */
+  recordedByUserId: int("recordedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -10984,7 +10986,7 @@ export const safetyProgramEvents = mysqlTable("safetyProgramEvents", {
 export type SafetyProgramEventRow = typeof safetyProgramEvents.$inferSelect;
 
 
-// ========================= MARKETPLACE (0233) =========================
+// ========================= MARKETPLACE (0237) =========================
 // The commercial layer between a CLIENT organization that needs work performed
 // and the CONTRACTOR organizations able to perform it. Distinct from the
 // dispatch posting/bid tables above, which record one company's own operators'
@@ -11108,7 +11110,7 @@ export const marketplaceBidRevisions = mysqlTable("marketplaceBidRevisions", {
   /** The readiness picture at submission — rows and verdict — as the bidder and the client both saw it. */
   readinessJson: text("readinessJson").notNull(),
   readinessVerdict: varchar("readinessVerdict", { length: 24 }).notNull(),
-  /** 0236 — `MR-` + SHA-256 over the canonical facts the submission picture read. NULL = submitted before verified readiness existed. */
+  /** 0240 — `MR-` + SHA-256 over the canonical facts the submission picture read. NULL = submitted before verified readiness existed. */
   readinessFingerprint: varchar("readinessFingerprint", { length: 80 }),
   submittedByUserId: int("submittedByUserId").notNull(),
   submittedAt: timestamp("submittedAt").notNull(),
@@ -11169,7 +11171,7 @@ export type MarketplaceEventRow = typeof marketplaceEvents.$inferSelect;
 export type MarketplaceInvitationRow = typeof marketplaceInvitations.$inferSelect;
 
 /**
- * 0234 — the award → dispatch bridge. One contract per award: the client issues it, which creates
+ * 0238 — the award → dispatch bridge. One contract per award: the client issues it, which creates
  * the job (owned by the CONTRACTOR organization, with the client as its customer) and the
  * commercial chain; the contractor then dispatches it through the canonical dispatch posting
  * door, and the posting it created is recorded here so the whole chain reads back:
@@ -11203,7 +11205,7 @@ export const marketplaceContracts = mysqlTable("marketplaceContracts", {
 }));
 export type MarketplaceContractRow = typeof marketplaceContracts.$inferSelect;
 
-/* ---- 0235: marketplace social layer — tender discussion, following, profiles, preferred contractors ---- */
+/* ---- 0239: marketplace social layer — tender discussion, following, profiles, preferred contractors ---- */
 
 /**
  * The tender discussion. A bidder's question is private to the asker and the client until the
@@ -11278,7 +11280,7 @@ export type MarketplaceClarificationRow = typeof marketplaceClarifications.$infe
 export type MarketplaceFollowRow = typeof marketplaceFollows.$inferSelect;
 
 /**
- * 0236 — every readiness evaluation that decided something: a submission, an award, a refusal.
+ * 0240 — every readiness evaluation that decided something: a submission, an award, a refusal.
  * The revision carries the picture it was submitted on (immutable); this carries the pictures
  * computed since, so "readiness at submission" and "readiness now" are two records, never one
  * overwritten. Mirrors `dispatchEligibilityChecks`: verdict, fingerprint, the facts' picture.

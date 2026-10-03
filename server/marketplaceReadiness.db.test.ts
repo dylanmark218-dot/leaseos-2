@@ -1,5 +1,5 @@
 /**
- * Verified marketplace readiness (0236, P10.3) through the real router, against a real database.
+ * Verified marketplace readiness (0240, P10.3) through the real router, against a real database.
  *
  * The registries are written as their own surfaces write them (see fixtures/marketplaceQualify.ts),
  * and the marketplace reads them through the engines that already decide validity. Proved here:

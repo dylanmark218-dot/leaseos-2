@@ -1,8 +1,10 @@
--- 0233 — Marketplace: posting + bid + award domain (checkpoint 1).
+-- 0237 — Marketplace: posting + bid + award domain (checkpoint 1).
 --
 -- Renumbered 2026-10-03: written as 0189–0192 (this file 0189); main took 0189, 0191 and 0192 (rule
 -- ledger, encrypted secrets, provider credentials) before this branch merged, so all four moved, unchanged,
--- to 0233–0236, the first numbers free on main and every remote branch. MIGRATION_COLLISION_REGISTER.md.
+-- to 0233–0236, the first numbers free on main and every remote branch. Main then took 0236 (#135) while
+-- 0233–0235 were claimed by other open branches, so they moved again, unchanged, to 0237–0240.
+-- MIGRATION_COLLISION_REGISTER.md.
 --
 -- The commercial layer between a client organization that needs work performed
 -- and the contractor organizations able to perform it. Six tables, all carrying
@@ -19,7 +21,7 @@
 -- willingness to take a shift inside one company. No automatic dispatch creation
 -- happens here; that is the next checkpoint's bridge.
 --
--- Numbered 0233: 0175–0188 are claimed by open branches (see
+-- First numbered 0189 (0175–0188 were claimed by open branches); now 0237 (see
 -- docs/architecture/MIGRATION_COLLISION_REGISTER.md).
 CREATE TABLE `marketplacePostings` (
   `id` int NOT NULL AUTO_INCREMENT,

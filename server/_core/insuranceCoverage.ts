@@ -1,6 +1,6 @@
 /**
  * The insurance engine's view of a financial entity's policies — lifted out of insuranceRouter at
- * 0236 so the marketplace reads a bidder's cover through the same loader the insurance surface
+ * 0240 so the marketplace reads a bidder's cover through the same loader the insurance surface
  * uses, rather than a second one that could drift. Its proof read is main's canonical one (SPINE item 2).
  */
 import { and, eq, gte, inArray, isNull, or } from "drizzle-orm";

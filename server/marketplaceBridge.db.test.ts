@@ -1,5 +1,5 @@
 /**
- * The award → dispatch bridge (0234) through the real router, against a real database.
+ * The award → dispatch bridge (0238) through the real router, against a real database.
  *
  * A client awards a sealed tender, issues the contract, and the contractor dispatches it. What
  * must be true afterwards: the job exists ONCE and is the contractor's (with the client as its

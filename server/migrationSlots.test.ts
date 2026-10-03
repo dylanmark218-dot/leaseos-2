@@ -73,7 +73,17 @@ describe("the real tree", () => {
     // the first slot free on main and on all 131 remote branches at the scan.
     expect(files).toContain("0228_safety_program_builder.sql");
     expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
-    expect(headSlot(files)).toBe("0228");
+    // Driver Portfolio security hardening took 0236 (compliance document recorder). Drafted as 0229; on
+    // merging main, 0229 was claimed by the integration hub and 0230–0235 by other open branches, so it
+    // moved to 0236, the first slot free on main and on all 144 remote branches at the scan.
+    expect(files).toContain("0236_compliance_document_recorder.sql");
+    // The marketplace (#109) took 0237–0240. Drafted as 0189–0192; main took 0189, 0191 and 0192 first, so it
+    // moved to 0233–0236; main then took 0236 (above) with 0233–0235 claimed by other open branches, so it
+    // moved again, unchanged, to 0237–0240, the first contiguous slots free on main and every remote ref.
+    expect(files.filter(f => f.includes("_marketplace_"))).toEqual([
+      "0237_marketplace_bid_award.sql", "0238_marketplace_contracts.sql", "0239_marketplace_social_layer.sql", "0240_marketplace_verified_readiness.sql",
+    ]);
+    expect(headSlot(files)).toBe("0240");
   });
 
   it("keeps the reserved slots empty", () => {

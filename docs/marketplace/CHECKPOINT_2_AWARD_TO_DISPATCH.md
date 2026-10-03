@@ -1,9 +1,9 @@
-# Marketplace — Checkpoint 2: Award → canonical dispatch (0234)
+# Marketplace — Checkpoint 2: Award → canonical dispatch (0238)
 
 **Release label:** v23.27
-**Migration:** `0234_marketplace_contracts.sql`
+**Migration:** `0238_marketplace_contracts.sql`
 **Date:** 2026-10-01
-**Builds on:** `CHECKPOINT_1_MARKETPLACE_FOUNDATION.md` (0233)
+**Builds on:** `CHECKPOINT_1_MARKETPLACE_FOUNDATION.md` (0237)
 
 ## What this closes
 
@@ -13,7 +13,7 @@ through the same door its dispatcher's screen uses:
 
 ```
 Marketplace posting → accepted bid (hashed revision) → award
-      → contract (0234)                          [client issues]
+      → contract (0238)                          [client issues]
             → jobs row, owned by the CONTRACTOR, customerOrgRef = client
             → commercialJobChains row, numbered JOB-…-C01 by the shared allocator
       → dispatchPostings + dispatchRoles          [contractor dispatches, via dispatchRoleService.createPosting]
