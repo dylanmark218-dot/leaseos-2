@@ -18,6 +18,7 @@ import { ENV, assertProductionSecrets } from "./env";
 import { bootstrapSecretKeys } from "./secretKeys";
 import { listenOnPort, resolveListenPort } from "./listen";
 import { createReadinessState, registerHealthRoutes } from "./health";
+import { securityHeaders, trustProxySetting } from "./httpHardening";
 
 /** How the client is served: the built bundle, or Vite over this server (development). */
 export type Frontend = (app: Express, server: Server) => void | Promise<void>;
@@ -52,6 +53,17 @@ export async function startServer(frontend: Frontend): Promise<void> {
   console.log(`[secrets] key provider: ${keys.source}${keys.backend ? ` (${keys.backend})` : ""}`);
 
   const worker = await startProductionWorker();
+  // The HTTP edge (#19): no framework banner, the proxy hops this deployment trusts, and the
+  // security headers on every response. Applied here so both entrypoints get them.
+  app.disable("x-powered-by");
+  const trustProxy = trustProxySetting(process.env);
+  if (trustProxy !== null) app.set("trust proxy", trustProxy);
+  app.use(
+    securityHeaders({
+      hsts: !isDevelopment,
+      frameAncestors: process.env.LEASEOS_FRAME_ANCESTORS?.trim() || null,
+    })
+  );
   // Integration Hub — the signed inbound edge reads the raw body, so it is mounted before
   // registerApi's express.json() parser.
   registerIntegrationHubInboundRoute(app);
