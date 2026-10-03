@@ -371,6 +371,28 @@ number free everywhere.
 * **2026-10-01 (PR #16)**: the driver portfolio renumbers `0202`–`0204` → `0210`–`0212` after LA-1a merged
   `0202`/`0203`; next free `0213`.
 
+## State at the S2-FLEET-A claim (2026-10-01, `main` = `2a76920`, after PR #60)
+
+`main` migration head: **`0209_operating_zone_scope.sql`**, 186 migrations. Re-scanned across `main` and
+every remote branch at the moment of claiming (`git ls-tree` of each `origin/*` ref over `drizzle/`):
+the only numbers held anywhere beyond `main` are `0210`–`0212`, all on
+`claude/driver-portfolio-credential-wallet-ya8928` (`0210_driver_portfolio.sql`,
+`0211_driver_portfolio_events_append_only.sql`, `0212_driver_portfolio_api.sql`), which renumbered off
+`0202`–`0204` after the P0-A2.1 scan. The "next free: `0210`" line above was written before that move
+and would have collided, so `0213` is the first number free everywhere.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0210–0212 | `0210_driver_portfolio.sql`, `0211_driver_portfolio_events_append_only.sql`, `0212_driver_portfolio_api.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | #16 | **merged** (`48a64e1`, 2026-10-03) | none | kept 0210–0212 |
+| 0213 | `0213_runtime_instances.sql` | `security/s2-fleet-runtime-identity` | S2-FLEET-A | claiming | none | keeps 0213 |
+
+**Next free number for new work was `0214`** at that scan — superseded: `0214`–`0219` landed on `main` while
+S2-FLEET-A was gated (Sign & Attest, Customer/Contract/Rate); `0213` stays below the head and applies by
+name. See the SA1 section below for the current next-free number.
+
+* **2026-10-01 (S2-FLEET-A)**: claimed `0213` (`runtimeInstances`: tenant-neutral runtime registry — per-process
+  build identity, capabilities, heartbeat and stop timestamps), recorded in the commit that creates the
+  migration. No branch renumbered.
 ## Claim: 0217–0219 (Customer, Contract and Rate Management, 2026-10-01)
 
 | Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |

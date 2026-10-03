@@ -135,12 +135,23 @@ describe("2./3. every bare import of the production graphs is a builtin or a pro
 });
 
 describe("4. the scripts keep the production/development split", () => {
-  it("build bundles exactly the two production entrypoints, external packages", () => {
+  it("build bundles exactly the two production entrypoints, external packages, one embedded build identity", () => {
+    // S2-FLEET-A: the esbuild command line moved into scripts/build-server.mjs so that ONE call bundles
+    // both entrypoints with ONE `define` of the build identity. The shape the smoke relies on is the same.
     const build = pkg.scripts.build!;
     expect(build).toContain("vite build");
-    expect(build).toContain("esbuild server/_core/index.ts server/_core/worker.ts");
-    expect(build).toContain("--packages=external");
+    expect(build).toContain("node scripts/build-server.mjs");
     expect(build).not.toContain("dev.ts");
+    const bundler = read("scripts/build-server.mjs");
+    expect(bundler).toMatch(/entryPoints:\s*\["server\/_core\/index\.ts",\s*"server\/_core\/worker\.ts"\]/);
+    expect(bundler).toMatch(/platform:\s*"node"/);
+    expect(bundler).toMatch(/packages:\s*"external"/);
+    expect(bundler).toMatch(/bundle:\s*true/);
+    expect(bundler).toMatch(/format:\s*"esm"/);
+    expect(bundler).toMatch(/outdir:\s*"dist"/);
+    expect(bundler).toMatch(/__LEASEOS_BUILD_IDENTITY__:\s*JSON\.stringify\(JSON\.stringify\(identity\)\)/);
+    expect(bundler).not.toContain("dev.ts");
+    expect(bundler.match(/await build\(/g)).toHaveLength(1);
   });
   it("start and worker run the built JavaScript under NODE_ENV=production", () => {
     expect(pkg.scripts.start).toBe("NODE_ENV=production node dist/index.js");

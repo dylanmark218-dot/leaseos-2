@@ -100,7 +100,14 @@ disabled) — each named by the preflight as its own blocker.
 
 ## 6. Fleet convergence — not provable
 
-What exists: `/healthz` and `/readyz` answer exactly one `status` field (pinned by the health
+> **Superseded by S2-FLEET-A** (`RUNTIME_FLEET_OBSERVABILITY.md`): the mechanism proposed below now
+> exists — `server/_core/buildIdentity.ts` (embedded at build time), `runtimeInstances` (migration
+> 0213), `server/fleetObservationService.ts`. The fleet component reports `not_observable`,
+> `observed_incompatible`, `observed_compatible_external_confirmation_required` or `converged`; the
+> last needs external deployment evidence no selected hosting platform yet provides, so the cutover
+> remains blocked. The text below is kept as the record of the Phase 2A state.
+
+What exists (at Phase 2A): `/healthz` and `/readyz` answer exactly one `status` field (pinned by the health
 tests); the drain worker's heartbeat port carries a worker id and a time, no build; `LEASEOS_RELEASE`
 is a file in the repository read by the current-state generator; `deviceRouter.appVersion` describes
 mobile devices, not server instances. No table, log line or endpoint reports which build a running

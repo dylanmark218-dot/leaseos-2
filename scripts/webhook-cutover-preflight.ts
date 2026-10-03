@@ -21,6 +21,13 @@ async function main() {
   }
   const report = await webhookCutoverPreflightFromEnvironment();
   console.log(JSON.stringify(report, null, 2));
+  // S2-FLEET-A: the fleet line an operator reads first. Observed from the runtime registry; `converged`
+  // needs external deployment evidence the observation service does not yet have a source for.
+  console.log(
+    `fleet: ${report.fleet.state} — live servers ${report.fleet.liveServers}, live workers ${report.fleet.liveWorkers}, ` +
+      `live builds ${report.fleet.liveBuilds.length}, live incompatible ${report.fleet.liveIncompatible.length}, stale ${report.fleet.stale}, ` +
+      `external confirmation ${report.fleet.externalConfirmation}`
+  );
   console.log(report.cutoverAllowed ? "S2-E cutover: ALLOWED" : `S2-E cutover: BLOCKED (${report.blockers.length} blocker(s))`);
   process.exit(report.cutoverAllowed ? 0 : 3);
 }

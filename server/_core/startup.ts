@@ -16,6 +16,7 @@ import { registerIntegrationHubInboundRoute } from "../integrationHubInbound";
 import { startProductionWorker } from "./productionWorker";
 import { ENV, assertProductionSecrets } from "./env";
 import { bootstrapSecretKeys } from "./secretKeys";
+import { registerThisRuntime } from "./runtimeRegistry";
 import { listenOnPort, resolveListenPort } from "./listen";
 import { createReadinessState, registerHealthRoutes } from "./health";
 import { securityHeaders, trustProxySetting } from "./httpHardening";
@@ -51,6 +52,13 @@ export async function startServer(frontend: Frontend): Promise<void> {
   // `/readyz` never says ready. The worker entrypoint makes the same call first (`worker.ts`).
   const keys = await bootstrapSecretKeys();
   console.log(`[secrets] key provider: ${keys.source}${keys.backend ? ` (${keys.backend})` : ""}`);
+
+  // S2-FLEET-A: identify this build and register this process before it can take work. In
+  // production an unbuilt process, a missing database or a rejected registration throws here —
+  // the port is never bound and `/readyz` never says ready — because an instance the fleet
+  // observation cannot see must not serve. The heartbeat starts with the registration and the
+  // instance is marked stopped at the end of shutdown. The worker entrypoint does the same.
+  const runtime = await registerThisRuntime("server", { production: !isDevelopment });
 
   const worker = await startProductionWorker();
   // The HTTP edge (#19): no framework banner, the proxy hops this deployment trusts, and the
@@ -108,6 +116,9 @@ export async function startServer(frontend: Frontend): Promise<void> {
     readiness.markNotReady();
     if (worker) await worker.close();
     await new Promise<void>(resolve => server.close(() => resolve()));
+    // Last: the instance stays live in the registry while it drains, and reads as stopped — not
+    // merely stale — once nothing is in flight.
+    if (runtime) await runtime.close();
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);

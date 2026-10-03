@@ -88,6 +88,12 @@ describe("the real tree", () => {
     // moved to 0236, the first slot free on main and on all 144 remote branches at the scan.
     expect(files).toContain("0236_compliance_document_recorder.sql");
     expect(headSlot(files)).toBe("0236");
+    // S2-FLEET-A: 0213 (0213_runtime_instances), claimed when main's head was 0209 and 0210–0212 were held
+    // by the driver-portfolio branch; 0214–0236 landed on main afterwards, so 0213 sits below the head and
+    // applies by name like 0207/0208 and 0214–0216 do. It asserts only what it owns — never that a neighbouring
+    // slot is empty: 0210–0212 were the driver portfolio's claim and landed with #16.
+    expect(files).toContain("0213_runtime_instances.sql");
+    expect(files.filter(f => f.startsWith("0213_"))).toEqual(["0213_runtime_instances.sql"]);
   });
 
   it("keeps the reserved slots empty", () => {

@@ -20,14 +20,18 @@
  * operator looking in five places; one that said only "ready" would be trusted in exactly the case
  * where it was wrong.
  *
- * THE FLEET ANSWER IS "NOT PROVABLE", AND THIS MODULE CANNOT SAY OTHERWISE. LeaseOS exposes no
- * per-instance build identity: `/healthz` and `/readyz` answer one `status` field by contract, the
- * worker's heartbeat carries no version, and `LEASEOS_RELEASE` is a file in the repository, not an
- * observation of what is running. Until a mechanism exists that observes the fleet, there is no
- * input to this function that can mark the fleet compatible — deliberately. A parameter for "the
- * operator says it is converged" would be the fake boolean the design forbids. The convergence
- * confirmation in `WEBHOOK_SECRET_PHASE1_DEPLOYMENT_EVIDENCE.md` is where a human records what they
- * established and how; it is evidence for a person, not an input to code.
+ * THE FLEET ANSWER COMES FROM THE OBSERVATION SERVICE, AND THIS MODULE CANNOT IMPROVE ON IT.
+ * S2-FLEET-A: every server and worker registers its build identity and capabilities in
+ * `runtimeInstances` (`_core/runtimeRegistry.ts`), and `fleetObservationService.observeFleet()`
+ * reads that registry. What it can establish is that every instance OBSERVED is compatible; whether
+ * those are all the instances that EXIST needs an authoritative deployment inventory, which no
+ * selected hosting platform yet provides. So the component's best state today is
+ * `observed_compatible_external_confirmation_required`, and only `converged` — which the service
+ * produces solely from that external evidence — lifts the blocker. There is no input to this
+ * function that can mark the fleet converged, deliberately: a parameter for "the operator says it
+ * is converged" would be the fake boolean the design forbids. The confirmation block in
+ * `WEBHOOK_SECRET_PHASE1_DEPLOYMENT_EVIDENCE.md` is where a human records what they established and
+ * how; it is evidence for a person, not an input to code.
  *
  * NOTHING HERE RETURNS A SECRET. Resolution runs through `probeWebhookSigningSecret`, which
  * discards the value; the write probe persists nothing; counts and reference *categories* are the
@@ -46,13 +50,27 @@ import { webhookSecretReadiness, type WebhookReadinessScope, type WebhookSecretR
 import { legacyMfaKey, resolveSecretKeyProvider } from "./_core/secretKeys";
 import type { ManagedKeyBackend } from "./_core/managedSecretKeys";
 import type { SecretKeyProvider } from "./_core/secretCrypto";
+import { observeFleet, type FleetConvergenceState, type FleetObservation, type ObservedRuntimeInstance } from "./fleetObservationService";
 
-export type FleetConvergence =
-  /** Produced today: no runtime mechanism observes which build each instance runs. */
-  | { state: "not_provable"; reason: string }
-  /** Reserved for the mechanism that will observe the fleet. Nothing produces these yet. */
-  | { state: "compatible"; observedBy: string }
-  | { state: "incompatible"; observedBy: string; reason: string };
+/**
+ * The fleet component: the observation service's verdict, projected to what an operator reading the
+ * preflight needs. The state and reason are the service's own; nothing here recomputes them.
+ */
+export type FleetConvergence = {
+  state: FleetConvergenceState;
+  reason: string;
+  observedBy: "runtimeInstances";
+  liveServers: number;
+  liveWorkers: number;
+  /** Distinct builds among live instances. Informational: compatibility is judged on capabilities. */
+  liveBuilds: string[];
+  /** Live instances that cannot be counted compatible, with why. Metadata only. */
+  liveIncompatible: ObservedRuntimeInstance[];
+  /** Registered, never stopped, heartbeat expired. Excluded from the live counts. */
+  stale: number;
+  requiredCapabilities: readonly string[];
+  externalConfirmation: "none" | "confirmed";
+};
 
 /** One unsignable subscription, by reference category. Never a secret, never a `secretRef`. */
 export type UnresolvableSubscription = {
@@ -119,13 +137,20 @@ export type PreflightArgs = {
   pageSize?: number;
 };
 
-const FLEET_NOT_PROVABLE: FleetConvergence = {
-  state: "not_provable",
-  reason:
-    "no runtime mechanism reports which build each server or worker instance is running: " +
-    "/healthz and /readyz carry a single status field, the worker heartbeat carries no build identity, " +
-    "and LEASEOS_RELEASE is a repository file rather than an observation of the fleet",
-};
+function fleetComponent(observation: FleetObservation): FleetConvergence {
+  return {
+    state: observation.state,
+    reason: observation.reason,
+    observedBy: observation.observedBy,
+    liveServers: observation.live.servers,
+    liveWorkers: observation.live.workers,
+    liveBuilds: observation.live.builds,
+    liveIncompatible: observation.live.incompatible,
+    stale: observation.stale.length,
+    requiredCapabilities: observation.requiredCapabilities,
+    externalConfirmation: observation.externalConfirmation.kind,
+  };
+}
 
 async function database() {
   const db = await getDb();
@@ -263,10 +288,14 @@ async function preflight(
   /* ---------------------------------------------------------------- the production write */
   const productionCanonicalWrite: ProductionCanonicalWrite = probeWebhookCanonicalWrite(args.keys);
 
+  /* ---------------------------------------------------------------- the fleet */
+  // Read, not received: the observation service is the only source, and `converged` is a state only
+  // it can produce (from external deployment evidence it alone reads).
+  const fleet = fleetComponent(await observeFleet());
+
   /* ---------------------------------------------------------------- the verdict */
-  const fleet = FLEET_NOT_PROVABLE;
   const blockers: string[] = [];
-  if (fleet.state !== "compatible") blockers.push(`fleet convergence ${fleet.state.replace("_", " ")}: ${fleet.reason}`);
+  if (fleet.state !== "converged") blockers.push(`fleet convergence ${fleet.state.replace(/_/g, " ")}: ${fleet.reason}`);
   blockers.push(...webhookData.blockers.map(b => `webhook data: ${b}`));
   blockers.push(...managedKeyProvider.blockers.map(b => `key provider: ${b}`));
   if (!existingCanonicalSecrets.resolvable) {
